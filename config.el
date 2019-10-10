@@ -8,3 +8,6 @@
 
 ;; (after! avy)
 (setq display-line-numbers-type 'relative)
+
+(after! doom-themes
+  (load-theme 'doom-gruvbox t))
