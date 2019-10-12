@@ -25,4 +25,4 @@
 (setq display-line-numbers-type 'relative)
 
 ;;; Load theme
-(load-theme 'doom-gruvbox t)
+(load-theme 'doom-molokai t)
