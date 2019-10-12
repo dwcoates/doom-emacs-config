@@ -14,8 +14,15 @@
  "C-p" 'previous-line
  "C-n" 'next-line
 
+ ;; File finding. FIXME: This seems like a shitty way to do this.
+ :prefix "C-x M-f"
+ ;; work
+ "c" '(lambda () (interactive) (find-file "~/workspace/ChessCom/ceac"))
+ "s" '(lambda () (interactive) (find-file "~/workspace/ChessCom/ceac/chess_engines/stockfish-tep/src/"))
+ "t" '(lambda () (interactive) (find-file "~/workspace/ChessCom/ceac/TEP/libs/"))
+ )
 
-;; (after! avy)
 (setq display-line-numbers-type 'relative)
 
+;;; Load theme
 (load-theme 'doom-gruvbox t)
