@@ -5,6 +5,8 @@
 (unmap! evil-visual-state-map "s") ;; No snipe in visual mode
 (unmap! evil-insert-state-map "C-f" "C-b") ;; Use emacs keys, for now
 
+(unbind-key "C-x C-p")
+
 ;; Place your private configuration here
 (map!
  ;; Use some basic emacs navigation bindings in insert-mode
