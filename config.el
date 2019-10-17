@@ -3,6 +3,7 @@
  ;; Use normal previous/next keys in insert-mode
 (unmap! evil-insert-state-map "C-p" "C-n") ;; No keys stealing C-p and C-n, for now.
 (unmap! evil-visual-state-map "s") ;; No snipe in visual mode
+(unmap! evil-insert-state-map "C-f" "C-b") ;; Use emacs keys, for now
 
 ;; Place your private configuration here
 (map!
@@ -15,6 +16,8 @@
  "C-d" 'delete-char
  "C-p" 'previous-line
  "C-n" 'next-line
+ "C-f" 'forward-char
+ "C-b" 'backward-char
  ;; Surround (paren manipulation)
  :n
  "M-]" 'evil-surround-delete
