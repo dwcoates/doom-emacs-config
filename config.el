@@ -4,6 +4,7 @@
 (unmap! evil-insert-state-map "C-p" "C-n") ;; No keys stealing C-p and C-n, for now.
 (unmap! evil-visual-state-map "s") ;; No snipe in visual mode
 (unmap! evil-insert-state-map "C-f" "C-b") ;; Use emacs keys, for now
+(unmap! evil-normal-state-map "M-y")
 
 (unbind-key "C-x C-p")
 
@@ -24,6 +25,7 @@
  :n
  "M-]" 'evil-surround-delete
  "M-[" 'evil-surround-change
+ "M-y" 'counsel-yank-pop
  :v
  "s"   'evil-surround-edit
  ;; File finding. FIXME: This seems like a shitty way to do this.
