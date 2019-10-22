@@ -35,7 +35,10 @@
  "t" '(lambda () (interactive) (find-file "~/workspace/ChessCom/ceac/TEP/libs/"))
  )
 
-(setq display-line-numbers-type 'relative)
+(setq! display-line-numbers-type 'relative)
+
+(when (string= system-name "blackbox")
+  (set-face-attribute 'default nil :height 100))
 
 ;;; Load theme
 (load-theme 'doom-molokai t)
