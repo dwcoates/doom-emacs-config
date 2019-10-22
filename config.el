@@ -46,3 +46,8 @@
 
 ;;; Load theme
 (load-theme 'doom-molokai t)
+
+;;; Roland's package.
+(use-package! fixmee)
+
+;;;
