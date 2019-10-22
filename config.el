@@ -26,7 +26,6 @@
  "M-[" 'evil-surround-change
  :v
  "s"   'evil-surround-edit
-
  ;; File finding. FIXME: This seems like a shitty way to do this.
  :prefix "C-x M-f"
  ;; work
@@ -35,9 +34,12 @@
  "t" '(lambda () (interactive) (find-file "~/workspace/ChessCom/ceac/TEP/libs/"))
  )
 
+;; Relative line numbers are pretty cool. Makes a lot of VIM commands easier to use.
 (setq! display-line-numbers-type 'relative)
 
+;; When on the laptop, use some special settings.
 (when (string= system-name "blackbox")
+  (display-battery-mode t)
   (set-face-attribute 'default nil :height 100))
 
 ;;; Load theme
