@@ -4,6 +4,7 @@
 (unmap! evil-insert-state-map "C-p" "C-n") ;; No keys stealing C-p and C-n, for now.
 (unmap! evil-visual-state-map "s") ;; No snipe in visual mode
 (unmap! evil-insert-state-map "C-f" "C-b") ;; Use emacs keys, for now
+(unmap! evil-normal-state-map "M-y")
 
 (unbind-key "C-x C-p")
 
@@ -24,9 +25,9 @@
  :n
  "M-]" 'evil-surround-delete
  "M-[" 'evil-surround-change
+ "M-y" 'counsel-yank-pop
  :v
  "s"   'evil-surround-edit
-
  ;; File finding. FIXME: This seems like a shitty way to do this.
  :prefix "C-x M-f"
  ;; work
@@ -35,7 +36,18 @@
  "t" '(lambda () (interactive) (find-file "~/workspace/ChessCom/ceac/TEP/libs/"))
  )
 
-(setq display-line-numbers-type 'relative)
+;; Relative line numbers are pretty cool. Makes a lot of VIM commands easier to use.
+(setq! display-line-numbers-type 'relative)
+
+;; When on the laptop, use some special settings.
+(when (string= system-name "blackbox")
+  (display-battery-mode t)
+  (set-face-attribute 'default nil :height 100))
 
 ;;; Load theme
 (load-theme 'doom-molokai t)
+
+;;; Roland's package.
+(use-package! fixmee)
+
+;;;

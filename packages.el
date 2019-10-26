@@ -7,3 +7,5 @@
 ;; (package! builtin-package :disable t)
 
 ;(package! doom-themes)
+;
+(package! fixmee)
