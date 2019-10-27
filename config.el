@@ -51,3 +51,34 @@
 (use-package! fixmee)
 
 ;;;
+(use-package! chess
+  :init
+  (map! :leader
+        (:prefix-map ("k" . "chess")
+          :desc "Display position for FEN found on current line." "f" 'chess-get-fen-on-line))
+  :config
+  (defun chess-get-fen-on-line ()
+  ;;; TODO: make find all fens on line, use counsel if more than one.
+    (interactive)
+    (let ((chess-fen-regex "\\([bnrqkpBNRQKP1-8]*/?\\)+ [bw] \\(-\\|[KQkq]+\\) \\(-\\|[1-8]\\)")
+          (curr-line (buffer-substring-no-properties
+                      (line-beginning-position) (line-end-position))))
+      (save-excursion
+        (and (string-match chess-fen-regex curr-line)
+             (match-string 0 curr-line)))))
+
+  (defun chess-make-pos-from-fen (fen)
+    (let* ((game (chess-game-create))
+           (new-display (chess-display-create game 'chess-images nil)))
+      (chess-game-set-start-position game (chess-fen-to-pos fen))
+      (chess-display-set-game new-display game 1)
+      (chess-display-popup new-display)))
+
+;;;###autoload
+  (defun chess-show-fen-at-point ()
+    (interactive)
+    (chess-make-pos-from-fen (call-interactively 'chess-get-fen-on-line)))
+
+  (setq! chess-images-directory ".local/dist-packages/elpa/chess-2.0.4/pieces/xboard"
+         chess-images-default-size 58
+         chess-images-separate-frame nil))

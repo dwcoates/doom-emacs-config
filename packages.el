@@ -9,3 +9,4 @@
 ;(package! doom-themes)
 ;
 (package! fixmee)
+(package! chess :recipe (:host github :repo "dwcoates/emacs-chess"))
