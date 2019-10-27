@@ -52,13 +52,17 @@
 
 ;;;
 (use-package! chess
+  :commands (+chess-show-positions-new-frame)
   :init
   (map! :leader
         (:prefix-map ("k" . "chess")
-          :desc "Display position for FEN found on current line." "f" 'chess-get-fen-on-line))
+          :desc "Display position for FEN found on current line." "f" 'chess-show-fen-at-point
+          :desc "Display position for FEN found on current line in new frame." "F" '+chess-show-positions-new-frame))
   :config
+  (set-popup-rule! "^\\*Chessboard.*" :side 'bottom)
+
   (defun chess-get-fen-on-line ()
-  ;;; TODO: make find all fens on line, use counsel if more than one.
+;;; TODO: make find all fens on line, use counsel if more than one.
     (interactive)
     (let ((chess-fen-regex "\\([bnrqkpBNRQKP1-8]*/?\\)+ [bw] \\(-\\|[KQkq]+\\) \\(-\\|[1-8]\\)")
           (curr-line (buffer-substring-no-properties
@@ -79,6 +83,11 @@
     (interactive)
     (chess-make-pos-from-fen (call-interactively 'chess-get-fen-on-line)))
 
-  (setq! chess-images-directory ".local/dist-packages/elpa/chess-2.0.4/pieces/xboard"
-         chess-images-default-size 58
+  (defun +chess-show-positions-new-frame ()
+    (interactive)
+    (let ((chess-images-separate-frame t))
+      (call-interactively 'chess-show-fen-at-point)))
+
+  (setq! chess-images-directory "/home/dodge/.emacs.d/.local/straight/repos/emacs-chess/pieces/large"
+         chess-images-default-size 25
          chess-images-separate-frame nil))
