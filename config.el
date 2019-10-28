@@ -175,3 +175,8 @@ if beginning and end are not supplied (or the region is not active) confine to c
    :n "w"     #'sp-wrap-round
    :n "y"     #'sp-wrap-curly
    :n "r"     #'sp-wrap-square))
+
+;;; Python
+(after! python-mode
+  (set-pretty-symbols! 'python-mode
+    :lambda "lambda"))
