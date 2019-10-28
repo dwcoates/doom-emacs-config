@@ -133,41 +133,42 @@ if beginning and end are not supplied (or the region is not active) confine to c
             (setq pos (match-end 0))))
         (if matches
             (if (> (length matches) 1)
-                (ivy-read "Found FENs: " matches
-                          :action '+chess-make-pos-from-fen
-                          :unwind (lambda ()
-                                    (mapc #'kill-buffer counsel--switch-buffer-temporary-buffers)
-                                    (mapc #'bury-buffer (cl-remove-if-not
-                                                         #'buffer-live-p
-                                                         counsel--switch-buffer-previous-buffers))
-                                    (setq counsel--switch-buffer-temporary-buffers nil
-                                          counsel--switch-buffer-previous-buffers nil))
-                          :update-fn (lambda ()
-                                       (unless counsel--switch-buffer-previous-buffers
-                                         (setq counsel--switch-buffer-previous-buffers (buffer-list)))
-                                       (let* ((current (ivy-state-current ivy-last))
-                                              (virtual (assoc current ivy--virtual-buffers)))
-                                         (mapc 'kill-buffer
-                                               (seq-filter (apply-partially 'string-match-p "\\*Chessboard\\*\\(<[0-9]+>\\)?")
-                                                           (mapcar (function buffer-name) (buffer-list))))
-                                         (let ((chess-images-separate-frame nil))
-                                           ;;;FIXME: this is horrible. Use let or something.
-                                           (chess-message-catalog 'english
-                                             '((piece-images-loading . "")
-                                               (piece-images-loaded  . "")))
+                (ivy-read
+                 "Found FENs: " matches
+                 :action '+chess-make-pos-from-fen
+                 :unwind (lambda ()
+                           (mapc #'kill-buffer counsel--switch-buffer-temporary-buffers)
+                           (mapc #'bury-buffer (cl-remove-if-not
+                                                #'buffer-live-p
+                                                counsel--switch-buffer-previous-buffers))
+                           (setq counsel--switch-buffer-temporary-buffers nil
+                                 counsel--switch-buffer-previous-buffers nil))
+                 :update-fn (lambda ()
+                              (unless counsel--switch-buffer-previous-buffers
+                                (setq counsel--switch-buffer-previous-buffers (buffer-list)))
+                              (let* ((current (ivy-state-current ivy-last))
+                                     (virtual (assoc current ivy--virtual-buffers)))
+                                (mapc 'kill-buffer
+                                      (seq-filter (apply-partially 'string-match-p "\\*Chessboard\\*\\(<[0-9]+>\\)?")
+                                                  (mapcar (function buffer-name) (buffer-list))))
+                                (let ((chess-images-separate-frame nil))
+;;;FIXME: this is horrible. Use let or something.
+                                  (chess-message-catalog 'english
+                                                         '((piece-images-loading . "")
+                                                           (piece-images-loaded  . "")))
 
-                                           (+chess-make-pos-from-fen current)
-                                           (chess-message-catalog 'english
-                                             '((piece-images-loading . "Loading chess piece images...")
-                                               (piece-images-loaded  . "Loading chess piece images...done")))
-)
-                                         ;;; Clean up the minibuffer so we can display the candidates again.
-                                         (message ""))
-                                         ))
+                                  (+chess-make-pos-from-fen current)
+                                  (chess-message-catalog 'english
+                                                         '((piece-images-loading . "Loading chess piece images...")
+                                                           (piece-images-loaded  . "Loading chess piece images...done")))
+                                  )
+;;; Clean up the minibuffer so we can display the candidates again.
+                                (message ""))
+                              ))
                           )
               (+chess-make-pos-from-fen (car matches)))
           (message "%s" "Could not find FENs."))
-        ))))
+      )))
 
 ;; Add smartparens mappings
 (map!
