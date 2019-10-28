@@ -50,19 +50,19 @@
 ;;; Roland's package.
 (use-package! fixmee)
 
-;;;
+;;; Chess stuff.
 (use-package! chess
   :commands (+chess-show-positions-new-frame)
   :init
   (map! :leader
         (:prefix-map ("k" . "chess")
-          :desc "Display position for FEN found on current line." "f" 'chess-show-fen-at-point
+          :desc "Display position for FEN found on current line." "f" '+chess-show-fen-at-point
           :desc "Display position for FEN found on current line in new frame." "F" '+chess-show-positions-new-frame))
   :config
   (set-popup-rule! "^\\*Chessboard.*" :side 'bottom)
 
-  (defun chess-get-fen-on-line ()
-;;; TODO: make find all fens on line, use counsel if more than one.
+  (defun +chess-get-fen-on-line ()
+    "Grab the first fen string findable on current line."
     (interactive)
     (let ((chess-fen-regex "\\([bnrqkpBNRQKP1-8]*/?\\)+ [bw] \\(-\\|[KQkq]+\\) \\(-\\|[1-8]\\)")
           (curr-line (buffer-substring-no-properties
@@ -71,7 +71,8 @@
         (and (string-match chess-fen-regex curr-line)
              (match-string 0 curr-line)))))
 
-  (defun chess-make-pos-from-fen (fen)
+  (defun +chess-make-pos-from-fen (fen)
+    "Display the position resulting from FEN."
     (let* ((game (chess-game-create))
            (new-display (chess-display-create game 'chess-images nil)))
       (chess-game-set-start-position game (chess-fen-to-pos fen))
@@ -79,15 +80,45 @@
       (chess-display-popup new-display)))
 
 ;;;###autoload
-  (defun chess-show-fen-at-point ()
+  (defun +chess-show-fen-at-point ()
+    "Find the first fen on the line and display it."
     (interactive)
-    (chess-make-pos-from-fen (call-interactively 'chess-get-fen-on-line)))
+    (+chess-make-pos-from-fen (call-interactively '+chess-get-fen-on-line)))
 
   (defun +chess-show-positions-new-frame ()
+    "Show the first fen on the line and display it in a second frame."
     (interactive)
     (let ((chess-images-separate-frame t))
-      (call-interactively 'chess-show-fen-at-point)))
+      (call-interactively '+chess-show-fen-at-point)))
 
-  (setq! chess-images-directory "/home/dodge/.emacs.d/.local/straight/repos/emacs-chess/pieces/large"
-         chess-images-default-size 25
-         chess-images-separate-frame nil))
+  (setq! chess-images-directory "/home/dodge/.emacs.d/.local/straight/repos/emacs-chess/pieces/xboard"
+         chess-images-default-size 40
+         chess-images-separate-frame nil)
+  
+  (defun +chess-images-popup ()
+    "A special chess images popup function to work with doom buffers."
+    (unless chess-images-size
+      (chess-error 'no-images))
+
+    (let* ((size (float (+ (* (or chess-images-border-width 0) 8)
+                           (* chess-images-size 8))))
+           (max-char-height (ceiling (/ size (frame-char-height))))
+           (max-char-width  (ceiling (/ size (frame-char-width)))))
+      ;; create the frame whenever necessary
+      (if chess-images-separate-frame
+          (chess-display-popup-in-frame 
+           (+ max-char-height 2)
+           max-char-width
+           (cdr (assq 'font (frame-parameters))))
+        (+chess--display-popup-in-window nil (+ max-char-height 1)))))
+
+  (setq chess-images-popup-function ' +chess-images-popup)
+
+  (defun +chess--display-popup-in-window (&optional max-h min-h max-w min-w)
+    "Popup the given DISPLAY, so that it's visible to the user."
+    (unless (get-buffer-window (current-buffer))
+      (if (> (length (window-list)) 1)
+          (fit-window-to-buffer (display-buffer (current-buffer)) 
+                                max-h min-h max-w min-w)
+        (display-buffer (current-buffer))))))
+
