@@ -176,6 +176,11 @@ if beginning and end are not supplied (or the region is not active) confine to c
    :n "y"     #'sp-wrap-curly
    :n "r"     #'sp-wrap-square))
 
+
+;;; Org-mode
+(after! org
+  (+org-pretty-mode))
+
 ;;; Python
 (after! python-mode
   (set-pretty-symbols! 'python-mode
