@@ -52,7 +52,8 @@
 
 ;;; Chess stuff.
 (use-package! chess
-  :commands (+chess-show-positions-new-frame)
+  :commands (+chess-show-positions-new-frame +chess-show-fen-at-point +chess-show-positions-new-frame
+                                             chess-pgn-show-position +chess-pgn-show-position)
   :init
   (map! :leader
         (:prefix-map ("k" . "chess")
@@ -60,16 +61,6 @@
           :desc "Display position for FEN found on current line in new frame." "F" '+chess-show-positions-new-frame))
   :config
   (set-popup-rule! "^\\*Chessboard.*" :side 'bottom)
-
-  (defun +chess-get-fen-on-line ()
-    "Grab the first fen string findable on current line."
-    (interactive)
-    (let ((chess-fen-regex "\\([bnrqkpBNRQKP1-8]*/?\\)+ [bw] \\(-\\|[KQkq]+\\) \\(-\\|[1-8]\\)")
-          (curr-line (buffer-substring-no-properties
-                      (line-beginning-position) (line-end-position))))
-      (save-excursion
-        (and (string-match chess-fen-regex curr-line)
-             (match-string 0 curr-line)))))
 
   (defun +chess-make-pos-from-fen (fen)
     "Display the position resulting from FEN."
@@ -83,13 +74,13 @@
   (defun +chess-show-fen-at-point ()
     "Find the first fen on the line and display it."
     (interactive)
-    (+chess-make-pos-from-fen (call-interactively '+chess-get-fen-on-line)))
+    (+chess-make-pos-from-fen (call-interactively '+chess-ivy-find-fens)))
 
   (defun +chess-show-positions-new-frame ()
     "Show the first fen on the line and display it in a second frame."
     (interactive)
     (let ((chess-images-separate-frame t))
-      (call-interactively '+chess-show-fen-at-point)))
+      (call-interactively '+chess-ivy-find-fens)))
 
   (setq! chess-images-directory "/home/dodge/.emacs.d/.local/straight/repos/emacs-chess/pieces/xboard"
          chess-images-default-size 40
@@ -120,7 +111,31 @@
       (if (> (length (window-list)) 1)
           (fit-window-to-buffer (display-buffer (current-buffer)) 
                                 max-h min-h max-w min-w)
-        (display-buffer (current-buffer))))))
+        (display-buffer (current-buffer)))))
+
+  (defun +chess-ivy-find-fens (beginning end)
+    "Use ivy to select all chess fens between BEGINNING and END.
+
+if beginning and end are not supplied (or the region is not active) confine to current line."
+    (interactive "r")
+    (let ((chess-fen-regex "\\([bnrqkpBNRQKP1-8]*/?\\)+ [bw] \\(-\\|[KQkq]+\\) \\(-\\|[1-8]\\)")
+          (curr-line (buffer-substring-no-properties
+                                        ; (line-beginning-position) } (line-end-position)}
+                      (if (use-region-p) beginning (line-beginning-position))
+                      (if (use-region-p) end (line-end-position))
+                      ))
+          (matches '())
+          (pos 0))
+      (save-excursion
+        (while (string-match chess-fen-regex curr-line pos)
+          (push (match-string 0 curr-line) matches)
+          (setq pos (match-end 0))))
+      (if matches
+          (if (> (length matches) 1)
+              (ivy-read "Found FENs: " matches :action '+chess-make-pos-from-fen)
+            (+chess-make-pos-from-fen (car matches)))
+        (message "%s" "Could not find FENs."))
+      )))
 
 ;; Add smartparens mappings
 (map!
