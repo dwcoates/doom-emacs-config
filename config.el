@@ -64,7 +64,7 @@
           :desc "Display position for FEN found on current line." "f" '+chess-ivy-find-fens
           :desc "Display position for FEN found on current line in new frame." "F" '+chess-show-positions-new-frame))
   :config
-  (set-popup-rule! "^\\*Chessboard.*" :side 'left)
+  (set-popup-rule! "^\\*Chessboard.*" :side (if (string= system-name "blackbox") 'top 'left))
 
   (defun +chess-make-pos-from-fen (fen)
     "Display the position resulting from FEN."
