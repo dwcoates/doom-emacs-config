@@ -117,7 +117,7 @@
                                 max-h min-h max-w min-w)
         (display-buffer (current-buffer)))))
 
-  ;;; If we're using Ivy, we can use a special function for getting the chess fens.
+;;; If we're using Ivy, we can use a special function for getting the chess fens.
   (after! ivy
     (defun +chess-ivy-find-fens (beginning end)
       "Use ivy to select all chess fens between BEGINNING and END.
@@ -157,7 +157,7 @@ if beginning and end are not supplied (or the region is not active) confine to c
                            (seq-filter (apply-partially 'string-match-p "\\*Chessboard\\*\\(<[0-9]+>\\)?")
                                        (mapcar (function buffer-name) (buffer-list))))
                      (let ((chess-images-separate-frame nil))
-                       ;;;FIXME: this is horrible. Use let or something.
+;;;FIXME: this is horrible. Use let or something.
                        (chess-message-catalog 'english
                          '((piece-images-loading . "")
                            (piece-images-loaded  . "")))
@@ -167,7 +167,7 @@ if beginning and end are not supplied (or the region is not active) confine to c
                          '((piece-images-loading . "Loading chess piece images...")
                            (piece-images-loaded  . "Loading chess piece images...done")))
                        )
-                     ;;; Clean up the minibuffer so we can display the candidates again.
+;;; Clean up the minibuffer so we can display the candidates again.
                      (message ""))))
               (+chess-make-pos-from-fen (car matches)))
           (message "%s" "Could not find FENs."))))))
