@@ -37,8 +37,7 @@
  ;; work
  "c" '(lambda () (interactive) (find-file "~/workspace/ChessCom/ceac"))
  "s" '(lambda () (interactive) (find-file "~/workspace/ChessCom/ceac/chess_engines/stockfish-tep/src/"))
- "t" '(lambda () (interactive) (find-file "~/workspace/ChessCom/ceac/TEP/libs/"))
- )
+ "t" '(lambda () (interactive) (find-file "~/workspace/ChessCom/ceac/TEP/libs/")))
 
 ;; Relative line numbers are pretty cool. Makes a lot of VIM commands easier to use.
 (setq! display-line-numbers-type 'relative)
@@ -157,7 +156,7 @@ if beginning and end are not supplied (or the region is not active) confine to c
                            (seq-filter (apply-partially 'string-match-p "\\*Chessboard\\*\\(<[0-9]+>\\)?")
                                        (mapcar (function buffer-name) (buffer-list))))
                      (let ((chess-images-separate-frame nil))
-;;;FIXME: this is horrible. Use let or something.
+                      ;;;FIXME: this is horrible. Use let or something.
                        (chess-message-catalog 'english
                          '((piece-images-loading . "")
                            (piece-images-loaded  . "")))
@@ -167,7 +166,7 @@ if beginning and end are not supplied (or the region is not active) confine to c
                          '((piece-images-loading . "Loading chess piece images...")
                            (piece-images-loaded  . "Loading chess piece images...done")))
                        )
-;;; Clean up the minibuffer so we can display the candidates again.
+                     ;;; Clean up the minibuffer so we can display the candidates again.
                      (message ""))))
               (+chess-make-pos-from-fen (car matches)))
           (message "%s" "Could not find FENs."))))))
