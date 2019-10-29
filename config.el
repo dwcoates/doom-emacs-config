@@ -5,6 +5,7 @@
 (unmap! evil-visual-state-map "s") ;; No snipe in visual mode
 (unmap! evil-insert-state-map "C-f" "C-b") ;; Use emacs keys, for now
 (unmap! evil-normal-state-map "M-y")
+(unmap! evil-insert-state-map "C-w") ;; No more deleting work accidentally in insert mode.
 
 (unbind-key "C-x C-p")
 
