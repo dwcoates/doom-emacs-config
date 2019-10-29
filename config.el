@@ -224,3 +224,7 @@ if beginning and end are not supplied (or the region is not active) confine to c
 (after! js2-mode
   (set-pretty-symbols! 'js2-mode
     :lambda "function"))
+
+;;; C/C++
+(after! c++-mode
+  (set-pretty-symbols! 'c++-mode nil))
