@@ -8,6 +8,9 @@
 
 (unbind-key "C-x C-p")
 
+;;; Paren match should pop a bit more. No more squinting.
+(set-face-attribute 'show-paren-match nil :background "grey25" :foreground "red3" :weight 'ultra-bold)
+
 ;; Place your private configuration here
 (map!
  ;; Use some basic emacs navigation bindings in insert-mode
