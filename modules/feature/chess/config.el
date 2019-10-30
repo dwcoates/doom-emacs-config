@@ -6,7 +6,7 @@
 
 ;;; Chess
 (use-package! chess
-  :commands (+chess-ivy-show-fens +chess-ivy-show-fens-new-frame)
+  :commands (+chess-ivy-show-fens +chess-ivy-show-fens-new-frame +chess-make-pos-from-fen)
   :init
   (map! :leader
         (:prefix-map ("k" . "chess")
