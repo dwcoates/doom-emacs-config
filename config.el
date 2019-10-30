@@ -218,7 +218,12 @@ if beginning and end are not supplied (or the region is not active) confine to c
 ;;; Python
 (after! python-mode
   (set-pretty-symbols! 'python-mode
-    :lambda "lambda"))
+    :lambda "lambda")
+
+  (defun dwc-python-mode-hook ()
+    (highlight-indentation-mode))
+
+  (add-hook 'python-mode-hook 'dwc-python-mode-hook))
 
 ;;; Javascript
 (after! js2-mode
