@@ -3,8 +3,6 @@
 (add-to-list 'exec-path "$HOME/bin")
 (add-to-list 'exec-path "$HOME/usr/lib/llvm-6.0/lib/clang/6.0.0/include")
 
-
-
 (after! rtags
   (setq rtags-path "/home/dodge/src/rtags/bin"))
 
