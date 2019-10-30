@@ -22,20 +22,6 @@
 ;;; Roland's package.
 (use-package! fixmee)
 
-;;; Chess
-(use-package! chess
-  :commands (+chess-ivy-show-fens +chess-ivy-show-fens-new-frame)
-  :init
-  (map! :leader
-        (:prefix-map ("k" . "chess")
-          :desc "Display position for FEN found on current line." "f" '+chess-ivy-show-fens
-          :desc "Display position for FEN found on current line in new frame." "F" '+chess-ivy-show-fens-new-frame))
-  ;; Main chess configuration file.
-  (load! "+chess")
-  :config
-  ;; TODO: this decision should really be made on a screen-size basis.
-  (set-popup-rule! "^\\*Chessboard.*" :side (if (string= system-name "blackbox") 'top 'left)))
-
 
 ;;; Org-mode
 (after! org
