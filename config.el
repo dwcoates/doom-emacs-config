@@ -216,7 +216,7 @@ if beginning and end are not supplied (or the region is not active) confine to c
   (+org-pretty-mode))
 
 ;;; Python
-(after! python-mode
+(after! python
   (set-pretty-symbols! 'python-mode
     :lambda "lambda")
 
@@ -231,5 +231,5 @@ if beginning and end are not supplied (or the region is not active) confine to c
     :lambda "function"))
 
 ;;; C/C++
-(after! c++-mode
+(after! c-mode
   (set-pretty-symbols! 'c++-mode nil))
