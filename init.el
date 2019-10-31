@@ -148,6 +148,10 @@
        ;;terra             ; Earth and Moon in alignment for performance.
        ;;web               ; the tubes
        ;;vala              ; GObjective-C
+       personal-cc
+       personal-org
+       personal-python
+       personal-javascript
 
        :email
        ;;(mu4e +gmail)       ; WIP
