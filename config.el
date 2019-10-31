@@ -10,7 +10,7 @@
 (add-hook 'window-setup-hook #'doom-display-benchmark-h)
 
 ;; Relative line numbers are pretty cool. Makes a lot of VIM commands easier to use.
-(setq! display-line-numbers-type 'relative)
+;; (setq! display-line-numbers-type 'relative)
 
 ;; When on the laptop, use some special settings.
 (when (string= system-name "blackbox")
