@@ -20,7 +20,3 @@
 
 ;;; Roland's package.
 (use-package! fixmee)
-
-;;; Org-mode
-(after! org
-  (+org-pretty-mode))
