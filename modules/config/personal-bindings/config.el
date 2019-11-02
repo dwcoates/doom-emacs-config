@@ -74,4 +74,7 @@
 
    :n "w"     #'sp-wrap-round
    :n "y"     #'sp-wrap-curly
-   :n "r"     #'sp-wrap-square))
+   :n "r"     #'sp-wrap-square)
+
+ (:after avy
+   :m "y" 'evil-avy-goto-char-in-line))
