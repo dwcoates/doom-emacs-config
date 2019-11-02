@@ -32,13 +32,9 @@
  "M-y" 'counsel-yank-pop
  :v
  "s"   'evil-surround-edit
- ;; File finding. FIXME: This seems like a shitty way to do this.
- :prefix "C-x M-f"
- ;; work
- "c" '(lambda () (interactive) (find-file "~/workspace/ChessCom/ceac"))
- "s" '(lambda () (interactive) (find-file "~/workspace/ChessCom/ceac/chess_engines/stockfish-tep/src/"))
- "t" '(lambda () (interactive) (find-file "~/workspace/ChessCom/ceac/TEP/libs/"))
- ;; smart-parens.el
+ ;; File finding. FIXME: This seems like a shitty way to do this.}}
+ (:after avy
+    :m "y" 'evil-avy-goto-char-in-line)
  (:after smartparens
    :leader
    :map smartparens-mode-map
@@ -74,7 +70,4 @@
 
    :n "w"     #'sp-wrap-round
    :n "y"     #'sp-wrap-curly
-   :n "r"     #'sp-wrap-square)
-
- (:after avy
-   :m "y" 'evil-avy-goto-char-in-line))
+   :n "r"     #'sp-wrap-square))
