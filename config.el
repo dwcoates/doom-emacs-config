@@ -18,5 +18,12 @@
   ;; Use a smaller font.
   (set-face-attribute 'default nil :height 100))
 
+;; Show directory contents in dired
+(use-package! dired-subtree
+  :after 'dired
+  :config
+  (map! :map dired-mode-map
+        :n "C-i" 'dired-subtree-cycle))
+
 ;;; Roland's package.
 (use-package! fixmee)

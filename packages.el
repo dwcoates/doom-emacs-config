@@ -10,3 +10,4 @@
 ;
 (package! fixmee)
 (package! highlight-indentation)
+(package! dired-subtree)
