@@ -16,6 +16,12 @@
   ;; TODO: this decision should really be made on a screen-size basis.
   (set-popup-rule! "^\\*Chessboard.*" :side (if (string= system-name "blackbox") 'top 'left))
 
+  (add-to-list 'evil-emacs-state-modes 'chess-display-mode)
+
+  (map! :map chess-display-mode
+        :g
+        "h" 'chess-display-move-forward)
+
   (defun +chess-make-pos-from-fen (fen)
     "Display the position resulting from FEN."
     (let* ((game (chess-game-create))
@@ -54,5 +60,4 @@
       (if (> (length (window-list)) 1)
           (fit-window-to-buffer (display-buffer (current-buffer))
                                 max-h min-h max-w min-w)
-        (display-buffer (current-buffer)))))
-)
+        (display-buffer (current-buffer))))))
