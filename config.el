@@ -9,6 +9,10 @@
 ;; Display the start-up time after loading.
 (add-hook 'window-setup-hook #'doom-display-benchmark-h)
 
+(map!
+ :v
+ "." 'er/expand-region)
+
 ;; Relative line numbers are pretty cool. Makes a lot of VIM commands easier to use.
 ;; (setq! display-line-numbers-type 'relative)
 
