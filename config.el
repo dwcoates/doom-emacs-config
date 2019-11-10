@@ -9,18 +9,23 @@
 ;; Display the start-up time after loading.
 (add-hook 'window-setup-hook #'doom-display-benchmark-h)
 
+(setq!
+ fill-column 100
+ display-line-numbers-type 'relative)
+
 (map!
  :v
  "." 'er/expand-region)
 
 ;; Relative line numbers are pretty cool. Makes a lot of VIM commands easier to use.
-;; (setq! display-line-numbers-type 'relative)
 
 ;; When on the laptop, use some special settings.
 (when (string= system-name "blackbox")
   (display-battery-mode t)
   ;; Use a smaller font.
-  (set-face-attribute 'default nil :height 100))
+  (set-face-attribute 'default nil :height 100)
+  ;; Turn off mode line, it's too intrusive.
+  (global-hide-mode-line-mode +1))
 
 ;; Show directory contents in dired
 (use-package! dired-subtree
