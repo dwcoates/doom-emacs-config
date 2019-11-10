@@ -25,6 +25,9 @@
  "C-n" 'next-line
  "C-f" 'forward-char
  "C-b" 'backward-char
+ "M-p" 'evil-paste-before
+ "M-P" 'evil-paste-after
+ ;;
  ;; Surround (paren manipulation)
  :n
  "M-]" 'evil-surround-delete
