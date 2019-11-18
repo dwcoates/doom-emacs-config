@@ -4,6 +4,14 @@
 ;;; Configuration and modification file for emacs-chess.
 
 
+(use-package! pgn-mode
+  :config
+  (map! :map pgn-mode-map
+        :g "M-h" #'pgn-mode-previous-move
+        :g "M-l" #'pgn-mode-next-move
+        :g "M-j" #'pgn-mode-next-game
+        :g "M-k" #'pgn-mode-previous-game))
+
 ;;; Chess
 (use-package! chess
   :commands (+chess-ivy-show-fens +chess-ivy-show-fens-new-frame +chess-make-pos-from-fen)

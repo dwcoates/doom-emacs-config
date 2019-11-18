@@ -182,4 +182,5 @@
        personal-bindings
 
        :feature
+       chess
        )
