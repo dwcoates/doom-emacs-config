@@ -36,6 +36,8 @@
  :v
  "s"   'evil-surround-edit
  ;; File finding. FIXME: This seems like a shitty way to do this.}}
+ :leader
+ "L" #'global-hide-mode-line-mode
  (:after avy
     :m "y" 'evil-avy-goto-char-in-line)
  (:after smartparens
