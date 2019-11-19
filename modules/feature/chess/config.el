@@ -3,6 +3,7 @@
 ;;;
  ;;; Configuration and modification file for emacs-chess.
 
+(load-file "/home/dodge/workspace/pygn-mode/pygn-mode.el")
 
 (use-package! pygn-mode
   :config
