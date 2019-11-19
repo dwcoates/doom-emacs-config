@@ -12,4 +12,5 @@
 
 ;;; C/C++
 (after! cc-mode
-  (set-pretty-symbols! 'c++-mode nil))
+  (set-pretty-symbols! 'c++-mode nil)
+  (set-popup-rule! "*compilation*" :side 'right :width 80 :quit nil :select t))
