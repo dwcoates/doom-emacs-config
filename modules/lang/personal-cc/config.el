@@ -5,9 +5,7 @@
 (after! rtags
   (setq rtags-path "/home/dodge/src/rtags/bin")
 
-  (defun dwc-rtags-hook ()
-    (rtags-enable-standard-keybindings))
-  (add-hook 'rtags-mode-hook rtags-enable-standard-keybindings)
+  (rtags-enable-standard-keybindings)
 
   (add-hook 'c-mode-hook 'rtags-start-process-unless-running)
   (add-hook 'c++-mode-hook 'rtags-start-process-unless-running))
