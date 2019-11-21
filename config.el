@@ -10,8 +10,10 @@
 (add-hook 'window-setup-hook #'doom-display-benchmark-h)
 
 (setq!
- fill-column 100
  display-line-numbers-type 'relative)
+
+(setq-default
+ fill-column 100)
 
 (map!
  :v
