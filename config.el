@@ -9,6 +9,9 @@
 ;; Display the start-up time after loading.
 (add-hook 'window-setup-hook #'doom-display-benchmark-h)
 
+(defun doom/popup-ctrl-g-close (popup-to-close)
+  (equal (kbd "C-g") (this-command-keys)))
+
 (setq!
  display-line-numbers-type 'relative)
 
