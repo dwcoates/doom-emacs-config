@@ -152,6 +152,7 @@
        personal-org
        personal-python
        personal-javascript
+       personal-emacs-lisp
 
        :email
        ;;(mu4e +gmail)       ; WIP
