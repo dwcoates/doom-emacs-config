@@ -31,12 +31,22 @@
                                  "* TODO %?\n %i\n %a"
                                  :clock-in t :prepend t)
                                 ("ptf" "Future features" entry
-                                 (file+headline +org-capture-project-todo-file "Features"))
+                                 (file+headline +org-capture-project-todo-file "Feature TODOs"))
+                                ("ptF" "Future features" entry
+                                 (file+headline +org-capture-project-todo-file "Feature notes"))
                                 ("ptr" "Future refactors" entry
-                                 (file+headline +org-capture-project-todo-file "Refactor"))
+                                 (file+headline +org-capture-project-todo-file "Refactor TODOs"))
+                                ("ptR" "Future refactors" entry
+                                 (file+headline +org-capture-project-todo-file "Refactor notes"))
                                 ("ptb" "Bugs to fix" entry
-                                 (file+headline +org-capture-project-todo-file "Bugs")
+                                 (file+headline +org-capture-project-todo-file "Bugs to fix")
                                  "* [ ] %?\t%t\n %i\n %a" :prepend t)
+                                ("ptd" "Design changes" entry
+                                 (file+headline +org-capture-project-todo-file "Design TODOs")
+                                 "* [ ] %?\t%t\n %i\n %a" :prepend t)
+                                ("ptD" "Design changes" entry
+                                 (file+headline +org-capture-project-todo-file "Design notes")
+                                 "* %?\t%t\n %i\n %a" :prepend t)
                                 ("pn" "Project-local notes" entry ; {project-root}/notes.org
                                  (file+headline +org-capture-project-notes-file "Inbox"))
                                 ("pc" "Project-local changelog" entry ; {project-root}/changelog.org
