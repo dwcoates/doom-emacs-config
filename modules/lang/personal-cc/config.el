@@ -13,4 +13,4 @@
 ;;; C/C++
 (after! cc-mode
   (set-pretty-symbols! 'c++-mode nil)
-  (set-popup-rule! "*compilation*" :side 'right :width 80 :quit #'doom/popup-ctrl-g-close :select t))
+  (set-popup-rule! "*compilation*" :side 'bottom :height 20 :quit #'doom/popup-ctrl-g-close :select t))
