@@ -27,7 +27,7 @@
                                 ("p" "Templates for projects")
                                 ("pt" "Project-local todo") ; {project-root}/todo.org
                                 ("ptt" "Today's todos" entry
-                                 (file+headline +org-capture-project-changelog-file "Today"))
+                                 (file+headline +org-capture-project-changelog-file "Today" :clock-in t))
                                 ("ptf" "Future features" entry
                                  (file+headline +org-capture-project-changelog-file "Features"))
                                 ("ptr" "Future refactors" entry
