@@ -64,6 +64,19 @@
                                  :heading "Changelog"
                                  :prepend t)))
 
+  ;;;  Fix the issue of escaping code markup (tildes)
+  (defun dwc-org-cycle (&optional arg)
+    (interactive "p")
+    "Wrapper around org-cycle that escapes code markup if point is just before a tilde."
+    (cond ((looking-at-p "~$")
+           (progn (when (search-forward-regexp "~$" (line-end-position) t 1)
+                    (replace-match "~ "))))
+          ((looking-at-p "~")
+           (forward-char))
+          (t
+           (org-cycle arg))))
+  (evil-define-key 'insert evil-org-mode-map (kbd "<tab>") 'dwc-org-cycle)
+
   (define-abbrev-table 'org-mode-abbrev-table
     (mapcar
      (lambda (char-string)
