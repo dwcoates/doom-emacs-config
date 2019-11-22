@@ -23,22 +23,27 @@
                                 ;; {todo,notes,changelog}.org file is found in a parent directory.
                                 ;; Uses the basename from `+org-capture-todo-file',
                                 ;; `+org-capture-changelog-file' and `+org-capture-notes-file'.
-                                ;;;
+;;;
                                 ("p" "Templates for projects")
-                                ("pt" "Project-local todo" entry  ; {project-root}/todo.org
-                                 (file+headline +org-capture-project-todo-file "Inbox")
-                                 "* TODO %?\n%i\n%a" :prepend t)
-                                ("pn" "Project-local notes" entry  ; {project-root}/notes.org
-                                 (file+headline +org-capture-project-notes-file "Inbox")
-                                 "* %U %?\n%i\n%a" :prepend t)
-                                ("pc" "Project-local changelog" entry  ; {project-root}/changelog.org
+                                ("pt" "Project-local todo") ; {project-root}/todo.org
+                                ("ptt" "Today's todos" entry
+                                 (file+headline +org-capture-project-changelog-file "Today"))
+                                ("ptf" "Future features" entry
+                                 (file+headline +org-capture-project-changelog-file "Features"))
+                                ("ptr" "Future refactors" entry
+                                 (file+headline +org-capture-project-changelog-file "Refactor"))
+                                ("ptb" "Bugs to fix" entry
+                                 (file+headline +org-capture-project-changelog-file "Bugs"))
+                                ("pn" "Project-local notes" entry ; {project-root}/notes.org
+                                 (file+headline +org-capture-project-notes-file "Inbox"))
+                                ("pc" "Project-local changelog" entry ; {project-root}/changelog.org
                                  (file+headline +org-capture-project-changelog-file "Unreleased")
                                  "* %U %?\n%i\n%a" :prepend t)
                                 ;; Will use {org-directory}/{+org-capture-projects-file} and store
                                 ;; these under {ProjectName}/{Tasks,Notes,Changelog} headings. They
                                 ;; support `:parents' to specify what headings to put them under, e.g.
                                 ;; :parents ("Projects")
-                                ;;;
+;;;
                                 ("o" "Centralized templates for projects")
                                 ("ot" "Project todo" entry
                                  (function +org-capture-central-project-todo-file)
