@@ -154,6 +154,7 @@
        personal-python
        personal-javascript
        personal-emacs-lisp
+       personal-common-lisp
 
        :email
        ;;(mu4e +gmail)       ; WIP
