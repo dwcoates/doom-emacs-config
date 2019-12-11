@@ -9,6 +9,10 @@
 ;; Display the start-up time after loading.
 (add-hook 'window-setup-hook #'doom-display-benchmark-h)
 
+;; I don't much like the highlighting done on snipe matches. Confuses me with isearch-forward
+;; behavior.
+(set-face-attribute 'evil-snipe-first-match-face nil :background nil)
+
 (defun doom/popup-ctrl-g-close (popup-to-close)
   (equal (kbd "C-g") (this-command-keys)))
 
