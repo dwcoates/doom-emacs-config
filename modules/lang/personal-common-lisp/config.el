@@ -1,4 +1,6 @@
 ;;; lang/personal-common-lisp/config.el -*- lexical-binding: t; -*-
 
-(add-hook 'common-lisp-mode-hook (lambda () (lispy-mode 1)))
-(add-hook 'sly-mrepl-mode-hook (lambda () (lispy-mode 1)))
+(after! sly
+  (set-popup-rule! "\*sly-description\*" :side 'right :width 80)
+  (set-popup-rule! "\*sly-compilation\*" :side 'right :width 80)
+  (set-popup-rule! "\*sly.mrepl.*" "" :side 'right :width 100)) ;; FIXME: this doesn't work for some reason.
