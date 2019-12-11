@@ -11,7 +11,10 @@
 
 ;; I don't much like the highlighting done on snipe matches. Confuses me with isearch-forward
 ;; behavior.
-(set-face-attribute 'evil-snipe-first-match-face nil :background nil)
+
+(add-hook 'eshell-mode-hook (lambda () (when company-mode (company-mode -1))))
+(after! evil-snipe
+  (set-face-attribute 'evil-snipe-first-match-face nil :background nil))
 
 (defun doom/popup-ctrl-g-close (popup-to-close)
   (equal (kbd "C-g") (this-command-keys)))
