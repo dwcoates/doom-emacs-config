@@ -4,6 +4,9 @@
   :config
   (+org-pretty-mode)
 
+  (set-popup-rule! "CAPTURE-.*" :quit 'other)
+  (set-popup-rule! "\*Org Note\*" :quit 'other)
+
   (defun my-org-hook ()
     (abbrev-mode t))
   (add-hook! 'org-mode-hook 'my-org-hook)
