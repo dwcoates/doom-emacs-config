@@ -29,6 +29,9 @@ This is a useful function for adding to `kill-emacs-query-functions'."
         org-capture-templates '(("t" "Personal todo" entry
                                  (file+headline +org-capture-todo-file "Inbox")
                                  "* [ ] %?\n%i\n%a" :prepend t)
+                                ("l" "Personal to learn" entry
+                                 (file+headline +org-capture-notes-file "Learn")
+                                 "* %u %?\n%i\n%a" :prepend t)
                                 ("n" "Personal notes" entry
                                  (file+headline +org-capture-notes-file "Inbox")
                                  "* %u %?\n%i\n%a" :prepend t)
