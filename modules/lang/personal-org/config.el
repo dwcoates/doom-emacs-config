@@ -11,6 +11,19 @@
     (abbrev-mode t))
   (add-hook! 'org-mode-hook 'my-org-hook)
 
+  (defun my/org-clock-query-out ()
+    "Ask the user before clocking out.
+This is a useful function for adding to `kill-emacs-query-functions'."
+    (if (and
+         (featurep 'org-clock)
+         (funcall 'org-clocking-p)
+         (y-or-n-p "You are currently clocking time, clock out? "))
+        (org-clock-out)
+      t)) ;; only fails on keyboard quit or error
+
+  ;; timeclock.el puts this on the wrong hook!
+  (add-hook 'kill-emacs-query-functions 'my/org-clock-query-out)
+
   ;;; TODO: customize captures?
   (setq org-default-notes-file (expand-file-name +org-capture-notes-file org-directory)
         org-capture-templates '(("t" "Personal todo" entry
