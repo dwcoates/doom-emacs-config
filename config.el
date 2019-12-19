@@ -20,7 +20,17 @@
   (equal (kbd "C-g") (this-command-keys)))
 
 (setq!
- display-line-numbers-type 'relative)
+ display-line-numbers-type 'relative
+;;; From Henrik:
+ ;;
+ ;; "By default it should keep scrolling until it detects the first error. It's controlled by the
+ ;;  compilation-scroll-output variable (set to 'first-error in doom, nil in vanilla. Set to t to
+ ;;  always scroll). Also, it stops auto-scrolling if you scroll it manually, i believe."
+ ;;
+ ;; https://discordapp.com/channels/406534637242810369/406554085794381833/654479202560770065
+ ;;
+ ;;NOTE: For some reason, 'first-error isn't working for me. Set to t.
+ compilation-scroll-output t)
 
 (setq-default
  fill-column 100)
