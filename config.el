@@ -32,6 +32,27 @@
  ;;NOTE: For some reason, 'first-error isn't working for me. Set to t.
  compilation-scroll-output t)
 
+(set-popup-rule! "\*input/output of .*\*" :height 18 :quit 'other)
+
+;;; Custom function for looking at Stockfish-TEP JSON output
+(defconst tep-json-buf-name " \*TEP JSON\*")
+(defun dwc-view-tep-json-at-point ()
+  (interactive)
+  (let ((json-data (buffer-substring-no-properties
+                    (save-excursion
+                      (beginning-of-line)
+                      (or (search-forward-regexp "json ")
+                          (error "No TEP json found")))
+                    (line-end-position))))
+    (when (buffer-live-p tep-json-buf-name)
+      (kill-buffer tep-json-buf-name))
+    (display-buffer (get-buffer-create tep-json-buf-name))
+    (with-current-buffer tep-json-buf-name
+      (json-mode)
+      (insert json-data)
+      (json-pretty-print (point-min) (point-max)))))
+(set-popup-rule! tep-json-buf-name :side 'right :quit 'other :width 60 :select t)
+
 (setq-default
  fill-column 100)
 
