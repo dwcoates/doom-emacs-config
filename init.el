@@ -48,8 +48,8 @@
        file-templates    ; auto-snippets for empty files
        fold              ; (nigh) universal code folding
        ;;(format +onsave)  ; automated prettiness
-       lispy             ; vim for lisp, for people who dont like vim
-       personal-lispy
+       ;; lispy             ; vim for lisp, for people who dont like vim
+       ;; personal-lispy
        multiple-cursors  ; editing in many places at once
        ;; objed             ; text object editing for the innocent
        parinfer          ; turn lisp into python, sort of
@@ -94,6 +94,8 @@
        ;;tmux              ; an API for interacting with tmux
        ;;upload            ; map local to remote projects via ssh/ftp
        ;;wakatime
+
+       personal-magit
 
        :lang
        ;;agda              ; types of types of types of types...
