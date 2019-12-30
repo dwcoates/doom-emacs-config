@@ -59,9 +59,9 @@
    :n "m"     #'sp-forward-symbol
    :n "bm"    #'sp-backward-symbol
 
-   :n "s"     #'sp-forward-slurp-sexp
+   :n ">"     #'sp-forward-slurp-sexp
    :n "f"     #'sp-forward-barf-sexp
-   :n "bs"    #'sp-backward-slurp-sexp
+   :n "<"    #'sp-backward-slurp-sexp
    :n "bf"    #'sp-backward-barf-sexp
 
    :n "t"     #'sp-transpose-sexp
