@@ -9,6 +9,10 @@
 ;; Display the start-up time after loading.
 (add-hook 'window-setup-hook #'doom-display-benchmark-h)
 
+(defconst doom-frame-transparency 93)
+(set-frame-parameter (selected-frame) 'alpha doom-frame-transparency)
+(add-to-list 'default-frame-alist `(alpha . ,doom-frame-transparency))
+
 ;; I don't much like the highlighting done on snipe matches. Confuses me with isearch-forward
 ;; behavior.
 
