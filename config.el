@@ -1,7 +1,7 @@
 ;;; .doom.d/config.el -*- lexical-binding: t; -*-
 
 ;;; Load theme
-(load-theme 'doom-peacock t)
+(load-theme 'doom-sourcerer t)
 
 ;;; TODO: is this necessary?
 (add-to-list 'exec-path "$HOME/bin")
