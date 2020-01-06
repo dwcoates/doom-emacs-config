@@ -9,9 +9,17 @@
 ;; Display the start-up time after loading.
 (add-hook 'window-setup-hook #'doom-display-benchmark-h)
 
-(defconst doom-frame-transparency 93)
+(defconst doom-frame-transparency 90)
 (set-frame-parameter (selected-frame) 'alpha doom-frame-transparency)
 (add-to-list 'default-frame-alist `(alpha . ,doom-frame-transparency))
+
+(defun dwc-smart-transparent-frame ()
+  (set-frame-parameter
+    (selected-frame)
+    'alpha (if (frame-parameter (selected-frame) 'fullscreen)
+              100
+             doom-frame-transparency)))
+(add-hook 'window-configuration-change-hook 'dwc-smart-transparent-frame)
 
 ;; I don't much like the highlighting done on snipe matches. Confuses me with isearch-forward
 ;; behavior.
