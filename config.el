@@ -78,7 +78,7 @@
 (when (string= system-name "blackbox")
   (display-battery-mode t)
   ;; Use a smaller font.
-  (set-face-attribute 'default nil :height 100)
+  (set-face-attribute 'default nil :height 110)
   ;; Turn off mode line, it's too intrusive.
   (global-hide-mode-line-mode +1))
 
