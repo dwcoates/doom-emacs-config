@@ -31,8 +31,8 @@
 (defun doom/popup-ctrl-g-close (popup-to-close)
   (equal (kbd "C-g") (this-command-keys)))
 
-(setq!
- display-line-numbers-type 'relative
+(setq
+ display-line-numbers-type nil
 ;;; From Henrik:
  ;;
  ;; "By default it should keep scrolling until it detects the first error. It's controlled by the
