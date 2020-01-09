@@ -87,5 +87,8 @@
   (map! :map dired-mode-map
         :n "C-i" 'dired-subtree-cycle))
 
+(when (string= system-name "goldbox")
+  (global-hide-mode-line-mode +1))
+
 ;;; Roland's package.
 (use-package! fixmee)
