@@ -9,6 +9,10 @@
 ;; Display the start-up time after loading.
 (add-hook 'window-setup-hook #'doom-display-benchmark-h)
 
+;; Use Jetbrains Mono: https://www.jetbrains.com/lp/mono/
+(set-frame-font "Jetbrains Mono" nil t)
+(setq-default line-spacing 1)
+
 (defconst doom-frame-transparency 90)
 (set-frame-parameter (selected-frame) 'alpha doom-frame-transparency)
 (add-to-list 'default-frame-alist `(alpha . ,doom-frame-transparency))
