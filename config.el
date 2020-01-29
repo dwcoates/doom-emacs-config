@@ -84,15 +84,16 @@
   ;; Turn off mode line, it's too intrusive.
   (global-hide-mode-line-mode +1))
 
+(when (string= system-name "goldbox")
+  (global-hide-mode-line-mode +1)
+  (set-face-attribute 'default nil :height 108))
+
 ;; Show directory contents in dired
 (use-package! dired-subtree
   :after 'dired
   :config
   (map! :map dired-mode-map
         :n "C-i" 'dired-subtree-cycle))
-
-(when (string= system-name "goldbox")
-  (global-hide-mode-line-mode +1))
 
 ;;; Roland's package.
 (use-package! fixmee)
