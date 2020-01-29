@@ -10,18 +10,20 @@
 (add-hook 'window-setup-hook #'doom-display-benchmark-h)
 
 ;; Use Jetbrains Mono: https://www.jetbrains.com/lp/mono/
+;;
+;; Credit to Roland.
 (set-frame-font "Jetbrains Mono" nil t)
 (setq-default line-spacing 1)
 
-(defconst doom-frame-transparency 90)
-(set-frame-parameter (selected-frame) 'alpha doom-frame-transparency)
-(add-to-list 'default-frame-alist `(alpha . ,doom-frame-transparency))
-(defun dwc-smart-transparent-frame ()
-  (set-frame-parameter
-    (selected-frame)
-    'alpha (if (frame-parameter (selected-frame) 'fullscreen)
-              100
-             doom-frame-transparency)))
+;; (defconst doom-frame-transparency 90)
+;; (set-frame-parameter (selected-frame) 'alpha doom-frame-transparency)
+;; (add-to-list 'default-frame-alist `(alpha . ,doom-frame-transparency))
+;; (defun dwc-smart-transparent-frame ()
+;;   (set-frame-parameter
+;;     (selected-frame)
+;;     'alpha (if (frame-parameter (selected-frame) 'fullscreen)
+;;               100
+;;              doom-frame-transparency)))
 
 ;; I don't much like the highlighting done on snipe matches. Confuses me with isearch-forward
 ;; behavior.
