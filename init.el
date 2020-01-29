@@ -69,6 +69,8 @@
        ;;term              ; terminals in Emacs
        ;;vterm             ; another terminals in Emacs
 
+       personal-shell
+
        :tools
        ;;ansible
        debugger          ; FIXME stepping through code, to help you add bugs
