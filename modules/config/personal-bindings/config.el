@@ -1,11 +1,11 @@
 ;;; ~/.doom.d/+bindings.el -*- lexical-binding: t; -*-
 
 ;; Use normal previous/next keys in insert-mode
-(unmap! evil-insert-state-map "C-p" "C-n") ;; No keys stealing C-p and C-n, for now.
-(unmap! evil-visual-state-map "s") ;; No snipe in visual mode
-(unmap! evil-insert-state-map "C-f" "C-b") ;; Use emacs keys, for now
-(unmap! evil-normal-state-map "M-y")
-(unmap! evil-insert-state-map "C-w") ;; No more deleting work accidentally in insert mode.
+;(unmap! evil-insert-state-map "C-p" "C-n") ;; No keys stealing C-p and C-n, for now.
+;(unmap! evil-visual-state-map "s") ;; No snipe in visual mode
+;(unmap! evil-insert-state-map "C-f" "C-b") ;; Use emacs keys, for now
+;(unmap! evil-normal-state-map "M-y")
+;(unmap! evil-insert-state-map "C-w") ;; No more deleting work accidentally in insert mode.
 
 (unbind-key "C-x C-p")
 
@@ -35,6 +35,9 @@
  "M-y" 'counsel-yank-pop
  :v
  "s"   'evil-surround-edit
+ :vom
+ "C-s" 'evil-snipe-s
+ "C-S" 'evil-snipe-S
  ;; File finding. FIXME: This seems like a shitty way to do this.}}
  :leader
  "L" #'global-hide-mode-line-mode
