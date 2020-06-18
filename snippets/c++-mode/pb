@@ -1,0 +1,4 @@
+#name : pretty_bitboard
+# key: pb          
+# --
+std::cout << pretty_bitboard($1) << std::endl;$0
