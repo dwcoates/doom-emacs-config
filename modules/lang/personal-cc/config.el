@@ -14,4 +14,13 @@
 (after! cc-mode
   (set-pretty-symbols! '(c-mode c++-mode) nil)
   (set-popup-rule! "*compilation*" :side 'bottom :height 20 :quit #'doom/popup-ctrl-g-close :select t)
-  (set-popup-rule! "*input/output of .*" :quit :quit #'doom/popup-ctrl-g-close ))
+  (set-popup-rule! "*input/output of .*" :quit :quit #'doom/popup-ctrl-g-close)
+  (setq realgud-safe-mode nil))
+
+(set-popup-rule! "\\*gdb.*shell\\*" :side 'right :width 100 :quit nil)
+
+(map!
+ :map cpp-mode-map
+ :nvigr
+ "C-c ?" 'realgud:gdb
+ )

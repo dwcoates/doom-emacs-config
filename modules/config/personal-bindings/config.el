@@ -41,44 +41,48 @@
  :vo
  "C-s" 'evil-snipe-s
  "C-S-s" 'evil-snipe-S
+ :n
+ "SPC h M-m" 'man
+ :i
+ "C-h M-m" 'man
  ;; File finding. FIXME: This seems like a shitty way to do this.}}
  :leader
  "L" #'global-hide-mode-line-mode
  (:after avy
-    :m "y" 'evil-avy-goto-char-in-line)
+  :m "y" 'evil-avy-goto-char-in-line)
  (:after smartparens
-   :leader
-   :map smartparens-mode-map
-   :prefix "r"
-   :n "a"     #'sp-beginning-of-sexp
-   :n "e"     #'sp-end-of-sexp
+  :leader
+  :map smartparens-mode-map
+  :prefix "r"
+  :n "a"     #'sp-beginning-of-sexp
+  :n "e"     #'sp-end-of-sexp
 
-   :n "d"     #'sp-down-sexp
-   :n "bd"    #'sp-backward-down-sexp
-   :n "]"     #'sp-up-sexp
-   :n "["     #'sp-backward-up-sexp
+  :n "d"     #'sp-down-sexp
+  :n "bd"    #'sp-backward-down-sexp
+  :n "]"     #'sp-up-sexp
+  :n "["     #'sp-backward-up-sexp
 
-   :n "p"     #'sp-backward-sexp
+  :n "p"     #'sp-backward-sexp
 
-   :n "n"     #'sp-next-sexp
+  :n "n"     #'sp-next-sexp
 
-   :n "m"     #'sp-forward-symbol
-   :n "bm"    #'sp-backward-symbol
+  :n "m"     #'sp-forward-symbol
+  :n "bm"    #'sp-backward-symbol
 
-   :n ">"     #'sp-forward-slurp-sexp
-   :n "f"     #'sp-forward-barf-sexp
-   :n "<"    #'sp-backward-slurp-sexp
-   :n "bf"    #'sp-backward-barf-sexp
+  :n ">"     #'sp-forward-slurp-sexp
+  :n "f"     #'sp-forward-barf-sexp
+  :n "<"    #'sp-backward-slurp-sexp
+  :n "bf"    #'sp-backward-barf-sexp
 
-   :n "t"     #'sp-transpose-sexp
-   :n "k"     #'sp-kill-sexp
-   :n "hk"    #'sp-kill-hybrid-sexp
-   :n "bk"    #'sp-backward-kill-sexp
-   :n "c"     #'sp-copy-sexp
+  :n "t"     #'sp-transpose-sexp
+  :n "k"     #'sp-kill-sexp
+  :n "hk"    #'sp-kill-hybrid-sexp
+  :n "bk"    #'sp-backward-kill-sexp
+  :n "c"     #'sp-copy-sexp
 
-   :n "u"     #'sp-unwrap-sexp
-   :n "bu"    #'sp-backward-unwrap-sexp
+  :n "u"     #'sp-unwrap-sexp
+  :n "bu"    #'sp-backward-unwrap-sexp
 
-   :n "w"     #'sp-wrap-round
-   :n "y"     #'sp-wrap-curly
-   :n "r"     #'sp-wrap-square))
+  :n "w"     #'sp-wrap-round
+  :n "y"     #'sp-wrap-curly
+  :n "r"     #'sp-wrap-square))
