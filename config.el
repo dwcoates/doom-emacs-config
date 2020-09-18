@@ -88,7 +88,8 @@
 
 (when (string= system-name "goldbox")
   (global-hide-mode-line-mode +1)
-  (set-face-attribute 'default nil :height 108))
+  (set-face-attribute 'default nil :height 108)
+  (setq kill-ring-max 2000))
 
 ;; Show directory contents in dired
 (use-package! dired-subtree
