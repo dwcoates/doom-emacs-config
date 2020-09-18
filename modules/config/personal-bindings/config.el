@@ -27,6 +27,9 @@
  "C-b" 'backward-char
  "M-p" 'evil-paste-before
  "M-P" 'evil-paste-after
+ :in
+ "C-s" 'isearch-forward
+ "C-S-s" 'isearch-backward
  ;;
  ;; Surround (paren manipulation)
  :n
