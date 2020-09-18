@@ -38,9 +38,9 @@
  "M-y" 'counsel-yank-pop
  :v
  "s"   'evil-surround-edit
- :vom
+ :vo
  "C-s" 'evil-snipe-s
- "C-S" 'evil-snipe-S
+ "C-S-s" 'evil-snipe-S
  ;; File finding. FIXME: This seems like a shitty way to do this.}}
  :leader
  "L" #'global-hide-mode-line-mode
