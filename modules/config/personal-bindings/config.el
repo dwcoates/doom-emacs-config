@@ -35,6 +35,10 @@
  "M-y" 'counsel-yank-pop
  :v
  "s"   'evil-surround-edit
+ :n
+ "SPC h M-m" 'man
+ :i
+ "C-h M-m" 'man
  ;; File finding. FIXME: This seems like a shitty way to do this.}}
  :leader
  "L" #'global-hide-mode-line-mode
