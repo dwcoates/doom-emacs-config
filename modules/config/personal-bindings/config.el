@@ -85,4 +85,10 @@
 
   :n "w"     #'sp-wrap-round
   :n "y"     #'sp-wrap-curly
-  :n "r"     #'sp-wrap-square))
+  :n "r"     #'sp-wrap-square)
+ (:after python
+  :map python-mode-map
+  :nvigr "C->" #'python-nav-end-of-statement
+  :nvigr "C-<" #'python-nav-beginning-of-statement
+  :i     "C->" #'python-nav-end-of-statement
+  :i     "C-<" #'python-nav-beginning-of-statement))
