@@ -29,7 +29,7 @@
  "M-P" 'evil-paste-after
  :in
  "C-s" 'isearch-forward
- "C-S-s" 'isearch-backward
+ "C-M-s" 'isearch-backward
  ;;
  ;; Surround (paren manipulation)
  :n
