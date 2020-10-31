@@ -108,5 +108,7 @@
   (map! :map dired-mode-map
         :n "C-i" 'dired-subtree-cycle))
 
+(use-package! yaml-mode)
+
 ;;; Roland's package.
 (use-package! fixmee)
