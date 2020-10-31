@@ -85,21 +85,14 @@
         lsp-ui-doc-max-width 80
         lsp-ui-doc-delay 0.8))
 
-
-;; Relative line numbers are pretty cool. Makes a lot of VIM commands easier to use.
-
-;; When on the laptop, use some special settings.
-(when (string= system-name "blackbox")
+(if (string= system-name "goldbox")
+    (progn
+      (set-face-attribute 'default nil :height 108) ;; Smaller character sizes
+      (setq kill-ring-max 2000))
   (display-battery-mode t)
   ;; Use a smaller font.
-  (set-face-attribute 'default nil :height 110)
-  ;; Turn off mode line, it's too intrusive.
-  (global-hide-mode-line-mode +1))
+  (set-face-attribute 'default nil :height 110))
 
-(when (string= system-name "goldbox")
-  (global-hide-mode-line-mode +1)
-  (set-face-attribute 'default nil :height 108)
-  (setq kill-ring-max 2000))
 
 ;; Show directory contents in dired
 (use-package! dired-subtree
