@@ -76,6 +76,16 @@
  :v
  "." 'er/expand-region)
 
+(after! lsp-ui
+  (setq lsp-ui-doc-enable t
+        lsp-ui-sideline-show-code-actions t
+        lsp-ui-sideline-show-diagnostics t
+        lsp-ui-peek-enable t
+        lsp-ui-doc-max-height 40
+        lsp-ui-doc-max-width 80
+        lsp-ui-doc-delay 0.8))
+
+
 ;; Relative line numbers are pretty cool. Makes a lot of VIM commands easier to use.
 
 ;; When on the laptop, use some special settings.
