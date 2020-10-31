@@ -133,7 +133,14 @@
        ;;ocaml             ; an objective camel
        (org              ; organize your plain life in plain text
         +dragndrop       ; file drag & drop support
-        +ipython         ; ipython support for babel
+        +brain
+        +gnuplot
+        +huge
+        +journal
+        +jupyter
+        +pandoc
+        +pomodoro
+        +noter
         +pandoc          ; pandoc integration into org's exporter
         +present)        ; using Emacs for presentations
        ;;perl              ; write code no one else can comprehend
