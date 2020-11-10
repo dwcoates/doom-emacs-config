@@ -91,4 +91,8 @@
   :nvigr "C->" #'python-nav-end-of-statement
   :nvigr "C-<" #'python-nav-beginning-of-statement
   :i     "C->" #'python-nav-end-of-statement
-  :i     "C-<" #'python-nav-beginning-of-statement))
+  :i     "C-<" #'python-nav-beginning-of-statement)
+ (:after magit
+   :map global-map
+   :leader
+   :n "g Z" #'magit-stash))
