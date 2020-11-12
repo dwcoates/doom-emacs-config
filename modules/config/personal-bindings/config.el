@@ -95,4 +95,7 @@
  (:after magit
    :map global-map
    :leader
-   :n "g Z" #'magit-stash))
+   :n "g Z" #'magit-stash)
+ (:after lsp-ui
+  :leader
+  :ni "c *" #'lsp-ui-find-workspace-symbol))
