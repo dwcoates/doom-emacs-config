@@ -24,8 +24,28 @@ This is a useful function for adding to `kill-emacs-query-functions'."
   ;; timeclock.el puts this on the wrong hook!
   (add-hook 'kill-emacs-query-functions 'my/org-clock-query-out)
 
+  (defun goto-branch-entry-create-maybe ()
+    "Jump to the current Git branch section in the Branch header of the project org todo file.
+
+Create it if necessary."
+    (interactive)
+    (if (not (magit-get-current-branch))
+        (error "Not in a Git repository...")
+      (set-buffer (org-capture-target-buffer (+org-capture-project-todo-file)))
+      (org-goto-marker-or-bmk (org-find-exact-headline-in-buffer "Branch"))
+      (org-narrow-to-subtree)
+      (let ((loc (org-find-exact-headline-in-buffer (magit-get-current-branch))))
+        ;; Goto branch heading, creating it if necessary
+        (if loc
+            (org-goto-marker-or-bmk loc)
+          (org-insert-subheading nil)
+          (insert (magit-get-current-branch))))
+      ;; Create new spot for entry
+      (widen)))
+
   ;;; TODO: customize captures?
-  (setq org-default-notes-file (expand-file-name +org-capture-notes-file org-directory)
+  (setq org-agenda-files '("~/workspace/ChessCom/explanation-engine/tasks.org")
+        org-default-notes-file (expand-file-name +org-capture-notes-file org-directory)
         org-capture-templates '(("t" "Personal todo" entry
                                  (file+headline +org-capture-todo-file "Inbox")
                                  "* [ ] %?\n%i\n%a" :prepend t)
@@ -49,9 +69,9 @@ This is a useful function for adding to `kill-emacs-query-functions'."
                                  (file+headline +org-capture-project-todo-file "Today")
                                  "* TODO %?\n %i\n %a"
                                  :clock-in t :prepend t)
-                                ("ptT" "Future general TODOs" entry
-                                 (file+headline +org-capture-project-todo-file "Future")
-                                 "* TODO %?\n %i\n %a" :prepend t)
+                                ("ptT" "TODOs for the current git branch" entry
+                                 (function goto-branch-entry-create-maybe)
+                                 "* TODO %?\n %i\n %a")
                                 ("ptf" "Future features" entry
                                  (file+headline +org-capture-project-todo-file "Feature"))
                                 ("ptr" "Future refactors" entry
