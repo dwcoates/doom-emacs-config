@@ -3,4 +3,5 @@
 (setq comint-get-old-input (lambda () "")
       term-prompt-regexp "^.*@.*:.*\$")
 
-(set-popup-rule! "*doom:vterm.**" :quit nil :select t :width 120 :side 'right)
+(set-popup-rule! "*doom:vterm.**" :quit nil :select t :width 120 :side 'right :ttl nil)
+t
