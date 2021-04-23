@@ -12,8 +12,8 @@
 ;; Use Jetbrains Mono: https://www.jetbrains.com/lp/mono/
 ;;
 ;; Credit to Roland.
-(set-frame-font "Jetbrains Mono" nil t)
-(setq-default line-spacing 1)
+;; (set-frame-font "Jetbrains Mono" nil t)
+;; (setq-default line-spacing 1)
 
 ;; (defconst doom-frame-transparency 90)
 ;; (set-frame-parameter (selected-frame) 'alpha doom-frame-transparency)
