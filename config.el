@@ -93,7 +93,6 @@
   ;; Use a smaller font.
   (set-face-attribute 'default nil :height 110))
 
-
 ;; Show directory contents in dired
 (use-package! dired-subtree
   :after 'dired

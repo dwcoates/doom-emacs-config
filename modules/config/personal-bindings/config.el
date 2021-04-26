@@ -48,6 +48,10 @@
  ;; File finding. FIXME: This seems like a shitty way to do this.}}
  :leader
  "L" #'global-hide-mode-line-mode
+ (:after ivy
+  :map doom-leader-project-map
+  :n "/"    #'+ivy/project-search
+  :n "?"    #'+ivy/project-search-from-cwd)
  (:after avy
   :m "y" 'evil-avy-goto-char-in-line)
  (:after smartparens
