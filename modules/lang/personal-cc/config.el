@@ -15,13 +15,22 @@
   (set-popup-rule! "*input/output of .*" :quit :quit #'doom/popup-ctrl-g-close)
   (setq realgud-safe-mode nil))
 
+
+
 (set-popup-rule! "\\*gdb.*shell\\*" :side 'right :width 100 :quit nil)
 
 (when (featurep! +lsp)
   (add-hook! '(c-mode-local-vars-hook
                c++-mode-local-vars-hook
                objc-mode-local-vars-hook)
-             #'lsp-ui-peek-mode #'lsp-ui-doc-mode))
+             #'lsp-ui-peek-mode #'lsp-ui-doc-mode)
+  (setq lsp-clients-clangd-args '("-j=5"
+                                  "--background-index"
+                                  "--clang-tidy"
+                                  "--completion-style=detailed"
+                                  "--header-insertion=never"
+                                  "--pch-storage=memory"))
+  (after! lsp-clangd (set-lsp-priority! 'clangd 2))
   (setq company-idle-delay 0.0))
 
 (map!
