@@ -22,6 +22,7 @@
                c++-mode-local-vars-hook
                objc-mode-local-vars-hook)
              #'lsp-ui-peek-mode #'lsp-ui-doc-mode))
+  (setq company-idle-delay 0.0))
 
 (map!
  :map cpp-mode-map
