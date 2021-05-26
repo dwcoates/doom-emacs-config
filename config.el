@@ -50,6 +50,8 @@
 
 (set-popup-rule! "\*input/output of .*\*" :height 18 :quit 'other)
 
+(set-popup-rule! "\\*helpful.*:.*\\*" :width 85 :quit 'nil :side 'right)
+
 ;;; Custom function for looking at Stockfish-TEP JSON output
 (defconst tep-json-buf-name " \*TEP JSON\*")
 (defun dwc-view-tep-json-at-point ()
