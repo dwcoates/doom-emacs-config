@@ -19,6 +19,8 @@
 
 (set-popup-rule! "\\*gdb.*shell\\*" :side 'right :width 100 :quit nil)
 
+(set-popup-rule! "\\*compilation.*\\*" :side 'right :width 100 :quit nil)
+
 (when (featurep! +lsp)
   (add-hook! '(c-mode-local-vars-hook
                c++-mode-local-vars-hook
