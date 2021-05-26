@@ -21,6 +21,12 @@
 
 (set-popup-rule! "\\*compilation.*\\*" :side 'right :width 100 :quit nil)
 
+(after! projectile
+  ;; Yikes
+  (put 'projectile-project-configure-cmd 'safe-local-variable (lambda (cmd) t))
+  (put 'projectile-project-compilation-cmd 'safe-local-variable (lambda (cmd) t))
+  (put 'projectile-project-test-cmd 'safe-local-variable (lambda (cmd) t)))
+
 (when (featurep! +lsp)
   (add-hook! '(c-mode-local-vars-hook
                c++-mode-local-vars-hook
