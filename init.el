@@ -19,6 +19,7 @@
        ivy               ; a search engine for love and life
 
        :ui
+       ligatures         ; ligatures and symbols to make your code pretty again
        deft              ; notational velocity for Emacs
        doom              ; what makes DOOM look the way it does
        doom-dashboard    ; a nifty splash screen for Emacs
@@ -34,7 +35,6 @@
        (popup            ; tame sudden yet inevitable temporary windows
         +all             ; catch all popups that start with an asterix
         +defaults)       ; default popup rules
-       pretty-code       ; replace bits of code with pretty symbols
                                         ; tabs              ;\ an tab bar for Emacs }
        treemacs          ; a project drawer, like neotree but cooler
        unicode           ; extended unicode support for various languages
@@ -69,6 +69,11 @@
        ;; term              ; terminals in Emacs
        vterm             ; another terminals in Emacs
 
+       :checkers
+       syntax              ; tasing you for every semicolon you forget
+       ;;(spell +flyspell) ; tasing you for misspelling mispelling
+       ;;grammar           ; tasing grammar mistake every you make
+
        personal-shell
 
        :tools
@@ -76,10 +81,10 @@
        (debugger +lsp)          ; FIXME stepping through code, to help you add bugs
        ;;direnv
        docker
+       lsp
        ;;editorconfig      ; let someone else argue about tabs vs spaces
        ein               ; tame Jupyter notebooks with emacs
        eval              ; run code, run (also, repls)
-       flycheck          ; tasing you for every semicolon you forget
        ;;flyspell          ; tasing you for misspelling mispelling
        gist              ; interacting with github gists
        (lookup           ; helps you navigate your code and documentation
@@ -103,7 +108,7 @@
        ;;agda              ; types of types of types of types...
        ;;assembly          ; assembly for fun or debugging
        (cc +lsp)                  ; C/C++/Obj-C madness
-       clojure           ; java with a lisp
+       ;;clojure           ; java with a lisp
        common-lisp       ; if you've seen one lisp, you've seen them all
        ;;coq               ; proofs-as-programs
        ;;crystal           ; ruby at the speed of c
@@ -143,7 +148,6 @@
         +noter
         +pandoc          ; pandoc integration into org's exporter
         +present)        ; using Emacs for presentations
-       perl              ; write code no one else can comprehend
        php               ; perl's insecure younger brother
        ;;plantuml          ; diagrams for confusing people more
        purescript        ; javascript, but functional
