@@ -68,13 +68,12 @@
        ;; shell               ; a terminal REPL for Emacs
        ;; term              ; terminals in Emacs
        vterm             ; another terminals in Emacs
+       personal-shell
 
        :checkers
        ;; syntax              ; tasing you for every semicolon you forget
        ;;(spell +flyspell) ; tasing you for misspelling mispelling
        ;;grammar           ; tasing grammar mistake every you make
-
-       personal-shell
 
        :tools
        ;;ansible
