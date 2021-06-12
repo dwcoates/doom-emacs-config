@@ -104,5 +104,7 @@
 
 (use-package! yaml-mode)
 
+(add-to-list 'load-path (concat (getenv "HOME") "/" "workspace"))
+
 ;;; Roland's package.
 (use-package! fixmee)
