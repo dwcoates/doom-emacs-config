@@ -187,6 +187,7 @@
        ;;(write            ; emacs for writers (fiction, notes, papers, etc.)
        ;; +wordnut         ; wordnet (wn) search
        ;; +langtool)       ; a proofreader (grammar/style check) for Emacs
+       chess
 
        :config
        ;; For literate config users. This will tangle+compile a config.org
@@ -198,7 +199,4 @@
        ;; config. Use it as a reference for your own modules.
        (default +bindings +smartparens)
        personal-bindings
-
-       :feature
-       chess
        )

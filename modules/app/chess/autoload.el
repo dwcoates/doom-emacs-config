@@ -1,4 +1,4 @@
-;;; chess/autoload.el -*- lexical-binding: t; -*-
+;;; app/chess/autoload.el -*- lexical-binding: t; -*-
 
 ;;; If we're using Ivy, we can use a special function for getting the chess fens.
 ;;;###autoload
