@@ -9,7 +9,6 @@
   :config
   (setq pygn-mode-script-directory (expand-file-name "~/workspace/pygn-mode"))
   (map! :map pygn-mode-map
-
         :nig "h" #'pygn-mode-previous-move
         :nig "H" #'pygn-mode-previous-move-follow-board
         :nig "l" #'pygn-mode-next-move
