@@ -1,5 +1,10 @@
 ;;; app/chess/config.el -*- lexical-binding: t; -*-
 
+(use-package! uci-mode
+  :config
+  (setq uci-mode-engine-command '("explanation-engine"))
+  (set-popup-rule! "*UCI*" :height 0.4 :quit nil))
+
 (use-package! pygn-mode
   :config
   (setq pygn-mode-script-directory (expand-file-name "~/workspace/pygn-mode"))
