@@ -7,7 +7,7 @@
   (setq realgud-safe-mode nil))
 
 (set-popup-rule! "\\*gdb.*shell\\*" :side 'right :width 0.4 :quit nil)
-(set-popup-rule! "\\*compilation.*\\*" :side 'right :width 0.4 :quit nil)
+(set-popup-rule! "\\*compilation.*\\*" :side 'bottom :height 0.45 :quit nil)
 
 (after! projectile
   ;; Yikes
