@@ -9,13 +9,13 @@
   :config
   (setq pygn-mode-script-directory (expand-file-name "~/workspace/pygn-mode"))
   (map! :map pygn-mode-map
-        :g "h" #'pygn-mode-previous-move
-        :g "H" #'pygn-mode-previous-move-follow-gui-board
-        :g "l" #'pygn-mode-next-move
-        :g "L" #'pygn-mode-next-move-follow-gui-board
-        :g "j" #'pygn-mode-next-game
-        :g "k" #'pygn-mode-previous-game
-        :g "RET" #'pygn-mode-echo-fen-at-point
-        :g "<mouse-8>" #'pygn-mode-mouse-display-gui-board)
-  (set-popup-rule! "*pygn-mode-board*" :ignore t))
 
+        :nig "h" #'pygn-mode-previous-move
+        :nig "H" #'pygn-mode-previous-move-follow-board
+        :nig "l" #'pygn-mode-next-move
+        :nig "L" #'pygn-mode-next-move-follow-board
+        :nig "j" #'pygn-mode-next-game
+        :nig "k" #'pygn-mode-previous-game
+        :nig "RET" #'pygn-mode-echo-fen-at-point
+        :nig "<mouse-8>" #'pygn-mode-mouse-display-gui-board)
+  (set-popup-rule! "*pygn-mode-board*" :ignore nil :height 50))
