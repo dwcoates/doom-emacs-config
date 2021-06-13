@@ -5,5 +5,5 @@
 ;; If system defines a PYGNPATH, then we use that code for pygn, forgoing bytecompiling for
 ;; development (no need to run `doom sync'). Otherwise, we install from official source.
 (if (and (getenv "PYGNPATH") (file-directory-p (getenv "PYGNPATH")))
-    (package! pygn-mode :recipe (:local-repo "~/workspace/pygn-mode" :build (:not compile)))
- (package! pygn-mode :recipe (:type git :host github :repo "dwcoates/pygn-mode")))
+    (package! pygn-mode :recipe (:local-repo "/home/dodge/workspace/pygn-mode" :build nil))
+  (package! pygn-mode :recipe (:type git :host github :repo "dwcoates/pygn-mode")))
