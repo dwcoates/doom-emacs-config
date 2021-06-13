@@ -26,9 +26,27 @@
                                   "--header-insertion=never"
                                   "--pch-storage=memory"))
   (after! lsp-clangd (set-lsp-priority! 'clangd 2))
+  (after! dap-mode
+    (require 'dap-cpptools)
+    (setq dap-auto-configure-features '(locals breakpoints sessions))
+    )
   (setq company-idle-delay 0.0))
 
 (map!
- :map cpp-mode-map
- :nvigr
- "C-c ?" 'realgud:gdb)
+ (:map cpp-mode-map
+  :nvigr
+  "C-c ?" 'realgud:gdb)
+ (:map cpp-mode-map
+  :leader
+  :prefix "c"
+  :n
+  "??" #'dap-debug-last
+  "?/" #'dap-debug
+  "?b" #'dap-breakpoint-add
+  "?c" #'dap-breakpoint-condition
+  "?l" #'dap-breakpoint-log-message
+  "?t" #'dap-breakpoint-toggle
+  "?d" #'dap-breakpoint-delete
+  "?1" #'dap-breakpoint-delete-all
+  )
+ )
