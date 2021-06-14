@@ -11,7 +11,7 @@ variable `PACKAGE-LOCAL-ENV-NAME' if available."
         (unless (file-directory-p package-local-path)
           (error "PYGNPATH environment variable points to a non-existent directory: '%s'"
                  package-local-path))
-        `(package! ,package-name :recipe (:local-repo ,package-local-path :build nil)))
+        `(package! ,package-name :recipe (:local-repo ,package-local-path :build (:not compile))))
       `(package! ,package-name
          :recipe (:type git :host github :repo ,(concat "dwcoates/" (symbol-name package-name)))))))
 
