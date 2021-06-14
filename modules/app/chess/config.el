@@ -26,4 +26,6 @@
         :nig "k" #'pygn-mode-previous-game
         :nig "RET" #'pygn-mode-echo-fen-at-point
         :nig "<mouse-8>" #'pygn-mode-mouse-display-gui-board)
-  (set-popup-rule! "*pygn-mode-board*" :ignore nil :height 50))
+  (set-popup-rule! "*pygn-mode-board*" :ignore nil :height 50)
+  (unless (pygn-mode-do-diagnostic)
+    (warn "pygn-mode diagnostic failed.")))
