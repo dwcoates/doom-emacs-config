@@ -15,6 +15,8 @@
          :n "8q" #'uci-mode-quit)))
 
 (use-package! pygn-mode
+  :init
+  (setq pygn-mode-python-executable "python3")
   :config
   (setq pygn-mode-script-directory (expand-file-name "~/workspace/pygn-mode"))
   (map! :map pygn-mode-map
