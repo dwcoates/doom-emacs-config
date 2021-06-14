@@ -3,7 +3,16 @@
 (use-package! uci-mode
   :config
   (setq uci-mode-engine-command '("explanation-engine"))
-  (set-popup-rule! "*UCI*" :height 0.4 :quit nil))
+  (set-popup-rule! "*UCI*" :side 'right :width 0.4 :quit nil :select t :ttl nil)
+  (map! (:map global-map
+         :prefix "C-c 8"
+         :ivomrg "e" #'uci-mode-run-engine
+         :ivomrg "r" #'uci-mode-restart-engine
+         :ivomrg "q" #'uci-mode-quit)
+        (:leader
+         :n "8e" #'uci-mode-run-engine
+         :n "8r" #'uci-mode-restart-engine
+         :n "8q" #'uci-mode-quit)))
 
 (use-package! pygn-mode
   :config
