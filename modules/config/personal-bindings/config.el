@@ -53,7 +53,9 @@
   :n "/"    #'+ivy/project-search
   :n "?"    #'+ivy/project-search-from-cwd)
  (:after avy
-  :m "y" 'evil-avy-goto-char-in-line)
+  :m "y" 'evil-avy-goto-char-in-line
+  :n "YL" 'avy-copy-line
+  :n "Yl" 'avy-goto-line)
  (:after smartparens
   :leader
   :map smartparens-mode-map
