@@ -33,7 +33,7 @@
     (warn "pygn-mode diagnostic failed.")))
 
 (use-package! cee-pygn-mode
-  :if (getenv "CEEPYGNPATH")
+  :if (and (getenv "CEEPYGNPATH") (file-directory-p (getenv "CEEPYGNPATH")))
   :load-path (lambda () (getenv "CEEPYGNPATH"))
   :config
   (map! (:map global
