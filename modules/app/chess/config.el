@@ -38,6 +38,14 @@
   :config
   (map! (:map global
          :prefix "C-c 8"
-         :ivomrg "?" #'cee-pygn-mode-open-integration-test-pgn)
+         :ivomrg "?" #'cee-pygn-mode-open-integration-test-pgn
+         :ivomrg "o" #'cee-pygn-mode-open-integration-test-engine-output
+         :ivomrg "O" #'cee-pygn-mode-fetch-integration-test-engine-output
+         :ivomrg "i" #'cee-pygn-mode-copy-integration-test-engine-input
+         :ivomrg "I" #'cee-pygn-mode-open-integration-test-engine-input)
         (:leader
-         :n "8?" #'cee-pygn-mode-open-integration-test-pgn)))
+         :n "8?" #'cee-pygn-mode-open-integration-test-pgn
+         :n "8o" #'cee-pygn-mode-open-integration-test-engine-output
+         :n "8O" #'cee-pygn-mode-fetch-integration-test-engine-output
+         :n "8i" #'cee-pygn-mode-copy-integration-test-engine-input
+         :n "8I" #'cee-pygn-mode-open-integration-test-engine-input)))
