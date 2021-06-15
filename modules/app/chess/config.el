@@ -32,12 +32,12 @@
   (unless (pygn-mode-do-diagnostic)
     (warn "pygn-mode diagnostic failed.")))
 
-;; (use-package! cee-pygn-mode
-;;   :if (getenv "CEEPYGNPATH")
-;;   :load-path (lambda () (getenv "CEEPYGNPATH"))
-;;   :config
-;;   (map! (:map global
-;;          :prefix "C-c 8"
-;;          :ivomrg "?" #'cee-pygn-mode-open-integration-test-pgn)
-;;         (:leader
-;;          :n "8?" #'cee-pygn-mode-open-integration-test-pgn)))
+(use-package! cee-pygn-mode
+  :if (getenv "CEEPYGNPATH")
+  :load-path (lambda () (getenv "CEEPYGNPATH"))
+  :config
+  (map! (:map global
+         :prefix "C-c 8"
+         :ivomrg "?" #'cee-pygn-mode-open-integration-test-pgn)
+        (:leader
+         :n "8?" #'cee-pygn-mode-open-integration-test-pgn)))
