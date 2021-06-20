@@ -29,7 +29,7 @@
         :nig "RET" #'pygn-mode-echo-fen-at-point
         :nig "<mouse-8>" #'pygn-mode-mouse-display-gui-board)
   (set-popup-rule! "*pygn-mode-board*" :ignore nil :height 50)
-  (unless (pygn-mode-do-diagnostic)
+  (unless (pygn-mode-run-diagnostic)
     (warn "pygn-mode diagnostic failed.")))
 
 (use-package! cee-pygn-mode
@@ -41,11 +41,11 @@
          :ivomrg "?" #'cee-pygn-mode-open-integration-test-pgn
          :ivomrg "o" #'cee-pygn-mode-open-integration-test-engine-output
          :ivomrg "O" #'cee-pygn-mode-fetch-integration-test-engine-output
-         :ivomrg "i" #'cee-pygn-mode-copy-integration-test-engine-input
+         :ivomrg "i" #'cee-pygn-mode-fetch-integration-test-engine-input
          :ivomrg "I" #'cee-pygn-mode-open-integration-test-engine-input)
         (:leader
          :n "8?" #'cee-pygn-mode-open-integration-test-pgn
          :n "8o" #'cee-pygn-mode-open-integration-test-engine-output
          :n "8O" #'cee-pygn-mode-fetch-integration-test-engine-output
-         :n "8i" #'cee-pygn-mode-copy-integration-test-engine-input
+         :n "8i" #'cee-pygn-mode-fetch-integration-test-engine-input
          :n "8I" #'cee-pygn-mode-open-integration-test-engine-input)))
