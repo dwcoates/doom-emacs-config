@@ -29,7 +29,8 @@
                                   "--clang-tidy"
                                   "--completion-style=detailed"
                                   "--header-insertion=never"
-                                  "--pch-storage=memory"))
+                                  "--pch-storage=memory")
+        lsp-ui-doc-show-with-cursor nil)
   (after! lsp-clangd (set-lsp-priority! 'clangd 2))
   (after! dap-mode
     (require 'dap-cpptools)
