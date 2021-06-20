@@ -6,8 +6,9 @@
   (set-popup-rule! "*input/output of .*" :quit :quit #'doom/popup-ctrl-g-close)
   (setq realgud-safe-mode nil))
 
+(setq +popup--display-buffer-alist)
 (set-popup-rule! "\\*gdb.*shell\\*" :side 'right :width 0.4 :quit nil)
-(set-popup-rule! "\\*compilation.*\\*" :side 'bottom :height 0.45 :quit nil)
+(set-popup-rule! "\\*compilation.*\\*" :side 'bottom :height 0.45 :width 0.50 :quit nil)
 
 (after! projectile
   ;; Yikes
@@ -33,6 +34,10 @@
   (setq company-idle-delay 0.0))
 
 (map!
+ (:map projectile-mode-map
+  :leader
+  :nvr
+  "pT" #'+projectile-test-project)
  (:map cpp-mode-map
   :nvigr
   "C-c ?" 'realgud:gdb)
@@ -47,6 +52,4 @@
   "?l" #'dap-breakpoint-log-message
   "?t" #'dap-breakpoint-toggle
   "?d" #'dap-breakpoint-delete
-  "?1" #'dap-breakpoint-delete-all
-  )
- )
+  "?1" #'dap-breakpoint-delete-all))
