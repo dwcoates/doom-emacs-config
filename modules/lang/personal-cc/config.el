@@ -17,9 +17,13 @@
   (put 'projectile-project-test-cmd 'safe-local-variable (lambda (cmd) t)))
 
 (when (featurep! +lsp)
+  (defun dwc-c-modes-hook ()
+    (electric-indent-mode -1)
+    (setq counsel-grep-swiper-limit 2200))
   (add-hook! '(c-mode-local-vars-hook
                c++-mode-local-vars-hook
-               objc-mode-local-vars-hook))
+               objc-mode-local-vars-hook)
+             '(dwc-c-modes-hook))
   (setq lsp-clients-clangd-args '("-j=5"
                                   "--background-index"
                                   "--clang-tidy"
@@ -29,8 +33,7 @@
   (after! lsp-clangd (set-lsp-priority! 'clangd 2))
   (after! dap-mode
     (require 'dap-cpptools)
-    (setq dap-auto-configure-features '(locals breakpoints sessions))
-    )
+    (setq dap-auto-configure-features '(locals breakpoints sessions)))
   (setq company-idle-delay 0.0))
 
 (map!
