@@ -106,5 +106,10 @@
 
 (add-to-list 'load-path (concat (getenv "HOME") "/" "workspace"))
 
+;; Do not tab complete with company (tab is for snippet expansion).
+(after! company
+  (define-key company-active-map [tab] nil)
+  (define-key company-active-map (kbd "TAB") nil))
+
 ;;; Roland's package.
 (use-package! fixmee)
