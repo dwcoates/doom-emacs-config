@@ -8,7 +8,7 @@
 
 (setq +popup--display-buffer-alist)
 (set-popup-rule! "\\*gdb.*shell\\*" :side 'right :width 0.4 :quit nil)
-(set-popup-rule! "\\*compilation.*\\*" :side 'bottom :height 0.45 :width 0.50 :quit nil)
+(set-popup-rule! "\\*compilation.*\\*" :side 'bottom :height 0.45 :width 0.45 :quit nil)
 
 (after! projectile
   ;; Yikes
