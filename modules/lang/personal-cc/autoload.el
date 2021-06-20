@@ -10,3 +10,12 @@
         (setf (cdr side-rule) 'right)
         (projectile-test-project ARG)
         (setf (cdr side-rule) side-rule-value)))))
+
+;;;###autoload
+(defun +lookup-current-c-function-references()
+  (interactive)
+  (save-excursion
+    (c-beginning-of-defun)
+    (search-forward "(")
+    (backward-char 1)
+    (call-interactively #'+lookup/references)))

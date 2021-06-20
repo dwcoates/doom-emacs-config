@@ -45,6 +45,11 @@
  (:map cpp-mode-map
   :nvigr
   "C-c ?" 'realgud:gdb)
+ (
+  :map lsp-mode-map
+  :leader
+  :nvr
+  "cf" #'+lookup-current-c-function-references)
  (:map cpp-mode-map
   :leader
   :prefix "c"
