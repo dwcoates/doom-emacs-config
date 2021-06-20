@@ -41,15 +41,11 @@
  (:map projectile-mode-map
   :leader
   :nvr
-  "pT" #'+projectile-test-project)
+  "pT" #'+projectile-test-project
+  "p<" #'+switch-to-compilation-buffer)
  (:map cpp-mode-map
   :nvigr
   "C-c ?" 'realgud:gdb)
- (
-  :map lsp-mode-map
-  :leader
-  :nvr
-  "cf" #'+lookup-current-c-function-references)
  (:map cpp-mode-map
   :leader
   :prefix "c"
@@ -61,4 +57,9 @@
   "?l" #'dap-breakpoint-log-message
   "?t" #'dap-breakpoint-toggle
   "?d" #'dap-breakpoint-delete
-  "?1" #'dap-breakpoint-delete-all))
+  "?1" #'dap-breakpoint-delete-all)
+(:after lsp-mode
+ :map lsp-mode-map
+ :leader
+ :nvr
+ "cf" #'+lookup-current-c-function-references) )

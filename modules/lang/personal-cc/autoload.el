@@ -19,3 +19,11 @@
     (search-forward "(")
     (backward-char 1)
     (call-interactively #'+lookup/references)))
+
+;;;###autoload
+(defun +switch-to-compilation-buffer ()
+  (interactive)
+  (let ((buf-name (format "*compilation*<%s>" (projectile-project-name))))
+    (if (get-buffer buf-name)
+        (switch-to-buffer buf-name  t t)
+      (message "No compilation buffer found ('%s')" buf-name))))
