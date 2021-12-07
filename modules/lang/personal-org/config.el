@@ -11,6 +11,11 @@
     (abbrev-mode t))
   (add-hook! 'org-mode-hook 'my-org-hook)
 
+  (map!
+   :map org-mode-map
+   :nvieomrg
+   "M-b" #'backward-word)
+
   (defun my/org-clock-query-out ()
     "Ask the user before clocking out.
 This is a useful function for adding to `kill-emacs-query-functions'."
