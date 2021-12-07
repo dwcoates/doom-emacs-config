@@ -1,5 +1,8 @@
 ;;; app/chess/package.el -*- lexical-binding: t; -*-
 
+(package! tree-sitter)
+(package! tree-sitter-langs)
+
 (defmacro register-dwc-package (package-name package-local-env-name &optional only-local)
   "Define with `package!' a dwcoates repository.
 
