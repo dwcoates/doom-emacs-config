@@ -19,6 +19,7 @@
 (when (featurep! +lsp)
   (defun dwc-c-modes-hook ()
     (electric-indent-mode -1)
+    (electric-indent-local-mode -1)
     (setq counsel-grep-swiper-limit 2200))
   (add-hook! '(c-mode-local-vars-hook
                c++-mode-local-vars-hook
