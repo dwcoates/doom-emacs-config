@@ -72,6 +72,7 @@
        ;;ibuffer         ; interactive buffer management
        undo              ; persistent, smarter undo for your inevitable mistakes
        vc                ; version-control and Emacs, sitting in a tree
+       personal-vc
 
        :term
        ;;eshell            ; the elisp shell that works everywhere
@@ -192,4 +193,5 @@
 
        :config
        ;;literate
-       (default +bindings +smartparens))
+       (default +bindings +smartparens)
+       personal-bindings)
