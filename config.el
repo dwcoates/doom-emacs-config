@@ -37,13 +37,55 @@
 
 (add-hook 'window-setup-hook #'doom-display-benchmark-h)
 
-;; This determines the style of line numbers in effect. If set to `nil', line
-;; numbers are disabled. For relative line numbers, set this to `relative'.
-(setq display-line-numbers-type t)
+(defun doom/popup-ctrl-g-close (popup-to-close)
+  (equal (kbd "C-g") (this-command-keys)))
+
+(set-popup-rule! "\\*helpful.*:.*\\*" :width 85 :quit 'nil :side 'right)
+
+(setq
+ display-line-numbers-type t
+;;; From Henrik:
+ ;;
+ ;; "By default it should keep scrolling until it detects the first error. It's controlled by the
+ ;;  compilation-scroll-output variable (set to 'first-error in doom, nil in vanilla. Set to t to
+ ;;  always scroll). Also, it stops auto-scrolling if you scroll it manually, i believe."
+ ;;
+ ;; https://discordapp.com/channels/406534637242810369/406554085794381833/654479202560770065
+ ;;
+ ;;NOTE: For some reason, 'first-error isn't working for me. Set to t.
+ compilation-scroll-output t
+ fill-column 100)
+
+(display-time)
+
+(after! helpful (if (s-contains-p  "silverbox" system-name)
+    (progn
+      (set-face-attribute 'default nil :height 125) ;; Smaller character sizes
+      (setq kill-ring-max 10000)
+      (display-battery-mode t))
+  (set-face-attribute 'default nil :height 110)))
+
+(use-package! dired-subtree
+  :after 'dired
+  :config
+  (map! :map dired-mode-map
+        :n "C-i" 'dired-subtree-cycle))
+
+(use-package! yaml-mode)
+
+(add-to-list 'load-path (concat (getenv "HOME") "/" "workspace"))
 
 ;; If you use `org' and don't want your org files in the default location below,
 ;; change `org-directory'. It must be set before org loads!
 (setq org-directory "~/org/")
+
+;; Do not tab complete with company (tab is for snippet expansion).
+(after! company
+  (define-key company-active-map [tab] nil)
+  (define-key company-active-map (kbd "TAB") nil))
+
+;;; Roland's package.
+(use-package! fixmee)
 
 ;; Whenever you reconfigure a package, make sure to wrap your config in an
 ;; `after!' block, otherwise Doom's defaults may override your settings. E.g.
