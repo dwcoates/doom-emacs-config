@@ -10,14 +10,3 @@
     (message "Buffer name copied to kill ring: '%s'" buf-name)
     (kill-new (buffer-name))))
 
-(add-hook 'emacs-startup-hook  (lambda () (add-hook 'kill-emacs-hook #'shutdown-computer-on-exit-maybe t)) t)
-
-(defvar shutdown-computer-on-emacs-exit-p nil "Set when shutting down with `shutdown-computer`")
-(defun shutdown-computer-on-exit-maybe ()
-  (when shutdown-computer-on-emacs-exit-p
-    (shell-command "shutdown now")))
-
-(defun shutdown-computer ()
-  (interactive)
-  (setq shutdown-computer-on-emacs-exit-p t)
-  (kill-emacs))
