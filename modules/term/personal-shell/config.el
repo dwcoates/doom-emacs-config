@@ -2,7 +2,7 @@
 
 (setq comint-get-old-input (lambda () "") term-prompt-regexp "^.*@.*:.*\$")
 
-(set-popup-rule! "*doom:vterm.**" :quit nil :select t :width 0.42 :side 'right :ttl nil)
+(set-popup-rule! "*doom:vterm.**" :quit nil :select t :height 0.5 :side 'bottom :ttl nil)
 
 (after! vterm
   :config
