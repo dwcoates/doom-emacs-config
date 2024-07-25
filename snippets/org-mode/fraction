@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: fraction
-# uuid: frac
-# key: frac
-# condition: t
-# --
-\frac{${numerator}}{${denominator}}$0

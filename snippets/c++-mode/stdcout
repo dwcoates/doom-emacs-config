@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-        
-# name: stdcout
-# uuid: cout
-# key: cout
-# condition: t
-# --
-std::cout << "${}" << std::endl;$0
