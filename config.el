@@ -44,9 +44,6 @@
 ;; theme may have their own settings.
 (load-theme 'doom-tomorrow-night t)
 
-;; Enable flashing mode-line on errors
-(doom-themes-visual-bell-config)
-
 ;; Enable custom neotree theme
 (doom-themes-neotree-config)  ; all-the-icons fonts must be installed!
 
