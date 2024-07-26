@@ -69,6 +69,8 @@
  compilation-scroll-output t
  fill-column 100)
 
+(display-time)
+
 
 ;; If you use `org' and don't want your org files in the default location below,
 ;; change `org-directory'. It must be set before org loads!
