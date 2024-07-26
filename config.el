@@ -71,6 +71,13 @@
 
 (display-time)
 
+(after! helpful (if (s-contains-p  "silverbox" system-name)
+    (progn
+      (set-face-attribute 'default nil :height 125) ;; Smaller character sizes
+      (setq kill-ring-max 10000)
+      (display-battery-mode t))
+  (set-face-attribute 'default nil :height 110)))
+
 
 ;; If you use `org' and don't want your org files in the default location below,
 ;; change `org-directory'. It must be set before org loads!
