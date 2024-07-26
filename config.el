@@ -93,6 +93,8 @@
 (after! lsp-mode
   (setq lsp-log-io t))
 
+(setq confirm-kill-emacs nil)
+
 ;; Whenever you reconfigure a package, make sure to wrap your config in an
 ;; `after!' block, otherwise Doom's defaults may override your settings. E.g.
 ;;
