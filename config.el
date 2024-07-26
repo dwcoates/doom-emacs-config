@@ -66,7 +66,8 @@
  ;; https://discordapp.com/channels/406534637242810369/406554085794381833/654479202560770065
  ;;
  ;;NOTE: For some reason, 'first-error isn't working for me. Set to t.
- compilation-scroll-output t)
+ compilation-scroll-output t
+ fill-column 100)
 
 
 ;; If you use `org' and don't want your org files in the default location below,
