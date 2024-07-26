@@ -66,14 +66,11 @@
  compilation-scroll-output t
  fill-column 100)
 
+;; Some UI doodads
 (display-time)
-
-(after! helpful (if (s-contains-p  "silverbox" system-name)
-    (progn
-      (set-face-attribute 'default nil :height 125) ;; Smaller character sizes
-      (setq kill-ring-max 10000)
-      (display-battery-mode t))
-  (set-face-attribute 'default nil :height 110)))
+(set-face-attribute 'default nil :height 125)
+(setq kill-ring-max 100000)
+(display-battery-mode t)
 
 (use-package! dired-subtree
   :after 'dired
