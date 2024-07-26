@@ -86,7 +86,9 @@
 ;; the highlighted symbol at press 'K' (non-evil users must press 'C-c c k').
 ;; This will open documentation for it, including demos of how they are used.
 ;; Alternatively, use `C-h o' to look up a symbol (functions, variables, faces,
-; etc).
+;; etc).
 ;;
 ;; You can also try 'gd' (or 'C-c c d') to jump to their definition and see how
 ;; they are implemented.
+;;;
+;;; $DOOMDIR/config.el -*- lexical-binding: t; -*-
