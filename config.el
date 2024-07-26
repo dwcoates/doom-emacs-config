@@ -78,6 +78,12 @@
       (display-battery-mode t))
   (set-face-attribute 'default nil :height 110)))
 
+(use-package! dired-subtree
+  :after 'dired
+  :config
+  (map! :map dired-mode-map
+        :n "C-i" 'dired-subtree-cycle))
+
 
 ;; If you use `org' and don't want your org files in the default location below,
 ;; change `org-directory'. It must be set before org loads!
