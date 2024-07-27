@@ -191,4 +191,5 @@
        ;;literate
        treemacs
        doom-tomorrow-night
-       (default +bindings +smartparens))
+       (default +bindings +smartparens)
+       personal-bindings)
