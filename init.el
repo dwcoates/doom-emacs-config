@@ -190,4 +190,5 @@
        :config
        ;;literate
        treemacs
+       doom-tomorrow-night
        (default +bindings +smartparens))
