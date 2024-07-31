@@ -191,5 +191,6 @@
        ;;literate
        treemacs
        doom-tomorrow-night
+       vc
        (default +bindings +smartparens)
        personal-bindings)
