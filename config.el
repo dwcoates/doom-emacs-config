@@ -95,6 +95,8 @@
 (after! evil
   (setq evil-ex-search-persistent-highlight nil))
 
+(set-popup-rule! "\\.*doom:vterm\\.*" :size 0.5 :side 'bottom :select t :quit nil)
+
 ;; Whenever you reconfigure a package, make sure to wrap your config in an
 ;; `after!' block, otherwise Doom's defaults may override your settings. E.g.
 ;;
