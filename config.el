@@ -97,6 +97,22 @@
 
 (set-popup-rule! "\\.*doom:vterm\\.*" :size 0.5 :side 'bottom :select t :quit nil)
 
+(map! :leader
+      :desc "Find other file" "T" #'ff-find-other-file)
+
+;; TODO: move to vterm config module
+(defun close-compilation-window ()
+  "Close the compilation window if it exists."
+  (interactive)
+  (let ((buffer-name (get-buffer-name-by-regex "\\*compilation\\*")))
+    (if buffer-name
+        ;; (message "hello")
+        (if-let ((window (get-buffer-window buffer-name)))
+            (delete-window window)
+          (message "No buffer found for compilation")))))
+(map! :leader
+      :desc "Close compilation window" "c q" #'close-compilation-window)
+
 ;; Whenever you reconfigure a package, make sure to wrap your config in an
 ;; `after!' block, otherwise Doom's defaults may override your settings. E.g.
 ;;
