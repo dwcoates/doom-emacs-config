@@ -79,7 +79,7 @@
   (map! :map dired-mode-map
         :n "C-i" 'dired-subtree-cycle))
 
-(set-popup-rule! "^\\*compilation\\*" :side 'right :size 0.5 :select t :quit t)
+(set-popup-rule! "^\\*compilation\\*" :side 'right :size 0.5 :select t :quit nil)
 
 (add-to-list 'load-path (concat (getenv "HOME") "/" "workspace"))
 
