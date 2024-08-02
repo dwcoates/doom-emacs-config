@@ -80,19 +80,17 @@
     "Center the screen after jumping to an error."
     :after '(compilation-next-error compilation-previous-error next-error previous-error)
     (recenter nil))
-
-  (defun close-compilation-window ()
-    "Close the compilation window if it exists."
-    (interactive)
-    (let ((buffer-name (get-buffer-name-by-regex "\\*compilation\\*")))
-      (if buffer-name
-          ;; (message "hello")
-          (if-let ((window (get-buffer-window buffer-name)))
-              (delete-window window)
-            (message "No buffer found for compilation")))))
-  (map! :leader
-        :desc "Close compilation window" "c q" #'close-compilation-window)
   )
+
+(defun close-doom-popup ()
+  "Close the currently open Doom popup window."
+  (interactive)
+  (let ((popup-windows (+popup-windows)))
+    (if (> (length popup-windows) 0)
+        (mapc (lambda (window) (delete-window window)) popup-windows)
+      (user-error "No popup windows open"))))
+(map! :leader
+      :desc "Close Doom popup" "w P" #'close-doom-popup)
 
 ;; Some UI doodads
 (display-time)
