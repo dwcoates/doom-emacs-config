@@ -100,7 +100,7 @@
 (map! :leader
       :desc "Find other file" "T" #'ff-find-other-file)
 
-;; TODO: move to vterm config module
+;; TODO: move to compilation config module?
 (defun close-compilation-window ()
   "Close the compilation window if it exists."
   (interactive)

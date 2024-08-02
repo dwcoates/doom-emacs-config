@@ -194,3 +194,14 @@
        vc
        (default +bindings +smartparens)
        personal-bindings)
+
+;;TODO find a home for this
+(defun get-buffer-name-by-regex (regex)
+  "Return the name of the first buffer matching REGEX, or nil if none found."
+  (let ((buffers (buffer-list)))
+    (catch 'found
+      (dolist (buffer buffers)
+        (let ((name (buffer-name buffer)))
+          (when (string-match regex name)
+            (throw 'found name))))
+      nil)))
