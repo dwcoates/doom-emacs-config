@@ -124,12 +124,37 @@
 
 (set-popup-rule! "\\.*doom:vterm\\.*" :size 0.5 :side 'bottom :select t :quit nil)
 
-(map! :leader
+(setq evil-disable-insert-state-bindings t)
+
+(map! :map global-map
+      ;; Better window navigation bindings
+      :nv "C-h" #'evil-window-left
+      :nv "C-j" #'evil-window-down
+      :nv "C-k" #'evil-window-up
+      :nv "C-l" #'evil-window-right
+      ;; Use Emacs bindings in insert mode
+      :i "C-a"  #'beginning-of-line
+      :i "C-e"  #'end-of-line
+      :i "C-f"  #'forward-char
+      :i "C-b"  #'backward-char
+      :i "C-n"  #'next-line
+      :i "C-p"  #'previous-line
+      :i "C-d"  #'delete-char
+      :i "C-k"  #'kill-line
+      :i "C-y"  #'yank
+      :i "M-f"  #'forward-word
+      :i "M-b"  #'backward-word
+      :i "C-v"  #'scroll-up-command
+      :i "M-v"  #'scroll-down-command
+      :i "M-<"  #'beginning-of-buffer
+      :i "M->"  #'end-of-buffer
+      :leader
       ;; Toggle between source and header files
       :desc "Find other file" "T" #'ff-find-other-file
-      ;; Use the Neovim-style search keys
+      ;; Use the Neovim-style search bindings
       :desc "Search buffer" "/" #'swiper
-      :desc "Search project" "ps" #'+default/search-project)
+      :desc "Search project" "ps" #'+default/search-project
+      )
 
 ;; TODO: move this to ivy config
 (after! ivy
