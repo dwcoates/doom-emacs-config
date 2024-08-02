@@ -125,7 +125,11 @@
 (set-popup-rule! "\\.*doom:vterm\\.*" :size 0.5 :side 'bottom :select t :quit nil)
 
 (map! :leader
-      :desc "Find other file" "T" #'ff-find-other-file)
+      ;; Toggle between source and header files
+      :desc "Find other file" "T" #'ff-find-other-file
+      ;; Use the Neovim-style search keys
+      :desc "Search buffer" "/" #'swiper
+      :desc "Search project" "ps" #'+default/search-project)
 
 ;; TODO: move this to ivy config
 (after! ivy
