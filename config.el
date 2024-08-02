@@ -126,6 +126,16 @@
 
 (setq evil-disable-insert-state-bindings t)
 
+(defun save-without-formatting ()
+  "Save current buffer without formatting"
+  (interactive)
+  (let ((old-value +format-on-save-disabled-modes))
+    (unwind-protect
+        (progn
+          (setq +format-on-save-disabled-modes (cons major-mode +format-on-save-disabled-modes))
+          (save-buffer))
+      (setq +format-on-save-disabled-modes old-value))))
+
 (map! :map global-map
       ;; Better window navigation bindings
       :nv "C-h" #'evil-window-left
@@ -154,6 +164,8 @@
       ;; Use the Neovim-style search bindings
       :desc "Search buffer" "/" #'swiper
       :desc "Search project" "ps" #'+default/search-project
+      ;; Saving files
+      :desc "Save without formatting the file" "W" #'save-without-formatting
       )
 
 ;; TODO: move this to ivy config
