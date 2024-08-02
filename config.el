@@ -51,7 +51,7 @@
 ;; numbers are disabled. For relative line numbers, set this to `relative'.
 (setq display-line-numbers-type 'relative)
 
-(set-popup-rule! "\\*helpful.*:.*\\*" :width 95 :quit t :side 'right)
+(set-popup-rule! "\\*helpful.*:.*\\*" :width 95 :quit nil :side 'right)
 
 (setq
  fill-column 100)
