@@ -56,17 +56,44 @@
 (setq
  fill-column 100)
 
+
+;; TODO: move to compilation config module?
 (after! compile
-  ;;; From Henrik:
-  ;;
-  ;; "By default it should keep scrolling until it detects the first error. It's controlled by the
-  ;;  compilation-scroll-output variable (set to 'first-error in doom, nil in vanilla. Set to t to
-  ;;  always scroll). Also, it stops auto-scrolling if you scroll it manually, i believe."
-  ;;
-  ;; https://discordapp.com/channels/406534637242810369/406554085794381833/654479202560770065
-  ;;
-  ;;NOTE: For some reason, 'first-error isn't working for me. Set to t.
-  (setq compilation-scroll-output t))
+  (setq
+   compilation-auto-jump-to-first-error t
+   ;;; From Henrik:
+   ;;
+   ;; "By default it should keep scrolling until it detects the first error. It's controlled by the
+   ;;  compilation-scroll-output variable (set to 'first-error in doom, nil in vanilla. Set to t to
+   ;;  always scroll). Also, it stops auto-scrolling if you scroll it manually, i believe."
+   ;;
+   ;; https://discordapp.com/channels/406534637242810369/406554085794381833/654479202560770065
+   ;;
+   ;;NOTE: For some reason, 'first-error isn't working for me. Set to t.
+   compilation-scroll-output t)
+
+  (add-hook! 'compilation-mode-hook
+    (setq-local truncate-lines nil
+                word-wrap t
+                line-move-visual t))
+  (defadvice! center-after-jump-a (&rest _)
+    "Center the screen after jumping to an error."
+    :after '(compilation-next-error compilation-previous-error next-error previous-error)
+    (recenter nil))
+
+  (defun close-compilation-window ()
+    "Close the compilation window if it exists."
+    (interactive)
+    (let ((buffer-name (get-buffer-name-by-regex "\\*compilation\\*")))
+      (if buffer-name
+          ;; (message "hello")
+          (if-let ((window (get-buffer-window buffer-name)))
+              (delete-window window)
+            (message "No buffer found for compilation")))))
+  (map! :leader
+        :desc "Close compilation window" "c q" #'close-compilation-window)
+  )
+
 ;; Some UI doodads
 (display-time)
 (set-face-attribute 'default nil :height 125)
@@ -99,19 +126,6 @@
 
 (map! :leader
       :desc "Find other file" "T" #'ff-find-other-file)
-
-;; TODO: move to compilation config module?
-(defun close-compilation-window ()
-  "Close the compilation window if it exists."
-  (interactive)
-  (let ((buffer-name (get-buffer-name-by-regex "\\*compilation\\*")))
-    (if buffer-name
-        ;; (message "hello")
-        (if-let ((window (get-buffer-window buffer-name)))
-            (delete-window window)
-          (message "No buffer found for compilation")))))
-(map! :leader
-      :desc "Close compilation window" "c q" #'close-compilation-window)
 
 ;; TODO: move this to ivy config
 (after! ivy
