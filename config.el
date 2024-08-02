@@ -113,6 +113,38 @@
 (map! :leader
       :desc "Close compilation window" "c q" #'close-compilation-window)
 
+;; TODO: move this to ivy config
+(after! ivy
+  (setq ivy-format-function #'ivy-format-function-line)
+
+  (defun DWC--add-last-ivy-command-to-projectile-history ()
+    "For making `projectile-repeat-last-command' work by updating projectile history."
+    (let ((hist (projectile--get-command-history (projectile-project-root)))
+          (command (DWC--get-last-ivy-command)))
+      (cond
+       ((eq projectile-cmd-hist-ignoredups t)
+        (unless (string= (car-safe (ring-elements hist)) command)
+          (ring-insert hist command)))
+       ((eq projectile-cmd-hist-ignoredups 'erase)
+        (let ((idx (ring-member hist command)))
+          (while idx
+            (ring-remove hist idx)
+            (setq idx (ring-member hist command))))
+        (ring-insert hist command))
+       (t (ring-insert hist command)))
+      (message (format "command: '%s'" command))))
+
+  (defun DWC--get-last-ivy-command ()
+    "Get only the command part from the last Ivy selection."
+    (when ivy-last
+      (let ((candidate (ivy-state-current ivy-last)))
+        (if (listp candidate)
+            (progn (message "car %s" (car candidat)) (car candidate))
+          (message "not car: ==%s==" candidate)
+          candidate))))
+
+  (advice-add '+ivy/project-compile :after #'DWC--add-command-to-projectile-history))
+
 ;; Whenever you reconfigure a package, make sure to wrap your config in an
 ;; `after!' block, otherwise Doom's defaults may override your settings. E.g.
 ;;
