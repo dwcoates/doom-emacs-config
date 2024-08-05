@@ -80,6 +80,44 @@
     "Center the screen after jumping to an error."
     :after '(compilation-next-error compilation-previous-error next-error previous-error)
     (recenter nil))
+
+  (defun toggle-compilation-auto-jump ()
+    (interactive)
+    (setq compilation-auto-jump-to-first-error (not compilation-auto-jump-to-first-error))
+    (message "Set `compilation-auto-jump-to-first-error' to %s" compilation-auto-jump-to-first-error))
+
+  (map! :leader
+        :desc "Toggle compilation auto-jump on error" "c y" #'toggle-compilation-auto-jump)
+
+  (defun +dwc/counsel-compile (initial-input &optional dir)
+    "Call `compile' completing with smart suggestions, optionally for DIR. From `counsel-compile'."
+    (interactive)
+    (setq counsel-compile--current-build-dir (or dir
+                                                 (counsel--compile-root)
+                                                 default-directory))
+    (ivy-read "Compile command: "
+              (delete-dups (counsel--get-compile-candidates dir))
+              :action #'counsel-compile--action
+              :keymap counsel-compile-map
+              :caller 'counsel-compile
+              :initial-input initial-input))
+
+  (after! ivy
+    (defun +dwc/ivy-project-compile (initial-input)
+      "Execute a compile command from the current project's root."
+      (interactive)
+      (+dwc/counsel-compile initial-input (projectile-project-root)))
+
+    (defun +dwc/quick-build-unit-test (&optional beg end)
+      (interactive "r")
+      (let ((marked-text (if beg (concat " -r " (string-trim (buffer-substring-no-properties beg end))) ""))
+            (quickbuild-str "./quick_build.sh -u"))
+        (deactivate-mark)
+        (+dwc/ivy-project-compile (concat quickbuild-str marked-text))))
+
+    (map! :leader
+          :desc "quick_build.sh unit-test" "c u" #'+dwc/quick-build-unit-test)
+    )
   )
 
 (defun close-doom-popup ()
@@ -134,7 +172,7 @@
           (save-buffer))
       (setq +format-on-save-disabled-modes old-value))))
 
-(map! :map global-map
+(map! :map override-global-map
       ;; Better window navigation bindings
       :nv "C-h" #'evil-window-left
       :nv "C-j" #'evil-window-down
@@ -165,6 +203,9 @@
       ;; Saving files
       :desc "Save without formatting the file" "W" #'save-without-formatting
       )
+(after! cc-mode
+  (map! :map c++-mode-map
+        "C-l" #'evil-window-right))
 
 ;; TODO: move this to ivy config
 (after! ivy
@@ -197,6 +238,9 @@
           candidate))))
 
   (advice-add '+ivy/project-compile :after #'DWC--add-command-to-projectile-history))
+
+(after! magit
+  (setq magit-no-confirm (append magit-no-confirm '(abort-revert abort-rebase abort-merge))))
 
 ;; Whenever you reconfigure a package, make sure to wrap your config in an
 ;; `after!' block, otherwise Doom's defaults may override your settings. E.g.
