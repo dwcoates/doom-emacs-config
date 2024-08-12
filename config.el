@@ -217,6 +217,11 @@
       :desc "Search project" "ps" #'+default/search-project
       ;; Saving files
       :desc "Save without formatting the file" "W" #'save-without-formatting
+      :map general-override-local-mode-map
+      :nv "C-h" #'evil-window-left
+      :nv "C-j" #'evil-window-down
+      :nv "C-k" #'evil-window-up
+      :nv "C-l" #'evil-window-right
       )
 (after! cc-mode
   (map! :map c++-mode-map
