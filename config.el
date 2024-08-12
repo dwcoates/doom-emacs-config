@@ -164,6 +164,17 @@
 
 (set-popup-rule! "\\.*doom:vterm\\.*" :size 0.5 :side 'right :select t :quit nil :ttl nil)
 
+(after! evil
+  ;; Highlight the current search match more brightly
+  (set-face-attribute 'evil-ex-search nil
+                      :foreground "black" :background "gold" :weight 'bold)
+
+  ;; Optionally, make other matches less prominent
+  (set-face-attribute 'evil-ex-lazy-highlight nil
+                      :foreground "gray" :background "#a9a9a9")
+
+  )
+
 (setq evil-disable-insert-state-bindings t)
 
 (defun save-without-formatting ()
