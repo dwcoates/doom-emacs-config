@@ -120,6 +120,10 @@
     )
   )
 
+(after! company
+  (setq company-idle-delay 0.1
+        company-tooltip-idle-delay 0.1))
+
 (defun close-doom-popup ()
   "Close the currently open Doom popup window."
   (interactive)
