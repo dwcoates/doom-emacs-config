@@ -14,6 +14,10 @@
 ;;      Alternatively, press 'gd' (or 'C-c c d') on a module to browse its
 ;;      directory (for easy access to its source code).
 
+;;FIXME: this is a temporary hack until i figure out why the hell the exec path isn't being correctly set / updated.
+;;       There's some stupid caching happenign somewhere.
+(setq exec-path (cons "/opt/homebrew/Cellar/llvm@17/17.0.6/bin" exec-path))
+
 (doom! :input
        ;;bidi              ; (tfel ot) thgir etirw uoy gnipleh
        ;;chinese
