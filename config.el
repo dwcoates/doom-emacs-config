@@ -162,7 +162,7 @@
 (after! evil
   (setq evil-ex-search-persistent-highlight nil))
 
-(set-popup-rule! "\\.*doom:vterm\\.*" :size 0.5 :side 'bottom :select t :quit nil)
+(set-popup-rule! "\\.*doom:vterm\\.*" :size 0.5 :side 'right :select t :quit nil :ttl nil)
 
 (setq evil-disable-insert-state-bindings t)
 
