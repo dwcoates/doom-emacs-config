@@ -198,7 +198,9 @@
        doom-tomorrow-night
        vc
        (default +bindings +smartparens)
-       personal-bindings)
+       personal-bindings
+       ;; javascript
+       )
 
 ;;TODO find a home for this
 (defun get-buffer-name-by-regex (regex)
