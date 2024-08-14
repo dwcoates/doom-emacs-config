@@ -7,8 +7,13 @@
 
 ;; Some functionality uses this to identify you, e.g. GPG configuration, email
 ;; clients, file templates and snippets. It is optional.
-(setq user-full-name "Dodge Coates"
-      user-mail-address "dodge@chess.com")
+(let ((full-name (getenv "EMACS_FULL_NAME"))
+      (email (getenv "EMACS_EMAIL")))
+  (if (and full-name email)
+      (setq user-full-name full-name
+            user-mail-address email)
+    (warn "Set ${EMACS_FULL_NAME} and ${EMACS_EMAIL} environment variables so they can be used by features which support them."))
+  )
 
 ;; Doom exposes five (optional) variables for controlling fonts in Doom:
 ;;
