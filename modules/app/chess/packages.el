@@ -23,5 +23,4 @@ If `ONLY-LOCAL' is non-nil, do not look for package on github."
 
 (register-dwc-package pygn-mode "PYGNPATH")
 (register-dwc-package uci-mode "UCIMODEPATH")
-(message "this ran")
 ;; (register-dwc-package cee-pygn-mode "CEEPYGNPATH" t) ;; private code
