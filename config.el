@@ -217,6 +217,8 @@
       :i "M-v"  #'scroll-down-command
       :i "M-<"  #'beginning-of-buffer
       :i "M->"  #'end-of-buffer
+      :nv "C-{" #'+goto-previous-function.outer
+      :nv "C-}" #'+goto-next-function.outer
       :leader
       ;; Toggle between source and header files
       :desc "Find other file" "T" #'ff-find-other-file
