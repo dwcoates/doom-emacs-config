@@ -184,8 +184,11 @@
     (unwind-protect
         (progn
           (setq +format-on-save-disabled-modes (cons major-mode +format-on-save-disabled-modes))
-          (save-buffer))
-      (setq +format-on-save-disabled-modes old-value))))
+          (save-buffer)
+          (message "Saving without formatting: %s" +format-on-save-disabled-modes))
+      (setq +format-on-save-disabled-modes old-value)
+      (message "Could not unwind: %s" +format-on-save-disabled-modes))))
+
 
 (map! :map override-global-map
       ;; Better window navigation bindings
