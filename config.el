@@ -265,6 +265,13 @@
 (after! magit
   (setq magit-no-confirm (append magit-no-confirm '(abort-revert abort-rebase abort-merge))))
 
+(unless (display-graphic-p)
+  ;; activate mouse-based scrolling
+  (xterm-mouse-mode 1)
+  (global-set-key (kbd "<mouse-4>") 'scroll-down-line)
+  (global-set-key (kbd "<mouse-5>") 'scroll-up-line)
+  )
+
 ;; Whenever you reconfigure a package, make sure to wrap your config in an
 ;; `after!' block, otherwise Doom's defaults may override your settings. E.g.
 ;;
