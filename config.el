@@ -129,7 +129,7 @@
   (setq company-idle-delay 0.1
         company-tooltip-idle-delay 0.1))
 
-(defun close-doom-popup ()
+(defun +dwc/close-doom-popup ()
   "Close the currently open Doom popup window."
   (interactive)
   (let ((popup-windows (+popup-windows)))
@@ -137,7 +137,7 @@
         (mapc (lambda (window) (delete-window window)) popup-windows)
       (user-error "No popup windows open"))))
 (map! :leader
-      :desc "Close Doom popup" "w P" #'close-doom-popup)
+      :desc "Close Doom popup" "w P" #'+dwc/close-doom-popup)
 
 ;; Some UI doodads
 (display-time)
