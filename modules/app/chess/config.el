@@ -2,13 +2,20 @@
 
 (use-package! uci-mode
   :config
-  (setq uci-mode-engine-command '("explanation-engine"))
+  (let ((exe (getenv "EMACS_CHESS_ENGINE_BIN")))
+    (if (executable-find exe)
+        (setq uci-mode-engine-command `(,exe))
+      (warn "explanation-engine executable not found. Not available as a `uci-mode-engine-command' executable")))
   (set-popup-rule! "*UCI*" :side 'right :width 0.4 :quit nil :select t :ttl nil)
   (map! (:map global-map
          :prefix "C-c 8"
          :ivomrg "e" #'uci-mode-run-engine
          :ivomrg "r" #'uci-mode-restart-engine
-         :ivomrg "q" #'uci-mode-quit)
+         :ivomrg "q" #'uci-mode-quit
+         )
+        (:map uci-mode-map
+         :n "q" #'uci-mode-quit
+         )
         (:leader
          :n "8e" #'uci-mode-run-engine
          :n "8r" #'uci-mode-restart-engine
