@@ -81,13 +81,13 @@
     :after '(compilation-next-error compilation-previous-error next-error previous-error)
     (recenter nil))
 
-  (defun toggle-compilation-auto-jump ()
+  (defun +dwc/toggle-compilation-auto-jump ()
     (interactive)
     (setq compilation-auto-jump-to-first-error (not compilation-auto-jump-to-first-error))
     (message "Set `compilation-auto-jump-to-first-error' to %s" compilation-auto-jump-to-first-error))
 
   (map! :leader
-        :desc "Toggle compilation auto-jump on error" "c y" #'toggle-compilation-auto-jump)
+        :desc "Toggle compilation auto-jump on error" "c y" #'+dwc/toggle-compilation-auto-jump)
 
   (defun +dwc/counsel-compile (initial-input &optional dir)
     "Call `compile' completing with smart suggestions, optionally for DIR. From `counsel-compile'."
