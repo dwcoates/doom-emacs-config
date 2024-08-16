@@ -273,7 +273,11 @@
   (advice-add '+ivy/project-compile :after #'DWC--add-command-to-projectile-history))
 
 (after! magit
-  (setq magit-no-confirm (append magit-no-confirm '(abort-revert abort-rebase abort-merge))))
+  (setq magit-no-confirm (append magit-no-confirm '(abort-revert abort-rebase abort-merge)))
+  (map! :map (magit-unstaged-section-map magit-staged-section-map magit-untracked-section-map magit-mode-map)
+        :desc "Jump to recent commits"
+        "g r"
+        #'magit-jump-to-unpushed-to-upstream))
 
 (unless (display-graphic-p)
   ;; activate mouse-based scrolling
