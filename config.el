@@ -167,7 +167,15 @@
 (after! evil
   (setq evil-ex-search-persistent-highlight nil))
 
-(set-popup-rule! "\\.*doom:vterm\\.*" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
+(after! vterm
+  (set-popup-rule! "\\.*doom:vterm\\.*" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
+  (defun +dwc/vterm-toggle (ARG)
+    (interactive "P")
+    (if (and (s-contains-p  "vterm" (buffer-name)) (= (length (window-list)) 1))
+        (+dwc/toggle-window-fullscreen))
+    (+vterm/toggle ARG))
+  (map! :leader :desc "Toggle vterm popup" "o t" #'+dwc/vterm-toggle)
+  )
 
 (after! evil
   ;; Highlight the current search match more brightly
