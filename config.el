@@ -180,6 +180,9 @@
 
   )
 
+(custom-set-faces!
+  '(hl-line :background "#2d2d2d"))
+
 (setq evil-disable-insert-state-bindings t)
 
 (defun save-without-formatting ()
