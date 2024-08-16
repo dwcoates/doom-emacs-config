@@ -151,7 +151,7 @@
   (map! :map dired-mode-map
         :n "C-i" 'dired-subtree-cycle))
 
-(set-popup-rule! "^\\*compilation\\*" :side 'right :size 0.5 :select t :quit nil)
+(set-popup-rule! "^\\*compilation\\*" :side 'bottom :size 0.3 :select t :quit nil)
 
 (add-to-list 'load-path (concat (getenv "HOME") "/" "workspace"))
 
@@ -167,7 +167,7 @@
 (after! evil
   (setq evil-ex-search-persistent-highlight nil))
 
-(set-popup-rule! "\\.*doom:vterm\\.*" :size 0.5 :side 'right :select t :quit nil :ttl nil)
+(set-popup-rule! "\\.*doom:vterm\\.*" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
 
 (after! evil
   ;; Highlight the current search match more brightly
@@ -278,6 +278,19 @@
   (global-set-key (kbd "<mouse-4>") 'scroll-down-line)
   (global-set-key (kbd "<mouse-5>") 'scroll-up-line)
   )
+
+(defun +dwc/toggle-window-fullscreen ()
+  "Toggle the current window between its normal size and fullscreen."
+  (interactive)
+  (if (= 1 (length (window-list)))
+      (progn
+        (jump-to-register '_) ;; Restore window configuration
+        (setq was-fullscreen nil))
+    (window-configuration-to-register '_) ;; Save window configuration
+    (delete-other-windows)))
+
+(map! :leader
+      :desc "Toggle popup fullscreen" "w f" #'+dwc/toggle-window-fullscreen)
 
 ;; Whenever you reconfigure a package, make sure to wrap your config in an
 ;; `after!' block, otherwise Doom's defaults may override your settings. E.g.
