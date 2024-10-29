@@ -307,10 +307,11 @@
 (map! :leader
       :desc "Toggle popup fullscreen" "w f" #'+dwc/toggle-window-fullscreen)
 
-(with-eval-after-load 'lsp-mode
-  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]vendor/[^g][^o][^o][^g][^l][^e][^/][^p][^r][^o][^t][^o][^b][^u][^f]$") ;; Only care about protobuf in Chesscom monolith PHP vendor/
-  (add-to-list 'lsp-file-watch-ignored-directories "client/node_modules") ;; ChessCom monolith client/node_modules has couple hundred thousand files in it
-  )
+;; (with-eval-after-load 'lsp-mode
+;;   (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]vendor/[^g][^o][^o][^g][^l][^e][^/][^p][^r][^o][^t][^o][^b][^u][^f]$") ;; Only care about protobuf in Chesscom monolith PHP vendor/
+;;   (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]client/node_modules$") ;; ChessCom monolith client/node_modules has couple hundred thousand files in it
+;;   (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]node_modules$") ;; ChessCom monolith client/node_modules has couple hundred thousand files in it
+;;   )
 
 ;; Whenever you reconfigure a package, make sure to wrap your config in an
 ;; `after!' block, otherwise Doom's defaults may override your settings. E.g.
