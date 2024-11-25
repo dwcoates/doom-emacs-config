@@ -345,6 +345,9 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
       "g h" #'+dwc/generate-github-link
       :desc "Generate and open GitHub link in browser"
       "g H" (lambda () (interactive) (+dwc/generate-github-link t))
+      :desc "Open commit in GitHub"
+      "g o" #'+dwc/open-commit-in-github
+      )
 
 ;; Whenever you reconfigure a package, make sure to wrap your config in an
 ;; `after!' block, otherwise Doom's defaults may override your settings. E.g.
