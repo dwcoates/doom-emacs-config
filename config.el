@@ -281,7 +281,8 @@
   (advice-add '+ivy/project-compile :after #'DWC--add-command-to-projectile-history))
 
 (after! magit
-  (setq magit-no-confirm (append magit-no-confirm '(abort-revert abort-rebase abort-merge)))
+  (setq magit-no-confirm (append magit-no-confirm '(abort-revert abort-rebase abort-merge))
+        magit-diff-visit-previous-blob nil)
   (map! :map (magit-unstaged-section-map magit-staged-section-map magit-untracked-section-map magit-mode-map)
         :desc "Jump to recent commits"
         "g r"
