@@ -383,3 +383,24 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
 ;; they are implemented.
 ;;;
 ;;; $DOOMDIR/config.el -*- lexical-binding: t; -*-
+(map! :leader
+      :desc "Open ChessCom ToDo org file"
+      "p t" #'(lambda () (interactive) (find-file "~/workspace/ChessCom/org/todo.org"))
+      :desc "Open ChessCom Notes org file"
+      "p n" #'(lambda () (interactive) (find-file "~/workspace/ChessCom/org/notes.org"))
+      )
+
+
+(after! org
+ (setq org-todo-keywords `((sequence "TODO(t)" "IN PROGRESS(p)" "BLOCKED(b)" "HOLD(h)" "IDEA(i)" "|" "DONE(d)" "KILLED(k)")
+                           (sequence "[ ](T)" "[-](S)" "[?](W)" "|" "[X](D)")
+                           (sequence "|" "OKAY(o)" "YES(y)" "NO(n)")))
+
+ (setq org-todo-keyword-faces `(("[-]" . +org-todo-active)
+                                ("IN PROGRESS" . +org-todo-active)
+                                ("[?]" . +org-todo-onhold)
+                                ("BLOCKED" . +org-todo-cancel)
+                                ("HOLD" . +org-todo-onhold)
+                                ("HOLD" . +org-todo-onhold)
+                                ("KILLED" . +org-todo-cancel)))
+ )
