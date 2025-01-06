@@ -395,7 +395,7 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
 
 
 (after! org
- (setq org-todo-keywords `((sequence "TODO(t)" "IN PROGRESS(p)" "BLOCKED(b)" "HOLD(h)" "IDEA(i)" "|" "DONE(d)" "KILLED(k)")
+ (setq org-todo-keywords `((sequence "TODO(t)" "IN PROGRESS(p)" "BLOCKED(b)" "HOLD(h)" "IDEA(i)" "QUESTION(q)" "|" "DONE(d)" "KILLED(k)")
                            (sequence "[ ](T)" "[-](S)" "[?](W)" "|" "[X](D)")
                            (sequence "|" "OKAY(o)" "YES(y)" "NO(n)")))
 
@@ -405,5 +405,8 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
                                 ("BLOCKED" . +org-todo-cancel)
                                 ("HOLD" . +org-todo-onhold)
                                 ("HOLD" . +org-todo-onhold)
+                                ("QUESTION" . +org-todo-cancel)
                                 ("KILLED" . +org-todo-cancel)))
+
+ (setq org-agenda-files '("~/workspace/ChessCom/org/todo.org" "~/workspace/ChessCom/org/notes.org" "~/workspace/ChessCom/org/devs.org" "~/org/notes.org" "~/org/todo.org"))
  )
