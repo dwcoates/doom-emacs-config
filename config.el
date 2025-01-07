@@ -392,21 +392,3 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
       :desc "Open ChessCom Notes org file"
       "p n" #'(lambda () (interactive) (find-file "~/workspace/ChessCom/org/notes.org"))
       )
-
-
-(after! org
- (setq org-todo-keywords `((sequence "TODO(t)" "IN PROGRESS(p)" "BLOCKED(b)" "HOLD(h)" "IDEA(i)" "QUESTION(q)" "|" "DONE(d)" "KILLED(k)")
-                           (sequence "[ ](T)" "[-](S)" "[?](W)" "|" "[X](D)")
-                           (sequence "|" "OKAY(o)" "YES(y)" "NO(n)")))
-
- (setq org-todo-keyword-faces `(("[-]" . +org-todo-active)
-                                ("IN PROGRESS" . +org-todo-active)
-                                ("[?]" . +org-todo-onhold)
-                                ("BLOCKED" . +org-todo-cancel)
-                                ("HOLD" . +org-todo-onhold)
-                                ("HOLD" . +org-todo-onhold)
-                                ("QUESTION" . +org-todo-cancel)
-                                ("KILLED" . +org-todo-cancel)))
-
- (setq org-agenda-files '("~/workspace/ChessCom/org/todo.org" "~/workspace/ChessCom/org/notes.org" "~/workspace/ChessCom/org/devs.org" "~/org/notes.org" "~/org/todo.org"))
- )
