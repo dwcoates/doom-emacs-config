@@ -385,10 +385,3 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
 ;;; $DOOMDIR/config.el -*- lexical-binding: t; -*-
 (after! projectile
   (setq projectile-indexing-method 'alien))
-
-(map! :leader
-      :desc "Open ChessCom ToDo org file"
-      "p t" #'(lambda () (interactive) (find-file "~/workspace/ChessCom/org/todo.org"))
-      :desc "Open ChessCom Notes org file"
-      "p n" #'(lambda () (interactive) (find-file "~/workspace/ChessCom/org/notes.org"))
-      )
