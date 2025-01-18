@@ -141,7 +141,12 @@
 
 ;; Some UI doodads
 (display-time)
-(set-face-attribute 'default nil :height 125)
+(set-face-attribute 'default nil
+                    :width 'normal
+                    :height 125
+                    :family "JetBrains Mono"
+                    )
+
 (setq kill-ring-max 100000)
 (display-battery-mode t)
 
@@ -383,5 +388,39 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
 ;; they are implemented.
 ;;;
 ;;; $DOOMDIR/config.el -*- lexical-binding: t; -*-
+
+(after! cc-mode
+ (setq lsp-headerline-breadcrumb-enable t)
+ (setq lsp-headerline-breadcrumb-segments '(symbols))
+ (set-face-attribute 'lsp-headerline-breadcrumb-symbols-face nil
+                     :inherit 'default
+                     :foreground "#f0c674"
+                     :weight 'normal)
+
+ )
+
+;; One option is the Evil plugin "evil-replace-with-register":
+;; https://github.com/emacs-evil/evil-replace-with-register
+;;
+;; It lets you replace text within any motion/text-object using
+;; what's in a register (e.g., the default yank register).
+;; In Doom Emacs, install and configure it:
+
+;; FIXME: make work
+;; (use-package! evil-replace-with-register
+;;   :after evil
+;;   :config
+;;   (evil-replace-with-register-install))
+
+;; Usage:
+;; 1. Yank/copy something into the default register (y, yi(, etc.)
+;; 2. Move the cursor where you want to replace.
+;; 3. Use: `gr` + a motion/text-object
+;;    e.g. `gr i )`  -> replaces inside parentheses with the last yanked text
+;;    e.g. `gr a )`  -> replaces including the parentheses
+;;
+;; This way, it won't overwrite your current yank buffer,
+;; and you won't have to jump through separate "delete + p" steps.
+
 (after! projectile
   (setq projectile-indexing-method 'alien))
