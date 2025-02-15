@@ -390,14 +390,33 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
 ;;; $DOOMDIR/config.el -*- lexical-binding: t; -*-
 
 (after! cc-mode
- (setq lsp-headerline-breadcrumb-enable t)
- (setq lsp-headerline-breadcrumb-segments '(symbols))
- (set-face-attribute 'lsp-headerline-breadcrumb-symbols-face nil
-                     :inherit 'default
-                     :foreground "#f0c674"
-                     :weight 'normal)
+  (after! lsp
+   ;; (setq lsp-headerline-breadcrumb-enable t
+   ;;       lsp-headerline-breadcrumb-segments '(symbols))
+   ;; (set-face-attribute 'lsp-headerline-breadcrumb-symbols-face nil
+   ;;                     :inherit 'default
+   ;;                     :foreground "#f0c674"
+   ;;                     :weight 'normal)
+   )
+  (after! yasnippet
+    ;; Override this broken function
+    ;;
+    ;; TODO: fix the function instead of overriding it
+    (defun doom-snippets-c++-using-std-p ()
+      "Return non-nil if 'using namespace std' is found at the top of this file."
+      nil)
 
- )
+    (defun doom-snippets-c++-class-name (str)
+      "Search for a class name like `DerivedClass' in STR
+(which may look like `DerivedClass : ParentClass1, ParentClass2, ...')
+If found, the class name is returned, otherwise STR is returned"
+      (yas-substr str "[^: ]*"))
+
+    (defun doom-snippets-c++-class-method-decl-choice ()
+      "Choose and return the end of a C++11 class method declaration"
+      (yas-choose-value '(";" " = default;" " = delete;")))
+    )
+  )
 
 ;; One option is the Evil plugin "evil-replace-with-register":
 ;; https://github.com/emacs-evil/evil-replace-with-register
