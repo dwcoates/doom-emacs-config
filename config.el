@@ -424,3 +424,9 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
 
 (after! projectile
   (setq projectile-indexing-method 'alien))
+
+(setq gc-cons-threshold 1000000000  ;; ~1gb, probably not taking
+      garbage-collection-messages t ;; show diagnostics
+      gc-cons-percentage 0.5 ;; this is an aggressive value, but seems to fix hanging LSPs?
+                             ;; FIXME wtf is stealing the heap in emacs? LSPs are separate processes, of course
+      )
