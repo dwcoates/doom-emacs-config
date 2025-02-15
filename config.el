@@ -425,8 +425,37 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
 (after! projectile
   (setq projectile-indexing-method 'alien))
 
-(setq gc-cons-threshold 1000000000  ;; ~1gb, probably not taking
-      garbage-collection-messages t ;; show diagnostics
-      gc-cons-percentage 0.5 ;; this is an aggressive value, but seems to fix hanging LSPs?
-                             ;; FIXME wtf is stealing the heap in emacs? LSPs are separate processes, of course
+;; Garbage collection
+(setq gc-cons-threshold 1000000000    ;; ~1gb, probably not taking
+      garbage-collection-messages nil ;; show diagnostics
+      gc-cons-percentage 0.2
       )
+(run-with-idle-timer 5 t #'garbage-collect)
+
+
+(after! lsp
+  (setq
+   lsp-ui-sideline-diagnostic-max-line-length 1000
+   lsp-ui-sideline-diagnostic-max-lines 2
+   lsp-ui-sideline-show-code-actions t
+   lsp-ui-sideline-show-symbol t
+   lsp-ui-sideline-delay 0.1
+
+   ;;; NOTE: lsp-ui-doc seems like it sucks
+   ;; lsp-ui-doc-enable t
+   ;; lsp-ui-doc-position 'top
+   ;; lsp-ui-doc-max-width 100
+   ;; lsp-ui-doc-max-height 30
+
+   ;; eldoc-echo-area-use-multiline-p t
+   ;; lsp-eldoc-enable-hover t
+   ;; lsp-eldoc-render-all t
+   ;; max-lisp-eval-depth 10000 ;;FIXME: remove
+   )
+  )
+
+
+
+;; (advice-add 'command-execute :before
+;;             (lambda (cmd)
+;;               (when cmd (message "Executing command: %s" cmd))))
