@@ -391,13 +391,13 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
 
 (after! cc-mode
   (after! lsp
-   ;; (setq lsp-headerline-breadcrumb-enable t
-   ;;       lsp-headerline-breadcrumb-segments '(symbols))
-   ;; (set-face-attribute 'lsp-headerline-breadcrumb-symbols-face nil
-   ;;                     :inherit 'default
-   ;;                     :foreground "#f0c674"
-   ;;                     :weight 'normal)
-   )
+    ;; (setq lsp-headerline-breadcrumb-enable t
+    ;;       lsp-headerline-breadcrumb-segments '(symbols))
+    ;; (set-face-attribute 'lsp-headerline-breadcrumb-symbols-face nil
+    ;;                     :inherit 'default
+    ;;                     :foreground "#f0c674"
+    ;;                     :weight 'normal)
+    )
   (after! yasnippet
     ;; Override this broken function
     ;;
@@ -416,7 +416,20 @@ If found, the class name is returned, otherwise STR is returned"
       "Choose and return the end of a C++11 class method declaration"
       (yas-choose-value '(";" " = default;" " = delete;")))
     )
+
+  (after! company
+    ;; FIXME: can't get it to successfully override C-SPC in normal context (outside of company-active)
+    (map! :map company-active-map "C-SPC" #'yas-expand)
+    (map! :map company-mode-map "C-SPC" #'yas-expand)
+    (map! :map override-global-map "C-SPC" #'yas-expand)
+    (map! :map company-active-map [tab] nil)
+    )
   )
+
+;; Ensure snippets in ./snippets take precedence over the Doom internal ones
+(after! yasnippet
+  (setq yas-snippet-dirs
+        (append yas-snippet-dirs '("~/.doom.d/snippets"))))
 
 ;; One option is the Evil plugin "evil-replace-with-register":
 ;; https://github.com/emacs-evil/evil-replace-with-register
