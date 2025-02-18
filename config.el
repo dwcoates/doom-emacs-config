@@ -418,7 +418,6 @@ If found, the class name is returned, otherwise STR is returned"
     )
 
   (after! company
-    ;; FIXME: can't get it to successfully override C-SPC in normal context (outside of company-active)
     (map! :map company-active-map "C-SPC" #'yas-expand)
     (map! :map company-mode-map "C-SPC" #'yas-expand)
     (map! :map override-global-map "C-SPC" #'yas-expand)
@@ -460,7 +459,7 @@ If found, the class name is returned, otherwise STR is returned"
 ;; Garbage collection
 (setq gc-cons-threshold 1000000000    ;; ~1gb, probably not taking
       garbage-collection-messages nil ;; show diagnostics
-      gc-cons-percentage 0.2
+      gc-cons-percentage 0.3
       )
 (run-with-idle-timer 5 t #'garbage-collect)
 
