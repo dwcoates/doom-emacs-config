@@ -461,7 +461,7 @@ If found, the class name is returned, otherwise STR is returned"
       garbage-collection-messages nil ;; show diagnostics
       gc-cons-percentage 0.3
       )
-(run-with-idle-timer 5 t #'garbage-collect)
+(run-with-idle-timer 20 t #'garbage-collect) ;; Run garbage collection if idle for at least 20 seconds (e.g., when checking Slack, etc)
 
 
 (after! lsp
