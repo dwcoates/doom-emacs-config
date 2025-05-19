@@ -499,6 +499,12 @@ If found, the class name is returned, otherwise STR is returned"
    )
   )
 
+(defun +dwc/toggle-last-buffer ()
+  "Toggle between the last two buffers, including popups."
+  (interactive)
+  (switch-to-buffer (other-buffer (current-buffer) t)))
+
+(map! :leader "b p" #'+dwc/toggle-last-buffer)
 
 
 ;; (advice-add 'command-execute :before
