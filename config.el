@@ -457,11 +457,25 @@ If found, the class name is returned, otherwise STR is returned"
   (setq projectile-indexing-method 'alien))
 
 ;; Garbage collection
-(setq gc-cons-threshold 1000000000    ;; ~1gb, probably not taking
-      garbage-collection-messages nil ;; show diagnostics
-      gc-cons-percentage 0.3
-      )
-(run-with-idle-timer 20 t #'garbage-collect) ;; Run garbage collection if idle for at least 20 seconds (e.g., when checking Slack, etc)
+;; (setq gc-cons-threshold 10000000000    ;; ~1gb, probably not taking
+;;       garbage-collection-messages t ;; show diagnostics
+;;       gc-cons-percentage 0.5
+;;       )
+;; (run-with-idle-timer 30 t #'garbage-collect) ;; Run garbage collection if idle for at least 20 seconds (e.g., when checking Slack, etc)
+
+;; Reasonable thresholds for interactive usage
+(setq gc-cons-threshold (* 100 1024 1024))  ;; 100MB during runtime
+(setq gc-cons-percentage 0.1)
+
+;; Max threshold for startup (temporarily disables GC)
+;; (setq doom-gc-cons-threshold (* 100 1024 1024)) ;; Doom uses this internally already
+
+;; Automatically run GC when idle
+(run-with-idle-timer 5 t #'garbage-collect)
+
+;; Reduce GC during minibuffer usage
+(add-hook 'minibuffer-setup-hook (lambda () (setq gc-cons-threshold most-positive-fixnum)))
+(add-hook 'minibuffer-exit-hook (lambda () (setq gc-cons-threshold (* 100 1024 1024))))
 
 
 (after! lsp
