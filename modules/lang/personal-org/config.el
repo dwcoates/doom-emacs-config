@@ -6,8 +6,8 @@
   (setq org-agenda-files '("~/org/"
                            "~/workspace/ChessCom/org/"))
 
-  (setq org-todo-keywords `((sequence "TODO(t!)" "IN PROGRESS(p!)" "BLOCKED(b@/!)" "HOLD(h)" "IDEA(i)"
-                             "QUESTION(q)" "NOTE(n)" "|" "DONE(d!/@)" "KILLED(k@)")))
+  (setq org-todo-keywords `((sequence "TODO(t)" "IN PROGRESS(p)" "BLOCKED(b@/)" "HOLD(h)" "IDEA(i)"
+                             "QUESTION(q)" "NOTE(n)" "|" "DONE(d/@)" "KILLED(k@)")))
 
   (setq org-todo-keyword-faces `(("IN PROGRESS" . +org-todo-active)
                                  ("BLOCKED" . +org-todo-cancel)
