@@ -164,6 +164,16 @@
 ;; change `org-directory'. It must be set before org loads!
 (setq org-directory "~/org/")
 
+(after! org
+  (setq org-agenda-custom-commands '(("A" "High Priority Tasks" tags-todo "PRIORITY=\"A\""))
+        org-use-tag-inheritance t
+        org-agenda-custom-commands
+        '(("A" "High Priority Tasks Grouped by Tag"
+           ((tags-todo "PRIORITY=\"A\""
+                       ((org-super-agenda-groups
+                         '((:auto-group t :name "Grouped by tag"))))))))
+        ))
+
 (after! lsp-mode
   (setq lsp-log-io t))
 
@@ -418,10 +428,10 @@ If found, the class name is returned, otherwise STR is returned"
     )
 
   (after! company
-    (map! :map company-active-map "C-SPC" #'yas-expand)
-    (map! :map company-mode-map "C-SPC" #'yas-expand)
-    (map! :map override-global-map "C-SPC" #'yas-expand)
-    (map! :map company-active-map [tab] nil)
+    ;; (map! :map company-active-map "C-SPC" #'yas-expand)
+    ;; (map! :map company-mode-map "C-SPC" #'yas-expand)
+    ;; (map! :map override-global-map "C-SPC" #'yas-expand)
+    ;; (map! :map company-active-map [tab] nil)
     )
   )
 
@@ -506,7 +516,45 @@ If found, the class name is returned, otherwise STR is returned"
 
 (map! :leader "b p" #'+dwc/toggle-last-buffer)
 
+(after! projectile
+  (defun my/projectile-custom-project-name (project-root)
+    (cond
+     ((string-match-p "/monorepo/project-a/" project-root) "explanation-engine")
+     ((string-match-p "/monorepo/project-b/" project-root) "LibB")
+     (t (projectile-default-project-name project-root))))
+
+  (setq projectile-project-name-function #'my/projectile-custom-project-name))
+
 
 ;; (advice-add 'command-execute :before
 ;;             (lambda (cmd)
 ;;               (when cmd (message "Executing command: %s" cmd))))
+;;
+;;
+;;
+
+(setq org-latex-packages-alist '(("" "geometry" t))
+      org-latex-default-class "article"
+      org-latex-default-packages-alist
+      '(("AUTO" "inputenc" t)
+        ("T1" "fontenc" t)
+        ("" "fixltx2e" nil)
+        ("" "graphicx" t)
+        ("" "longtable" nil)
+        ("" "float" nil)
+        ("" "wrapfig" nil)
+        ("" "soul" t)
+        ("" "textcomp" t)
+        ("" "marvosym" t)
+        ("" "wasysym" t)
+        ("" "amsmath" t)
+        ("" "amssymb" t)
+        ("" "hyperref" nil))
+      org-latex-pdf-process
+      '("pdflatex -interaction nonstopmode -output-directory %o %f"))
+
+(setq org-latex-packages-alist
+      '(("top=0.75in,bottom=0.75in,left=0.75in,right=0.75in" "geometry" nil)))
+
+(map! :leader
+      "/" #'+default/search-buffer) ;; or #'consult-line if using Vertico/Consult
