@@ -558,3 +558,6 @@ If found, the class name is returned, otherwise STR is returned"
 
 (map! :leader
       "/" #'+default/search-buffer) ;; or #'consult-line if using Vertico/Consult
+
+(map! :map (magit-status-mode-map magit-diff-section-base-map magit-diff-section-map)
+      "C-<return>" #'magit-diff-visit-file-other-window)
