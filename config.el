@@ -466,10 +466,11 @@ If found, the class name is returned, otherwise STR is returned"
 (after! projectile
   (setq projectile-indexing-method 'alien)
   
-  ;; Custom project name function to differentiate git worktrees
+  ;; Custom project name function to differentiate projects using .projectile contents
   (defun +dwc/projectile-project-name (project-root)
-    "Generate a unique project name that includes git worktree info."
+    "Generate a unique project name using .projectile file contents as identifier."
     (let* ((default-name (file-name-nondirectory (directory-file-name project-root)))
+           (projectile-file (expand-file-name ".projectile" project-root))
            (git-root (ignore-errors 
                        (string-trim (shell-command-to-string 
                                      (format "cd %s && git rev-parse --show-toplevel" 
@@ -479,6 +480,17 @@ If found, the class name is returned, otherwise STR is returned"
                                        (format "cd %s && git branch --show-current" 
                                                (shell-quote-argument project-root)))))))
       (cond
+       ;; If .projectile file exists, use format: <project>[<contents>] - <branch>
+       ((file-exists-p projectile-file)
+        (let* ((workspace-name (string-trim (with-temp-buffer
+                                              (insert-file-contents projectile-file)
+                                              (buffer-string))))
+               (branch-suffix (if (and git-branch (not (string-empty-p git-branch)))
+                                  (format " - %s" git-branch)
+                                "")))
+          (if (string-empty-p workspace-name)
+              (format "%s%s" default-name branch-suffix)
+            (format "%s[%s]%s" default-name workspace-name branch-suffix))))
        ;; If we're in a git worktree and have a branch name, include it
        ((and git-root git-branch (not (string-empty-p git-branch)))
         (if (string= project-root git-root)
@@ -590,3 +602,10 @@ If found, the class name is returned, otherwise STR is returned"
 (use-package! just-mode
   :mode "\\.justfile\\'"
   :mode "justfile\\'")
+
+;; .envrc files should use sh-mode
+(add-to-list 'auto-mode-alist '("\\.envrc.*\\'" . sh-mode))
+
+;; Enable LSP for .envrc files
+(after! lsp-mode
+  (add-to-list 'lsp-language-id-configuration '("\\.envrc.*\\'" . "shellscript")))
