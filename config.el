@@ -333,14 +333,14 @@
   "Generate a GitHub link to the current line or selected line range in the file.
 If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
   (interactive "P")
-  (let* ((project-root (projectile-project-root))
-         (file-path (file-relative-name (buffer-file-name) project-root))
+  (let* ((git-root (string-trim (shell-command-to-string "git rev-parse --show-toplevel")))
+         (file-path (file-relative-name (buffer-file-name) git-root))
          (start-line (line-number-at-pos (if (use-region-p) (region-beginning) (point))))
          (end-line (line-number-at-pos (if (use-region-p) (region-end) (point))))
          (line-range (if (= start-line end-line)
                          (format "#L%d" start-line)
                        (format "#L%d-L%d" start-line end-line)))
-         (default-directory project-root)
+         (default-directory git-root)
          (commit-sha (string-trim (shell-command-to-string "git rev-parse HEAD")))
          (remote-url (string-trim (shell-command-to-string "git config --get remote.origin.url")))
          (cleaned-url (replace-regexp-in-string "^git@github.com:" "https://github.com"
@@ -561,3 +561,7 @@ If found, the class name is returned, otherwise STR is returned"
 
 (map! :map (magit-status-mode-map magit-diff-section-base-map magit-diff-section-map)
       "C-<return>" #'magit-diff-visit-file-other-window)
+;; just-mode configuration
+(use-package! just-mode
+  :mode "\\.justfile\\'"
+  :mode "justfile\\'")

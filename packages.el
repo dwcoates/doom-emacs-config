@@ -51,3 +51,5 @@
 
 
 (package! org-super-agenda)
+
+(package! just-mode)
