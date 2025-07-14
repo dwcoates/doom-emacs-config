@@ -501,7 +501,8 @@ If found, the class name is returned, otherwise STR is returned"
        ;; Fallback to default name
        (t default-name))))
   
-  (setq projectile-project-name-function '+dwc/projectile-project-name))
+  (setq projectile-project-name-function '+dwc/projectile-project-name)
+  )
 
 ;; Garbage collection
 ;; (setq gc-cons-threshold 10000000000    ;; ~1gb, probably not taking
@@ -552,16 +553,6 @@ If found, the class name is returned, otherwise STR is returned"
   (switch-to-buffer (other-buffer (current-buffer) t)))
 
 (map! :leader "b p" #'+dwc/toggle-last-buffer)
-
-(after! projectile
-  (defun my/projectile-custom-project-name (project-root)
-    (cond
-     ((string-match-p "/monorepo/project-a/" project-root) "explanation-engine")
-     ((string-match-p "/monorepo/project-b/" project-root) "LibB")
-     (t (projectile-default-project-name project-root))))
-
-  (setq projectile-project-name-function #'my/projectile-custom-project-name))
-
 
 ;; (advice-add 'command-execute :before
 ;;             (lambda (cmd)
