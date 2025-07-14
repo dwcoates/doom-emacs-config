@@ -464,7 +464,32 @@ If found, the class name is returned, otherwise STR is returned"
 ;; and you won't have to jump through separate "delete + p" steps.
 
 (after! projectile
-  (setq projectile-indexing-method 'alien))
+  (setq projectile-indexing-method 'alien)
+  
+  ;; Custom project name function to differentiate git worktrees
+  (defun +dwc/projectile-project-name (project-root)
+    "Generate a unique project name that includes git worktree info."
+    (let* ((default-name (file-name-nondirectory (directory-file-name project-root)))
+           (git-root (ignore-errors 
+                       (string-trim (shell-command-to-string 
+                                     (format "cd %s && git rev-parse --show-toplevel" 
+                                             (shell-quote-argument project-root))))))
+           (git-branch (ignore-errors 
+                         (string-trim (shell-command-to-string 
+                                       (format "cd %s && git branch --show-current" 
+                                               (shell-quote-argument project-root)))))))
+      (cond
+       ;; If we're in a git worktree and have a branch name, include it
+       ((and git-root git-branch (not (string-empty-p git-branch)))
+        (if (string= project-root git-root)
+            ;; Main worktree
+            default-name
+          ;; Worktree or subdirectory - include branch
+          (format "%s[%s]" default-name git-branch)))
+       ;; Fallback to default name
+       (t default-name))))
+  
+  (setq projectile-project-name-function '+dwc/projectile-project-name))
 
 ;; Garbage collection
 ;; (setq gc-cons-threshold 10000000000    ;; ~1gb, probably not taking
