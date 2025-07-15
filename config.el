@@ -466,18 +466,21 @@ If found, the class name is returned, otherwise STR is returned"
 (after! projectile
   (setq projectile-indexing-method 'alien)
   
-  ;; Custom project name function to show only .projectile contents
+  ;; Custom project name function with format: <git-root-parent> [<projectile-dir>]
   (defun +dwc/projectile-project-name (project-root)
-    "Generate project name using only .projectile file contents."
+    "Generate project name with format: <git-root-parent> [<projectile-dir>] or [<git-root-dir>]"
     (let* ((default-name (file-name-nondirectory (directory-file-name project-root)))
-           (projectile-file (expand-file-name ".projectile" project-root)))
-      (if (file-exists-p projectile-file)
-          (let ((workspace-name (string-trim (with-temp-buffer
-                                               (insert-file-contents projectile-file)
-                                               (buffer-string)))))
-            (if (string-empty-p workspace-name)
-                default-name
-              workspace-name))
+           (projectile-file (expand-file-name ".projectile" project-root))
+           (git-root (ignore-errors 
+                       (string-trim (shell-command-to-string 
+                                     (format "cd %s && git rev-parse --show-toplevel" 
+                                             (shell-quote-argument project-root)))))))
+      (if git-root
+          (let* ((git-root-dir (file-name-nondirectory (directory-file-name git-root)))
+                 (projectile-dir (file-name-nondirectory (directory-file-name project-root))))
+            (if (file-exists-p projectile-file)
+                (format "%s [%s]" git-root-dir projectile-dir)
+              (format "%s [%s]" git-root-dir git-root-dir)))
         default-name)))
   
   (setq projectile-project-name-function '+dwc/projectile-project-name)
