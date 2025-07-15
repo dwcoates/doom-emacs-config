@@ -466,43 +466,54 @@ If found, the class name is returned, otherwise STR is returned"
 (after! projectile
   (setq projectile-indexing-method 'alien)
   
-  ;; Custom project name function to differentiate projects using .projectile contents
+  ;; Custom project name function to show only .projectile contents
   (defun +dwc/projectile-project-name (project-root)
-    "Generate a unique project name using .projectile file contents as identifier."
+    "Generate project name using only .projectile file contents."
     (let* ((default-name (file-name-nondirectory (directory-file-name project-root)))
-           (projectile-file (expand-file-name ".projectile" project-root))
-           (git-root (ignore-errors 
-                       (string-trim (shell-command-to-string 
-                                     (format "cd %s && git rev-parse --show-toplevel" 
-                                             (shell-quote-argument project-root))))))
-           (git-branch (ignore-errors 
-                         (string-trim (shell-command-to-string 
-                                       (format "cd %s && git branch --show-current" 
-                                               (shell-quote-argument project-root)))))))
-      (cond
-       ;; If .projectile file exists, use format: <project>[<contents>] - <branch>
-       ((file-exists-p projectile-file)
-        (let* ((workspace-name (string-trim (with-temp-buffer
-                                              (insert-file-contents projectile-file)
-                                              (buffer-string))))
-               (branch-suffix (if (and git-branch (not (string-empty-p git-branch)))
-                                  (format " - %s" git-branch)
-                                "")))
-          (if (string-empty-p workspace-name)
-              (format "%s%s" default-name branch-suffix)
-            (format "%s[%s]%s" default-name workspace-name branch-suffix))))
-       ;; If we're in a git worktree and have a branch name, include it
-       ((and git-root git-branch (not (string-empty-p git-branch)))
-        (if (string= project-root git-root)
-            ;; Main worktree
-            default-name
-          ;; Worktree or subdirectory - include branch
-          (format "%s[%s]" default-name git-branch)))
-       ;; Fallback to default name
-       (t default-name))))
+           (projectile-file (expand-file-name ".projectile" project-root)))
+      (if (file-exists-p projectile-file)
+          (let ((workspace-name (string-trim (with-temp-buffer
+                                               (insert-file-contents projectile-file)
+                                               (buffer-string)))))
+            (if (string-empty-p workspace-name)
+                default-name
+              workspace-name))
+        default-name)))
   
   (setq projectile-project-name-function '+dwc/projectile-project-name)
+  
+  ;; Custom project switching behavior
+  (defun +dwc/switch-to-project ()
+    "Switch to project and open most recent file from that project."
+    (interactive)
+    (let ((project (projectile-completing-read "Switch to project: "
+                                               (projectile-relevant-known-projects))))
+      (projectile-switch-project-by-name project)
+      ;; Try to open the most recent file from this project
+      (let ((recent-file (+dwc/get-most-recent-file-in-project project)))
+        (when (and recent-file (file-exists-p recent-file))
+          (find-file recent-file)))))
+  
+  (defun +dwc/get-most-recent-file-in-project (project-root)
+    "Get the most recently accessed file in the given project."
+    (let ((project-files (seq-filter 
+                          (lambda (file)
+                            (and (file-exists-p file)
+                                 (string-prefix-p project-root file)))
+                          recentf-list)))
+      (car project-files)))
+  
+  (defun +dwc/switch-to-project-with-file ()
+    "Switch to project and always prompt for file (old behavior)."
+    (interactive)
+    (call-interactively #'projectile-switch-project))
   )
+
+;; Remap project switching keybindings
+(map! :leader
+      (:prefix "p"
+       :desc "Switch to project" "p" #'+dwc/switch-to-project
+       :desc "Switch to project with file" "P" #'+dwc/switch-to-project-with-file))
 
 ;; Garbage collection
 ;; (setq gc-cons-threshold 10000000000    ;; ~1gb, probably not taking
