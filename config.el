@@ -485,6 +485,18 @@ If found, the class name is returned, otherwise STR is returned"
   
   (setq projectile-project-name-function '+dwc/projectile-project-name)
   
+  ;; Configure LSP to use full path to git root for workspace identification
+  (defun +dwc/lsp-workspace-root (orig-fun &rest args)
+    "Override LSP workspace root to use full path to git root."
+    (let ((git-root (ignore-errors 
+                      (string-trim (shell-command-to-string "git rev-parse --show-toplevel")))))
+      (if git-root
+          git-root
+        (apply orig-fun args))))
+  
+  ;; Apply the advice to LSP workspace root functions
+  (advice-add 'lsp-workspace-root :around #'+dwc/lsp-workspace-root)
+  
   ;; Custom project switching behavior
   (defun +dwc/switch-to-project ()
     "Switch to project and open most recent file from that project."
