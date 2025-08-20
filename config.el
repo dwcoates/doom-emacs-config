@@ -466,9 +466,9 @@ If found, the class name is returned, otherwise STR is returned"
 (after! projectile
   (setq projectile-indexing-method 'alien)
   
-  ;; Custom project name function with format: <git-root-parent> [<projectile-dir>]
+  ;; Custom project name function with improved logic
   (defun +dwc/projectile-project-name (project-root)
-    "Generate project name with format: <git-root-parent> [<projectile-dir>] or [<git-root-dir>]"
+    "Generate project name using .projectile at git root if available, with smart bracketing"
     (let* ((default-name (file-name-nondirectory (directory-file-name project-root)))
            (projectile-file (expand-file-name ".projectile" project-root))
            (git-root (ignore-errors 
@@ -477,10 +477,19 @@ If found, the class name is returned, otherwise STR is returned"
                                              (shell-quote-argument project-root)))))))
       (if git-root
           (let* ((git-root-dir (file-name-nondirectory (directory-file-name git-root)))
-                 (projectile-dir (file-name-nondirectory (directory-file-name project-root))))
-            (if (file-exists-p projectile-file)
-                (format "%s [%s]" git-root-dir projectile-dir)
-              (format "%s [%s]" git-root-dir git-root-dir)))
+                 (projectile-dir (file-name-nondirectory (directory-file-name project-root)))
+                 (git-root-projectile-file (expand-file-name ".projectile" git-root))
+                 (git-root-name (if (file-exists-p git-root-projectile-file)
+                                    (string-trim (with-temp-buffer
+                                                   (insert-file-contents git-root-projectile-file)
+                                                   (buffer-string)))
+                                  git-root-dir)))
+            (if (and (file-exists-p projectile-file) 
+                     (not (string= projectile-dir git-root-dir)))
+                ;; Different directories, show both
+                (format "%s [%s]" git-root-name projectile-dir)
+              ;; Same directory or no .projectile in subdir, just show git root name
+              git-root-name))
         default-name)))
   
   (setq projectile-project-name-function '+dwc/projectile-project-name)
@@ -529,6 +538,23 @@ If found, the class name is returned, otherwise STR is returned"
       (:prefix "p"
        :desc "Switch to project" "p" #'+dwc/switch-to-project
        :desc "Switch to project with file" "P" #'+dwc/switch-to-project-with-file))
+
+;; Custom named vterm function
+(defun +dwc/vterm-named ()
+  "Create a new vterm with a custom name in current window, cd'd to current file's directory."
+  (interactive)
+  (let ((name (read-string "Terminal name: "))
+        (current-dir (if (buffer-file-name)
+                         (file-name-directory (buffer-file-name))
+                       default-directory)))
+    (when (not (string-empty-p name))
+      (let ((default-directory current-dir))
+        (vterm (format "*vterm: %s*" name))))))
+
+;; Map SPC o T to named vterm
+(map! :leader
+      (:prefix "o"
+       :desc "Named vterm" "T" #'+dwc/vterm-named))
 
 ;; Garbage collection
 ;; (setq gc-cons-threshold 10000000000    ;; ~1gb, probably not taking
@@ -615,6 +641,7 @@ If found, the class name is returned, otherwise STR is returned"
 
 (map! :map (magit-status-mode-map magit-diff-section-base-map magit-diff-section-map)
       "C-<return>" #'magit-diff-visit-file-other-window)
+
 ;; just-mode configuration
 (use-package! just-mode
   :mode "\\.justfile\\'"
