@@ -401,13 +401,10 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
 
 (after! cc-mode
   (after! lsp
-    ;; (setq lsp-headerline-breadcrumb-enable t
-    ;;       lsp-headerline-breadcrumb-segments '(symbols))
-    ;; (set-face-attribute 'lsp-headerline-breadcrumb-symbols-face nil
-    ;;                     :inherit 'default
-    ;;                     :foreground "#f0c674"
-    ;;                     :weight 'normal)
-    )
+    ;; Enable LSP headerline breadcrumbs for function names
+    (setq lsp-headerline-breadcrumb-enable t
+          lsp-headerline-breadcrumb-segments '(symbols)))
+
   (after! yasnippet
     ;; Override this broken function
     ;;
