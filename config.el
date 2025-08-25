@@ -403,7 +403,11 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
   (after! lsp
     ;; Enable LSP headerline breadcrumbs for function names
     (setq lsp-headerline-breadcrumb-enable t
-          lsp-headerline-breadcrumb-segments '(symbols)))
+          lsp-headerline-breadcrumb-segments '(symbols))
+    (after! lsp-headerline
+     (set-face-attribute 'lsp-headerline-breadcrumb-symbols-face nil
+                         :inherit 'font-lock-function-name-face))
+    )
 
   (after! yasnippet
     ;; Override this broken function
@@ -650,3 +654,6 @@ If found, the class name is returned, otherwise STR is returned"
 ;; Enable LSP for .envrc files
 (after! lsp-mode
   (add-to-list 'lsp-language-id-configuration '("\\.envrc.*\\'" . "shellscript")))
+
+(define-key org-mode-map (kbd "C-c t")
+  (lambda () (interactive) (insert (format-time-string "%Y-%m-%d")) (org-cycle)))
