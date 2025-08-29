@@ -549,13 +549,32 @@ If found, the class name is returned, otherwise STR is returned"
                          (file-name-directory (buffer-file-name))
                        default-directory)))
     (when (not (string-empty-p name))
-      (let ((default-directory current-dir))
+      (let ((default-directory current-dir)
+            (display-buffer-alist
+             (cons '("\\*vterm.*\\*"
+                     (display-buffer-same-window))
+                   display-buffer-alist)))
         (vterm (format "*vterm: %s*" name))))))
 
-;; Map SPC o T to named vterm
+;; Custom unnamed vterm function
+(defun +dwc/vterm-here ()
+  "Create a new unnamed vterm in current window, cd'd to current file's directory."
+  (interactive)
+  (let ((current-dir (if (buffer-file-name)
+                         (file-name-directory (buffer-file-name))
+                       default-directory))
+        (display-buffer-alist
+         (cons '("\\*vterm.*\\*"
+                 (display-buffer-same-window))
+               display-buffer-alist)))
+    (let ((default-directory current-dir))
+      (vterm))))
+
+;; Map SPC o T to named vterm and SPC o C-t to unnamed vterm
 (map! :leader
       (:prefix "o"
-       :desc "Named vterm" "T" #'+dwc/vterm-named))
+       :desc "Named vterm" "T" #'+dwc/vterm-named
+       :desc "Unnamed vterm here" "C-t" #'+dwc/vterm-here))
 
 ;; Garbage collection
 ;; (setq gc-cons-threshold 10000000000    ;; ~1gb, probably not taking
@@ -655,5 +674,5 @@ If found, the class name is returned, otherwise STR is returned"
 (after! lsp-mode
   (add-to-list 'lsp-language-id-configuration '("\\.envrc.*\\'" . "shellscript")))
 
-(define-key org-mode-map (kbd "C-c t")
-  (lambda () (interactive) (insert (format-time-string "%Y-%m-%d")) (org-cycle)))
+(after! org (define-key org-mode-map (kbd "C-c t")
+                        (lambda () (interactive) (insert (format-time-string "%Y-%m-%d")) (org-cycle))))
