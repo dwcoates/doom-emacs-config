@@ -356,6 +356,36 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
       (kill-new github-url)
       (message "GitHub link copied to clipboard: %s" github-url))))
 
+(defun +dwc/magit-open-commit-in-github ()
+  "Open the current commit in GitHub browser."
+  (interactive)
+  (let* ((commit-sha (string-trim (shell-command-to-string "git rev-parse HEAD")))
+         (remote-url (string-trim (shell-command-to-string "git config --get remote.origin.url")))
+         (cleaned-url (replace-regexp-in-string "^git@github.com:" "https://github.com"
+                                                (replace-regexp-in-string "\\.git$" "" remote-url)))
+         (repo-name (progn
+                      (if (string-match "github.com[:/]ChessCom/\\(.*\\)" cleaned-url)
+                          (match-string 1 cleaned-url)
+                        (error (format "Remote URL '%s' does not match expected pattern" cleaned-url)))))
+         (github-url (format "https://github.com/ChessCom/%s/commit/%s" repo-name commit-sha)))
+    (browse-url github-url)))
+
+(defun +dwc/magit-copy-commit-link ()
+  "Copy GitHub link for commit at point in magit buffer."
+  (interactive)
+  (let* ((commit-sha (magit-commit-at-point))
+         (default-directory (magit-toplevel))
+         (remote-url (string-trim (shell-command-to-string "git config --get remote.origin.url")))
+         (cleaned-url (replace-regexp-in-string "^git@github.com:" "https://github.com"
+                                                (replace-regexp-in-string "\\.git$" "" remote-url)))
+         (repo-name (progn
+                      (if (string-match "github.com[:/]ChessCom/\\(.*\\)" cleaned-url)
+                          (match-string 1 cleaned-url)
+                        (error (format "Remote URL '%s' does not match expected pattern" cleaned-url)))))
+         (github-url (format "https://github.com/ChessCom/%s/commit/%s" repo-name commit-sha)))
+    (kill-new github-url)
+    (message "GitHub commit link copied to clipboard: %s" github-url)))
+
 (map! :leader
       :desc "Generate GitHub link for current line"
       "g h" #'+dwc/generate-github-link
@@ -364,6 +394,11 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
       :desc "Open commit in GitHub"
       "g o" #'+dwc/open-commit-in-github
       )
+
+;; Add magit-specific keybinding
+(map! :map magit-status-mode-map
+      "g c" #'+dwc/magit-copy-commit-link
+      "g C" #'+dwc/magit-open-commit-in-github)
 
 ;; Whenever you reconfigure a package, make sure to wrap your config in an
 ;; `after!' block, otherwise Doom's defaults may override your settings. E.g.
