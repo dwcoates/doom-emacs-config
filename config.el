@@ -711,3 +711,6 @@ If found, the class name is returned, otherwise STR is returned"
 
 (after! org (define-key org-mode-map (kbd "C-c t")
                         (lambda () (interactive) (insert (format-time-string "%Y-%m-%d")) (org-cycle))))
+
+;; color between windows. Dark gray.
+(set-face-foreground 'vertical-border "#686868")
