@@ -714,3 +714,5 @@ If found, the class name is returned, otherwise STR is returned"
 
 ;; color between windows. Dark gray.
 (set-face-foreground 'vertical-border "#686868")
+
+(setq scroll-margin 999)  ; Keep cursor vertically centered when scolling with mouse
