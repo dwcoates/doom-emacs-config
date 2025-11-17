@@ -53,3 +53,5 @@
 (package! org-super-agenda)
 
 (package! just-mode)
+
+(package! centered-cursor-mode)

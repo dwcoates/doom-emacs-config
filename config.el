@@ -716,3 +716,8 @@ If found, the class name is returned, otherwise STR is returned"
 (set-face-foreground 'vertical-border "#686868")
 
 (setq scroll-margin 999)  ; Keep cursor vertically centered when scolling with mouse
+
+;; Centered cursor mode
+(use-package! centered-cursor-mode
+  :config
+  (global-centered-cursor-mode 1))
