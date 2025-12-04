@@ -313,7 +313,7 @@
 ;; Workspace configuration
 (after! persp-mode
   ;; Auto-restore workspaces from last session on startup
-  (setq persp-auto-resume-time 10.0)
+  (setq persp-auto-resume-time 0.1)
 
   ;; Show workspace names in tab-bar
   (defun +dwc/workspace-tabline-formatted ()
