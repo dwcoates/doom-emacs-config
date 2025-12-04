@@ -310,6 +310,10 @@
   (define-key magit-hunk-section-map [return] #'magit-diff-visit-worktree-file)
   (define-key magit-hunk-section-map [C-return] #'magit-diff-visit-file))
 
+;; Auto-restore workspaces from last session on startup
+(after! persp-mode
+  (setq persp-auto-resume-time 1.0))
+
 (unless (display-graphic-p)
   ;; activate mouse-based scrolling
   (xterm-mouse-mode 1)
