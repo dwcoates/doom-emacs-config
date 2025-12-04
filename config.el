@@ -314,11 +314,24 @@
 (after! persp-mode
   ;; Auto-restore workspaces from last session on startup
   (setq persp-auto-resume-time 10.0)
-  ;; Show workspace tabs at top of frame
-  (tab-bar-mode 1)
+
+  ;; Show workspace names in tab-bar
+  (defun +dwc/workspace-tabline-formatted ()
+    "Format workspace list for tab-bar display."
+    (+doom-dashboard--center (frame-width) (+workspace--tabline)))
+
+  (defun +dwc/current-workspace-name ()
+    "Return current workspace name (invisible, for triggering updates)."
+    (propertize (safe-persp-name (get-current-persp)) 'invisible t))
+
+  (setq tab-bar-format '(+dwc/workspace-tabline-formatted
+                         tab-bar-format-align-right
+                         +dwc/current-workspace-name))
+
   (setq tab-bar-show t
         tab-bar-new-button-show nil
-        tab-bar-close-button-show nil))
+        tab-bar-close-button-show nil)
+  (tab-bar-mode 1))
 
 (unless (display-graphic-p)
   ;; activate mouse-based scrolling
