@@ -303,6 +303,13 @@
         "g r"
         #'magit-jump-to-unpushed-to-upstream))
 
+;; Section map bindings must be done after magit-diff loads
+(after! magit-diff
+  (define-key magit-file-section-map [return] #'magit-diff-visit-worktree-file)
+  (define-key magit-file-section-map [C-return] #'magit-diff-visit-file)
+  (define-key magit-hunk-section-map [return] #'magit-diff-visit-worktree-file)
+  (define-key magit-hunk-section-map [C-return] #'magit-diff-visit-file))
+
 (unless (display-graphic-p)
   ;; activate mouse-based scrolling
   (xterm-mouse-mode 1)
