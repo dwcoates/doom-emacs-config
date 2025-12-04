@@ -310,9 +310,15 @@
   (define-key magit-hunk-section-map [return] #'magit-diff-visit-worktree-file)
   (define-key magit-hunk-section-map [C-return] #'magit-diff-visit-file))
 
-;; Auto-restore workspaces from last session on startup
+;; Workspace configuration
 (after! persp-mode
-  (setq persp-auto-resume-time 1.0))
+  ;; Auto-restore workspaces from last session on startup
+  (setq persp-auto-resume-time 10.0)
+  ;; Show workspace tabs at top of frame
+  (tab-bar-mode 1)
+  (setq tab-bar-show t
+        tab-bar-new-button-show nil
+        tab-bar-close-button-show nil))
 
 (unless (display-graphic-p)
   ;; activate mouse-based scrolling
