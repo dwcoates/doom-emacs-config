@@ -175,7 +175,7 @@
         ))
 
 (after! lsp-mode
-  (setq lsp-log-io t))
+  (setq lsp-log-io nil))  ; Only enable when debugging LSP issues
 
 (setq confirm-kill-emacs nil)
 
