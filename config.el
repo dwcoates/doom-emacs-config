@@ -182,6 +182,9 @@
 (after! evil
   (setq evil-ex-search-persistent-highlight nil))
 
+(after! hl-todo
+  (add-to-list 'hl-todo-keyword-faces '("PRREVIEW" . "#7cb8bb")))
+
 (after! vterm
   (set-popup-rule! "\\.*doom:vterm\\.*" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
   (defun +dwc/vterm-toggle (ARG)
