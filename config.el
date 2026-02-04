@@ -270,6 +270,31 @@
 (after! ivy
   (setq ivy-format-function #'ivy-format-function-line)
 
+  ;; Persistent highlight for ivy-call previews
+  (defvar +dwc/ivy-preview-overlay nil
+    "Overlay for highlighting the previewed line.")
+
+  (defun +dwc/ivy-call-with-highlight ()
+    "Call `ivy-call' and persistently highlight the current line."
+    (interactive)
+    (ivy-call)
+    (with-ivy-window
+      (when +dwc/ivy-preview-overlay
+        (delete-overlay +dwc/ivy-preview-overlay))
+      (setq +dwc/ivy-preview-overlay (make-overlay (line-beginning-position) (1+ (line-end-position))))
+      (overlay-put +dwc/ivy-preview-overlay 'face 'highlight)))
+
+  (defun +dwc/ivy-cleanup-preview-overlay ()
+    "Remove the preview overlay when ivy exits."
+    (when +dwc/ivy-preview-overlay
+      (delete-overlay +dwc/ivy-preview-overlay)
+      (setq +dwc/ivy-preview-overlay nil)))
+
+  (add-hook 'minibuffer-exit-hook #'+dwc/ivy-cleanup-preview-overlay)
+
+  (map! :map ivy-minibuffer-map
+        "C-S-SPC " #'+dwc/ivy-call-with-highlight)
+
   (defun DWC--add-last-ivy-command-to-projectile-history ()
     "For making `projectile-repeat-last-command' work by updating projectile history."
     (let ((hist (projectile--get-command-history (projectile-project-root)))
