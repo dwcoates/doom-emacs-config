@@ -30,12 +30,13 @@
     (define-key map (kbd "C-S-0") (lambda () (interactive) (claude-repl-send-char "0")))
     (define-key map (kbd "C-c y") (lambda () (interactive) (claude-repl-send-char "y")))
     (define-key map (kbd "C-c n") (lambda () (interactive) (claude-repl-send-char "n")))
+    (define-key map (kbd "C-c k") #'claude-repl-clear-input-area)
     map)
   "Keymap for claude-input-mode.")
 
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
-  (setq-local header-line-format "Claude Input | C-RET: send | C-S-0-9: select | C-c y/n: yes/no"))
+  (setq-local header-line-format "Claude Input | C-RET: send | C-S-0-9: select | C-c y/n | C-c k: clear"))
 
 ;; Core functions
 (defun claude-repl-send ()
@@ -67,6 +68,15 @@
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
     (with-current-buffer claude-repl-vterm-buffer
       (vterm-send "C-c"))))
+
+(defun claude-repl-clear-input-area (&optional lines)
+  "Clear the Claude CLI's input area by sending ANSI escape codes.
+LINES defaults to 5. Moves cursor up and clears to end of screen."
+  (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
+    (let ((n (or lines 5)))
+      (with-current-buffer claude-repl-vterm-buffer
+        ;; Move cursor up N lines, then clear from cursor to end of screen
+        (vterm-send-string (format "\e[%dA\e[J" n))))))
 
 (defun claude-repl--vterm-running-p ()
   "Return t if Claude vterm buffer exists and is alive."
@@ -117,6 +127,8 @@ Always focuses the input buffer, never the output."
      ;; Vterm running but input not visible - open input and interrupt
      ((and vterm-running (not input-visible))
       (claude-repl-interrupt)
+      ;; Clear input area after CLI responds to interrupt
+      (run-at-time 0.1 nil #'claude-repl-clear-input-area)
       (claude-repl--ensure-input-buffer)
       (display-buffer claude-repl-input-buffer)
       (select-window (get-buffer-window claude-repl-input-buffer)))
