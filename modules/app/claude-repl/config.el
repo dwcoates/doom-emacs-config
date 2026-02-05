@@ -7,8 +7,11 @@
 (defvar claude-repl-input-buffer nil
   "The input buffer for composing messages.")
 
+(defvar claude-repl-return-window nil
+  "The window to return to after sending input.")
+
 ;; Popup rules
-(set-popup-rule! "^\\*claude\\*$" :size 0.4 :side 'right :select nil :quit nil :ttl nil)
+(set-popup-rule! "^\\*claude\\*$" :size 0.4 :side 'right :select nil :quit nil :ttl nil :no-other-window t)
 (set-popup-rule! "^\\*claude-input\\*$" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
 
 ;; Input mode keymap
@@ -36,7 +39,7 @@
 
 ;; Core functions
 (defun claude-repl-send ()
-  "Send input buffer contents to Claude, clear buffer, and close input popup."
+  "Send input buffer contents to Claude, clear buffer, and return to original window."
   (interactive)
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
     (let ((input (with-current-buffer claude-repl-input-buffer
@@ -46,9 +49,11 @@
         (vterm-send-return))
       (with-current-buffer claude-repl-input-buffer
         (erase-buffer))
-      ;; Close input popup, keep claude output visible
+      ;; Close input popup and return to original window
       (when-let ((win (get-buffer-window claude-repl-input-buffer)))
-        (delete-window win)))))
+        (delete-window win))
+      (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
+        (select-window claude-repl-return-window)))))
 
 (defun claude-repl-send-char (char)
   "Send a single character to Claude."
@@ -93,8 +98,12 @@
 (defun claude-repl ()
   "Smart toggle for Claude REPL.
 If nothing open: open both Claude output and input.
-If Claude open but input closed: open input and interrupt Claude."
+If Claude open but input closed: open input and interrupt Claude.
+Always focuses the input buffer, never the output."
   (interactive)
+  ;; Save current window to return to after sending
+  (unless (eq (current-buffer) claude-repl-input-buffer)
+    (setq claude-repl-return-window (selected-window)))
   (let ((vterm-running (claude-repl--vterm-running-p))
         (input-visible (claude-repl--input-visible-p)))
     (cond
