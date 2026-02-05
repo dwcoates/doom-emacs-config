@@ -129,6 +129,11 @@
   (setq company-idle-delay 0.1
         company-tooltip-idle-delay 0.1))
 
+;; Swift LSP (sourcekit-lsp from Xcode)
+(after! lsp-mode
+  (setq lsp-sourcekit-executable
+        (string-trim (shell-command-to-string "xcrun --find sourcekit-lsp"))))
+
 (defun +dwc/close-doom-popup ()
   "Close the currently open Doom popup window."
   (interactive)
@@ -450,8 +455,7 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
       :desc "Generate and open GitHub link in browser"
       "g H" (lambda () (interactive) (+dwc/generate-github-link t))
       :desc "Open commit in GitHub"
-      "g o" #'+dwc/open-commit-in-github
-      )
+      "g O" #'+dwc/open-commit-in-github)
 
 ;; Add magit-specific keybinding
 (map! :map magit-status-mode-map
