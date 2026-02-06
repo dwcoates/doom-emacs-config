@@ -32,7 +32,7 @@ Uses an MD5 hash of the git root path.  Falls back to the buffer-local
 (defvar-local claude-repl-hide-overlay nil
   "Overlay used to hide Claude CLI input box.")
 
-(setq claude-repl-hide-input-box t)
+(setq claude-repl-hide-input-box nil)
 
 ;; Per-project session storage
 (setq claude-repl--sessions (or (bound-and-true-p claude-repl--sessions)
@@ -82,7 +82,7 @@ and restores window config / notify state from the sessions hash table."
       :ni "RET"       #'claude-repl-send
       :ni "S-RET"     #'newline
       :ni "C-RET"     #'claude-repl-send-and-hide
-      :ni "C-c C-c"   (cmd! (erase-buffer))
+      :ni "C-c C-c"   (cmd! (erase-buffer) (evil-insert-state))
       :ni "C-c y"     (cmd! (claude-repl-send-char "y"))
       :ni "C-c n"     (cmd! (claude-repl-send-char "n"))
       :ni "C-c r"     #'claude-repl-restart
