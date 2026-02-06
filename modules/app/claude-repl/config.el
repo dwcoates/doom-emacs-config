@@ -14,7 +14,7 @@
   "Overlay used to hide Claude CLI input box.")
 
 ;; Popup rules
-(set-popup-rule! "^\\*claude\\*$" :size 0.4 :side 'right :select nil :quit nil :ttl nil :no-other-window t)
+(set-popup-rule! "^\\*claude\\*$" :size 0.6 :side 'right :select nil :quit nil :ttl nil :no-other-window t)
 (set-popup-rule! "^\\*claude-input\\*$" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
 
 ;; Input mode keymap
@@ -42,12 +42,13 @@
 
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
-  (setq-local header-line-format "Claude Input | RET: send | S-RET: newline | C-c: y/n/C-c/r/q"))
+  (setq-local header-line-format "Claude Input | RET: send | C-RET: send+hide | S-RET: newline | C-c: y/n/C-c/r/q"))
 
 ;; Evil insert state bindings (override evil's RET)
 (evil-define-key 'insert claude-input-mode-map
   (kbd "<return>") #'claude-repl-send
-  (kbd "S-<return>") #'newline)
+  (kbd "S-<return>") #'newline
+  (kbd "C-<return>") #'claude-repl-send-and-hide)
 
 ;; Core functions
 (defun claude-repl-send ()
@@ -61,6 +62,14 @@
         (vterm-send-return))
       (with-current-buffer claude-repl-input-buffer
         (erase-buffer)))))
+
+(defun claude-repl-send-and-hide ()
+  "Send input to Claude and hide both panels."
+  (interactive)
+  (claude-repl-send)
+  (claude-repl--hide-panels)
+  (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
+    (select-window claude-repl-return-window)))
 
 (defun claude-repl-send-char (char)
   "Send a single character to Claude."
