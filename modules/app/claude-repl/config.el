@@ -32,6 +32,19 @@ Uses an MD5 hash of the git root path.  Falls back to the buffer-local
 (defvar-local claude-repl-hide-overlay nil
   "Overlay used to hide Claude CLI input box.")
 
+;; Input history
+(defvar-local claude-repl--input-history nil
+  "List of previous inputs, most recent first.")
+
+(defvar-local claude-repl--history-index -1
+  "Current position in history. -1 means not browsing.")
+
+(defvar-local claude-repl--history-stash nil
+  "Stashed in-progress text saved when history browsing begins.")
+
+(defvar-local claude-repl--history-navigating nil
+  "Non-nil while history navigation is replacing buffer text.")
+
 (setq claude-repl-hide-input-box nil)
 
 ;; Per-project session storage
@@ -74,13 +87,14 @@ and restores window config from the sessions hash table."
 ;; Input mode
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
-  (setq-local header-line-format "Claude Input | RET: send | C-RET: send+hide | S-RET: newline | C-c C-c: clear | ESC ESC: interrupt | C-c: y/n/r/q"))
+  (setq-local header-line-format "Claude Input | RET: send | C-RET: send+hide | S-RET: newline | C-c C-c: clear | ESC ESC: interrupt | C-c: y/n/r/q")
+  (add-hook 'after-change-functions #'claude-repl--history-on-change nil t))
 
 (map! :map claude-input-mode-map
       :ni "RET"       #'claude-repl-send
       :ni "S-RET"     #'newline
       :ni "C-RET"     #'claude-repl-send-and-hide
-      :ni "C-c C-c"   (cmd! (erase-buffer) (evil-insert-state))
+      :ni "C-c C-c"   (cmd! (claude-repl--history-push) (erase-buffer) (evil-insert-state))
       :ni "C-c y"     (cmd! (claude-repl-send-char "y"))
       :ni "C-c n"     (cmd! (claude-repl-send-char "n"))
       :ni "C-c r"     #'claude-repl-restart
@@ -104,7 +118,55 @@ and restores window config from the sessions hash table."
                               (with-current-buffer claude-repl-vterm-buffer (vterm-send-down))))
       :n  "C-p"       (cmd! (claude-repl--load-session)
                             (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
-                              (with-current-buffer claude-repl-vterm-buffer (vterm-send-up)))))
+                              (with-current-buffer claude-repl-vterm-buffer (vterm-send-up))))
+      :i  "<up>"        #'claude-repl--history-prev
+      :i  "<down>"      #'claude-repl--history-next)
+
+;; Input history functions
+(defun claude-repl--history-push ()
+  "Save current input buffer text to history.
+Skips empty strings and duplicates of the most recent entry.
+Resets history browsing index."
+  (let ((text (string-trim (buffer-string))))
+    (unless (string-empty-p text)
+      (unless (equal text (car claude-repl--input-history))
+        (push text claude-repl--input-history))))
+  (setq claude-repl--history-index -1))
+
+(defun claude-repl--history-prev ()
+  "Navigate to the previous (older) history entry."
+  (interactive)
+  (when claude-repl--input-history
+    (let ((next-index (1+ claude-repl--history-index)))
+      (when (< next-index (length claude-repl--input-history))
+        ;; Stash current text on first navigation
+        (when (= claude-repl--history-index -1)
+          (setq claude-repl--history-stash (buffer-string)))
+        (setq claude-repl--history-index next-index)
+        (let ((claude-repl--history-navigating t))
+          (erase-buffer)
+          (insert (nth claude-repl--history-index claude-repl--input-history)))))))
+
+(defun claude-repl--history-next ()
+  "Navigate to the next (newer) history entry, or restore stashed text."
+  (interactive)
+  (when (>= claude-repl--history-index 0)
+    (let ((next-index (1- claude-repl--history-index)))
+      (let ((claude-repl--history-navigating t))
+        (erase-buffer)
+        (if (< next-index 0)
+            ;; Past newest entry — restore stash
+            (progn
+              (setq claude-repl--history-index -1)
+              (when claude-repl--history-stash
+                (insert claude-repl--history-stash)))
+          (setq claude-repl--history-index next-index)
+          (insert (nth claude-repl--history-index claude-repl--input-history)))))))
+
+(defun claude-repl--history-on-change (&rest _)
+  "Reset history browsing when the user edits the buffer directly."
+  (unless claude-repl--history-navigating
+    (setq claude-repl--history-index -1)))
 
 ;; Core functions
 (defun claude-repl-send ()
@@ -118,6 +180,7 @@ and restores window config from the sessions hash table."
         (vterm-send-string input)
         (vterm-send-return))
       (with-current-buffer claude-repl-input-buffer
+        (claude-repl--history-push)
         (erase-buffer))
       (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
         (select-window claude-repl-return-window)))))
