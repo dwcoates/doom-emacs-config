@@ -14,7 +14,7 @@
   "Overlay used to hide Claude CLI input box.")
 
 ;; Popup rules
-(set-popup-rule! "^\\*claude\\*$" :size 0.6 :side 'right :select nil :quit nil :ttl nil :no-other-window t)
+(set-popup-rule! "^\\*claude\\*$" :size 0.5 :side 'right :select nil :quit nil :ttl nil :no-other-window t)
 (set-popup-rule! "^\\*claude-input\\*$" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
 
 ;; Input mode keymap
@@ -162,13 +162,15 @@
       (claude-input-mode))))
 
 (defun claude-repl--ensure-vterm-buffer ()
-  "Create vterm buffer running claude if needed."
-  (setq claude-repl-vterm-buffer (get-buffer-create "*claude*"))
-  (with-current-buffer claude-repl-vterm-buffer
-    (unless (eq major-mode 'vterm-mode)
-      (vterm-mode)
-      (vterm-send-string "clear && claude -c")
-      (vterm-send-return))))
+  "Create vterm buffer running claude if needed.
+Starts claude from the projectile project root."
+  (let ((default-directory (or (projectile-project-root) default-directory)))
+    (setq claude-repl-vterm-buffer (get-buffer-create "*claude*"))
+    (with-current-buffer claude-repl-vterm-buffer
+      (unless (eq major-mode 'vterm-mode)
+        (vterm-mode)
+        (vterm-send-string "clear && claude -c")
+        (vterm-send-return)))))
 
 ;; Entry point - smart toggle
 (defun claude-repl ()
@@ -227,18 +229,19 @@ If panels hidden: show both panels and interrupt Claude."
 (defun claude-repl-restart ()
   "Kill Claude REPL and restart with `claude -c` to continue session."
   (interactive)
-  (claude-repl-kill)
-  ;; Start fresh with -c flag
-  (setq claude-repl-vterm-buffer (get-buffer-create "*claude*"))
-  (with-current-buffer claude-repl-vterm-buffer
-    (vterm-mode)
-    (vterm-send-string "clear && claude -c")
-    (vterm-send-return))
-  (claude-repl--ensure-input-buffer)
-  (claude-repl--enable-hide-overlay)
-  (display-buffer claude-repl-vterm-buffer)
-  (display-buffer claude-repl-input-buffer)
-  (select-window (get-buffer-window claude-repl-input-buffer)))
+  (let ((default-directory (or (projectile-project-root) default-directory)))
+    (claude-repl-kill)
+    ;; Start fresh with -c flag
+    (setq claude-repl-vterm-buffer (get-buffer-create "*claude*"))
+    (with-current-buffer claude-repl-vterm-buffer
+      (vterm-mode)
+      (vterm-send-string "clear && claude -c")
+      (vterm-send-return))
+    (claude-repl--ensure-input-buffer)
+    (claude-repl--enable-hide-overlay)
+    (display-buffer claude-repl-vterm-buffer)
+    (display-buffer claude-repl-input-buffer)
+    (select-window (get-buffer-window claude-repl-input-buffer))))
 
 ;; Keybindings
 (map! :leader
