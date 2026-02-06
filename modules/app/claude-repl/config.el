@@ -10,6 +10,9 @@
 (defvar claude-repl-return-window nil
   "The window to return to after sending input.")
 
+(defvar-local claude-repl-hide-overlay nil
+  "Overlay used to hide Claude CLI input box.")
+
 ;; Popup rules
 (set-popup-rule! "^\\*claude\\*$" :size 0.4 :side 'right :select nil :quit nil :ttl nil :no-other-window t)
 (set-popup-rule! "^\\*claude-input\\*$" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
@@ -30,13 +33,14 @@
     (define-key map (kbd "C-S-0") (lambda () (interactive) (claude-repl-send-char "0")))
     (define-key map (kbd "C-c y") (lambda () (interactive) (claude-repl-send-char "y")))
     (define-key map (kbd "C-c n") (lambda () (interactive) (claude-repl-send-char "n")))
-    (define-key map (kbd "C-c k") #'claude-repl-clear-input-area)
+    (define-key map (kbd "C-c r") #'claude-repl-restart)
+    (define-key map (kbd "C-c q") #'claude-repl-kill)
     map)
   "Keymap for claude-input-mode.")
 
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
-  (setq-local header-line-format "Claude Input | C-RET: send | C-S-0-9: select | C-c y/n | C-c k: clear"))
+  (setq-local header-line-format "Claude Input | C-RET: send | C-S-0-9: select | C-c: y/n/r/q"))
 
 ;; Core functions
 (defun claude-repl-send ()
@@ -69,14 +73,47 @@
     (with-current-buffer claude-repl-vterm-buffer
       (vterm-send "C-c"))))
 
-(defun claude-repl-clear-input-area (&optional lines)
-  "Clear the Claude CLI's input area by sending ANSI escape codes.
-LINES defaults to 5. Moves cursor up and clears to end of screen."
-  (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
-    (let ((n (or lines 5)))
-      (with-current-buffer claude-repl-vterm-buffer
-        ;; Move cursor up N lines, then clear from cursor to end of screen
-        (vterm-send-string (format "\e[%dA\e[J" n))))))
+;; Hide overlay functions
+(defun claude-repl--update-hide-overlay ()
+  "Update overlay to hide bottom lines of Claude vterm buffer."
+  (when (and claude-repl-vterm-buffer
+             (buffer-live-p claude-repl-vterm-buffer))
+    (with-current-buffer claude-repl-vterm-buffer
+      ;; Only proceed if buffer has content
+      (when (> (point-max) 1)
+        ;; Remove old overlay if it exists
+        (when (and claude-repl-hide-overlay
+                   (overlay-buffer claude-repl-hide-overlay))
+          (delete-overlay claude-repl-hide-overlay))
+        ;; Create new overlay covering bottom 4 lines
+        (let* ((end (point-max))
+               (start (save-excursion
+                        (goto-char end)
+                        (forward-line -4)
+                        (line-beginning-position))))
+          (when (< start end)
+            (setq claude-repl-hide-overlay (make-overlay start end nil t nil))
+            ;; Use display property to replace with empty string
+            (overlay-put claude-repl-hide-overlay 'display "")
+            (overlay-put claude-repl-hide-overlay 'evaporate t)))))))
+
+(defun claude-repl--after-vterm-redraw (&rest _)
+  "Apply hide overlay after vterm redraws."
+  (when (and claude-repl-vterm-buffer
+             (eq (current-buffer) claude-repl-vterm-buffer))
+    (claude-repl--update-hide-overlay)))
+
+(defun claude-repl--enable-hide-overlay ()
+  "Enable the hide overlay advice."
+  (advice-add 'vterm--redraw :after #'claude-repl--after-vterm-redraw))
+
+(defun claude-repl--disable-hide-overlay ()
+  "Disable the hide overlay advice and clean up."
+  (advice-remove 'vterm--redraw #'claude-repl--after-vterm-redraw)
+  (when (and claude-repl-hide-overlay
+             (overlay-buffer claude-repl-hide-overlay))
+    (delete-overlay claude-repl-hide-overlay))
+  (setq claude-repl-hide-overlay nil))
 
 (defun claude-repl--vterm-running-p ()
   "Return t if Claude vterm buffer exists and is alive."
@@ -101,7 +138,7 @@ LINES defaults to 5. Moves cursor up and clears to end of screen."
   (with-current-buffer claude-repl-vterm-buffer
     (unless (eq major-mode 'vterm-mode)
       (vterm-mode)
-      (vterm-send-string "claude")
+      (vterm-send-string "clear && claude -c")
       (vterm-send-return))))
 
 ;; Entry point - smart toggle
@@ -121,14 +158,13 @@ Always focuses the input buffer, never the output."
      ((not vterm-running)
       (claude-repl--ensure-vterm-buffer)
       (claude-repl--ensure-input-buffer)
+      (claude-repl--enable-hide-overlay)
       (display-buffer claude-repl-vterm-buffer)
       (display-buffer claude-repl-input-buffer)
       (select-window (get-buffer-window claude-repl-input-buffer)))
      ;; Vterm running but input not visible - open input and interrupt
      ((and vterm-running (not input-visible))
       (claude-repl-interrupt)
-      ;; Clear input area after CLI responds to interrupt
-      (run-at-time 0.1 nil #'claude-repl-clear-input-area)
       (claude-repl--ensure-input-buffer)
       (display-buffer claude-repl-input-buffer)
       (select-window (get-buffer-window claude-repl-input-buffer)))
@@ -136,5 +172,41 @@ Always focuses the input buffer, never the output."
      (t
       (select-window (get-buffer-window claude-repl-input-buffer))))))
 
-;; Keybinding
-(map! :leader :desc "Claude REPL" "o c" #'claude-repl)
+(defun claude-repl-kill ()
+  "Kill Claude REPL buffers and windows without confirmation."
+  (interactive)
+  (claude-repl--disable-hide-overlay)
+  (when-let ((win (get-buffer-window claude-repl-input-buffer)))
+    (delete-window win))
+  (when-let ((win (get-buffer-window claude-repl-vterm-buffer)))
+    (delete-window win))
+  (when (and claude-repl-input-buffer (buffer-live-p claude-repl-input-buffer))
+    (kill-buffer claude-repl-input-buffer))
+  (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
+    ;; Don't prompt about killing the process
+    (when-let ((proc (get-buffer-process claude-repl-vterm-buffer)))
+      (set-process-query-on-exit-flag proc nil))
+    (kill-buffer claude-repl-vterm-buffer))
+  (setq claude-repl-vterm-buffer nil
+        claude-repl-input-buffer nil))
+
+(defun claude-repl-restart ()
+  "Kill Claude REPL and restart with `claude -c` to continue session."
+  (interactive)
+  (claude-repl-kill)
+  ;; Start fresh with -c flag
+  (setq claude-repl-vterm-buffer (get-buffer-create "*claude*"))
+  (with-current-buffer claude-repl-vterm-buffer
+    (vterm-mode)
+    (vterm-send-string "clear && claude -c")
+    (vterm-send-return))
+  (claude-repl--ensure-input-buffer)
+  (claude-repl--enable-hide-overlay)
+  (display-buffer claude-repl-vterm-buffer)
+  (display-buffer claude-repl-input-buffer)
+  (select-window (get-buffer-window claude-repl-input-buffer)))
+
+;; Keybindings
+(map! :leader
+      :desc "Claude REPL" "o c" #'claude-repl
+      :desc "Kill Claude" "o C" #'claude-repl-kill)
