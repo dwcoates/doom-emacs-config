@@ -275,6 +275,28 @@
 (after! ivy
   (setq ivy-format-function #'ivy-format-function-line)
 
+  ;; Enable full path matching for projectile file search
+  ;; ivy--regex-ignore-order: space-separated terms match anywhere in path, any order
+  ;; e.g., "comp btn" matches "src/components/Button.tsx"
+  (setq ivy-re-builders-alist
+        '((counsel-projectile-find-file . ivy--regex-ignore-order)
+          (projectile-find-file . ivy--regex-ignore-order)
+          (t . ivy--regex-plus)))
+
+  ;; Grey out directory path, keep filename normal
+  (defun +dwc/ivy-projectile-file-transformer (candidate)
+    "Display directory path in grey, filename in default face."
+    (let* ((dir (file-name-directory candidate))
+           (file (file-name-nondirectory candidate)))
+      (if dir
+          (concat (propertize dir 'face 'font-lock-comment-face) file)
+        candidate)))
+
+  (ivy-configure 'counsel-projectile-find-file
+    :display-transformer-fn #'+dwc/ivy-projectile-file-transformer)
+  (ivy-configure 'projectile-find-file
+    :display-transformer-fn #'+dwc/ivy-projectile-file-transformer)
+
   ;; Persistent highlight for ivy-call previews
   (defvar +dwc/ivy-preview-overlay nil
     "Overlay for highlighting the previewed line.")
@@ -455,7 +477,7 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
       :desc "Generate and open GitHub link in browser"
       "g H" (lambda () (interactive) (+dwc/generate-github-link t))
       :desc "Open commit in GitHub"
-      "g O" #'+dwc/open-commit-in-github)
+      "g O" #'+dwc/magit-open-commit-in-github)
 
 ;; Add magit-specific keybinding
 (map! :map magit-status-mode-map
