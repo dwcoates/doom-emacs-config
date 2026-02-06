@@ -87,6 +87,32 @@
       (vterm-send-string char)
       (vterm-send-return))))
 
+(defun claude-repl--send-to-claude (text)
+  "Send TEXT to Claude, starting it if needed."
+  (unless (claude-repl--vterm-running-p)
+    (claude-repl--ensure-vterm-buffer)
+    (claude-repl--ensure-input-buffer)
+    (claude-repl--enable-hide-overlay))
+  (setq claude-repl--notify-when-done t)
+  (with-current-buffer claude-repl-vterm-buffer
+    (vterm-send-string text)
+    (vterm-send-return)))
+
+(defun claude-repl-explain ()
+  "Ask Claude to explain the selected region or current file.
+With active region: sends file path and line range.
+Without region: sends relative file path."
+  (interactive)
+  (let* ((rel-path (file-relative-name (buffer-file-name)
+                                        (projectile-project-root)))
+         (msg (if (use-region-p)
+                  (let ((start-line (line-number-at-pos (region-beginning)))
+                        (end-line (line-number-at-pos (region-end))))
+                    (deactivate-mark)
+                    (format "please explain %s:%d-%d" rel-path start-line end-line))
+                (format "please explain %s" rel-path))))
+    (claude-repl--send-to-claude msg)))
+
 (defun claude-repl-interrupt ()
   "Send interrupt (C-c) to Claude vterm."
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
@@ -216,14 +242,7 @@ If panels hidden: show both panels."
      ;; Text selected - send directly to Claude
      (selection
       (deactivate-mark)
-      (unless vterm-running
-        (claude-repl--ensure-vterm-buffer)
-        (claude-repl--ensure-input-buffer)
-        (claude-repl--enable-hide-overlay))
-      (setq claude-repl--notify-when-done t)
-      (with-current-buffer claude-repl-vterm-buffer
-        (vterm-send-string selection)
-        (vterm-send-return)))
+      (claude-repl--send-to-claude selection))
      ;; Nothing running - start fresh
      ((not vterm-running)
       (claude-repl--ensure-vterm-buffer)
@@ -291,6 +310,7 @@ If panels hidden: show both panels."
 (map! :leader
       :desc "Claude REPL" "o c" #'claude-repl
       :desc "Kill Claude" "o C" #'claude-repl-kill
+      :desc "Claude explain" "o e" #'claude-repl-explain
       :desc "Send 1 to Claude" "o 1" (lambda () (interactive) (claude-repl-send-char "1"))
       :desc "Send 2 to Claude" "o 2" (lambda () (interactive) (claude-repl-send-char "2"))
       :desc "Send 3 to Claude" "o 3" (lambda () (interactive) (claude-repl-send-char "3"))
