@@ -1,5 +1,13 @@
 ;;; app/claude-repl/config.el -*- lexical-binding: t; -*-
 
+;; Workspace identity
+(defun claude-repl--workspace-id ()
+  "Return a short identifier for the current projectile workspace.
+Uses an MD5 hash of the project root path."
+  (let ((root (projectile-project-root)))
+    (when root
+      (substring (md5 root) 0 8))))
+
 ;; State
 (defvar claude-repl-vterm-buffer nil
   "The vterm buffer running Claude.")
@@ -22,8 +30,11 @@
 (defvar claude-repl--notify-when-done nil
   "When non-nil, send a notification when Claude stops producing output.")
 
+(defvar claude-repl-hide-input-box t
+  "When non-nil, hide Claude CLI's input box in the vterm buffer.")
+
 ;; Popup rules
-(set-popup-rule! "^\\*claude\\*$" :size 0.5 :side 'right :select nil :quit nil :ttl nil :no-other-window t)
+(set-popup-rule! "^\\*claude\\*$" :size 0.55 :side 'right :select nil :quit nil :ttl nil :no-other-window t)
 (set-popup-rule! "^\\*claude-input\\*$" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
 
 ;; Input mode keymap
@@ -43,7 +54,7 @@
     (define-key map (kbd "C-S-0") (lambda () (interactive) (claude-repl-send-char "0")))
     (define-key map (kbd "C-c y") (lambda () (interactive) (claude-repl-send-char "y")))
     (define-key map (kbd "C-c n") (lambda () (interactive) (claude-repl-send-char "n")))
-    (define-key map (kbd "C-c C-c") #'claude-repl-interrupt)
+    (define-key map (kbd "C-c C-c") (lambda () (interactive) (erase-buffer)))
     (define-key map (kbd "C-c r") #'claude-repl-restart)
     (define-key map (kbd "C-c q") #'claude-repl-kill)
     map)
@@ -51,13 +62,15 @@
 
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
-  (setq-local header-line-format "Claude Input | RET: send | C-RET: send+hide | S-RET: newline | C-c: y/n/C-c/r/q"))
+  (setq-local header-line-format "Claude Input | RET: send | C-RET: send+hide | S-RET: newline | C-c C-c: clear | ESC ESC: interrupt | C-c: y/n/r/q"))
 
 ;; Evil insert state bindings (override evil's RET)
 (evil-define-key 'insert claude-input-mode-map
   (kbd "<return>") #'claude-repl-send
   (kbd "S-<return>") #'newline
-  (kbd "C-<return>") #'claude-repl-send-and-hide)
+  (kbd "C-<return>") #'claude-repl-send-and-hide
+  (kbd "C-c C-c") (lambda () (interactive) (erase-buffer))
+  )
 
 ;; Core functions
 (defun claude-repl-send ()
@@ -122,9 +135,11 @@ Without region: sends relative file path."
 
 (defun claude-repl-interrupt ()
   "Send interrupt (C-c) to Claude vterm."
+  (interactive)
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
     (with-current-buffer claude-repl-vterm-buffer
-      (vterm-send "C-c"))))
+      (vterm-send "<escape>")
+      (vterm-send "<escape>"))))
 
 ;; Hide overlay functions
 (defun claude-repl--update-hide-overlay ()
@@ -132,13 +147,12 @@ Without region: sends relative file path."
   (when (and claude-repl-vterm-buffer
              (buffer-live-p claude-repl-vterm-buffer))
     (with-current-buffer claude-repl-vterm-buffer
-      ;; Only proceed if buffer has content
-      (when (> (point-max) 1)
-        ;; Remove old overlay if it exists
-        (when (and claude-repl-hide-overlay
-                   (overlay-buffer claude-repl-hide-overlay))
-          (delete-overlay claude-repl-hide-overlay))
-        ;; Create new overlay covering bottom 4 lines
+      ;; Remove old overlay if it exists
+      (when (and claude-repl-hide-overlay
+                 (overlay-buffer claude-repl-hide-overlay))
+        (delete-overlay claude-repl-hide-overlay))
+      ;; Only create new overlay if enabled and buffer has content
+      (when (and claude-repl-hide-input-box (> (point-max) 1))
         (let* ((end (point-max))
                (start (save-excursion
                         (goto-char end)
@@ -146,9 +160,15 @@ Without region: sends relative file path."
                         (line-beginning-position))))
           (when (< start end)
             (setq claude-repl-hide-overlay (make-overlay start end nil t nil))
-            ;; Use display property to replace with empty string
             (overlay-put claude-repl-hide-overlay 'display "")
             (overlay-put claude-repl-hide-overlay 'evaporate t)))))))
+
+(defun claude-repl-toggle-hide-input-box ()
+  "Toggle hiding of Claude CLI's input box in the vterm buffer."
+  (interactive)
+  (setq claude-repl-hide-input-box (not claude-repl-hide-input-box))
+  (claude-repl--update-hide-overlay)
+  (message "Claude input box hiding %s" (if claude-repl-hide-input-box "enabled" "disabled")))
 
 (defun claude-repl--notify-claude-done ()
   "Send a desktop notification that Claude has finished."
@@ -326,6 +346,7 @@ If panels hidden: show both panels."
       :desc "Claude REPL" "o c" #'claude-repl
       :desc "Kill Claude" "o C" #'claude-repl-kill
       :desc "Claude explain" "o e" #'claude-repl-explain
+      :desc "Claude interrupt" "o i" #'claude-repl-interrupt
       :desc "Send 1 to Claude" "o 1" (lambda () (interactive) (claude-repl-send-char "1"))
       :desc "Send 2 to Claude" "o 2" (lambda () (interactive) (claude-repl-send-char "2"))
       :desc "Send 3 to Claude" "o 3" (lambda () (interactive) (claude-repl-send-char "3"))
@@ -336,3 +357,6 @@ If panels hidden: show both panels."
       :desc "Send 8 to Claude" "o 8" (lambda () (interactive) (claude-repl-send-char "8"))
       :desc "Send 9 to Claude" "o 9" (lambda () (interactive) (claude-repl-send-char "9"))
       :desc "Send 0 to Claude" "o 0" (lambda () (interactive) (claude-repl-send-char "0")))
+
+
+;; FIXME: C-c C-c should clear the buffer of the repl
