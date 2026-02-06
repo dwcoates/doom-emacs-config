@@ -223,8 +223,10 @@ Without region: sends relative file path."
   (when (string-match-p "^\\*claude-[0-9a-f]" (buffer-name))
     (let ((thinking (claude-repl--title-has-spinner-p title)))
       (when (and claude-repl--title-thinking (not thinking))
-        ;; Transition: was thinking, now idle
-        (message "Claude is done."))
+        (message "Claude is done.")
+        (start-process "claude-notify" nil
+                       "osascript" "-e"
+                       "display notification \"Claude has finished working\" with title \"Claude REPL\""))
       (setq claude-repl--title-thinking thinking))))
 
 (advice-add 'vterm--set-title :before #'claude-repl--on-title-change)
