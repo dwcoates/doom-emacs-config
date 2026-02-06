@@ -52,7 +52,7 @@
 
 ;; Core functions
 (defun claude-repl-send ()
-  "Send input buffer contents to Claude and clear buffer."
+  "Send input buffer contents to Claude, clear buffer, and return to previous window."
   (interactive)
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
     (let ((input (with-current-buffer claude-repl-input-buffer
@@ -61,7 +61,9 @@
         (vterm-send-string input)
         (vterm-send-return))
       (with-current-buffer claude-repl-input-buffer
-        (erase-buffer)))))
+        (erase-buffer))
+      (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
+        (select-window claude-repl-return-window)))))
 
 (defun claude-repl-send-and-hide ()
   "Send input to Claude and hide both panels."
