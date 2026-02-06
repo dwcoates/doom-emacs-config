@@ -177,16 +177,29 @@ Starts claude from the projectile project root."
 ;; Entry point - smart toggle
 (defun claude-repl ()
   "Toggle Claude REPL panels.
+If text is selected: send it directly to Claude.
 If not running: start Claude and show both panels.
 If panels visible: hide both panels.
-If panels hidden: show both panels and interrupt Claude."
+If panels hidden: show both panels."
   (interactive)
   ;; Save current window to return to after hiding
   (unless (eq (current-buffer) claude-repl-input-buffer)
     (setq claude-repl-return-window (selected-window)))
   (let ((vterm-running (claude-repl--vterm-running-p))
-        (panels-visible (claude-repl--panels-visible-p)))
+        (panels-visible (claude-repl--panels-visible-p))
+        (selection (when (use-region-p)
+                    (buffer-substring-no-properties (region-beginning) (region-end)))))
     (cond
+     ;; Text selected - send directly to Claude
+     (selection
+      (deactivate-mark)
+      (unless vterm-running
+        (claude-repl--ensure-vterm-buffer)
+        (claude-repl--ensure-input-buffer)
+        (claude-repl--enable-hide-overlay))
+      (with-current-buffer claude-repl-vterm-buffer
+        (vterm-send-string selection)
+        (vterm-send-return)))
      ;; Nothing running - start fresh
      ((not vterm-running)
       (claude-repl--ensure-vterm-buffer)
