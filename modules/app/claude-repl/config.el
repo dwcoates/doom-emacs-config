@@ -1,11 +1,9 @@
 ;;; app/claude-repl/config.el -*- lexical-binding: t; -*-
 
 ;; Force monospace fallback for Unicode ranges that cause alignment issues.
-;; Without this, Emacs falls back to non-monospaced fonts (e.g. Apple Braille)
-;; and the vterm grid drifts horizontally.
-(dolist (range '((#x2500 . #x259F)    ;; Box drawing + block elements
-                 (#x25A0 . #x25FF))) ;; Geometric shapes
-  (set-fontset-font t range "JetBrains Mono"))
+;; Without this, Emacs falls back to non-monospaced system fonts and the
+;; vterm grid drifts horizontally.
+(set-fontset-font t 'unicode-bmp "DejaVuSansM Nerd Font Mono" nil 'append)
 
 ;; Workspace identity
 (defvar-local claude-repl--project-root nil
@@ -276,6 +274,35 @@ Without region: sends relative file path."
     (delete-window win))
   (when-let ((win (get-buffer-window claude-repl-vterm-buffer)))
     (delete-window win)))
+
+;; Auto-close orphaned panels: if one is closed, close the other.
+(defun claude-repl--sync-panels ()
+  "Close any Claude panel whose partner is no longer visible.
+Iterates over all windows so it works across sessions."
+  (dolist (win (window-list))
+    (let ((name (buffer-name (window-buffer win))))
+      (cond
+       ;; Vterm visible, input missing -> close vterm
+       ((and (string-match "^\\*claude-\\([0-9a-f]+\\)\\*$" name)
+             (not (get-buffer-window
+                   (format "*claude-input-%s*" (match-string 1 name)))))
+        (delete-window win))
+       ;; Input visible, vterm missing -> close input
+       ((and (string-match "^\\*claude-input-\\([0-9a-f]+\\)\\*$" name)
+             (not (get-buffer-window
+                   (format "*claude-%s*" (match-string 1 name)))))
+        (delete-window win))))))
+
+(setq claude-repl--sync-timer nil)
+
+(defun claude-repl--schedule-sync (&rest _)
+  "Defer panel sync to after the current command finishes."
+  (when claude-repl--sync-timer
+    (cancel-timer claude-repl--sync-timer))
+  (setq claude-repl--sync-timer
+        (run-at-time 0 nil #'claude-repl--sync-panels)))
+
+(add-hook 'window-configuration-change-hook #'claude-repl--schedule-sync)
 
 (defun claude-repl--ensure-input-buffer ()
   "Create input buffer if needed, put in claude-input-mode."
