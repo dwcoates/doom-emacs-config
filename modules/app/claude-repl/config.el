@@ -13,6 +13,12 @@
 (defvar-local claude-repl-hide-overlay nil
   "Overlay used to hide Claude CLI input box.")
 
+(defvar claude-repl--notify-timer nil
+  "Debounce timer for detecting when Claude finishes working.")
+
+(defvar claude-repl--notify-when-done nil
+  "When non-nil, send a notification when Claude stops producing output.")
+
 ;; Popup rules
 (set-popup-rule! "^\\*claude\\*$" :size 0.5 :side 'right :select nil :quit nil :ttl nil :no-other-window t)
 (set-popup-rule! "^\\*claude-input\\*$" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
@@ -69,6 +75,7 @@
   "Send input to Claude and hide both panels."
   (interactive)
   (claude-repl-send)
+  (setq claude-repl--notify-when-done t)
   (claude-repl--hide-panels)
   (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
     (select-window claude-repl-return-window)))
@@ -110,11 +117,25 @@
             (overlay-put claude-repl-hide-overlay 'display "")
             (overlay-put claude-repl-hide-overlay 'evaporate t)))))))
 
+(defun claude-repl--notify-claude-done ()
+  "Send a desktop notification that Claude has finished."
+  (setq claude-repl--notify-when-done nil)
+  (start-process "claude-notify" nil
+                 "osascript" "-e"
+                 "display notification \"Claude has finished working\" with title \"Claude REPL\""))
+
 (defun claude-repl--after-vterm-redraw (&rest _)
-  "Apply hide overlay after vterm redraws."
+  "Apply hide overlay after vterm redraws.
+When panels are hidden, debounce a notification for when output stops."
   (when (and claude-repl-vterm-buffer
              (eq (current-buffer) claude-repl-vterm-buffer))
-    (claude-repl--update-hide-overlay)))
+    (claude-repl--update-hide-overlay)
+    ;; Debounce notification: reset timer on each redraw
+    (when claude-repl--notify-when-done
+      (when claude-repl--notify-timer
+        (cancel-timer claude-repl--notify-timer))
+      (setq claude-repl--notify-timer
+            (run-at-time 3 nil #'claude-repl--notify-claude-done)))))
 
 (defun claude-repl--enable-hide-overlay ()
   "Enable the hide overlay advice."
@@ -197,6 +218,7 @@ If panels hidden: show both panels."
         (claude-repl--ensure-vterm-buffer)
         (claude-repl--ensure-input-buffer)
         (claude-repl--enable-hide-overlay))
+      (setq claude-repl--notify-when-done t)
       (with-current-buffer claude-repl-vterm-buffer
         (vterm-send-string selection)
         (vterm-send-return)))
@@ -209,13 +231,18 @@ If panels hidden: show both panels."
       (display-buffer claude-repl-input-buffer)
       (select-window (get-buffer-window claude-repl-input-buffer))
       (evil-insert-state))
-     ;; Panels visible - hide both
+     ;; Panels visible - hide both, enable notifications
      (panels-visible
+      (setq claude-repl--notify-when-done t)
       (claude-repl--hide-panels)
       (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
         (select-window claude-repl-return-window)))
-     ;; Panels hidden - show both
+     ;; Panels hidden - show both, cancel notifications
      (t
+      (setq claude-repl--notify-when-done nil)
+      (when claude-repl--notify-timer
+        (cancel-timer claude-repl--notify-timer)
+        (setq claude-repl--notify-timer nil))
       (claude-repl--ensure-input-buffer)
       (display-buffer claude-repl-vterm-buffer)
       (display-buffer claude-repl-input-buffer)
@@ -261,7 +288,17 @@ If panels hidden: show both panels."
 ;; Keybindings
 (map! :leader
       :desc "Claude REPL" "o c" #'claude-repl
-      :desc "Kill Claude" "o C" #'claude-repl-kill)
+      :desc "Kill Claude" "o C" #'claude-repl-kill
+      :desc "Send 1 to Claude" "o 1" (lambda () (interactive) (claude-repl-send-char "1"))
+      :desc "Send 2 to Claude" "o 2" (lambda () (interactive) (claude-repl-send-char "2"))
+      :desc "Send 3 to Claude" "o 3" (lambda () (interactive) (claude-repl-send-char "3"))
+      :desc "Send 4 to Claude" "o 4" (lambda () (interactive) (claude-repl-send-char "4"))
+      :desc "Send 5 to Claude" "o 5" (lambda () (interactive) (claude-repl-send-char "5"))
+      :desc "Send 6 to Claude" "o 6" (lambda () (interactive) (claude-repl-send-char "6"))
+      :desc "Send 7 to Claude" "o 7" (lambda () (interactive) (claude-repl-send-char "7"))
+      :desc "Send 8 to Claude" "o 8" (lambda () (interactive) (claude-repl-send-char "8"))
+      :desc "Send 9 to Claude" "o 9" (lambda () (interactive) (claude-repl-send-char "9"))
+      :desc "Send 0 to Claude" "o 0" (lambda () (interactive) (claude-repl-send-char "0")))
 
 ;; FIXME: opening repl should start in insert mode
 ;; FIXME: RET should send to claude code, S-RET should go to new line
