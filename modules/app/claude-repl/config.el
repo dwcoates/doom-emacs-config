@@ -34,7 +34,7 @@ Uses an MD5 hash of the git root path.  Falls back to the buffer-local
 ;; Transient globals — always set by `claude-repl--load-session' before use.
 ;; No defvar needed; these are just scratch space swapped per-project.
 ;; claude-repl-vterm-buffer, claude-repl-input-buffer, claude-repl-return-window,
-;; claude-repl--saved-window-config, claude-repl--notify-timer, claude-repl--notify-when-done
+;; claude-repl--saved-window-config
 
 (defvar-local claude-repl-hide-overlay nil
   "Overlay used to hide Claude CLI input box.")
@@ -54,7 +54,7 @@ SUFFIX, if provided, is inserted before the hash (e.g. \"-input\")."
 (defun claude-repl--load-session ()
   "Load the current project's session state into global vars.
 Sets `claude-repl-vterm-buffer', `claude-repl-input-buffer' from buffer names,
-and restores window config / notify state from the sessions hash table."
+and restores window config from the sessions hash table."
   (let* ((id (claude-repl--workspace-id))
          (vterm-name (claude-repl--buffer-name))
          (input-name (claude-repl--buffer-name "-input"))
@@ -62,18 +62,14 @@ and restores window config / notify state from the sessions hash table."
     (setq claude-repl-vterm-buffer (get-buffer vterm-name)
           claude-repl-input-buffer (get-buffer input-name)
           claude-repl--saved-window-config (plist-get session :saved-window-config)
-          claude-repl-return-window (plist-get session :return-window)
-          claude-repl--notify-timer (plist-get session :notify-timer)
-          claude-repl--notify-when-done (plist-get session :notify-when-done))))
+          claude-repl-return-window (plist-get session :return-window))))
 
 (defun claude-repl--save-session ()
   "Save the current global state back to the sessions hash table."
   (let ((id (claude-repl--workspace-id)))
     (puthash id
              (list :saved-window-config claude-repl--saved-window-config
-                   :return-window claude-repl-return-window
-                   :notify-timer claude-repl--notify-timer
-                   :notify-when-done claude-repl--notify-when-done)
+                   :return-window claude-repl-return-window)
              claude-repl--sessions)))
 
 ;; Popup rules (input rule first — it's more specific and Doom matches first)
@@ -132,7 +128,6 @@ and restores window config / notify state from the sessions hash table."
   (interactive)
   (claude-repl--load-session)
   (claude-repl-send)
-  (setq claude-repl--notify-when-done t)
   (if claude-repl--saved-window-config
       (progn
         (set-window-configuration claude-repl--saved-window-config)
@@ -157,7 +152,6 @@ and restores window config / notify state from the sessions hash table."
     (claude-repl--ensure-vterm-buffer)
     (claude-repl--ensure-input-buffer)
     (claude-repl--enable-hide-overlay))
-  (setq claude-repl--notify-when-done t)
   (with-current-buffer claude-repl-vterm-buffer
     (vterm-send-string text)
     (vterm-send-return))
@@ -217,32 +211,31 @@ Without region: sends relative file path."
   (claude-repl--update-hide-overlay)
   (message "Claude input box hiding %s" (if claude-repl-hide-input-box "enabled" "disabled")))
 
-(defun claude-repl--notify-claude-done (workspace-id)
-  "Send a desktop notification that Claude has finished.
-WORKSPACE-ID identifies which project's session to update."
-  (let ((session (gethash workspace-id claude-repl--sessions)))
-    (when session
-      (puthash workspace-id
-               (plist-put session :notify-when-done nil)
-               claude-repl--sessions)))
-  (start-process "claude-notify" nil
-                 "osascript" "-e"
-                 "display notification \"Claude has finished working\" with title \"Claude REPL\""))
+;; Title-based "Claude is done" detection.
+;; Claude Code sets the terminal title to "<spinner> Claude Code" while thinking
+;; and plain "Claude Code" when idle.  We poll via vterm--set-title advice.
+(setq claude-repl--title-thinking nil)
+
+(defun claude-repl--title-has-spinner-p (title)
+  "Return non-nil if TITLE contains Claude Code's braille spinner."
+  (string-match-p "^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]" title))
+
+(defun claude-repl--on-title-change (title)
+  "Detect thinking->idle transition from vterm title changes."
+  (when (string-match-p "^\\*claude-[0-9a-f]" (buffer-name))
+    (let ((thinking (claude-repl--title-has-spinner-p title)))
+      (when (and claude-repl--title-thinking (not thinking))
+        ;; Transition: was thinking, now idle
+        (message "Claude is done."))
+      (setq claude-repl--title-thinking thinking))))
+
+(advice-add 'vterm--set-title :before #'claude-repl--on-title-change)
 
 (defun claude-repl--after-vterm-redraw (&rest _)
-  "Apply hide overlay after vterm redraws.
-When panels are hidden, debounce a notification for when output stops."
+  "Apply hide overlay after vterm redraws."
   (when (string-match-p "^\\*claude-[0-9a-f]" (buffer-name))
     (claude-repl--load-session)
-    (claude-repl--update-hide-overlay)
-    ;; Debounce notification: reset timer on each redraw
-    (when claude-repl--notify-when-done
-      (when claude-repl--notify-timer
-        (cancel-timer claude-repl--notify-timer))
-      (let ((ws-id (claude-repl--workspace-id)))
-        (setq claude-repl--notify-timer
-              (run-at-time 3 nil (lambda () (claude-repl--notify-claude-done ws-id))))))
-    (claude-repl--save-session)))
+    (claude-repl--update-hide-overlay)))
 
 (defun claude-repl--enable-hide-overlay ()
   "Enable the hide overlay advice."
@@ -348,7 +341,6 @@ If panels hidden: show both panels."
       (claude-repl--save-session))
      ;; Panels visible - hide both, restore window layout
      (panels-visible
-      (setq claude-repl--notify-when-done t)
       (if claude-repl--saved-window-config
           (progn
             (set-window-configuration claude-repl--saved-window-config)
@@ -357,12 +349,8 @@ If panels hidden: show both panels."
         (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
           (select-window claude-repl-return-window)))
       (claude-repl--save-session))
-     ;; Panels hidden - show both, cancel notifications
+     ;; Panels hidden - show both
      (t
-      (setq claude-repl--notify-when-done nil)
-      (when claude-repl--notify-timer
-        (cancel-timer claude-repl--notify-timer)
-        (setq claude-repl--notify-timer nil))
       (setq claude-repl--saved-window-config (current-window-configuration))
       (claude-repl--ensure-input-buffer)
       (delete-other-windows claude-repl-return-window)
@@ -391,11 +379,7 @@ If panels hidden: show both panels."
     (kill-buffer claude-repl-vterm-buffer))
   (setq claude-repl-vterm-buffer nil
         claude-repl-input-buffer nil
-        claude-repl--saved-window-config nil
-        claude-repl--notify-when-done nil)
-  (when claude-repl--notify-timer
-    (cancel-timer claude-repl--notify-timer)
-    (setq claude-repl--notify-timer nil))
+        claude-repl--saved-window-config nil)
   (claude-repl--save-session))
 
 (defun claude-repl-restart ()
