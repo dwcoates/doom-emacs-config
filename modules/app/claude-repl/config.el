@@ -20,7 +20,8 @@
 ;; Input mode keymap
 (defvar claude-input-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-<return>") #'claude-repl-send)
+    (define-key map (kbd "<return>") #'claude-repl-send)
+    (define-key map (kbd "S-<return>") #'newline)
     (define-key map (kbd "C-S-1") (lambda () (interactive) (claude-repl-send-char "1")))
     (define-key map (kbd "C-S-2") (lambda () (interactive) (claude-repl-send-char "2")))
     (define-key map (kbd "C-S-3") (lambda () (interactive) (claude-repl-send-char "3")))
@@ -41,11 +42,16 @@
 
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
-  (setq-local header-line-format "Claude Input | C-RET: send | C-S-0-9: select | C-c: y/n/C-c/r/q"))
+  (setq-local header-line-format "Claude Input | RET: send | S-RET: newline | C-c: y/n/C-c/r/q"))
+
+;; Evil insert state bindings (override evil's RET)
+(evil-define-key 'insert claude-input-mode-map
+  (kbd "<return>") #'claude-repl-send
+  (kbd "S-<return>") #'newline)
 
 ;; Core functions
 (defun claude-repl-send ()
-  "Send input buffer contents to Claude, clear buffer, and return to original window."
+  "Send input buffer contents to Claude and clear buffer."
   (interactive)
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
     (let ((input (with-current-buffer claude-repl-input-buffer
@@ -54,12 +60,7 @@
         (vterm-send-string input)
         (vterm-send-return))
       (with-current-buffer claude-repl-input-buffer
-        (erase-buffer))
-      ;; Close input popup and return to original window
-      (when-let ((win (get-buffer-window claude-repl-input-buffer)))
-        (delete-window win))
-      (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
-        (select-window claude-repl-return-window)))))
+        (erase-buffer)))))
 
 (defun claude-repl-send-char (char)
   "Send a single character to Claude."
