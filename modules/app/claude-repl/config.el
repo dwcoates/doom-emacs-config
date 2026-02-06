@@ -1,41 +1,69 @@
 ;;; app/claude-repl/config.el -*- lexical-binding: t; -*-
 
 ;; Workspace identity
+(defvar-local claude-repl--project-root nil
+  "Buffer-local project root for Claude REPL buffers.
+Set when vterm/input buffers are created so workspace-id works from them.")
+
 (defun claude-repl--workspace-id ()
   "Return a short identifier for the current projectile workspace.
-Uses an MD5 hash of the project root path."
-  (let ((root (projectile-project-root)))
+Uses an MD5 hash of the project root path.  Falls back to the buffer-local
+`claude-repl--project-root' and then `default-directory'."
+  (let ((root (or (and (fboundp 'projectile-project-root)
+                       (ignore-errors (projectile-project-root)))
+                  claude-repl--project-root
+                  default-directory)))
     (when root
       (substring (md5 root) 0 8))))
 
-;; State
-(defvar claude-repl-vterm-buffer nil
-  "The vterm buffer running Claude.")
-
-(defvar claude-repl-input-buffer nil
-  "The input buffer for composing messages.")
-
-(defvar claude-repl-return-window nil
-  "The window to return to after sending input.")
-
-(defvar claude-repl--saved-window-config nil
-  "Window configuration saved before opening Claude panels.")
+;; Transient globals — always set by `claude-repl--load-session' before use.
+;; No defvar needed; these are just scratch space swapped per-project.
+;; claude-repl-vterm-buffer, claude-repl-input-buffer, claude-repl-return-window,
+;; claude-repl--saved-window-config, claude-repl--notify-timer, claude-repl--notify-when-done
 
 (defvar-local claude-repl-hide-overlay nil
   "Overlay used to hide Claude CLI input box.")
 
-(defvar claude-repl--notify-timer nil
-  "Debounce timer for detecting when Claude finishes working.")
+(setq claude-repl-hide-input-box t)
 
-(defvar claude-repl--notify-when-done nil
-  "When non-nil, send a notification when Claude stops producing output.")
+;; Per-project session storage
+(setq claude-repl--sessions (or (bound-and-true-p claude-repl--sessions)
+                                (make-hash-table :test 'equal)))
 
-(defvar claude-repl-hide-input-box t
-  "When non-nil, hide Claude CLI's input box in the vterm buffer.")
+(defun claude-repl--buffer-name (&optional suffix)
+  "Return a project-specific buffer name like *claude-HASH* or *claude-input-HASH*.
+SUFFIX, if provided, is inserted before the hash (e.g. \"-input\")."
+  (let ((id (claude-repl--workspace-id)))
+    (format "*claude%s-%s*" (or suffix "") (or id "default"))))
 
-;; Popup rules
-(set-popup-rule! "^\\*claude\\*$" :size 0.55 :side 'right :select nil :quit nil :ttl nil :no-other-window t)
-(set-popup-rule! "^\\*claude-input\\*$" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
+(defun claude-repl--load-session ()
+  "Load the current project's session state into global vars.
+Sets `claude-repl-vterm-buffer', `claude-repl-input-buffer' from buffer names,
+and restores window config / notify state from the sessions hash table."
+  (let* ((id (claude-repl--workspace-id))
+         (vterm-name (claude-repl--buffer-name))
+         (input-name (claude-repl--buffer-name "-input"))
+         (session (gethash id claude-repl--sessions)))
+    (setq claude-repl-vterm-buffer (get-buffer vterm-name)
+          claude-repl-input-buffer (get-buffer input-name)
+          claude-repl--saved-window-config (plist-get session :saved-window-config)
+          claude-repl-return-window (plist-get session :return-window)
+          claude-repl--notify-timer (plist-get session :notify-timer)
+          claude-repl--notify-when-done (plist-get session :notify-when-done))))
+
+(defun claude-repl--save-session ()
+  "Save the current global state back to the sessions hash table."
+  (let ((id (claude-repl--workspace-id)))
+    (puthash id
+             (list :saved-window-config claude-repl--saved-window-config
+                   :return-window claude-repl-return-window
+                   :notify-timer claude-repl--notify-timer
+                   :notify-when-done claude-repl--notify-when-done)
+             claude-repl--sessions)))
+
+;; Popup rules (input rule first — it's more specific and Doom matches first)
+(set-popup-rule! "^\\*claude-input-[0-9a-f]+" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
+(set-popup-rule! "^\\*claude-[0-9a-f]+" :size 0.55 :side 'right :select nil :quit nil :ttl nil :no-other-window t)
 
 ;; Input mode
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
@@ -61,15 +89,18 @@ Uses an MD5 hash of the project root path."
       :ni "C-S-8"     (cmd! (claude-repl-send-char "8"))
       :ni "C-S-9"     (cmd! (claude-repl-send-char "9"))
       :ni "C-S-0"     (cmd! (claude-repl-send-char "0"))
-      :n  "C-n"       (cmd! (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
+      :n  "C-n"       (cmd! (claude-repl--load-session)
+                            (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
                               (with-current-buffer claude-repl-vterm-buffer (vterm-send-down))))
-      :n  "C-p"       (cmd! (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
+      :n  "C-p"       (cmd! (claude-repl--load-session)
+                            (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
                               (with-current-buffer claude-repl-vterm-buffer (vterm-send-up)))))
 
 ;; Core functions
 (defun claude-repl-send ()
   "Send input buffer contents to Claude, clear buffer, and return to previous window."
   (interactive)
+  (claude-repl--load-session)
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
     (let ((input (with-current-buffer claude-repl-input-buffer
                    (buffer-string))))
@@ -84,6 +115,7 @@ Uses an MD5 hash of the project root path."
 (defun claude-repl-send-and-hide ()
   "Send input to Claude and hide both panels."
   (interactive)
+  (claude-repl--load-session)
   (claude-repl-send)
   (setq claude-repl--notify-when-done t)
   (if claude-repl--saved-window-config
@@ -92,10 +124,12 @@ Uses an MD5 hash of the project root path."
         (setq claude-repl--saved-window-config nil))
     (claude-repl--hide-panels)
     (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
-      (select-window claude-repl-return-window))))
+      (select-window claude-repl-return-window)))
+  (claude-repl--save-session))
 
 (defun claude-repl-send-char (char)
   "Send a single character to Claude."
+  (claude-repl--load-session)
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
     (with-current-buffer claude-repl-vterm-buffer
       (vterm-send-string char)
@@ -103,6 +137,7 @@ Uses an MD5 hash of the project root path."
 
 (defun claude-repl--send-to-claude (text)
   "Send TEXT to Claude, starting it if needed."
+  (claude-repl--load-session)
   (unless (claude-repl--vterm-running-p)
     (claude-repl--ensure-vterm-buffer)
     (claude-repl--ensure-input-buffer)
@@ -110,13 +145,15 @@ Uses an MD5 hash of the project root path."
   (setq claude-repl--notify-when-done t)
   (with-current-buffer claude-repl-vterm-buffer
     (vterm-send-string text)
-    (vterm-send-return)))
+    (vterm-send-return))
+  (claude-repl--save-session))
 
 (defun claude-repl-explain ()
   "Ask Claude to explain the selected region or current file.
 With active region: sends file path and line range.
 Without region: sends relative file path."
   (interactive)
+  (claude-repl--load-session)
   (let* ((rel-path (file-relative-name (buffer-file-name)
                                         (projectile-project-root)))
          (msg (if (use-region-p)
@@ -130,6 +167,7 @@ Without region: sends relative file path."
 (defun claude-repl-interrupt ()
   "Send interrupt (C-c) to Claude vterm."
   (interactive)
+  (claude-repl--load-session)
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
     (with-current-buffer claude-repl-vterm-buffer
       (vterm-send "<escape>")
@@ -164,9 +202,14 @@ Without region: sends relative file path."
   (claude-repl--update-hide-overlay)
   (message "Claude input box hiding %s" (if claude-repl-hide-input-box "enabled" "disabled")))
 
-(defun claude-repl--notify-claude-done ()
-  "Send a desktop notification that Claude has finished."
-  (setq claude-repl--notify-when-done nil)
+(defun claude-repl--notify-claude-done (workspace-id)
+  "Send a desktop notification that Claude has finished.
+WORKSPACE-ID identifies which project's session to update."
+  (let ((session (gethash workspace-id claude-repl--sessions)))
+    (when session
+      (puthash workspace-id
+               (plist-put session :notify-when-done nil)
+               claude-repl--sessions)))
   (start-process "claude-notify" nil
                  "osascript" "-e"
                  "display notification \"Claude has finished working\" with title \"Claude REPL\""))
@@ -174,15 +217,17 @@ Without region: sends relative file path."
 (defun claude-repl--after-vterm-redraw (&rest _)
   "Apply hide overlay after vterm redraws.
 When panels are hidden, debounce a notification for when output stops."
-  (when (and claude-repl-vterm-buffer
-             (eq (current-buffer) claude-repl-vterm-buffer))
+  (when (string-match-p "^\\*claude-[0-9a-f]" (buffer-name))
+    (claude-repl--load-session)
     (claude-repl--update-hide-overlay)
     ;; Debounce notification: reset timer on each redraw
     (when claude-repl--notify-when-done
       (when claude-repl--notify-timer
         (cancel-timer claude-repl--notify-timer))
-      (setq claude-repl--notify-timer
-            (run-at-time 3 nil #'claude-repl--notify-claude-done)))))
+      (let ((ws-id (claude-repl--workspace-id)))
+        (setq claude-repl--notify-timer
+              (run-at-time 3 nil (lambda () (claude-repl--notify-claude-done ws-id))))))
+    (claude-repl--save-session)))
 
 (defun claude-repl--enable-hide-overlay ()
   "Enable the hide overlay advice."
@@ -226,17 +271,27 @@ When panels are hidden, debounce a notification for when output stops."
 
 (defun claude-repl--ensure-input-buffer ()
   "Create input buffer if needed, put in claude-input-mode."
-  (setq claude-repl-input-buffer (get-buffer-create "*claude-input*"))
-  (with-current-buffer claude-repl-input-buffer
-    (unless (eq major-mode 'claude-input-mode)
-      (claude-input-mode))))
+  (let ((root (or (and (fboundp 'projectile-project-root)
+                       (ignore-errors (projectile-project-root)))
+                  claude-repl--project-root
+                  default-directory)))
+    (setq claude-repl-input-buffer (get-buffer-create (claude-repl--buffer-name "-input")))
+    (with-current-buffer claude-repl-input-buffer
+      (setq-local claude-repl--project-root root)
+      (unless (eq major-mode 'claude-input-mode)
+        (claude-input-mode)))))
 
 (defun claude-repl--ensure-vterm-buffer ()
   "Create vterm buffer running claude if needed.
 Starts claude from the projectile project root."
-  (let ((default-directory (or (projectile-project-root) default-directory)))
-    (setq claude-repl-vterm-buffer (get-buffer-create "*claude*"))
+  (let* ((root (or (and (fboundp 'projectile-project-root)
+                        (ignore-errors (projectile-project-root)))
+                   claude-repl--project-root
+                   default-directory))
+         (default-directory root))
+    (setq claude-repl-vterm-buffer (get-buffer-create (claude-repl--buffer-name)))
     (with-current-buffer claude-repl-vterm-buffer
+      (setq-local claude-repl--project-root root)
       (unless (eq major-mode 'vterm-mode)
         (vterm-mode)
         (setq-local truncate-lines nil)
@@ -252,6 +307,7 @@ If not running: start Claude and show both panels.
 If panels visible: hide both panels.
 If panels hidden: show both panels."
   (interactive)
+  (claude-repl--load-session)
   ;; Save current window to return to after hiding
   (unless (eq (current-buffer) claude-repl-input-buffer)
     (setq claude-repl-return-window (selected-window)))
@@ -263,7 +319,8 @@ If panels hidden: show both panels."
      ;; Text selected - send directly to Claude
      (selection
       (deactivate-mark)
-      (claude-repl--send-to-claude selection))
+      (claude-repl--send-to-claude selection)
+      (claude-repl--save-session))
      ;; Nothing running - start fresh
      ((not vterm-running)
       (setq claude-repl--saved-window-config (current-window-configuration))
@@ -274,7 +331,8 @@ If panels hidden: show both panels."
       (display-buffer claude-repl-vterm-buffer)
       (display-buffer claude-repl-input-buffer)
       (select-window (get-buffer-window claude-repl-input-buffer))
-      (evil-insert-state))
+      (evil-insert-state)
+      (claude-repl--save-session))
      ;; Panels visible - hide both, restore window layout
      (panels-visible
       (setq claude-repl--notify-when-done t)
@@ -284,7 +342,8 @@ If panels hidden: show both panels."
             (setq claude-repl--saved-window-config nil))
         (claude-repl--hide-panels)
         (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
-          (select-window claude-repl-return-window))))
+          (select-window claude-repl-return-window)))
+      (claude-repl--save-session))
      ;; Panels hidden - show both, cancel notifications
      (t
       (setq claude-repl--notify-when-done nil)
@@ -298,11 +357,13 @@ If panels hidden: show both panels."
       (display-buffer claude-repl-input-buffer)
       (claude-repl--update-hide-overlay)
       (select-window (get-buffer-window claude-repl-input-buffer))
-      (evil-insert-state)))))
+      (evil-insert-state)
+      (claude-repl--save-session)))))
 
 (defun claude-repl-kill ()
   "Kill Claude REPL buffers and windows without confirmation."
   (interactive)
+  (claude-repl--load-session)
   (claude-repl--disable-hide-overlay)
   (when-let ((win (get-buffer-window claude-repl-input-buffer)))
     (delete-window win))
@@ -316,16 +377,28 @@ If panels hidden: show both panels."
       (set-process-query-on-exit-flag proc nil))
     (kill-buffer claude-repl-vterm-buffer))
   (setq claude-repl-vterm-buffer nil
-        claude-repl-input-buffer nil))
+        claude-repl-input-buffer nil
+        claude-repl--saved-window-config nil
+        claude-repl--notify-when-done nil)
+  (when claude-repl--notify-timer
+    (cancel-timer claude-repl--notify-timer)
+    (setq claude-repl--notify-timer nil))
+  (claude-repl--save-session))
 
 (defun claude-repl-restart ()
   "Kill Claude REPL and restart with `claude -c` to continue session."
   (interactive)
-  (let ((default-directory (or (projectile-project-root) default-directory)))
+  (claude-repl--load-session)
+  (let* ((root (or (and (fboundp 'projectile-project-root)
+                        (ignore-errors (projectile-project-root)))
+                   claude-repl--project-root
+                   default-directory))
+         (default-directory root))
     (claude-repl-kill)
     ;; Start fresh with -c flag
-    (setq claude-repl-vterm-buffer (get-buffer-create "*claude*"))
+    (setq claude-repl-vterm-buffer (get-buffer-create (claude-repl--buffer-name)))
     (with-current-buffer claude-repl-vterm-buffer
+      (setq-local claude-repl--project-root root)
       (vterm-mode)
       (vterm-send-string "clear && claude -c")
       (vterm-send-return))
@@ -333,7 +406,8 @@ If panels hidden: show both panels."
     (claude-repl--enable-hide-overlay)
     (display-buffer claude-repl-vterm-buffer)
     (display-buffer claude-repl-input-buffer)
-    (select-window (get-buffer-window claude-repl-input-buffer))))
+    (select-window (get-buffer-window claude-repl-input-buffer))
+    (claude-repl--save-session)))
 
 ;; Keybindings
 (map! :leader
@@ -351,6 +425,3 @@ If panels hidden: show both panels."
       :desc "Send 8 to Claude" "o 8" (lambda () (interactive) (claude-repl-send-char "8"))
       :desc "Send 9 to Claude" "o 9" (lambda () (interactive) (claude-repl-send-char "9"))
       :desc "Send 0 to Claude" "o 0" (lambda () (interactive) (claude-repl-send-char "0")))
-
-
-;; FIXME: C-c C-c should clear the buffer of the repl
