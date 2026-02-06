@@ -192,6 +192,8 @@ Starts claude from the projectile project root."
     (with-current-buffer claude-repl-vterm-buffer
       (unless (eq major-mode 'vterm-mode)
         (vterm-mode)
+        (setq-local truncate-lines nil)
+        (setq-local word-wrap t)
         (vterm-send-string "clear && claude -c")
         (vterm-send-return)))))
 
