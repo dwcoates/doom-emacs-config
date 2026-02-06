@@ -2,15 +2,23 @@
 
 ;; Workspace identity
 (defvar-local claude-repl--project-root nil
-  "Buffer-local project root for Claude REPL buffers.
+  "Buffer-local git root for Claude REPL buffers.
 Set when vterm/input buffers are created so workspace-id works from them.")
 
+(defun claude-repl--git-root (&optional dir)
+  "Find the git root by walking up from DIR (default `default-directory').
+Checks for both .git directory and .git file (worktrees)."
+  (let ((dir (or dir default-directory)))
+    (locate-dominating-file dir
+      (lambda (d)
+        (let ((git (expand-file-name ".git" d)))
+          (or (file-directory-p git) (file-regular-p git)))))))
+
 (defun claude-repl--workspace-id ()
-  "Return a short identifier for the current projectile workspace.
-Uses an MD5 hash of the project root path.  Falls back to the buffer-local
+  "Return a short identifier for the current git workspace.
+Uses an MD5 hash of the git root path.  Falls back to the buffer-local
 `claude-repl--project-root' and then `default-directory'."
-  (let ((root (or (and (fboundp 'projectile-project-root)
-                       (ignore-errors (projectile-project-root)))
+  (let ((root (or (claude-repl--git-root)
                   claude-repl--project-root
                   default-directory)))
     (when root
@@ -155,7 +163,7 @@ Without region: sends relative file path."
   (interactive)
   (claude-repl--load-session)
   (let* ((rel-path (file-relative-name (buffer-file-name)
-                                        (projectile-project-root)))
+                                        (or (claude-repl--git-root) default-directory)))
          (msg (if (use-region-p)
                   (let ((start-line (line-number-at-pos (region-beginning)))
                         (end-line (line-number-at-pos (region-end))))
@@ -271,8 +279,7 @@ When panels are hidden, debounce a notification for when output stops."
 
 (defun claude-repl--ensure-input-buffer ()
   "Create input buffer if needed, put in claude-input-mode."
-  (let ((root (or (and (fboundp 'projectile-project-root)
-                       (ignore-errors (projectile-project-root)))
+  (let ((root (or (claude-repl--git-root)
                   claude-repl--project-root
                   default-directory)))
     (setq claude-repl-input-buffer (get-buffer-create (claude-repl--buffer-name "-input")))
@@ -283,9 +290,8 @@ When panels are hidden, debounce a notification for when output stops."
 
 (defun claude-repl--ensure-vterm-buffer ()
   "Create vterm buffer running claude if needed.
-Starts claude from the projectile project root."
-  (let* ((root (or (and (fboundp 'projectile-project-root)
-                        (ignore-errors (projectile-project-root)))
+Starts claude from the git root."
+  (let* ((root (or (claude-repl--git-root)
                    claude-repl--project-root
                    default-directory))
          (default-directory root))
@@ -389,8 +395,7 @@ If panels hidden: show both panels."
   "Kill Claude REPL and restart with `claude -c` to continue session."
   (interactive)
   (claude-repl--load-session)
-  (let* ((root (or (and (fboundp 'projectile-project-root)
-                        (ignore-errors (projectile-project-root)))
+  (let* ((root (or (claude-repl--git-root)
                    claude-repl--project-root
                    default-directory))
          (default-directory root))
