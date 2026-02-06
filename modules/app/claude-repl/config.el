@@ -1,10 +1,5 @@
 ;;; app/claude-repl/config.el -*- lexical-binding: t; -*-
 
-;; Force monospace fallback for Unicode ranges that cause alignment issues.
-;; Without this, Emacs falls back to non-monospaced system fonts and the
-;; vterm grid drifts horizontally.
-(set-fontset-font t 'unicode-bmp "DejaVuSansM Nerd Font Mono" nil 'append)
-
 ;; Workspace identity
 (defvar-local claude-repl--project-root nil
   "Buffer-local git root for Claude REPL buffers.
@@ -70,6 +65,8 @@ and restores window config from the sessions hash table."
                    :return-window claude-repl-return-window)
              claude-repl--sessions)))
 
+(after! vterm
+
 ;; Popup rules (input rule first — it's more specific and Doom matches first)
 (set-popup-rule! "^\\*claude-input-[0-9a-f]+" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
 (set-popup-rule! "^\\*claude-[0-9a-f]+" :size 0.55 :side 'right :select nil :quit nil :ttl nil :no-other-window t)
@@ -88,6 +85,10 @@ and restores window config from the sessions hash table."
       :ni "C-c n"     (cmd! (claude-repl-send-char "n"))
       :ni "C-c r"     #'claude-repl-restart
       :ni "C-c q"     #'claude-repl-kill
+      :ni "C-S-m"     (cmd! (claude-repl--load-session)
+                            (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
+                              (with-current-buffer claude-repl-vterm-buffer
+                                (vterm-send-key "<backtab>"))))
       :ni "C-S-1"     (cmd! (claude-repl-send-char "1"))
       :ni "C-S-2"     (cmd! (claude-repl-send-char "2"))
       :ni "C-S-3"     (cmd! (claude-repl-send-char "3"))
@@ -450,3 +451,5 @@ If panels hidden: show both panels."
       :desc "Send 8 to Claude" "o 8" (lambda () (interactive) (claude-repl-send-char "8"))
       :desc "Send 9 to Claude" "o 9" (lambda () (interactive) (claude-repl-send-char "9"))
       :desc "Send 0 to Claude" "o 0" (lambda () (interactive) (claude-repl-send-char "0")))
+
+) ;; end (after! vterm)
