@@ -125,6 +125,24 @@
        (buffer-live-p claude-repl-input-buffer)
        (get-buffer-window claude-repl-input-buffer)))
 
+(defun claude-repl--vterm-visible-p ()
+  "Return t if vterm buffer is visible in a window."
+  (and claude-repl-vterm-buffer
+       (buffer-live-p claude-repl-vterm-buffer)
+       (get-buffer-window claude-repl-vterm-buffer)))
+
+(defun claude-repl--panels-visible-p ()
+  "Return t if both panels are visible."
+  (and (claude-repl--input-visible-p)
+       (claude-repl--vterm-visible-p)))
+
+(defun claude-repl--hide-panels ()
+  "Hide both Claude panels without killing buffers."
+  (when-let ((win (get-buffer-window claude-repl-input-buffer)))
+    (delete-window win))
+  (when-let ((win (get-buffer-window claude-repl-vterm-buffer)))
+    (delete-window win)))
+
 (defun claude-repl--ensure-input-buffer ()
   "Create input buffer if needed, put in claude-input-mode."
   (setq claude-repl-input-buffer (get-buffer-create "*claude-input*"))
@@ -143,16 +161,16 @@
 
 ;; Entry point - smart toggle
 (defun claude-repl ()
-  "Smart toggle for Claude REPL.
-If nothing open: open both Claude output and input.
-If Claude open but input closed: open input and interrupt Claude.
-Always focuses the input buffer, never the output."
+  "Toggle Claude REPL panels.
+If not running: start Claude and show both panels.
+If panels visible: hide both panels.
+If panels hidden: show both panels and interrupt Claude."
   (interactive)
-  ;; Save current window to return to after sending
+  ;; Save current window to return to after hiding
   (unless (eq (current-buffer) claude-repl-input-buffer)
     (setq claude-repl-return-window (selected-window)))
   (let ((vterm-running (claude-repl--vterm-running-p))
-        (input-visible (claude-repl--input-visible-p)))
+        (panels-visible (claude-repl--panels-visible-p)))
     (cond
      ;; Nothing running - start fresh
      ((not vterm-running)
@@ -162,14 +180,18 @@ Always focuses the input buffer, never the output."
       (display-buffer claude-repl-vterm-buffer)
       (display-buffer claude-repl-input-buffer)
       (select-window (get-buffer-window claude-repl-input-buffer)))
-     ;; Vterm running but input not visible - open input and interrupt
-     ((and vterm-running (not input-visible))
+     ;; Panels visible - hide both
+     (panels-visible
+      (claude-repl--hide-panels)
+      (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
+        (select-window claude-repl-return-window)))
+     ;; Panels hidden - show both and interrupt
+     (t
       (claude-repl-interrupt)
       (claude-repl--ensure-input-buffer)
+      (display-buffer claude-repl-vterm-buffer)
       (display-buffer claude-repl-input-buffer)
-      (select-window (get-buffer-window claude-repl-input-buffer)))
-     ;; Both visible - just focus input
-     (t
+      (claude-repl--update-hide-overlay)
       (select-window (get-buffer-window claude-repl-input-buffer))))))
 
 (defun claude-repl-kill ()
