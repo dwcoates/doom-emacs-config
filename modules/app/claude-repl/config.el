@@ -37,40 +37,34 @@ Uses an MD5 hash of the project root path."
 (set-popup-rule! "^\\*claude\\*$" :size 0.55 :side 'right :select nil :quit nil :ttl nil :no-other-window t)
 (set-popup-rule! "^\\*claude-input\\*$" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
 
-;; Input mode keymap
-(defvar claude-input-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "<return>") #'claude-repl-send)
-    (define-key map (kbd "S-<return>") #'newline)
-    (define-key map (kbd "C-S-1") (lambda () (interactive) (claude-repl-send-char "1")))
-    (define-key map (kbd "C-S-2") (lambda () (interactive) (claude-repl-send-char "2")))
-    (define-key map (kbd "C-S-3") (lambda () (interactive) (claude-repl-send-char "3")))
-    (define-key map (kbd "C-S-4") (lambda () (interactive) (claude-repl-send-char "4")))
-    (define-key map (kbd "C-S-5") (lambda () (interactive) (claude-repl-send-char "5")))
-    (define-key map (kbd "C-S-6") (lambda () (interactive) (claude-repl-send-char "6")))
-    (define-key map (kbd "C-S-7") (lambda () (interactive) (claude-repl-send-char "7")))
-    (define-key map (kbd "C-S-8") (lambda () (interactive) (claude-repl-send-char "8")))
-    (define-key map (kbd "C-S-9") (lambda () (interactive) (claude-repl-send-char "9")))
-    (define-key map (kbd "C-S-0") (lambda () (interactive) (claude-repl-send-char "0")))
-    (define-key map (kbd "C-c y") (lambda () (interactive) (claude-repl-send-char "y")))
-    (define-key map (kbd "C-c n") (lambda () (interactive) (claude-repl-send-char "n")))
-    (define-key map (kbd "C-c C-c") (lambda () (interactive) (erase-buffer)))
-    (define-key map (kbd "C-c r") #'claude-repl-restart)
-    (define-key map (kbd "C-c q") #'claude-repl-kill)
-    map)
-  "Keymap for claude-input-mode.")
-
+;; Input mode
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
   (setq-local header-line-format "Claude Input | RET: send | C-RET: send+hide | S-RET: newline | C-c C-c: clear | ESC ESC: interrupt | C-c: y/n/r/q"))
 
-;; Evil insert state bindings (override evil's RET)
-(evil-define-key 'insert claude-input-mode-map
-  (kbd "<return>") #'claude-repl-send
-  (kbd "S-<return>") #'newline
-  (kbd "C-<return>") #'claude-repl-send-and-hide
-  (kbd "C-c C-c") (lambda () (interactive) (erase-buffer))
-  )
+(map! :map claude-input-mode-map
+      :ni "RET"       #'claude-repl-send
+      :ni "S-RET"     #'newline
+      :ni "C-RET"     #'claude-repl-send-and-hide
+      :ni "C-c C-c"   (cmd! (erase-buffer))
+      :ni "C-c y"     (cmd! (claude-repl-send-char "y"))
+      :ni "C-c n"     (cmd! (claude-repl-send-char "n"))
+      :ni "C-c r"     #'claude-repl-restart
+      :ni "C-c q"     #'claude-repl-kill
+      :ni "C-S-1"     (cmd! (claude-repl-send-char "1"))
+      :ni "C-S-2"     (cmd! (claude-repl-send-char "2"))
+      :ni "C-S-3"     (cmd! (claude-repl-send-char "3"))
+      :ni "C-S-4"     (cmd! (claude-repl-send-char "4"))
+      :ni "C-S-5"     (cmd! (claude-repl-send-char "5"))
+      :ni "C-S-6"     (cmd! (claude-repl-send-char "6"))
+      :ni "C-S-7"     (cmd! (claude-repl-send-char "7"))
+      :ni "C-S-8"     (cmd! (claude-repl-send-char "8"))
+      :ni "C-S-9"     (cmd! (claude-repl-send-char "9"))
+      :ni "C-S-0"     (cmd! (claude-repl-send-char "0"))
+      :n  "C-n"       (cmd! (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
+                              (with-current-buffer claude-repl-vterm-buffer (vterm-send-down))))
+      :n  "C-p"       (cmd! (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
+                              (with-current-buffer claude-repl-vterm-buffer (vterm-send-up)))))
 
 ;; Core functions
 (defun claude-repl-send ()
