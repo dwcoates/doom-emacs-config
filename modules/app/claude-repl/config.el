@@ -33,6 +33,7 @@
     (define-key map (kbd "C-S-0") (lambda () (interactive) (claude-repl-send-char "0")))
     (define-key map (kbd "C-c y") (lambda () (interactive) (claude-repl-send-char "y")))
     (define-key map (kbd "C-c n") (lambda () (interactive) (claude-repl-send-char "n")))
+    (define-key map (kbd "C-c C-c") #'claude-repl-interrupt)
     (define-key map (kbd "C-c r") #'claude-repl-restart)
     (define-key map (kbd "C-c q") #'claude-repl-kill)
     map)
@@ -40,7 +41,7 @@
 
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
-  (setq-local header-line-format "Claude Input | C-RET: send | C-S-0-9: select | C-c: y/n/r/q"))
+  (setq-local header-line-format "Claude Input | C-RET: send | C-S-0-9: select | C-c: y/n/C-c/r/q"))
 
 ;; Core functions
 (defun claude-repl-send ()
@@ -179,20 +180,21 @@ If panels hidden: show both panels and interrupt Claude."
       (claude-repl--enable-hide-overlay)
       (display-buffer claude-repl-vterm-buffer)
       (display-buffer claude-repl-input-buffer)
-      (select-window (get-buffer-window claude-repl-input-buffer)))
+      (select-window (get-buffer-window claude-repl-input-buffer))
+      (evil-insert-state))
      ;; Panels visible - hide both
      (panels-visible
       (claude-repl--hide-panels)
       (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
         (select-window claude-repl-return-window)))
-     ;; Panels hidden - show both and interrupt
+     ;; Panels hidden - show both
      (t
-      (claude-repl-interrupt)
       (claude-repl--ensure-input-buffer)
       (display-buffer claude-repl-vterm-buffer)
       (display-buffer claude-repl-input-buffer)
       (claude-repl--update-hide-overlay)
-      (select-window (get-buffer-window claude-repl-input-buffer))))))
+      (select-window (get-buffer-window claude-repl-input-buffer))
+      (evil-insert-state)))))
 
 (defun claude-repl-kill ()
   "Kill Claude REPL buffers and windows without confirmation."
@@ -232,3 +234,10 @@ If panels hidden: show both panels and interrupt Claude."
 (map! :leader
       :desc "Claude REPL" "o c" #'claude-repl
       :desc "Kill Claude" "o C" #'claude-repl-kill)
+
+;; FIXME: opening repl should start in insert mode
+;; FIXME: RET should send to claude code, S-RET should go to new line
+;; FIXME: C-c C-k can close clode (input and output boxes) when in insert mode
+;; FIXME: sending to claude should not close the input window, only move the cursor back to the window from which claude was just opened
+;; FIXME: C-RET should send the input to claude and close BOTH windows
+;; FIXME: closing clode UI (in any way that doesn't kill cluade) should result in desktop notifications when claude is finished working. Maybe vterm has some way to know when claude is done thinking
