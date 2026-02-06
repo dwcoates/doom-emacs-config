@@ -1,5 +1,12 @@
 ;;; app/claude-repl/config.el -*- lexical-binding: t; -*-
 
+;; Force monospace fallback for Unicode ranges that cause alignment issues.
+;; Without this, Emacs falls back to non-monospaced fonts (e.g. Apple Braille)
+;; and the vterm grid drifts horizontally.
+(dolist (range '((#x2500 . #x259F)    ;; Box drawing + block elements
+                 (#x25A0 . #x25FF))) ;; Geometric shapes
+  (set-fontset-font t range "JetBrains Mono"))
+
 ;; Workspace identity
 (defvar-local claude-repl--project-root nil
   "Buffer-local git root for Claude REPL buffers.
