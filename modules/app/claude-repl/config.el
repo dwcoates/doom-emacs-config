@@ -301,10 +301,3 @@ If panels hidden: show both panels."
       :desc "Send 8 to Claude" "o 8" (lambda () (interactive) (claude-repl-send-char "8"))
       :desc "Send 9 to Claude" "o 9" (lambda () (interactive) (claude-repl-send-char "9"))
       :desc "Send 0 to Claude" "o 0" (lambda () (interactive) (claude-repl-send-char "0")))
-
-;; FIXME: opening repl should start in insert mode
-;; FIXME: RET should send to claude code, S-RET should go to new line
-;; FIXME: C-c C-k can close clode (input and output boxes) when in insert mode
-;; FIXME: sending to claude should not close the input window, only move the cursor back to the window from which claude was just opened
-;; FIXME: C-RET should send the input to claude and close BOTH windows
-;; FIXME: closing clode UI (in any way that doesn't kill cluade) should result in desktop notifications when claude is finished working. Maybe vterm has some way to know when claude is done thinking
