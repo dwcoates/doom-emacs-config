@@ -10,6 +10,9 @@
 (defvar claude-repl-return-window nil
   "The window to return to after sending input.")
 
+(defvar claude-repl--saved-window-config nil
+  "Window configuration saved before opening Claude panels.")
+
 (defvar-local claude-repl-hide-overlay nil
   "Overlay used to hide Claude CLI input box.")
 
@@ -76,9 +79,13 @@
   (interactive)
   (claude-repl-send)
   (setq claude-repl--notify-when-done t)
-  (claude-repl--hide-panels)
-  (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
-    (select-window claude-repl-return-window)))
+  (if claude-repl--saved-window-config
+      (progn
+        (set-window-configuration claude-repl--saved-window-config)
+        (setq claude-repl--saved-window-config nil))
+    (claude-repl--hide-panels)
+    (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
+      (select-window claude-repl-return-window))))
 
 (defun claude-repl-send-char (char)
   "Send a single character to Claude."
@@ -245,26 +252,34 @@ If panels hidden: show both panels."
       (claude-repl--send-to-claude selection))
      ;; Nothing running - start fresh
      ((not vterm-running)
+      (setq claude-repl--saved-window-config (current-window-configuration))
       (claude-repl--ensure-vterm-buffer)
       (claude-repl--ensure-input-buffer)
       (claude-repl--enable-hide-overlay)
+      (delete-other-windows claude-repl-return-window)
       (display-buffer claude-repl-vterm-buffer)
       (display-buffer claude-repl-input-buffer)
       (select-window (get-buffer-window claude-repl-input-buffer))
       (evil-insert-state))
-     ;; Panels visible - hide both, enable notifications
+     ;; Panels visible - hide both, restore window layout
      (panels-visible
       (setq claude-repl--notify-when-done t)
-      (claude-repl--hide-panels)
-      (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
-        (select-window claude-repl-return-window)))
+      (if claude-repl--saved-window-config
+          (progn
+            (set-window-configuration claude-repl--saved-window-config)
+            (setq claude-repl--saved-window-config nil))
+        (claude-repl--hide-panels)
+        (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
+          (select-window claude-repl-return-window))))
      ;; Panels hidden - show both, cancel notifications
      (t
       (setq claude-repl--notify-when-done nil)
       (when claude-repl--notify-timer
         (cancel-timer claude-repl--notify-timer)
         (setq claude-repl--notify-timer nil))
+      (setq claude-repl--saved-window-config (current-window-configuration))
       (claude-repl--ensure-input-buffer)
+      (delete-other-windows claude-repl-return-window)
       (display-buffer claude-repl-vterm-buffer)
       (display-buffer claude-repl-input-buffer)
       (claude-repl--update-hide-overlay)
