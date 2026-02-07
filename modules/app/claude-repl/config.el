@@ -85,7 +85,7 @@ and restores window config from the sessions hash table."
   "Display vterm and input panels to the right of the current window.
 Splits right for vterm (55% of frame), then splits vterm bottom for input (30%)."
   (let* ((work-win (or claude-repl-return-window (selected-window)))
-         (vterm-win (split-window work-win (round (* 0.45 (window-total-width work-win))) 'right))
+         (vterm-win (split-window work-win (round (* 0.6 (window-total-width work-win))) 'right))
          (input-win (split-window vterm-win (round (* -0.15 (window-total-height vterm-win))) 'below)))
     (set-window-buffer vterm-win claude-repl-vterm-buffer)
     (set-window-buffer input-win claude-repl-input-buffer)
@@ -93,6 +93,10 @@ Splits right for vterm (55% of frame), then splits vterm bottom for input (30%).
     (set-window-dedicated-p input-win t)
     (select-window input-win)
     (evil-insert-state)))
+
+(defun claude-repl--grey (n)
+  "Return a hex color string for greyscale value N (0=black, 255=white)."
+  (format "#%02x%02x%02x" n n n))
 
 ;; Instructions bar face
 (defface claude-repl-header-line
@@ -105,8 +109,8 @@ Splits right for vterm (55% of frame), then splits vterm bottom for input (30%).
   (setq-local header-line-format
               " Claude Input | RET: send | C-RET: send+hide | S-RET: newline | C-c C-c: clear | ESC ESC: interrupt | C-c: y/n/r/q")
   (face-remap-add-relative 'header-line 'claude-repl-header-line)
-  (face-remap-add-relative 'default :background "#1a1a2e")
-  (face-remap-add-relative 'fringe :background "#1a1a2e")
+  (face-remap-add-relative 'default :background (claude-repl--grey 30))
+  (face-remap-add-relative 'fringe :background (claude-repl--grey 30))
   (add-hook 'after-change-functions #'claude-repl--history-on-change nil t))
 
 (map! :map claude-input-mode-map
