@@ -132,6 +132,7 @@ Splits right for vterm (55% of frame), then splits vterm bottom for input (30%).
       :ni "C-S-8"     (cmd! (claude-repl-send-char "8"))
       :ni "C-S-9"     (cmd! (claude-repl-send-char "9"))
       :ni "C-S-0"     (cmd! (claude-repl-send-char "0"))
+      :ni "C-h"       #'evil-window-left
       :n  "C-n"       (cmd! (claude-repl--load-session)
                             (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
                               (with-current-buffer claude-repl-vterm-buffer (vterm-send-down))))
