@@ -226,6 +226,9 @@ Resets history browsing index."
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
     (let ((input (with-current-buffer claude-repl-input-buffer
                    (buffer-string))))
+      ;; Clear the "done" indicator for this workspace
+      (when-let ((ws (claude-repl--workspace-for-buffer claude-repl-vterm-buffer)))
+        (remhash ws claude-repl--done-workspaces))
       (with-current-buffer claude-repl-vterm-buffer
         (vterm-send-string input)
         (vterm-send-return))
@@ -344,6 +347,37 @@ Without region: sends relative file path."
                    (format "display notification %S with title %S"
                            message title))))
 
+;; Workspace tab indicator for Claude status
+(setq claude-repl--done-workspaces (or (bound-and-true-p claude-repl--done-workspaces)
+                                       (make-hash-table :test 'equal)))
+
+(defun claude-repl--workspace-for-buffer (buf)
+  "Return the workspace name that contains BUF, or nil."
+  (when (bound-and-true-p persp-mode)
+    (cl-loop for persp in (persp-persps)
+             when (persp-contain-buffer-p buf persp)
+             return (safe-persp-name persp))))
+
+(defun claude-repl--tabline-advice (&optional names)
+  "Override for `+workspace--tabline' to show ✓ for workspaces where Claude is done."
+  (let* ((names (or names (+workspace-list-names)))
+         (current-name (+workspace-current-name)))
+    (mapconcat
+     #'identity
+     (cl-loop for name in names
+              for i to (length names)
+              collect
+              (let ((indicator (if (gethash name claude-repl--done-workspaces)
+                                   "✓"
+                                 (number-to-string (1+ i)))))
+                (propertize (format " [%s] %s " indicator name)
+                            'face (if (equal current-name name)
+                                      '+workspace-tab-selected-face
+                                    '+workspace-tab-face))))
+     " ")))
+
+(advice-add '+workspace--tabline :override #'claude-repl--tabline-advice)
+
 ;; Title-based "Claude is done" detection.
 ;; Claude Code sets the terminal title to "<spinner> Claude Code" while thinking
 ;; and plain "Claude Code" when idle.  We poll via vterm--set-title advice.
@@ -362,6 +396,8 @@ Without region: sends relative file path."
       (message "claude-repl title: %S thinking=%s was=%s" title thinking claude-repl--title-thinking)
       (when (and claude-repl--title-thinking (not thinking))
         (message "Claude is done.")
+        (when-let ((ws (claude-repl--workspace-for-buffer (current-buffer))))
+          (puthash ws t claude-repl--done-workspaces))
         (unless (get-buffer-window (current-buffer))
           (claude-repl--notify "Claude REPL" "Claude has finished working")))
       (setq claude-repl--title-thinking thinking))))
@@ -594,3 +630,6 @@ If panels hidden: show both panels."
       :desc "Send 9 to Claude" "o 9" (lambda () (interactive) (claude-repl-send-char "9"))
       :desc "Send 0 to Claude" "o 0" (lambda () (interactive) (claude-repl-send-char "0")))
 
+
+;; FIXME: SPC o v for switching to input box (in insert mode). same as SPC o c if Claude is not already open
+;; TODO: turn off jetbrains and bounce emacs.
