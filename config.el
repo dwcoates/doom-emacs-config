@@ -404,12 +404,11 @@
   (add-hook 'persp-after-load-state-functions
             (lambda (&rest _)
               (let ((names (+workspace-list-names)))
-                (message "persp-after-load: workspaces = %S" names)
                 (when (member "main" names)
                   (condition-case err
                       (progn
-                        (+workspace-delete "main")
-                        (message "Deleted 'main' workspace. Remaining: %S" (+workspace-list-names)))
+                        (persp-kill "main")
+                        (message "Deleted 'main' workspace."))
                     (error (message "Failed to delete 'main' workspace: %s" err))))))))
 
 (unless (display-graphic-p)
