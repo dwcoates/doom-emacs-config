@@ -80,14 +80,33 @@ and restores window config from the sessions hash table."
 
 (require 'vterm)
 
-;; Popup rules (input rule first — it's more specific and Doom matches first)
-(set-popup-rule! "^\\*claude-input-[0-9a-f]+" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
-(set-popup-rule! "^\\*claude-[0-9a-f]+" :size 0.55 :side 'right :select nil :quit nil :ttl nil :no-other-window t)
+;; Manual window layout: vterm on the right (full height), input below vterm.
+(defun claude-repl--show-panels ()
+  "Display vterm and input panels to the right of the current window.
+Splits right for vterm (55% of frame), then splits vterm bottom for input (30%)."
+  (let* ((work-win (or claude-repl-return-window (selected-window)))
+         (vterm-win (split-window work-win (round (* 0.45 (window-total-width work-win))) 'right))
+         (input-win (split-window vterm-win (round (* -0.15 (window-total-height vterm-win))) 'below)))
+    (set-window-buffer vterm-win claude-repl-vterm-buffer)
+    (set-window-buffer input-win claude-repl-input-buffer)
+    (set-window-dedicated-p vterm-win t)
+    (set-window-dedicated-p input-win t)
+    (select-window input-win)
+    (evil-insert-state)))
+
+;; Instructions bar face
+(defface claude-repl-header-line
+  '((t :background "white" :foreground "black" :weight bold))
+  "Face for the Claude Input header line.")
 
 ;; Input mode
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
-  (setq-local header-line-format "Claude Input | RET: send | C-RET: send+hide | S-RET: newline | C-c C-c: clear | ESC ESC: interrupt | C-c: y/n/r/q")
+  (setq-local header-line-format
+              " Claude Input | RET: send | C-RET: send+hide | S-RET: newline | C-c C-c: clear | ESC ESC: interrupt | C-c: y/n/r/q")
+  (face-remap-add-relative 'header-line 'claude-repl-header-line)
+  (face-remap-add-relative 'default :background "#1a1a2e")
+  (face-remap-add-relative 'fringe :background "#1a1a2e")
   (add-hook 'after-change-functions #'claude-repl--history-on-change nil t))
 
 (map! :map claude-input-mode-map
@@ -426,11 +445,7 @@ If panels hidden: show both panels."
       (claude-repl--ensure-vterm-buffer)
       (claude-repl--ensure-input-buffer)
       (claude-repl--enable-hide-overlay)
-      (delete-other-windows claude-repl-return-window)
-      (display-buffer claude-repl-vterm-buffer)
-      (display-buffer claude-repl-input-buffer)
-      (select-window (get-buffer-window claude-repl-input-buffer))
-      (evil-insert-state)
+      (claude-repl--show-panels)
       (claude-repl--save-session))
      ;; Panels visible - hide both, restore window layout
      (panels-visible
@@ -446,12 +461,8 @@ If panels hidden: show both panels."
      (t
       (setq claude-repl--saved-window-config (current-window-configuration))
       (claude-repl--ensure-input-buffer)
-      (delete-other-windows claude-repl-return-window)
-      (display-buffer claude-repl-vterm-buffer)
-      (display-buffer claude-repl-input-buffer)
+      (claude-repl--show-panels)
       (claude-repl--update-hide-overlay)
-      (select-window (get-buffer-window claude-repl-input-buffer))
-      (evil-insert-state)
       (claude-repl--save-session)))))
 
 (defun claude-repl-kill ()
@@ -493,9 +504,7 @@ If panels hidden: show both panels."
       (vterm-send-return))
     (claude-repl--ensure-input-buffer)
     (claude-repl--enable-hide-overlay)
-    (display-buffer claude-repl-vterm-buffer)
-    (display-buffer claude-repl-input-buffer)
-    (select-window (get-buffer-window claude-repl-input-buffer))
+    (claude-repl--show-panels)
     (claude-repl--save-session)))
 
 ;; Keybindings
