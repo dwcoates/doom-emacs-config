@@ -233,7 +233,8 @@ Resets history browsing index."
         (if (> (length input) 200)
             (let ((proc (get-buffer-process (current-buffer))))
               (process-send-string proc
-                                   (concat "\e[200~" input "\e[201~\n")))
+                                   (concat "\e[200~" input "\e[201~"))
+              (process-send-string proc ".\n"))
           (vterm-send-string input)
           (vterm-send-return)))
       (with-current-buffer claude-repl-input-buffer
@@ -684,6 +685,3 @@ If Claude isn't running, start it (same as `claude-repl')."
       :desc "Send 8 to Claude" "o 8" (lambda () (interactive) (claude-repl-send-char "8"))
       :desc "Send 9 to Claude" "o 9" (lambda () (interactive) (claude-repl-send-char "9"))
       :desc "Send 0 to Claude" "o 0" (lambda () (interactive) (claude-repl-send-char "0")))
-
-
-;; FIXME: override emoji

@@ -159,9 +159,11 @@
                                (_ "JetBrains Mono")))
  )
 
-;; Force U+23FA (⏺ Black Circle for Record) to render from a monospace-compatible
-;; font. Prevents column misalignment in vterm when Claude Code outputs this char.
-(set-fontset-font t '(#x23FA . #x23FA) (font-spec :family "Menlo"))
+;; Replace U+23FA (⏺ Black Circle for Record) with a monospace-safe bullet.
+;; Apple Color Emoji renders it proportionally, breaking vterm column alignment.
+(unless standard-display-table
+  (setq standard-display-table (make-display-table)))
+(aset standard-display-table #x23FA (vconcat "●"))
 
 (setq kill-ring-max 100000)
 (display-battery-mode t)
