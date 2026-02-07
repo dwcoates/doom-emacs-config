@@ -47,6 +47,10 @@ Uses an MD5 hash of the git root path.  Falls back to the buffer-local
 
 (setq claude-repl-hide-input-box nil)
 
+;; Set to t once Claude has set its terminal title (meaning it's ready).
+(defvar-local claude-repl--ready nil
+  "Non-nil once Claude Code has finished starting up.")
+
 ;; Per-project session storage
 (setq claude-repl--sessions (or (bound-and-true-p claude-repl--sessions)
                                 (make-hash-table :test 'equal)))
@@ -421,8 +425,23 @@ Without region: sends relative file path."
        (string-match-p "^[^[:ascii:]]" title)))
 
 (defun claude-repl--on-title-change (title)
-  "Detect thinking->idle transition from vterm title changes."
+  "Detect thinking->idle transition from vterm title changes.
+On first title change, reveal panels (Claude is ready)."
   (when (string-match-p "^\\*claude-[0-9a-f]" (buffer-name))
+    ;; First title = Claude is ready. Swap placeholder for real vterm.
+    (unless claude-repl--ready
+      (setq claude-repl--ready t)
+      (let ((buf (current-buffer))
+            (placeholder (get-buffer " *claude-loading*")))
+        (when placeholder
+          (run-at-time 0 nil
+                       (lambda ()
+                         (when (buffer-live-p buf)
+                           (dolist (win (get-buffer-window-list placeholder nil t))
+                             (set-window-dedicated-p win nil)
+                             (set-window-buffer win buf)
+                             (set-window-dedicated-p win t))
+                           (kill-buffer placeholder)))))))
     (let ((thinking (claude-repl--title-has-spinner-p title)))
       (when (and claude-repl--title-thinking (not thinking))
         (when-let ((ws (claude-repl--workspace-for-buffer (current-buffer))))
@@ -492,9 +511,11 @@ Iterates over all windows so it works across sessions."
                    (format "*claude-input-%s*" (match-string 1 name)))))
         (delete-window win))
        ;; Input visible, vterm missing -> close input
+       ;; (but not if placeholder is showing — Claude is still starting)
        ((and (string-match "^\\*claude-input-\\([0-9a-f]+\\)\\*$" name)
              (not (get-buffer-window
-                   (format "*claude-%s*" (match-string 1 name)))))
+                   (format "*claude-%s*" (match-string 1 name))))
+             (not (get-buffer " *claude-loading*")))
         (delete-window win))))))
 
 (setq claude-repl--sync-timer nil)
@@ -578,14 +599,24 @@ If panels hidden: show both panels."
       (deactivate-mark)
       (claude-repl--send-to-claude selection)
       (claude-repl--save-session))
-     ;; Nothing running - start fresh
+     ;; Nothing running - start fresh with placeholder until Claude is ready
      ((not vterm-running)
       (setq claude-repl--saved-window-config (current-window-configuration))
       (claude-repl--ensure-vterm-buffer)
       (claude-repl--ensure-input-buffer)
       (claude-repl--enable-hide-overlay)
-      (claude-repl--show-panels)
-      (claude-repl--save-session))
+      ;; Show panels with a blank placeholder in the output slot
+      (let ((real-vterm claude-repl-vterm-buffer)
+            (placeholder (get-buffer-create " *claude-loading*")))
+        (with-current-buffer placeholder
+          (setq-local mode-line-format nil)
+          (face-remap-add-relative 'default :background (claude-repl--grey 15))
+          (face-remap-add-relative 'fringe :background (claude-repl--grey 15)))
+        (setq claude-repl-vterm-buffer placeholder)
+        (claude-repl--show-panels)
+        (setq claude-repl-vterm-buffer real-vterm))
+      (claude-repl--save-session)
+      (message "Starting Claude..."))
      ;; Panels visible - hide both, restore window layout
      (panels-visible
       (if claude-repl--saved-window-config
