@@ -389,6 +389,20 @@ Iterates over all windows so it works across sessions."
 
 (add-hook 'window-configuration-change-hook #'claude-repl--schedule-sync)
 
+;; Redirect focus from vterm output to input buffer
+(defun claude-repl--redirect-to-input (_frame)
+  "If the selected window shows a Claude vterm buffer, jump to its input window."
+  (let ((name (buffer-name (window-buffer (selected-window)))))
+    (when (string-match "^\\*claude-\\([0-9a-f]+\\)\\*$" name)
+      (let* ((id (match-string 1 name))
+             (input-buf (get-buffer (format "*claude-input-%s*" id))))
+        (when-let ((input-win (and input-buf (get-buffer-window input-buf))))
+          (select-window input-win)
+          (when (bound-and-true-p evil-mode)
+            (evil-insert-state)))))))
+
+(add-hook 'window-selection-change-functions #'claude-repl--redirect-to-input)
+
 (defun claude-repl--ensure-input-buffer ()
   "Create input buffer if needed, put in claude-input-mode."
   (let ((root (or (claude-repl--git-root)
