@@ -45,7 +45,7 @@ Uses an MD5 hash of the git root path.  Falls back to the buffer-local
 (defvar-local claude-repl--history-navigating nil
   "Non-nil while history navigation is replacing buffer text.")
 
-(setq claude-repl-hide-input-box t)
+(setq claude-repl-hide-input-box nil)
 
 
 ;; Set to t once Claude has set its terminal title (meaning it's ready).
@@ -369,8 +369,7 @@ Without region: sends relative file path."
   "Send a desktop notification via terminal-notifier."
   (call-process "terminal-notifier" nil 0 nil
                 "-title" title
-                "-message" message
-                "-sound" "default"))
+                "-message" message))
 
 (defun claude-repl--notify-osascript (title message)
   "Send a desktop notification via osascript."
@@ -455,7 +454,9 @@ On first title change, reveal panels (Claude is ready)."
         (when-let ((ws (claude-repl--workspace-for-buffer (current-buffer))))
           (puthash ws t claude-repl--done-workspaces))
         (unless (frame-focus-state)
-          (run-at-time 0.1 nil #'claude-repl--notify "Claude REPL" "Claude has finished working")))
+          (let ((notify-ws (or ws "Claude")))
+            (run-at-time 0.1 nil #'claude-repl--notify "Claude REPL"
+                         (format "%s: Claude ready" notify-ws)))))
       (setq claude-repl--title-thinking thinking))))
 
 (advice-add 'vterm--set-title :before #'claude-repl--on-title-change)
