@@ -161,7 +161,7 @@
 
 ;; Force U+23FA (⏺ Black Circle for Record) to render from a monospace-compatible
 ;; font. Prevents column misalignment in vterm when Claude Code outputs this char.
-(set-fontset-font t #x23FA (font-spec :family "Unifont"))
+(set-fontset-font t '(#x23FA . #x23FA) (font-spec :family "Menlo"))
 
 (setq kill-ring-max 100000)
 (display-battery-mode t)
