@@ -80,6 +80,19 @@ and restores window config from the sessions hash table."
 
 (require 'vterm)
 
+;; Override vterm--get-color so claude vterm buffers get a black background.
+;; Solaire-mode advises this function and face-background ignores buffer-local
+;; remaps, so we hardcode black for claude buffers' default background case.
+(advice-add 'vterm--get-color :around
+            (lambda (fn index &rest args)
+              (let ((result (apply fn index args)))
+                (if (and (not (member :foreground args))
+                         (= index -1)
+                         (not (member :inverse-video args))
+                         (string-match-p "^\\*claude-[0-9a-f]" (buffer-name)))
+                    (claude-repl--grey 15)
+                  result))))
+
 ;; Manual window layout: vterm on the right (full height), input below vterm.
 (defun claude-repl--show-panels ()
   "Display vterm and input panels to the right of the current window.
@@ -538,8 +551,8 @@ Starts claude from the git root."
         (vterm-mode)
         (setq-local truncate-lines nil)
         (setq-local word-wrap t)
-        (face-remap-add-relative 'default :background "#000000")
-        (face-remap-add-relative 'fringe :background "#000000")
+        (face-remap-add-relative 'default :background (claude-repl--grey 15))
+        (face-remap-add-relative 'fringe :background (claude-repl--grey 15))
         (vterm-send-string "clear && claude -c")
         (vterm-send-return)))))
 
