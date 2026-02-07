@@ -413,6 +413,19 @@
                         (message "Deleted 'main' workspace."))
                     (error (message "Failed to delete 'main' workspace: %s" err))))))))
 
+;; Cmd+<numeral> workspace switching in insert mode
+;; Doom binds s-1..s-9 with :n (normal only) on macOS. Add insert state.
+(map! :i "s-1" #'+workspace/switch-to-0
+      :i "s-2" #'+workspace/switch-to-1
+      :i "s-3" #'+workspace/switch-to-2
+      :i "s-4" #'+workspace/switch-to-3
+      :i "s-5" #'+workspace/switch-to-4
+      :i "s-6" #'+workspace/switch-to-5
+      :i "s-7" #'+workspace/switch-to-6
+      :i "s-8" #'+workspace/switch-to-7
+      :i "s-9" #'+workspace/switch-to-8
+      :i "s-0" #'+workspace/switch-to-final)
+
 (unless (display-graphic-p)
   ;; activate mouse-based scrolling
   (xterm-mouse-mode 1)
