@@ -122,8 +122,8 @@ Splits right for vterm (55% of frame), then splits vterm bottom for input (30%).
   (setq-local header-line-format
               "C-RET: send+hide | C-c C-c: clear+save | ESC ESC: interrupt | <up>/<down>: history")
   (face-remap-add-relative 'header-line 'claude-repl-header-line)
-  (face-remap-add-relative 'default :background (claude-repl--grey 30))
-  (face-remap-add-relative 'fringe :background (claude-repl--grey 30))
+  (face-remap-add-relative 'default :background (claude-repl--grey 37))
+  (face-remap-add-relative 'fringe :background (claude-repl--grey 37))
   (add-hook 'after-change-functions #'claude-repl--history-on-change nil t))
 
 (map! :map claude-input-mode-map
