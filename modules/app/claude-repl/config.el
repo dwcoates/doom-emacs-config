@@ -45,7 +45,8 @@ Uses an MD5 hash of the git root path.  Falls back to the buffer-local
 (defvar-local claude-repl--history-navigating nil
   "Non-nil while history navigation is replacing buffer text.")
 
-(setq claude-repl-hide-input-box nil)
+(setq claude-repl-hide-input-box t)
+
 
 ;; Set to t once Claude has set its terminal title (meaning it's ready).
 (defvar-local claude-repl--ready nil
@@ -108,6 +109,8 @@ Splits right for vterm (55% of frame), then splits vterm bottom for input (30%).
     (set-window-buffer input-win claude-repl-input-buffer)
     (set-window-dedicated-p vterm-win t)
     (set-window-dedicated-p input-win t)
+    ;; Lock width to prevent resize-triggered reflow in vterm
+    (set-window-parameter vterm-win 'window-size-fixed 'width)
     (select-window input-win)
     (evil-insert-state)))
 
@@ -443,10 +446,14 @@ On first title change, reveal panels (Claude is ready)."
                              (set-window-dedicated-p win t))
                            (kill-buffer placeholder)))))))
     (let ((thinking (claude-repl--title-has-spinner-p title)))
+      (message "claude-repl title: %S thinking=%s was=%s focus=%s"
+               title thinking claude-repl--title-thinking (frame-focus-state))
       (when (and claude-repl--title-thinking (not thinking))
         (when-let ((ws (claude-repl--workspace-for-buffer (current-buffer))))
           (puthash ws t claude-repl--done-workspaces))
-        (unless (get-buffer-window (current-buffer))
+        (if (frame-focus-state)
+            (message "claude-repl: skipping notification (focused)")
+          (message "claude-repl: SENDING notification")
           (claude-repl--notify "Claude REPL" "Claude has finished working")))
       (setq claude-repl--title-thinking thinking))))
 
@@ -499,9 +506,13 @@ On first title change, reveal panels (Claude is ready)."
     (delete-window win)))
 
 ;; Auto-close orphaned panels: if one is closed, close the other.
+;; Also refresh the hide overlay in case a window change invalidated it.
 (defun claude-repl--sync-panels ()
   "Close any Claude panel whose partner is no longer visible.
-Iterates over all windows so it works across sessions."
+Iterates over all windows so it works across sessions.
+Also refreshes the hide-input-box overlay."
+  (claude-repl--load-session)
+  (claude-repl--update-hide-overlay)
   (dolist (win (window-list))
     (let ((name (buffer-name (window-buffer win))))
       (cond
