@@ -78,7 +78,7 @@ and restores window config from the sessions hash table."
                    :return-window claude-repl-return-window)
              claude-repl--sessions)))
 
-(after! vterm
+(require 'vterm)
 
 ;; Popup rules (input rule first — it's more specific and Doom matches first)
 (set-popup-rule! "^\\*claude-input-[0-9a-f]+" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
@@ -515,4 +515,3 @@ If panels hidden: show both panels."
       :desc "Send 9 to Claude" "o 9" (lambda () (interactive) (claude-repl-send-char "9"))
       :desc "Send 0 to Claude" "o 0" (lambda () (interactive) (claude-repl-send-char "0")))
 
-) ;; end (after! vterm)
