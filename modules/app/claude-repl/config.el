@@ -228,13 +228,16 @@ Resets history browsing index."
       (when-let ((ws (claude-repl--workspace-for-buffer claude-repl-vterm-buffer)))
         (remhash ws claude-repl--done-workspaces))
       (with-current-buffer claude-repl-vterm-buffer
-        ;; For large inputs, send directly to the process via bracketed paste
-        ;; to avoid vterm's character-by-character bottleneck.
+        ;; Use vterm's built-in paste mode for large inputs to avoid
+        ;; truncation from character-by-character sending.
         (if (> (length input) 200)
-            (let ((proc (get-buffer-process (current-buffer))))
-              (process-send-string proc
-                                   (concat "\e[200~" input "\e[201~"))
-              (process-send-string proc ".\n"))
+            (let ((buf (current-buffer)))
+              (vterm-send-string input t)
+              (run-at-time 0.1 nil
+                           (lambda ()
+                             (when (buffer-live-p buf)
+                               (with-current-buffer buf
+                                 (vterm-send-return))))))
           (vterm-send-string input)
           (vterm-send-return)))
       (with-current-buffer claude-repl-input-buffer
@@ -535,6 +538,8 @@ Starts claude from the git root."
         (vterm-mode)
         (setq-local truncate-lines nil)
         (setq-local word-wrap t)
+        (face-remap-add-relative 'default :background "#000000")
+        (face-remap-add-relative 'fringe :background "#000000")
         (vterm-send-string "clear && claude -c")
         (vterm-send-return)))))
 
