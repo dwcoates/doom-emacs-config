@@ -70,7 +70,7 @@ and restores window config from the sessions hash table."
           claude-repl--saved-window-config (plist-get session :saved-window-config)
           claude-repl-return-window (plist-get session :return-window))))
 
-(defun claude-repl--save-session ()
+(defun clauderepl--save-session ()
   "Save the current global state back to the sessions hash table."
   (let ((id (claude-repl--workspace-id)))
     (puthash id
@@ -143,8 +143,34 @@ Splits right for vterm (55% of frame), then splits vterm bottom for input (30%).
       :n  "C-p"       (cmd! (claude-repl--load-session)
                             (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
                               (with-current-buffer claude-repl-vterm-buffer (vterm-send-up))))
-      :i  "<up>"        #'claude-repl--history-prev
-      :i  "<down>"      #'claude-repl--history-next)
+      :ni "<up>"        #'claude-repl--history-prev
+      :ni "<down>"      #'claude-repl--history-next)
+
+;; Input history persistence
+(defun claude-repl--history-file ()
+  "Return the path to the history file for the current project."
+  (let ((root (or (claude-repl--git-root)
+                  claude-repl--project-root
+                  default-directory)))
+    (expand-file-name ".claude-repl-history" root)))
+
+(defun claude-repl--history-save ()
+  "Write input history to disk."
+  (when claude-repl-input-buffer
+    (let ((history (buffer-local-value 'claude-repl--input-history claude-repl-input-buffer))
+          (file (claude-repl--history-file)))
+      (when history
+        (with-temp-file file
+          (prin1 history (current-buffer)))))))
+
+(defun claude-repl--history-restore ()
+  "Load input history from disk into the current buffer."
+  (let ((file (claude-repl--history-file)))
+    (when (file-exists-p file)
+      (setq claude-repl--input-history
+            (with-temp-buffer
+              (insert-file-contents file)
+              (read (current-buffer)))))))
 
 ;; Input history functions
 (defun claude-repl--history-push ()
@@ -265,8 +291,8 @@ Without region: sends relative file path."
   (claude-repl--load-session)
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
     (with-current-buffer claude-repl-vterm-buffer
-      (vterm-send "<escape>")
-      (vterm-send "<escape>"))))
+      (vterm-send-key "<escape>")
+      (vterm-send-key "<escape>"))))
 
 ;; Hide overlay functions
 (defun claude-repl--update-hide-overlay ()
@@ -310,6 +336,7 @@ Without region: sends relative file path."
   "Detect thinking->idle transition from vterm title changes."
   (when (string-match-p "^\\*claude-[0-9a-f]" (buffer-name))
     (let ((thinking (claude-repl--title-has-spinner-p title)))
+      (message "claude-repl title: %S thinking=%s was=%s" title thinking claude-repl--title-thinking)
       (when (and claude-repl--title-thinking (not thinking))
         (message "Claude is done.")
         (start-process "claude-notify" nil
@@ -417,7 +444,8 @@ Iterates over all windows so it works across sessions."
     (with-current-buffer claude-repl-input-buffer
       (setq-local claude-repl--project-root root)
       (unless (eq major-mode 'claude-input-mode)
-        (claude-input-mode)))))
+        (claude-input-mode)
+        (claude-repl--history-restore)))))
 
 (defun claude-repl--ensure-vterm-buffer ()
   "Create vterm buffer running claude if needed.
@@ -488,6 +516,7 @@ If panels hidden: show both panels."
   "Kill Claude REPL buffers and windows without confirmation."
   (interactive)
   (claude-repl--load-session)
+  (claude-repl--history-save)
   (claude-repl--disable-hide-overlay)
   (when-let ((win (get-buffer-window claude-repl-input-buffer)))
     (delete-window win))
