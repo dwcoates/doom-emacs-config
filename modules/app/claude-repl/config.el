@@ -70,7 +70,7 @@ and restores window config from the sessions hash table."
           claude-repl--saved-window-config (plist-get session :saved-window-config)
           claude-repl-return-window (plist-get session :return-window))))
 
-(defun clauderepl--save-session ()
+(defun claude-repl--save-session ()
   "Save the current global state back to the sessions hash table."
   (let ((id (claude-repl--workspace-id)))
     (puthash id
@@ -323,14 +323,37 @@ Without region: sends relative file path."
   (claude-repl--update-hide-overlay)
   (message "Claude input box hiding %s" (if claude-repl-hide-input-box "enabled" "disabled")))
 
+;; Notifications
+(setq claude-repl--notifier
+      (or (executable-find "terminal-notifier")
+          (progn
+            (message "claude-repl: terminal-notifier not found, falling back to osascript")
+            nil)))
+
+(defun claude-repl--notify (title message)
+  "Send a desktop notification with TITLE and MESSAGE."
+  (if claude-repl--notifier
+      (start-process "claude-notify" nil
+                     claude-repl--notifier
+                     "-title" title
+                     "-message" message
+                     "-sender" "org.gnu.Emacs"
+                     "-sound" "default")
+    (start-process "claude-notify" nil
+                   "osascript" "-e"
+                   (format "display notification %S with title %S"
+                           message title))))
+
 ;; Title-based "Claude is done" detection.
 ;; Claude Code sets the terminal title to "<spinner> Claude Code" while thinking
 ;; and plain "Claude Code" when idle.  We poll via vterm--set-title advice.
 (setq claude-repl--title-thinking nil)
 
 (defun claude-repl--title-has-spinner-p (title)
-  "Return non-nil if TITLE contains Claude Code's braille spinner."
-  (string-match-p "^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]" title))
+  "Return non-nil if TITLE contains a spinner (i.e. not the idle ✳ icon)."
+  (and (> (length title) 0)
+       (not (string-prefix-p "✳" title))
+       (string-match-p "^[^[:ascii:]]" title)))
 
 (defun claude-repl--on-title-change (title)
   "Detect thinking->idle transition from vterm title changes."
@@ -339,9 +362,8 @@ Without region: sends relative file path."
       (message "claude-repl title: %S thinking=%s was=%s" title thinking claude-repl--title-thinking)
       (when (and claude-repl--title-thinking (not thinking))
         (message "Claude is done.")
-        (start-process "claude-notify" nil
-                       "osascript" "-e"
-                       "display notification \"Claude has finished working\" with title \"Claude REPL\""))
+        (unless (get-buffer-window (current-buffer))
+          (claude-repl--notify "Claude REPL" "Claude has finished working")))
       (setq claude-repl--title-thinking thinking))))
 
 (advice-add 'vterm--set-title :before #'claude-repl--on-title-change)
