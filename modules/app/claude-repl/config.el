@@ -365,25 +365,28 @@ Without region: sends relative file path."
   (message "Claude input box hiding %s" (if claude-repl-hide-input-box "enabled" "disabled")))
 
 ;; Notifications
-(setq claude-repl--notifier
-      (or (executable-find "terminal-notifier")
-          (progn
-            (message "claude-repl: terminal-notifier not found, falling back to osascript")
-            nil)))
+(defun claude-repl--notify-terminal-notifier (title message)
+  "Send a desktop notification via terminal-notifier."
+  (call-process "terminal-notifier" nil 0 nil
+                "-title" title
+                "-message" message
+                "-sound" "default"))
+
+(defun claude-repl--notify-osascript (title message)
+  "Send a desktop notification via osascript."
+  (start-process "claude-notify" nil
+                 "osascript" "-e"
+                 (format "display notification %S with title %S sound name \"default\""
+                         message title)))
+
+(setq claude-repl--notify-fn
+      (if (executable-find "terminal-notifier")
+          #'claude-repl--notify-terminal-notifier
+        #'claude-repl--notify-osascript))
 
 (defun claude-repl--notify (title message)
   "Send a desktop notification with TITLE and MESSAGE."
-  (if claude-repl--notifier
-      (start-process "claude-notify" nil
-                     claude-repl--notifier
-                     "-title" title
-                     "-message" message
-                     "-sender" "org.gnu.Emacs"
-                     "-sound" "default")
-    (start-process "claude-notify" nil
-                   "osascript" "-e"
-                   (format "display notification %S with title %S"
-                           message title))))
+  (funcall claude-repl--notify-fn title message))
 
 ;; Workspace tab indicator for Claude status
 (setq claude-repl--done-workspaces (or (bound-and-true-p claude-repl--done-workspaces)
@@ -446,15 +449,13 @@ On first title change, reveal panels (Claude is ready)."
                              (set-window-dedicated-p win t))
                            (kill-buffer placeholder)))))))
     (let ((thinking (claude-repl--title-has-spinner-p title)))
-      (message "claude-repl title: %S thinking=%s was=%s focus=%s"
-               title thinking claude-repl--title-thinking (frame-focus-state))
       (when (and claude-repl--title-thinking (not thinking))
+        ;; Claude just finished — refresh hide overlay and notify
+        (claude-repl--update-hide-overlay)
         (when-let ((ws (claude-repl--workspace-for-buffer (current-buffer))))
           (puthash ws t claude-repl--done-workspaces))
-        (if (frame-focus-state)
-            (message "claude-repl: skipping notification (focused)")
-          (message "claude-repl: SENDING notification")
-          (claude-repl--notify "Claude REPL" "Claude has finished working")))
+        (unless (frame-focus-state)
+          (run-at-time 0.1 nil #'claude-repl--notify "Claude REPL" "Claude has finished working")))
       (setq claude-repl--title-thinking thinking))))
 
 (advice-add 'vterm--set-title :before #'claude-repl--on-title-change)

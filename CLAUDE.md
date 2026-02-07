@@ -100,3 +100,5 @@ Set these environment variables for full functionality:
 - Idle GC collection every 5 seconds
 - Increased GC threshold during minibuffer operations
 - Projectile uses 'alien indexing for large projects
+
+DO NOT MAKE CHANGES TO CODE UNLESS EXPLICITLY ASKED OR SUGGESTED. If the prompt is a question or aside, do not come to own conclusions on changes to make -- answer question and, if you feel like it, suggest the change inferred while answering.
