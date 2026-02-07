@@ -624,6 +624,22 @@ If panels hidden: show both panels."
     (claude-repl--show-panels)
     (claude-repl--save-session)))
 
+(defun claude-repl-focus-input ()
+  "Focus the Claude input buffer. If Claude isn't running, start it (same as `claude-repl')."
+  (interactive)
+  (claude-repl--load-session)
+  (if (not (claude-repl--vterm-running-p))
+      (claude-repl)
+    (unless (claude-repl--panels-visible-p)
+      (setq claude-repl--saved-window-config (current-window-configuration))
+      (claude-repl--ensure-input-buffer)
+      (claude-repl--show-panels)
+      (claude-repl--save-session))
+    (when-let ((win (get-buffer-window claude-repl-input-buffer)))
+      (select-window win)
+      (when (bound-and-true-p evil-mode)
+        (evil-insert-state)))))
+
 (defun claude-repl-cycle ()
   "Send backtab to Claude vterm to cycle through options."
   (interactive)
@@ -638,6 +654,7 @@ If panels hidden: show both panels."
 ;; Keybindings
 (map! :leader
       :desc "Claude REPL" "o c" #'claude-repl
+      :desc "Claude input" "o v" #'claude-repl-focus-input
       :desc "Kill Claude" "o C" #'claude-repl-kill
       :desc "Claude explain" "o e" #'claude-repl-explain
       :desc "Claude explain line" "o E" #'claude-repl-explain-line
@@ -654,6 +671,4 @@ If panels hidden: show both panels."
       :desc "Send 0 to Claude" "o 0" (lambda () (interactive) (claude-repl-send-char "0")))
 
 
-;; FIXME: SPC o v for switching to input box (in insert mode). same as SPC o c if Claude is not already open
-;; TODO: turn off jetbrains and bounce emacs.
-;; FIXME: we should remove the changes to projectile file seach we added for making things more searchable, and instead apply it to workspace BUFFER switch (SPC ,)
+;; FIXME: override emoji
