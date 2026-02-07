@@ -107,7 +107,7 @@ Splits right for vterm (55% of frame), then splits vterm bottom for input (30%).
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
   (setq-local header-line-format
-              " Claude Input | RET: send | C-RET: send+hide | S-RET: newline | C-c C-c: clear | ESC ESC: interrupt | C-c: y/n/r/q")
+              "C-RET: send+hide | C-c C-c: clear+save | ESC ESC: interrupt | <up>/<down>: history")
   (face-remap-add-relative 'header-line 'claude-repl-header-line)
   (face-remap-add-relative 'default :background (claude-repl--grey 30))
   (face-remap-add-relative 'fringe :background (claude-repl--grey 30))
@@ -228,8 +228,14 @@ Resets history browsing index."
       (when-let ((ws (claude-repl--workspace-for-buffer claude-repl-vterm-buffer)))
         (remhash ws claude-repl--done-workspaces))
       (with-current-buffer claude-repl-vterm-buffer
-        (vterm-send-string input)
-        (vterm-send-return))
+        ;; For large inputs, send directly to the process via bracketed paste
+        ;; to avoid vterm's character-by-character bottleneck.
+        (if (> (length input) 200)
+            (let ((proc (get-buffer-process (current-buffer))))
+              (process-send-string proc
+                                   (concat "\e[200~" input "\e[201~\n")))
+          (vterm-send-string input)
+          (vterm-send-return)))
       (with-current-buffer claude-repl-input-buffer
         (claude-repl--history-push)
         (erase-buffer))
@@ -401,9 +407,7 @@ Without region: sends relative file path."
   "Detect thinking->idle transition from vterm title changes."
   (when (string-match-p "^\\*claude-[0-9a-f]" (buffer-name))
     (let ((thinking (claude-repl--title-has-spinner-p title)))
-      (message "claude-repl title: %S thinking=%s was=%s" title thinking claude-repl--title-thinking)
       (when (and claude-repl--title-thinking (not thinking))
-        (message "Claude is done.")
         (when-let ((ws (claude-repl--workspace-for-buffer (current-buffer))))
           (puthash ws t claude-repl--done-workspaces))
         (unless (get-buffer-window (current-buffer))
@@ -625,20 +629,31 @@ If panels hidden: show both panels."
     (claude-repl--save-session)))
 
 (defun claude-repl-focus-input ()
-  "Focus the Claude input buffer. If Claude isn't running, start it (same as `claude-repl')."
+  "Focus the Claude input buffer, or return to previous window if already there.
+If Claude isn't running, start it (same as `claude-repl')."
   (interactive)
   (claude-repl--load-session)
-  (if (not (claude-repl--vterm-running-p))
-      (claude-repl)
+  (cond
+   ;; Already in the input buffer — jump back
+   ((eq (current-buffer) claude-repl-input-buffer)
+    (if (and claude-repl-return-window (window-live-p claude-repl-return-window))
+        (select-window claude-repl-return-window)
+      (evil-window-left 1)))
+   ;; Not running — start fresh
+   ((not (claude-repl--vterm-running-p))
+    (claude-repl))
+   ;; Running but panels hidden — show them
+   (t
     (unless (claude-repl--panels-visible-p)
       (setq claude-repl--saved-window-config (current-window-configuration))
       (claude-repl--ensure-input-buffer)
       (claude-repl--show-panels)
       (claude-repl--save-session))
+    (setq claude-repl-return-window (selected-window))
     (when-let ((win (get-buffer-window claude-repl-input-buffer)))
       (select-window win)
       (when (bound-and-true-p evil-mode)
-        (evil-insert-state)))))
+        (evil-insert-state))))))
 
 (defun claude-repl-cycle ()
   "Send backtab to Claude vterm to cycle through options."

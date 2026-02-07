@@ -401,18 +401,16 @@
   (tab-bar-mode 1)
 
   ;; Delete the "main" workspace after session restore.
-  ;; Uses emacs-startup-hook + idle timer to ensure all workspace restoration is complete.
-  (add-hook 'emacs-startup-hook
-            (lambda ()
-              (run-with-idle-timer 1 nil
-                                   (lambda ()
-                                     (if (member "main" (+workspace-list-names))
-                                         (condition-case err
-                                             (progn
-                                               (+workspace-delete "main")
-                                               (message "Deleted 'main' workspace"))
-                                           (error (message "Failed to delete 'main' workspace: %s" err)))
-                                       (message "'main' workspace not found, nothing to delete")))))))
+  (add-hook 'persp-after-load-state-functions
+            (lambda (&rest _)
+              (let ((names (+workspace-list-names)))
+                (message "persp-after-load: workspaces = %S" names)
+                (when (member "main" names)
+                  (condition-case err
+                      (progn
+                        (+workspace-delete "main")
+                        (message "Deleted 'main' workspace. Remaining: %S" (+workspace-list-names)))
+                    (error (message "Failed to delete 'main' workspace: %s" err))))))))
 
 (unless (display-graphic-p)
   ;; activate mouse-based scrolling
