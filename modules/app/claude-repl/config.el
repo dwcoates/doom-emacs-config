@@ -117,15 +117,13 @@ Splits right for vterm (55% of frame), then splits vterm bottom for input (30%).
       :ni "RET"       #'claude-repl-send
       :ni "S-RET"     #'newline
       :ni "C-RET"     #'claude-repl-send-and-hide
+      :ni "C-c C-k"   #'claude-repl-interrupt
       :ni "C-c C-c"   (cmd! (claude-repl--history-push) (erase-buffer) (evil-insert-state))
       :ni "C-c y"     (cmd! (claude-repl-send-char "y"))
       :ni "C-c n"     (cmd! (claude-repl-send-char "n"))
       :ni "C-c r"     #'claude-repl-restart
       :ni "C-c q"     #'claude-repl-kill
-      :ni "C-S-m"     (cmd! (claude-repl--load-session)
-                            (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
-                              (with-current-buffer claude-repl-vterm-buffer
-                                (vterm-send-key "<backtab>"))))
+      :ni "C-S-m"     #'claude-repl-cycle
       :ni "C-S-1"     (cmd! (claude-repl-send-char "1"))
       :ni "C-S-2"     (cmd! (claude-repl-send-char "2"))
       :ni "C-S-3"     (cmd! (claude-repl-send-char "3"))
@@ -286,6 +284,16 @@ Without region: sends relative file path."
                     (deactivate-mark)
                     (format "please explain %s:%d-%d" rel-path start-line end-line))
                 (format "please explain %s" rel-path))))
+    (claude-repl--send-to-claude msg)))
+
+(defun claude-repl-explain-line ()
+  "Ask Claude to explain the current line."
+  (interactive)
+  (claude-repl--load-session)
+  (let* ((rel-path (file-relative-name (buffer-file-name)
+                                        (or (claude-repl--git-root) default-directory)))
+         (line (line-number-at-pos (point)))
+         (msg (format "please explain %s:%d" rel-path line)))
     (claude-repl--send-to-claude msg)))
 
 (defun claude-repl-interrupt ()
@@ -479,17 +487,20 @@ Iterates over all windows so it works across sessions."
 
 (add-hook 'window-configuration-change-hook #'claude-repl--schedule-sync)
 
-;; Redirect focus from vterm output to input buffer
+;; Redirect focus from vterm output to input buffer (keyboard only, not mouse)
 (defun claude-repl--redirect-to-input (_frame)
-  "If the selected window shows a Claude vterm buffer, jump to its input window."
-  (let ((name (buffer-name (window-buffer (selected-window)))))
-    (when (string-match "^\\*claude-\\([0-9a-f]+\\)\\*$" name)
-      (let* ((id (match-string 1 name))
-             (input-buf (get-buffer (format "*claude-input-%s*" id))))
-        (when-let ((input-win (and input-buf (get-buffer-window input-buf))))
-          (select-window input-win)
-          (when (bound-and-true-p evil-mode)
-            (evil-insert-state)))))))
+  "If the selected window shows a Claude vterm buffer, jump to its input window.
+Only redirects for keyboard navigation; mouse clicks are allowed through
+so the user can select and copy text from the output."
+  (unless (mouse-event-p last-input-event)
+    (let ((name (buffer-name (window-buffer (selected-window)))))
+      (when (string-match "^\\*claude-\\([0-9a-f]+\\)\\*$" name)
+        (let* ((id (match-string 1 name))
+               (input-buf (get-buffer (format "*claude-input-%s*" id))))
+          (when-let ((input-win (and input-buf (get-buffer-window input-buf))))
+            (select-window input-win)
+            (when (bound-and-true-p evil-mode)
+              (evil-insert-state))))))))
 
 (add-hook 'window-selection-change-functions #'claude-repl--redirect-to-input)
 
@@ -613,11 +624,23 @@ If panels hidden: show both panels."
     (claude-repl--show-panels)
     (claude-repl--save-session)))
 
+(defun claude-repl-cycle ()
+  "Send backtab to Claude vterm to cycle through options."
+  (interactive)
+  (claude-repl--load-session)
+  (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
+    (with-current-buffer claude-repl-vterm-buffer
+      (vterm-send-key "<backtab>"))))
+
+;; Global C-S-m binding
+(map! :nvi "C-S-m" #'claude-repl-cycle)
+
 ;; Keybindings
 (map! :leader
       :desc "Claude REPL" "o c" #'claude-repl
       :desc "Kill Claude" "o C" #'claude-repl-kill
       :desc "Claude explain" "o e" #'claude-repl-explain
+      :desc "Claude explain line" "o E" #'claude-repl-explain-line
       :desc "Claude interrupt" "o i" #'claude-repl-interrupt
       :desc "Send 1 to Claude" "o 1" (lambda () (interactive) (claude-repl-send-char "1"))
       :desc "Send 2 to Claude" "o 2" (lambda () (interactive) (claude-repl-send-char "2"))
@@ -633,3 +656,4 @@ If panels hidden: show both panels."
 
 ;; FIXME: SPC o v for switching to input box (in insert mode). same as SPC o c if Claude is not already open
 ;; TODO: turn off jetbrains and bounce emacs.
+;; FIXME: we should remove the changes to projectile file seach we added for making things more searchable, and instead apply it to workspace BUFFER switch (SPC ,)

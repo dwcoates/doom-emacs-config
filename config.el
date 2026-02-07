@@ -145,12 +145,19 @@
       :desc "Close Doom popup" "w P" #'+dwc/close-doom-popup)
 
 ;; Some UI doodads
+(defvar +dwc/font 'menlo
+  "Which monospace font to use. Options: 'jetbrains, 'menlo, 'dejavu.")
+
 (display-time)
-(set-face-attribute 'default nil
-                    :width 'normal
-                    :height 125
-                    :family "JetBrains Mono"
-                    )
+(when +dwc/font
+ (set-face-attribute 'default nil
+                     :width 'normal
+                     :height 125
+                     :family (pcase +dwc/font
+                               ('menlo "Menlo")
+                               ('dejavu "DejaVu Sans Mono")
+                               (_ "JetBrains Mono")))
+ )
 
 (setq kill-ring-max 100000)
 (display-battery-mode t)
@@ -183,6 +190,11 @@
   (setq lsp-log-io nil))  ; Only enable when debugging LSP issues
 
 (setq confirm-kill-emacs nil)
+
+(defadvice! +dwc/save-before-restart-a (&rest _)
+  "Save all buffers without prompting before restarting Emacs."
+  :before #'doom/restart
+  (save-some-buffers nil t))
 
 (after! evil
   (setq evil-ex-search-persistent-highlight nil))
@@ -386,7 +398,21 @@
   (setq tab-bar-show t
         tab-bar-new-button-show nil
         tab-bar-close-button-show nil)
-  (tab-bar-mode 1))
+  (tab-bar-mode 1)
+
+  ;; Delete the "main" workspace after session restore.
+  ;; Uses emacs-startup-hook + idle timer to ensure all workspace restoration is complete.
+  (add-hook 'emacs-startup-hook
+            (lambda ()
+              (run-with-idle-timer 1 nil
+                                   (lambda ()
+                                     (if (member "main" (+workspace-list-names))
+                                         (condition-case err
+                                             (progn
+                                               (+workspace-delete "main")
+                                               (message "Deleted 'main' workspace"))
+                                           (error (message "Failed to delete 'main' workspace: %s" err)))
+                                       (message "'main' workspace not found, nothing to delete")))))))
 
 (unless (display-graphic-p)
   ;; activate mouse-based scrolling
