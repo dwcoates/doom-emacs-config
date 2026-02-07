@@ -287,16 +287,14 @@
 (after! ivy
   (setq ivy-format-function #'ivy-format-function-line)
 
-  ;; Enable full path matching for projectile file search
-  ;; ivy--regex-ignore-order: space-separated terms match anywhere in path, any order
-  ;; e.g., "comp btn" matches "src/components/Button.tsx"
+  ;; Enable fuzzy matching for workspace buffer switch (SPC ,)
+  ;; ivy--regex-ignore-order: space-separated terms match anywhere, any order
   (setq ivy-re-builders-alist
-        '((counsel-projectile-find-file . ivy--regex-ignore-order)
-          (projectile-find-file . ivy--regex-ignore-order)
+        '((persp-switch-to-buffer . ivy--regex-ignore-order)
           (t . ivy--regex-plus)))
 
-  ;; Grey out directory path, keep filename normal
-  (defun +dwc/ivy-projectile-file-transformer (candidate)
+  ;; Grey out directory path, keep filename normal in buffer list
+  (defun +dwc/ivy-buffer-transformer (candidate)
     "Display directory path in grey, filename in default face."
     (let* ((dir (file-name-directory candidate))
            (file (file-name-nondirectory candidate)))
@@ -304,10 +302,8 @@
           (concat (propertize dir 'face 'font-lock-comment-face) file)
         candidate)))
 
-  (ivy-configure 'counsel-projectile-find-file
-    :display-transformer-fn #'+dwc/ivy-projectile-file-transformer)
-  (ivy-configure 'projectile-find-file
-    :display-transformer-fn #'+dwc/ivy-projectile-file-transformer)
+  (ivy-configure 'persp-switch-to-buffer
+    :display-transformer-fn #'+dwc/ivy-buffer-transformer)
 
   ;; Persistent highlight for ivy-call previews
   (defvar +dwc/ivy-preview-overlay nil
