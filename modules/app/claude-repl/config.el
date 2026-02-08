@@ -105,6 +105,7 @@ Splits right for vterm (55% of frame), then splits vterm bottom for input (30%).
   (let* ((work-win (or claude-repl-return-window (selected-window)))
          (vterm-win (split-window work-win (round (* 0.6 (window-total-width work-win))) 'right))
          (input-win (split-window vterm-win (round (* -0.15 (window-total-height vterm-win))) 'below)))
+    (claude-repl--refresh-vterm)
     (set-window-buffer vterm-win claude-repl-vterm-buffer)
     (set-window-buffer input-win claude-repl-input-buffer)
     (set-window-dedicated-p vterm-win t)
@@ -127,7 +128,7 @@ Splits right for vterm (55% of frame), then splits vterm bottom for input (30%).
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
   (setq-local header-line-format
-              "C-RET: send+hide | C-c C-c: clear+save | ESC ESC: interrupt | <up>/<down>: history")
+              "C-RET: send+hide | C-c C-c: clear+save | C-c C-k: interrupt | <up>/<down>: history")
   (face-remap-add-relative 'header-line 'claude-repl-header-line)
   (face-remap-add-relative 'default :background (claude-repl--grey 37))
   (face-remap-add-relative 'fringe :background (claude-repl--grey 37))
@@ -257,9 +258,11 @@ Resets history browsing index."
                            (lambda ()
                              (when (buffer-live-p buf)
                                (with-current-buffer buf
-                                 (vterm-send-return))))))
+                                 (vterm-send-return)
+                                 (claude-repl--refresh-vterm))))))
           (vterm-send-string input)
-          (vterm-send-return)))
+          (vterm-send-return)
+          (claude-repl--refresh-vterm)))
       (with-current-buffer claude-repl-input-buffer
         (claude-repl--history-push)
         (erase-buffer))
@@ -327,7 +330,7 @@ Without region: sends relative file path."
     (claude-repl--send-to-claude msg)))
 
 (defun claude-repl-interrupt ()
-  "Send interrupt (C-c) to Claude vterm."
+  "Send Escape to interrupt Claude."
   (interactive)
   (claude-repl--load-session)
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
@@ -408,7 +411,7 @@ Without region: sends relative file path."
               for i to (length names)
               collect
               (let ((indicator (if (gethash name claude-repl--done-workspaces)
-                                   "✓"
+                                   "✅"
                                  (number-to-string (1+ i)))))
                 (propertize (format " [%s] %s " indicator name)
                             'face (if (equal current-name name)
@@ -449,7 +452,8 @@ On first title change, reveal panels (Claude is ready)."
                            (kill-buffer placeholder)))))))
     (let ((thinking (claude-repl--title-has-spinner-p title)))
       (when (and claude-repl--title-thinking (not thinking))
-        ;; Claude just finished — refresh hide overlay and notify
+        ;; Claude just finished — refresh display
+        (claude-repl--refresh-vterm)
         (claude-repl--update-hide-overlay)
         (when-let ((ws (claude-repl--workspace-for-buffer (current-buffer))))
           (puthash ws t claude-repl--done-workspaces))
@@ -460,6 +464,36 @@ On first title change, reveal panels (Claude is ready)."
       (setq claude-repl--title-thinking thinking))))
 
 (advice-add 'vterm--set-title :before #'claude-repl--on-title-change)
+
+(defun claude-repl--do-refresh ()
+  "Low-level refresh of the current vterm buffer.
+Must be called with a vterm-mode buffer current."
+  (redisplay t))
+
+(defun claude-repl--refresh-vterm ()
+  "Refresh the claude vterm display.
+Works from any buffer (loads session) or from within the vterm buffer itself."
+  (if (eq major-mode 'vterm-mode)
+      (claude-repl--do-refresh)
+    (claude-repl--load-session)
+    (when (and claude-repl-vterm-buffer
+               (buffer-live-p claude-repl-vterm-buffer))
+      (with-current-buffer claude-repl-vterm-buffer
+        (when (eq major-mode 'vterm-mode)
+          (claude-repl--do-refresh))))))
+
+;; Refresh vterm on frame focus
+(defun claude-repl--on-frame-focus ()
+  "Refresh claude vterm when Emacs regains focus."
+  (when (frame-focus-state)
+    (claude-repl--refresh-vterm)))
+
+(add-function :after after-focus-change-function #'claude-repl--on-frame-focus)
+
+;; Refresh vterm on workspace switch
+(when (modulep! :ui workspaces)
+  (add-hook 'persp-activated-functions
+            (lambda (&rest _) (claude-repl--refresh-vterm))))
 
 (defun claude-repl--after-vterm-redraw (&rest _)
   "Apply hide overlay after vterm redraws."
@@ -642,6 +676,7 @@ If panels hidden: show both panels."
       (claude-repl--save-session))
      ;; Panels hidden - show both
      (t
+      (claude-repl--refresh-vterm)
       (setq claude-repl--saved-window-config (current-window-configuration))
       (claude-repl--ensure-input-buffer)
       (claude-repl--show-panels)
@@ -747,3 +782,6 @@ If Claude isn't running, start it (same as `claude-repl')."
       :desc "Send 8 to Claude" "o 8" (lambda () (interactive) (claude-repl-send-char "8"))
       :desc "Send 9 to Claude" "o 9" (lambda () (interactive) (claude-repl-send-char "9"))
       :desc "Send 0 to Claude" "o 0" (lambda () (interactive) (claude-repl-send-char "0")))
+
+
+;; FIXME: vterm-clear &&  vterm-reset-cursor-point
