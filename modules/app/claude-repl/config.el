@@ -83,20 +83,19 @@ and restores window config from the sessions hash table."
                    :return-window claude-repl-return-window)
              claude-repl--sessions)))
 
-(require 'vterm)
-
 ;; Override vterm--get-color so claude vterm buffers get a black background.
 ;; Solaire-mode advises this function and face-background ignores buffer-local
 ;; remaps, so we hardcode black for claude buffers' default background case.
-(advice-add 'vterm--get-color :around
-            (lambda (fn index &rest args)
-              (let ((result (apply fn index args)))
-                (if (and (not (member :foreground args))
-                         (= index -1)
-                         (not (member :inverse-video args))
-                         (string-match-p "^\\*claude-[0-9a-f]" (buffer-name)))
-                    (claude-repl--grey 15)
-                  result))))
+(after! vterm
+  (advice-add 'vterm--get-color :around
+              (lambda (fn index &rest args)
+                (let ((result (apply fn index args)))
+                  (if (and (not (member :foreground args))
+                           (= index -1)
+                           (not (member :inverse-video args))
+                           (string-match-p "^\\*claude-[0-9a-f]" (buffer-name)))
+                      (claude-repl--grey 15)
+                    result)))))
 
 ;; Manual window layout: vterm on the right (full height), input below vterm.
 (defun claude-repl--show-panels ()
@@ -463,7 +462,8 @@ On first title change, reveal panels (Claude is ready)."
                          (format "%s: Claude ready" notify-ws)))))
       (setq claude-repl--title-thinking thinking))))
 
-(advice-add 'vterm--set-title :before #'claude-repl--on-title-change)
+(after! vterm
+  (advice-add 'vterm--set-title :before #'claude-repl--on-title-change))
 
 (defun claude-repl--do-refresh ()
   "Low-level refresh of the current vterm buffer.
@@ -478,9 +478,15 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
                (claude-repl--load-session)
                claude-repl-vterm-buffer)))
     (when (and buf (buffer-live-p buf))
-      (with-current-buffer buf
-        (when (eq major-mode 'vterm-mode)
-          (claude-repl--do-refresh)))
+      (let ((vterm-win (get-buffer-window buf))
+            (orig-win (selected-window)))
+        (with-current-buffer buf
+          (when (eq major-mode 'vterm-mode)
+            (claude-repl--do-refresh)))
+        ;; Briefly select the vterm window to fix scroll position
+        (when (and vterm-win (not (eq vterm-win orig-win)))
+          (select-window vterm-win 'norecord)
+          (select-window orig-win 'norecord)))
       (when-let ((ws (claude-repl--workspace-for-buffer buf)))
         (remhash ws claude-repl--done-workspaces)))))
 
