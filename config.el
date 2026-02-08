@@ -164,6 +164,7 @@
 (unless standard-display-table
   (setq standard-display-table (make-display-table)))
 (aset standard-display-table #x23FA (vconcat "●"))
+(aset standard-display-table #x23F8 (vconcat "▮▮"))
 
 (setq kill-ring-max 100000)
 (display-battery-mode t)
