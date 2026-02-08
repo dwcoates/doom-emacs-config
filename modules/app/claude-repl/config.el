@@ -402,7 +402,7 @@ Without region: sends relative file path."
              return (safe-persp-name persp))))
 
 (defun claude-repl--tabline-advice (&optional names)
-  "Override for `+workspace--tabline' to show ✓ for workspaces where Claude is done."
+  "Override for `+workspace--tabline' to show ✅ for workspaces where Claude is done."
   (let* ((names (or names (+workspace-list-names)))
          (current-name (+workspace-current-name)))
     (mapconcat
@@ -471,16 +471,18 @@ Must be called with a vterm-mode buffer current."
   (redisplay t))
 
 (defun claude-repl--refresh-vterm ()
-  "Refresh the claude vterm display.
+  "Refresh the claude vterm display and clear the done indicator.
 Works from any buffer (loads session) or from within the vterm buffer itself."
-  (if (eq major-mode 'vterm-mode)
-      (claude-repl--do-refresh)
-    (claude-repl--load-session)
-    (when (and claude-repl-vterm-buffer
-               (buffer-live-p claude-repl-vterm-buffer))
-      (with-current-buffer claude-repl-vterm-buffer
+  (let ((buf (if (eq major-mode 'vterm-mode)
+                 (current-buffer)
+               (claude-repl--load-session)
+               claude-repl-vterm-buffer)))
+    (when (and buf (buffer-live-p buf))
+      (with-current-buffer buf
         (when (eq major-mode 'vterm-mode)
-          (claude-repl--do-refresh))))))
+          (claude-repl--do-refresh)))
+      (when-let ((ws (claude-repl--workspace-for-buffer buf)))
+        (remhash ws claude-repl--done-workspaces)))))
 
 ;; Refresh vterm on frame focus
 (defun claude-repl--on-frame-focus ()
