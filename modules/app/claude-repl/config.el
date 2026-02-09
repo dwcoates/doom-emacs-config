@@ -50,10 +50,17 @@ Uses an MD5 hash of the git root path.  Falls back to the buffer-local
 (defvar claude-repl-skip-permissions t
   "When non-nil, start Claude with --dangerously-skip-permissions and prepend the command prefix metaprompt.")
 
+(defvar claude-repl-prefix-period 5
+  "Number of prompts between metaprompt prefix injections.
+The prefix is sent on the first prompt and every Nth prompt thereafter.")
+
+(defvar claude-repl--prefix-counter 0
+  "Counts prompts since the last prefix injection.")
+
 (defvar claude-repl-command-prefix "DO NOT run any mutating git commands (push, reset, checkout, etc) without EXPLICIT PERMISSION from ME. Do not INSTALL or UNINSTALL anything without my EXPLICIT PERMISSION. Do not operate on any files OUTSIDE OF PROJECT without MY EXPLICIT PERMISSION. Do not take any actions unless it FOLLOWS DIRECTLY from an action EXPLICITLY REQUESTED in the following prompt "
   "When non-nil, this string is prepended (with a newline) before every input sent to Claude.")
 
-(defvar claude-repl--command-prefix (format "<<*this is a metaprompt*: %s *metaprompt over* (rest is actual user request that you should respond to directly)>>\n\n" claude-repl-command-prefix)
+(defvar claude-repl--command-prefix (format "<<*this is a metaprompt. I will periodically prefix my prompts with this to remind you of our restrictions for freely making changes. Do not be alarmed, this is merely a periodic reminder*: %s *metaprompt over* (rest is actual user request that you should respond to directly)>>\n\n" claude-repl-command-prefix)
   "Formatted metaprompt string prepended before every input when `claude-repl-skip-permissions' is non-nil.")
 
 
@@ -253,8 +260,12 @@ Resets history browsing index."
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
     (let ((input (let ((raw (with-current-buffer claude-repl-input-buffer
                           (buffer-string))))
-               (if (and claude-repl-skip-permissions claude-repl-command-prefix)
-                   (concat claude-repl--command-prefix raw)
+               (if (and claude-repl-skip-permissions claude-repl-command-prefix
+                        (zerop (mod claude-repl--prefix-counter claude-repl-prefix-period)))
+                   (progn
+                     (setq claude-repl--prefix-counter (1+ claude-repl--prefix-counter))
+                     (concat claude-repl--command-prefix raw))
+                 (setq claude-repl--prefix-counter (1+ claude-repl--prefix-counter))
                  raw))))
       ;; Clear the "done" indicator for this workspace
       (when-let ((ws (claude-repl--workspace-for-buffer claude-repl-vterm-buffer)))
@@ -414,8 +425,16 @@ Without region: sends relative file path."
              when (persp-contain-buffer-p buf persp)
              return (safe-persp-name persp))))
 
+(defface claude-repl-tab-thinking
+  '((t :background "#cc8800" :foreground "black" :weight bold))
+  "Face for workspace tabs where Claude is thinking.")
+
+(defface claude-repl-tab-done
+  '((t :background "#1a7a1a" :foreground "black" :weight bold))
+  "Face for workspace tabs where Claude is done.")
+
 (defun claude-repl--tabline-advice (&optional names)
-  "Override for `+workspace--tabline' to show ✅ for workspaces where Claude is done."
+  "Override for `+workspace--tabline' to color tabs by Claude status."
   (let* ((names (or names (+workspace-list-names)))
          (current-name (+workspace-current-name)))
     (mapconcat
@@ -423,14 +442,15 @@ Without region: sends relative file path."
      (cl-loop for name in names
               for i to (length names)
               collect
-              (let ((indicator (cond
-                                ((gethash name claude-repl--done-workspaces) "✅")
-                                ((gethash name claude-repl--thinking-workspaces) "🤔")
-                                (t (number-to-string (1+ i))))))
-                (propertize (format " [%s] %s " indicator name)
-                            'face (if (equal current-name name)
-                                      '+workspace-tab-selected-face
-                                    '+workspace-tab-face))))
+              (let* ((num (number-to-string (1+ i)))
+                     (claude-face (cond
+                                   ((gethash name claude-repl--done-workspaces) 'claude-repl-tab-done)
+                                   ((gethash name claude-repl--thinking-workspaces) 'claude-repl-tab-thinking)))
+                     (base-face (if (equal current-name name)
+                                    '+workspace-tab-selected-face
+                                  '+workspace-tab-face))
+                     (face (or claude-face base-face)))
+                (propertize (format " [%s] %s " num name) 'face face)))
      " ")))
 
 (advice-add '+workspace--tabline :override #'claude-repl--tabline-advice)
@@ -689,6 +709,7 @@ If panels hidden: show both panels."
      ;; Nothing running - start fresh with placeholder until Claude is ready
      ((not vterm-running)
       (setq claude-repl--saved-window-config (current-window-configuration))
+      (delete-other-windows (or claude-repl-return-window (selected-window)))
       (claude-repl--ensure-vterm-buffer)
       (claude-repl--ensure-input-buffer)
       (claude-repl--enable-hide-overlay)
@@ -718,6 +739,7 @@ If panels hidden: show both panels."
      (t
       (claude-repl--refresh-vterm)
       (setq claude-repl--saved-window-config (current-window-configuration))
+      (delete-other-windows (or claude-repl-return-window (selected-window)))
       (claude-repl--ensure-input-buffer)
       (claude-repl--show-panels)
       (claude-repl--update-hide-overlay)
