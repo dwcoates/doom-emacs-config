@@ -47,6 +47,12 @@ Uses an MD5 hash of the git root path.  Falls back to the buffer-local
 
 (setq claude-repl-hide-input-box nil)
 
+(defvar claude-repl-command-prefix "DO NOT run any mutating git commands (push, reset, checkout, etc) without EXPLICIT PERMISSION from ME. Do not INSTALL or UNINSTALL anything without my EXPLICIT PERMISSION. Do not operate on any files OUTSIDE OF PROJECT without MY EXPLICIT PERMISSION."
+  "When non-nil, this string is prepended (with a newline) before every input sent to Claude.")
+
+(defvar claude-repl--command-prefix (format "<<*this is a metaprompt*: %s *metaprompt over* (rest is actual user request that you should respond to directly)>>\n\n" claude-repl-command-prefix)
+  "When non-nil, this string is prepended (with a newline) before every input sent to Claude.")
+
 
 ;; Set to t once Claude has set its terminal title (meaning it's ready).
 (defvar-local claude-repl--ready nil
@@ -242,8 +248,11 @@ Resets history browsing index."
   (interactive)
   (claude-repl--load-session)
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
-    (let ((input (with-current-buffer claude-repl-input-buffer
-                   (buffer-string))))
+    (let ((input (let ((raw (with-current-buffer claude-repl-input-buffer
+                          (buffer-string))))
+               (if claude-repl--command-prefix
+                   (concat claude-repl--command-prefix raw)
+                 raw))))
       ;; Clear the "done" indicator for this workspace
       (when-let ((ws (claude-repl--workspace-for-buffer claude-repl-vterm-buffer)))
         (remhash ws claude-repl--done-workspaces))
@@ -451,15 +460,17 @@ On first title change, reveal panels (Claude is ready)."
                            (kill-buffer placeholder)))))))
     (let ((thinking (claude-repl--title-has-spinner-p title)))
       (when (and claude-repl--title-thinking (not thinking))
-        ;; Claude just finished — refresh display
-        (claude-repl--refresh-vterm)
-        (claude-repl--update-hide-overlay)
-        (when-let ((ws (claude-repl--workspace-for-buffer (current-buffer))))
-          (puthash ws t claude-repl--done-workspaces))
-        (unless (frame-focus-state)
-          (let ((notify-ws (or ws "Claude")))
-            (run-at-time 0.1 nil #'claude-repl--notify "Claude REPL"
-                         (format "%s: Claude ready" notify-ws)))))
+        ;; Claude just finished — set done (if hidden), then refresh display
+        (let ((buf (current-buffer))
+              (ws (claude-repl--workspace-for-buffer (current-buffer))))
+          (when (and ws (not (get-buffer-window buf t)))
+            (puthash ws t claude-repl--done-workspaces))
+          (claude-repl--refresh-vterm)
+          (claude-repl--update-hide-overlay)
+          (unless (frame-focus-state)
+            (let ((notify-ws (or ws "Claude")))
+              (run-at-time 0.1 nil #'claude-repl--notify "Claude REPL"
+                           (format "%s: Claude ready" notify-ws))))))
       (setq claude-repl--title-thinking thinking))))
 
 (after! vterm
@@ -471,7 +482,8 @@ Must be called with a vterm-mode buffer current."
   (redisplay t))
 
 (defun claude-repl--refresh-vterm ()
-  "Refresh the claude vterm display and clear the done indicator.
+  "Refresh the claude vterm display.
+Clears the done indicator only when the vterm buffer is visible.
 Works from any buffer (loads session) or from within the vterm buffer itself."
   (let ((buf (if (eq major-mode 'vterm-mode)
                  (current-buffer)
@@ -488,7 +500,8 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
           (select-window vterm-win 'norecord)
           (select-window orig-win 'norecord)))
       (when-let ((ws (claude-repl--workspace-for-buffer buf)))
-        (remhash ws claude-repl--done-workspaces)))))
+        (when (get-buffer-window buf t)
+          (remhash ws claude-repl--done-workspaces))))))
 
 ;; Refresh vterm on frame focus
 (defun claude-repl--on-frame-focus ()
@@ -501,7 +514,8 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
 ;; Refresh vterm on workspace switch
 (when (modulep! :ui workspaces)
   (add-hook 'persp-activated-functions
-            (lambda (&rest _) (claude-repl--refresh-vterm))))
+            (lambda (&rest _)
+              (run-at-time 0 nil #'claude-repl--refresh-vterm))))
 
 (defun claude-repl--after-vterm-redraw (&rest _)
   "Apply hide overlay after vterm redraws."
@@ -635,7 +649,7 @@ Kills any stale buffer (no live process) first. Starts claude from the git root.
         (setq-local word-wrap t)
         (face-remap-add-relative 'default :background (claude-repl--grey 15))
         (face-remap-add-relative 'fringe :background (claude-repl--grey 15))
-        (vterm-send-string "clear && claude -c")
+        (vterm-send-string "clear && claude -c --dangerously-skip-permissions")
         (vterm-send-return)))))
 
 ;; Entry point - smart toggle
@@ -698,31 +712,52 @@ If panels hidden: show both panels."
       (claude-repl--save-session)))))
 
 (defun claude-repl-kill ()
-  "Kill ALL Claude REPL buffers and windows unconditionally.
-Sweeps every buffer and window by name so nothing survives."
+  "Kill Claude REPL buffers and windows for the current workspace."
   (interactive)
   (claude-repl--load-session)
-  (claude-repl--history-save)
-  (claude-repl--disable-hide-overlay)
-  ;; Close all claude windows first (across all frames)
-  (dolist (win (window-list-1 nil nil t))
-    (when (string-match-p "^\\*claude-\\(input-\\)?[0-9a-f]+\\*$"
-                          (buffer-name (window-buffer win)))
-      (delete-window win)))
-  ;; Kill all claude buffers — no prompts
-  (dolist (buf (buffer-list))
-    (when (string-match-p "^\\*claude-\\(input-\\)?[0-9a-f]+\\*$"
-                          (buffer-name buf))
-      (when-let ((proc (get-buffer-process buf)))
-        (set-process-query-on-exit-flag proc nil))
-      (kill-buffer buf)))
-  ;; Kill loading placeholder if present
-  (when-let ((placeholder (get-buffer " *claude-loading*")))
-    (kill-buffer placeholder))
-  (setq claude-repl-vterm-buffer nil
-        claude-repl-input-buffer nil
-        claude-repl--saved-window-config nil)
-  (claude-repl--save-session))
+  (let ((vterm-buf claude-repl-vterm-buffer)
+        (input-buf claude-repl-input-buffer))
+    ;; Best-effort: save history
+    (ignore-errors (claude-repl--history-save))
+    ;; Best-effort: clean up overlay/advice
+    (ignore-errors (claude-repl--disable-hide-overlay))
+    ;; Cancel sync timer to prevent stale callbacks
+    (when claude-repl--sync-timer
+      (cancel-timer claude-repl--sync-timer)
+      (setq claude-repl--sync-timer nil))
+    ;; Nil out globals before deleting windows (prevents sync hook from
+    ;; operating on dead buffers)
+    (setq claude-repl-vterm-buffer nil
+          claude-repl-input-buffer nil
+          claude-repl--saved-window-config nil)
+    (claude-repl--save-session)
+    ;; Close windows for this workspace's buffers
+    (dolist (buf (list vterm-buf input-buf))
+      (when (and buf (buffer-live-p buf))
+        (when-let ((win (get-buffer-window buf)))
+          (ignore-errors (delete-window win)))))
+    ;; Kill loading placeholder if it's showing where our vterm would be
+    (when-let ((placeholder (get-buffer " *claude-loading*")))
+      (when-let ((win (get-buffer-window placeholder)))
+        (ignore-errors (delete-window win)))
+      (kill-buffer placeholder))
+    ;; Grab the process before killing the buffer
+    (let ((proc (and vterm-buf (buffer-live-p vterm-buf)
+                     (get-buffer-process vterm-buf))))
+      ;; Kill vterm buffer
+      (when (and vterm-buf (buffer-live-p vterm-buf))
+        (when proc
+          (set-process-query-on-exit-flag proc nil))
+        (kill-buffer vterm-buf))
+      ;; SIGKILL after 0.5s in case the process lingers
+      (when proc
+        (run-at-time 0.5 nil
+                     (lambda ()
+                       (when (process-live-p proc)
+                         (signal-process proc 'SIGKILL))))))
+    ;; Kill input buffer
+    (when (and input-buf (buffer-live-p input-buf))
+      (kill-buffer input-buf))))
 
 (defun claude-repl-restart ()
   "Kill Claude REPL and restart with `claude -c` to continue session."
@@ -738,7 +773,7 @@ Sweeps every buffer and window by name so nothing survives."
     (with-current-buffer claude-repl-vterm-buffer
       (setq-local claude-repl--project-root root)
       (vterm-mode)
-      (vterm-send-string "clear && claude -c")
+      (vterm-send-string "clear && claude -c --dangerously-skip-permissions")
       (vterm-send-return))
     (claude-repl--ensure-input-buffer)
     (claude-repl--enable-hide-overlay)
