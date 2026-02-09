@@ -915,6 +915,28 @@ If Claude isn't running, start it (same as `claude-repl')."
       (when (bound-and-true-p evil-mode)
         (evil-insert-state))))))
 
+(defvar claude-repl--fullscreen-config nil
+  "Saved window configuration before fullscreen toggle.")
+
+(defun claude-repl-toggle-fullscreen ()
+  "Toggle the Claude vterm buffer fullscreen.
+If already fullscreen, restore the previous window layout."
+  (interactive)
+  (claude-repl--load-session)
+  (cond
+   ;; Already fullscreen — restore
+   (claude-repl--fullscreen-config
+    (set-window-configuration claude-repl--fullscreen-config)
+    (setq claude-repl--fullscreen-config nil))
+   ;; Not fullscreen — go fullscreen if vterm exists
+   ((and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
+    (setq claude-repl--fullscreen-config (current-window-configuration))
+    (delete-other-windows)
+    (set-window-dedicated-p (selected-window) nil)
+    (switch-to-buffer claude-repl-vterm-buffer)
+    (claude-repl--reset-vterm-cursors))
+   (t (message "No Claude vterm buffer for this workspace."))))
+
 (defun claude-repl-cycle ()
   "Send backtab to Claude vterm to cycle through options."
   (interactive)
@@ -923,8 +945,10 @@ If Claude isn't running, start it (same as `claude-repl')."
     (with-current-buffer claude-repl-vterm-buffer
       (vterm-send-key "<backtab>"))))
 
-;; Global C-S-m binding
+;; Global bindings
 (map! :nvi "C-S-m" #'claude-repl-cycle)
+(map! :i "C-S-f" #'claude-repl-toggle-fullscreen)
+(map! :leader :prefix "w" :n "c" #'claude-repl-toggle-fullscreen)
 
 ;; Keybindings
 (map! :leader
