@@ -545,6 +545,8 @@ On first title change, reveal panels (Claude is ready)."
 (defun claude-repl--do-refresh ()
   "Low-level refresh of the current vterm buffer.
 Must be called with a vterm-mode buffer current."
+  (when vterm--term
+    (vterm--redraw vterm--term))
   (redisplay t))
 
 (defun claude-repl--refresh-vterm ()
