@@ -281,7 +281,7 @@ Resets history browsing index."
   (interactive)
   (claude-repl--load-session)
   (when (claude-repl--vterm-live-p)
-    (let ((ws (and (bound-and-true-p persp-mode) (+workspace-current-name)))
+    (let ((ws (+workspace-current-name))
           (input (let ((raw (with-current-buffer claude-repl-input-buffer
                           (buffer-string))))
                (if (and claude-repl-skip-permissions claude-repl-command-prefix
@@ -291,21 +291,21 @@ Resets history browsing index."
                      (concat claude-repl--command-prefix raw))
                  (setq claude-repl--prefix-counter (1+ claude-repl--prefix-counter))
                  raw))))
+      (unless ws (error "claude-repl-send: no active workspace"))
       ;; Optimistically set thinking and schedule a 5s check
-      (message "[claude-send] ws=%s persp-mode=%s" ws (bound-and-true-p persp-mode))
-      (when ws
-        (claude-repl--ws-set ws :thinking)
-        (message "[claude-send] SET thinking for ws=%s" ws)
-        (claude-repl--touch-activity ws)
-        (let ((check-ws ws)
-              (check-buf claude-repl-vterm-buffer))
-          (run-at-time 5 nil
-                       (lambda ()
-                         (when (and (buffer-live-p check-buf)
-                                    (eq (claude-repl--ws-state check-ws) :thinking)
-                                    (not claude-repl--title-thinking))
-                           ;; Title never showed a spinner — mark as failed
-                           (claude-repl--ws-set check-ws :failed))))))
+      (message "[claude-send] ws=%s" ws)
+      (claude-repl--ws-set ws :thinking)
+      (message "[claude-send] SET thinking for ws=%s" ws)
+      (claude-repl--touch-activity ws)
+      (let ((check-ws ws)
+            (check-buf claude-repl-vterm-buffer))
+        (run-at-time 5 nil
+                     (lambda ()
+                       (when (and (buffer-live-p check-buf)
+                                  (eq (claude-repl--ws-state check-ws) :thinking)
+                                  (not claude-repl--title-thinking))
+                         ;; Title never showed a spinner — mark as failed
+                         (claude-repl--ws-set check-ws :failed)))))
       (with-current-buffer claude-repl-vterm-buffer
         ;; Use vterm's built-in paste mode for large inputs to avoid
         ;; truncation from character-by-character sending.
@@ -477,31 +477,31 @@ Returns one of: :thinking, :done, :permission, :failed, :stale, or nil."
 (defun claude-repl--ws-set (ws state)
   "Set workspace WS to STATE, clearing any conflicting states.
 STATE is one of: :thinking, :done, :permission, :failed."
-  (when ws
-    (remhash ws claude-repl--thinking-workspaces)
-    (remhash ws claude-repl--done-workspaces)
-    (remhash ws claude-repl--permission-workspaces)
-    (remhash ws claude-repl--failed-workspaces)
-    (pcase state
-      (:thinking   (puthash ws t claude-repl--thinking-workspaces))
-      (:done       (puthash ws t claude-repl--done-workspaces))
-      (:permission (puthash ws t claude-repl--permission-workspaces))
-      (:failed     (puthash ws t claude-repl--failed-workspaces)))))
+  (unless ws (error "claude-repl--ws-set: ws is nil"))
+  (remhash ws claude-repl--thinking-workspaces)
+  (remhash ws claude-repl--done-workspaces)
+  (remhash ws claude-repl--permission-workspaces)
+  (remhash ws claude-repl--failed-workspaces)
+  (pcase state
+    (:thinking   (puthash ws t claude-repl--thinking-workspaces))
+    (:done       (puthash ws t claude-repl--done-workspaces))
+    (:permission (puthash ws t claude-repl--permission-workspaces))
+    (:failed     (puthash ws t claude-repl--failed-workspaces))))
 
 (defun claude-repl--ws-clear (ws state)
   "Clear a single STATE for workspace WS.
 STATE is one of: :thinking, :done, :permission, :failed."
-  (when ws
-    (pcase state
-      (:thinking   (remhash ws claude-repl--thinking-workspaces))
-      (:done       (remhash ws claude-repl--done-workspaces))
-      (:permission (remhash ws claude-repl--permission-workspaces))
-      (:failed     (remhash ws claude-repl--failed-workspaces)))))
+  (unless ws (error "claude-repl--ws-clear: ws is nil"))
+  (pcase state
+    (:thinking   (remhash ws claude-repl--thinking-workspaces))
+    (:done       (remhash ws claude-repl--done-workspaces))
+    (:permission (remhash ws claude-repl--permission-workspaces))
+    (:failed     (remhash ws claude-repl--failed-workspaces))))
 
 (defun claude-repl--touch-activity (ws)
   "Record current time as last input for workspace WS."
-  (when ws
-    (puthash ws (float-time) claude-repl--activity-times)))
+  (unless ws (error "claude-repl--touch-activity: ws is nil"))
+  (puthash ws (float-time) claude-repl--activity-times))
 
 (defun claude-repl--workspace-for-buffer (buf)
   "Return the workspace name that contains BUF, or nil."
@@ -619,21 +619,20 @@ On first title change, reveal panels (Claude is ready)."
            (thinking (plist-get info :thinking))
            (transition (plist-get info :transition))
            (ws (plist-get info :ws)))
-      (when ws
-        (pcase transition
-          ('started  (claude-repl--ws-set ws :thinking))
-          ('finished (claude-repl--ws-clear ws :thinking))))
+      (unless ws (error "claude-repl--on-title-change: no workspace for buffer %s" (buffer-name)))
+      (pcase transition
+        ('started  (claude-repl--ws-set ws :thinking))
+        ('finished (claude-repl--ws-clear ws :thinking)))
       (when (eq transition 'finished)
         ;; Claude just finished — set done (if hidden), then refresh display
         (let ((buf (current-buffer)))
-          (when (and ws (not (get-buffer-window buf t)))
+          (unless (get-buffer-window buf t)
             (claude-repl--ws-set ws :done))
           (claude-repl--refresh-vterm)
           (claude-repl--update-hide-overlay)
           (unless (frame-focus-state)
-            (let ((notify-ws (or ws "Claude")))
-              (run-at-time 0.1 nil #'claude-repl--notify "Claude REPL"
-                           (format "%s: Claude ready" notify-ws))))))
+            (run-at-time 0.1 nil #'claude-repl--notify "Claude REPL"
+                         (format "%s: Claude ready" ws)))))
       (setq claude-repl--title-thinking thinking))))
 
 (after! vterm
@@ -689,7 +688,8 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
         (when (and vterm-win (not (eq vterm-win orig-win)))
           (select-window vterm-win 'norecord)
           (select-window orig-win 'norecord)))
-      (when-let ((ws (claude-repl--workspace-for-buffer buf)))
+      (let ((ws (claude-repl--workspace-for-buffer buf)))
+        (unless ws (error "claude-repl--refresh-vterm: no workspace for buffer %s" (buffer-name buf)))
         (when (get-buffer-window buf t)
           (claude-repl--ws-clear ws :done))))))
 
@@ -707,7 +707,8 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
             (lambda (&rest _)
               (run-at-time 0 nil
                            (lambda ()
-                             (when-let ((ws (+workspace-current-name)))
+                             (let ((ws (+workspace-current-name)))
+                               (unless ws (error "persp-activated: no workspace"))
                                (message "[ws-switch] into ws=%s, clearing done" ws)
                                (claude-repl--ws-clear ws :done))
                              (claude-repl--refresh-vterm)
