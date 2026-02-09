@@ -651,7 +651,21 @@ Also refreshes the hide-input-box overlay."
              (not (get-buffer-window
                    (format "*claude-%s*" (match-string 1 name))))
              (not (get-buffer " *claude-loading*")))
-        (delete-window win))))))
+        (delete-window win)))))
+  (claude-repl--reset-vterm-cursors))
+
+;; Keep visible Claude vterm buffers scrolled to the cursor.
+(defun claude-repl--reset-vterm-cursors ()
+  "Call `vterm-reset-cursor-point' in every visible Claude vterm buffer."
+  (dolist (win (window-list))
+    (let ((buf (window-buffer win)))
+      (when (and buf (buffer-live-p buf)
+                 (string-match-p "^\\*claude-[0-9a-f]+\\*$" (buffer-name buf)))
+        (with-current-buffer buf
+          (when (and (eq major-mode 'vterm-mode)
+                     (fboundp 'vterm-reset-cursor-point))
+            (vterm-reset-cursor-point)
+            (set-window-point win (point))))))))
 
 (setq claude-repl--sync-timer nil)
 
@@ -663,6 +677,18 @@ Also refreshes the hide-input-box overlay."
         (run-at-time 0 nil #'claude-repl--sync-panels)))
 
 (add-hook 'window-configuration-change-hook #'claude-repl--schedule-sync)
+
+(setq claude-repl--cursor-reset-timer nil)
+
+(defun claude-repl--schedule-cursor-reset (&rest _)
+  "Defer vterm cursor reset to after the current command finishes."
+  (when claude-repl--cursor-reset-timer
+    (cancel-timer claude-repl--cursor-reset-timer))
+  (setq claude-repl--cursor-reset-timer
+        (run-at-time 0 nil #'claude-repl--reset-vterm-cursors)))
+
+(add-hook 'window-selection-change-functions #'claude-repl--schedule-cursor-reset)
+(add-hook 'buffer-list-update-hook #'claude-repl--schedule-cursor-reset)
 
 ;; Redirect focus from vterm output to input buffer (keyboard only, not mouse)
 (defun claude-repl--redirect-to-input (_frame)
@@ -906,6 +932,3 @@ If Claude isn't running, start it (same as `claude-repl')."
       :desc "Send 8 to Claude" "o 8" (lambda () (interactive) (claude-repl-send-char "8"))
       :desc "Send 9 to Claude" "o 9" (lambda () (interactive) (claude-repl-send-char "9"))
       :desc "Send 0 to Claude" "o 0" (lambda () (interactive) (claude-repl-send-char "0")))
-
-
-;; FIXME: vterm-clear &&  vterm-reset-cursor-point
