@@ -47,7 +47,7 @@ Uses an MD5 hash of the git root path.  Falls back to the buffer-local
 
 (setq claude-repl-hide-input-box nil)
 
-(defvar claude-repl-command-prefix "DO NOT run any mutating git commands (push, reset, checkout, etc) without EXPLICIT PERMISSION from ME. Do not INSTALL or UNINSTALL anything without my EXPLICIT PERMISSION. Do not operate on any files OUTSIDE OF PROJECT without MY EXPLICIT PERMISSION."
+(defvar claude-repl-command-prefix "DO NOT run any mutating git commands (push, reset, checkout, etc) without EXPLICIT PERMISSION from ME. Do not INSTALL or UNINSTALL anything without my EXPLICIT PERMISSION. Do not operate on any files OUTSIDE OF PROJECT without MY EXPLICIT PERMISSION. Do not take any actions unless it FOLLOWS DIRECTLY from an action EXPLICITLY REQUESTED in the following prompt "
   "When non-nil, this string is prepended (with a newline) before every input sent to Claude.")
 
 (defvar claude-repl--command-prefix (format "<<*this is a metaprompt*: %s *metaprompt over* (rest is actual user request that you should respond to directly)>>\n\n" claude-repl-command-prefix)
@@ -250,7 +250,7 @@ Resets history browsing index."
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
     (let ((input (let ((raw (with-current-buffer claude-repl-input-buffer
                           (buffer-string))))
-               (if claude-repl--command-prefix
+               (if claude-repl-command-prefix
                    (concat claude-repl--command-prefix raw)
                  raw))))
       ;; Clear the "done" indicator for this workspace
