@@ -450,11 +450,13 @@ Without region: sends relative file path."
               for i to (length names)
               collect
               (let* ((num (number-to-string (1+ i)))
-                     (claude-face (cond
-                                   ((gethash name claude-repl--permission-workspaces) 'claude-repl-tab-permission)
-                                   ((gethash name claude-repl--done-workspaces) 'claude-repl-tab-done)
-                                   ((gethash name claude-repl--thinking-workspaces) 'claude-repl-tab-thinking)))
-                     (base-face (if (equal current-name name)
+                     (selected (equal current-name name))
+                     (claude-face (and (not selected)
+                                       (cond
+                                        ((gethash name claude-repl--permission-workspaces) 'claude-repl-tab-permission)
+                                        ((gethash name claude-repl--done-workspaces) 'claude-repl-tab-done)
+                                        ((gethash name claude-repl--thinking-workspaces) 'claude-repl-tab-thinking))))
+                     (base-face (if selected
                                     '+workspace-tab-selected-face
                                   '+workspace-tab-face))
                      (face (or claude-face base-face)))
