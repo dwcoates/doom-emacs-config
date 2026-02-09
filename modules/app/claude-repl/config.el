@@ -581,7 +581,14 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
 (when (modulep! :ui workspaces)
   (add-hook 'persp-activated-functions
             (lambda (&rest _)
-              (run-at-time 0 nil #'claude-repl--refresh-vterm))))
+              (run-at-time 0 nil
+                           (lambda ()
+                             (when-let ((ws (+workspace-current-name)))
+                               (remhash ws claude-repl--done-workspaces)
+                               (remhash ws claude-repl--thinking-workspaces)
+                               (remhash ws claude-repl--permission-workspaces))
+                             (claude-repl--refresh-vterm)
+                             (claude-repl--reset-vterm-cursors))))))
 
 (defun claude-repl--after-vterm-redraw (&rest _)
   "Apply hide overlay after vterm redraws."
@@ -666,6 +673,9 @@ Also refreshes the hide-input-box overlay."
         (with-current-buffer buf
           (when (and (eq major-mode 'vterm-mode)
                      (fboundp 'vterm-reset-cursor-point))
+            (vterm-reset-cursor-point)
+            (when vterm--term
+              (vterm--redraw vterm--term))
             (vterm-reset-cursor-point)
             (set-window-point win (point))))))))
 
