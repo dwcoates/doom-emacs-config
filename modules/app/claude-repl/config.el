@@ -267,9 +267,10 @@ Resets history browsing index."
                      (concat claude-repl--command-prefix raw))
                  (setq claude-repl--prefix-counter (1+ claude-repl--prefix-counter))
                  raw))))
-      ;; Clear the "done" indicator for this workspace
+      ;; Clear the "done" and "permission" indicators for this workspace
       (when-let ((ws (claude-repl--workspace-for-buffer claude-repl-vterm-buffer)))
-        (remhash ws claude-repl--done-workspaces))
+        (remhash ws claude-repl--done-workspaces)
+        (remhash ws claude-repl--permission-workspaces))
       (with-current-buffer claude-repl-vterm-buffer
         ;; Use vterm's built-in paste mode for large inputs to avoid
         ;; truncation from character-by-character sending.
@@ -417,6 +418,8 @@ Without region: sends relative file path."
                                        (make-hash-table :test 'equal)))
 (setq claude-repl--thinking-workspaces (or (bound-and-true-p claude-repl--thinking-workspaces)
                                            (make-hash-table :test 'equal)))
+(setq claude-repl--permission-workspaces (or (bound-and-true-p claude-repl--permission-workspaces)
+                                             (make-hash-table :test 'equal)))
 
 (defun claude-repl--workspace-for-buffer (buf)
   "Return the workspace name that contains BUF, or nil."
@@ -433,6 +436,10 @@ Without region: sends relative file path."
   '((t :background "#1a7a1a" :foreground "black" :weight bold))
   "Face for workspace tabs where Claude is done.")
 
+(defface claude-repl-tab-permission
+  '((t :background "#cc3333" :foreground "white" :weight bold))
+  "Face for workspace tabs where Claude needs permission.")
+
 (defun claude-repl--tabline-advice (&optional names)
   "Override for `+workspace--tabline' to color tabs by Claude status."
   (let* ((names (or names (+workspace-list-names)))
@@ -444,6 +451,7 @@ Without region: sends relative file path."
               collect
               (let* ((num (number-to-string (1+ i)))
                      (claude-face (cond
+                                   ((gethash name claude-repl--permission-workspaces) 'claude-repl-tab-permission)
                                    ((gethash name claude-repl--done-workspaces) 'claude-repl-tab-done)
                                    ((gethash name claude-repl--thinking-workspaces) 'claude-repl-tab-thinking)))
                      (base-face (if (equal current-name name)
@@ -488,7 +496,9 @@ On first title change, reveal panels (Claude is ready)."
           (ws (claude-repl--workspace-for-buffer (current-buffer))))
       (when ws
         (if thinking
-            (puthash ws t claude-repl--thinking-workspaces)
+            (progn
+              (puthash ws t claude-repl--thinking-workspaces)
+              (remhash ws claude-repl--permission-workspaces))
           (remhash ws claude-repl--thinking-workspaces)))
       (when (and claude-repl--title-thinking (not thinking))
         ;; Claude just finished — set done (if hidden), then refresh display
@@ -505,6 +515,30 @@ On first title change, reveal panels (Claude is ready)."
 
 (after! vterm
   (advice-add 'vterm--set-title :before #'claude-repl--on-title-change))
+
+;; Permission prompt detection via file-notify watcher.
+;; A Claude Code Notification hook writes the CWD to a sentinel file;
+;; we watch for it and set the permission state for the matching workspace.
+(defun claude-repl--on-permission-notify (event)
+  "Handle file-notify event for permission prompt sentinel file."
+  (let ((action (nth 1 event))
+        (file (nth 2 event)))
+    (when (and (memq action '(created changed))
+               (string-match-p "permission_prompt$" file))
+      (let* ((cwd (string-trim (with-temp-buffer
+                                 (insert-file-contents file)
+                                 (buffer-string))))
+             (root (claude-repl--git-root cwd))
+             (hash (when root (substring (md5 root) 0 8)))
+             (vterm-buf (when hash (get-buffer (format "*claude-%s*" hash))))
+             (ws (when vterm-buf (claude-repl--workspace-for-buffer vterm-buf))))
+        (when ws
+          (puthash ws t claude-repl--permission-workspaces))
+        (delete-file file)))))
+
+(let ((dir (expand-file-name "~/.claude/workspace-notifications")))
+  (make-directory dir t)
+  (file-notify-add-watch dir '(change) #'claude-repl--on-permission-notify))
 
 (defun claude-repl--do-refresh ()
   "Low-level refresh of the current vterm buffer.
