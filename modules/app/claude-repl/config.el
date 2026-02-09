@@ -522,8 +522,10 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
   (setq claude-repl-hide-overlay nil))
 
 (defun claude-repl--vterm-running-p ()
-  "Return t if Claude vterm buffer exists and is alive."
-  (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer)))
+  "Return t if Claude vterm buffer exists with a live process."
+  (and claude-repl-vterm-buffer
+       (buffer-live-p claude-repl-vterm-buffer)
+       (get-buffer-process claude-repl-vterm-buffer)))
 
 (defun claude-repl--input-visible-p ()
   "Return t if input buffer is visible in a window."
@@ -615,11 +617,15 @@ so the user can select and copy text from the output."
 
 (defun claude-repl--ensure-vterm-buffer ()
   "Create vterm buffer running claude if needed.
-Starts claude from the git root."
+Kills any stale buffer (no live process) first. Starts claude from the git root."
   (let* ((root (or (claude-repl--git-root)
                    claude-repl--project-root
                    default-directory))
-         (default-directory root))
+         (default-directory root)
+         (existing (get-buffer (claude-repl--buffer-name))))
+    ;; Kill stale buffer (exists but process died)
+    (when (and existing (not (get-buffer-process existing)))
+      (kill-buffer existing))
     (setq claude-repl-vterm-buffer (get-buffer-create (claude-repl--buffer-name)))
     (with-current-buffer claude-repl-vterm-buffer
       (setq-local claude-repl--project-root root)
@@ -692,22 +698,27 @@ If panels hidden: show both panels."
       (claude-repl--save-session)))))
 
 (defun claude-repl-kill ()
-  "Kill Claude REPL buffers and windows without confirmation."
+  "Kill ALL Claude REPL buffers and windows unconditionally.
+Sweeps every buffer and window by name so nothing survives."
   (interactive)
   (claude-repl--load-session)
   (claude-repl--history-save)
   (claude-repl--disable-hide-overlay)
-  (when-let ((win (get-buffer-window claude-repl-input-buffer)))
-    (delete-window win))
-  (when-let ((win (get-buffer-window claude-repl-vterm-buffer)))
-    (delete-window win))
-  (when (and claude-repl-input-buffer (buffer-live-p claude-repl-input-buffer))
-    (kill-buffer claude-repl-input-buffer))
-  (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
-    ;; Don't prompt about killing the process
-    (when-let ((proc (get-buffer-process claude-repl-vterm-buffer)))
-      (set-process-query-on-exit-flag proc nil))
-    (kill-buffer claude-repl-vterm-buffer))
+  ;; Close all claude windows first (across all frames)
+  (dolist (win (window-list-1 nil nil t))
+    (when (string-match-p "^\\*claude-\\(input-\\)?[0-9a-f]+\\*$"
+                          (buffer-name (window-buffer win)))
+      (delete-window win)))
+  ;; Kill all claude buffers — no prompts
+  (dolist (buf (buffer-list))
+    (when (string-match-p "^\\*claude-\\(input-\\)?[0-9a-f]+\\*$"
+                          (buffer-name buf))
+      (when-let ((proc (get-buffer-process buf)))
+        (set-process-query-on-exit-flag proc nil))
+      (kill-buffer buf)))
+  ;; Kill loading placeholder if present
+  (when-let ((placeholder (get-buffer " *claude-loading*")))
+    (kill-buffer placeholder))
   (setq claude-repl-vterm-buffer nil
         claude-repl-input-buffer nil
         claude-repl--saved-window-config nil)
