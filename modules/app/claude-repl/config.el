@@ -47,11 +47,14 @@ Uses an MD5 hash of the git root path.  Falls back to the buffer-local
 
 (setq claude-repl-hide-input-box nil)
 
+(defvar claude-repl-skip-permissions t
+  "When non-nil, start Claude with --dangerously-skip-permissions and prepend the command prefix metaprompt.")
+
 (defvar claude-repl-command-prefix "DO NOT run any mutating git commands (push, reset, checkout, etc) without EXPLICIT PERMISSION from ME. Do not INSTALL or UNINSTALL anything without my EXPLICIT PERMISSION. Do not operate on any files OUTSIDE OF PROJECT without MY EXPLICIT PERMISSION. Do not take any actions unless it FOLLOWS DIRECTLY from an action EXPLICITLY REQUESTED in the following prompt "
   "When non-nil, this string is prepended (with a newline) before every input sent to Claude.")
 
 (defvar claude-repl--command-prefix (format "<<*this is a metaprompt*: %s *metaprompt over* (rest is actual user request that you should respond to directly)>>\n\n" claude-repl-command-prefix)
-  "When non-nil, this string is prepended (with a newline) before every input sent to Claude.")
+  "Formatted metaprompt string prepended before every input when `claude-repl-skip-permissions' is non-nil.")
 
 
 ;; Set to t once Claude has set its terminal title (meaning it's ready).
@@ -250,7 +253,7 @@ Resets history browsing index."
   (when (and claude-repl-vterm-buffer (buffer-live-p claude-repl-vterm-buffer))
     (let ((input (let ((raw (with-current-buffer claude-repl-input-buffer
                           (buffer-string))))
-               (if claude-repl-command-prefix
+               (if (and claude-repl-skip-permissions claude-repl-command-prefix)
                    (concat claude-repl--command-prefix raw)
                  raw))))
       ;; Clear the "done" indicator for this workspace
@@ -401,6 +404,8 @@ Without region: sends relative file path."
 ;; Workspace tab indicator for Claude status
 (setq claude-repl--done-workspaces (or (bound-and-true-p claude-repl--done-workspaces)
                                        (make-hash-table :test 'equal)))
+(setq claude-repl--thinking-workspaces (or (bound-and-true-p claude-repl--thinking-workspaces)
+                                           (make-hash-table :test 'equal)))
 
 (defun claude-repl--workspace-for-buffer (buf)
   "Return the workspace name that contains BUF, or nil."
@@ -418,9 +423,10 @@ Without region: sends relative file path."
      (cl-loop for name in names
               for i to (length names)
               collect
-              (let ((indicator (if (gethash name claude-repl--done-workspaces)
-                                   "✅"
-                                 (number-to-string (1+ i)))))
+              (let ((indicator (cond
+                                ((gethash name claude-repl--done-workspaces) "✅")
+                                ((gethash name claude-repl--thinking-workspaces) "🤔")
+                                (t (number-to-string (1+ i))))))
                 (propertize (format " [%s] %s " indicator name)
                             'face (if (equal current-name name)
                                       '+workspace-tab-selected-face
@@ -458,11 +464,15 @@ On first title change, reveal panels (Claude is ready)."
                              (set-window-buffer win buf)
                              (set-window-dedicated-p win t))
                            (kill-buffer placeholder)))))))
-    (let ((thinking (claude-repl--title-has-spinner-p title)))
+    (let ((thinking (claude-repl--title-has-spinner-p title))
+          (ws (claude-repl--workspace-for-buffer (current-buffer))))
+      (when ws
+        (if thinking
+            (puthash ws t claude-repl--thinking-workspaces)
+          (remhash ws claude-repl--thinking-workspaces)))
       (when (and claude-repl--title-thinking (not thinking))
         ;; Claude just finished — set done (if hidden), then refresh display
-        (let ((buf (current-buffer))
-              (ws (claude-repl--workspace-for-buffer (current-buffer))))
+        (let ((buf (current-buffer)))
           (when (and ws (not (get-buffer-window buf t)))
             (puthash ws t claude-repl--done-workspaces))
           (claude-repl--refresh-vterm)
@@ -649,7 +659,9 @@ Kills any stale buffer (no live process) first. Starts claude from the git root.
         (setq-local word-wrap t)
         (face-remap-add-relative 'default :background (claude-repl--grey 15))
         (face-remap-add-relative 'fringe :background (claude-repl--grey 15))
-        (vterm-send-string "clear && claude -c --dangerously-skip-permissions")
+        (vterm-send-string (concat "clear && claude -c"
+                                   (when claude-repl-skip-permissions
+                                     " --dangerously-skip-permissions")))
         (vterm-send-return)))))
 
 ;; Entry point - smart toggle
@@ -773,7 +785,9 @@ If panels hidden: show both panels."
     (with-current-buffer claude-repl-vterm-buffer
       (setq-local claude-repl--project-root root)
       (vterm-mode)
-      (vterm-send-string "clear && claude -c --dangerously-skip-permissions")
+      (vterm-send-string (concat "clear && claude -c"
+                                 (when claude-repl-skip-permissions
+                                   " --dangerously-skip-permissions")))
       (vterm-send-return))
     (claude-repl--ensure-input-buffer)
     (claude-repl--enable-hide-overlay)
