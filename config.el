@@ -165,6 +165,8 @@
   (setq standard-display-table (make-display-table)))
 (aset standard-display-table #x23FA (vconcat "●"))
 (aset standard-display-table #x23F8 (vconcat "▮▮"))
+(aset standard-display-table #x23F5 (vconcat "▸"))
+(aset standard-display-table #x276F (vconcat ">"))
 
 (setq kill-ring-max 100000)
 (display-battery-mode t)
@@ -368,6 +370,20 @@
 (after! magit
   (setq magit-no-confirm (append magit-no-confirm '(abort-revert abort-rebase abort-merge))
         magit-diff-visit-previous-blob nil)
+
+  ;; Prevent magit from trying to display buffers in dedicated (e.g. claude) windows.
+  (defun +dwc/magit-display-buffer-skip-dedicated (buffer)
+    "Display BUFFER in a non-dedicated window, falling back to magit's default."
+    (let ((win (cl-find-if (lambda (w)
+                             (and (not (window-dedicated-p w))
+                                  (not (eq w (minibuffer-window)))))
+                           (window-list))))
+      (if win
+          (window--display-buffer buffer win 'reuse)
+        (magit-display-buffer-traditional buffer))))
+
+  (setq magit-display-buffer-function #'+dwc/magit-display-buffer-skip-dedicated)
+
   (map! :map (magit-unstaged-section-map magit-staged-section-map magit-untracked-section-map magit-mode-map)
         :desc "Jump to recent commits"
         "g r"
