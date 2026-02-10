@@ -144,6 +144,7 @@ Splits right for vterm (55% of frame), then splits vterm bottom for input (30%).
 
 (defun claude-repl--focus-input-panel ()
   "Focus the input panel window and enter insert state."
+  (claude-repl--log "focus-input-panel")
   (when-let ((win (get-buffer-window claude-repl-input-buffer)))
     (select-window win)
     (evil-insert-state)))
@@ -176,6 +177,7 @@ Tries git root, then buffer-local project root, then `default-directory'."
 
 (defun claude-repl--start-claude ()
   "Send the claude startup command to the current vterm buffer."
+  (claude-repl--log "start-claude skip-permissions=%s" claude-repl-skip-permissions)
   (vterm-send-string (concat "clear && claude -c"
                              (when claude-repl-skip-permissions
                                " --dangerously-skip-permissions")))
@@ -250,6 +252,7 @@ Tries git root, then buffer-local project root, then `default-directory'."
 
 (defun claude-repl--history-save ()
   "Write input history to disk."
+  (claude-repl--log "history-save")
   (when claude-repl-input-buffer
     (let ((history (buffer-local-value 'claude-repl--input-history claude-repl-input-buffer))
           (file (claude-repl--history-file)))
@@ -259,6 +262,7 @@ Tries git root, then buffer-local project root, then `default-directory'."
 
 (defun claude-repl--history-restore ()
   "Load input history from disk into the current buffer."
+  (claude-repl--log "history-restore")
   (let ((file (claude-repl--history-file)))
     (when (file-exists-p file)
       (setq claude-repl--input-history
@@ -282,6 +286,7 @@ Skips empty strings and duplicates of the most recent entry."
 (defun claude-repl--history-prev ()
   "Navigate to the previous (older) history entry."
   (interactive)
+  (claude-repl--log "history-prev index=%d" claude-repl--history-index)
   (when claude-repl--input-history
     (let ((next-index (1+ claude-repl--history-index)))
       (when (< next-index (length claude-repl--input-history))
@@ -296,6 +301,7 @@ Skips empty strings and duplicates of the most recent entry."
 (defun claude-repl--history-next ()
   "Navigate to the next (newer) history entry, or restore stashed text."
   (interactive)
+  (claude-repl--log "history-next index=%d" claude-repl--history-index)
   (when (>= claude-repl--history-index 0)
     (let ((next-index (1- claude-repl--history-index)))
       (let ((claude-repl--history-navigating t))
@@ -312,12 +318,15 @@ Skips empty strings and duplicates of the most recent entry."
 (defun claude-repl--history-on-change (&rest _)
   "Reset history browsing when the user edits the buffer directly."
   (unless claude-repl--history-navigating
+    (when (>= claude-repl--history-index 0)
+      (claude-repl--log "history-on-change resetting from index=%d" claude-repl--history-index))
     (setq claude-repl--history-index -1)))
 
 ;; Core functions
 (defun claude-repl--prepare-input ()
   "Read and return input from the input buffer.
 Periodically prepends the metaprompt prefix when `claude-repl-skip-permissions' is on."
+  (claude-repl--log "prepare-input counter=%d period=%d" claude-repl--prefix-counter claude-repl-prefix-period)
   (let ((raw (with-current-buffer claude-repl-input-buffer
                (buffer-string))))
     (if (and claude-repl-skip-permissions claude-repl-command-prefix
@@ -360,12 +369,14 @@ Uses paste mode for large inputs to avoid truncation."
 
 (defun claude-repl--mark-ws-thinking (ws)
   "Mark workspace WS as thinking: set state, record activity, schedule failed check."
+  (claude-repl--log "mark-ws-thinking ws=%s" ws)
   (claude-repl--ws-set ws :thinking)
   (claude-repl--touch-activity ws)
   (claude-repl--schedule-failed-check ws))
 
 (defun claude-repl--clear-input ()
   "Push current input to history, reset browsing, and clear the input buffer."
+  (claude-repl--log "clear-input")
   (with-current-buffer claude-repl-input-buffer
     (claude-repl--history-push)
     (claude-repl--history-reset)
@@ -390,6 +401,7 @@ Uses paste mode for large inputs to avoid truncation."
 (defun claude-repl--remember-return-window ()
   "Save the current window as the return target, unless we're in the input buffer."
   (unless (eq (current-buffer) claude-repl-input-buffer)
+    (claude-repl--log "remember-return-window %s" (selected-window))
     (setq claude-repl-return-window (selected-window))))
 
 (defun claude-repl--restore-layout ()
@@ -495,6 +507,7 @@ Without region: sends file path and current line."
 (defun claude-repl-toggle-hide-input-box ()
   "Toggle hiding of Claude CLI's input box in the vterm buffer."
   (interactive)
+  (claude-repl--log "toggle-hide-input-box -> %s" (not claude-repl-hide-input-box))
   (setq claude-repl-hide-input-box (not claude-repl-hide-input-box))
   (claude-repl--update-hide-overlay)
   (message "Claude input box hiding %s" (if claude-repl-hide-input-box "enabled" "disabled")))
@@ -691,6 +704,7 @@ Called once when Claude sets its first terminal title (meaning it's ready)."
 
 (defun claude-repl--maybe-notify-finished (ws)
   "Send a desktop notification that Claude finished in WS, if frame is unfocused."
+  (claude-repl--log "maybe-notify-finished ws=%s focused=%s" ws (if (frame-focus-state) "yes" "no"))
   (unless (frame-focus-state)
     (run-at-time 0.1 nil #'claude-repl--notify "Claude REPL"
                  (format "%s: Claude ready" ws))))
@@ -835,6 +849,7 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
 
 (defun claude-repl--enable-hide-overlay ()
   "Enable the hide overlay advice."
+  (claude-repl--log "enable-hide-overlay")
   (advice-add 'vterm--redraw :after #'claude-repl--after-vterm-redraw))
 
 (defun claude-repl--delete-hide-overlay ()
@@ -846,6 +861,7 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
 
 (defun claude-repl--disable-hide-overlay ()
   "Disable the hide overlay advice and clean up any existing overlay."
+  (claude-repl--log "disable-hide-overlay")
   (advice-remove 'vterm--redraw #'claude-repl--after-vterm-redraw)
   (claude-repl--delete-hide-overlay))
 
@@ -1009,6 +1025,7 @@ so the user can select and copy text from the output."
 (defun claude-repl--show-panels-with-placeholder ()
   "Show panels using a loading placeholder in the vterm slot.
 The placeholder is swapped for the real vterm buffer once Claude is ready."
+  (claude-repl--log "show-panels-with-placeholder")
   (let ((real-vterm claude-repl-vterm-buffer)
         (placeholder (get-buffer-create " *claude-loading*")))
     (with-current-buffer placeholder
@@ -1078,6 +1095,7 @@ If panels hidden: show both panels."
 
 (defun claude-repl--close-buffer-windows (&rest bufs)
   "Close windows displaying any of BUFS."
+  (claude-repl--log "close-buffer-windows %s" (mapcar (lambda (b) (and b (buffer-name b))) bufs))
   (dolist (buf bufs)
     (when (and buf (buffer-live-p buf))
       (when-let ((win (get-buffer-window buf)))
@@ -1085,6 +1103,7 @@ If panels hidden: show both panels."
 
 (defun claude-repl--kill-placeholder ()
   "Close and kill the loading placeholder buffer if it exists."
+  (claude-repl--log "kill-placeholder exists=%s" (if (get-buffer " *claude-loading*") "yes" "no"))
   (when-let ((placeholder (get-buffer " *claude-loading*")))
     (when-let ((win (get-buffer-window placeholder)))
       (ignore-errors (delete-window win)))
@@ -1111,6 +1130,7 @@ If panels hidden: show both panels."
 
 (defun claude-repl--teardown-session-state ()
   "Save history, disable overlay, cancel timers, and nil out session globals."
+  (claude-repl--log "teardown-session-state")
   (ignore-errors (claude-repl--history-save))
   (ignore-errors (claude-repl--disable-hide-overlay))
   (when claude-repl--sync-timer
@@ -1123,6 +1143,7 @@ If panels hidden: show both panels."
 
 (defun claude-repl--destroy-session-buffers (vterm-buf input-buf)
   "Close windows and kill VTERM-BUF, INPUT-BUF, and any placeholder."
+  (claude-repl--log "destroy-session-buffers")
   (claude-repl--close-buffer-windows vterm-buf input-buf)
   (claude-repl--kill-placeholder)
   (claude-repl--kill-vterm-process vterm-buf)
@@ -1210,6 +1231,7 @@ If already fullscreen, restore the previous window layout."
 (defun claude-repl-cycle ()
   "Send backtab to Claude vterm to cycle through options."
   (interactive)
+  (claude-repl--log "cycle")
   (claude-repl--load-session)
   (when (claude-repl--vterm-live-p)
     (with-current-buffer claude-repl-vterm-buffer
