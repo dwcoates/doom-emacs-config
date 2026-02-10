@@ -1254,3 +1254,5 @@ If already fullscreen, restore the previous window layout."
   (let ((char (number-to-string i)))
     (define-key doom-leader-map (kbd (format "o %s" char))
       (lambda () (interactive) (claude-repl-send-char char)))))
+
+;; FIXME: add support for C-v for image pasting (we just send C-v to claude, NOT cmd+v)
