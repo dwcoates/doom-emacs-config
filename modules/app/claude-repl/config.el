@@ -195,24 +195,45 @@ Tries git root, then buffer-local project root, then `default-directory'."
   (claude-repl--set-buffer-background 37)
   (add-hook 'after-change-functions #'claude-repl--history-on-change nil t))
 
+(defun claude-repl-discard-input ()
+  "Save current input to history, clear the buffer, and enter insert state."
+  (interactive)
+  (claude-repl--log "discard-input")
+  (claude-repl--history-push)
+  (claude-repl--history-reset)
+  (erase-buffer)
+  (evil-insert-state))
+
+(defun claude-repl-scroll-down ()
+  "Scroll the Claude vterm buffer down."
+  (interactive)
+  (claude-repl--log "scroll-down")
+  (claude-repl--load-session)
+  (when (claude-repl--vterm-live-p)
+    (with-current-buffer claude-repl-vterm-buffer (vterm-send-down))))
+
+(defun claude-repl-scroll-up ()
+  "Scroll the Claude vterm buffer up."
+  (interactive)
+  (claude-repl--log "scroll-up")
+  (claude-repl--load-session)
+  (when (claude-repl--vterm-live-p)
+    (with-current-buffer claude-repl-vterm-buffer (vterm-send-up))))
+
 (map! :map claude-input-mode-map
       :ni "RET"       #'claude-repl-send
       :ni "S-RET"     #'newline
       :ni "C-RET"     #'claude-repl-send-and-hide
       :ni "C-c C-k"   #'claude-repl-interrupt
-      :ni "C-c C-c"   (cmd! (claude-repl--history-push) (claude-repl--history-reset) (erase-buffer) (evil-insert-state))
+      :ni "C-c C-c"   #'claude-repl-discard-input
       :ni "C-c y"     (cmd! (claude-repl-send-char "y"))
       :ni "C-c n"     (cmd! (claude-repl-send-char "n"))
       :ni "C-c r"     #'claude-repl-restart
       :ni "C-c q"     #'claude-repl-kill
       :ni "C-S-m"     #'claude-repl-cycle
       :ni "C-h"       #'evil-window-left
-      :n  "C-n"       (cmd! (claude-repl--load-session)
-                            (when (claude-repl--vterm-live-p)
-                              (with-current-buffer claude-repl-vterm-buffer (vterm-send-down))))
-      :n  "C-p"       (cmd! (claude-repl--load-session)
-                            (when (claude-repl--vterm-live-p)
-                              (with-current-buffer claude-repl-vterm-buffer (vterm-send-up))))
+      :n  "C-n"       #'claude-repl-scroll-down
+      :n  "C-p"       #'claude-repl-scroll-up
       :ni "<up>"        #'claude-repl--history-prev
       :ni "<down>"      #'claude-repl--history-next)
 
