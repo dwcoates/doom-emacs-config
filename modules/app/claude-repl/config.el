@@ -140,8 +140,12 @@ Splits right for vterm (55% of frame), then splits vterm bottom for input (30%).
     (set-window-dedicated-p vterm-win t)
     (set-window-dedicated-p input-win t)
     ;; Lock width to prevent resize-triggered reflow in vterm
-    (set-window-parameter vterm-win 'window-size-fixed 'width)
-    (select-window input-win)
+    (set-window-parameter vterm-win 'window-size-fixed 'width)))
+
+(defun claude-repl--focus-input-panel ()
+  "Focus the input panel window and enter insert state."
+  (when-let ((win (get-buffer-window claude-repl-input-buffer)))
+    (select-window win)
     (evil-insert-state)))
 
 (defun claude-repl--grey (n)
@@ -196,7 +200,7 @@ Tries git root, then buffer-local project root, then `default-directory'."
       :ni "S-RET"     #'newline
       :ni "C-RET"     #'claude-repl-send-and-hide
       :ni "C-c C-k"   #'claude-repl-interrupt
-      :ni "C-c C-c"   (cmd! (claude-repl--history-push) (erase-buffer) (evil-insert-state))
+      :ni "C-c C-c"   (cmd! (claude-repl--history-push) (claude-repl--history-reset) (erase-buffer) (evil-insert-state))
       :ni "C-c y"     (cmd! (claude-repl-send-char "y"))
       :ni "C-c n"     (cmd! (claude-repl-send-char "n"))
       :ni "C-c r"     #'claude-repl-restart
@@ -244,12 +248,14 @@ Tries git root, then buffer-local project root, then `default-directory'."
 ;; Input history functions
 (defun claude-repl--history-push ()
   "Save current input buffer text to history.
-Skips empty strings and duplicates of the most recent entry.
-Resets history browsing index."
+Skips empty strings and duplicates of the most recent entry."
   (let ((text (string-trim (buffer-string))))
     (unless (string-empty-p text)
       (unless (equal text (car claude-repl--input-history))
-        (push text claude-repl--input-history))))
+        (push text claude-repl--input-history)))))
+
+(defun claude-repl--history-reset ()
+  "Reset history browsing index to the default (not browsing) state."
   (setq claude-repl--history-index -1))
 
 (defun claude-repl--history-prev ()
@@ -293,12 +299,10 @@ Resets history browsing index."
 Periodically prepends the metaprompt prefix when `claude-repl-skip-permissions' is on."
   (let ((raw (with-current-buffer claude-repl-input-buffer
                (buffer-string))))
-    (prog1
-        (if (and claude-repl-skip-permissions claude-repl-command-prefix
-                 (zerop (mod claude-repl--prefix-counter claude-repl-prefix-period)))
-            (concat claude-repl--command-prefix raw)
-          raw)
-      (setq claude-repl--prefix-counter (1+ claude-repl--prefix-counter)))))
+    (if (and claude-repl-skip-permissions claude-repl-command-prefix
+             (zerop (mod claude-repl--prefix-counter claude-repl-prefix-period)))
+        (concat claude-repl--command-prefix raw)
+      raw)))
 
 (defun claude-repl--schedule-failed-check (ws)
   "Schedule a 5s check: if WS is still :thinking without a title spinner, mark :failed."
@@ -333,6 +337,19 @@ Uses paste mode for large inputs to avoid truncation."
       (vterm-send-return)
       (claude-repl--refresh-vterm))))
 
+(defun claude-repl--mark-ws-thinking (ws)
+  "Mark workspace WS as thinking: set state, record activity, schedule failed check."
+  (claude-repl--ws-set ws :thinking)
+  (claude-repl--touch-activity ws)
+  (claude-repl--schedule-failed-check ws))
+
+(defun claude-repl--clear-input ()
+  "Push current input to history, reset browsing, and clear the input buffer."
+  (with-current-buffer claude-repl-input-buffer
+    (claude-repl--history-push)
+    (claude-repl--history-reset)
+    (erase-buffer)))
+
 (defun claude-repl-send ()
   "Send input buffer contents to Claude, clear buffer, and return to previous window."
   (interactive)
@@ -342,13 +359,10 @@ Uses paste mode for large inputs to avoid truncation."
           (input (claude-repl--prepare-input)))
       (unless ws (error "claude-repl-send: no active workspace"))
       (claude-repl--log "send ws=%s len=%d" ws (length input))
-      (claude-repl--ws-set ws :thinking)
-      (claude-repl--touch-activity ws)
-      (claude-repl--schedule-failed-check ws)
+      (setq claude-repl--prefix-counter (1+ claude-repl--prefix-counter))
+      (claude-repl--mark-ws-thinking ws)
       (claude-repl--send-input-to-vterm input)
-      (with-current-buffer claude-repl-input-buffer
-        (claude-repl--history-push)
-        (erase-buffer))
+      (claude-repl--clear-input)
       (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
         (select-window claude-repl-return-window)))))
 
@@ -382,14 +396,20 @@ Falls back to hiding panels and selecting the return window."
       (vterm-send-string char)
       (vterm-send-return))))
 
+(defun claude-repl--ensure-session ()
+  "Ensure a Claude session exists (vterm + input + overlay).
+No-op if already running."
+  (unless (claude-repl--vterm-running-p)
+    (claude-repl--log "ensure-session: starting new session")
+    (claude-repl--ensure-vterm-buffer)
+    (claude-repl--ensure-input-buffer)
+    (claude-repl--enable-hide-overlay)))
+
 (defun claude-repl--send-to-claude (text)
   "Send TEXT to Claude, starting it if needed."
   (claude-repl--log "send-to-claude len=%d" (length text))
   (claude-repl--load-session)
-  (unless (claude-repl--vterm-running-p)
-    (claude-repl--ensure-vterm-buffer)
-    (claude-repl--ensure-input-buffer)
-    (claude-repl--enable-hide-overlay))
+  (claude-repl--ensure-session)
   (with-current-buffer claude-repl-vterm-buffer
     (vterm-send-string text)
     (vterm-send-return))
@@ -643,9 +663,15 @@ Called once when Claude sets its first terminal title (meaning it's ready)."
                          (set-window-dedicated-p win t))
                        (kill-buffer placeholder)))))))
 
+(defun claude-repl--maybe-notify-finished (ws)
+  "Send a desktop notification that Claude finished in WS, if frame is unfocused."
+  (unless (frame-focus-state)
+    (run-at-time 0.1 nil #'claude-repl--notify "Claude REPL"
+                 (format "%s: Claude ready" ws))))
+
 (defun claude-repl--on-claude-finished (ws)
   "Handle Claude finishing work in workspace WS.
-Sets done state if buffer is hidden, refreshes display, sends notification."
+Sets done state if buffer is hidden, refreshes display."
   (claude-repl--log "on-claude-finished ws=%s visible=%s focused=%s"
                     ws (if (get-buffer-window (current-buffer) t) "yes" "no")
                     (if (frame-focus-state) "yes" "no"))
@@ -653,17 +679,20 @@ Sets done state if buffer is hidden, refreshes display, sends notification."
     (claude-repl--ws-set ws :done))
   (claude-repl--refresh-vterm)
   (claude-repl--update-hide-overlay)
-  (unless (frame-focus-state)
-    (run-at-time 0.1 nil #'claude-repl--notify "Claude REPL"
-                 (format "%s: Claude ready" ws))))
+  (claude-repl--maybe-notify-finished ws))
+
+(defun claude-repl--handle-first-ready ()
+  "Handle the first terminal title set — Claude is now ready.
+Swaps the loading placeholder for the real vterm buffer."
+  (unless claude-repl--ready
+    (claude-repl--log "first-ready buf=%s" (buffer-name))
+    (setq claude-repl--ready t)
+    (claude-repl--swap-placeholder)))
 
 (defun claude-repl--on-title-change (title)
-  "Detect thinking->idle transition from vterm title changes.
-On first title change, reveal panels (Claude is ready)."
+  "Detect thinking->idle transition from vterm title changes."
   (when (claude-repl--claude-buffer-p)
-    (unless claude-repl--ready
-      (setq claude-repl--ready t)
-      (claude-repl--swap-placeholder))
+    (claude-repl--handle-first-ready)
     (let* ((info (claude-repl--detect-title-transition title))
            (thinking (plist-get info :thinking))
            (transition (plist-get info :transition))
@@ -718,6 +747,14 @@ Must be called with a vterm-mode buffer current."
     (vterm--redraw vterm--term))
   (redisplay t))
 
+(defun claude-repl--fix-vterm-scroll (buf)
+  "Briefly select the vterm window for BUF to fix Emacs scroll position."
+  (let ((vterm-win (get-buffer-window buf))
+        (orig-win (selected-window)))
+    (when (and vterm-win (not (eq vterm-win orig-win)))
+      (select-window vterm-win 'norecord)
+      (select-window orig-win 'norecord))))
+
 (defun claude-repl--refresh-vterm ()
   "Refresh the claude vterm display.
 Works from any buffer (loads session) or from within the vterm buffer itself."
@@ -726,15 +763,10 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
                (claude-repl--load-session)
                claude-repl-vterm-buffer)))
     (when (and buf (buffer-live-p buf))
-      (let ((vterm-win (get-buffer-window buf))
-            (orig-win (selected-window)))
-        (with-current-buffer buf
-          (when (eq major-mode 'vterm-mode)
-            (claude-repl--do-refresh)))
-        ;; Briefly select the vterm window to fix scroll position
-        (when (and vterm-win (not (eq vterm-win orig-win)))
-          (select-window vterm-win 'norecord)
-          (select-window orig-win 'norecord))))))
+      (with-current-buffer buf
+        (when (eq major-mode 'vterm-mode)
+          (claude-repl--do-refresh)))
+      (claude-repl--fix-vterm-scroll buf))))
 
 ;; Refresh vterm on frame focus
 (defun claude-repl--clear-done-if-visible ()
@@ -779,13 +811,17 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
   "Enable the hide overlay advice."
   (advice-add 'vterm--redraw :after #'claude-repl--after-vterm-redraw))
 
-(defun claude-repl--disable-hide-overlay ()
-  "Disable the hide overlay advice and clean up."
-  (advice-remove 'vterm--redraw #'claude-repl--after-vterm-redraw)
+(defun claude-repl--delete-hide-overlay ()
+  "Delete the hide overlay if it exists and nil the variable."
   (when (and claude-repl-hide-overlay
              (overlay-buffer claude-repl-hide-overlay))
     (delete-overlay claude-repl-hide-overlay))
   (setq claude-repl-hide-overlay nil))
+
+(defun claude-repl--disable-hide-overlay ()
+  "Disable the hide overlay advice and clean up any existing overlay."
+  (advice-remove 'vterm--redraw #'claude-repl--after-vterm-redraw)
+  (claude-repl--delete-hide-overlay))
 
 (defun claude-repl--vterm-running-p ()
   "Return t if Claude vterm buffer exists with a live process."
@@ -941,15 +977,9 @@ Kills any stale buffer (no live process) first. Starts claude from the git root.
         (claude-repl--log "ensure-vterm created %s root=%s" (buffer-name claude-repl-vterm-buffer) root)
         (claude-repl--start-claude)))))
 
-(defun claude-repl--start-fresh ()
-  "Start a new Claude session with placeholder panels.
-Shows a loading placeholder in the output slot until Claude is ready."
-  (claude-repl--log "start-fresh")
-  (setq claude-repl--saved-window-config (current-window-configuration))
-  (delete-other-windows (or claude-repl-return-window (selected-window)))
-  (claude-repl--ensure-vterm-buffer)
-  (claude-repl--ensure-input-buffer)
-  (claude-repl--enable-hide-overlay)
+(defun claude-repl--show-panels-with-placeholder ()
+  "Show panels using a loading placeholder in the vterm slot.
+The placeholder is swapped for the real vterm buffer once Claude is ready."
   (let ((real-vterm claude-repl-vterm-buffer)
         (placeholder (get-buffer-create " *claude-loading*")))
     (with-current-buffer placeholder
@@ -957,7 +987,16 @@ Shows a loading placeholder in the output slot until Claude is ready."
       (claude-repl--set-buffer-background 15))
     (setq claude-repl-vterm-buffer placeholder)
     (claude-repl--show-panels)
-    (setq claude-repl-vterm-buffer real-vterm))
+    (claude-repl--focus-input-panel)
+    (setq claude-repl-vterm-buffer real-vterm)))
+
+(defun claude-repl--start-fresh ()
+  "Start a new Claude session with placeholder panels."
+  (claude-repl--log "start-fresh")
+  (setq claude-repl--saved-window-config (current-window-configuration))
+  (delete-other-windows (or claude-repl-return-window (selected-window)))
+  (claude-repl--ensure-session)
+  (claude-repl--show-panels-with-placeholder)
   (claude-repl--save-session)
   (message "Starting Claude..."))
 
@@ -971,6 +1010,7 @@ Clears done state, refreshes display, and restores panel layout."
   (delete-other-windows (or claude-repl-return-window (selected-window)))
   (claude-repl--ensure-input-buffer)
   (claude-repl--show-panels)
+  (claude-repl--focus-input-panel)
   (claude-repl--update-hide-overlay)
   (claude-repl--save-session))
 
@@ -1009,19 +1049,30 @@ If panels hidden: show both panels."
      (t
       (claude-repl--show-existing-panels)))))
 
-(defun claude-repl--close-session-windows (&rest bufs)
-  "Close windows displaying any of BUFS, plus the loading placeholder."
+(defun claude-repl--close-buffer-windows (&rest bufs)
+  "Close windows displaying any of BUFS."
   (dolist (buf bufs)
     (when (and buf (buffer-live-p buf))
       (when-let ((win (get-buffer-window buf)))
-        (ignore-errors (delete-window win)))))
+        (ignore-errors (delete-window win))))))
+
+(defun claude-repl--kill-placeholder ()
+  "Close and kill the loading placeholder buffer if it exists."
   (when-let ((placeholder (get-buffer " *claude-loading*")))
     (when-let ((win (get-buffer-window placeholder)))
       (ignore-errors (delete-window win)))
     (kill-buffer placeholder)))
 
+(defun claude-repl--schedule-sigkill (proc)
+  "Schedule a SIGKILL for PROC after 0.5s if it's still alive."
+  (run-at-time 0.5 nil
+               (lambda ()
+                 (when (process-live-p proc)
+                   (claude-repl--log "sigkill fallback for lingering process")
+                   (signal-process proc 'SIGKILL)))))
+
 (defun claude-repl--kill-vterm-process (buf)
-  "Kill the vterm process in BUF, with a delayed SIGKILL fallback."
+  "Kill the vterm buffer BUF and its process."
   (claude-repl--log "kill-vterm-process buf=%s" (and buf (buffer-name buf)))
   (when (and buf (buffer-live-p buf))
     (let ((proc (get-buffer-process buf)))
@@ -1029,10 +1080,27 @@ If panels hidden: show both panels."
         (set-process-query-on-exit-flag proc nil))
       (kill-buffer buf)
       (when proc
-        (run-at-time 0.5 nil
-                     (lambda ()
-                       (when (process-live-p proc)
-                         (signal-process proc 'SIGKILL))))))))
+        (claude-repl--schedule-sigkill proc)))))
+
+(defun claude-repl--teardown-session-state ()
+  "Save history, disable overlay, cancel timers, and nil out session globals."
+  (ignore-errors (claude-repl--history-save))
+  (ignore-errors (claude-repl--disable-hide-overlay))
+  (when claude-repl--sync-timer
+    (cancel-timer claude-repl--sync-timer)
+    (setq claude-repl--sync-timer nil))
+  (setq claude-repl-vterm-buffer nil
+        claude-repl-input-buffer nil
+        claude-repl--saved-window-config nil)
+  (claude-repl--save-session))
+
+(defun claude-repl--destroy-session-buffers (vterm-buf input-buf)
+  "Close windows and kill VTERM-BUF, INPUT-BUF, and any placeholder."
+  (claude-repl--close-buffer-windows vterm-buf input-buf)
+  (claude-repl--kill-placeholder)
+  (claude-repl--kill-vterm-process vterm-buf)
+  (when (and input-buf (buffer-live-p input-buf))
+    (kill-buffer input-buf)))
 
 (defun claude-repl-kill ()
   "Kill Claude REPL buffers and windows for the current workspace."
@@ -1041,21 +1109,8 @@ If panels hidden: show both panels."
   (claude-repl--load-session)
   (let ((vterm-buf claude-repl-vterm-buffer)
         (input-buf claude-repl-input-buffer))
-    (ignore-errors (claude-repl--history-save))
-    (ignore-errors (claude-repl--disable-hide-overlay))
-    (when claude-repl--sync-timer
-      (cancel-timer claude-repl--sync-timer)
-      (setq claude-repl--sync-timer nil))
-    ;; Nil out globals before deleting windows (prevents sync hook from
-    ;; operating on dead buffers)
-    (setq claude-repl-vterm-buffer nil
-          claude-repl-input-buffer nil
-          claude-repl--saved-window-config nil)
-    (claude-repl--save-session)
-    (claude-repl--close-session-windows vterm-buf input-buf)
-    (claude-repl--kill-vterm-process vterm-buf)
-    (when (and input-buf (buffer-live-p input-buf))
-      (kill-buffer input-buf))))
+    (claude-repl--teardown-session-state)
+    (claude-repl--destroy-session-buffers vterm-buf input-buf)))
 
 (defun claude-repl-restart ()
   "Kill Claude REPL and restart with `claude -c` to continue session."
@@ -1067,6 +1122,7 @@ If panels hidden: show both panels."
   (claude-repl--ensure-input-buffer)
   (claude-repl--enable-hide-overlay)
   (claude-repl--show-panels)
+  (claude-repl--focus-input-panel)
   (claude-repl--save-session))
 
 (defun claude-repl-focus-input ()
