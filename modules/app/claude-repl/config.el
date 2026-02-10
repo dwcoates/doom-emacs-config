@@ -49,10 +49,10 @@ Uses an MD5 hash of the git root path.  Falls back to the buffer-local
   "When non-nil, emit debug messages to *Messages*.")
 
 (defun claude-repl--log (fmt &rest args)
-  "Log a debug message when `claude-repl-debug' is non-nil.
-FMT and ARGS are passed to `message', prefixed with [claude-repl]."
+  "Log a timestamped debug message when `claude-repl-debug' is non-nil.
+FMT and ARGS are passed to `message', prefixed with timestamp and [claude-repl]."
   (when claude-repl-debug
-    (apply #'message (concat "[claude-repl] " fmt) args)))
+    (apply #'message (concat (format-time-string "%H:%M:%S.%3N") " [claude-repl] " fmt) args)))
 
 (defvar claude-repl-skip-permissions t
   "When non-nil, start Claude with --dangerously-skip-permissions and prepend the command prefix metaprompt.")
@@ -96,11 +96,15 @@ and restores window config from the sessions hash table."
     (setq claude-repl-vterm-buffer (get-buffer vterm-name)
           claude-repl-input-buffer (get-buffer input-name)
           claude-repl--saved-window-config (plist-get session :saved-window-config)
-          claude-repl-return-window (plist-get session :return-window))))
+          claude-repl-return-window (plist-get session :return-window))
+    (claude-repl--log "load-session id=%s vterm=%s input=%s" id
+                      (and claude-repl-vterm-buffer (buffer-name claude-repl-vterm-buffer))
+                      (and claude-repl-input-buffer (buffer-name claude-repl-input-buffer)))))
 
 (defun claude-repl--save-session ()
   "Save the current global state back to the sessions hash table."
   (let ((id (claude-repl--workspace-id)))
+    (claude-repl--log "save-session id=%s" id)
     (puthash id
              (list :saved-window-config claude-repl--saved-window-config
                    :return-window claude-repl-return-window)
@@ -124,6 +128,9 @@ and restores window config from the sessions hash table."
 (defun claude-repl--show-panels ()
   "Display vterm and input panels to the right of the current window.
 Splits right for vterm (55% of frame), then splits vterm bottom for input (30%)."
+  (claude-repl--log "show-panels vterm=%s input=%s"
+                    (and claude-repl-vterm-buffer (buffer-name claude-repl-vterm-buffer))
+                    (and claude-repl-input-buffer (buffer-name claude-repl-input-buffer)))
   (let* ((work-win (or claude-repl-return-window (selected-window)))
          (vterm-win (split-window work-win (round (* 0.6 (window-total-width work-win))) 'right))
          (input-win (split-window vterm-win (round (* -0.15 (window-total-height vterm-win))) 'below)))
@@ -295,10 +302,13 @@ Periodically prepends the metaprompt prefix when `claude-repl-skip-permissions' 
 
 (defun claude-repl--schedule-failed-check (ws)
   "Schedule a 5s check: if WS is still :thinking without a title spinner, mark :failed."
+  (claude-repl--log "schedule-failed-check ws=%s" ws)
   (let ((check-ws ws)
         (check-buf claude-repl-vterm-buffer))
     (run-at-time 5 nil
                  (lambda ()
+                   (claude-repl--log "failed-check firing ws=%s state=%s title-thinking=%s"
+                                     check-ws (claude-repl--ws-state check-ws) claude-repl--title-thinking)
                    (when (and (buffer-live-p check-buf)
                               (eq (claude-repl--ws-state check-ws) :thinking)
                               (not claude-repl--title-thinking))
@@ -307,6 +317,8 @@ Periodically prepends the metaprompt prefix when `claude-repl-skip-permissions' 
 (defun claude-repl--send-input-to-vterm (input)
   "Send INPUT string to the Claude vterm buffer.
 Uses paste mode for large inputs to avoid truncation."
+  (claude-repl--log "send-input-to-vterm len=%d mode=%s" (length input)
+                    (if (> (length input) 200) "paste" "direct"))
   (with-current-buffer claude-repl-vterm-buffer
     (if (> (length input) 200)
         (let ((buf (current-buffer)))
@@ -343,6 +355,7 @@ Uses paste mode for large inputs to avoid truncation."
 (defun claude-repl--restore-layout ()
   "Restore the window layout from before panels were shown.
 Falls back to hiding panels and selecting the return window."
+  (claude-repl--log "restore-layout saved-config=%s" (if claude-repl--saved-window-config "yes" "no"))
   (if claude-repl--saved-window-config
       (progn
         (set-window-configuration claude-repl--saved-window-config)
@@ -354,6 +367,7 @@ Falls back to hiding panels and selecting the return window."
 (defun claude-repl-send-and-hide ()
   "Send input to Claude and hide both panels."
   (interactive)
+  (claude-repl--log "send-and-hide")
   (claude-repl--load-session)
   (claude-repl-send)
   (claude-repl--restore-layout)
@@ -361,6 +375,7 @@ Falls back to hiding panels and selecting the return window."
 
 (defun claude-repl-send-char (char)
   "Send a single character to Claude."
+  (claude-repl--log "send-char %s" char)
   (claude-repl--load-session)
   (when (claude-repl--vterm-live-p)
     (with-current-buffer claude-repl-vterm-buffer
@@ -369,6 +384,7 @@ Falls back to hiding panels and selecting the return window."
 
 (defun claude-repl--send-to-claude (text)
   "Send TEXT to Claude, starting it if needed."
+  (claude-repl--log "send-to-claude len=%d" (length text))
   (claude-repl--load-session)
   (unless (claude-repl--vterm-running-p)
     (claude-repl--ensure-vterm-buffer)
@@ -396,11 +412,13 @@ Without region: sends file path and current line."
                     (deactivate-mark)
                     (format "please explain %s:%d-%d" rel start-line end-line))
                 (format "please explain %s:%d" rel (line-number-at-pos (point))))))
+    (claude-repl--log "explain %s" msg)
     (claude-repl--send-to-claude msg)))
 
 (defun claude-repl-interrupt ()
   "Send Escape to interrupt Claude."
   (interactive)
+  (claude-repl--log "interrupt")
   (claude-repl--load-session)
   (when (claude-repl--vterm-live-p)
     (with-current-buffer claude-repl-vterm-buffer
@@ -456,6 +474,7 @@ Without region: sends file path and current line."
 
 (defun claude-repl--notify (title message)
   "Send a desktop notification with TITLE and MESSAGE."
+  (claude-repl--log "notify title=%s msg=%s" title message)
   (funcall claude-repl--notify-fn title message))
 
 ;; Workspace tab indicator for Claude status
@@ -504,6 +523,7 @@ STATE is one of: :thinking, :done, :permission, :failed."
   "Clear a single STATE for workspace WS.
 STATE is one of: :thinking, :done, :permission, :failed."
   (unless ws (error "claude-repl--ws-clear: ws is nil"))
+  (claude-repl--log "clear %s %s" ws state)
   (pcase state
     (:thinking   (remhash ws claude-repl--thinking-workspaces))
     (:done       (remhash ws claude-repl--done-workspaces))
@@ -610,6 +630,7 @@ Returns a plist with:
 (defun claude-repl--swap-placeholder ()
   "Replace the loading placeholder window with the real vterm buffer.
 Called once when Claude sets its first terminal title (meaning it's ready)."
+  (claude-repl--log "swap-placeholder buf=%s" (buffer-name))
   (let ((buf (current-buffer))
         (placeholder (get-buffer " *claude-loading*")))
     (when placeholder
@@ -625,6 +646,9 @@ Called once when Claude sets its first terminal title (meaning it's ready)."
 (defun claude-repl--on-claude-finished (ws)
   "Handle Claude finishing work in workspace WS.
 Sets done state if buffer is hidden, refreshes display, sends notification."
+  (claude-repl--log "on-claude-finished ws=%s visible=%s focused=%s"
+                    ws (if (get-buffer-window (current-buffer) t) "yes" "no")
+                    (if (frame-focus-state) "yes" "no"))
   (unless (get-buffer-window (current-buffer) t)
     (claude-repl--ws-set ws :done))
   (claude-repl--refresh-vterm)
@@ -717,11 +741,14 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
   "Clear :done state for the current vterm's workspace if the vterm is visible."
   (when (and (claude-repl--vterm-live-p) (claude-repl--vterm-visible-p))
     (let ((ws (claude-repl--workspace-for-buffer claude-repl-vterm-buffer)))
-      (when ws (claude-repl--ws-clear ws :done)))))
+      (when ws
+        (claude-repl--log "clear-done-if-visible ws=%s" ws)
+        (claude-repl--ws-clear ws :done)))))
 
 (defun claude-repl--on-frame-focus ()
   "Refresh claude vterm and clear done indicator when Emacs regains focus."
   (when (frame-focus-state)
+    (claude-repl--log "on-frame-focus")
     (claude-repl--load-session)
     (claude-repl--refresh-vterm)
     (claude-repl--clear-done-if-visible)))
@@ -783,6 +810,7 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
 
 (defun claude-repl--hide-panels ()
   "Hide both Claude panels without killing buffers."
+  (claude-repl--log "hide-panels")
   (when-let ((win (get-buffer-window claude-repl-input-buffer)))
     (delete-window win))
   (when-let ((win (get-buffer-window claude-repl-vterm-buffer)))
@@ -802,6 +830,7 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
              (not (one-window-p))
              (not (get-buffer-window
                    (format "*claude-input-%s*" (match-string 1 name)))))
+        (claude-repl--log "sync-panels closing orphaned vterm %s" name)
         (delete-window win))
        ;; Input visible, vterm missing -> close input
        ;; (but not if placeholder is showing — Claude is still starting)
@@ -810,6 +839,7 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
              (not (get-buffer-window
                    (format "*claude-%s*" (match-string 1 name))))
              (not (get-buffer " *claude-loading*")))
+        (claude-repl--log "sync-panels closing orphaned input %s" name)
         (delete-window win))))))
 
 ;; Keep visible Claude vterm buffers scrolled to the cursor.
@@ -841,6 +871,7 @@ Resets cursor, redraws, and syncs window point."
 (defun claude-repl--on-window-change ()
   "Deferred handler for window configuration changes.
 Syncs orphaned panels, refreshes overlay, and resets cursors."
+  (claude-repl--log "on-window-change")
   (claude-repl--load-session)
   (claude-repl--sync-panels)
   (claude-repl--update-hide-overlay)
@@ -871,6 +902,7 @@ so the user can select and copy text from the output."
         (let* ((id (match-string 1 name))
                (input-buf (get-buffer (format "*claude-input-%s*" id))))
           (when-let ((input-win (and input-buf (get-buffer-window input-buf))))
+            (claude-repl--log "redirect-to-input from %s" name)
             (select-window input-win)
             (when (bound-and-true-p evil-mode)
               (evil-insert-state))))))))
@@ -879,6 +911,7 @@ so the user can select and copy text from the output."
 
 (defun claude-repl--ensure-input-buffer ()
   "Create input buffer if needed, put in claude-input-mode."
+  (claude-repl--log "ensure-input-buffer")
   (let ((root (claude-repl--resolve-root)))
     (setq claude-repl-input-buffer (get-buffer-create (claude-repl--buffer-name "-input")))
     (with-current-buffer claude-repl-input-buffer
@@ -895,6 +928,7 @@ Kills any stale buffer (no live process) first. Starts claude from the git root.
          (existing (get-buffer (claude-repl--buffer-name))))
     ;; Kill stale buffer (exists but process died)
     (when (and existing (not (get-buffer-process existing)))
+      (claude-repl--log "ensure-vterm killing stale buffer %s" (buffer-name existing))
       (kill-buffer existing))
     (setq claude-repl-vterm-buffer (get-buffer-create (claude-repl--buffer-name)))
     (with-current-buffer claude-repl-vterm-buffer
@@ -904,11 +938,13 @@ Kills any stale buffer (no live process) first. Starts claude from the git root.
         (setq-local truncate-lines nil)
         (setq-local word-wrap t)
         (claude-repl--set-buffer-background 15)
+        (claude-repl--log "ensure-vterm created %s root=%s" (buffer-name claude-repl-vterm-buffer) root)
         (claude-repl--start-claude)))))
 
 (defun claude-repl--start-fresh ()
   "Start a new Claude session with placeholder panels.
 Shows a loading placeholder in the output slot until Claude is ready."
+  (claude-repl--log "start-fresh")
   (setq claude-repl--saved-window-config (current-window-configuration))
   (delete-other-windows (or claude-repl-return-window (selected-window)))
   (claude-repl--ensure-vterm-buffer)
@@ -928,6 +964,7 @@ Shows a loading placeholder in the output slot until Claude is ready."
 (defun claude-repl--show-existing-panels ()
   "Show panels for an already-running Claude session.
 Clears done state, refreshes display, and restores panel layout."
+  (claude-repl--log "show-existing-panels")
   (claude-repl--refresh-vterm)
   (claude-repl--clear-done-if-visible)
   (setq claude-repl--saved-window-config (current-window-configuration))
@@ -953,6 +990,8 @@ If panels hidden: show both panels."
         (panels-visible (claude-repl--panels-visible-p))
         (selection (when (use-region-p)
                     (buffer-substring-no-properties (region-beginning) (region-end)))))
+    (claude-repl--log "claude-repl running=%s visible=%s selection=%s"
+                      vterm-running panels-visible (if selection "yes" "no"))
     (cond
      ;; Text selected - send directly to Claude
      (selection
@@ -983,6 +1022,7 @@ If panels hidden: show both panels."
 
 (defun claude-repl--kill-vterm-process (buf)
   "Kill the vterm process in BUF, with a delayed SIGKILL fallback."
+  (claude-repl--log "kill-vterm-process buf=%s" (and buf (buffer-name buf)))
   (when (and buf (buffer-live-p buf))
     (let ((proc (get-buffer-process buf)))
       (when proc
@@ -997,6 +1037,7 @@ If panels hidden: show both panels."
 (defun claude-repl-kill ()
   "Kill Claude REPL buffers and windows for the current workspace."
   (interactive)
+  (claude-repl--log "kill")
   (claude-repl--load-session)
   (let ((vterm-buf claude-repl-vterm-buffer)
         (input-buf claude-repl-input-buffer))
@@ -1019,6 +1060,7 @@ If panels hidden: show both panels."
 (defun claude-repl-restart ()
   "Kill Claude REPL and restart with `claude -c` to continue session."
   (interactive)
+  (claude-repl--log "restart")
   (claude-repl--load-session)
   (claude-repl-kill)
   (claude-repl--ensure-vterm-buffer)
@@ -1032,6 +1074,11 @@ If panels hidden: show both panels."
 If Claude isn't running, start it (same as `claude-repl')."
   (interactive)
   (claude-repl--load-session)
+  (let ((branch (cond
+                  ((eq (current-buffer) claude-repl-input-buffer) 'jump-back)
+                  ((not (claude-repl--vterm-running-p)) 'start-fresh)
+                  (t 'show-or-focus))))
+    (claude-repl--log "focus-input branch=%s" branch))
   (cond
    ;; Already in the input buffer — jump back
    ((eq (current-buffer) claude-repl-input-buffer)
@@ -1061,6 +1108,7 @@ If Claude isn't running, start it (same as `claude-repl')."
   "Toggle the Claude vterm buffer fullscreen.
 If already fullscreen, restore the previous window layout."
   (interactive)
+  (claude-repl--log "toggle-fullscreen currently=%s" (if claude-repl--fullscreen-config "fullscreen" "normal"))
   (claude-repl--load-session)
   (cond
    ;; Already fullscreen — restore
