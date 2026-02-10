@@ -215,8 +215,8 @@ Tries git root, then buffer-local project root, then `default-directory'."
 ;; C-S-0 through C-S-9: send digit to Claude
 (dotimes (i 10)
   (let ((char (number-to-string i)))
-    (map! :map claude-input-mode-map
-          :ni (format "C-S-%s" char) (cmd! (claude-repl-send-char char)))))
+    (define-key claude-input-mode-map (kbd (format "C-S-%s" char))
+      (lambda () (interactive) (claude-repl-send-char char)))))
 
 ;; Input history persistence
 (defun claude-repl--history-file ()
@@ -1147,7 +1147,5 @@ If already fullscreen, restore the previous window layout."
 
 (dotimes (i 10)
   (let ((char (number-to-string i)))
-    (map! :leader
-          :desc (format "Send %s to Claude" char)
-          (format "o %s" char)
-          (cmd! (claude-repl-send-char char)))))
+    (define-key doom-leader-map (kbd (format "o %s" char))
+      (lambda () (interactive) (claude-repl-send-char char)))))
