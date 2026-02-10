@@ -810,6 +810,10 @@ Swaps the loading placeholder for the real vterm buffer."
            (thinking (plist-get info :thinking))
            (transition (plist-get info :transition))
            (ws (plist-get info :ws)))
+      ;; Update buffer-local thinking state before side effects so
+      ;; re-entrant vterm--redraw calls see the current value and
+      ;; detect no transition (prevents infinite recursion).
+      (setq claude-repl--title-thinking thinking)
       (when ws
         (when transition
           (claude-repl--log "title transition=%s ws=%s" transition ws))
@@ -817,9 +821,7 @@ Swaps the loading placeholder for the real vterm buffer."
           ('started  (claude-repl--ws-set ws :thinking))
           ('finished (claude-repl--ws-clear ws :thinking)))
         (when (eq transition 'finished)
-          (claude-repl--on-claude-finished ws)))
-      ;; Always update buffer-local thinking state
-      (setq claude-repl--title-thinking thinking))))
+          (claude-repl--on-claude-finished ws))))))
 
 (after! vterm
   (advice-add 'vterm--set-title :before #'claude-repl--on-title-change))

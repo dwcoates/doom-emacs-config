@@ -943,6 +943,33 @@ When t, it should call `message'."
           (should-not (gethash "ws1" claude-repl--thinking-workspaces))
           (should (equal finished-called "ws1")))))))
 
+(ert-deftest claude-repl-test-on-title-change-no-reentrant-recursion ()
+  "Regression: on-title-change updates title-thinking BEFORE side effects.
+If on-claude-finished triggers a re-entrant on-title-change (via
+refresh-vterm -> vterm--redraw -> set-title), the re-entrant call should
+see the updated title-thinking and detect no transition."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+      (setq-local claude-repl--title-thinking t)
+      (setq-local claude-repl--ready t)
+      (claude-repl--ws-set "ws1" :thinking)
+      (let ((reentrant-transition nil))
+        (cl-letf (((symbol-function 'claude-repl--workspace-for-buffer)
+                   (lambda (_buf) "ws1"))
+                  ((symbol-function 'claude-repl--handle-first-ready) #'ignore)
+                  ((symbol-function 'claude-repl--on-claude-finished)
+                   (lambda (_ws)
+                     ;; Simulate re-entrant call: on-claude-finished would
+                     ;; normally call refresh-vterm -> vterm--redraw, which
+                     ;; triggers vterm--set-title -> on-title-change again.
+                     ;; title-thinking must already be nil at this point.
+                     (let ((info (claude-repl--detect-title-transition "✳ Claude Code")))
+                       (setq reentrant-transition (plist-get info :transition))))))
+          (claude-repl--on-title-change "✳ Claude Code")
+          ;; The re-entrant detect-title-transition should see title-thinking=nil
+          ;; (already updated) and return nil transition — not 'finished again.
+          (should-not reentrant-transition))))))
+
 (ert-deftest claude-repl-test-on-title-change-non-claude-buffer ()
   "In a non-claude buffer, `on-title-change' should do nothing."
   (claude-repl-test--with-clean-state
