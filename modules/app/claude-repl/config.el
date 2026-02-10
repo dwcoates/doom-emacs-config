@@ -1256,3 +1256,5 @@ If already fullscreen, restore the previous window layout."
       (lambda () (interactive) (claude-repl-send-char char)))))
 
 ;; FIXME: add support for C-v for image pasting (we just send C-v to claude, NOT cmd+v)
+;; FIXME: fix magit handling
+;; FIXME: dont consider claude window when doing SPC b to switch to previous buffer
