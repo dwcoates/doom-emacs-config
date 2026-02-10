@@ -45,6 +45,15 @@ Uses an MD5 hash of the git root path.  Falls back to the buffer-local
 
 (setq claude-repl-hide-input-box nil)
 
+(defvar claude-repl-debug nil
+  "When non-nil, emit debug messages to *Messages*.")
+
+(defun claude-repl--log (fmt &rest args)
+  "Log a debug message when `claude-repl-debug' is non-nil.
+FMT and ARGS are passed to `message', prefixed with [claude-repl]."
+  (when claude-repl-debug
+    (apply #'message (concat "[claude-repl] " fmt) args)))
+
 (defvar claude-repl-skip-permissions t
   "When non-nil, start Claude with --dangerously-skip-permissions and prepend the command prefix metaprompt.")
 
@@ -320,6 +329,7 @@ Uses paste mode for large inputs to avoid truncation."
     (let ((ws (+workspace-current-name))
           (input (claude-repl--prepare-input)))
       (unless ws (error "claude-repl-send: no active workspace"))
+      (claude-repl--log "send ws=%s len=%d" ws (length input))
       (claude-repl--ws-set ws :thinking)
       (claude-repl--touch-activity ws)
       (claude-repl--schedule-failed-check ws)
@@ -479,6 +489,7 @@ Returns one of: :thinking, :done, :permission, :failed, :stale, or nil."
   "Set workspace WS to STATE, clearing any conflicting states.
 STATE is one of: :thinking, :done, :permission, :failed."
   (unless ws (error "claude-repl--ws-set: ws is nil"))
+  (claude-repl--log "state %s -> %s" ws state)
   (remhash ws claude-repl--thinking-workspaces)
   (remhash ws claude-repl--done-workspaces)
   (remhash ws claude-repl--permission-workspaces)
@@ -634,6 +645,8 @@ On first title change, reveal panels (Claude is ready)."
            (transition (plist-get info :transition))
            (ws (plist-get info :ws)))
       (unless ws (error "claude-repl--on-title-change: no workspace for buffer %s" (buffer-name)))
+      (when transition
+        (claude-repl--log "title transition=%s ws=%s" transition ws))
       (pcase transition
         ('started  (claude-repl--ws-set ws :thinking))
         ('finished (claude-repl--ws-clear ws :thinking)))
@@ -664,6 +677,7 @@ On first title change, reveal panels (Claude is ready)."
                  (string-trim (with-temp-buffer
                                 (insert-file-contents file)
                                 (buffer-string))))))
+        (claude-repl--log "permission notify ws=%s" ws)
         (when ws
           (claude-repl--ws-set ws :permission))
         (delete-file file)))))
@@ -718,6 +732,7 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
 (defun claude-repl--on-workspace-switch ()
   "Handle workspace switch: clear done state, refresh vterm, reset cursors."
   (claude-repl--load-session)
+  (claude-repl--log "workspace-switch ws=%s" (+workspace-current-name))
   (claude-repl--clear-done-if-visible)
   (claude-repl--refresh-vterm)
   (claude-repl--reset-vterm-cursors))
