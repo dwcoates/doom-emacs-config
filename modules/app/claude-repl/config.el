@@ -290,6 +290,7 @@ Tries git root, then buffer-local project root, then `default-directory'."
       :ni "C-h"       #'evil-window-left
       :n  "C-n"       #'claude-repl-scroll-down
       :n  "C-p"       #'claude-repl-scroll-up
+      :ni "C-v"       #'claude-repl-paste-to-vterm
       :ni "<up>"        #'claude-repl--history-prev
       :ni "<down>"      #'claude-repl--history-next)
 
@@ -856,8 +857,9 @@ Swaps the loading placeholder for the real vterm buffer."
 (defun claude-repl--do-refresh ()
   "Low-level refresh of the current vterm buffer.
 Must be called with a vterm-mode buffer current."
-  (when vterm--term
-    (vterm--redraw vterm--term))
+  (let ((inhibit-read-only t))
+    (when vterm--term
+      (vterm--redraw vterm--term)))
   (redisplay t))
 
 (defun claude-repl--fix-vterm-scroll (buf)
@@ -914,11 +916,16 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
             (lambda (&rest _)
               (run-at-time 0 nil #'claude-repl--on-workspace-switch))))
 
+(defvar claude-repl--in-redraw-advice nil
+  "Non-nil while the vterm redraw advice is executing, to prevent recursion.")
+
 (defun claude-repl--after-vterm-redraw (&rest _)
   "Apply hide overlay after vterm redraws."
-  (when (claude-repl--claude-buffer-p)
-    (claude-repl--load-session)
-    (claude-repl--update-hide-overlay)))
+  (unless claude-repl--in-redraw-advice
+    (let ((claude-repl--in-redraw-advice t))
+      (when (claude-repl--claude-buffer-p)
+        (claude-repl--load-session)
+        (claude-repl--update-hide-overlay)))))
 
 (defun claude-repl--enable-hide-overlay ()
   "Enable the hide overlay advice.  Uses reference counting so
@@ -1336,9 +1343,24 @@ If already fullscreen, restore the previous window layout."
     (define-key doom-leader-map (kbd (format "o %s" char))
       (lambda () (interactive) (claude-repl-send-char char)))))
 
-;; FIXME: add support for C-v for image pasting (we just send C-v to claude, NOT cmd+v)
 ;; FIXME: fix magit handling
-;; FIXME: dont consider claude window when doing SPC b to switch to previous buffer
+
+;; Exclude claude-repl buffers from Doom's buffer switching (SPC b b, SPC b p, etc.)
+(defun claude-repl--doom-unreal-buffer-p (buf)
+  "Return non-nil if BUF is a claude-repl buffer."
+  (string-match-p "^\\*claude-\\(input-\\)?[0-9a-f]+\\*$" (buffer-name buf)))
+
+(add-hook 'doom-unreal-buffer-functions #'claude-repl--doom-unreal-buffer-p)
+
+;; C-v paste forwarding to vterm
+(defun claude-repl-paste-to-vterm ()
+  "Forward a Ctrl-V keystroke to the Claude vterm buffer.
+This lets Claude CLI handle paste natively, including images."
+  (interactive)
+  (claude-repl--load-session)
+  (when (claude-repl--vterm-live-p)
+    (with-current-buffer claude-repl-vterm-buffer
+      (vterm-send-key "v" nil nil t))))
 
 (provide 'claude-repl)
 ;;; config.el ends here

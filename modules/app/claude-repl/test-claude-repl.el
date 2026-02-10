@@ -597,4 +597,673 @@
   (claude-repl-test--with-temp-buffer "*scratch*"
     (should-not (claude-repl--claude-buffer-p))))
 
+;;;; ---- Tests: Unreal buffer predicate ----
+
+(ert-deftest claude-repl-test-unreal-buffer-predicate ()
+  "claude-repl--doom-unreal-buffer-p should match claude-repl buffers only."
+  (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+    (should (claude-repl--doom-unreal-buffer-p (current-buffer))))
+  (claude-repl-test--with-temp-buffer "*claude-input-abcd1234*"
+    (should (claude-repl--doom-unreal-buffer-p (current-buffer))))
+  (claude-repl-test--with-temp-buffer "*scratch*"
+    (should-not (claude-repl--doom-unreal-buffer-p (current-buffer))))
+  (claude-repl-test--with-temp-buffer "*claude-code-something*"
+    (should-not (claude-repl--doom-unreal-buffer-p (current-buffer)))))
+
+;;;; ---- Tests: Paste to vterm ----
+
+(ert-deftest claude-repl-test-paste-to-vterm ()
+  "claude-repl-paste-to-vterm should call vterm-send-key with C-v args."
+  (claude-repl-test--with-clean-state
+    (let ((send-key-args nil))
+      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+        (setq claude-repl-vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function 'claude-repl--load-session) #'ignore)
+                  ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                  ((symbol-function 'vterm-send-key)
+                   (lambda (&rest args) (setq send-key-args args))))
+          (claude-repl-paste-to-vterm)
+          (should (equal send-key-args '("v" nil nil t))))))))
+
+;;;; ---- Tests: Logging ----
+
+(ert-deftest claude-repl-test-log-respects-debug-flag ()
+  "When `claude-repl-debug' is nil, `claude-repl--log' should NOT call `message'.
+When t, it should call `message'."
+  (let ((message-called nil))
+    (cl-letf (((symbol-function 'message)
+               (lambda (&rest _args) (setq message-called t))))
+      ;; debug off: no message
+      (let ((claude-repl-debug nil))
+        (claude-repl--log "test %s" "hello")
+        (should-not message-called))
+      ;; debug on: message called
+      (let ((claude-repl-debug t))
+        (setq message-called nil)
+        (claude-repl--log "test %s" "hello")
+        (should message-called)))))
+
+;;;; ---- Tests: Buffer predicates ----
+
+(ert-deftest claude-repl-test-vterm-live-p-nil ()
+  "Returns nil when `claude-repl-vterm-buffer' is nil."
+  (let ((claude-repl-vterm-buffer nil))
+    (should-not (claude-repl--vterm-live-p))))
+
+(ert-deftest claude-repl-test-vterm-live-p-dead ()
+  "Returns nil for a killed buffer."
+  (let ((buf (get-buffer-create " *test-dead-buf*")))
+    (kill-buffer buf)
+    (let ((claude-repl-vterm-buffer buf))
+      (should-not (claude-repl--vterm-live-p)))))
+
+(ert-deftest claude-repl-test-vterm-live-p-live ()
+  "Returns non-nil for a live buffer."
+  (claude-repl-test--with-temp-buffer " *test-live-buf*"
+    (let ((claude-repl-vterm-buffer (current-buffer)))
+      (should (claude-repl--vterm-live-p)))))
+
+(ert-deftest claude-repl-test-vterm-running-p-no-process ()
+  "Returns nil when buffer is live but has no process."
+  (claude-repl-test--with-temp-buffer " *test-no-proc*"
+    (let ((claude-repl-vterm-buffer (current-buffer)))
+      (should-not (claude-repl--vterm-running-p)))))
+
+(ert-deftest claude-repl-test-vterm-running-p-with-process ()
+  "Returns non-nil when buffer has a live process."
+  (claude-repl-test--with-temp-buffer " *test-with-proc*"
+    (let ((claude-repl-vterm-buffer (current-buffer)))
+      (cl-letf (((symbol-function 'get-buffer-process)
+                 (lambda (_buf) 'fake-process)))
+        (should (claude-repl--vterm-running-p))))))
+
+;;;; ---- Tests: History edge cases ----
+
+(ert-deftest claude-repl-test-history-prev-empty-list ()
+  "Calling `history-prev' with empty history does nothing."
+  (claude-repl-test--with-temp-buffer " *test-hist-empty*"
+    (setq-local claude-repl--input-history nil)
+    (setq-local claude-repl--history-index -1)
+    (setq-local claude-repl--history-navigating nil)
+    (insert "original")
+    (claude-repl--history-prev)
+    (should (equal (buffer-string) "original"))
+    (should (= claude-repl--history-index -1))))
+
+(ert-deftest claude-repl-test-history-prev-at-oldest ()
+  "When already at the last (oldest) entry, `history-prev' does nothing."
+  (claude-repl-test--with-temp-buffer " *test-hist-oldest*"
+    (setq-local claude-repl--input-history '("only-entry"))
+    (setq-local claude-repl--history-index 0)
+    (setq-local claude-repl--history-stash "stashed")
+    (setq-local claude-repl--history-navigating nil)
+    (insert "only-entry")
+    (claude-repl--history-prev)
+    ;; index should stay at 0, buffer unchanged
+    (should (= claude-repl--history-index 0))
+    (should (equal (buffer-string) "only-entry"))))
+
+(ert-deftest claude-repl-test-history-next-at-start ()
+  "When `claude-repl--history-index' is -1, `history-next' does nothing."
+  (claude-repl-test--with-temp-buffer " *test-hist-at-start*"
+    (setq-local claude-repl--input-history '("a" "b"))
+    (setq-local claude-repl--history-index -1)
+    (setq-local claude-repl--history-navigating nil)
+    (insert "current")
+    (claude-repl--history-next)
+    (should (equal (buffer-string) "current"))
+    (should (= claude-repl--history-index -1))))
+
+(ert-deftest claude-repl-test-history-on-change-noop-during-navigation ()
+  "When `claude-repl--history-navigating' is t, `history-on-change' does NOT reset the index."
+  (claude-repl-test--with-temp-buffer " *test-hist-nav-noop*"
+    (setq-local claude-repl--history-index 3)
+    (setq-local claude-repl--history-navigating t)
+    (claude-repl--history-on-change)
+    (should (= claude-repl--history-index 3))))
+
+(ert-deftest claude-repl-test-history-file-path ()
+  "`claude-repl--history-file' returns `<root>/.claude-repl-history'."
+  (cl-letf (((symbol-function 'claude-repl--resolve-root) (lambda () "/test/root")))
+    (should (equal (claude-repl--history-file)
+                   (expand-file-name ".claude-repl-history" "/test/root")))))
+
+;;;; ---- Tests: Input preparation ----
+
+(ert-deftest claude-repl-test-prepare-input-no-prefix-when-disabled ()
+  "When `claude-repl-skip-permissions' is nil, `prepare-input' returns raw text."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-skip-permissions nil)
+          (claude-repl--prefix-counter 0)
+          (claude-repl-prefix-period 1))
+      (claude-repl-test--with-temp-buffer " *test-no-prefix*"
+        (setq claude-repl-input-buffer (current-buffer))
+        (insert "raw text")
+        (should (equal (claude-repl--prepare-input) "raw text"))))))
+
+;;;; ---- Tests: Send functions ----
+
+(ert-deftest claude-repl-test-send-char-calls-vterm ()
+  "`claude-repl-send-char' should call `vterm-send-string' with the char, then `vterm-send-return'."
+  (claude-repl-test--with-clean-state
+    (let ((calls nil))
+      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+        (setq claude-repl-vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function 'claude-repl--load-session) #'ignore)
+                  ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                  ((symbol-function 'vterm-send-string)
+                   (lambda (s &rest _) (push (list 'send-string s) calls)))
+                  ((symbol-function 'vterm-send-return)
+                   (lambda () (push '(send-return) calls))))
+          (claude-repl-send-char "y")
+          (should (member '(send-string "y") (reverse calls)))
+          (should (member '(send-return) (reverse calls))))))))
+
+(ert-deftest claude-repl-test-scroll-down-sends-down ()
+  "`claude-repl-scroll-down' calls `vterm-send-down' in the vterm buffer."
+  (claude-repl-test--with-clean-state
+    (let ((down-called nil))
+      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+        (setq claude-repl-vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function 'claude-repl--load-session) #'ignore)
+                  ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                  ((symbol-function 'vterm-send-down)
+                   (lambda () (setq down-called t))))
+          (claude-repl-scroll-down)
+          (should down-called))))))
+
+(ert-deftest claude-repl-test-scroll-up-sends-up ()
+  "`claude-repl-scroll-up' calls `vterm-send-up'."
+  (claude-repl-test--with-clean-state
+    (let ((up-called nil))
+      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+        (setq claude-repl-vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function 'claude-repl--load-session) #'ignore)
+                  ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                  ((symbol-function 'vterm-send-up)
+                   (lambda () (setq up-called t))))
+          (claude-repl-scroll-up)
+          (should up-called))))))
+
+(ert-deftest claude-repl-test-interrupt-sends-escape-twice ()
+  "`claude-repl-interrupt' calls `vterm-send-key' with \"<escape>\" twice."
+  (claude-repl-test--with-clean-state
+    (let ((escape-count 0))
+      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+        (setq claude-repl-vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function 'claude-repl--load-session) #'ignore)
+                  ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                  ((symbol-function 'vterm-send-key)
+                   (lambda (key &rest _)
+                     (when (equal key "<escape>")
+                       (cl-incf escape-count)))))
+          (claude-repl-interrupt)
+          (should (= escape-count 2)))))))
+
+(ert-deftest claude-repl-test-cycle-sends-backtab ()
+  "`claude-repl-cycle' calls `vterm-send-key' with \"<backtab>\"."
+  (claude-repl-test--with-clean-state
+    (let ((backtab-called nil))
+      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+        (setq claude-repl-vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function 'claude-repl--load-session) #'ignore)
+                  ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                  ((symbol-function 'vterm-send-key)
+                   (lambda (key &rest _)
+                     (when (equal key "<backtab>")
+                       (setq backtab-called t)))))
+          (claude-repl-cycle)
+          (should backtab-called))))))
+
+(ert-deftest claude-repl-test-send-input-direct-mode ()
+  "For input <=200 chars, `send-input-to-vterm' calls `vterm-send-string' without paste flag."
+  (claude-repl-test--with-clean-state
+    (let ((send-string-args nil)
+          (return-called nil))
+      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+        (setq claude-repl-vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function 'vterm-send-string)
+                   (lambda (s &rest args) (setq send-string-args (cons s args))))
+                  ((symbol-function 'vterm-send-return)
+                   (lambda () (setq return-called t)))
+                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore))
+          (claude-repl--send-input-to-vterm "short input")
+          ;; Should have been called with just the string (no paste flag)
+          (should (equal (car send-string-args) "short input"))
+          (should (null (cdr send-string-args)))
+          (should return-called))))))
+
+(ert-deftest claude-repl-test-send-input-paste-mode ()
+  "For input >200 chars, calls `vterm-send-string' WITH paste flag, defers return."
+  (claude-repl-test--with-clean-state
+    (let ((send-string-args nil)
+          (return-called nil)
+          (timer-args nil))
+      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+        (setq claude-repl-vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function 'vterm-send-string)
+                   (lambda (s &rest args) (setq send-string-args (cons s args))))
+                  ((symbol-function 'vterm-send-return)
+                   (lambda () (setq return-called t)))
+                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+                  ((symbol-function 'run-at-time)
+                   (lambda (&rest args) (setq timer-args args))))
+          (let ((long-input (make-string 201 ?x)))
+            (claude-repl--send-input-to-vterm long-input)
+            ;; paste flag (2nd arg) should be t
+            (should (equal (cadr send-string-args) t))
+            ;; return should NOT have been called directly
+            (should-not return-called)
+            ;; run-at-time should have been called to defer
+            (should timer-args)))))))
+
+;;;; ---- Tests: Composite state functions ----
+
+(ert-deftest claude-repl-test-mark-ws-thinking-composite ()
+  "`claude-repl--mark-ws-thinking' should set :thinking state AND record activity."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--schedule-failed-check) #'ignore))
+      (claude-repl--mark-ws-thinking "ws1")
+      (should (eq (claude-repl--ws-state "ws1") :thinking))
+      (should (gethash "ws1" claude-repl--activity-times)))))
+
+(ert-deftest claude-repl-test-clear-input-pushes-and-clears ()
+  "`claude-repl--clear-input' pushes text to history, resets index, clears buffer."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-clear-input*"
+      (setq-local claude-repl--input-history nil)
+      (setq-local claude-repl--history-index 5)
+      (setq-local claude-repl--history-navigating nil)
+      (setq claude-repl-input-buffer (current-buffer))
+      (insert "some input text")
+      (claude-repl--clear-input)
+      (should (equal claude-repl--input-history '("some input text")))
+      (should (= claude-repl--history-index -1))
+      (should (equal (buffer-string) "")))))
+
+(ert-deftest claude-repl-test-discard-input-pushes-and-clears ()
+  "`claude-repl-discard-input' pushes text, clears buffer, calls `evil-insert-state'."
+  (claude-repl-test--with-temp-buffer " *test-discard*"
+    (setq-local claude-repl--input-history nil)
+    (setq-local claude-repl--history-index 3)
+    (setq-local claude-repl--history-navigating nil)
+    (insert "discard me")
+    (let ((evil-called nil))
+      (cl-letf (((symbol-function 'evil-insert-state)
+                 (lambda () (setq evil-called t))))
+        (claude-repl-discard-input)
+        (should (equal claude-repl--input-history '("discard me")))
+        (should (= claude-repl--history-index -1))
+        (should (equal (buffer-string) ""))
+        (should evil-called)))))
+
+(ert-deftest claude-repl-test-remember-return-window-saves ()
+  "`claude-repl--remember-return-window' sets `claude-repl-return-window' when not in input buffer."
+  (let ((claude-repl-input-buffer nil)
+        (claude-repl-return-window nil))
+    (claude-repl--remember-return-window)
+    (should (eq claude-repl-return-window (selected-window)))))
+
+(ert-deftest claude-repl-test-remember-return-window-skips-input ()
+  "When current buffer IS `claude-repl-input-buffer', should NOT change return-window."
+  (claude-repl-test--with-temp-buffer " *test-skip-input*"
+    (let ((claude-repl-input-buffer (current-buffer))
+          (claude-repl-return-window nil))
+      (claude-repl--remember-return-window)
+      (should-not claude-repl-return-window))))
+
+;;;; ---- Tests: Title change handling ----
+
+(ert-deftest claude-repl-test-on-title-change-started-sets-thinking ()
+  "In a claude buffer with `title-thinking' nil, spinner title sets workspace to :thinking."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+      (setq-local claude-repl--title-thinking nil)
+      (setq-local claude-repl--ready t)
+      (cl-letf (((symbol-function 'claude-repl--workspace-for-buffer)
+                 (lambda (_buf) "ws1"))
+                ((symbol-function 'claude-repl--handle-first-ready) #'ignore))
+        (claude-repl--on-title-change "⠋ Claude Code")
+        (should (eq (claude-repl--ws-state "ws1") :thinking))))))
+
+(ert-deftest claude-repl-test-on-title-change-finished-clears-thinking ()
+  "With `title-thinking' t, idle title clears :thinking and calls `on-claude-finished'."
+  (claude-repl-test--with-clean-state
+    (let ((finished-called nil))
+      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+        (setq-local claude-repl--title-thinking t)
+        (setq-local claude-repl--ready t)
+        (claude-repl--ws-set "ws1" :thinking)
+        (cl-letf (((symbol-function 'claude-repl--workspace-for-buffer)
+                   (lambda (_buf) "ws1"))
+                  ((symbol-function 'claude-repl--handle-first-ready) #'ignore)
+                  ((symbol-function 'claude-repl--on-claude-finished)
+                   (lambda (ws) (setq finished-called ws))))
+          (claude-repl--on-title-change "✳ Claude Code")
+          (should-not (gethash "ws1" claude-repl--thinking-workspaces))
+          (should (equal finished-called "ws1")))))))
+
+(ert-deftest claude-repl-test-on-title-change-non-claude-buffer ()
+  "In a non-claude buffer, `on-title-change' should do nothing."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*scratch*"
+      (setq-local claude-repl--title-thinking nil)
+      ;; Should not error or change state
+      (claude-repl--on-title-change "⠋ Claude Code")
+      (should-not claude-repl--title-thinking))))
+
+(ert-deftest claude-repl-test-handle-first-ready-idempotent ()
+  "First call sets `claude-repl--ready' to t and calls `swap-placeholder'. Second call is a no-op."
+  (claude-repl-test--with-temp-buffer " *test-first-ready*"
+    (setq-local claude-repl--ready nil)
+    (let ((swap-count 0))
+      (cl-letf (((symbol-function 'claude-repl--swap-placeholder)
+                 (lambda () (cl-incf swap-count))))
+        (claude-repl--handle-first-ready)
+        (should claude-repl--ready)
+        (should (= swap-count 1))
+        ;; Second call should be no-op
+        (claude-repl--handle-first-ready)
+        (should (= swap-count 1))))))
+
+(ert-deftest claude-repl-test-detect-title-transition-no-change ()
+  "When `title-thinking' is nil and title has no spinner, transition should be nil."
+  (claude-repl-test--with-temp-buffer " *test-no-change*"
+    (setq-local claude-repl--title-thinking nil)
+    (cl-letf (((symbol-function 'claude-repl--workspace-for-buffer) (lambda (_buf) "ws1")))
+      (let ((info (claude-repl--detect-title-transition "Claude Code")))
+        (should-not (plist-get info :transition))))))
+
+(ert-deftest claude-repl-test-detect-title-transition-still-thinking ()
+  "When `title-thinking' is t and title has spinner, transition should be nil."
+  (claude-repl-test--with-temp-buffer " *test-still-thinking*"
+    (setq-local claude-repl--title-thinking t)
+    (cl-letf (((symbol-function 'claude-repl--workspace-for-buffer) (lambda (_buf) "ws1")))
+      (let ((info (claude-repl--detect-title-transition "⠋ Claude Code")))
+        (should-not (plist-get info :transition))
+        (should (plist-get info :thinking))))))
+
+;;;; ---- Tests: State machine completeness ----
+
+(ert-deftest claude-repl-test-ws-state-priority-order ()
+  "Verify state priority: :thinking > :permission > :failed > :done > :stale."
+  (claude-repl-test--with-clean-state
+    ;; Set both :thinking and :done directly
+    (puthash "ws1" t claude-repl--thinking-workspaces)
+    (puthash "ws1" t claude-repl--done-workspaces)
+    (should (eq (claude-repl--ws-state "ws1") :thinking))
+    ;; Clear thinking, add permission and done
+    (remhash "ws1" claude-repl--thinking-workspaces)
+    (puthash "ws1" t claude-repl--permission-workspaces)
+    (should (eq (claude-repl--ws-state "ws1") :permission))
+    ;; Clear permission, add failed and done
+    (remhash "ws1" claude-repl--permission-workspaces)
+    (puthash "ws1" t claude-repl--failed-workspaces)
+    (should (eq (claude-repl--ws-state "ws1") :failed))
+    ;; Clear failed, just done remains
+    (remhash "ws1" claude-repl--failed-workspaces)
+    (should (eq (claude-repl--ws-state "ws1") :done))
+    ;; Clear done, set activity for stale
+    (remhash "ws1" claude-repl--done-workspaces)
+    (claude-repl--touch-activity "ws1")
+    (should (eq (claude-repl--ws-state "ws1") :stale))))
+
+(ert-deftest claude-repl-test-ws-state-expired-stale ()
+  "Activity time >60 minutes ago should return nil (expired)."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-stale-minutes 60))
+      ;; Set activity to 61 minutes ago
+      (puthash "ws1" (- (float-time) (* 61 60)) claude-repl--activity-times)
+      (should-not (claude-repl--ws-state "ws1")))))
+
+(ert-deftest claude-repl-test-ws-set-permission ()
+  "`ws-set' with :permission should set permission hash."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set "ws1" :permission)
+    (should (eq (claude-repl--ws-state "ws1") :permission))))
+
+(ert-deftest claude-repl-test-ws-set-failed ()
+  "`ws-set' with :failed should set failed hash."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set "ws1" :failed)
+    (should (eq (claude-repl--ws-state "ws1") :failed))))
+
+(ert-deftest claude-repl-test-ws-clear-done ()
+  "`ws-clear' with :done should only clear done, leaving others."
+  (claude-repl-test--with-clean-state
+    (puthash "ws1" t claude-repl--thinking-workspaces)
+    (puthash "ws1" t claude-repl--done-workspaces)
+    (claude-repl--ws-clear "ws1" :done)
+    (should-not (gethash "ws1" claude-repl--done-workspaces))
+    (should (gethash "ws1" claude-repl--thinking-workspaces))))
+
+(ert-deftest claude-repl-test-ws-clear-permission ()
+  "`ws-clear' with :permission should only clear permission."
+  (claude-repl-test--with-clean-state
+    (puthash "ws1" t claude-repl--permission-workspaces)
+    (puthash "ws1" t claude-repl--done-workspaces)
+    (claude-repl--ws-clear "ws1" :permission)
+    (should-not (gethash "ws1" claude-repl--permission-workspaces))
+    (should (gethash "ws1" claude-repl--done-workspaces))))
+
+(ert-deftest claude-repl-test-ws-clear-failed ()
+  "`ws-clear' with :failed should only clear failed."
+  (claude-repl-test--with-clean-state
+    (puthash "ws1" t claude-repl--failed-workspaces)
+    (puthash "ws1" t claude-repl--thinking-workspaces)
+    (claude-repl--ws-clear "ws1" :failed)
+    (should-not (gethash "ws1" claude-repl--failed-workspaces))
+    (should (gethash "ws1" claude-repl--thinking-workspaces))))
+
+(ert-deftest claude-repl-test-ws-clear-nil-error ()
+  "`ws-clear' with nil ws should signal error."
+  (claude-repl-test--with-clean-state
+    (should-error (claude-repl--ws-clear nil :done) :type 'error)))
+
+(ert-deftest claude-repl-test-touch-activity-nil-error ()
+  "`touch-activity' with nil ws should signal error."
+  (claude-repl-test--with-clean-state
+    (should-error (claude-repl--touch-activity nil) :type 'error)))
+
+;;;; ---- Tests: Tabline rendering completeness ----
+
+(ert-deftest claude-repl-test-tabline-done-face ()
+  "A background tab with :done should use `claude-repl-tab-done' face."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set "bg-ws" :done)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))
+      (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
+        ;; Find the "bg-ws" segment and check its face
+        (let ((pos (string-match "bg-ws" result)))
+          (should pos)
+          (should (eq (get-text-property pos 'face result) 'claude-repl-tab-done)))))))
+
+(ert-deftest claude-repl-test-tabline-failed-label ()
+  "A tab with :failed should show the failed label."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set "bg-ws" :failed)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))
+      (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
+        (should (string-match-p "❌" result))))))
+
+(ert-deftest claude-repl-test-tabline-selected-suppresses-thinking ()
+  "The SELECTED tab with :thinking should NOT get the thinking face."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set "sel-ws" :thinking)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "sel-ws")))
+      (let ((result (claude-repl--tabline-advice '("sel-ws"))))
+        (let ((pos (string-match "sel-ws" result)))
+          (should pos)
+          ;; Should get the normal selected face, NOT thinking
+          (should (eq (get-text-property pos 'face result)
+                      '+workspace-tab-selected-face)))))))
+
+(ert-deftest claude-repl-test-tabline-selected-shows-permission ()
+  "The SELECTED tab with :permission SHOULD still get the permission face."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set "sel-ws" :permission)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "sel-ws")))
+      (let ((result (claude-repl--tabline-advice '("sel-ws"))))
+        (let ((pos (string-match "sel-ws" result)))
+          (should pos)
+          (should (eq (get-text-property pos 'face result)
+                      'claude-repl-tab-permission)))))))
+
+(ert-deftest claude-repl-test-tabline-stale-face ()
+  "A background tab with :stale should use stale face."
+  (claude-repl-test--with-clean-state
+    (claude-repl--touch-activity "bg-ws")
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))
+      (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
+        (let ((pos (string-match "bg-ws" result)))
+          (should pos)
+          (should (eq (get-text-property pos 'face result)
+                      'claude-repl-tab-stale)))))))
+
+;;;; ---- Tests: Orphan detection edge cases ----
+
+(ert-deftest claude-repl-test-orphaned-vterm-in-fullscreen ()
+  "When `claude-repl--fullscreen-config' is non-nil, `orphaned-vterm-p' returns nil."
+  (let ((claude-repl--fullscreen-config 'some-config))
+    (should-not (claude-repl--orphaned-vterm-p "*claude-abcd1234*"))))
+
+(ert-deftest claude-repl-test-orphaned-vterm-one-window ()
+  "When `one-window-p' returns t, should return nil."
+  (let ((claude-repl--fullscreen-config nil))
+    (cl-letf (((symbol-function 'one-window-p) (lambda () t)))
+      (should-not (claude-repl--orphaned-vterm-p "*claude-abcd1234*")))))
+
+(ert-deftest claude-repl-test-orphaned-input-with-loading ()
+  "When loading placeholder buffer exists, `orphaned-input-p' should return nil."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'one-window-p) (lambda () nil))
+              ((symbol-function 'get-buffer-window) (lambda (_buf) nil))
+              ((symbol-function 'get-buffer) (lambda (name)
+                                               (when (equal name " *claude-loading*")
+                                                 'fake-buffer))))
+      (should-not (claude-repl--orphaned-input-p "*claude-input-abcd1234*")))))
+
+;;;; ---- Tests: Permission notification handler ----
+
+(ert-deftest claude-repl-test-on-permission-notify-ignores-non-permission ()
+  "An event with a non-matching filename should not call `ws-set'."
+  (claude-repl-test--with-clean-state
+    (let ((ws-set-called nil))
+      (cl-letf (((symbol-function 'claude-repl--ws-set)
+                 (lambda (&rest _) (setq ws-set-called t))))
+        (claude-repl--on-permission-notify '(nil changed "/some/other-file"))
+        (should-not ws-set-called)))))
+
+(ert-deftest claude-repl-test-on-permission-notify-ignores-other-actions ()
+  "An event with action `deleted' should be ignored even if filename matches."
+  (claude-repl-test--with-clean-state
+    (let ((ws-set-called nil))
+      (cl-letf (((symbol-function 'claude-repl--ws-set)
+                 (lambda (&rest _) (setq ws-set-called t))))
+        (claude-repl--on-permission-notify '(nil deleted "/path/to/permission_prompt"))
+        (should-not ws-set-called)))))
+
+;;;; ---- Tests: Overlay management ----
+
+(ert-deftest claude-repl-test-create-overlay-respects-flag ()
+  "When `claude-repl-hide-input-box' is nil, `create-hide-overlay' should NOT create an overlay."
+  (claude-repl-test--with-temp-buffer " *test-no-overlay*"
+    (let ((claude-repl-hide-input-box nil))
+      (insert "some content\nline two\nline three\nline four\nline five\n")
+      (claude-repl--create-hide-overlay)
+      (should-not claude-repl-hide-overlay))))
+
+(ert-deftest claude-repl-test-create-overlay-creates-when-enabled ()
+  "When `claude-repl-hide-input-box' is t and buffer has content, overlay is created."
+  (claude-repl-test--with-temp-buffer " *test-yes-overlay*"
+    (let ((claude-repl-hide-input-box t))
+      (insert "line1\nline2\nline3\nline4\nline5\nline6\n")
+      (claude-repl--create-hide-overlay)
+      (should claude-repl-hide-overlay)
+      (should (overlayp claude-repl-hide-overlay)))))
+
+(ert-deftest claude-repl-test-delete-overlay-noop-when-nil ()
+  "When `claude-repl-hide-overlay' is nil, `delete-hide-overlay' should not error."
+  (claude-repl-test--with-temp-buffer " *test-del-nil*"
+    (setq-local claude-repl-hide-overlay nil)
+    ;; Should not signal any error
+    (claude-repl--delete-hide-overlay)
+    (should-not claude-repl-hide-overlay)))
+
+(ert-deftest claude-repl-test-redraw-advice-reentrancy-guard ()
+  "Reentrancy guard prevents recursive calls to `after-vterm-redraw'."
+  (claude-repl-test--with-clean-state
+    (let ((load-session-count 0))
+      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+        (cl-letf (((symbol-function 'claude-repl--load-session)
+                   (lambda () (cl-incf load-session-count)))
+                  ((symbol-function 'claude-repl--update-hide-overlay) #'ignore))
+          ;; With reentrancy guard active, load-session should NOT be called
+          (let ((claude-repl--in-redraw-advice t))
+            (claude-repl--after-vterm-redraw)
+            (should (= load-session-count 0)))
+          ;; Without guard, in a claude buffer, load-session IS called
+          (let ((claude-repl--in-redraw-advice nil))
+            (claude-repl--after-vterm-redraw)
+            (should (= load-session-count 1))))))))
+
+(ert-deftest claude-repl-test-redraw-advice-skips-non-claude ()
+  "In a non-claude buffer, `after-vterm-redraw' should not call `load-session'."
+  (claude-repl-test--with-clean-state
+    (let ((load-session-count 0))
+      (claude-repl-test--with-temp-buffer "*scratch*"
+        (cl-letf (((symbol-function 'claude-repl--load-session)
+                   (lambda () (cl-incf load-session-count)))
+                  ((symbol-function 'claude-repl--update-hide-overlay) #'ignore))
+          (let ((claude-repl--in-redraw-advice nil))
+            (claude-repl--after-vterm-redraw)
+            (should (= load-session-count 0))))))))
+
+;;;; ---- Tests: Workspace-for-buffer ----
+
+(ert-deftest claude-repl-test-workspace-for-buffer-no-persp ()
+  "When `persp-mode' is nil, `workspace-for-buffer' should return nil."
+  (let ((persp-mode nil))
+    (should-not (claude-repl--workspace-for-buffer (current-buffer)))))
+
+;;;; ---- Tests: on-claude-finished ----
+
+(ert-deftest claude-repl-test-on-claude-finished-hidden-sets-done ()
+  "When the buffer is NOT visible, `on-claude-finished' should call `ws-set' with :done."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-hidden-done*"
+      (let ((done-set nil))
+        (cl-letf (((symbol-function 'get-buffer-window) (lambda (_buf &rest _) nil))
+                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+                  ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
+                  ((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
+                  ((symbol-function 'claude-repl--ws-set)
+                   (lambda (ws state)
+                     (when (eq state :done)
+                       (setq done-set ws)))))
+          (claude-repl--on-claude-finished "ws1")
+          (should (equal done-set "ws1")))))))
+
+(ert-deftest claude-repl-test-on-claude-finished-visible-no-done ()
+  "When the buffer IS visible, should NOT set :done."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-visible-no-done*"
+      (let ((done-set nil))
+        (cl-letf (((symbol-function 'get-buffer-window) (lambda (_buf &rest _) 'some-window))
+                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+                  ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
+                  ((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
+                  ((symbol-function 'claude-repl--ws-set)
+                   (lambda (ws state)
+                     (when (eq state :done)
+                       (setq done-set ws)))))
+          (claude-repl--on-claude-finished "ws1")
+          (should-not done-set))))))
+
+;;;; ---- Tests: Misc declared variables ----
+
+(ert-deftest claude-repl-test-in-redraw-advice-declared ()
+  "`claude-repl--in-redraw-advice' should be `boundp'."
+  (should (boundp 'claude-repl--in-redraw-advice)))
+
 ;;; test-claude-repl.el ends here
