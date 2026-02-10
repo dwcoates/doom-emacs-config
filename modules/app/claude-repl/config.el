@@ -387,6 +387,11 @@ Uses paste mode for large inputs to avoid truncation."
       (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
         (select-window claude-repl-return-window)))))
 
+(defun claude-repl--remember-return-window ()
+  "Save the current window as the return target, unless we're in the input buffer."
+  (unless (eq (current-buffer) claude-repl-input-buffer)
+    (setq claude-repl-return-window (selected-window))))
+
 (defun claude-repl--restore-layout ()
   "Restore the window layout from before panels were shown.
 Falls back to hiding panels and selecting the return window."
@@ -467,25 +472,25 @@ Without region: sends file path and current line."
       (vterm-send-key "<escape>"))))
 
 ;; Hide overlay functions
+(defun claude-repl--create-hide-overlay ()
+  "Create a new hide overlay covering the bottom 4 lines of the current buffer."
+  (when (and claude-repl-hide-input-box (> (point-max) 1))
+    (let* ((end (point-max))
+           (start (save-excursion
+                    (goto-char end)
+                    (forward-line -4)
+                    (line-beginning-position))))
+      (when (< start end)
+        (setq claude-repl-hide-overlay (make-overlay start end nil t nil))
+        (overlay-put claude-repl-hide-overlay 'display "")
+        (overlay-put claude-repl-hide-overlay 'evaporate t)))))
+
 (defun claude-repl--update-hide-overlay ()
   "Update overlay to hide bottom lines of Claude vterm buffer."
   (when (claude-repl--vterm-live-p)
     (with-current-buffer claude-repl-vterm-buffer
-      ;; Remove old overlay if it exists
-      (when (and claude-repl-hide-overlay
-                 (overlay-buffer claude-repl-hide-overlay))
-        (delete-overlay claude-repl-hide-overlay))
-      ;; Only create new overlay if enabled and buffer has content
-      (when (and claude-repl-hide-input-box (> (point-max) 1))
-        (let* ((end (point-max))
-               (start (save-excursion
-                        (goto-char end)
-                        (forward-line -4)
-                        (line-beginning-position))))
-          (when (< start end)
-            (setq claude-repl-hide-overlay (make-overlay start end nil t nil))
-            (overlay-put claude-repl-hide-overlay 'display "")
-            (overlay-put claude-repl-hide-overlay 'evaporate t)))))))
+      (claude-repl--delete-hide-overlay)
+      (claude-repl--create-hide-overlay))))
 
 (defun claude-repl-toggle-hide-input-box ()
   "Toggle hiding of Claude CLI's input box in the vterm buffer."
@@ -875,29 +880,30 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
 
 ;; Auto-close orphaned panels: if one is closed, close the other.
 ;; Also refresh the hide overlay in case a window change invalidated it.
+(defun claude-repl--orphaned-vterm-p (name)
+  "Return non-nil if NAME is a claude vterm buffer with no matching input window."
+  (and (string-match "^\\*claude-\\([0-9a-f]+\\)\\*$" name)
+       (not claude-repl--fullscreen-config)
+       (not (one-window-p))
+       (not (get-buffer-window
+             (format "*claude-input-%s*" (match-string 1 name))))))
+
+(defun claude-repl--orphaned-input-p (name)
+  "Return non-nil if NAME is a claude input buffer with no matching vterm window."
+  (and (string-match "^\\*claude-input-\\([0-9a-f]+\\)\\*$" name)
+       (not (one-window-p))
+       (not (get-buffer-window
+             (format "*claude-%s*" (match-string 1 name))))
+       (not (get-buffer " *claude-loading*"))))
+
 (defun claude-repl--sync-panels ()
   "Close any Claude panel whose partner is no longer visible."
   (dolist (win (window-list))
     (let ((name (buffer-name (window-buffer win))))
-      (cond
-       ;; Vterm visible, input missing -> close vterm
-       ;; (but not during fullscreen or if it's the sole window)
-       ((and (string-match "^\\*claude-\\([0-9a-f]+\\)\\*$" name)
-             (not claude-repl--fullscreen-config)
-             (not (one-window-p))
-             (not (get-buffer-window
-                   (format "*claude-input-%s*" (match-string 1 name)))))
-        (claude-repl--log "sync-panels closing orphaned vterm %s" name)
-        (delete-window win))
-       ;; Input visible, vterm missing -> close input
-       ;; (but not if placeholder is showing — Claude is still starting)
-       ((and (string-match "^\\*claude-input-\\([0-9a-f]+\\)\\*$" name)
-             (not (one-window-p))
-             (not (get-buffer-window
-                   (format "*claude-%s*" (match-string 1 name))))
-             (not (get-buffer " *claude-loading*")))
-        (claude-repl--log "sync-panels closing orphaned input %s" name)
-        (delete-window win))))))
+      (when (or (claude-repl--orphaned-vterm-p name)
+                (claude-repl--orphaned-input-p name))
+        (claude-repl--log "sync-panels closing orphaned %s" name)
+        (delete-window win)))))
 
 ;; Keep visible Claude vterm buffers scrolled to the cursor.
 ;; Skips the selected window so clicking into vterm to read/copy isn't disrupted.
@@ -977,16 +983,18 @@ so the user can select and copy text from the output."
         (claude-input-mode)
         (claude-repl--history-restore)))))
 
+(defun claude-repl--kill-stale-vterm ()
+  "Kill the Claude vterm buffer if it exists but has no live process."
+  (when-let ((existing (get-buffer (claude-repl--buffer-name))))
+    (unless (get-buffer-process existing)
+      (claude-repl--log "killing stale vterm %s" (buffer-name existing))
+      (kill-buffer existing))))
+
 (defun claude-repl--ensure-vterm-buffer ()
-  "Create vterm buffer running claude if needed.
-Kills any stale buffer (no live process) first. Starts claude from the git root."
+  "Create vterm buffer running claude if needed. Starts claude from the git root."
   (let* ((root (claude-repl--resolve-root))
-         (default-directory root)
-         (existing (get-buffer (claude-repl--buffer-name))))
-    ;; Kill stale buffer (exists but process died)
-    (when (and existing (not (get-buffer-process existing)))
-      (claude-repl--log "ensure-vterm killing stale buffer %s" (buffer-name existing))
-      (kill-buffer existing))
+         (default-directory root))
+    (claude-repl--kill-stale-vterm)
     (setq claude-repl-vterm-buffer (get-buffer-create (claude-repl--buffer-name)))
     (with-current-buffer claude-repl-vterm-buffer
       (setq-local claude-repl--project-root root)
@@ -1044,9 +1052,7 @@ If panels visible: hide both panels.
 If panels hidden: show both panels."
   (interactive)
   (claude-repl--load-session)
-  ;; Save current window to return to after hiding
-  (unless (eq (current-buffer) claude-repl-input-buffer)
-    (setq claude-repl-return-window (selected-window)))
+  (claude-repl--remember-return-window)
   (let ((vterm-running (claude-repl--vterm-running-p))
         (panels-visible (claude-repl--panels-visible-p))
         (selection (when (use-region-p)
