@@ -193,6 +193,10 @@ Splits right for vterm (60% width to work window), then splits vterm bottom for 
     (set-window-buffer input-win claude-repl-input-buffer)
     (set-window-dedicated-p vterm-win t)
     (set-window-dedicated-p input-win t)
+    ;; Hide from other-window, display-buffer, etc. so magit and friends
+    ;; never try to reuse these windows.
+    (set-window-parameter vterm-win 'no-other-window t)
+    (set-window-parameter input-win 'no-other-window t)
     ;; Lock width to prevent resize-triggered reflow in vterm
     (set-window-parameter vterm-win 'window-size-fixed 'width)))
 
@@ -888,12 +892,17 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
 
 ;; Refresh vterm on frame focus
 (defun claude-repl--clear-done-if-visible ()
-  "Clear :done state for the current vterm's workspace if the vterm is visible."
+  "Clear indicator states for the current vterm's workspace if visible.
+Clears :done, :permission, and :failed — the user is looking at the
+REPL so the tab indicator has served its purpose.  :thinking is left
+alone because it represents an actively running operation."
   (when (and (claude-repl--vterm-live-p) (claude-repl--vterm-visible-p))
     (let ((ws (claude-repl--workspace-for-buffer claude-repl-vterm-buffer)))
       (when ws
         (claude-repl--log "clear-done-if-visible ws=%s" ws)
-        (claude-repl--ws-clear ws :done)))))
+        (claude-repl--ws-clear ws :done)
+        (claude-repl--ws-clear ws :permission)
+        (claude-repl--ws-clear ws :failed)))))
 
 (defun claude-repl--on-frame-focus ()
   "Refresh claude vterm and clear done indicator when Emacs regains focus."
