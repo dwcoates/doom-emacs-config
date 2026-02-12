@@ -1333,13 +1333,29 @@ If already fullscreen, restore the previous window layout."
 (map! :i "C-S-f" #'claude-repl-toggle-fullscreen)
 (map! :leader :prefix "w" :n "c" #'claude-repl-toggle-fullscreen)
 
+(defun claude-repl-copy-reference ()
+  "Copy the current file and line reference to the clipboard.
+With active region: copies file:startline-endline.
+Without region: copies file:line."
+  (interactive)
+  (let* ((rel (claude-repl--rel-path))
+         (ref (if (use-region-p)
+                  (let ((start-line (line-number-at-pos (region-beginning)))
+                        (end-line (line-number-at-pos (region-end))))
+                    (deactivate-mark)
+                    (format "%s:%d-%d" rel start-line end-line))
+                (format "%s:%d" rel (line-number-at-pos (point))))))
+    (kill-new ref)
+    (message "Copied: %s" ref)))
+
 ;; Keybindings
 (map! :leader
       :desc "Claude REPL" "o c" #'claude-repl
       :desc "Claude input" "o v" #'claude-repl-focus-input
       :desc "Kill Claude" "o C" #'claude-repl-kill
       :desc "Claude explain" "o e" #'claude-repl-explain
-      :desc "Claude interrupt" "o i" #'claude-repl-interrupt)
+      :desc "Claude interrupt" "o i" #'claude-repl-interrupt
+      :desc "Copy file reference" "o r" #'claude-repl-copy-reference)
 
 (dotimes (i 10)
   (let ((char (number-to-string i)))
