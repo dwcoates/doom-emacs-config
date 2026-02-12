@@ -249,6 +249,7 @@ Tries git root, then buffer-local project root, then `default-directory'."
               "C-RET: send+hide | C-c C-c: clear+save | C-c C-k: interrupt | <up>/<down>: history")
   (face-remap-add-relative 'header-line 'claude-repl-header-line)
   (claude-repl--set-buffer-background 37)
+  (visual-line-mode 1)
   (add-hook 'after-change-functions #'claude-repl--history-on-change nil t))
 
 (defun claude-repl-discard-input ()
