@@ -367,6 +367,12 @@
 
   (advice-add '+ivy/project-compile :after #'DWC--add-command-to-projectile-history))
 
+;; Skip find-file prompt when switching to a project that already has an open workspace
+(setq +workspaces-switch-project-function
+      (lambda (dir)
+        (unless (doom-real-buffer-list)
+          (doom-project-find-file dir))))
+
 (after! magit
   (setq magit-no-confirm (append magit-no-confirm '(abort-revert abort-rebase abort-merge))
         magit-diff-visit-previous-blob nil)
