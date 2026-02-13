@@ -562,6 +562,62 @@ Without region: sends file path and current line."
       (vterm-send-key "<escape>")
       (vterm-send-key "<escape>"))))
 
+;; Git diff analysis commands
+(defconst claude-repl--test-quality-prompt
+  "please analyze tests to ensure they are following AAA standards for testing. They should be employing DRY principle for refactoring as well (extract repeated code into helpers, use builder pattern to facilitate test DSL). We should only be testing one thing per test (can extract tests into subtests to ensure this)")
+
+(defconst claude-repl--test-coverage-prompt
+  "please analyze test coverage in depth for recent changes: start by enumerating all edge cases introduced or modified, and THEN, afterwards, analyze in depth our current coverage to check for missing coverage of those edge cases.")
+
+(defun claude-repl--send-diff-analysis (change-spec prompt)
+  "Send a diff analysis request to Claude.
+CHANGE-SPEC describes which changes (e.g. \"unstaged changes (git diff)\").
+PROMPT is the analysis instruction."
+  (claude-repl--load-session)
+  (let ((msg (format "for the %s, %s" change-spec prompt)))
+    (claude-repl--log "diff-analysis: %s" change-spec)
+    (claude-repl--send-to-claude msg)))
+
+(defun claude-repl-test-quality-worktree ()
+  "Analyze test quality for unstaged changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "unstaged changes (git diff)" claude-repl--test-quality-prompt))
+
+(defun claude-repl-test-quality-staged ()
+  "Analyze test quality for staged changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "staged changes (git diff --cached)" claude-repl--test-quality-prompt))
+
+(defun claude-repl-test-quality-uncommitted ()
+  "Analyze test quality for all uncommitted changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "uncommitted changes (git diff HEAD)" claude-repl--test-quality-prompt))
+
+(defun claude-repl-test-quality-head ()
+  "Analyze test quality for the last commit."
+  (interactive)
+  (claude-repl--send-diff-analysis "last commit (git show HEAD)" claude-repl--test-quality-prompt))
+
+(defun claude-repl-test-coverage-worktree ()
+  "Analyze test coverage for unstaged changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "unstaged changes (git diff)" claude-repl--test-coverage-prompt))
+
+(defun claude-repl-test-coverage-staged ()
+  "Analyze test coverage for staged changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "staged changes (git diff --cached)" claude-repl--test-coverage-prompt))
+
+(defun claude-repl-test-coverage-uncommitted ()
+  "Analyze test coverage for all uncommitted changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "uncommitted changes (git diff HEAD)" claude-repl--test-coverage-prompt))
+
+(defun claude-repl-test-coverage-head ()
+  "Analyze test coverage for the last commit."
+  (interactive)
+  (claude-repl--send-diff-analysis "last commit (git show HEAD)" claude-repl--test-coverage-prompt))
+
 ;; Hide overlay functions
 (defun claude-repl--create-hide-overlay ()
   "Create a new hide overlay covering the bottom 4 lines of the current buffer."
@@ -1418,8 +1474,18 @@ Without region: copies file:line."
       :desc "Claude input" "o v" #'claude-repl-focus-input
       :desc "Kill Claude" "o C" #'claude-repl-kill
       :desc "Claude explain" "o e" #'claude-repl-explain
-      :desc "Claude interrupt" "o i" #'claude-repl-interrupt
-      :desc "Copy file reference" "o r" #'claude-repl-copy-reference)
+      :desc "Claude interrupt" "o x" #'claude-repl-interrupt
+      :desc "Copy file reference" "o r" #'claude-repl-copy-reference
+      ;; Test quality analysis (AAA/DRY)
+      :desc "Tests: worktree" "o w" #'claude-repl-test-quality-worktree
+      :desc "Tests: staged" "o i" #'claude-repl-test-quality-staged
+      :desc "Tests: uncommitted" "o u" #'claude-repl-test-quality-uncommitted
+      :desc "Tests: HEAD" "o h" #'claude-repl-test-quality-head
+      ;; Test coverage analysis
+      :desc "Coverage: worktree" "o W" #'claude-repl-test-coverage-worktree
+      :desc "Coverage: staged" "o I" #'claude-repl-test-coverage-staged
+      :desc "Coverage: uncommitted" "o U" #'claude-repl-test-coverage-uncommitted
+      :desc "Coverage: HEAD" "o H" #'claude-repl-test-coverage-head)
 
 (dotimes (i 10)
   (let ((char (number-to-string i)))
