@@ -12,6 +12,25 @@
 
 ;;; Code:
 
+;; Cancel all previously registered timers on re-eval so we don't accumulate.
+(defvar claude-repl--timers nil
+  "List of active timers created by claude-repl.
+Cancelled and reset whenever this file is re-evaluated.")
+
+(dolist (timer claude-repl--timers)
+  (when (timerp timer)
+    (cancel-timer timer)))
+(setq claude-repl--timers nil)
+
+(defun claude-repl-debug/cancel-timers ()
+  "Cancel all claude-repl timers."
+  (interactive)
+  (dolist (timer claude-repl--timers)
+    (when (timerp timer)
+      (cancel-timer timer)))
+  (setq claude-repl--timers nil)
+  (message "Cancelled all claude-repl timers."))
+
 (defgroup claude-repl nil
   "Claude Code REPL integration for Doom Emacs."
   :group 'tools
@@ -814,10 +833,13 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
 (advice-add '+workspace--tabline :override #'claude-repl--tabline-advice)
 
 ;; Periodically refresh tabline so stale indicators appear on time.
-(run-with-timer 0.5 60
-                (lambda ()
-                  (when (bound-and-true-p persp-mode)
-                    (+workspace/display))))
+;; Uses force-mode-line-update instead of +workspace/display to avoid
+;; flashing the tabline in the echo area (bottom of screen).
+(push (run-with-timer 0.5 60
+                      (lambda ()
+                        (when (bound-and-true-p persp-mode)
+                          (force-mode-line-update t))))
+      claude-repl--timers)
 
 ;; Periodically redraw invisible claude vterm buffers in :thinking workspaces.
 ;; This catches missed title transitions (e.g., Claude finished while we were
@@ -836,7 +858,8 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
           (with-current-buffer buf
             (claude-repl--do-refresh)))))))
 
-(run-with-timer 5 5 #'claude-repl--poll-thinking-workspaces)
+(push (run-with-timer 5 5 #'claude-repl--poll-thinking-workspaces)
+      claude-repl--timers)
 
 ;; Title-based "Claude is done" detection.
 ;; Claude Code sets the terminal title to "<spinner> Claude Code" while thinking
