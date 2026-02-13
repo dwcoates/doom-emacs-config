@@ -702,10 +702,27 @@ If found, the class name is returned, otherwise STR is returned"
   )
 
 ;; Remap project switching keybindings
+(defun +dwc/switch-to-project-buffer ()
+  "Switch to a project buffer, with file paths searchable in Ivy."
+  (interactive)
+  (let* ((buffers (projectile-project-buffer-names))
+         (candidates
+          (mapcar (lambda (name)
+                    (let* ((buf (get-buffer name))
+                           (path (and buf (buffer-file-name buf))))
+                      (if path
+                          (cons (format "%s  %s" name (abbreviate-file-name path)) name)
+                        (cons name name))))
+                  buffers)))
+    (ivy-read "Switch to buffer: " candidates
+              :action (lambda (c) (switch-to-buffer (if (consp c) (cdr c) c)))
+              :caller '+dwc/switch-to-project-buffer)))
+
 (map! :leader
       (:prefix "p"
        :desc "Switch to project" "p" #'+dwc/switch-to-project
-       :desc "Switch to project with file" "P" #'+dwc/switch-to-project-with-file))
+       :desc "Switch to project with file" "P" #'+dwc/switch-to-project-with-file
+       :desc "Switch to project buffer" "b" #'+dwc/switch-to-project-buffer))
 
 ;; Custom named vterm function
 (defun +dwc/vterm-named ()
