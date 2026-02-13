@@ -832,14 +832,11 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
 
 (advice-add '+workspace--tabline :override #'claude-repl--tabline-advice)
 
-;; Periodically refresh tabline so stale indicators appear on time.
-;; Uses force-mode-line-update instead of +workspace/display to avoid
-;; flashing the tabline in the echo area (bottom of screen).
-(push (run-with-timer 0.5 60
-                      (lambda ()
-                        (when (bound-and-true-p persp-mode)
-                          (force-mode-line-update t))))
-      claude-repl--timers)
+;; Suppress the echo area flash when switching workspaces.
+;; Doom calls (+workspace/display) after switch/cycle/new/load, which uses
+;; (message ...) to show the tabline in the echo area.  Since tabs are
+;; already visible at the top, the bottom flash is redundant.
+(advice-add '+workspace/display :override #'ignore)
 
 ;; Periodically redraw invisible claude vterm buffers in :thinking workspaces.
 ;; This catches missed title transitions (e.g., Claude finished while we were
