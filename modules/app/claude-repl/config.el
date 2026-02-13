@@ -1326,7 +1326,8 @@ The placeholder is swapped for the real vterm buffer once Claude is ready."
   "Start a new Claude session with placeholder panels."
   (claude-repl--log "start-fresh")
   (let ((ws (+workspace-current-name)))
-    (when ws (claude-repl--touch-activity ws)))
+    (unless ws (error "claude-repl--start-fresh: no active workspace"))
+    (claude-repl--touch-activity ws))
   (setq claude-repl--saved-window-config (current-window-configuration))
   (delete-other-windows (claude-repl--live-return-window))
   (claude-repl--ensure-session)
@@ -1339,7 +1340,8 @@ The placeholder is swapped for the real vterm buffer once Claude is ready."
 Demotes indicators, refreshes display, and restores panel layout."
   (claude-repl--log "show-existing-panels")
   (let ((ws (+workspace-current-name)))
-    (when ws (claude-repl--touch-activity ws)))
+    (unless ws (error "claude-repl--show-existing-panels: no active workspace"))
+    (claude-repl--touch-activity ws))
   (claude-repl--refresh-vterm)
   (claude-repl--update-all-workspace-states)
   (setq claude-repl--saved-window-config (current-window-configuration))
@@ -1378,12 +1380,12 @@ If panels hidden: show both panels."
      ;; Panels visible - hide both, restore window layout
      (panels-visible
       (let ((ws (+workspace-current-name)))
-        (when ws
-          (claude-repl--ws-clear ws :thinking)
-          (claude-repl--ws-clear ws :done)
-          (claude-repl--ws-clear ws :permission)
-          (claude-repl--ws-clear ws :failed)
-          (claude-repl--ws-clear ws :stale)))
+        (unless ws (error "claude-repl: no active workspace when hiding panels"))
+        (claude-repl--ws-clear ws :thinking)
+        (claude-repl--ws-clear ws :done)
+        (claude-repl--ws-clear ws :permission)
+        (claude-repl--ws-clear ws :failed)
+        (claude-repl--ws-clear ws :stale))
       (claude-repl--restore-layout)
       (claude-repl--save-session))
      ;; Panels hidden - show both
@@ -1455,12 +1457,12 @@ If panels hidden: show both panels."
   (let ((ws (+workspace-current-name))
         (vterm-buf claude-repl-vterm-buffer)
         (input-buf claude-repl-input-buffer))
-    (when ws
-      (claude-repl--ws-clear ws :thinking)
-      (claude-repl--ws-clear ws :done)
-      (claude-repl--ws-clear ws :permission)
-      (claude-repl--ws-clear ws :failed)
-      (claude-repl--ws-clear ws :stale))
+    (unless ws (error "claude-repl-kill: no active workspace"))
+    (claude-repl--ws-clear ws :thinking)
+    (claude-repl--ws-clear ws :done)
+    (claude-repl--ws-clear ws :permission)
+    (claude-repl--ws-clear ws :failed)
+    (claude-repl--ws-clear ws :stale)
     (claude-repl--teardown-session-state)
     (claude-repl--destroy-session-buffers vterm-buf input-buf)))
 
