@@ -222,7 +222,8 @@ Splits right for vterm (60% width to work window), then splits vterm bottom for 
     (set-window-parameter vterm-win 'no-other-window t)
     (set-window-parameter input-win 'no-other-window t)
     ;; Lock width to prevent resize-triggered reflow in vterm
-    (set-window-parameter vterm-win 'window-size-fixed 'width)))
+    (set-window-parameter vterm-win 'window-size-fixed 'width))
+  (claude-repl--update-all-workspace-states))
 
 (defun claude-repl--focus-input-panel ()
   "Focus the input panel window and enter insert state."
@@ -949,7 +950,9 @@ Swaps the loading placeholder for the real vterm buffer."
           ('started  (claude-repl--ws-set ws :thinking))
           ('finished (claude-repl--ws-clear ws :thinking)))
         (when (eq transition 'finished)
-          (claude-repl--on-claude-finished ws))))))
+          (claude-repl--on-claude-finished ws))
+        (claude-repl--update-all-workspace-states)))))
+
 
 (after! vterm
   (advice-add 'vterm--set-title :before #'claude-repl--on-title-change))
@@ -1343,7 +1346,6 @@ Demotes indicators, refreshes display, and restores panel layout."
     (unless ws (error "claude-repl--show-existing-panels: no active workspace"))
     (claude-repl--touch-activity ws))
   (claude-repl--refresh-vterm)
-  (claude-repl--update-all-workspace-states)
   (setq claude-repl--saved-window-config (current-window-configuration))
   (delete-other-windows (claude-repl--live-return-window))
   (claude-repl--ensure-input-buffer)
