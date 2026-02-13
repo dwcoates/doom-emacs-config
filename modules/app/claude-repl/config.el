@@ -819,9 +819,10 @@ Swaps the loading placeholder for the real vterm buffer."
       ;; re-entrant vterm--redraw calls see the current value and
       ;; detect no transition (prevents infinite recursion).
       (setq claude-repl--title-thinking thinking)
-      (when ws
-        (when transition
-          (claude-repl--log "title transition=%s ws=%s" transition ws))
+      (when transition
+        (unless ws
+          (error "claude-repl--on-title-change: workspace is nil for buffer %s" (buffer-name)))
+        (claude-repl--log "title transition=%s ws=%s" transition ws)
         (pcase transition
           ('started  (claude-repl--ws-set ws :thinking))
           ('finished (claude-repl--ws-clear ws :thinking)))
@@ -852,8 +853,9 @@ Swaps the loading placeholder for the real vterm buffer."
                                 (insert-file-contents file)
                                 (buffer-string))))))
         (claude-repl--log "permission notify ws=%s" ws)
-        (when ws
-          (claude-repl--ws-set ws :permission))
+        (unless ws
+          (error "claude-repl--on-permission-notify: no workspace for dir in %s" file))
+        (claude-repl--ws-set ws :permission)
         (delete-file file)))))
 
 (require 'filenotify)
@@ -898,11 +900,13 @@ REPL so the tab indicator has served its purpose.  :thinking is left
 alone because it represents an actively running operation."
   (when (and (claude-repl--vterm-live-p) (claude-repl--vterm-visible-p))
     (let ((ws (claude-repl--workspace-for-buffer claude-repl-vterm-buffer)))
-      (when ws
-        (claude-repl--log "clear-done-if-visible ws=%s" ws)
-        (claude-repl--ws-clear ws :done)
-        (claude-repl--ws-clear ws :permission)
-        (claude-repl--ws-clear ws :failed)))))
+      (unless ws
+        (error "claude-repl--clear-done-if-visible: workspace is nil for buffer %s"
+               (buffer-name claude-repl-vterm-buffer)))
+      (claude-repl--log "clear-done-if-visible ws=%s" ws)
+      (claude-repl--ws-clear ws :done)
+      (claude-repl--ws-clear ws :permission)
+      (claude-repl--ws-clear ws :failed))))
 
 (defun claude-repl--on-frame-focus ()
   "Refresh claude vterm and clear done indicator when Emacs regains focus."

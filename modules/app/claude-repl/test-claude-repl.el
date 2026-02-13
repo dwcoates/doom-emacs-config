@@ -481,7 +481,7 @@
       (should-not claude-repl--title-thinking))))
 
 (ert-deftest claude-repl-test-bug3-title-change-no-ws ()
-  "Bug 3: on-title-change should not error when workspace is nil."
+  "Bug 3: on-title-change should error when workspace is nil during a transition."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
       (setq-local claude-repl--ready t)  ;; skip first-ready handling
@@ -490,9 +490,9 @@
                  (lambda (_buf) nil))
                 ((symbol-function 'claude-repl--handle-first-ready)
                  (lambda () nil)))
-        ;; Should not signal an error
-        (claude-repl--on-title-change "⠋ Claude Code")
-        ;; But title-thinking should still be updated
+        ;; Should error because ws is nil during a started transition
+        (should-error (claude-repl--on-title-change "⠋ Claude Code"))
+        ;; title-thinking should still be updated (setq is before the guard)
         (should claude-repl--title-thinking)))))
 
 (ert-deftest claude-repl-test-bug5-rel-path-non-file-buffer ()
