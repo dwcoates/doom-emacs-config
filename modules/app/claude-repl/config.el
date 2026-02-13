@@ -61,6 +61,11 @@ Only add advice when going from 0 to 1; only remove when going from 1 to 0.")
 (defvar-local claude-repl-hide-overlay nil
   "Overlay used to hide Claude CLI input box.")
 
+(defvar-local claude-repl--owning-workspace nil
+  "Workspace name that owns this claude session.
+Set when the user sends a message; used to correctly target workspace
+state changes regardless of which persp the buffer drifts into.")
+
 ;; Input history
 (defvar-local claude-repl--input-history nil
   "List of previous inputs, most recent first.")
@@ -458,6 +463,11 @@ Uses paste mode for large inputs to avoid truncation."
       (unless ws (error "claude-repl-send: no active workspace"))
       (claude-repl--log "send ws=%s len=%d" ws (length input))
       (setq claude-repl--prefix-counter (1+ claude-repl--prefix-counter))
+      ;; Pin the owning workspace on the vterm buffer so title-change
+      ;; clears the correct workspace even if the buffer drifts between persps.
+      (when claude-repl-vterm-buffer
+        (with-current-buffer claude-repl-vterm-buffer
+          (setq-local claude-repl--owning-workspace ws)))
       (claude-repl--mark-ws-thinking ws)
       (claude-repl--send-input-to-vterm input)
       (claude-repl--clear-input)
@@ -748,7 +758,8 @@ STATE is one of: :thinking, :done, :permission, :failed, :stale."
                (string-match-p "^\\*claude-[0-9a-f]+\\*$" (buffer-name buf))
                (not (get-buffer-window buf))  ;; invisible
                (with-current-buffer buf (eq major-mode 'vterm-mode)))
-      (let ((ws (claude-repl--workspace-for-buffer buf)))
+      (let ((ws (or (buffer-local-value 'claude-repl--owning-workspace buf)
+                     (claude-repl--workspace-for-buffer buf))))
         (when (and ws (eq (claude-repl--ws-state ws) :thinking))
           (claude-repl--log "poll-thinking: redrawing %s (ws=%s)" (buffer-name buf) ws)
           (with-current-buffer buf
@@ -774,9 +785,10 @@ Buffer-local so multiple Claude sessions don't interfere.")
 Returns a plist with:
   :thinking    - non-nil if the new title has a spinner
   :transition  - one of 'started, 'finished, or nil (no change)
-  :ws          - the workspace name for the current buffer, or nil"
+  :ws          - the owning workspace name for the current buffer, or nil"
   (let* ((thinking (claude-repl--title-has-spinner-p title))
-         (ws (claude-repl--workspace-for-buffer (current-buffer)))
+         (ws (or claude-repl--owning-workspace
+                 (claude-repl--workspace-for-buffer (current-buffer))))
          (transition (cond
                       ((and thinking (not claude-repl--title-thinking)) 'started)
                       ((and (not thinking) claude-repl--title-thinking) 'finished)
@@ -918,7 +930,8 @@ Transitions :done, :permission, and :failed to :stale — the user is
 looking at the REPL so the urgent indicator has served its purpose,
 but we keep the workspace marked as recently active."
   (when (and (claude-repl--vterm-live-p) (claude-repl--vterm-visible-p))
-    (let ((ws (claude-repl--workspace-for-buffer claude-repl-vterm-buffer)))
+    (let ((ws (or (buffer-local-value 'claude-repl--owning-workspace claude-repl-vterm-buffer)
+                  (claude-repl--workspace-for-buffer claude-repl-vterm-buffer))))
       (unless ws
         (error "claude-repl--demote-if-visible: workspace is nil for buffer %s"
                (buffer-name claude-repl-vterm-buffer)))
