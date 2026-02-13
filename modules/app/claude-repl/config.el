@@ -1014,45 +1014,97 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
           (claude-repl--do-refresh)))
       (claude-repl--fix-vterm-scroll buf))))
 
-;; Refresh vterm on frame focus
-(defun claude-repl--demote-if-visible ()
-  "Demote indicator states to :stale for the current vterm's workspace if visible.
-Transitions :done, :permission, and :failed to :stale — the user is
-looking at the REPL so the urgent indicator has served its purpose,
-but we keep the workspace marked as recently active."
-  (when (and (claude-repl--vterm-live-p) (claude-repl--vterm-visible-p))
-    (let ((ws (or (buffer-local-value 'claude-repl--owning-workspace claude-repl-vterm-buffer)
-                  (claude-repl--workspace-for-buffer claude-repl-vterm-buffer))))
-      (unless ws
-        (error "claude-repl--demote-if-visible: workspace is nil for buffer %s"
-               (buffer-name claude-repl-vterm-buffer)))
-      (let ((state (claude-repl--ws-state ws)))
-        (when (and (memq state '(:done :permission :failed))
-                   (claude-repl--workspace-clean-p ws))
-          (claude-repl--log "demote-if-visible ws=%s from=%s" ws state)
-          (claude-repl--ws-clear ws state)
-          (claude-repl--touch-activity ws))))))
+;; Walk saved window-configuration tree to find claude buffers.
+(defun claude-repl--wconf-has-claude-p (wconf)
+  "Return non-nil if WCONF (a `window-state-get' tree) contains a claude buffer."
+  (when (and wconf (listp wconf))
+    (let ((buf-entry (alist-get 'buffer wconf)))
+      (if (and buf-entry (stringp (car-safe buf-entry))
+               (string-match-p "^\\*claude-[0-9a-f]+\\*$" (car buf-entry)))
+          t
+        (cl-some #'claude-repl--wconf-has-claude-p
+                 (cl-remove-if-not #'listp wconf))))))
+
+(defun claude-repl--ws-claude-open-p (ws-name)
+  "Return non-nil if workspace WS-NAME has a claude buffer in its window layout.
+For the current workspace, checks live windows.
+For background workspaces, inspects the saved persp window configuration."
+  (if (equal ws-name (+workspace-current-name))
+      ;; Current workspace: check live windows
+      (cl-some (lambda (buf)
+                 (and (buffer-live-p buf)
+                      (claude-repl--claude-buffer-p buf)
+                      (get-buffer-window buf)))
+               (buffer-list))
+    ;; Background workspace: inspect saved window config
+    (let* ((persp (persp-get-by-name ws-name))
+           (wconf (and persp (not (symbolp persp)) (persp-window-conf persp))))
+      (claude-repl--wconf-has-claude-p wconf))))
+
+(defun claude-repl--update-ws-state (ws)
+  "Update workspace WS state according to claude visibility and git status.
+State table:
+  :thinking  → unchanged (never touch)
+  :done      + clean → :stale  |  :done      + dirty → :done
+  :permission         → unchanged
+  :failed             → unchanged
+  :stale     + dirty → :done   |  :stale     + clean → :stale
+  nil        + dirty → :done   |  nil        + clean → nil"
+  (let ((state (claude-repl--ws-state ws))
+        (dirty (not (claude-repl--workspace-clean-p ws))))
+    (pcase (cons state dirty)
+      ;; :done + clean → :stale
+      (`(:done . nil)
+       (claude-repl--log "update-ws-state ws=%s :done->:stale" ws)
+       (claude-repl--ws-clear ws :done)
+       (claude-repl--touch-activity ws))
+      ;; :stale + dirty → :done
+      (`(:stale . t)
+       (claude-repl--log "update-ws-state ws=%s :stale->:done" ws)
+       (claude-repl--ws-clear ws :stale)
+       (claude-repl--ws-set ws :done))
+      ;; nil + dirty → :done
+      (`(nil . t)
+       (claude-repl--log "update-ws-state ws=%s nil->:done" ws)
+       (claude-repl--ws-set ws :done)))))
+
+(defun claude-repl--update-all-workspace-states ()
+  "Update state for all workspaces based on claude visibility and git status."
+  (when (bound-and-true-p persp-mode)
+    (dolist (ws (+workspace-list-names))
+      (if (claude-repl--ws-claude-open-p ws)
+          (claude-repl--update-ws-state ws)
+        ;; Claude not open on this workspace → clear all state
+        (let ((state (claude-repl--ws-state ws)))
+          (when (and state (not (eq state :thinking)))
+            (claude-repl--log "update-all: ws=%s clearing %s (claude not open)" ws state)
+            (claude-repl--ws-clear ws state)))))))
 
 (defun claude-repl--on-frame-focus ()
-  "Refresh claude vterm and clear done indicator when Emacs regains focus."
+  "Refresh claude vterm and update all workspace states when Emacs regains focus."
   (when (frame-focus-state)
     (claude-repl--log "on-frame-focus")
     (claude-repl--load-session)
     (claude-repl--refresh-vterm)
-    (claude-repl--demote-if-visible)))
+    (claude-repl--update-all-workspace-states)))
 
 (add-function :after after-focus-change-function #'claude-repl--on-frame-focus)
 
 ;; Refresh vterm on workspace switch
 (defun claude-repl--on-workspace-switch ()
-  "Handle workspace switch: clear done state, refresh vterm, reset cursors."
+  "Handle workspace switch: update all workspace states, refresh vterm, reset cursors."
   (claude-repl--load-session)
   (claude-repl--log "workspace-switch ws=%s" (+workspace-current-name))
-  (claude-repl--demote-if-visible)
+  (claude-repl--update-all-workspace-states)
   (claude-repl--refresh-vterm)
   (claude-repl--reset-vterm-cursors))
 
+;; Save window state for current workspace before switching away,
+;; so update-all-workspace-states can inspect the saved config.
 (when (modulep! :ui workspaces)
+  (add-hook 'persp-before-deactivate-functions
+            (lambda (&rest _)
+              (ignore-errors (persp-frame-save-state))))
   (add-hook 'persp-activated-functions
             (lambda (&rest _)
               (run-at-time 0 nil #'claude-repl--on-workspace-switch))))
@@ -1289,7 +1341,7 @@ Demotes indicators, refreshes display, and restores panel layout."
   (let ((ws (+workspace-current-name)))
     (when ws (claude-repl--touch-activity ws)))
   (claude-repl--refresh-vterm)
-  (claude-repl--demote-if-visible)
+  (claude-repl--update-all-workspace-states)
   (setq claude-repl--saved-window-config (current-window-configuration))
   (delete-other-windows (claude-repl--live-return-window))
   (claude-repl--ensure-input-buffer)
