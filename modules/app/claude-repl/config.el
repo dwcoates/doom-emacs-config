@@ -656,14 +656,15 @@ STATE is one of: :thinking, :done, :permission, :failed."
 
 (defun claude-repl--ws-clear (ws state)
   "Clear a single STATE for workspace WS.
-STATE is one of: :thinking, :done, :permission, :failed."
+STATE is one of: :thinking, :done, :permission, :failed, :stale."
   (unless ws (error "claude-repl--ws-clear: ws is nil"))
   (claude-repl--log "clear %s %s" ws state)
   (pcase state
     (:thinking   (remhash ws claude-repl--thinking-workspaces))
     (:done       (remhash ws claude-repl--done-workspaces))
     (:permission (remhash ws claude-repl--permission-workspaces))
-    (:failed     (remhash ws claude-repl--failed-workspaces))))
+    (:failed     (remhash ws claude-repl--failed-workspaces))
+    (:stale      (remhash ws claude-repl--activity-times))))
 
 (defun claude-repl--touch-activity (ws)
   "Record current time as last input for workspace WS."
@@ -736,6 +737,24 @@ STATE is one of: :thinking, :done, :permission, :failed."
                 (lambda ()
                   (when (bound-and-true-p persp-mode)
                     (+workspace/display))))
+
+;; Periodically redraw invisible claude vterm buffers in :thinking workspaces.
+;; This catches missed title transitions (e.g., Claude finished while we were
+;; on a different workspace and vterm never redrawed).
+(defun claude-repl--poll-thinking-workspaces ()
+  "Redraw invisible claude vterm buffers whose workspace is :thinking."
+  (dolist (buf (buffer-list))
+    (when (and (buffer-live-p buf)
+               (string-match-p "^\\*claude-[0-9a-f]+\\*$" (buffer-name buf))
+               (not (get-buffer-window buf))  ;; invisible
+               (with-current-buffer buf (eq major-mode 'vterm-mode)))
+      (let ((ws (claude-repl--workspace-for-buffer buf)))
+        (when (and ws (eq (claude-repl--ws-state ws) :thinking))
+          (claude-repl--log "poll-thinking: redrawing %s (ws=%s)" (buffer-name buf) ws)
+          (with-current-buffer buf
+            (claude-repl--do-refresh)))))))
+
+(run-with-timer 5 5 #'claude-repl--poll-thinking-workspaces)
 
 ;; Title-based "Claude is done" detection.
 ;; Claude Code sets the terminal title to "<spinner> Claude Code" while thinking
@@ -893,20 +912,21 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
       (claude-repl--fix-vterm-scroll buf))))
 
 ;; Refresh vterm on frame focus
-(defun claude-repl--clear-done-if-visible ()
-  "Clear indicator states for the current vterm's workspace if visible.
-Clears :done, :permission, and :failed — the user is looking at the
-REPL so the tab indicator has served its purpose.  :thinking is left
-alone because it represents an actively running operation."
+(defun claude-repl--demote-if-visible ()
+  "Demote indicator states to :stale for the current vterm's workspace if visible.
+Transitions :done, :permission, and :failed to :stale — the user is
+looking at the REPL so the urgent indicator has served its purpose,
+but we keep the workspace marked as recently active."
   (when (and (claude-repl--vterm-live-p) (claude-repl--vterm-visible-p))
     (let ((ws (claude-repl--workspace-for-buffer claude-repl-vterm-buffer)))
       (unless ws
-        (error "claude-repl--clear-done-if-visible: workspace is nil for buffer %s"
+        (error "claude-repl--demote-if-visible: workspace is nil for buffer %s"
                (buffer-name claude-repl-vterm-buffer)))
-      (claude-repl--log "clear-done-if-visible ws=%s" ws)
-      (claude-repl--ws-clear ws :done)
-      (claude-repl--ws-clear ws :permission)
-      (claude-repl--ws-clear ws :failed))))
+      (let ((state (claude-repl--ws-state ws)))
+        (when (memq state '(:done :permission :failed))
+          (claude-repl--log "demote-if-visible ws=%s from=%s" ws state)
+          (claude-repl--ws-clear ws state)
+          (claude-repl--touch-activity ws))))))
 
 (defun claude-repl--on-frame-focus ()
   "Refresh claude vterm and clear done indicator when Emacs regains focus."
@@ -914,7 +934,7 @@ alone because it represents an actively running operation."
     (claude-repl--log "on-frame-focus")
     (claude-repl--load-session)
     (claude-repl--refresh-vterm)
-    (claude-repl--clear-done-if-visible)))
+    (claude-repl--demote-if-visible)))
 
 (add-function :after after-focus-change-function #'claude-repl--on-frame-focus)
 
@@ -923,7 +943,7 @@ alone because it represents an actively running operation."
   "Handle workspace switch: clear done state, refresh vterm, reset cursors."
   (claude-repl--load-session)
   (claude-repl--log "workspace-switch ws=%s" (+workspace-current-name))
-  (claude-repl--clear-done-if-visible)
+  (claude-repl--demote-if-visible)
   (claude-repl--refresh-vterm)
   (claude-repl--reset-vterm-cursors))
 
@@ -1148,6 +1168,8 @@ The placeholder is swapped for the real vterm buffer once Claude is ready."
 (defun claude-repl--start-fresh ()
   "Start a new Claude session with placeholder panels."
   (claude-repl--log "start-fresh")
+  (let ((ws (+workspace-current-name)))
+    (when ws (claude-repl--touch-activity ws)))
   (setq claude-repl--saved-window-config (current-window-configuration))
   (delete-other-windows (claude-repl--live-return-window))
   (claude-repl--ensure-session)
@@ -1157,10 +1179,12 @@ The placeholder is swapped for the real vterm buffer once Claude is ready."
 
 (defun claude-repl--show-existing-panels ()
   "Show panels for an already-running Claude session.
-Clears done state, refreshes display, and restores panel layout."
+Demotes indicators, refreshes display, and restores panel layout."
   (claude-repl--log "show-existing-panels")
+  (let ((ws (+workspace-current-name)))
+    (when ws (claude-repl--touch-activity ws)))
   (claude-repl--refresh-vterm)
-  (claude-repl--clear-done-if-visible)
+  (claude-repl--demote-if-visible)
   (setq claude-repl--saved-window-config (current-window-configuration))
   (delete-other-windows (claude-repl--live-return-window))
   (claude-repl--ensure-input-buffer)
@@ -1196,6 +1220,13 @@ If panels hidden: show both panels."
       (claude-repl--start-fresh))
      ;; Panels visible - hide both, restore window layout
      (panels-visible
+      (let ((ws (+workspace-current-name)))
+        (when ws
+          (claude-repl--ws-clear ws :thinking)
+          (claude-repl--ws-clear ws :done)
+          (claude-repl--ws-clear ws :permission)
+          (claude-repl--ws-clear ws :failed)
+          (claude-repl--ws-clear ws :stale)))
       (claude-repl--restore-layout)
       (claude-repl--save-session))
      ;; Panels hidden - show both
@@ -1264,8 +1295,15 @@ If panels hidden: show both panels."
   (interactive)
   (claude-repl--log "kill")
   (claude-repl--load-session)
-  (let ((vterm-buf claude-repl-vterm-buffer)
+  (let ((ws (+workspace-current-name))
+        (vterm-buf claude-repl-vterm-buffer)
         (input-buf claude-repl-input-buffer))
+    (when ws
+      (claude-repl--ws-clear ws :thinking)
+      (claude-repl--ws-clear ws :done)
+      (claude-repl--ws-clear ws :permission)
+      (claude-repl--ws-clear ws :failed)
+      (claude-repl--ws-clear ws :stale))
     (claude-repl--teardown-session-state)
     (claude-repl--destroy-session-buffers vterm-buf input-buf)))
 
