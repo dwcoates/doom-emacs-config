@@ -303,8 +303,9 @@
   "ws-state should return :stale for recently-active workspaces."
   (claude-repl-test--with-clean-state
     (let ((claude-repl-stale-minutes 60))
-      (claude-repl--touch-activity "ws1")
-      (should (eq (claude-repl--ws-state "ws1") :stale)))))
+      (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_) t)))
+        (claude-repl--touch-activity "ws1")
+        (should (eq (claude-repl--ws-state "ws1") :stale))))))
 
 (ert-deftest claude-repl-test-ws-set-nil-error ()
   "ws-set with nil workspace should signal an error."
@@ -851,7 +852,8 @@ When t, it should call `message'."
 (ert-deftest claude-repl-test-mark-ws-thinking-composite ()
   "`claude-repl--mark-ws-thinking' should set :thinking state AND record activity."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--schedule-failed-check) #'ignore))
+    (cl-letf (((symbol-function 'claude-repl--schedule-failed-check) #'ignore)
+              ((symbol-function 'claude-repl--workspace-clean-p) (lambda (_) t)))
       (claude-repl--mark-ws-thinking "ws1")
       (should (eq (claude-repl--ws-state "ws1") :thinking))
       (should (gethash "ws1" claude-repl--activity-times)))))
@@ -1021,7 +1023,8 @@ see the updated title-thinking and detect no transition."
     (should (eq (claude-repl--ws-state "ws1") :done))
     ;; Clear done, set activity for stale
     (remhash "ws1" claude-repl--done-workspaces)
-    (claude-repl--touch-activity "ws1")
+    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_) t)))
+      (claude-repl--touch-activity "ws1"))
     (should (eq (claude-repl--ws-state "ws1") :stale))))
 
 (ert-deftest claude-repl-test-ws-state-expired-stale ()
@@ -1128,7 +1131,8 @@ see the updated title-thinking and detect no transition."
 (ert-deftest claude-repl-test-tabline-stale-face ()
   "A background tab with :stale should use stale face."
   (claude-repl-test--with-clean-state
-    (claude-repl--touch-activity "bg-ws")
+    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_) t)))
+      (claude-repl--touch-activity "bg-ws"))
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))
       (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
         (let ((pos (string-match "bg-ws" result)))

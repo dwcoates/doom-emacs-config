@@ -732,10 +732,25 @@ STATE is one of: :thinking, :done, :permission, :failed, :stale."
     (:failed     (remhash ws claude-repl--failed-workspaces))
     (:stale      (remhash ws claude-repl--activity-times))))
 
+(defun claude-repl--workspace-clean-p (ws)
+  "Return non-nil if workspace WS has no unstaged changes to tracked files."
+  (ignore-errors
+    (let* ((persp (persp-get-by-name ws))
+           (bufs (and persp (not (symbolp persp)) (persp-buffers persp)))
+           (dir (cl-loop for buf in bufs
+                         when (buffer-live-p buf)
+                         return (buffer-local-value 'default-directory buf))))
+      (when dir
+        (let ((default-directory dir))
+          (= 0 (process-file "git" nil nil nil "diff" "--quiet")))))))
+
 (defun claude-repl--touch-activity (ws)
-  "Record current time as last input for workspace WS."
+  "Record current time as last input for workspace WS.
+Only sets stale if the workspace has no unstaged changes to tracked files."
   (unless ws (error "claude-repl--touch-activity: ws is nil"))
-  (puthash ws (float-time) claude-repl--activity-times))
+  (if (claude-repl--workspace-clean-p ws)
+      (puthash ws (float-time) claude-repl--activity-times)
+    (remhash ws claude-repl--activity-times)))
 
 (defun claude-repl--workspace-for-buffer (buf)
   "Return the workspace name that contains BUF, or nil."
