@@ -859,6 +859,10 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
 (push (run-with-timer 5 5 #'claude-repl--poll-thinking-workspaces)
       claude-repl--timers)
 
+;; Periodically update all workspace states (catches git changes, etc.)
+(push (run-with-timer 1 1 #'claude-repl--update-all-workspace-states)
+      claude-repl--timers)
+
 ;; Title-based "Claude is done" detection.
 ;; Claude Code sets the terminal title to "<spinner> Claude Code" while thinking
 ;; and plain "Claude Code" when idle.  We poll via vterm--set-title advice.
