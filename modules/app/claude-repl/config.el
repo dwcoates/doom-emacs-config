@@ -1020,13 +1020,13 @@ Works from any buffer (loads session) or from within the vterm buffer itself."
 ;; Walk saved window-configuration tree to find claude buffers.
 (defun claude-repl--wconf-has-claude-p (wconf)
   "Return non-nil if WCONF (a `window-state-get' tree) contains a claude buffer."
-  (when (and wconf (listp wconf))
+  (when (and wconf (proper-list-p wconf))
     (let ((buf-entry (alist-get 'buffer wconf)))
       (if (and buf-entry (stringp (car-safe buf-entry))
                (string-match-p "^\\*claude-[0-9a-f]+\\*$" (car buf-entry)))
           t
         (cl-some #'claude-repl--wconf-has-claude-p
-                 (cl-remove-if-not #'listp wconf))))))
+                 (cl-remove-if-not #'proper-list-p wconf))))))
 
 (defun claude-repl--ws-claude-open-p (ws-name)
   "Return non-nil if workspace WS-NAME has a claude buffer in its window layout.
