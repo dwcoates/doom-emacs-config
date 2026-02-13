@@ -1438,5 +1438,101 @@ This lets Claude CLI handle paste natively, including images."
     (with-current-buffer claude-repl-vterm-buffer
       (vterm-send-key "v" nil nil t))))
 
+;;; Debug helpers — interactive commands for diagnosing workspace state issues.
+;;; Call via M-x claude-repl-debug/...
+
+(defun claude-repl-debug/workspace-states ()
+  "Display all workspace states."
+  (interactive)
+  (let ((states (mapcar (lambda (name)
+                          (cons name (claude-repl--ws-state name)))
+                        (+workspace-list-names))))
+    (message "Workspace states:\n%s"
+             (mapconcat (lambda (s) (format "  %s: %s" (car s) (or (cdr s) "nil")))
+                        states "\n"))))
+
+(defun claude-repl-debug/buffer-info ()
+  "Display all claude vterm buffers with their owning and persp workspaces."
+  (interactive)
+  (let (result)
+    (dolist (buf (buffer-list))
+      (when (string-match-p "^\\*claude-[0-9a-f]+\\*$" (buffer-name buf))
+        (push (format "  %s  owning=%s  persp=%s  thinking=%s"
+                      (buffer-name buf)
+                      (or (buffer-local-value 'claude-repl--owning-workspace buf) "nil")
+                      (or (claude-repl--workspace-for-buffer buf) "nil")
+                      (buffer-local-value 'claude-repl--title-thinking buf))
+              result)))
+    (message "Claude buffers:\n%s"
+             (if result (mapconcat #'identity (nreverse result) "\n") "  (none)"))))
+
+(defun claude-repl-debug/clear-state (ws)
+  "Clear all states for workspace WS without killing buffers."
+  (interactive
+   (list (completing-read "Workspace: " (+workspace-list-names) nil t)))
+  (claude-repl--ws-clear ws :thinking)
+  (claude-repl--ws-clear ws :done)
+  (claude-repl--ws-clear ws :permission)
+  (claude-repl--ws-clear ws :failed)
+  (claude-repl--ws-clear ws :stale)
+  (message "Cleared all states for %s" ws))
+
+(defun claude-repl-debug/obliterate (ws)
+  "Completely remove workspace WS from all claude-repl tracking.
+Kills claude buffers, closes windows, removes from all hash tables,
+and clears owning-workspace refs on any buffers pointing to WS."
+  (interactive
+   (list (completing-read "Obliterate workspace: " (+workspace-list-names) nil t)))
+  ;; Clear all state hash tables
+  (remhash ws claude-repl--thinking-workspaces)
+  (remhash ws claude-repl--done-workspaces)
+  (remhash ws claude-repl--permission-workspaces)
+  (remhash ws claude-repl--failed-workspaces)
+  (remhash ws claude-repl--activity-times)
+  ;; Find and destroy any claude buffers owned by this workspace
+  (dolist (buf (buffer-list))
+    (when (and (buffer-live-p buf)
+               (string-match-p "^\\*claude-\\(input-\\)?[0-9a-f]+\\*$" (buffer-name buf))
+               (equal ws (buffer-local-value 'claude-repl--owning-workspace buf)))
+      (when-let ((win (get-buffer-window buf)))
+        (ignore-errors (delete-window win)))
+      (let ((proc (get-buffer-process buf)))
+        (when proc (set-process-query-on-exit-flag proc nil)))
+      (kill-buffer buf)))
+  ;; Remove session entry keyed by workspace ID
+  ;; (workspace ID is md5-based, so we scan sessions for matching buffers)
+  (let (dead-ids)
+    (maphash (lambda (id _plist)
+               (let ((vterm-name (format "*claude-%s*" id)))
+                 (unless (get-buffer vterm-name)
+                   (push id dead-ids))))
+             claude-repl--sessions)
+    (dolist (id dead-ids)
+      (remhash id claude-repl--sessions)))
+  ;; Clear globals if they pointed to now-dead buffers
+  (when (and claude-repl-vterm-buffer (not (buffer-live-p claude-repl-vterm-buffer)))
+    (setq claude-repl-vterm-buffer nil))
+  (when (and claude-repl-input-buffer (not (buffer-live-p claude-repl-input-buffer)))
+    (setq claude-repl-input-buffer nil))
+  (message "Obliterated all claude-repl state for %s" ws))
+
+(defun claude-repl-debug/set-owning-workspace ()
+  "Set the owning workspace for a claude vterm buffer."
+  (interactive)
+  (let* ((bufs (cl-remove-if-not
+                (lambda (b) (string-match-p "^\\*claude-[0-9a-f]+\\*$" (buffer-name b)))
+                (buffer-list)))
+         (buf-name (completing-read "Buffer: " (mapcar #'buffer-name bufs) nil t))
+         (ws (completing-read "Owning workspace: " (+workspace-list-names) nil t)))
+    (with-current-buffer buf-name
+      (setq-local claude-repl--owning-workspace ws))
+    (message "Set %s owning workspace to %s" buf-name ws)))
+
+(defun claude-repl-debug/toggle-logging ()
+  "Toggle debug logging."
+  (interactive)
+  (setq claude-repl-debug (not claude-repl-debug))
+  (message "Claude REPL debug logging: %s" (if claude-repl-debug "ON" "OFF")))
+
 (provide 'claude-repl)
 ;;; config.el ends here
