@@ -1030,7 +1030,8 @@ but we keep the workspace marked as recently active."
         (error "claude-repl--demote-if-visible: workspace is nil for buffer %s"
                (buffer-name claude-repl-vterm-buffer)))
       (let ((state (claude-repl--ws-state ws)))
-        (when (memq state '(:done :permission :failed))
+        (when (and (memq state '(:done :permission :failed))
+                   (claude-repl--workspace-clean-p ws))
           (claude-repl--log "demote-if-visible ws=%s from=%s" ws state)
           (claude-repl--ws-clear ws state)
           (claude-repl--touch-activity ws))))))
