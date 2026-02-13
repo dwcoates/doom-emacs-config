@@ -822,7 +822,9 @@ If BUFFER-OR-NAME belongs to another workspace, switch there first."
            (current-ws (+workspace-current-name))
            (target-ws (and buf current-ws
                            (claude-repl--workspace-for-buffer buf))))
-      (when (and target-ws (not (equal target-ws current-ws)))
+      (when (and target-ws
+                   (not (equal target-ws current-ws))
+                   (not (equal target-ws "none")))
         (+workspace-switch target-ws))))
   (apply orig-fn buffer-or-name args))
 
