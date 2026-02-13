@@ -1415,13 +1415,6 @@ Without region: copies file:line."
 
 ;; FIXME: fix magit handling
 
-;; Exclude claude-repl buffers from Doom's buffer switching (SPC b b, SPC b p, etc.)
-(defun claude-repl--doom-unreal-buffer-p (buf)
-  "Return non-nil if BUF is a claude-repl buffer."
-  (string-match-p "^\\*claude-\\(input-\\)?[0-9a-f]+\\*$" (buffer-name buf)))
-
-(add-hook 'doom-unreal-buffer-functions #'claude-repl--doom-unreal-buffer-p)
-
 ;; C-v paste forwarding to vterm
 (defun claude-repl-paste-to-vterm ()
   "Forward a Ctrl-V keystroke to the Claude vterm buffer.

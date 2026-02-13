@@ -599,17 +599,6 @@
 
 ;;;; ---- Tests: Unreal buffer predicate ----
 
-(ert-deftest claude-repl-test-unreal-buffer-predicate ()
-  "claude-repl--doom-unreal-buffer-p should match claude-repl buffers only."
-  (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
-    (should (claude-repl--doom-unreal-buffer-p (current-buffer))))
-  (claude-repl-test--with-temp-buffer "*claude-input-abcd1234*"
-    (should (claude-repl--doom-unreal-buffer-p (current-buffer))))
-  (claude-repl-test--with-temp-buffer "*scratch*"
-    (should-not (claude-repl--doom-unreal-buffer-p (current-buffer))))
-  (claude-repl-test--with-temp-buffer "*claude-code-something*"
-    (should-not (claude-repl--doom-unreal-buffer-p (current-buffer)))))
-
 ;;;; ---- Tests: Paste to vterm ----
 
 (ert-deftest claude-repl-test-paste-to-vterm ()

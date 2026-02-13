@@ -810,6 +810,24 @@ If found, the class name is returned, otherwise STR is returned"
 
 (map! :leader "b p" #'+dwc/toggle-last-buffer)
 
+;; Workspace-aware buffer switching: if the target buffer belongs to another
+;; workspace, switch to that workspace instead of pulling the buffer here.
+;; Applied as advice so all buffer switch commands (SPC <, SPC b b, etc.)
+;; get the behavior and ivy-rich transformers remain intact.
+(defun +dwc/switch-to-buffer-workspace-aware (orig-fn buffer-or-name &rest args)
+  "Advice around `switch-to-buffer'.
+If BUFFER-OR-NAME belongs to another workspace, switch there first."
+  (when (bound-and-true-p persp-mode)
+    (let* ((buf (get-buffer buffer-or-name))
+           (current-ws (+workspace-current-name))
+           (target-ws (and buf current-ws
+                           (claude-repl--workspace-for-buffer buf))))
+      (when (and target-ws (not (equal target-ws current-ws)))
+        (+workspace-switch target-ws))))
+  (apply orig-fn buffer-or-name args))
+
+(advice-add 'switch-to-buffer :around #'+dwc/switch-to-buffer-workspace-aware)
+
 ;; (advice-add 'command-execute :before
 ;;             (lambda (cmd)
 ;;               (when cmd (message "Executing command: %s" cmd))))
