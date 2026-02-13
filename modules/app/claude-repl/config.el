@@ -1636,5 +1636,42 @@ and clears owning-workspace refs on any buffers pointing to WS."
   (setq claude-repl-debug (not claude-repl-debug))
   (message "Claude REPL debug logging: %s" (if claude-repl-debug "ON" "OFF")))
 
+(defun claude-repl--git-branch-for-workspace (ws-name)
+  "Return the git branch for workspace WS-NAME, or nil.
+Uses the first live buffer's default-directory and runs
+git rev-parse --abbrev-ref HEAD (works for both repos and worktrees)."
+  (ignore-errors
+    (let* ((persp (persp-get-by-name ws-name))
+           (bufs (and persp (not (symbolp persp)) (persp-buffers persp)))
+           (dir (cl-loop for buf in bufs
+                         when (buffer-live-p buf)
+                         return (buffer-local-value 'default-directory buf))))
+      (when dir
+        (let ((default-directory dir))
+          (with-temp-buffer
+            (when (= 0 (process-file "git" nil t nil "rev-parse" "--abbrev-ref" "HEAD"))
+              (string-trim (buffer-string)))))))))
+
+(defun claude-repl--ws-base-name (ws-name)
+  "Strip any existing branch suffix from WS-NAME.
+E.g. \"my-project (main)\" → \"my-project\"."
+  (if (string-match "\\(.+?\\) (.*?)$" ws-name)
+      (match-string 1 ws-name)
+    ws-name))
+
+(defun claude-repl-debug/ws-set-branch (ws-name)
+  "Rename workspace WS-NAME to include its current git branch.
+Strips any existing branch suffix first, then appends \" (branch)\"."
+  (interactive
+   (list (completing-read "Workspace: " (+workspace-list-names) nil t
+                          nil nil (+workspace-current-name))))
+  (let* ((base (claude-repl--ws-base-name ws-name))
+         (branch (claude-repl--git-branch-for-workspace ws-name))
+         (new-name (if branch (format "%s (%s)" base branch) base)))
+    (if (equal ws-name new-name)
+        (message "Workspace %s: already up to date" ws-name)
+      (+workspace-rename ws-name new-name)
+      (message "Renamed: %s → %s" ws-name new-name))))
+
 (provide 'claude-repl)
 ;;; config.el ends here
