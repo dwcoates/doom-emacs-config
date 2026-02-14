@@ -713,7 +713,8 @@ STATE is one of: :thinking, :done, :permission."
   (pcase state
     (:thinking   (puthash ws t claude-repl--thinking-workspaces))
     (:done       (puthash ws t claude-repl--done-workspaces))
-    (:permission (puthash ws t claude-repl--permission-workspaces))))
+    (:permission (puthash ws t claude-repl--permission-workspaces)))
+  (force-mode-line-update t))
 
 (defun claude-repl--ws-clear (ws state)
   "Clear a single STATE for workspace WS.
@@ -724,7 +725,8 @@ STATE is one of: :thinking, :done, :permission, :stale."
     (:thinking   (remhash ws claude-repl--thinking-workspaces))
     (:done       (remhash ws claude-repl--done-workspaces))
     (:permission (remhash ws claude-repl--permission-workspaces))
-    (:stale      (remhash ws claude-repl--activity-times))))
+    (:stale      (remhash ws claude-repl--activity-times)))
+  (force-mode-line-update t))
 
 (defun claude-repl--workspace-clean-p (ws)
   "Return non-nil if workspace WS has no unstaged changes to tracked files."
