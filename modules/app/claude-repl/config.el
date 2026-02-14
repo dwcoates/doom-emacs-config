@@ -421,22 +421,6 @@ Periodically prepends the metaprompt prefix when `claude-repl-skip-permissions' 
         (concat claude-repl--command-prefix raw)
       raw)))
 
-(defun claude-repl--schedule-failed-check (ws)
-  "Schedule a 5s check: if WS is still :thinking without a title spinner, mark :failed."
-  (claude-repl--log "schedule-failed-check ws=%s" ws)
-  (let ((check-ws ws)
-        (check-buf claude-repl-vterm-buffer))
-    (run-at-time 5 nil
-                 (lambda ()
-                   (claude-repl--log "failed-check firing ws=%s state=%s title-thinking=%s"
-                                     check-ws (claude-repl--ws-state check-ws)
-                                     (and (buffer-live-p check-buf)
-                                          (buffer-local-value 'claude-repl--title-thinking check-buf)))
-                   (when (and (buffer-live-p check-buf)
-                              (eq (claude-repl--ws-state check-ws) :thinking)
-                              (not (buffer-local-value 'claude-repl--title-thinking check-buf)))
-                     (claude-repl--ws-set check-ws :failed))))))
-
 (defun claude-repl--send-input-to-vterm (input)
   "Send INPUT string to the Claude vterm buffer.
 Uses paste mode for large inputs to avoid truncation."
@@ -457,11 +441,10 @@ Uses paste mode for large inputs to avoid truncation."
       (claude-repl--refresh-vterm))))
 
 (defun claude-repl--mark-ws-thinking (ws)
-  "Mark workspace WS as thinking: set state, record activity, schedule failed check."
+  "Mark workspace WS as thinking: set state and record activity."
   (claude-repl--log "mark-ws-thinking ws=%s" ws)
   (claude-repl--ws-set ws :thinking)
-  (claude-repl--touch-activity ws)
-  (claude-repl--schedule-failed-check ws))
+  (claude-repl--touch-activity ws))
 
 (defun claude-repl--clear-input ()
   "Push current input to history, reset browsing, and clear the input buffer."
@@ -703,9 +686,6 @@ PROMPT is the analysis instruction."
 (defvar claude-repl--activity-times (make-hash-table :test 'equal)
   "Hash table of workspace name to last-activity float-time.")
 
-(defvar claude-repl--failed-workspaces (make-hash-table :test 'equal)
-  "Hash table of workspaces where Claude failed to start thinking.")
-
 (defcustom claude-repl-stale-minutes 60
   "Minutes after last input before a workspace tab stops showing as stale."
   :type 'integer
@@ -713,11 +693,10 @@ PROMPT is the analysis instruction."
 
 (defun claude-repl--ws-state (ws)
   "Return the current status keyword for workspace WS.
-Returns one of: :thinking, :done, :permission, :failed, :stale, or nil."
+Returns one of: :thinking, :done, :permission, :stale, or nil."
   (cond
    ((gethash ws claude-repl--thinking-workspaces)   :thinking)
    ((gethash ws claude-repl--permission-workspaces)  :permission)
-   ((gethash ws claude-repl--failed-workspaces)      :failed)
    ((gethash ws claude-repl--done-workspaces)        :done)
    ((when-let ((last-time (gethash ws claude-repl--activity-times)))
       (< (- (float-time) last-time) (* claude-repl-stale-minutes 60)))
@@ -725,29 +704,26 @@ Returns one of: :thinking, :done, :permission, :failed, :stale, or nil."
 
 (defun claude-repl--ws-set (ws state)
   "Set workspace WS to STATE, clearing any conflicting states.
-STATE is one of: :thinking, :done, :permission, :failed."
+STATE is one of: :thinking, :done, :permission."
   (unless ws (error "claude-repl--ws-set: ws is nil"))
   (claude-repl--log "state %s -> %s" ws state)
   (remhash ws claude-repl--thinking-workspaces)
   (remhash ws claude-repl--done-workspaces)
   (remhash ws claude-repl--permission-workspaces)
-  (remhash ws claude-repl--failed-workspaces)
   (pcase state
     (:thinking   (puthash ws t claude-repl--thinking-workspaces))
     (:done       (puthash ws t claude-repl--done-workspaces))
-    (:permission (puthash ws t claude-repl--permission-workspaces))
-    (:failed     (puthash ws t claude-repl--failed-workspaces))))
+    (:permission (puthash ws t claude-repl--permission-workspaces))))
 
 (defun claude-repl--ws-clear (ws state)
   "Clear a single STATE for workspace WS.
-STATE is one of: :thinking, :done, :permission, :failed, :stale."
+STATE is one of: :thinking, :done, :permission, :stale."
   (unless ws (error "claude-repl--ws-clear: ws is nil"))
   (claude-repl--log "clear %s %s" ws state)
   (pcase state
     (:thinking   (remhash ws claude-repl--thinking-workspaces))
     (:done       (remhash ws claude-repl--done-workspaces))
     (:permission (remhash ws claude-repl--permission-workspaces))
-    (:failed     (remhash ws claude-repl--failed-workspaces))
     (:stale      (remhash ws claude-repl--activity-times))))
 
 (defun claude-repl--workspace-clean-p (ws)
@@ -789,10 +765,6 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
   '((t :background "#1a7a1a" :foreground "black" :weight bold))
   "Face for workspace tabs where Claude needs permission (green + emoji).")
 
-(defface claude-repl-tab-failed
-  '((t :background "#1a7a1a" :foreground "black" :weight bold))
-  "Face for workspace tabs where Claude failed to start thinking (green + ❌).")
-
 (defface claude-repl-tab-stale
   '((t :background "#cc8800" :foreground "black" :weight bold))
   "Face for workspace tabs you've worked in recently but aren't viewing (orange).")
@@ -815,12 +787,10 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
                                    ;; Remaining states only on background tabs
                                    ((guard selected) nil)
                                    (:done       'claude-repl-tab-done)
-                                   (:failed     'claude-repl-tab-failed)
                                    (:thinking   'claude-repl-tab-thinking)
                                    (:stale      'claude-repl-tab-stale)))
                      (label (pcase state
                               (:permission "❓")
-                              (:failed "❌")
                               (_ num)))
                      (base-face (if (and selected (not claude-face))
                                     '+workspace-tab-selected-face
@@ -1052,7 +1022,6 @@ State table:
   :thinking  → unchanged (never touch)
   :done      + clean → :stale  |  :done      + dirty → :done
   :permission         → unchanged
-  :failed             → unchanged
   :stale     + dirty → :done   |  :stale     + clean → :stale
   nil        + dirty → :done   |  nil        + clean → nil"
   (let ((state (claude-repl--ws-state ws))
@@ -1388,7 +1357,6 @@ If panels hidden: show both panels."
         (claude-repl--ws-clear ws :thinking)
         (claude-repl--ws-clear ws :done)
         (claude-repl--ws-clear ws :permission)
-        (claude-repl--ws-clear ws :failed)
         (claude-repl--ws-clear ws :stale))
       (claude-repl--restore-layout)
       (claude-repl--save-session))
@@ -1465,7 +1433,6 @@ If panels hidden: show both panels."
     (claude-repl--ws-clear ws :thinking)
     (claude-repl--ws-clear ws :done)
     (claude-repl--ws-clear ws :permission)
-    (claude-repl--ws-clear ws :failed)
     (claude-repl--ws-clear ws :stale)
     (claude-repl--teardown-session-state)
     (claude-repl--destroy-session-buffers vterm-buf input-buf)))
@@ -1633,7 +1600,6 @@ This lets Claude CLI handle paste natively, including images."
   (claude-repl--ws-clear ws :thinking)
   (claude-repl--ws-clear ws :done)
   (claude-repl--ws-clear ws :permission)
-  (claude-repl--ws-clear ws :failed)
   (claude-repl--ws-clear ws :stale)
   (message "Cleared all states for %s" ws))
 
@@ -1647,7 +1613,6 @@ and clears owning-workspace refs on any buffers pointing to WS."
   (remhash ws claude-repl--thinking-workspaces)
   (remhash ws claude-repl--done-workspaces)
   (remhash ws claude-repl--permission-workspaces)
-  (remhash ws claude-repl--failed-workspaces)
   (remhash ws claude-repl--activity-times)
   ;; Find and destroy any claude buffers owned by this workspace
   (dolist (buf (buffer-list))

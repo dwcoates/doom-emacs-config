@@ -143,7 +143,6 @@
          (claude-repl--thinking-workspaces (make-hash-table :test 'equal))
          (claude-repl--permission-workspaces (make-hash-table :test 'equal))
          (claude-repl--activity-times (make-hash-table :test 'equal))
-         (claude-repl--failed-workspaces (make-hash-table :test 'equal))
          (claude-repl-vterm-buffer nil)
          (claude-repl-input-buffer nil)
          (claude-repl-return-window nil)
@@ -565,7 +564,6 @@
   (should (boundp 'claude-repl--thinking-workspaces))
   (should (boundp 'claude-repl--permission-workspaces))
   (should (boundp 'claude-repl--activity-times))
-  (should (boundp 'claude-repl--failed-workspaces))
   (should (boundp 'claude-repl--sync-timer))
   (should (boundp 'claude-repl--title-thinking)))
 
@@ -852,8 +850,7 @@ When t, it should call `message'."
 (ert-deftest claude-repl-test-mark-ws-thinking-composite ()
   "`claude-repl--mark-ws-thinking' should set :thinking state AND record activity."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--schedule-failed-check) #'ignore)
-              ((symbol-function 'claude-repl--workspace-clean-p) (lambda (_) t)))
+    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_) t)))
       (claude-repl--mark-ws-thinking "ws1")
       (should (eq (claude-repl--ws-state "ws1") :thinking))
       (should (gethash "ws1" claude-repl--activity-times)))))
@@ -1004,7 +1001,7 @@ see the updated title-thinking and detect no transition."
 ;;;; ---- Tests: State machine completeness ----
 
 (ert-deftest claude-repl-test-ws-state-priority-order ()
-  "Verify state priority: :thinking > :permission > :failed > :done > :stale."
+  "Verify state priority: :thinking > :permission > :done > :stale."
   (claude-repl-test--with-clean-state
     ;; Set both :thinking and :done directly
     (puthash "ws1" t claude-repl--thinking-workspaces)
@@ -1014,12 +1011,8 @@ see the updated title-thinking and detect no transition."
     (remhash "ws1" claude-repl--thinking-workspaces)
     (puthash "ws1" t claude-repl--permission-workspaces)
     (should (eq (claude-repl--ws-state "ws1") :permission))
-    ;; Clear permission, add failed and done
+    ;; Clear permission, just done remains
     (remhash "ws1" claude-repl--permission-workspaces)
-    (puthash "ws1" t claude-repl--failed-workspaces)
-    (should (eq (claude-repl--ws-state "ws1") :failed))
-    ;; Clear failed, just done remains
-    (remhash "ws1" claude-repl--failed-workspaces)
     (should (eq (claude-repl--ws-state "ws1") :done))
     ;; Clear done, set activity for stale
     (remhash "ws1" claude-repl--done-workspaces)
@@ -1041,12 +1034,6 @@ see the updated title-thinking and detect no transition."
     (claude-repl--ws-set "ws1" :permission)
     (should (eq (claude-repl--ws-state "ws1") :permission))))
 
-(ert-deftest claude-repl-test-ws-set-failed ()
-  "`ws-set' with :failed should set failed hash."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-set "ws1" :failed)
-    (should (eq (claude-repl--ws-state "ws1") :failed))))
-
 (ert-deftest claude-repl-test-ws-clear-done ()
   "`ws-clear' with :done should only clear done, leaving others."
   (claude-repl-test--with-clean-state
@@ -1064,15 +1051,6 @@ see the updated title-thinking and detect no transition."
     (claude-repl--ws-clear "ws1" :permission)
     (should-not (gethash "ws1" claude-repl--permission-workspaces))
     (should (gethash "ws1" claude-repl--done-workspaces))))
-
-(ert-deftest claude-repl-test-ws-clear-failed ()
-  "`ws-clear' with :failed should only clear failed."
-  (claude-repl-test--with-clean-state
-    (puthash "ws1" t claude-repl--failed-workspaces)
-    (puthash "ws1" t claude-repl--thinking-workspaces)
-    (claude-repl--ws-clear "ws1" :failed)
-    (should-not (gethash "ws1" claude-repl--failed-workspaces))
-    (should (gethash "ws1" claude-repl--thinking-workspaces))))
 
 (ert-deftest claude-repl-test-ws-clear-nil-error ()
   "`ws-clear' with nil ws should signal error."
@@ -1096,14 +1074,6 @@ see the updated title-thinking and detect no transition."
         (let ((pos (string-match "bg-ws" result)))
           (should pos)
           (should (eq (get-text-property pos 'face result) 'claude-repl-tab-done)))))))
-
-(ert-deftest claude-repl-test-tabline-failed-label ()
-  "A tab with :failed should show the failed label."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-set "bg-ws" :failed)
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))
-      (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
-        (should (string-match-p "❌" result))))))
 
 (ert-deftest claude-repl-test-tabline-selected-suppresses-thinking ()
   "The SELECTED tab with :thinking should NOT get the thinking face."
