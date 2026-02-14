@@ -863,6 +863,9 @@ If BUFFER-OR-NAME belongs to another workspace, switch there first."
 (map! :leader
       "/" #'+default/search-buffer) ;; or #'consult-line if using Vertico/Consult
 
+(map! :leader
+      :desc "Search kill ring" "s y" #'counsel-yank-pop)
+
 (map! :map (magit-status-mode-map magit-diff-section-base-map magit-diff-section-map)
       "C-<return>" #'magit-diff-visit-file-other-window)
 
