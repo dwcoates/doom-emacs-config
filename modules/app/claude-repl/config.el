@@ -168,9 +168,7 @@ and restores window config from the sessions hash table."
           claude-repl--saved-window-config (plist-get session :saved-window-config)
           claude-repl-return-window (plist-get session :return-window)
           claude-repl--prefix-counter (or (plist-get session :prefix-counter) 0))
-    (claude-repl--log "load-session id=%s vterm=%s input=%s" id
-                      (and claude-repl-vterm-buffer (buffer-name claude-repl-vterm-buffer))
-                      (and claude-repl-input-buffer (buffer-name claude-repl-input-buffer)))))
+))
 
 (defun claude-repl--save-session ()
   "Save the current global state back to the sessions hash table."
@@ -1732,6 +1730,15 @@ Strips any existing branch suffix first, then appends \" (branch)\"."
         (message "Workspace %s: already up to date" ws-name)
       (+workspace-rename ws-name new-name)
       (message "Renamed: %s → %s" ws-name new-name))))
+
+(defun claude-repl-debug/workspace-clean-p (ws-name)
+  "Show whether workspace WS-NAME has unstaged changes to tracked files.
+Uses `claude-repl--workspace-clean-p' — the same function used in production."
+  (interactive
+   (list (completing-read "Workspace: " (+workspace-list-names) nil t
+                          nil nil (+workspace-current-name))))
+  (let ((clean (claude-repl--workspace-clean-p ws-name)))
+    (message "Workspace %s: %s" ws-name (if clean "clean" "dirty"))))
 
 (provide 'claude-repl)
 ;;; config.el ends here
