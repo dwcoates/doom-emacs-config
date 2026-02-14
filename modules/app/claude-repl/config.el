@@ -1740,5 +1740,51 @@ Uses `claude-repl--workspace-clean-p' — the same function used in production."
   (let ((clean (claude-repl--workspace-clean-p ws-name)))
     (message "Workspace %s: %s" ws-name (if clean "clean" "dirty"))))
 
+(defun claude-repl-debug/refresh-state (ws-name)
+  "Force a full state refresh for workspace WS-NAME.
+Runs the same logic as the periodic `update-all-workspace-states' timer:
+checks claude visibility, git dirty status, and applies the state table.
+Reports comprehensive diagnostics."
+  (interactive
+   (list (completing-read "Workspace: " (+workspace-list-names) nil t
+                          nil nil (+workspace-current-name))))
+  (let* ((before (claude-repl--ws-state ws-name))
+         (open (claude-repl--ws-claude-open-p ws-name))
+         (dirty (not (claude-repl--workspace-clean-p ws-name)))
+         ;; Find the claude vterm buffer for this workspace
+         (persp (persp-get-by-name ws-name))
+         (persp-bufs (and persp (not (symbolp persp)) (persp-buffers persp)))
+         (vterm-buf (cl-loop for buf in persp-bufs
+                             when (and (buffer-live-p buf)
+                                       (claude-repl--claude-buffer-p buf))
+                             return buf))
+         ;; Read buffer-local state from the vterm buffer
+         (title-thinking (and vterm-buf
+                              (buffer-local-value 'claude-repl--title-thinking vterm-buf)))
+         (proc (and vterm-buf (get-buffer-process vterm-buf)))
+         (proc-alive (and proc (process-live-p proc)))
+         (owning-ws (and vterm-buf
+                         (buffer-local-value 'claude-repl--owning-workspace vterm-buf)))
+         (has-window (and vterm-buf (get-buffer-window vterm-buf t))))
+    ;; Apply the state update
+    (if open
+        (claude-repl--update-ws-state ws-name)
+      (let ((state (claude-repl--ws-state ws-name)))
+        (when (and state (not (eq state :thinking)))
+          (claude-repl--ws-clear ws-name state))))
+    (let ((after (claude-repl--ws-state ws-name)))
+      (force-mode-line-update t)
+      (message (concat "Workspace %s:\n"
+                       "  vterm-buf=%s process=%s\n"
+                       "  owning-ws=%s title-thinking=%s has-window=%s\n"
+                       "  claude-open=%s dirty=%s\n"
+                       "  state=%s -> %s")
+               ws-name
+               (and vterm-buf (buffer-name vterm-buf))
+               (if proc-alive "alive" "dead/nil")
+               (or owning-ws "nil") title-thinking (if has-window "yes" "no")
+               (if open "yes" "no") (if dirty "yes" "no")
+               (or before "nil") (or after "nil")))))
+
 (provide 'claude-repl)
 ;;; config.el ends here
