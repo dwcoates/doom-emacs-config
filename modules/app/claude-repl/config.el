@@ -119,7 +119,7 @@ FMT and ARGS are passed to `message', prefixed with timestamp and [claude-repl].
   :type 'boolean
   :group 'claude-repl)
 
-(defcustom claude-repl-prefix-period 5
+(defcustom claude-repl-prefix-period 20
   "Number of prompts between metaprompt prefix injections.
 The prefix is sent on the first prompt and every Nth prompt thereafter."
   :type 'integer
@@ -464,6 +464,7 @@ Uses paste mode for large inputs to avoid truncation."
       (unless ws (error "claude-repl-send: no active workspace"))
       (claude-repl--log "send ws=%s len=%d" ws (length input))
       (setq claude-repl--prefix-counter (1+ claude-repl--prefix-counter))
+      (claude-repl--save-session)
       ;; Pin the owning workspace on the vterm buffer so title-change
       ;; clears the correct workspace even if the buffer drifts between persps.
       (when claude-repl-vterm-buffer
@@ -1660,6 +1661,12 @@ and clears owning-workspace refs on any buffers pointing to WS."
   (interactive)
   (setq claude-repl-debug (not claude-repl-debug))
   (message "Claude REPL debug logging: %s" (if claude-repl-debug "ON" "OFF")))
+
+(defun claude-repl-debug/toggle-metaprompt ()
+  "Toggle the metaprompt prefix injection."
+  (interactive)
+  (setq claude-repl-skip-permissions (not claude-repl-skip-permissions))
+  (message "Claude REPL metaprompt: %s" (if claude-repl-skip-permissions "ON" "OFF")))
 
 (defun claude-repl--git-branch-for-workspace (ws-name)
   "Return the git branch for workspace WS-NAME, or nil.
