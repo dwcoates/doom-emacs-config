@@ -639,10 +639,11 @@ If found, the class name is returned, otherwise STR is returned"
     "Generate project name using .projectile at git root if available, with smart bracketing"
     (let* ((default-name (file-name-nondirectory (directory-file-name project-root)))
            (projectile-file (expand-file-name ".projectile" project-root))
-           (git-root (ignore-errors 
-                       (string-trim (shell-command-to-string 
-                                     (format "cd %s && git rev-parse --show-toplevel" 
-                                             (shell-quote-argument project-root)))))))
+           (git-root (ignore-errors
+                       (let ((default-directory project-root))
+                         (with-temp-buffer
+                           (when (= 0 (process-file "git" nil t nil "rev-parse" "--show-toplevel"))
+                             (string-trim (buffer-string))))))))
       (if git-root
           (let* ((git-root-dir (file-name-nondirectory (directory-file-name git-root)))
                  (projectile-dir (file-name-nondirectory (directory-file-name project-root)))
@@ -665,8 +666,10 @@ If found, the class name is returned, otherwise STR is returned"
   ;; Configure LSP to use full path to git root for workspace identification
   (defun +dwc/lsp-workspace-root (orig-fun &rest args)
     "Override LSP workspace root to use full path to git root."
-    (let ((git-root (ignore-errors 
-                      (string-trim (shell-command-to-string "git rev-parse --show-toplevel")))))
+    (let ((git-root (ignore-errors
+                      (with-temp-buffer
+                        (when (= 0 (process-file "git" nil t nil "rev-parse" "--show-toplevel"))
+                          (string-trim (buffer-string)))))))
       (if git-root
           git-root
         (apply orig-fun args))))
