@@ -519,13 +519,34 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
     (kill-new github-url)
     (message "GitHub commit link copied to clipboard: %s" github-url)))
 
+(defun +dwc/pr-url-for-branch (&optional open-in-browser)
+  "Get the GitHub pull request URL for the current branch.
+If OPEN-IN-BROWSER is non-nil, open it in the browser.
+Otherwise, copy to the kill ring."
+  (interactive "P")
+  (let* ((default-directory (or (magit-toplevel) default-directory))
+         (branch (string-trim (shell-command-to-string "git rev-parse --abbrev-ref HEAD")))
+         (remote-url (string-trim (shell-command-to-string "git config --get remote.origin.url")))
+         (cleaned-url (replace-regexp-in-string "^git@github.com:" "https://github.com"
+                                                (replace-regexp-in-string "\\.git$" "" remote-url)))
+         (pr-url (format "%s/pull/%s" cleaned-url (url-hexify-string branch))))
+    (kill-new pr-url)
+    (if open-in-browser
+        (progn (browse-url pr-url)
+               (message "Opened PR: %s" pr-url))
+      (message "PR link copied: %s" pr-url))))
+
 (map! :leader
       :desc "Generate GitHub link for current line"
       "g h" #'+dwc/generate-github-link
       :desc "Generate and open GitHub link in browser"
       "g H" (lambda () (interactive) (+dwc/generate-github-link t))
       :desc "Open commit in GitHub"
-      "g O" #'+dwc/magit-open-commit-in-github)
+      "g O" #'+dwc/magit-open-commit-in-github
+      :desc "Copy PR link for current branch"
+      "g p" #'+dwc/pr-url-for-branch
+      :desc "Open PR for current branch in browser"
+      "g P" (lambda () (interactive) (+dwc/pr-url-for-branch t)))
 
 ;; Add magit-specific keybinding
 (map! :map magit-status-mode-map
