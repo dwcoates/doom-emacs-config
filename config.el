@@ -475,15 +475,10 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
                        (format "#L%d-L%d" start-line end-line)))
          (default-directory git-root)
          (commit-sha (string-trim (shell-command-to-string "git rev-parse HEAD")))
-         (remote-url (string-trim (shell-command-to-string "git config --get remote.origin.url")))
-         (cleaned-url (replace-regexp-in-string "^git@github.com:" "https://github.com"
-                                                (replace-regexp-in-string "\\.git$" "" remote-url)))
-         (repo-name (progn
-                      (if (string-match "github.com[:/]ChessCom/\\(.*\\)" cleaned-url)
-                          (match-string 1 cleaned-url)
-                        (error (format "Remote URL '%s' does not match expected pattern" cleaned-url)))))
-         (github-url (format "https://github.com/ChessCom/%s/blob/%s/%s%s"
-                             repo-name commit-sha file-path line-range)))
+         (repo-url (string-trim (shell-command-to-string "gh browse -n --no-browser")))
+         (github-url (format "%s/blob/%s/%s%s"
+                             (replace-regexp-in-string "/$" "" repo-url)
+                             commit-sha file-path line-range)))
     (if open-in-browser
         (browse-url github-url)
       (kill-new github-url)
