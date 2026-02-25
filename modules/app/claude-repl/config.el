@@ -541,16 +541,37 @@ No-op if already running."
 (defun claude-repl-explain ()
   "Ask Claude to explain the selected region, current line, or current file.
 With active region: sends file path and line range.
+In magit hunk: sends file path and hunk line range.
 Without region: sends file path and current line."
   (interactive)
   (claude-repl--load-session)
-  (let* ((rel (claude-repl--rel-path))
-         (msg (if (use-region-p)
-                  (let ((start-line (line-number-at-pos (region-beginning)))
-                        (end-line (line-number-at-pos (region-end))))
-                    (deactivate-mark)
-                    (format "please explain %s:%d-%d" rel start-line end-line))
-                (format "please explain %s:%d" rel (line-number-at-pos (point))))))
+  (let* ((msg
+          (cond
+           ;; Active region in any buffer
+           ((use-region-p)
+            (let ((rel (claude-repl--rel-path))
+                  (start-line (line-number-at-pos (region-beginning)))
+                  (end-line (line-number-at-pos (region-end))))
+              (deactivate-mark)
+              (format "please explain %s:%d-%d" rel start-line end-line)))
+           ;; Magit hunk section
+           ((and (derived-mode-p 'magit-diff-mode 'magit-status-mode
+                                 'magit-revision-mode)
+                 (magit-section-match 'hunk))
+            (let* ((section (magit-current-section))
+                   (file (magit-file-at-point))
+                   (range (oref section to-range))
+                   (start (car range))
+                   (len (cadr range))
+                   (end (+ start len -1))
+                   (rel (file-relative-name
+                         (expand-file-name file (magit-toplevel))
+                         (claude-repl--resolve-root))))
+              (format "please explain %s:%d-%d" rel start end)))
+           ;; Default: current line
+           (t
+            (format "please explain %s:%d"
+                    (claude-repl--rel-path) (line-number-at-pos (point)))))))
     (claude-repl--log "explain %s" msg)
     (claude-repl--send-to-claude msg)))
 
