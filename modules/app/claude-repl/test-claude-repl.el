@@ -138,17 +138,8 @@
 (defmacro claude-repl-test--with-clean-state (&rest body)
   "Execute BODY with fresh claude-repl global state."
   (declare (indent 0))
-  `(let ((claude-repl--sessions (make-hash-table :test 'equal))
-         (claude-repl--done-workspaces (make-hash-table :test 'equal))
-         (claude-repl--thinking-workspaces (make-hash-table :test 'equal))
-         (claude-repl--permission-workspaces (make-hash-table :test 'equal))
-         (claude-repl--activity-times (make-hash-table :test 'equal))
-         (claude-repl-vterm-buffer nil)
-         (claude-repl-input-buffer nil)
-         (claude-repl-return-window nil)
-         (claude-repl--saved-window-config nil)
+  `(let ((claude-repl--workspaces (make-hash-table :test 'equal))
          (claude-repl--fullscreen-config nil)
-         (claude-repl--prefix-counter 0)
          (claude-repl--sync-timer nil)
          (claude-repl--cursor-reset-timer nil)
          (claude-repl--hide-overlay-refcount 0)
@@ -288,8 +279,8 @@
     (should (eq (claude-repl--ws-state "ws1") :thinking))
     (claude-repl--ws-set "ws1" :done)
     (should (eq (claude-repl--ws-state "ws1") :done))
-    ;; Thinking should be cleared
-    (should-not (gethash "ws1" claude-repl--thinking-workspaces))))
+    ;; Thinking should be cleared — the plist status should now be :done
+    (should (eq (claude-repl--ws-get "ws1" :status) :done))))
 
 (ert-deftest claude-repl-test-ws-clear ()
   "ws-clear should clear only the specified state."
@@ -346,38 +337,35 @@
   (claude-repl-test--with-clean-state
     (let ((claude-repl-skip-permissions t)
           (claude-repl-prefix-period 3)
-          (claude-repl--prefix-counter 0)
           (claude-repl-command-prefix "TEST")
           (claude-repl--command-prefix "PREFIX: "))
       (claude-repl-test--with-temp-buffer " *test-prefix*"
-        (setq claude-repl-input-buffer (current-buffer))
-        (insert "hello")
-        ;; Counter 0 mod 3 = 0 → prefix
-        (should (string-prefix-p "PREFIX: " (claude-repl--prepare-input)))
-        ;; Counter 1 mod 3 ≠ 0 → no prefix
-        (setq claude-repl--prefix-counter 1)
-        (should-not (string-prefix-p "PREFIX: " (claude-repl--prepare-input)))
-        ;; Counter 3 mod 3 = 0 → prefix again
-        (setq claude-repl--prefix-counter 3)
-        (should (string-prefix-p "PREFIX: " (claude-repl--prepare-input)))))))
+        (let ((ws "test-ws"))
+          (claude-repl--ws-put ws :input-buffer (current-buffer))
+          (claude-repl--ws-put ws :prefix-counter 0)
+          (insert "hello")
+          ;; Counter 0 mod 3 = 0 → prefix
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () ws)))
+            (should (string-prefix-p "PREFIX: " (claude-repl--prepare-input ws)))
+            ;; Counter 1 mod 3 ≠ 0 → no prefix
+            (claude-repl--ws-put ws :prefix-counter 1)
+            (should-not (string-prefix-p "PREFIX: " (claude-repl--prepare-input ws)))
+            ;; Counter 3 mod 3 = 0 → prefix again
+            (claude-repl--ws-put ws :prefix-counter 3)
+            (should (string-prefix-p "PREFIX: " (claude-repl--prepare-input ws)))))))))
 
-(ert-deftest claude-repl-test-prefix-counter-per-session ()
-  "Each session should maintain its own prefix counter via save/load."
+(ert-deftest claude-repl-test-prefix-counter-per-workspace ()
+  "Each workspace should maintain its own prefix counter independently."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) nil)))
-      ;; Session A
-      (claude-repl-test--with-temp-buffer " *test-session-a*"
-        (setq-local claude-repl--project-root "/project-a")
-        (setq claude-repl--prefix-counter 7)
-        (claude-repl--save-session)
-        ;; Session B
-        (claude-repl-test--with-temp-buffer " *test-session-b*"
-          (setq-local claude-repl--project-root "/project-b")
-          (setq claude-repl--prefix-counter 42)
-          (claude-repl--save-session))
-        ;; Reload session A
-        (claude-repl--load-session)
-        (should (= claude-repl--prefix-counter 7))))))
+    ;; Set different counters for two workspaces
+    (claude-repl--ws-put "ws-a" :prefix-counter 7)
+    (claude-repl--ws-put "ws-b" :prefix-counter 42)
+    ;; They should be independent
+    (should (= (claude-repl--ws-get "ws-a" :prefix-counter) 7))
+    (should (= (claude-repl--ws-get "ws-b" :prefix-counter) 42))
+    ;; Mutating one should not affect the other
+    (claude-repl--ws-put "ws-a" :prefix-counter 8)
+    (should (= (claude-repl--ws-get "ws-b" :prefix-counter) 42))))
 
 ;;;; ---- Tests: Overlay refcount ----
 
@@ -481,7 +469,7 @@
       (should-not claude-repl--title-thinking))))
 
 (ert-deftest claude-repl-test-bug3-title-change-no-ws ()
-  "Bug 3: on-title-change should error when workspace is nil during a transition."
+  "Bug 3: on-title-change should silently skip (not error) when workspace is nil during a transition."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
       (setq-local claude-repl--ready t)  ;; skip first-ready handling
@@ -490,8 +478,8 @@
                  (lambda (_buf) nil))
                 ((symbol-function 'claude-repl--handle-first-ready)
                  (lambda () nil)))
-        ;; Should error because ws is nil during a started transition
-        (should-error (claude-repl--on-title-change "⠋ Claude Code"))
+        ;; Should log and return nil, not error, when ws is nil during a transition
+        (should-not (claude-repl--on-title-change "⠋ Claude Code"))
         ;; title-thinking should still be updated (setq is before the guard)
         (should claude-repl--title-thinking)))))
 
@@ -510,41 +498,36 @@
 
 (ert-deftest claude-repl-test-bug6-stale-window ()
   "Bug 6: live-return-window should fall back to selected-window."
-  (let ((claude-repl-return-window nil))
-    ;; nil window should fall back
-    (should (eq (claude-repl--live-return-window) (selected-window))))
-  ;; Live window should be returned
-  (let ((claude-repl-return-window (selected-window)))
-    (should (eq (claude-repl--live-return-window) (selected-window)))))
-
-(ert-deftest claude-repl-test-bug7-prefix-counter-session ()
-  "Bug 7: prefix counter should round-trip through save/load."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) nil)))
-      (claude-repl-test--with-temp-buffer " *test-pc-rt*"
-        (setq-local claude-repl--project-root "/test/proj")
-        (setq claude-repl--prefix-counter 42)
-        (claude-repl--save-session)
-        (setq claude-repl--prefix-counter 0)
-        (claude-repl--load-session)
-        (should (= claude-repl--prefix-counter 42))))))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+      ;; No return-window stored → fall back to selected-window
+      (should (eq (claude-repl--live-return-window) (selected-window)))
+      ;; Live window stored → return it
+      (claude-repl--ws-put "ws1" :return-window (selected-window))
+      (should (eq (claude-repl--live-return-window) (selected-window))))))
+
+(ert-deftest claude-repl-test-bug7-prefix-counter-persists ()
+  "Bug 7: prefix counter should persist in the workspaces hash across lookups."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :prefix-counter 42)
+    (should (= (claude-repl--ws-get "ws1" :prefix-counter) 42))
+    ;; Incrementing should work correctly
+    (claude-repl--ws-put "ws1" :prefix-counter
+                         (1+ (or (claude-repl--ws-get "ws1" :prefix-counter) 0)))
+    (should (= (claude-repl--ws-get "ws1" :prefix-counter) 43))))
 
 (ert-deftest claude-repl-test-bug8-history-save-uses-input-buffer-root ()
   "Bug 8: history-save should use the input buffer's project root."
   (claude-repl-test--with-clean-state
-    (let ((saved-file nil))
-      (claude-repl-test--with-temp-buffer " *test-hist-save*"
-        (setq-local claude-repl--project-root "/input-buffer-root")
-        (setq-local claude-repl--input-history '("entry1" "entry2"))
-        (setq claude-repl-input-buffer (current-buffer))
-        (cl-letf (((symbol-function 'with-temp-file)
-                   ;; Just capture the file argument
-                   nil))
-          ;; We can't easily mock with-temp-file (it's a macro),
-          ;; so instead just verify the file path is computed correctly
-          (let* ((root (buffer-local-value 'claude-repl--project-root claude-repl-input-buffer))
-                 (file (expand-file-name ".claude-repl-history" root)))
-            (should (string-match-p "/input-buffer-root" file))))))))
+    (claude-repl-test--with-temp-buffer " *test-hist-save*"
+      (setq-local claude-repl--project-root "/input-buffer-root")
+      (setq-local claude-repl--input-history '("entry1" "entry2"))
+      (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
+      ;; Verify the file path computed from the input buffer's project root
+      (let* ((buf (claude-repl--ws-get "test-ws" :input-buffer))
+             (root (buffer-local-value 'claude-repl--project-root buf))
+             (file (expand-file-name ".claude-repl-history" root)))
+        (should (string-match-p "/input-buffer-root" file))))))
 
 (ert-deftest claude-repl-test-bug9-paste-delay-configurable ()
   "Bug 9: claude-repl-paste-delay should be a configurable variable."
@@ -552,18 +535,10 @@
   (should (numberp claude-repl-paste-delay)))
 
 (ert-deftest claude-repl-test-bug10-defvar-declarations ()
-  "Bug 10: All former bare-setq variables should be properly declared."
-  (should (boundp 'claude-repl-vterm-buffer))
-  (should (boundp 'claude-repl-input-buffer))
-  (should (boundp 'claude-repl-return-window))
-  (should (boundp 'claude-repl--saved-window-config))
+  "Bug 10: All key variables should be properly declared."
+  (should (boundp 'claude-repl--workspaces))
   (should (boundp 'claude-repl-hide-input-box))
-  (should (boundp 'claude-repl--sessions))
   (should (boundp 'claude-repl--notify-fn))
-  (should (boundp 'claude-repl--done-workspaces))
-  (should (boundp 'claude-repl--thinking-workspaces))
-  (should (boundp 'claude-repl--permission-workspaces))
-  (should (boundp 'claude-repl--activity-times))
   (should (boundp 'claude-repl--sync-timer))
   (should (boundp 'claude-repl--title-thinking)))
 
@@ -605,8 +580,8 @@
   (claude-repl-test--with-clean-state
     (let ((send-key-args nil))
       (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
-        (setq claude-repl-vterm-buffer (current-buffer))
-        (cl-letf (((symbol-function 'claude-repl--load-session) #'ignore)
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                   ((symbol-function 'vterm-send-key)
                    (lambda (&rest args) (setq send-key-args args))))
@@ -634,34 +609,43 @@ When t, it should call `message'."
 ;;;; ---- Tests: Buffer predicates ----
 
 (ert-deftest claude-repl-test-vterm-live-p-nil ()
-  "Returns nil when `claude-repl-vterm-buffer' is nil."
-  (let ((claude-repl-vterm-buffer nil))
-    (should-not (claude-repl--vterm-live-p))))
+  "Returns nil when no vterm buffer is stored for the workspace."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+      (should-not (claude-repl--vterm-live-p)))))
 
 (ert-deftest claude-repl-test-vterm-live-p-dead ()
   "Returns nil for a killed buffer."
-  (let ((buf (get-buffer-create " *test-dead-buf*")))
-    (kill-buffer buf)
-    (let ((claude-repl-vterm-buffer buf))
-      (should-not (claude-repl--vterm-live-p)))))
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+      (let ((buf (get-buffer-create " *test-dead-buf*")))
+        (claude-repl--ws-put "ws1" :vterm-buffer buf)
+        (kill-buffer buf)
+        (should-not (claude-repl--vterm-live-p))))))
 
 (ert-deftest claude-repl-test-vterm-live-p-live ()
   "Returns non-nil for a live buffer."
-  (claude-repl-test--with-temp-buffer " *test-live-buf*"
-    (let ((claude-repl-vterm-buffer (current-buffer)))
-      (should (claude-repl--vterm-live-p)))))
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-live-buf*"
+      (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+        (should (claude-repl--vterm-live-p))))))
 
 (ert-deftest claude-repl-test-vterm-running-p-no-process ()
   "Returns nil when buffer is live but has no process."
-  (claude-repl-test--with-temp-buffer " *test-no-proc*"
-    (let ((claude-repl-vterm-buffer (current-buffer)))
-      (should-not (claude-repl--vterm-running-p)))))
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-no-proc*"
+      (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+        (should-not (claude-repl--vterm-running-p))))))
 
 (ert-deftest claude-repl-test-vterm-running-p-with-process ()
   "Returns non-nil when buffer has a live process."
-  (claude-repl-test--with-temp-buffer " *test-with-proc*"
-    (let ((claude-repl-vterm-buffer (current-buffer)))
-      (cl-letf (((symbol-function 'get-buffer-process)
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-with-proc*"
+      (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'get-buffer-process)
                  (lambda (_buf) 'fake-process)))
         (should (claude-repl--vterm-running-p))))))
 
@@ -722,12 +706,12 @@ When t, it should call `message'."
   "When `claude-repl-skip-permissions' is nil, `prepare-input' returns raw text."
   (claude-repl-test--with-clean-state
     (let ((claude-repl-skip-permissions nil)
-          (claude-repl--prefix-counter 0)
           (claude-repl-prefix-period 1))
       (claude-repl-test--with-temp-buffer " *test-no-prefix*"
-        (setq claude-repl-input-buffer (current-buffer))
+        (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+        (claude-repl--ws-put "ws1" :prefix-counter 0)
         (insert "raw text")
-        (should (equal (claude-repl--prepare-input) "raw text"))))))
+        (should (equal (claude-repl--prepare-input "ws1") "raw text"))))))
 
 ;;;; ---- Tests: Send functions ----
 
@@ -736,8 +720,8 @@ When t, it should call `message'."
   (claude-repl-test--with-clean-state
     (let ((calls nil))
       (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
-        (setq claude-repl-vterm-buffer (current-buffer))
-        (cl-letf (((symbol-function 'claude-repl--load-session) #'ignore)
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                   ((symbol-function 'vterm-send-string)
                    (lambda (s &rest _) (push (list 'send-string s) calls)))
@@ -752,8 +736,8 @@ When t, it should call `message'."
   (claude-repl-test--with-clean-state
     (let ((down-called nil))
       (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
-        (setq claude-repl-vterm-buffer (current-buffer))
-        (cl-letf (((symbol-function 'claude-repl--load-session) #'ignore)
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                   ((symbol-function 'vterm-send-down)
                    (lambda () (setq down-called t))))
@@ -765,8 +749,8 @@ When t, it should call `message'."
   (claude-repl-test--with-clean-state
     (let ((up-called nil))
       (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
-        (setq claude-repl-vterm-buffer (current-buffer))
-        (cl-letf (((symbol-function 'claude-repl--load-session) #'ignore)
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                   ((symbol-function 'vterm-send-up)
                    (lambda () (setq up-called t))))
@@ -778,8 +762,8 @@ When t, it should call `message'."
   (claude-repl-test--with-clean-state
     (let ((escape-count 0))
       (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
-        (setq claude-repl-vterm-buffer (current-buffer))
-        (cl-letf (((symbol-function 'claude-repl--load-session) #'ignore)
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                   ((symbol-function 'vterm-send-key)
                    (lambda (key &rest _)
@@ -793,8 +777,8 @@ When t, it should call `message'."
   (claude-repl-test--with-clean-state
     (let ((backtab-called nil))
       (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
-        (setq claude-repl-vterm-buffer (current-buffer))
-        (cl-letf (((symbol-function 'claude-repl--load-session) #'ignore)
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                   ((symbol-function 'vterm-send-key)
                    (lambda (key &rest _)
@@ -809,13 +793,12 @@ When t, it should call `message'."
     (let ((send-string-args nil)
           (return-called nil))
       (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
-        (setq claude-repl-vterm-buffer (current-buffer))
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
                    (lambda () (setq return-called t)))
                   ((symbol-function 'claude-repl--refresh-vterm) #'ignore))
-          (claude-repl--send-input-to-vterm "short input")
+          (claude-repl--send-input-to-vterm (current-buffer) "short input")
           ;; Should have been called with just the string (no paste flag)
           (should (equal (car send-string-args) "short input"))
           (should (null (cdr send-string-args)))
@@ -828,7 +811,6 @@ When t, it should call `message'."
           (return-called nil)
           (timer-args nil))
       (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
-        (setq claude-repl-vterm-buffer (current-buffer))
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
@@ -837,7 +819,7 @@ When t, it should call `message'."
                   ((symbol-function 'run-at-time)
                    (lambda (&rest args) (setq timer-args args))))
           (let ((long-input (make-string 201 ?x)))
-            (claude-repl--send-input-to-vterm long-input)
+            (claude-repl--send-input-to-vterm (current-buffer) long-input)
             ;; paste flag (2nd arg) should be t
             (should (equal (cadr send-string-args) t))
             ;; return should NOT have been called directly
@@ -853,7 +835,7 @@ When t, it should call `message'."
     (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_) t)))
       (claude-repl--mark-ws-thinking "ws1")
       (should (eq (claude-repl--ws-state "ws1") :thinking))
-      (should (gethash "ws1" claude-repl--activity-times)))))
+      (should (claude-repl--ws-get "ws1" :activity-time)))))
 
 (ert-deftest claude-repl-test-clear-input-pushes-and-clears ()
   "`claude-repl--clear-input' pushes text to history, resets index, clears buffer."
@@ -862,9 +844,9 @@ When t, it should call `message'."
       (setq-local claude-repl--input-history nil)
       (setq-local claude-repl--history-index 5)
       (setq-local claude-repl--history-navigating nil)
-      (setq claude-repl-input-buffer (current-buffer))
+      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
       (insert "some input text")
-      (claude-repl--clear-input)
+      (claude-repl--clear-input "ws1")
       (should (equal claude-repl--input-history '("some input text")))
       (should (= claude-repl--history-index -1))
       (should (equal (buffer-string) "")))))
@@ -886,19 +868,21 @@ When t, it should call `message'."
         (should evil-called)))))
 
 (ert-deftest claude-repl-test-remember-return-window-saves ()
-  "`claude-repl--remember-return-window' sets `claude-repl-return-window' when not in input buffer."
-  (let ((claude-repl-input-buffer nil)
-        (claude-repl-return-window nil))
-    (claude-repl--remember-return-window)
-    (should (eq claude-repl-return-window (selected-window)))))
+  "`claude-repl--remember-return-window' stores return-window when not in input buffer."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+      ;; No input buffer stored — any buffer qualifies as non-input
+      (claude-repl--remember-return-window)
+      (should (eq (claude-repl--ws-get "ws1" :return-window) (selected-window))))))
 
 (ert-deftest claude-repl-test-remember-return-window-skips-input ()
-  "When current buffer IS `claude-repl-input-buffer', should NOT change return-window."
-  (claude-repl-test--with-temp-buffer " *test-skip-input*"
-    (let ((claude-repl-input-buffer (current-buffer))
-          (claude-repl-return-window nil))
-      (claude-repl--remember-return-window)
-      (should-not claude-repl-return-window))))
+  "When current buffer IS the workspace's input buffer, should NOT change return-window."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-skip-input*"
+      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+        (claude-repl--remember-return-window)
+        (should-not (claude-repl--ws-get "ws1" :return-window))))))
 
 ;;;; ---- Tests: Title change handling ----
 
@@ -928,7 +912,7 @@ When t, it should call `message'."
                   ((symbol-function 'claude-repl--on-claude-finished)
                    (lambda (ws) (setq finished-called ws))))
           (claude-repl--on-title-change "✳ Claude Code")
-          (should-not (gethash "ws1" claude-repl--thinking-workspaces))
+          (should-not (eq (claude-repl--ws-get "ws1" :status) :thinking))
           (should (equal finished-called "ws1")))))))
 
 (ert-deftest claude-repl-test-on-title-change-no-reentrant-recursion ()
@@ -1003,19 +987,18 @@ see the updated title-thinking and detect no transition."
 (ert-deftest claude-repl-test-ws-state-priority-order ()
   "Verify state priority: :thinking > :permission > :done > :stale."
   (claude-repl-test--with-clean-state
-    ;; Set both :thinking and :done directly
-    (puthash "ws1" t claude-repl--thinking-workspaces)
-    (puthash "ws1" t claude-repl--done-workspaces)
+    ;; :thinking wins over :done (ws-set replaces, but we can test ordering by
+    ;; setting :status directly in the plist and checking ws-state)
+    (claude-repl--ws-set "ws1" :thinking)
     (should (eq (claude-repl--ws-state "ws1") :thinking))
-    ;; Clear thinking, add permission and done
-    (remhash "ws1" claude-repl--thinking-workspaces)
-    (puthash "ws1" t claude-repl--permission-workspaces)
+    ;; Set to :permission
+    (claude-repl--ws-set "ws1" :permission)
     (should (eq (claude-repl--ws-state "ws1") :permission))
-    ;; Clear permission, just done remains
-    (remhash "ws1" claude-repl--permission-workspaces)
+    ;; Set to :done
+    (claude-repl--ws-set "ws1" :done)
     (should (eq (claude-repl--ws-state "ws1") :done))
     ;; Clear done, set activity for stale
-    (remhash "ws1" claude-repl--done-workspaces)
+    (claude-repl--ws-clear "ws1" :done)
     (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_) t)))
       (claude-repl--touch-activity "ws1"))
     (should (eq (claude-repl--ws-state "ws1") :stale))))
@@ -1025,7 +1008,7 @@ see the updated title-thinking and detect no transition."
   (claude-repl-test--with-clean-state
     (let ((claude-repl-stale-minutes 60))
       ;; Set activity to 61 minutes ago
-      (puthash "ws1" (- (float-time) (* 61 60)) claude-repl--activity-times)
+      (claude-repl--ws-put "ws1" :activity-time (- (float-time) (* 61 60)))
       (should-not (claude-repl--ws-state "ws1")))))
 
 (ert-deftest claude-repl-test-ws-set-permission ()
@@ -1035,22 +1018,18 @@ see the updated title-thinking and detect no transition."
     (should (eq (claude-repl--ws-state "ws1") :permission))))
 
 (ert-deftest claude-repl-test-ws-clear-done ()
-  "`ws-clear' with :done should only clear done, leaving others."
+  "`ws-clear' with :done should not clear status when it is :thinking."
   (claude-repl-test--with-clean-state
-    (puthash "ws1" t claude-repl--thinking-workspaces)
-    (puthash "ws1" t claude-repl--done-workspaces)
+    (claude-repl--ws-set "ws1" :thinking)
     (claude-repl--ws-clear "ws1" :done)
-    (should-not (gethash "ws1" claude-repl--done-workspaces))
-    (should (gethash "ws1" claude-repl--thinking-workspaces))))
+    (should (eq (claude-repl--ws-get "ws1" :status) :thinking))))
 
 (ert-deftest claude-repl-test-ws-clear-permission ()
-  "`ws-clear' with :permission should only clear permission."
+  "`ws-clear' with :permission should not clear status when it is :done."
   (claude-repl-test--with-clean-state
-    (puthash "ws1" t claude-repl--permission-workspaces)
-    (puthash "ws1" t claude-repl--done-workspaces)
+    (claude-repl--ws-set "ws1" :done)
     (claude-repl--ws-clear "ws1" :permission)
-    (should-not (gethash "ws1" claude-repl--permission-workspaces))
-    (should (gethash "ws1" claude-repl--done-workspaces))))
+    (should (eq (claude-repl--ws-get "ws1" :status) :done))))
 
 (ert-deftest claude-repl-test-ws-clear-nil-error ()
   "`ws-clear' with nil ws should signal error."
@@ -1183,31 +1162,29 @@ see the updated title-thinking and detect no transition."
 (ert-deftest claude-repl-test-redraw-advice-reentrancy-guard ()
   "Reentrancy guard prevents recursive calls to `after-vterm-redraw'."
   (claude-repl-test--with-clean-state
-    (let ((load-session-count 0))
+    (let ((update-count 0))
       (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
-        (cl-letf (((symbol-function 'claude-repl--load-session)
-                   (lambda () (cl-incf load-session-count)))
-                  ((symbol-function 'claude-repl--update-hide-overlay) #'ignore))
-          ;; With reentrancy guard active, load-session should NOT be called
+        (cl-letf (((symbol-function 'claude-repl--update-hide-overlay)
+                   (lambda () (cl-incf update-count))))
+          ;; With reentrancy guard active, update-hide-overlay should NOT be called
           (let ((claude-repl--in-redraw-advice t))
             (claude-repl--after-vterm-redraw)
-            (should (= load-session-count 0)))
-          ;; Without guard, in a claude buffer, load-session IS called
+            (should (= update-count 0)))
+          ;; Without guard, in a claude buffer, update-hide-overlay IS called
           (let ((claude-repl--in-redraw-advice nil))
             (claude-repl--after-vterm-redraw)
-            (should (= load-session-count 1))))))))
+            (should (= update-count 1))))))))
 
 (ert-deftest claude-repl-test-redraw-advice-skips-non-claude ()
-  "In a non-claude buffer, `after-vterm-redraw' should not call `load-session'."
+  "In a non-claude buffer, `after-vterm-redraw' should not call `update-hide-overlay'."
   (claude-repl-test--with-clean-state
-    (let ((load-session-count 0))
+    (let ((update-count 0))
       (claude-repl-test--with-temp-buffer "*scratch*"
-        (cl-letf (((symbol-function 'claude-repl--load-session)
-                   (lambda () (cl-incf load-session-count)))
-                  ((symbol-function 'claude-repl--update-hide-overlay) #'ignore))
+        (cl-letf (((symbol-function 'claude-repl--update-hide-overlay)
+                   (lambda () (cl-incf update-count))))
           (let ((claude-repl--in-redraw-advice nil))
             (claude-repl--after-vterm-redraw)
-            (should (= load-session-count 0))))))))
+            (should (= update-count 0))))))))
 
 ;;;; ---- Tests: Workspace-for-buffer ----
 
