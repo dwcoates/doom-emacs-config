@@ -423,6 +423,19 @@ ignoring trailing whitespace."
     (or (member trimmed claude-repl-metaprompt-exempt-strings)
         (string-match-p "^[0-9]+$" trimmed))))
 
+(defvar claude-repl-send-posthooks nil
+  "Alist of (PATTERN . FUNCTION) posthooks run after input is sent.
+PATTERN is a string or regexp matched against the raw input (trimmed).
+FUNCTION is called with the raw input string as its sole argument.")
+
+(defun claude-repl--run-send-posthooks (raw)
+  "Run posthooks matching RAW input."
+  (let ((trimmed (string-trim-right raw)))
+    (dolist (hook claude-repl-send-posthooks)
+      (when (string-match-p (car hook) trimmed)
+        (claude-repl--log "posthook matched pattern=%s" (car hook))
+        (funcall (cdr hook) raw)))))
+
 (defun claude-repl--prepare-input ()
   "Read and return input from the input buffer.
 Periodically prepends the metaprompt prefix when `claude-repl-skip-permissions' is on."
@@ -473,8 +486,10 @@ Uses paste mode for large inputs to avoid truncation."
   (interactive)
   (claude-repl--load-session)
   (when (claude-repl--vterm-live-p)
-    (let ((ws (+workspace-current-name))
-          (input (claude-repl--prepare-input)))
+    (let* ((raw (with-current-buffer claude-repl-input-buffer
+                  (buffer-string)))
+           (ws (+workspace-current-name))
+           (input (claude-repl--prepare-input)))
       (unless ws (error "claude-repl-send: no active workspace"))
       (claude-repl--log "send ws=%s len=%d" ws (length input))
       (setq claude-repl--prefix-counter (1+ claude-repl--prefix-counter))
@@ -487,6 +502,7 @@ Uses paste mode for large inputs to avoid truncation."
       (claude-repl--mark-ws-thinking ws)
       (claude-repl--send-input-to-vterm input)
       (claude-repl--clear-input)
+      (claude-repl--run-send-posthooks raw)
       (when (and claude-repl-return-window (window-live-p claude-repl-return-window))
         (select-window claude-repl-return-window)))))
 
