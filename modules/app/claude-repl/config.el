@@ -410,6 +410,19 @@ Skips empty strings and duplicates of the most recent entry."
     (setq claude-repl--history-index -1)))
 
 ;; Core functions
+(defvar claude-repl-metaprompt-exempt-strings
+  '("/clear" "/usage" "/login" "/logout")
+  "Inputs that should never have the metaprompt prepended.
+Compared exactly against the trimmed input.")
+
+(defun claude-repl--skip-metaprompt-p (raw)
+  "Return non-nil if RAW input should never have the metaprompt prepended.
+Matches `claude-repl-metaprompt-exempt-strings' and bare numerals,
+ignoring trailing whitespace."
+  (let ((trimmed (string-trim-right raw)))
+    (or (member trimmed claude-repl-metaprompt-exempt-strings)
+        (string-match-p "^[0-9]+$" trimmed))))
+
 (defun claude-repl--prepare-input ()
   "Read and return input from the input buffer.
 Periodically prepends the metaprompt prefix when `claude-repl-skip-permissions' is on."
@@ -417,6 +430,7 @@ Periodically prepends the metaprompt prefix when `claude-repl-skip-permissions' 
   (let ((raw (with-current-buffer claude-repl-input-buffer
                (buffer-string))))
     (if (and claude-repl-skip-permissions claude-repl-command-prefix
+             (not (claude-repl--skip-metaprompt-p raw))
              (zerop (mod claude-repl--prefix-counter claude-repl-prefix-period)))
         (concat claude-repl--command-prefix raw)
       raw)))
@@ -916,7 +930,11 @@ Sets done state if buffer is hidden, refreshes display."
     (claude-repl--ws-set ws :done))
   (claude-repl--refresh-vterm)
   (claude-repl--update-hide-overlay)
-  (claude-repl--maybe-notify-finished ws))
+  (claude-repl--maybe-notify-finished ws)
+  (unless (string= ws (+workspace-current-name))
+    (message "Claude finished in workspace: %s" ws)
+    (run-at-time 0.1 nil #'claude-repl--notify "Claude REPL"
+                 (format "%s: Claude ready" ws))))
 
 (defun claude-repl--handle-first-ready ()
   "Handle the first terminal title set — Claude is now ready.
