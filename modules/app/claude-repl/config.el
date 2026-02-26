@@ -423,10 +423,15 @@ ignoring trailing whitespace."
     (or (member trimmed claude-repl-metaprompt-exempt-strings)
         (string-match-p "^[0-9]+$" trimmed))))
 
-(defvar claude-repl-send-posthooks nil
+(defvar claude-repl-send-posthooks
+  '(("^/clear$" . claude-repl--posthook-reset-prefix-counter))
   "Alist of (PATTERN . FUNCTION) posthooks run after input is sent.
 PATTERN is a string or regexp matched against the raw input (trimmed).
 FUNCTION is called with the raw input string as its sole argument.")
+
+(defun claude-repl--posthook-reset-prefix-counter (_raw)
+  "Reset the metaprompt prefix counter to zero."
+  (setq claude-repl--prefix-counter 0))
 
 (defun claude-repl--run-send-posthooks (raw)
   "Run posthooks matching RAW input."
@@ -1722,6 +1727,15 @@ and clears owning-workspace refs on any buffers pointing to WS."
   (interactive)
   (setq claude-repl-skip-permissions (not claude-repl-skip-permissions))
   (message "Claude REPL metaprompt: %s" (if claude-repl-skip-permissions "ON" "OFF")))
+
+(defun claude-repl-debug/prefix-counter ()
+  "Show the current metaprompt prefix counter and period."
+  (interactive)
+  (message "Prefix counter: %d  period: %d  next metaprompt in: %d sends"
+           claude-repl--prefix-counter
+           claude-repl-prefix-period
+           (- claude-repl-prefix-period
+              (mod claude-repl--prefix-counter claude-repl-prefix-period))))
 
 (defun claude-repl--git-branch-for-workspace (ws-name)
   "Return the git branch for workspace WS-NAME, or nil.
