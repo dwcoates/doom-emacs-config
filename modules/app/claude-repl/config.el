@@ -61,7 +61,7 @@ Uses an MD5 hash of the git root path.  Falls back to the buffer-local
 ;; Single hash table for all per-workspace state.
 (defvar claude-repl--workspaces (make-hash-table :test 'equal)
   "Hash table mapping workspace name → state plist.
-Keys: :id :vterm-buffer :input-buffer :saved-window-config
+Keys: :vterm-buffer :input-buffer :saved-window-config
       :return-window :prefix-counter :status :activity-time")
 
 (defun claude-repl--ws-get (ws key)
@@ -71,7 +71,7 @@ Keys: :id :vterm-buffer :input-buffer :saved-window-config
 (defun claude-repl--ws-put (ws key val)
   "Set KEY to VAL in workspace WS's plist in `claude-repl--workspaces'.
 Internally uses plist-put (which returns a new list) threaded into puthash."
-  (puthash ws (plist-put (or (gethash ws claude-repl--workspaces) nil) key val)
+  (puthash ws (plist-put (gethash ws claude-repl--workspaces) key val)
            claude-repl--workspaces))
 
 (defun claude-repl--ws-del (ws)
@@ -466,21 +466,22 @@ Uses paste mode for large inputs to avoid truncation."
   "Push current input to history, reset browsing, and clear the input buffer for workspace WS."
   (claude-repl--log "clear-input")
   (let ((input-buf (claude-repl--ws-get ws :input-buffer)))
-    (with-current-buffer input-buf
-      (claude-repl--history-push)
-      (claude-repl--history-reset)
-      (erase-buffer))))
+    (when input-buf
+      (with-current-buffer input-buf
+        (claude-repl--history-push)
+        (claude-repl--history-reset)
+        (erase-buffer)))))
 
 (defun claude-repl-send ()
   "Send input buffer contents to Claude, clear buffer, and return to previous window."
   (interactive)
   (let* ((ws (+workspace-current-name)))
+    (unless ws (error "claude-repl-send: no active workspace"))
     (when (claude-repl--vterm-live-p)
       (let* ((input-buf (claude-repl--ws-get ws :input-buffer))
              (vterm-buf (claude-repl--ws-get ws :vterm-buffer))
              (raw (with-current-buffer input-buf (buffer-string)))
              (input (claude-repl--prepare-input ws)))
-        (unless ws (error "claude-repl-send: no active workspace"))
         (claude-repl--log "send ws=%s len=%d" ws (length input))
         (claude-repl--ws-put ws :prefix-counter
                              (1+ (or (claude-repl--ws-get ws :prefix-counter) 0)))
@@ -1310,12 +1311,10 @@ so the user can select and copy text from the output."
 (defun claude-repl--ensure-vterm-buffer (ws)
   "Create vterm buffer for workspace WS running claude if needed. Starts claude from the git root."
   (let* ((root (claude-repl--resolve-root))
-         (default-directory root)
-         (id (claude-repl--workspace-id)))
+         (default-directory root))
     (claude-repl--kill-stale-vterm)
     (let ((vterm-buf (get-buffer-create (claude-repl--buffer-name))))
       (claude-repl--ws-put ws :vterm-buffer vterm-buf)
-      (claude-repl--ws-put ws :id id)
       (with-current-buffer vterm-buf
         (setq-local claude-repl--project-root root)
         (setq-local claude-repl--owning-workspace ws)

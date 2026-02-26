@@ -984,8 +984,8 @@ see the updated title-thinking and detect no transition."
 
 ;;;; ---- Tests: State machine completeness ----
 
-(ert-deftest claude-repl-test-ws-state-priority-order ()
-  "Verify state priority: :thinking > :permission > :done > :stale."
+(ert-deftest claude-repl-test-ws-state-transitions ()
+  "Verify state transitions: ws-set correctly cycles through :thinking, :permission, :done, and :stale."
   (claude-repl-test--with-clean-state
     ;; :thinking wins over :done (ws-set replaces, but we can test ordering by
     ;; setting :status directly in the plist and checking ws-state)
