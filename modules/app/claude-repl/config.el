@@ -1729,9 +1729,11 @@ and clears owning-workspace refs on any buffers pointing to WS."
   (message "Claude REPL metaprompt: %s" (if claude-repl-skip-permissions "ON" "OFF")))
 
 (defun claude-repl-debug/prefix-counter ()
-  "Show the current metaprompt prefix counter and period."
+  "Show the current metaprompt prefix counter, period, and workspace."
   (interactive)
-  (message "Prefix counter: %d  period: %d  next metaprompt in: %d sends"
+  (claude-repl--load-session)
+  (message "[%s] Prefix counter: %d  period: %d  next metaprompt in: %d sends"
+           (+workspace-current-name)
            claude-repl--prefix-counter
            claude-repl-prefix-period
            (- claude-repl-prefix-period
