@@ -893,3 +893,8 @@ If found, the class name is returned, otherwise STR is returned"
 (use-package! centered-cursor-mode
   :config
   (global-centered-cursor-mode 1))
+
+(after! which-key
+  (setq which-key-idle-delay 0.2
+        which-key-max-description-length 60
+        which-key-side-window-max-width 0.5))

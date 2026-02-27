@@ -725,6 +725,37 @@ Without region: sends file path and current line."
     (claude-repl--log "explain %s" msg)
     (claude-repl--send-to-claude msg)))
 
+(defcustom claude-repl-explain-diff-prompt
+  "please explain the changes"
+  "Prompt sent to Claude by explain-diff commands."
+  :type 'string
+  :group 'claude-repl)
+
+(defun claude-repl-explain-diff-worktree ()
+  "Ask Claude to explain unstaged changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "unstaged changes (git diff)" claude-repl-explain-diff-prompt))
+
+(defun claude-repl-explain-diff-staged ()
+  "Ask Claude to explain staged changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "staged changes (git diff --cached)" claude-repl-explain-diff-prompt))
+
+(defun claude-repl-explain-diff-uncommitted ()
+  "Ask Claude to explain all uncommitted changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "uncommitted changes (git diff HEAD)" claude-repl-explain-diff-prompt))
+
+(defun claude-repl-explain-diff-head ()
+  "Ask Claude to explain the last commit."
+  (interactive)
+  (claude-repl--send-diff-analysis "last commit (git show HEAD)" claude-repl-explain-diff-prompt))
+
+(defun claude-repl-explain-diff-branch ()
+  "Ask Claude to explain all changes in the current branch."
+  (interactive)
+  (claude-repl--send-diff-analysis claude-repl-branch-diff-spec claude-repl-explain-diff-prompt))
+
 (defun claude-repl-interrupt ()
   "Send Escape to interrupt Claude."
   (interactive)
@@ -752,27 +783,129 @@ Without region: sends file path and current line."
   (interactive)
   (claude-repl--send-to-claude claude-repl-update-pr-prompt))
 
-(defcustom claude-repl-lint-and-test-prompt
-  "please run lint and tests, and address any issues found for both"
-  "Prompt sent to Claude by `claude-repl-lint-and-test'."
+(defcustom claude-repl-update-pr-diff-prompt
+  "please update the PR description"
+  "Prompt sent to Claude by update-pr-diff commands."
   :type 'string
   :group 'claude-repl)
 
-(defun claude-repl-lint-and-test ()
-  "Ask Claude to run lint and tests and fix any issues."
+(defun claude-repl-update-pr-diff-worktree ()
+  "Ask Claude to update the PR description for unstaged changes."
   (interactive)
-  (claude-repl--send-to-claude claude-repl-lint-and-test-prompt))
+  (claude-repl--send-diff-analysis "unstaged changes (git diff)" claude-repl-update-pr-diff-prompt))
 
-(defcustom claude-repl-test-and-summarize-prompt
+(defun claude-repl-update-pr-diff-staged ()
+  "Ask Claude to update the PR description for staged changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "staged changes (git diff --cached)" claude-repl-update-pr-diff-prompt))
+
+(defun claude-repl-update-pr-diff-uncommitted ()
+  "Ask Claude to update the PR description for all uncommitted changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "uncommitted changes (git diff HEAD)" claude-repl-update-pr-diff-prompt))
+
+(defun claude-repl-update-pr-diff-head ()
+  "Ask Claude to update the PR description for the last commit."
+  (interactive)
+  (claude-repl--send-diff-analysis "last commit (git show HEAD)" claude-repl-update-pr-diff-prompt))
+
+(defun claude-repl-update-pr-diff-branch ()
+  "Ask Claude to update the PR description for all changes in the current branch."
+  (interactive)
+  (claude-repl--send-diff-analysis claude-repl-branch-diff-spec claude-repl-update-pr-diff-prompt))
+
+(defcustom claude-repl-run-tests-prompt
   "please run tests, and summarize the issues found and probable causes"
-  "Prompt sent to Claude by `claude-repl-test-and-summarize'."
+  "Prompt sent to Claude by run-tests commands."
   :type 'string
   :group 'claude-repl)
 
-(defun claude-repl-test-and-summarize ()
-  "Ask Claude to run tests and summarize the issues found."
+(defcustom claude-repl-run-lint-prompt
+  "please run lint, and address any issues found"
+  "Prompt sent to Claude by run-lint commands."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-run-all-prompt
+  "please run lint and tests, and address any issues found for both"
+  "Prompt sent to Claude by run-all commands."
+  :type 'string
+  :group 'claude-repl)
+
+(defun claude-repl-run-tests-worktree ()
+  "Run tests for unstaged changes."
   (interactive)
-  (claude-repl--send-to-claude claude-repl-test-and-summarize-prompt))
+  (claude-repl--send-diff-analysis "unstaged changes (git diff)" claude-repl-run-tests-prompt))
+
+(defun claude-repl-run-tests-staged ()
+  "Run tests for staged changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "staged changes (git diff --cached)" claude-repl-run-tests-prompt))
+
+(defun claude-repl-run-tests-uncommitted ()
+  "Run tests for all uncommitted changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "uncommitted changes (git diff HEAD)" claude-repl-run-tests-prompt))
+
+(defun claude-repl-run-tests-head ()
+  "Run tests for the last commit."
+  (interactive)
+  (claude-repl--send-diff-analysis "last commit (git show HEAD)" claude-repl-run-tests-prompt))
+
+(defun claude-repl-run-tests-branch ()
+  "Run tests for all changes in the current branch."
+  (interactive)
+  (claude-repl--send-diff-analysis claude-repl-branch-diff-spec claude-repl-run-tests-prompt))
+
+(defun claude-repl-run-lint-worktree ()
+  "Run lint for unstaged changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "unstaged changes (git diff)" claude-repl-run-lint-prompt))
+
+(defun claude-repl-run-lint-staged ()
+  "Run lint for staged changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "staged changes (git diff --cached)" claude-repl-run-lint-prompt))
+
+(defun claude-repl-run-lint-uncommitted ()
+  "Run lint for all uncommitted changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "uncommitted changes (git diff HEAD)" claude-repl-run-lint-prompt))
+
+(defun claude-repl-run-lint-head ()
+  "Run lint for the last commit."
+  (interactive)
+  (claude-repl--send-diff-analysis "last commit (git show HEAD)" claude-repl-run-lint-prompt))
+
+(defun claude-repl-run-lint-branch ()
+  "Run lint for all changes in the current branch."
+  (interactive)
+  (claude-repl--send-diff-analysis claude-repl-branch-diff-spec claude-repl-run-lint-prompt))
+
+(defun claude-repl-run-all-worktree ()
+  "Run lint and tests for unstaged changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "unstaged changes (git diff)" claude-repl-run-all-prompt))
+
+(defun claude-repl-run-all-staged ()
+  "Run lint and tests for staged changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "staged changes (git diff --cached)" claude-repl-run-all-prompt))
+
+(defun claude-repl-run-all-uncommitted ()
+  "Run lint and tests for all uncommitted changes."
+  (interactive)
+  (claude-repl--send-diff-analysis "uncommitted changes (git diff HEAD)" claude-repl-run-all-prompt))
+
+(defun claude-repl-run-all-head ()
+  "Run lint and tests for the last commit."
+  (interactive)
+  (claude-repl--send-diff-analysis "last commit (git show HEAD)" claude-repl-run-all-prompt))
+
+(defun claude-repl-run-all-branch ()
+  "Run lint and tests for all changes in the current branch."
+  (interactive)
+  (claude-repl--send-diff-analysis claude-repl-branch-diff-spec claude-repl-run-all-prompt))
 
 (defconst claude-repl--test-quality-prompt
   "please analyze tests to ensure they are following AAA standards for testing. They should be employing DRY principle for refactoring as well (extract repeated code into helpers, use builder pattern to facilitate test DSL). We should only be testing one thing per test (can extract tests into subtests to ensure this)")
@@ -1752,23 +1885,64 @@ Without region: copies file:line."
       :desc "Copy file reference" "o r" #'claude-repl-copy-reference)
 
 ;; SPC j — Tell Claude to do a predefined thing
+(define-prefix-command 'claude-repl-tests-prefix      'claude-repl-tests-map)
+(define-prefix-command 'claude-repl-explain-diff-prefix 'claude-repl-explain-diff-map)
+(define-prefix-command 'claude-repl-update-pr-diff-prefix 'claude-repl-update-pr-diff-map)
+
 (map! :leader
-      :desc "Claude Explain line/region/hunk" "j e" #'claude-repl-explain
-      :desc "Update GitHub PR description" "j R" #'claude-repl-update-pr
-      :desc "Run Lint & Test: fix all" "j t" #'claude-repl-lint-and-test
-      :desc "Run Tests: summarize issues" "j T" #'claude-repl-test-and-summarize
-      ;; Test quality analysis (AAA/DRY)
-      :desc "Analyze Test Quality: worktree" "j w" #'claude-repl-test-quality-worktree
-      :desc "Analyze Test Quality: staged" "j i" #'claude-repl-test-quality-staged
-      :desc "Analyze Test Quality: uncommitted" "j u" #'claude-repl-test-quality-uncommitted
-      :desc "Analyze Test Quality: HEAD" "j h" #'claude-repl-test-quality-head
-      :desc "Analyze Test Quality: branch" "j b" #'claude-repl-test-quality-branch
-      ;; Test coverage analysis
-      :desc "Analyze Test Coverage: worktree" "j W" #'claude-repl-test-coverage-worktree
-      :desc "Analyze Test Coverage: staged" "j I" #'claude-repl-test-coverage-staged
-      :desc "Analyze Test Coverage: uncommitted" "j U" #'claude-repl-test-coverage-uncommitted
-      :desc "Analyze Test Coverage: HEAD" "j H" #'claude-repl-test-coverage-head
-      :desc "Analyze Test Coverage: branch" "j B" #'claude-repl-test-coverage-branch)
+      :desc "Explain line/region/hunk"      "j e" #'claude-repl-explain
+      :desc "Explain diff scope"            "j E" #'claude-repl-explain-diff-prefix
+      :desc "Update GitHub PR description"  "j r" #'claude-repl-update-pr
+      :desc "Update PR desc for diff scope" "j R" #'claude-repl-update-pr-diff-prefix
+      :desc "tests"                         "j t" #'claude-repl-tests-prefix)
+
+(map! :map claude-repl-explain-diff-map
+      :desc "worktree"    "w" #'claude-repl-explain-diff-worktree
+      :desc "staged"      "s" #'claude-repl-explain-diff-staged
+      :desc "uncommitted" "u" #'claude-repl-explain-diff-uncommitted
+      :desc "HEAD"        "h" #'claude-repl-explain-diff-head
+      :desc "branch"      "b" #'claude-repl-explain-diff-branch)
+
+(map! :map claude-repl-update-pr-diff-map
+      :desc "worktree"    "w" #'claude-repl-update-pr-diff-worktree
+      :desc "staged"      "s" #'claude-repl-update-pr-diff-staged
+      :desc "uncommitted" "u" #'claude-repl-update-pr-diff-uncommitted
+      :desc "HEAD"        "h" #'claude-repl-update-pr-diff-head
+      :desc "branch"      "b" #'claude-repl-update-pr-diff-branch)
+
+(map! :map claude-repl-tests-map
+      (:prefix ("r" . "run")
+       (:prefix ("t" . "tests")
+        :desc "worktree"    "w" #'claude-repl-run-tests-worktree
+        :desc "staged"      "s" #'claude-repl-run-tests-staged
+        :desc "uncommitted" "u" #'claude-repl-run-tests-uncommitted
+        :desc "HEAD"        "h" #'claude-repl-run-tests-head
+        :desc "branch"      "b" #'claude-repl-run-tests-branch)
+       (:prefix ("l" . "lint")
+        :desc "worktree"    "w" #'claude-repl-run-lint-worktree
+        :desc "staged"      "s" #'claude-repl-run-lint-staged
+        :desc "uncommitted" "u" #'claude-repl-run-lint-uncommitted
+        :desc "HEAD"        "h" #'claude-repl-run-lint-head
+        :desc "branch"      "b" #'claude-repl-run-lint-branch)
+       (:prefix ("a" . "all")
+        :desc "worktree"    "w" #'claude-repl-run-all-worktree
+        :desc "staged"      "s" #'claude-repl-run-all-staged
+        :desc "uncommitted" "u" #'claude-repl-run-all-uncommitted
+        :desc "HEAD"        "h" #'claude-repl-run-all-head
+        :desc "branch"      "b" #'claude-repl-run-all-branch))
+      (:prefix ("a" . "analyze")
+       (:prefix ("q" . "quality")
+        :desc "worktree"    "w" #'claude-repl-test-quality-worktree
+        :desc "staged"      "s" #'claude-repl-test-quality-staged
+        :desc "uncommitted" "u" #'claude-repl-test-quality-uncommitted
+        :desc "HEAD"        "h" #'claude-repl-test-quality-head
+        :desc "branch"      "b" #'claude-repl-test-quality-branch)
+       (:prefix ("c" . "coverage")
+        :desc "worktree"    "w" #'claude-repl-test-coverage-worktree
+        :desc "staged"      "s" #'claude-repl-test-coverage-staged
+        :desc "uncommitted" "u" #'claude-repl-test-coverage-uncommitted
+        :desc "HEAD"        "h" #'claude-repl-test-coverage-head
+        :desc "branch"      "b" #'claude-repl-test-coverage-branch)))
 
 (dotimes (i 10)
   (let ((char (number-to-string i)))
