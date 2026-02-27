@@ -1,4 +1,4 @@
-;;; config.el --- Claude REPL for Doom Emacs -*- lexical-binding: t; -*-
+;;; config.el --- claude repl for doom emacs -*- lexical-binding: t; -*-
 
 ;; Author: Dodge Coates
 ;; URL: https://github.com/dodgecoates
@@ -788,6 +788,12 @@ PROMPT is the analysis instruction."
     (claude-repl--log "diff-analysis: %s" change-spec)
     (claude-repl--send-to-claude msg)))
 
+(defcustom claude-repl-branch-diff-spec
+  "changes in current branch (git diff main...HEAD)"
+  "Change-spec string used for branch-level quality and coverage analysis commands."
+  :type 'string
+  :group 'claude-repl)
+
 (defun claude-repl-test-quality-worktree ()
   "Analyze test quality for unstaged changes."
   (interactive)
@@ -808,6 +814,11 @@ PROMPT is the analysis instruction."
   (interactive)
   (claude-repl--send-diff-analysis "last commit (git show HEAD)" claude-repl--test-quality-prompt))
 
+(defun claude-repl-test-quality-branch ()
+  "Analyze test quality for all changes in the current branch."
+  (interactive)
+  (claude-repl--send-diff-analysis claude-repl-branch-diff-spec claude-repl--test-quality-prompt))
+
 (defun claude-repl-test-coverage-worktree ()
   "Analyze test coverage for unstaged changes."
   (interactive)
@@ -827,6 +838,11 @@ PROMPT is the analysis instruction."
   "Analyze test coverage for the last commit."
   (interactive)
   (claude-repl--send-diff-analysis "last commit (git show HEAD)" claude-repl--test-coverage-prompt))
+
+(defun claude-repl-test-coverage-branch ()
+  "Analyze test coverage for all changes in the current branch."
+  (interactive)
+  (claude-repl--send-diff-analysis claude-repl-branch-diff-spec claude-repl--test-coverage-prompt))
 
 ;; Hide overlay functions
 (defun claude-repl--create-hide-overlay ()
@@ -1737,19 +1753,22 @@ Without region: copies file:line."
 
 ;; SPC j — Tell Claude to do a predefined thing
 (map! :leader
-      :desc "Claude explain" "j e" #'claude-repl-explain
-      :desc "Update PR description" "j R" #'claude-repl-update-pr
-      :desc "Lint and test: fix all" "j t" #'claude-repl-lint-and-test
-      :desc "Run tests: summarize issues" "j T" #'claude-repl-test-and-summarize
+      :desc "Claude Explain line/region/hunk" "j e" #'claude-repl-explain
+      :desc "Update GitHub PR description" "j R" #'claude-repl-update-pr
+      :desc "Run Lint & Test: fix all" "j t" #'claude-repl-lint-and-test
+      :desc "Run Tests: summarize issues" "j T" #'claude-repl-test-and-summarize
       ;; Test quality analysis (AAA/DRY)
-      :desc "Tests: staged" "j i" #'claude-repl-test-quality-staged
-      :desc "Tests: uncommitted" "j u" #'claude-repl-test-quality-uncommitted
-      :desc "Tests: HEAD" "j h" #'claude-repl-test-quality-head
+      :desc "Analyze Test Quality: worktree" "j w" #'claude-repl-test-quality-worktree
+      :desc "Analyze Test Quality: staged" "j i" #'claude-repl-test-quality-staged
+      :desc "Analyze Test Quality: uncommitted" "j u" #'claude-repl-test-quality-uncommitted
+      :desc "Analyze Test Quality: HEAD" "j h" #'claude-repl-test-quality-head
+      :desc "Analyze Test Quality: branch" "j b" #'claude-repl-test-quality-branch
       ;; Test coverage analysis
-      :desc "Coverage: worktree" "j W" #'claude-repl-test-coverage-worktree
-      :desc "Coverage: staged" "j I" #'claude-repl-test-coverage-staged
-      :desc "Coverage: uncommitted" "j U" #'claude-repl-test-coverage-uncommitted
-      :desc "Coverage: HEAD" "j H" #'claude-repl-test-coverage-head)
+      :desc "Analyze Test Coverage: worktree" "j W" #'claude-repl-test-coverage-worktree
+      :desc "Analyze Test Coverage: staged" "j I" #'claude-repl-test-coverage-staged
+      :desc "Analyze Test Coverage: uncommitted" "j U" #'claude-repl-test-coverage-uncommitted
+      :desc "Analyze Test Coverage: HEAD" "j H" #'claude-repl-test-coverage-head
+      :desc "Analyze Test Coverage: branch" "j B" #'claude-repl-test-coverage-branch)
 
 (dotimes (i 10)
   (let ((char (number-to-string i)))
