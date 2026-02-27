@@ -733,7 +733,12 @@ Without region: sends file path and current line."
     (let ((vterm-buf (claude-repl--ws-get (+workspace-current-name) :vterm-buffer)))
       (with-current-buffer vterm-buf
         (vterm-send-key "<escape>")
-        (vterm-send-key "<escape>")))))
+        (vterm-send-key "<escape>"))
+      (run-at-time 0.25 nil
+                   (lambda ()
+                     (when (buffer-live-p vterm-buf)
+                       (with-current-buffer vterm-buf
+                         (vterm-send-string "i"))))))))
 
 ;; Git diff analysis commands
 (defconst claude-repl--test-quality-prompt
