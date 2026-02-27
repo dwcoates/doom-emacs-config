@@ -134,6 +134,11 @@ The prefix is sent on the first prompt and every Nth prompt thereafter."
   :group 'claude-repl)
 
 
+(defcustom claude-repl-send-postfix "\n what do you think? spit it back to me."
+  "String appended to input when sending via `claude-repl-send-with-postfix'."
+  :type 'string
+  :group 'claude-repl)
+
 (defvar claude-repl-paste-delay 0.1
   "Seconds to wait after pasting before sending Return.
 Used by `claude-repl--send-input-to-vterm' for large inputs.")
@@ -254,7 +259,7 @@ Tries git root, then buffer-local project root, then `default-directory'."
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
   (setq-local header-line-format
-              "C-RET: send+hide | C-c C-c: clear+save | C-c C-k: interrupt | <up>/<down>: history")
+              "RET: send | C-RET: send+postfix | C-c C-c: clear+save | C-c C-k: interrupt | <up>/<down>: history")
   (face-remap-add-relative 'header-line 'claude-repl-header-line)
   (claude-repl--set-buffer-background 37)
   (visual-line-mode 1)
@@ -288,7 +293,7 @@ Tries git root, then buffer-local project root, then `default-directory'."
 (map! :map claude-input-mode-map
       :ni "RET"       #'claude-repl-send
       :ni "S-RET"     #'newline
-      :ni "C-RET"     #'claude-repl-send-and-hide
+      :ni "C-RET"     #'claude-repl-send-with-postfix
       :ni "C-c C-k"   #'claude-repl-interrupt
       :ni "C-c C-c"   #'claude-repl-discard-input
       :ni "C-c y"     (cmd! (claude-repl-send-char "y"))
