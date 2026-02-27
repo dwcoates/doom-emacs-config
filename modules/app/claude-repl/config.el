@@ -127,7 +127,7 @@ FMT and ARGS are passed to `message', prefixed with timestamp and [claude-repl].
   :type 'boolean
   :group 'claude-repl)
 
-(defcustom claude-repl-prefix-period 20
+(defcustom claude-repl-prefix-period 7
   "Number of prompts between metaprompt prefix injections.
 The prefix is sent on the first prompt and every Nth prompt thereafter."
   :type 'integer
