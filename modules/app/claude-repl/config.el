@@ -418,8 +418,10 @@ PATTERN is a string or regexp matched against the raw input (trimmed).
 FUNCTION is called with (WS RAW) where WS is the workspace name and RAW is the input.")
 
 (defun claude-repl--posthook-reset-prefix-counter (ws _raw)
-  "Reset the metaprompt prefix counter to zero for workspace WS."
-  (claude-repl--ws-put ws :prefix-counter 0))
+  "Reset the metaprompt prefix counter for workspace WS.
+Resets to 1 (just past the firing point) so the next send does not
+immediately re-trigger the metaprompt."
+  (claude-repl--ws-put ws :prefix-counter 1))
 
 (defun claude-repl--run-send-posthooks (ws raw)
   "Run posthooks matching RAW input for workspace WS."
@@ -531,6 +533,17 @@ Falls back to hiding panels and selecting the return window."
   (claude-repl--log "send-and-hide")
   (claude-repl-send)
   (claude-repl--restore-layout))
+
+(defun claude-repl-send-with-postfix ()
+  "Append `claude-repl-send-postfix' to the input buffer, then send."
+  (interactive)
+  (let* ((ws (+workspace-current-name))
+         (input-buf (claude-repl--ws-get ws :input-buffer)))
+    (when input-buf
+      (with-current-buffer input-buf
+        (goto-char (point-max))
+        (insert claude-repl-send-postfix))))
+  (claude-repl-send))
 
 (defun claude-repl-send-char (char)
   "Send a single character to Claude."
