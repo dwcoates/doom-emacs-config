@@ -256,6 +256,18 @@ Tries git root, then buffer-local project root, then `default-directory'."
   "Face for the Claude Input header line.")
 
 ;; Input mode
+(defun claude-repl--slash-intercept-backspace ()
+  "Redirect backspace-like commands to `claude-repl--slash-backspace' in slash mode.
+Runs as a buffer-local `pre-command-hook'.  Setting `this-command' here causes
+Emacs to call our handler instead of the originally resolved command."
+  (when claude-slash-input-mode
+    (when (memq this-command
+                '(evil-delete-backward-char-and-join
+                  evil-delete-backward-char
+                  delete-backward-char
+                  backward-delete-char-untabify))
+      (setq this-command #'claude-repl--slash-backspace))))
+
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
   (setq-local header-line-format
@@ -263,12 +275,16 @@ Tries git root, then buffer-local project root, then `default-directory'."
   (face-remap-add-relative 'header-line 'claude-repl-header-line)
   (claude-repl--set-buffer-background 37)
   (visual-line-mode 1)
-  (add-hook 'after-change-functions #'claude-repl--history-on-change nil t))
+  (add-hook 'after-change-functions #'claude-repl--history-on-change nil t)
+  (add-hook 'pre-command-hook #'claude-repl--slash-intercept-backspace nil t))
 
 (defun claude-repl-discard-input ()
   "Save current input to history, clear the buffer, and enter insert state."
   (interactive)
   (claude-repl--log "discard-input")
+  (when claude-slash-input-mode
+    (setq claude-repl--slash-stack nil)
+    (claude-slash-input-mode -1))
   (claude-repl--history-push)
   (claude-repl--history-reset)
   (erase-buffer)
@@ -293,6 +309,7 @@ Tries git root, then buffer-local project root, then `default-directory'."
 (map! :map claude-input-mode-map
       :ni "RET"       #'claude-repl-send
       :ni "S-RET"     #'newline
+      :i  "/"         #'claude-repl--slash-start
       :ni "C-RET"     #'claude-repl-send-with-postfix
       :ni "C-c C-k"   #'claude-repl-interrupt
       :ni "C-c C-c"   #'claude-repl-discard-input
@@ -553,6 +570,84 @@ Falls back to hiding panels and selecting the return window."
       (with-current-buffer vterm-buf
         (vterm-send-string char)
         (vterm-send-return)))))
+
+;;; Slash-command pass-through mode
+;;
+;; When the user types "/" into an empty input buffer, every subsequent
+;; keystroke is forwarded directly to vterm without being inserted into the
+;; input buffer.  The buffer stays visually empty.  Backspace is forwarded too,
+;; and deleting back past the initial "/" exits the mode.
+
+(defvar-local claude-repl--slash-stack nil
+  "Stack of characters forwarded to vterm in slash mode.
+Each element is the string that was sent (the leading \"/\" is the first entry).
+Popped on backspace; when empty the mode exits.")
+
+(defun claude-repl--slash-vterm-send (str)
+  "Send STR to the current workspace's vterm buffer without a trailing return."
+  (let* ((ws (+workspace-current-name))
+         (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+    (when (and vterm-buf (buffer-live-p vterm-buf))
+      (with-current-buffer vterm-buf
+        (vterm-send-string str)))))
+
+(defun claude-repl--slash-forward-char ()
+  "Forward the typed character to vterm without inserting it into the buffer."
+  (interactive)
+  (let ((char (string last-command-event)))
+    (claude-repl--slash-vterm-send char)
+    (push char claude-repl--slash-stack)))
+
+(defun claude-repl--slash-backspace ()
+  "Pop from the slash stack; send backspace to vterm; exit mode when stack is empty."
+  (interactive)
+  (let* ((ws (+workspace-current-name))
+         (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+    (when (and vterm-buf (buffer-live-p vterm-buf))
+      (with-current-buffer vterm-buf
+        (vterm-send-key "<backspace>"))))
+  (pop claude-repl--slash-stack)
+  (when (null claude-repl--slash-stack)
+    (claude-slash-input-mode -1)))
+
+(defun claude-repl--slash-return ()
+  "Send return to vterm and exit slash mode."
+  (interactive)
+  (let* ((ws (+workspace-current-name))
+         (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+    (when (and vterm-buf (buffer-live-p vterm-buf))
+      (with-current-buffer vterm-buf
+        (vterm-send-return))))
+  (setq claude-repl--slash-stack nil)
+  (claude-slash-input-mode -1))
+
+(defun claude-repl--slash-start ()
+  "Enter slash pass-through mode if the buffer is empty, else insert / normally."
+  (interactive)
+  (if (= (buffer-size) 0)
+      (progn
+        (claude-slash-input-mode 1)
+        (setq claude-repl--slash-stack (list "/"))
+        (claude-repl--slash-vterm-send "/"))
+    (self-insert-command 1 ?/)))
+
+(define-minor-mode claude-slash-input-mode
+  "Minor mode that transparently forwards keystrokes to Claude vterm.
+Active when the user begins input with /. The input buffer stays empty;
+all characters are sent directly to vterm."
+  :lighter " /…"
+  :keymap (make-sparse-keymap))
+
+;; Use remaps throughout so evil keymap priority is irrelevant — remaps are
+;; resolved after key→command lookup and apply across all evil states.
+(map! :map claude-slash-input-mode-map
+      [remap self-insert-command]                #'claude-repl--slash-forward-char
+      [remap evil-delete-backward-char-and-join] #'claude-repl--slash-backspace
+      [remap delete-backward-char]               #'claude-repl--slash-backspace
+      [remap backward-delete-char-untabify]      #'claude-repl--slash-backspace
+      [remap claude-repl-send]                   #'claude-repl--slash-return
+      :ni "<up>"   #'ignore
+      :ni "<down>" #'ignore)
 
 (defun claude-repl--ensure-session ()
   "Ensure a Claude session exists (vterm + input + overlay).
