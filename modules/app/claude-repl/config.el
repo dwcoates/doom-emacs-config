@@ -1591,7 +1591,6 @@ Without region: copies file:line."
       :desc "Claude interrupt" "o x" #'claude-repl-interrupt
       :desc "Copy file reference" "o r" #'claude-repl-copy-reference
       ;; Test quality analysis (AAA/DRY)
-      :desc "Tests: worktree" "o w" #'claude-repl-test-quality-worktree
       :desc "Tests: staged" "o i" #'claude-repl-test-quality-staged
       :desc "Tests: uncommitted" "o u" #'claude-repl-test-quality-uncommitted
       :desc "Tests: HEAD" "o h" #'claude-repl-test-quality-head
