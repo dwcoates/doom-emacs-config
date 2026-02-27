@@ -311,6 +311,7 @@ Emacs to call our handler instead of the originally resolved command."
       :ni "S-RET"     #'newline
       :i  "/"         #'claude-repl--slash-start
       :ni "C-RET"     #'claude-repl-send-with-postfix
+      [remap +default/newline-below] #'claude-repl-send-with-postfix
       :ni "C-c C-k"   #'claude-repl-interrupt
       :ni "C-c C-c"   #'claude-repl-discard-input
       :ni "C-c y"     (cmd! (claude-repl-send-char "y"))
