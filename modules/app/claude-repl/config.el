@@ -331,6 +331,16 @@ Emacs to call our handler instead of the originally resolved command."
     (define-key claude-input-mode-map (kbd (format "C-S-%s" char))
       (lambda () (interactive) (claude-repl-send-char char)))))
 
+;; 0-9 in insert mode: if the buffer is empty, immediately forward the raw digit
+;; to vterm with no return and no state change; otherwise insert normally.
+(dotimes (i 10)
+  (let ((char (number-to-string i)))
+    (evil-define-key 'insert claude-input-mode-map (kbd char)
+      (lambda () (interactive)
+        (if (= (buffer-size) 0)
+            (claude-repl--slash-vterm-send char)
+          (self-insert-command 1 (string-to-char char)))))))
+
 ;; Input history persistence
 (defun claude-repl--history-file ()
   "Return the path to the history file for the current project."
