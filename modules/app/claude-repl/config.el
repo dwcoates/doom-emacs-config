@@ -1727,27 +1727,29 @@ Without region: copies file:line."
     (message "Copied: %s" ref)))
 
 ;; Keybindings
+;; SPC o — Claude session control (open, focus, kill, interrupt, utilities)
 (map! :leader
       :desc "Claude REPL" "o c" #'claude-repl
       :desc "Claude input" "o v" #'claude-repl-focus-input
       :desc "Kill Claude" "o C" #'claude-repl-kill
-      :desc "Claude explain" "o e" #'claude-repl-explain
       :desc "Claude interrupt" "o x" #'claude-repl-interrupt
-      :desc "Copy file reference" "o r" #'claude-repl-copy-reference
-      :desc "Update PR description" "o R" #'claude-repl-update-pr
-      ;; Test quality analysis (AAA/DRY)
-      :desc "Tests: staged" "o i" #'claude-repl-test-quality-staged
-      :desc "Tests: uncommitted" "o u" #'claude-repl-test-quality-uncommitted
-      :desc "Tests: HEAD" "o h" #'claude-repl-test-quality-head
-      ;; Test coverage analysis
-      :desc "Coverage: worktree" "o W" #'claude-repl-test-coverage-worktree
-      :desc "Coverage: staged" "o I" #'claude-repl-test-coverage-staged
-      :desc "Coverage: uncommitted" "o U" #'claude-repl-test-coverage-uncommitted
-      :desc "Coverage: HEAD" "o H" #'claude-repl-test-coverage-head)
+      :desc "Copy file reference" "o r" #'claude-repl-copy-reference)
 
+;; SPC j — Tell Claude to do a predefined thing
 (map! :leader
+      :desc "Claude explain" "j e" #'claude-repl-explain
+      :desc "Update PR description" "j R" #'claude-repl-update-pr
       :desc "Lint and test: fix all" "j t" #'claude-repl-lint-and-test
-      :desc "Run tests: summarize issues" "j T" #'claude-repl-test-and-summarize)
+      :desc "Run tests: summarize issues" "j T" #'claude-repl-test-and-summarize
+      ;; Test quality analysis (AAA/DRY)
+      :desc "Tests: staged" "j i" #'claude-repl-test-quality-staged
+      :desc "Tests: uncommitted" "j u" #'claude-repl-test-quality-uncommitted
+      :desc "Tests: HEAD" "j h" #'claude-repl-test-quality-head
+      ;; Test coverage analysis
+      :desc "Coverage: worktree" "j W" #'claude-repl-test-coverage-worktree
+      :desc "Coverage: staged" "j I" #'claude-repl-test-coverage-staged
+      :desc "Coverage: uncommitted" "j U" #'claude-repl-test-coverage-uncommitted
+      :desc "Coverage: HEAD" "j H" #'claude-repl-test-coverage-head)
 
 (dotimes (i 10)
   (let ((char (number-to-string i)))
