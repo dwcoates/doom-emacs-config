@@ -741,6 +741,17 @@ Without region: sends file path and current line."
                          (vterm-send-string "i"))))))))
 
 ;; Git diff analysis commands
+(defcustom claude-repl-update-pr-prompt
+  "please update the PR description for the PR corresponding to our branch"
+  "Prompt sent to Claude by `claude-repl-update-pr'."
+  :type 'string
+  :group 'claude-repl)
+
+(defun claude-repl-update-pr ()
+  "Ask Claude to update the PR description for the current branch."
+  (interactive)
+  (claude-repl--send-to-claude claude-repl-update-pr-prompt))
+
 (defconst claude-repl--test-quality-prompt
   "please analyze tests to ensure they are following AAA standards for testing. They should be employing DRY principle for refactoring as well (extract repeated code into helpers, use builder pattern to facilitate test DSL). We should only be testing one thing per test (can extract tests into subtests to ensure this)")
 
@@ -1701,6 +1712,7 @@ Without region: copies file:line."
       :desc "Claude explain" "o e" #'claude-repl-explain
       :desc "Claude interrupt" "o x" #'claude-repl-interrupt
       :desc "Copy file reference" "o r" #'claude-repl-copy-reference
+      :desc "Update PR description" "o R" #'claude-repl-update-pr
       ;; Test quality analysis (AAA/DRY)
       :desc "Tests: staged" "o i" #'claude-repl-test-quality-staged
       :desc "Tests: uncommitted" "o u" #'claude-repl-test-quality-uncommitted
