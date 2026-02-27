@@ -477,11 +477,11 @@ Uses paste mode for large inputs to avoid truncation."
   (interactive)
   (let* ((ws (+workspace-current-name)))
     (unless ws (error "claude-repl-send: no active workspace"))
-    (when (claude-repl--vterm-live-p)
-      (let* ((input-buf (claude-repl--ws-get ws :input-buffer))
-             (vterm-buf (claude-repl--ws-get ws :vterm-buffer))
-             (raw (with-current-buffer input-buf (buffer-string)))
-             (input (claude-repl--prepare-input ws)))
+    (let* ((input-buf (claude-repl--ws-get ws :input-buffer))
+           (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+      (when (and input-buf (claude-repl--vterm-live-p))
+        (let* ((raw (with-current-buffer input-buf (buffer-string)))
+               (input (claude-repl--prepare-input ws)))
         (claude-repl--log "send ws=%s len=%d" ws (length input))
         (claude-repl--ws-put ws :prefix-counter
                              (1+ (or (claude-repl--ws-get ws :prefix-counter) 0)))
@@ -496,7 +496,7 @@ Uses paste mode for large inputs to avoid truncation."
         (claude-repl--run-send-posthooks ws raw)
         (let ((ret (claude-repl--ws-get ws :return-window)))
           (when (and ret (window-live-p ret))
-            (select-window ret)))))))
+            (select-window ret))))))))
 
 (defun claude-repl--remember-return-window ()
   "Save the current window as the return target, unless we're in the input buffer."
