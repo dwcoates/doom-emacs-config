@@ -752,6 +752,28 @@ Without region: sends file path and current line."
   (interactive)
   (claude-repl--send-to-claude claude-repl-update-pr-prompt))
 
+(defcustom claude-repl-lint-and-test-prompt
+  "please run lint and tests, and address any issues found for both"
+  "Prompt sent to Claude by `claude-repl-lint-and-test'."
+  :type 'string
+  :group 'claude-repl)
+
+(defun claude-repl-lint-and-test ()
+  "Ask Claude to run lint and tests and fix any issues."
+  (interactive)
+  (claude-repl--send-to-claude claude-repl-lint-and-test-prompt))
+
+(defcustom claude-repl-test-and-summarize-prompt
+  "please run tests, and summarize the issues found and probable causes"
+  "Prompt sent to Claude by `claude-repl-test-and-summarize'."
+  :type 'string
+  :group 'claude-repl)
+
+(defun claude-repl-test-and-summarize ()
+  "Ask Claude to run tests and summarize the issues found."
+  (interactive)
+  (claude-repl--send-to-claude claude-repl-test-and-summarize-prompt))
+
 (defconst claude-repl--test-quality-prompt
   "please analyze tests to ensure they are following AAA standards for testing. They should be employing DRY principle for refactoring as well (extract repeated code into helpers, use builder pattern to facilitate test DSL). We should only be testing one thing per test (can extract tests into subtests to ensure this)")
 
@@ -1722,6 +1744,10 @@ Without region: copies file:line."
       :desc "Coverage: staged" "o I" #'claude-repl-test-coverage-staged
       :desc "Coverage: uncommitted" "o U" #'claude-repl-test-coverage-uncommitted
       :desc "Coverage: HEAD" "o H" #'claude-repl-test-coverage-head)
+
+(map! :leader
+      :desc "Lint and test: fix all" "j t" #'claude-repl-lint-and-test
+      :desc "Run tests: summarize issues" "j T" #'claude-repl-test-and-summarize)
 
 (dotimes (i 10)
   (let ((char (number-to-string i)))
