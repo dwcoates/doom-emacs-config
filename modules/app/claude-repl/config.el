@@ -331,7 +331,9 @@ Emacs to call our handler instead of the originally resolved command."
       :ni "S-RET"     #'newline
       :i  "/"         #'claude-repl--slash-start
       :ni "C-RET"     #'claude-repl-send-with-postfix
+      :ni "C-S-RET"   #'claude-repl-send-with-metaprompt
       [remap +default/newline-below] #'claude-repl-send-with-postfix
+      [remap +default/newline-above] #'claude-repl-send-with-metaprompt
       :ni "C-c C-k"   #'claude-repl-interrupt
       :ni "C-c C-c"   #'claude-repl-discard-input
       :ni "C-c y"     (cmd! (claude-repl-send-char "y"))
@@ -583,6 +585,32 @@ Falls back to hiding panels and selecting the return window."
   (claude-repl--log "send-and-hide")
   (claude-repl-send)
   (claude-repl--restore-layout))
+
+(defun claude-repl-send-with-metaprompt ()
+  "Send input with the metaprompt prefix, bypassing the counter."
+  (interactive)
+  (let* ((ws (+workspace-current-name))
+         (input-buf (claude-repl--ws-get ws :input-buffer))
+         (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+    (when (and input-buf (claude-repl--vterm-live-p))
+      (let* ((raw (with-current-buffer input-buf (buffer-string)))
+             (input (if (and claude-repl-skip-permissions claude-repl-command-prefix
+                             (not (claude-repl--skip-metaprompt-p raw)))
+                        (concat claude-repl--command-prefix raw)
+                      raw)))
+        (claude-repl--log "send-with-metaprompt ws=%s len=%d" ws (length input))
+        (claude-repl--ws-put ws :prefix-counter
+                             (1+ (or (claude-repl--ws-get ws :prefix-counter) 0)))
+        (when vterm-buf
+          (with-current-buffer vterm-buf
+            (setq-local claude-repl--owning-workspace ws)))
+        (claude-repl--mark-ws-thinking ws)
+        (claude-repl--send-input-to-vterm vterm-buf input)
+        (claude-repl--clear-input ws)
+        (claude-repl--run-send-posthooks ws raw)
+        (let ((ret (claude-repl--ws-get ws :return-window)))
+          (when (and ret (window-live-p ret))
+            (select-window ret)))))))
 
 (defun claude-repl-send-with-postfix ()
   "Append `claude-repl-send-postfix' to the input buffer, then send."
