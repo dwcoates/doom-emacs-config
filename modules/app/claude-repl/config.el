@@ -1850,24 +1850,31 @@ If Claude isn't running, start it (same as `claude-repl')."
           (evil-insert-state)))))))
 
 (defun claude-repl-toggle-fullscreen ()
-  "Toggle the Claude vterm buffer fullscreen.
-If already fullscreen, restore the previous window layout."
+  "Toggle fullscreen for the Claude REPL vterm and input windows.
+Saves the current window configuration per-workspace and expands the
+Claude panels to fill the frame.  Calling again restores the layout."
   (interactive)
-  (claude-repl--log "toggle-fullscreen currently=%s" (if claude-repl--fullscreen-config "fullscreen" "normal"))
-  (cond
-   ;; Already fullscreen — restore
-   (claude-repl--fullscreen-config
-    (set-window-configuration claude-repl--fullscreen-config)
-    (setq claude-repl--fullscreen-config nil))
-   ;; Not fullscreen — go fullscreen if vterm exists
-   ((claude-repl--vterm-live-p)
-    (let ((vterm-buf (claude-repl--ws-get (+workspace-current-name) :vterm-buffer)))
-      (setq claude-repl--fullscreen-config (current-window-configuration))
-      (delete-other-windows)
-      (set-window-dedicated-p (selected-window) nil)
-      (switch-to-buffer vterm-buf)
-      (claude-repl--reset-vterm-cursors)))
-   (t (message "No Claude vterm buffer for this workspace."))))
+  (let* ((ws (+workspace-current-name))
+         (saved (claude-repl--ws-get ws :fullscreen-config)))
+    (claude-repl--log "toggle-fullscreen ws=%s currently=%s" ws (if saved "fullscreen" "normal"))
+    (cond
+     ;; Already fullscreen — restore
+     (saved
+      (set-window-configuration saved)
+      (claude-repl--ws-put ws :fullscreen-config nil))
+     ;; Not fullscreen — go fullscreen if panels are visible
+     ((claude-repl--vterm-live-p)
+      (let* ((vterm-buf (claude-repl--ws-get ws :vterm-buffer))
+             (input-buf (claude-repl--ws-get ws :input-buffer)))
+        (unless (and vterm-buf input-buf
+                     (get-buffer-window vterm-buf)
+                     (get-buffer-window input-buf))
+          (user-error "Claude REPL panels are not visible"))
+        (claude-repl--ws-put ws :fullscreen-config (current-window-configuration))
+        (dolist (win (window-list))
+          (unless (memq (window-buffer win) (list vterm-buf input-buf))
+            (ignore-errors (delete-window win))))))
+     (t (message "No Claude vterm buffer for this workspace.")))))
 
 (defun claude-repl-cycle ()
   "Send backtab to Claude vterm to cycle through options."
@@ -2163,30 +2170,6 @@ Reports comprehensive diagnostics."
                (or owning-ws "nil") title-thinking (if has-window "yes" "no")
                (if open "yes" "no") (if dirty "yes" "no")
                (or before "nil") (or after "nil")))))
-
-(defun claude-repl-toggle-fullscreen ()
-  "Toggle fullscreen for the Claude REPL vterm and input windows.
-Saves the current window configuration and expands the Claude panels
-to fill the frame.  Calling again restores the saved configuration."
-  (interactive)
-  (if claude-repl--fullscreen-config
-      (progn
-        (set-window-configuration claude-repl--fullscreen-config)
-        (setq claude-repl--fullscreen-config nil))
-    (let* ((ws (+workspace-current-name))
-           (vterm-buf (claude-repl--ws-get ws :vterm-buffer))
-           (input-buf (claude-repl--ws-get ws :input-buffer)))
-      (unless (and vterm-buf input-buf
-                   (get-buffer-window vterm-buf)
-                   (get-buffer-window input-buf))
-        (user-error "Claude REPL panels are not visible"))
-      (setq claude-repl--fullscreen-config (current-window-configuration))
-      (dolist (win (window-list))
-        (unless (memq (window-buffer win) (list vterm-buf input-buf))
-          (ignore-errors (delete-window win)))))))
-
-(map! :leader
-      :desc "Toggle Claude REPL fullscreen" "w c" #'claude-repl-toggle-fullscreen)
 
 (provide 'claude-repl)
 ;;; config.el ends here
