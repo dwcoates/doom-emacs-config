@@ -1942,64 +1942,55 @@ Without region: copies file:line."
       :desc "Copy file reference" "o r" #'claude-repl-copy-reference)
 
 ;; SPC j — Tell Claude to do a predefined thing
-(define-prefix-command 'claude-repl-tests-prefix      'claude-repl-tests-map)
-(define-prefix-command 'claude-repl-explain-diff-prefix 'claude-repl-explain-diff-map)
-(define-prefix-command 'claude-repl-update-pr-diff-prefix 'claude-repl-update-pr-diff-map)
-
 (map! :leader
-      :desc "Explain line/region/hunk"      "j e" #'claude-repl-explain
-      :desc "Explain diff scope"            "j E" #'claude-repl-explain-diff-prefix
-      :desc "Update GitHub PR description"  "j r" #'claude-repl-update-pr
-      :desc "Update PR desc for diff scope" "j R" #'claude-repl-update-pr-diff-prefix
-      :desc "tests"                         "j t" #'claude-repl-tests-prefix)
-
-(map! :map claude-repl-explain-diff-map
-      :desc "worktree"    "w" #'claude-repl-explain-diff-worktree
-      :desc "staged"      "s" #'claude-repl-explain-diff-staged
-      :desc "uncommitted" "u" #'claude-repl-explain-diff-uncommitted
-      :desc "HEAD"        "h" #'claude-repl-explain-diff-head
-      :desc "branch"      "b" #'claude-repl-explain-diff-branch)
-
-(map! :map claude-repl-update-pr-diff-map
-      :desc "worktree"    "w" #'claude-repl-update-pr-diff-worktree
-      :desc "staged"      "s" #'claude-repl-update-pr-diff-staged
-      :desc "uncommitted" "u" #'claude-repl-update-pr-diff-uncommitted
-      :desc "HEAD"        "h" #'claude-repl-update-pr-diff-head
-      :desc "branch"      "b" #'claude-repl-update-pr-diff-branch)
-
-(map! :map claude-repl-tests-map
-      (:prefix ("r" . "run")
+      (:prefix ("j" . "claude")
+       :desc "Explain line/region/hunk"      "e" #'claude-repl-explain
+       :desc "Update GitHub PR description"  "r" #'claude-repl-update-pr
+       (:prefix ("E" . "explain diff")
+        :desc "worktree"    "w" #'claude-repl-explain-diff-worktree
+        :desc "staged"      "s" #'claude-repl-explain-diff-staged
+        :desc "uncommitted" "u" #'claude-repl-explain-diff-uncommitted
+        :desc "HEAD"        "h" #'claude-repl-explain-diff-head
+        :desc "branch"      "b" #'claude-repl-explain-diff-branch)
+       (:prefix ("R" . "update PR diff")
+        :desc "worktree"    "w" #'claude-repl-update-pr-diff-worktree
+        :desc "staged"      "s" #'claude-repl-update-pr-diff-staged
+        :desc "uncommitted" "u" #'claude-repl-update-pr-diff-uncommitted
+        :desc "HEAD"        "h" #'claude-repl-update-pr-diff-head
+        :desc "branch"      "b" #'claude-repl-update-pr-diff-branch)
        (:prefix ("t" . "tests")
-        :desc "worktree"    "w" #'claude-repl-run-tests-worktree
-        :desc "staged"      "s" #'claude-repl-run-tests-staged
-        :desc "uncommitted" "u" #'claude-repl-run-tests-uncommitted
-        :desc "HEAD"        "h" #'claude-repl-run-tests-head
-        :desc "branch"      "b" #'claude-repl-run-tests-branch)
-       (:prefix ("l" . "lint")
-        :desc "worktree"    "w" #'claude-repl-run-lint-worktree
-        :desc "staged"      "s" #'claude-repl-run-lint-staged
-        :desc "uncommitted" "u" #'claude-repl-run-lint-uncommitted
-        :desc "HEAD"        "h" #'claude-repl-run-lint-head
-        :desc "branch"      "b" #'claude-repl-run-lint-branch)
-       (:prefix ("a" . "all")
-        :desc "worktree"    "w" #'claude-repl-run-all-worktree
-        :desc "staged"      "s" #'claude-repl-run-all-staged
-        :desc "uncommitted" "u" #'claude-repl-run-all-uncommitted
-        :desc "HEAD"        "h" #'claude-repl-run-all-head
-        :desc "branch"      "b" #'claude-repl-run-all-branch))
-      (:prefix ("a" . "analyze")
-       (:prefix ("q" . "quality")
-        :desc "worktree"    "w" #'claude-repl-test-quality-worktree
-        :desc "staged"      "s" #'claude-repl-test-quality-staged
-        :desc "uncommitted" "u" #'claude-repl-test-quality-uncommitted
-        :desc "HEAD"        "h" #'claude-repl-test-quality-head
-        :desc "branch"      "b" #'claude-repl-test-quality-branch)
-       (:prefix ("c" . "coverage")
-        :desc "worktree"    "w" #'claude-repl-test-coverage-worktree
-        :desc "staged"      "s" #'claude-repl-test-coverage-staged
-        :desc "uncommitted" "u" #'claude-repl-test-coverage-uncommitted
-        :desc "HEAD"        "h" #'claude-repl-test-coverage-head
-        :desc "branch"      "b" #'claude-repl-test-coverage-branch)))
+        (:prefix ("r" . "run")
+         (:prefix ("t" . "tests")
+          :desc "worktree"    "w" #'claude-repl-run-tests-worktree
+          :desc "staged"      "s" #'claude-repl-run-tests-staged
+          :desc "uncommitted" "u" #'claude-repl-run-tests-uncommitted
+          :desc "HEAD"        "h" #'claude-repl-run-tests-head
+          :desc "branch"      "b" #'claude-repl-run-tests-branch)
+         (:prefix ("l" . "lint")
+          :desc "worktree"    "w" #'claude-repl-run-lint-worktree
+          :desc "staged"      "s" #'claude-repl-run-lint-staged
+          :desc "uncommitted" "u" #'claude-repl-run-lint-uncommitted
+          :desc "HEAD"        "h" #'claude-repl-run-lint-head
+          :desc "branch"      "b" #'claude-repl-run-lint-branch)
+         (:prefix ("a" . "all")
+          :desc "worktree"    "w" #'claude-repl-run-all-worktree
+          :desc "staged"      "s" #'claude-repl-run-all-staged
+          :desc "uncommitted" "u" #'claude-repl-run-all-uncommitted
+          :desc "HEAD"        "h" #'claude-repl-run-all-head
+          :desc "branch"      "b" #'claude-repl-run-all-branch))
+        (:prefix ("a" . "analyze")
+         (:prefix ("q" . "quality")
+          :desc "worktree"    "w" #'claude-repl-test-quality-worktree
+          :desc "staged"      "s" #'claude-repl-test-quality-staged
+          :desc "uncommitted" "u" #'claude-repl-test-quality-uncommitted
+          :desc "HEAD"        "h" #'claude-repl-test-quality-head
+          :desc "branch"      "b" #'claude-repl-test-quality-branch)
+         (:prefix ("c" . "coverage")
+          :desc "worktree"    "w" #'claude-repl-test-coverage-worktree
+          :desc "staged"      "s" #'claude-repl-test-coverage-staged
+          :desc "uncommitted" "u" #'claude-repl-test-coverage-uncommitted
+          :desc "HEAD"        "h" #'claude-repl-test-coverage-head
+          :desc "branch"      "b" #'claude-repl-test-coverage-branch)))))
 
 (dotimes (i 10)
   (let ((char (number-to-string i)))
