@@ -306,6 +306,26 @@ Emacs to call our handler instead of the originally resolved command."
     (with-current-buffer (claude-repl--ws-get (+workspace-current-name) :vterm-buffer)
       (vterm-send-up))))
 
+(defun claude-repl--input-wheel-up ()
+  "Scroll the Claude vterm window toward older output (mouse wheel up from input)."
+  (interactive)
+  (when (claude-repl--vterm-live-p)
+    (let* ((vterm-buf (claude-repl--ws-get (+workspace-current-name) :vterm-buffer))
+           (vterm-win (get-buffer-window vterm-buf)))
+      (when vterm-win
+        (with-selected-window vterm-win
+          (scroll-down 3))))))
+
+(defun claude-repl--input-wheel-down ()
+  "Scroll the Claude vterm window toward newer output (mouse wheel down from input)."
+  (interactive)
+  (when (claude-repl--vterm-live-p)
+    (let* ((vterm-buf (claude-repl--ws-get (+workspace-current-name) :vterm-buffer))
+           (vterm-win (get-buffer-window vterm-buf)))
+      (when vterm-win
+        (with-selected-window vterm-win
+          (scroll-up 3))))))
+
 (map! :map claude-input-mode-map
       :ni "RET"       #'claude-repl-send
       :ni "S-RET"     #'newline
@@ -324,7 +344,9 @@ Emacs to call our handler instead of the originally resolved command."
       :n  "C-p"       #'claude-repl-scroll-up
       :ni "C-v"       #'claude-repl-paste-to-vterm
       :ni "<up>"        #'claude-repl--history-prev
-      :ni "<down>"      #'claude-repl--history-next)
+      :ni "<down>"      #'claude-repl--history-next
+      [wheel-up]        #'claude-repl--input-wheel-up
+      [wheel-down]      #'claude-repl--input-wheel-down)
 
 ;; C-S-0 through C-S-9: send digit to Claude
 (dotimes (i 10)
