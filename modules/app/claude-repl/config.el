@@ -2142,5 +2142,29 @@ Reports comprehensive diagnostics."
                (if open "yes" "no") (if dirty "yes" "no")
                (or before "nil") (or after "nil")))))
 
+(defun claude-repl-toggle-fullscreen ()
+  "Toggle fullscreen for the Claude REPL vterm and input windows.
+Saves the current window configuration and expands the Claude panels
+to fill the frame.  Calling again restores the saved configuration."
+  (interactive)
+  (if claude-repl--fullscreen-config
+      (progn
+        (set-window-configuration claude-repl--fullscreen-config)
+        (setq claude-repl--fullscreen-config nil))
+    (let* ((ws (+workspace-current-name))
+           (vterm-buf (claude-repl--ws-get ws :vterm-buffer))
+           (input-buf (claude-repl--ws-get ws :input-buffer)))
+      (unless (and vterm-buf input-buf
+                   (get-buffer-window vterm-buf)
+                   (get-buffer-window input-buf))
+        (user-error "Claude REPL panels are not visible"))
+      (setq claude-repl--fullscreen-config (current-window-configuration))
+      (dolist (win (window-list))
+        (unless (memq (window-buffer win) (list vterm-buf input-buf))
+          (ignore-errors (delete-window win)))))))
+
+(map! :leader
+      :desc "Toggle Claude REPL fullscreen" "w c" #'claude-repl-toggle-fullscreen)
+
 (provide 'claude-repl)
 ;;; config.el ends here
