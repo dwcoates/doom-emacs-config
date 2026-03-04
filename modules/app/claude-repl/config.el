@@ -134,7 +134,7 @@ The prefix is sent on the first prompt and every Nth prompt thereafter."
   :group 'claude-repl)
 
 
-(defcustom claude-repl-send-postfix "\n what do you think? spit it back to me."
+(defcustom claude-repl-send-postfix "\n what do you think? do NOT code, just analyze."
   "String appended to input when sending via `claude-repl-send-with-postfix'."
   :type 'string
   :group 'claude-repl)
