@@ -412,6 +412,12 @@
         tab-bar-close-button-show nil)
   (tab-bar-mode 1)
 
+  (defun +dwc/refresh-tab-bar ()
+    "Force the tab-bar to re-render with current face/theme colors."
+    (interactive)
+    (tab-bar-tabs-set (tab-bar-tabs))
+    (tab-bar--update-tab-bar-lines t))
+
   ;; Delete the "main" workspace after session restore.
   (add-hook 'persp-after-load-state-functions
             (lambda (&rest _)
