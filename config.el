@@ -393,6 +393,8 @@
 (after! persp-mode
   ;; Auto-restore workspaces from last session on startup
   (setq persp-auto-resume-time 0.1)
+  ;; Never ask for confirmation when killing a buffer not in the current workspace
+  (setq persp-kill-foreign-buffer-behaviour 'kill)
 
   ;; Show workspace names in tab-bar
   (defun +dwc/workspace-tabline-formatted ()
@@ -834,6 +836,19 @@ If found, the class name is returned, otherwise STR is returned"
   (switch-to-buffer (other-buffer (current-buffer) t)))
 
 (map! :leader "b p" #'+dwc/toggle-last-buffer)
+
+(defun +dwc/kill-all-buffers-everywhere ()
+  "Kill all buffers in all workspaces."
+  (interactive)
+  (when (y-or-n-p "Kill ALL buffers in ALL workspaces? ")
+    (let ((killed 0))
+      (dolist (buf (buffer-list))
+        (unless (or (string-match-p "^ " (buffer-name buf))
+                    (string-match-p "^\\*Messages\\*$" (buffer-name buf))
+                    (string-match-p "^\\*scratch\\*$" (buffer-name buf)))
+          (kill-buffer buf)
+          (cl-incf killed)))
+      (message "Killed %d buffers." killed))))
 
 
 ;; (advice-add 'command-execute :before
