@@ -958,7 +958,7 @@ Without region: sends file path and current line."
   (claude-repl--send-diff-analysis claude-repl-branch-diff-spec claude-repl-run-all-prompt))
 
 (defconst claude-repl--test-quality-prompt
-  "please analyze tests to ensure they are following AAA standards for testing. They should be employing DRY principle for refactoring as well (extract repeated code into helpers, use builder pattern to facilitate test DSL). We should only be testing one thing per test (can extract tests into subtests to ensure this)")
+  "please analyze tests to ensure they are following AAA standards for testing. They should be employing DRY principle for refactoring as well (extract repeated code into helpers, use builder pattern to facilitate test DSL). We should only be testing one thing per test (can extract tests into subtests to ensure this). We should not be using ANY timing logic in tests. If there is any timing logic found, surface it.")
 
 (defconst claude-repl--test-coverage-prompt
   "please analyze test coverage in depth for recent changes: start by enumerating all edge cases introduced or modified, and THEN, afterwards, analyze in depth our current coverage to check for missing coverage of those edge cases.")
