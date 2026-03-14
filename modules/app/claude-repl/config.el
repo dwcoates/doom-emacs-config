@@ -1827,13 +1827,21 @@ If panels hidden: show both panels."
   (claude-repl--log "kill")
   (let* ((ws (+workspace-current-name))
          (vterm-buf (claude-repl--ws-get ws :vterm-buffer))
-         (input-buf (claude-repl--ws-get ws :input-buffer)))
+         (input-buf (claude-repl--ws-get ws :input-buffer))
+         (saved-wconf (claude-repl--ws-get ws :saved-window-config))
+         (ret-win (claude-repl--ws-get ws :return-window)))
     (unless ws (error "claude-repl-kill: no active workspace"))
     (claude-repl--ws-put ws :status nil)
     (claude-repl--ws-put ws :activity-time nil)
     (force-mode-line-update t)
     (claude-repl--teardown-session-state ws)
-    (claude-repl--destroy-session-buffers vterm-buf input-buf)))
+    (if saved-wconf
+        (progn
+          (set-window-configuration saved-wconf)
+          (claude-repl--destroy-session-buffers vterm-buf input-buf))
+      (claude-repl--destroy-session-buffers vterm-buf input-buf)
+      (when (and ret-win (window-live-p ret-win))
+        (select-window ret-win)))))
 
 (defun claude-repl-restart ()
   "Kill Claude REPL and restart with `claude -c` to continue session."
