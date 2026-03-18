@@ -842,22 +842,22 @@ Without region: sends file path and current line."
 (defun claude-repl-update-pr-diff-worktree ()
   "Ask Claude to update the PR description for unstaged changes."
   (interactive)
-  (claude-repl--send-diff-analysis "unstaged changes (git diff)" claude-repl-update-pr-diff-prompt))
+  (claude-repl--send-diff-analysis "UNSTAGED changes (git diff). So not consider staged changes or committed changes." claude-repl-update-pr-diff-prompt))
 
 (defun claude-repl-update-pr-diff-staged ()
   "Ask Claude to update the PR description for staged changes."
   (interactive)
-  (claude-repl--send-diff-analysis "staged changes (git diff --cached)" claude-repl-update-pr-diff-prompt))
+  (claude-repl--send-diff-analysis "STAGED changes (git diff --cached). Do not consider unstaged changes or committed changes." claude-repl-update-pr-diff-prompt))
 
 (defun claude-repl-update-pr-diff-uncommitted ()
   "Ask Claude to update the PR description for all uncommitted changes."
   (interactive)
-  (claude-repl--send-diff-analysis "uncommitted changes (git diff HEAD)" claude-repl-update-pr-diff-prompt))
+  (claude-repl--send-diff-analysis "All UNCOMMITTED changes (git diff HEAD). Consider BOTH staged and unstaged changes. Do not consider committed changes." claude-repl-update-pr-diff-prompt))
 
 (defun claude-repl-update-pr-diff-head ()
   "Ask Claude to update the PR description for the last commit."
   (interactive)
-  (claude-repl--send-diff-analysis "last commit (git show HEAD)" claude-repl-update-pr-diff-prompt))
+  (claude-repl--send-diff-analysis "last commit (git show HEAD)." claude-repl-update-pr-diff-prompt))
 
 (defun claude-repl-update-pr-diff-branch ()
   "Ask Claude to update the PR description for all changes in the current branch."
@@ -958,10 +958,10 @@ Without region: sends file path and current line."
   (claude-repl--send-diff-analysis claude-repl-branch-diff-spec claude-repl-run-all-prompt))
 
 (defconst claude-repl--test-quality-prompt
-  "please analyze tests to ensure they are following AAA standards for testing. They should be employing DRY principle for refactoring as well (extract repeated code into helpers, use builder pattern to facilitate test DSL). We should only be testing one thing per test (can extract tests into subtests to ensure this). Ensure that tests are correctly grouped into subtests, and that very similar/redundant suites are merged. We should not be using ANY timing logic in tests. If there is any timing logic found, surface it. It is FINE for potentially hanging tests to become unblocked with ERROR after some amount of time -- we are only concerned with not attempting to ballpark synchronization via time. We should be careful to NOT reduce the production code path coverage of our refactors -- for example, we should avoid removing asserts in the effort to 'only test one thing', and instead prefer adding a new subtest.")
+  "please analyze tests to ensure they are following AAA standards for testing. Please be sure to confine your analysis to the specified context (branch, HEAD, uncommitted changes, etc). They should be employing DRY principle for refactoring as well (extract repeated code into helpers, use builder pattern to facilitate test DSL). We should only be testing one thing per test (can extract tests into subtests to ensure this). Ensure that tests are correctly grouped into subtests, and that very similar/redundant suites are merged. We should not be using ANY timing logic in tests. If there is any timing logic found, surface it. It is FINE for potentially hanging tests to become unblocked with ERROR after some amount of time -- we are only concerned with not attempting to ballpark synchronization via time. We should be careful to NOT reduce the production code path coverage of our refactors -- for example, we should avoid removing asserts in the effort to 'only test one thing', and instead prefer adding a new subtest. Please spin up ONE AGENT PER TEST FILE!")
 
 (defconst claude-repl--test-coverage-prompt
-  "<<IF AND ONLY IF YOU JUST PRODUCED A LIST OF EDGE CASES>>: write up a plan for producing a unit test that covers each and every one of the edge cases you just enumerated. Each test should cover *precisely* one edge case. <<IF AND ONLY IF YOU DID NOT -- I REPEAT, NOT -- JUST PRODUCE A LIST OF EDGE CASES IN YOUR LAST RESPONSE MESSAGE>>: please enumerate each and every edge cases introduced or modified by each and every function added or modified.")
+  "Please be sure to confine your analysis to the specified context (branch, HEAD, uncommitted changes, etc). <<IF AND ONLY IF YOU JUST PRODUCED A LIST OF EDGE CASES>>: write up a plan for producing a unit test that covers each and every one of the edge cases you just enumerated. Each test should cover *precisely* one edge case. Each test file should be worked on by a separate agent. <<IF AND ONLY IF YOU DID NOT -- I REPEAT, NOT -- JUST PRODUCE A LIST OF EDGE CASES IN YOUR LAST RESPONSE MESSAGE>>: please enumerate each and every edge cases introduced or modified by each and every function added or modified.")
 
 (defun claude-repl--send-diff-analysis (change-spec prompt)
   "Send a diff analysis request to Claude.
@@ -972,7 +972,7 @@ PROMPT is the analysis instruction."
     (claude-repl--send-to-claude msg)))
 
 (defcustom claude-repl-branch-diff-spec
-  "changes in current branch (git diff main...HEAD)"
+  "changes in current branch (git diff $(git merge-base HEAD origin/master))"
   "Change-spec string used for branch-level quality and coverage analysis commands."
   :type 'string
   :group 'claude-repl)
