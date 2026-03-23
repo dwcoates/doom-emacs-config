@@ -727,10 +727,8 @@ No-op if already running."
   (claude-repl--log "send-to-claude len=%d" (length text))
   (let ((ws (+workspace-current-name)))
     (claude-repl--ensure-session)
-    (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
-      (with-current-buffer vterm-buf
-        (vterm-send-string text)
-        (vterm-send-return)))))
+    (claude-repl--send-input-to-vterm
+     (claude-repl--ws-get ws :vterm-buffer) text)))
 
 (defun claude-repl--rel-path ()
   "Return the current file path relative to the project root."
