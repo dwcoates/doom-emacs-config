@@ -374,6 +374,24 @@
           (doom-project-find-file dir))))
 
 (after! magit
+  ;; Close claude-repl panels before opening magit-status, restore on quit
+  (defvar +dwc/magit--claude-repl-was-visible nil)
+
+  (advice-add #'magit-status :before
+              (lambda (&rest _)
+                (setq +dwc/magit--claude-repl-was-visible
+                      (and (fboundp 'claude-repl--panels-visible-p)
+                           (claude-repl--panels-visible-p)))
+                (when +dwc/magit--claude-repl-was-visible
+                  (claude-repl--restore-layout))))
+
+  (advice-add #'magit-mode-bury-buffer :after
+              (lambda (&rest _)
+                (when +dwc/magit--claude-repl-was-visible
+                  (setq +dwc/magit--claude-repl-was-visible nil)
+                  (when (fboundp 'claude-repl--show-existing-panels)
+                    (claude-repl--show-existing-panels)))))
+
   (setq magit-no-confirm (append magit-no-confirm '(abort-revert abort-rebase abort-merge))
         magit-diff-visit-previous-blob nil)
 
