@@ -760,11 +760,63 @@ If found, the class name is returned, otherwise STR is returned"
               :action (lambda (c) (switch-to-buffer (if (consp c) (cdr c) c)))
               :caller '+dwc/switch-to-project-buffer)))
 
+(defun +dwc/create-worktree-workspace ()
+  "Create a new git worktree and switch to it as a project workspace.
+Prompts for a name (may use branch-style slashes like DC/CV-100/cool-branch).
+The worktree directory uses only the last path component; the full name becomes
+the branch name.
+
+If called from a worktree, the new worktree is created as a sibling (../<dirname>).
+If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirname>."
+  (interactive)
+  (let* ((git-root (string-trim
+                    (shell-command-to-string "git rev-parse --show-toplevel")))
+         (_ (when (string-match-p "^fatal" git-root)
+              (user-error "Not in a git repository")))
+         (name (read-string "Worktree name: "))
+         (_ (when (string-empty-p name)
+              (user-error "Name cannot be empty")))
+         ;; If name contains slashes (e.g. DC/CV-100/cool-branch), use only the
+         ;; last component as the directory name, but pass the full name as the
+         ;; branch name to git.
+         (dirname (file-name-nondirectory (directory-file-name name)))
+         (branch-name (if (string-match-p "/" name) name nil))
+         (git-root-parent (file-name-directory (directory-file-name git-root)))
+         ;; A worktree has .git as a regular file; a normal repo has it as a directory.
+         (in-worktree (file-regular-p (expand-file-name ".git" git-root)))
+         (worktree-parent (if in-worktree
+                              git-root-parent
+                            (let* ((repo-name (file-name-nondirectory (directory-file-name git-root)))
+                                   (wt-dir (expand-file-name (concat repo-name "-worktrees") git-root-parent)))
+                              (make-directory wt-dir t)
+                              wt-dir)))
+         (path (expand-file-name dirname worktree-parent)))
+    (when (projectile-project-p path)
+      (user-error "Worktree '%s' already exists — use SPC p p to switch to it" dirname))
+    (let* ((cmd (if branch-name
+                    (format "git -C %s worktree add -b %s %s 2>&1"
+                            (shell-quote-argument git-root)
+                            (shell-quote-argument branch-name)
+                            (shell-quote-argument path))
+                  (format "git -C %s worktree add %s 2>&1"
+                          (shell-quote-argument git-root)
+                          (shell-quote-argument path))))
+           (result (shell-command-to-string cmd)))
+      (when (string-match-p "^fatal\\|^error" result)
+        (user-error "git worktree add failed: %s" (string-trim result))))
+    ;; Create a .projectile marker so projectile-project-p detects this as a project.
+    (write-region "" nil (expand-file-name ".projectile" path))
+    (projectile-add-known-project (file-name-as-directory path))
+    (projectile-switch-project-by-name (file-name-as-directory path))
+    (let ((ws-id (substring (md5 (file-truename path)) 0 8)))
+      (claude-repl--register-worktree-ws ws-id path))))
+
 (map! :leader
       (:prefix "p"
        :desc "Switch to project" "p" #'+dwc/switch-to-project
        :desc "Switch to project with file" "P" #'+dwc/switch-to-project-with-file
-       :desc "Switch to project buffer" "b" #'+dwc/switch-to-project-buffer))
+       :desc "Switch to project buffer" "b" #'+dwc/switch-to-project-buffer
+       :desc "Create worktree workspace" "w" #'+dwc/create-worktree-workspace))
 
 ;; Custom named vterm function
 (defun +dwc/vterm-named ()

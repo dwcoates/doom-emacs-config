@@ -78,6 +78,11 @@ Internally uses plist-put (which returns a new list) threaded into puthash."
   "Remove all state for workspace WS."
   (remhash ws claude-repl--workspaces))
 
+(defun claude-repl--register-worktree-ws (ws-id path)
+  "Mark workspace WS-ID as a worktree workspace rooted at PATH."
+  (claude-repl--ws-put ws-id :worktree-p t)
+  (claude-repl--ws-put ws-id :worktree-path path))
+
 (defvar claude-repl--fullscreen-config nil
   "Saved window configuration before fullscreen toggle.")
 
