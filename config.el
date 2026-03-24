@@ -805,7 +805,7 @@ If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirn
       (when (string-match-p "^fatal\\|^error" result)
         (user-error "git worktree add failed: %s" (string-trim result))))
     ;; Create a .projectile marker so projectile-project-p detects this as a project.
-    (write-region "" nil (expand-file-name ".projectile" path))
+    (write-region name nil (expand-file-name ".projectile" path))
     (projectile-add-known-project (file-name-as-directory path))
     (projectile-switch-project-by-name (file-name-as-directory path))
     (let ((ws-id (substring (md5 (file-truename path)) 0 8)))
