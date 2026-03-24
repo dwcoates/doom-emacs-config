@@ -680,7 +680,6 @@ If found, the class name is returned, otherwise STR is returned"
   (defun +dwc/projectile-project-name (project-root)
     "Generate project name using .projectile at git root if available, with smart bracketing"
     (let* ((default-name (file-name-nondirectory (directory-file-name project-root)))
-           (projectile-file (expand-file-name ".projectile" project-root))
            (git-root (ignore-errors
                        (let ((default-directory project-root))
                          (with-temp-buffer
@@ -695,11 +694,9 @@ If found, the class name is returned, otherwise STR is returned"
                                                    (insert-file-contents git-root-projectile-file)
                                                    (buffer-string)))
                                   git-root-dir)))
-            (if (and (file-exists-p projectile-file) 
-                     (not (string= projectile-dir git-root-dir)))
-                ;; Different directories, show both
+            (if (not (string= projectile-dir git-root-dir))
+                ;; Subproject: show git root name with subdir in brackets
                 (format "%s [%s]" git-root-name projectile-dir)
-              ;; Same directory or no .projectile in subdir, just show git root name
               git-root-name))
         default-name)))
   
