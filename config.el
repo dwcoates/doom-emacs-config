@@ -959,6 +959,14 @@ If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirn
 (map! :leader
       :desc "Search kill ring" "s y" #'counsel-yank-pop)
 
+(defun +dwc/counsel-rg-here ()
+  "Search file contents recursively from the current directory."
+  (interactive)
+  (counsel-rg nil default-directory))
+
+(map! :leader
+      :desc "Search files from current dir" "s d" #'+dwc/counsel-rg-here)
+
 (map! :map (magit-status-mode-map magit-diff-section-base-map magit-diff-section-map)
       "C-<return>" #'magit-diff-visit-file-other-window)
 
