@@ -808,7 +808,7 @@ If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirn
     (start-process "claude-init" nil "sh" "-c"
                    (format "cd %s && claude --print 'use gns to read the ticket from the branchname %s'"
                            (shell-quote-argument path)
-                           (shell-quote-argument name))))
+                           (shell-quote-argument name)))
     ;; Create a .projectile marker so projectile-project-p detects this as a project.
     (write-region dirname nil (expand-file-name ".projectile" path))
     (projectile-add-known-project (file-name-as-directory path))
