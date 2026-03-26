@@ -350,8 +350,10 @@ Emacs to call our handler instead of the originally resolved command."
       :n  "C-n"       #'claude-repl-scroll-down
       :n  "C-p"       #'claude-repl-scroll-up
       :ni "C-v"       #'claude-repl-paste-to-vterm
-      :ni "<up>"        #'claude-repl--history-prev
-      :ni "<down>"      #'claude-repl--history-next
+      :n  "<up>"        #'claude-repl--history-prev
+      :n  "<down>"      #'claude-repl--history-next
+      :i  "<up>"        #'claude-repl--send-up-arrow
+      :i  "<down>"      #'claude-repl--send-down-arrow
       [wheel-up]        #'claude-repl--input-wheel-up
       [wheel-down]      #'claude-repl--input-wheel-down)
 
@@ -706,8 +708,33 @@ all characters are sent directly to vterm."
 
 ;; Use remaps throughout so evil keymap priority is irrelevant — remaps are
 ;; resolved after key→command lookup and apply across all evil states.
+(defun claude-repl--slash-tab ()
+  "Forward a tab character to vterm in slash mode."
+  (interactive)
+  (claude-repl--slash-vterm-send "\t")
+  (push "\t" claude-repl--slash-stack))
+
+(defun claude-repl--send-up-arrow ()
+  "Send up arrow key to the current workspace's vterm."
+  (interactive)
+  (let* ((ws (+workspace-current-name))
+         (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+    (when (and vterm-buf (buffer-live-p vterm-buf))
+      (with-current-buffer vterm-buf
+        (vterm-send-key "<up>")))))
+
+(defun claude-repl--send-down-arrow ()
+  "Send down arrow key to the current workspace's vterm."
+  (interactive)
+  (let* ((ws (+workspace-current-name))
+         (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+    (when (and vterm-buf (buffer-live-p vterm-buf))
+      (with-current-buffer vterm-buf
+        (vterm-send-key "<down>")))))
+
 (map! :map claude-slash-input-mode-map
       [remap self-insert-command]                #'claude-repl--slash-forward-char
+      [remap indent-for-tab-command]             #'claude-repl--slash-tab
       [remap evil-delete-backward-char-and-join] #'claude-repl--slash-backspace
       [remap delete-backward-char]               #'claude-repl--slash-backspace
       [remap backward-delete-char-untabify]      #'claude-repl--slash-backspace
