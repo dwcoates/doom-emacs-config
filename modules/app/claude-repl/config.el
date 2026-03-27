@@ -387,15 +387,13 @@ Emacs to call our handler instead of the originally resolved command."
     (define-key claude-input-mode-map (kbd (format "C-S-%s" char))
       (lambda () (interactive) (claude-repl-send-char char)))))
 
-;; 0-9 in insert mode: if the buffer is empty, immediately forward the raw digit
-;; to vterm with no return and no state change; otherwise insert normally.
+;; 0-9 in insert mode: if the buffer is empty, enter pass-through mode and
+;; forward the digit to vterm; otherwise insert normally.
 (dotimes (i 10)
   (let ((char (number-to-string i)))
     (evil-define-key 'insert claude-input-mode-map (kbd char)
       (lambda () (interactive)
-        (if (= (buffer-size) 0)
-            (claude-repl--slash-vterm-send char)
-          (self-insert-command 1 (string-to-char char)))))))
+        (claude-repl--passthrough-start char)))))
 
 ;; Input history persistence
 (defun claude-repl--history-file ()
@@ -713,15 +711,21 @@ Popped on backspace; when empty the mode exits.")
   (setq claude-repl--slash-stack nil)
   (claude-slash-input-mode -1))
 
-(defun claude-repl--slash-start ()
-  "Enter slash pass-through mode if the buffer is empty, else insert / normally."
-  (interactive)
+(defun claude-repl--passthrough-start (char)
+  "Enter pass-through mode and send CHAR to vterm if the buffer is empty.
+Otherwise insert CHAR normally.  Used for /, digits, and any other
+characters that should go directly to Claude when typed first."
   (if (= (buffer-size) 0)
       (progn
         (claude-slash-input-mode 1)
-        (setq claude-repl--slash-stack (list "/"))
-        (claude-repl--slash-vterm-send "/"))
-    (self-insert-command 1 ?/)))
+        (setq claude-repl--slash-stack (list char))
+        (claude-repl--slash-vterm-send char))
+    (self-insert-command 1 (string-to-char char))))
+
+(defun claude-repl--slash-start ()
+  "Enter pass-through mode if the buffer is empty, else insert / normally."
+  (interactive)
+  (claude-repl--passthrough-start "/"))
 
 (define-minor-mode claude-slash-input-mode
   "Minor mode that transparently forwards keystrokes to Claude vterm.
