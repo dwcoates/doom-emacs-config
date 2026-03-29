@@ -539,7 +539,12 @@ Uses paste mode for large inputs to avoid truncation."
                          (when (buffer-live-p buf)
                            (with-current-buffer buf
                              (vterm-send-return)
-                             (claude-repl--refresh-vterm))))))
+                             (run-at-time 0.05 nil
+                                          (lambda ()
+                                            (when (buffer-live-p buf)
+                                              (with-current-buffer buf
+                                                (vterm-send-return)
+                                                (claude-repl--refresh-vterm))))))))))
       (vterm-send-string input)
       (vterm-send-return)
       (claude-repl--refresh-vterm))))
