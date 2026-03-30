@@ -62,7 +62,8 @@ Uses an MD5 hash of the git root path.  Falls back to the buffer-local
 (defvar claude-repl--workspaces (make-hash-table :test 'equal)
   "Hash table mapping workspace name → state plist.
 Keys: :vterm-buffer :input-buffer :saved-window-config
-      :return-window :prefix-counter :status :activity-time")
+      :return-window :prefix-counter :status :activity-time
+      :git-clean :git-proc")
 
 (defun claude-repl--ws-get (ws key)
   "Get KEY from workspace WS's plist."
@@ -1186,17 +1187,50 @@ STATE is one of: :thinking, :done, :permission, :stale."
     (:stale (claude-repl--ws-put ws :activity-time nil)))
   (force-mode-line-update t))
 
-(defun claude-repl--workspace-clean-p (ws)
-  "Return non-nil if workspace WS has no unstaged changes to tracked files."
+(defun claude-repl--ws-dir (ws)
+  "Return a directory associated with workspace WS, used for git checks.
+Returns the `default-directory' of the first live buffer in WS, or nil."
   (ignore-errors
     (let* ((persp (persp-get-by-name ws))
-           (bufs (and persp (not (symbolp persp)) (persp-buffers persp)))
-           (dir (cl-loop for buf in bufs
-                         when (buffer-live-p buf)
-                         return (buffer-local-value 'default-directory buf))))
-      (when dir
-        (let ((default-directory dir))
-          (= 0 (process-file "git" nil nil nil "diff" "--quiet")))))))
+           (bufs (and persp (not (symbolp persp)) (persp-buffers persp))))
+      (cl-loop for buf in bufs
+               when (buffer-live-p buf)
+               return (buffer-local-value 'default-directory buf)))))
+
+(defun claude-repl--workspace-clean-p (ws)
+  "Return non-nil if workspace WS has no unstaged changes to tracked files.
+Reads from a cached value updated asynchronously by
+`claude-repl--async-refresh-git-status'.  Defaults to non-nil (clean) when
+the cache has not yet been populated."
+  (not (eq (claude-repl--ws-get ws :git-clean) 'dirty)))
+
+(defun claude-repl--async-refresh-git-status (ws)
+  "Asynchronously refresh the git cleanliness cache for workspace WS.
+Starts `git diff --quiet' in WS's directory.  On exit, sets `:git-clean'
+to `clean' or `dirty' in the workspace plist and calls
+`claude-repl--update-ws-state' to apply any resulting state transition.
+A no-op if a check is already in progress for WS."
+  (when-let ((dir (claude-repl--ws-dir ws)))
+    (unless (let ((proc (claude-repl--ws-get ws :git-proc)))
+              (and proc (process-live-p proc)))
+      (let* ((default-directory dir)
+             (proc (make-process
+                    :name (format "claude-repl-git-%s" ws)
+                    :command '("git" "diff" "--quiet")
+                    :connection-type 'pipe
+                    :noquery t
+                    :buffer nil
+                    :sentinel
+                    (lambda (proc _event)
+                      (unless (process-live-p proc)
+                        (claude-repl--ws-put ws :git-clean
+                                            (if (= 0 (process-exit-status proc))
+                                                'clean
+                                              'dirty))
+                        (claude-repl--ws-put ws :git-proc nil)
+                        (claude-repl--update-ws-state ws)
+                        (force-mode-line-update t))))))
+        (claude-repl--ws-put ws :git-proc proc)))))
 
 (defun claude-repl--touch-activity (ws)
   "Record current time as last input for workspace WS.
@@ -1510,11 +1544,14 @@ State table:
       (_ nil))))
 
 (defun claude-repl--update-all-workspace-states ()
-  "Update state for all workspaces based on claude visibility and git status."
+  "Update state for all workspaces based on claude visibility and git status.
+Uses cached git status (`:git-clean') and kicks off async refreshes."
   (when (bound-and-true-p persp-mode)
     (dolist (ws (+workspace-list-names))
       (if (claude-repl--ws-claude-open-p ws)
-          (claude-repl--update-ws-state ws)
+          (progn
+            (claude-repl--update-ws-state ws)
+            (claude-repl--async-refresh-git-status ws))
         ;; Claude not open on this workspace → clear all state
         (let ((state (claude-repl--ws-state ws)))
           (when (and state (not (eq state :thinking)))
