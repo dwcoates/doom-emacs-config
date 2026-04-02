@@ -50,13 +50,19 @@ Checks for both .git directory and .git file (worktrees)."
         (let ((git (expand-file-name ".git" d)))
           (or (file-directory-p git) (file-regular-p git)))))))
 
+(defun claude-repl--path-canonical (path)
+  "Return a canonical, stable string for PATH suitable for hashing.
+Expands tildes and symlinks via `file-truename', then strips any trailing slash
+via `directory-file-name' so that the same directory always produces the same hash."
+  (directory-file-name (file-truename path)))
+
 (defun claude-repl--workspace-id ()
   "Return a short identifier for the current git workspace.
-Uses an MD5 hash of the git root path.  Falls back to the buffer-local
+Uses an MD5 hash of the canonical git root path.  Falls back to the buffer-local
 `claude-repl--project-root' and then `default-directory'."
   (let ((root (claude-repl--resolve-root)))
     (when root
-      (substring (md5 root) 0 8))))
+      (substring (md5 (claude-repl--path-canonical root)) 0 8))))
 
 ;; Single hash table for all per-workspace state.
 (defvar claude-repl--workspaces (make-hash-table :test 'equal)
@@ -80,9 +86,70 @@ Internally uses plist-put (which returns a new list) threaded into puthash."
   (remhash ws claude-repl--workspaces))
 
 (defun claude-repl--register-worktree-ws (ws-id path)
-  "Mark workspace WS-ID as a worktree workspace rooted at PATH."
-  (claude-repl--ws-put ws-id :worktree-p t)
-  (claude-repl--ws-put ws-id :worktree-path path))
+  "Mark the current workspace as a worktree workspace rooted at PATH.
+WS-ID is the hash identifier (used for logging/buffer naming); the state
+is stored under the workspace name from `+workspace-current-name'.
+Sets :fresh-start t so the first SPC o c opens Claude without -c."
+  (let ((ws (+workspace-current-name)))
+    (claude-repl--log "register-worktree-ws ws-id=%s ws=%s path=%s" ws-id ws path)
+    (claude-repl--ws-put ws :worktree-p t)
+    (claude-repl--ws-put ws :worktree-path path)
+    (claude-repl--ws-put ws :fresh-start t)))
+
+(defun claude-repl-create-worktree-workspace ()
+  "Create a new git worktree and switch to it as a project workspace.
+Prompts for a name (may use branch-style slashes like DC/CV-100/cool-branch).
+The worktree directory uses only the last path component; the full name becomes
+the branch name.
+
+If called from a worktree, the new worktree is created as a sibling (../<dirname>).
+If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirname>."
+  (interactive)
+  (let* ((git-root (string-trim
+                    (shell-command-to-string "git rev-parse --show-toplevel")))
+         (_ (when (string-match-p "^fatal" git-root)
+              (user-error "Not in a git repository")))
+         (name (read-string "Worktree name: "))
+         (_ (when (string-empty-p name)
+              (user-error "Name cannot be empty")))
+         (dirname (file-name-nondirectory (directory-file-name name)))
+         (branch-name (if (string-match-p "/" name) name nil))
+         (git-root-parent (file-name-directory (directory-file-name git-root)))
+         (in-worktree (file-regular-p (expand-file-name ".git" git-root)))
+         (worktree-parent (if in-worktree
+                              git-root-parent
+                            (let* ((repo-name (file-name-nondirectory (directory-file-name git-root)))
+                                   (wt-dir (expand-file-name (concat repo-name "-worktrees") git-root-parent)))
+                              (make-directory wt-dir t)
+                              wt-dir)))
+         (path (expand-file-name dirname worktree-parent)))
+    (message "[worktree] git-root=%s name=%s dirname=%s branch=%s in-worktree=%s path=%s old-ws=%s old-ws-id=%s"
+             git-root name dirname (or branch-name "none") in-worktree path
+             (+workspace-current-name) (claude-repl--workspace-id))
+    (when (projectile-project-p path)
+      (user-error "Worktree '%s' already exists — use SPC p p to switch to it" dirname))
+    (let* ((cmd (if branch-name
+                    (format "git -C %s worktree add -b %s %s 2>&1"
+                            (shell-quote-argument git-root)
+                            (shell-quote-argument branch-name)
+                            (shell-quote-argument path))
+                  (format "git -C %s worktree add %s 2>&1"
+                          (shell-quote-argument git-root)
+                          (shell-quote-argument path))))
+           (result (shell-command-to-string cmd)))
+      (message "[worktree] git cmd: %s" cmd)
+      (message "[worktree] git result: %s" (string-trim result))
+      (when (string-match-p "^fatal\\|^error" result)
+        (user-error "git worktree add failed: %s" (string-trim result))))
+    (write-region dirname nil (expand-file-name ".projectile" path))
+    (message "[worktree] wrote .projectile, adding to projectile known projects")
+    (projectile-add-known-project (file-name-as-directory path))
+    (message "[worktree] switching to project: %s" (file-name-as-directory path))
+    (projectile-switch-project-by-name (file-name-as-directory path))
+    (let* ((canonical (claude-repl--path-canonical path))
+           (ws-id (substring (md5 canonical) 0 8)))
+      (message "[worktree] registering ws-id=%s canonical=%s" ws-id canonical)
+      (claude-repl--register-worktree-ws ws-id path))))
 
 (defvar claude-repl--fullscreen-config nil
   "Saved window configuration before fullscreen toggle.")
@@ -234,9 +301,11 @@ Splits right for vterm (60% width to work window), then splits vterm bottom for 
 (defun claude-repl--resolve-root ()
   "Return the project root directory.
 Tries git root, then buffer-local project root, then `default-directory'."
-  (or (claude-repl--git-root)
-      claude-repl--project-root
-      default-directory))
+  (let* ((git (claude-repl--git-root))
+         (root (or git claude-repl--project-root default-directory))
+         (source (cond (git "git") (claude-repl--project-root "buffer-local") (t "default-directory"))))
+    (claude-repl--log "resolve-root source=%s root=%s" source root)
+    root))
 
 (defun claude-repl--vterm-live-p ()
   "Return non-nil if the Claude vterm buffer for the current workspace exists and is live."
@@ -249,12 +318,18 @@ Tries git root, then buffer-local project root, then `default-directory'."
   (face-remap-add-relative 'fringe :background (claude-repl--grey grey-level)))
 
 (defun claude-repl--start-claude ()
-  "Send the claude startup command to the current vterm buffer."
-  (claude-repl--log "start-claude skip-permissions=%s" claude-repl-skip-permissions)
-  (vterm-send-string (concat "clear && claude -c"
-                             (when claude-repl-skip-permissions
-                               " --dangerously-skip-permissions")))
-  (vterm-send-return))
+  "Send the claude startup command to the current vterm buffer.
+On a fresh worktree workspace (:fresh-start t) the -c flag is omitted so
+Claude starts a new conversation rather than resuming a prior one."
+  (let* ((ws (+workspace-current-name))
+         (fresh (claude-repl--ws-get ws :fresh-start))
+         (cmd (concat (if fresh "claude" "claude -c")
+                      (when claude-repl-skip-permissions " --dangerously-skip-permissions"))))
+    (when fresh
+      (claude-repl--ws-put ws :fresh-start nil))
+    (message "[claude-repl] start-claude dir=%s fresh=%s cmd=%s" default-directory (if fresh "yes" "no") cmd)
+    (vterm-send-string (concat "clear && " cmd))
+    (vterm-send-return)))
 
 ;; Instructions bar face
 (defface claude-repl-header-line
@@ -263,15 +338,22 @@ Tries git root, then buffer-local project root, then `default-directory'."
 
 ;; Input mode
 (defun claude-repl--slash-intercept-backspace ()
-  "Redirect backspace-like commands to `claude-repl--slash-backspace' in slash mode.
+  "Always forward backspace to vterm; also redirect to slash handler in slash mode.
 Runs as a buffer-local `pre-command-hook'.  Setting `this-command' here causes
 Emacs to call our handler instead of the originally resolved command."
-  (when claude-slash-input-mode
-    (when (memq this-command
-                '(evil-delete-backward-char-and-join
-                  evil-delete-backward-char
-                  delete-backward-char
-                  backward-delete-char-untabify))
+  (when (memq this-command
+              '(evil-delete-backward-char-and-join
+                evil-delete-backward-char
+                delete-backward-char
+                backward-delete-char-untabify))
+    (unless claude-slash-input-mode
+      (when (= (buffer-size) 0)
+        (let* ((ws (+workspace-current-name))
+               (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+          (when (and vterm-buf (buffer-live-p vterm-buf))
+            (with-current-buffer vterm-buf
+              (vterm-send-key "<backspace>"))))))
+    (when claude-slash-input-mode
       (setq this-command #'claude-repl--slash-backspace))))
 
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
@@ -1434,7 +1516,7 @@ Swaps the loading placeholder for the real vterm buffer."
 (defun claude-repl--ws-for-dir (dir)
   "Return the workspace name for a Claude session rooted at DIR, or nil."
   (when-let* ((root (claude-repl--git-root dir))
-              (hash (substring (md5 root) 0 8))
+              (hash (substring (md5 (claude-repl--path-canonical root)) 0 8))
               (buf (get-buffer (format "*claude-%s*" hash))))
     (claude-repl--workspace-for-buffer buf)))
 
@@ -1690,12 +1772,14 @@ Resets cursor, redraws, and syncs window point."
       (with-current-buffer buf
         (when (and (eq major-mode 'vterm-mode)
                    (fboundp 'vterm-reset-cursor-point))
-          (let ((inhibit-read-only t))
-            (vterm-reset-cursor-point)
-            (when vterm--term
-              (vterm--redraw vterm--term))
-            (vterm-reset-cursor-point)
-            (set-window-point win (point))))))))
+          (condition-case nil
+              (let ((inhibit-read-only t))
+                (vterm-reset-cursor-point)
+                (when vterm--term
+                  (vterm--redraw vterm--term))
+                (vterm-reset-cursor-point)
+                (set-window-point win (point)))
+            (end-of-buffer nil)))))))
 
 (defun claude-repl--reset-vterm-cursors ()
   "Refresh every visible Claude vterm window except the selected one."
@@ -1714,7 +1798,9 @@ Resets cursor, redraws, and syncs window point."
   "Deferred handler for window configuration changes.
 Syncs orphaned panels, refreshes overlay, and resets cursors."
   (claude-repl--log "on-window-change")
-  (claude-repl--sync-panels)
+  (condition-case nil
+      (claude-repl--sync-panels)
+    (error nil))
   (claude-repl--update-hide-overlay)
   (claude-repl--reset-vterm-cursors))
 
@@ -1773,13 +1859,15 @@ so the user can select and copy text from the output."
   "Create vterm buffer for workspace WS running claude if needed. Starts claude from the git root."
   (let* ((root (claude-repl--resolve-root))
          (default-directory root))
+    (claude-repl--log "ensure-vterm-buffer ws=%s root=%s default-directory=%s" ws root default-directory)
     (claude-repl--kill-stale-vterm)
     (let ((vterm-buf (get-buffer-create (claude-repl--buffer-name))))
       (claude-repl--ws-put ws :vterm-buffer vterm-buf)
       (with-current-buffer vterm-buf
         (setq-local claude-repl--project-root root)
         (setq-local claude-repl--owning-workspace ws)
-        (unless (eq major-mode 'vterm-mode)
+        (if (eq major-mode 'vterm-mode)
+            (claude-repl--log "ensure-vterm reusing existing buffer %s" (buffer-name vterm-buf))
           (vterm-mode)
           (setq-local truncate-lines nil)
           (setq-local word-wrap t)
@@ -1812,7 +1900,10 @@ The placeholder is swapped for the real vterm buffer once Claude is ready."
   (delete-other-windows (claude-repl--live-return-window))
   (claude-repl--ensure-session)
   (claude-repl--show-panels-with-placeholder)
-  (message "Starting Claude..."))
+  (message "Starting Claude... ws=%s ws-id=%s dir=%s"
+           (+workspace-current-name)
+           (claude-repl--workspace-id)
+           (claude-repl--resolve-root)))
 
 (defun claude-repl--show-existing-panels ()
   "Show panels for an already-running Claude session.
@@ -2048,6 +2139,10 @@ Without region: copies file:line."
       :desc "Kill Claude" "o C" #'claude-repl-kill
       :desc "Claude interrupt" "o x" #'claude-repl-interrupt
       :desc "Copy file reference" "o r" #'claude-repl-copy-reference)
+
+(map! :leader
+      (:prefix "p"
+       :desc "Create worktree workspace" "w" #'claude-repl-create-worktree-workspace))
 
 ;; SPC j — Tell Claude to do a predefined thing
 (map! :leader
