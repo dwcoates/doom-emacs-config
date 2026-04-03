@@ -212,7 +212,7 @@ The prefix is sent on the first prompt and every Nth prompt thereafter."
   :type 'string
   :group 'claude-repl)
 
-(defvar claude-repl-paste-delay 0.1
+(defvar claude-repl-paste-delay 0.25
   "Seconds to wait after pasting before sending Return.
 Used by `claude-repl--send-input-to-vterm' for large inputs.")
 

@@ -214,7 +214,7 @@ The prefix is sent on the first prompt and every Nth prompt thereafter."
   :type 'string
   :group 'agents-repl)
 
-(defvar agents-repl-paste-delay 0.1
+(defvar agents-repl-paste-delay 0.25
   "Seconds to wait after pasting before sending Return.
 Used by `agents-repl--send-input-to-vterm' for large inputs.")
 
