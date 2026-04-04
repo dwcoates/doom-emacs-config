@@ -334,15 +334,24 @@ with the worktree mounted at /workspace and ~/.claude mounted read-only."
          (fresh (claude-repl--ws-get ws :fresh-start))
          (worktree-p (claude-repl--ws-get ws :worktree-p))
          (worktree-path (claude-repl--ws-get ws :worktree-path))
+         (worktree-dirname (when worktree-path
+                             (file-name-nondirectory (directory-file-name worktree-path))))
          (cmd (if worktree-p
-                  (format "docker run --rm -it -v %s:/workspace -v %s:/root/.claude:ro -w /workspace %s"
+                  (format "docker run --rm -it -v %s:/%s -v %s:/root/.claude:ro -w /%s %s"
                           (shell-quote-argument worktree-path)
+                          worktree-dirname
                           (shell-quote-argument (expand-file-name "~/.claude"))
+                          worktree-dirname
                           claude-repl-docker-image)
                 (concat (if fresh "claude" "claude -c")
                         (when claude-repl-skip-permissions " --dangerously-skip-permissions")))))
     (when fresh
       (claude-repl--ws-put ws :fresh-start nil))
+    (claude-repl--ws-put ws :start-cmd cmd)
+    (when worktree-p
+      (setq-local mode-line-format
+                  (list (propertize (format " SANDBOX: %s" cmd)
+                                    'face '(:foreground "green" :weight bold)))))
     (message "[claude-repl] start-claude dir=%s fresh=%s worktree=%s cmd=%s"
              default-directory (if fresh "yes" "no") (if worktree-p "yes" "no") cmd)
     (vterm-send-string (concat "clear && " cmd))
@@ -1917,10 +1926,13 @@ The placeholder is swapped for the real vterm buffer once Claude is ready."
   (delete-other-windows (claude-repl--live-return-window))
   (claude-repl--ensure-session)
   (claude-repl--show-panels-with-placeholder)
-  (message "Starting Claude... ws=%s ws-id=%s dir=%s"
-           (+workspace-current-name)
-           (claude-repl--workspace-id)
-           (claude-repl--resolve-root)))
+  (let* ((ws (+workspace-current-name))
+         (start-cmd (claude-repl--ws-get ws :start-cmd)))
+    (message "Starting Claude... ws=%s ws-id=%s dir=%s cmd=%s"
+             ws
+             (claude-repl--workspace-id)
+             (claude-repl--resolve-root)
+             (or start-cmd "?"))))
 
 (defun claude-repl--show-existing-panels ()
   "Show panels for an already-running Claude session.
