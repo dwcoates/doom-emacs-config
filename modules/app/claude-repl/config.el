@@ -414,7 +414,7 @@ if a .claude/sandbox/image file exists.  Falls back to bare-metal Claude otherwi
                 (list (if (and worktree-p docker-image)
                           (propertize (format " DOCKER SANDBOX: %s" docker-image)
                                       'face '(:foreground "green" :weight bold))
-                        (propertize " BARE METAL"
+                        (propertize (format " BARE METAL: %s" (system-name))
                                     'face '(:foreground "red" :weight bold)))))
     (message "[claude-repl] start-claude dir=%s fresh=%s worktree=%s prime=%s cmd=%s"
              default-directory (if fresh "yes" "no") (if worktree-p "yes" "no")
