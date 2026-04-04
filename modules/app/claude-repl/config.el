@@ -147,7 +147,9 @@ If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirn
     (let* ((canonical (claude-repl--path-canonical path))
            (ws-id (substring (md5 canonical) 0 8)))
       (message "[worktree] registering ws-id=%s canonical=%s" ws-id canonical)
-      (claude-repl--register-worktree-ws ws-id path))))
+      (claude-repl--register-worktree-ws ws-id path)
+      (let ((default-directory (file-name-as-directory path)))
+        (claude-repl--ensure-session)))))
 
 (defvar claude-repl--fullscreen-config nil
   "Saved window configuration before fullscreen toggle.")
@@ -402,7 +404,7 @@ Emacs to call our handler instead of the originally resolved command."
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
   (setq-local header-line-format
-              "RET: send | C-RET: send+postfix | C-c C-c: clear+save | C-c C-k: interrupt | <up>/<down>: history")
+              "RET: send | C-RET: send+postfix | C-c C-c: clear+save (empty→C-c) | C-c C-k: interrupt | <up>/<down>: history")
   (face-remap-add-relative 'header-line 'claude-repl-header-line)
   (claude-repl--set-buffer-background 37)
   (visual-line-mode 1)
@@ -420,6 +422,18 @@ Emacs to call our handler instead of the originally resolved command."
   (claude-repl--history-reset)
   (erase-buffer)
   (evil-insert-state))
+
+(defun claude-repl-discard-or-send-interrupt ()
+  "If input buffer is empty, send C-c to Claude; otherwise discard input."
+  (interactive)
+  (if (string-blank-p (buffer-string))
+      (progn
+        (claude-repl--log "discard-or-send-interrupt: empty buffer, sending C-c to vterm")
+        (when (claude-repl--vterm-live-p)
+          (let ((vterm-buf (claude-repl--ws-get (+workspace-current-name) :vterm-buffer)))
+            (with-current-buffer vterm-buf
+              (vterm-send-key "c" nil nil t)))))
+    (claude-repl-discard-input)))
 
 (defun claude-repl-scroll-down ()
   "Scroll the Claude vterm buffer down."
@@ -486,7 +500,7 @@ Emacs to call our handler instead of the originally resolved command."
       [remap +default/newline-below] #'claude-repl-send-with-postfix
       [remap +default/newline-above] #'claude-repl-send-with-metaprompt
       :ni "C-c C-k"   #'claude-repl-interrupt
-      :ni "C-c C-c"   #'claude-repl-discard-input
+      :ni "C-c C-c"   #'claude-repl-discard-or-send-interrupt
       :ni "C-c y"     (cmd! (claude-repl-send-char "y"))
       :ni "C-c n"     (cmd! (claude-repl-send-char "n"))
       :ni "C-c r"     #'claude-repl-restart
