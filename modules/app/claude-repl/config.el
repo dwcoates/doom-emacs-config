@@ -212,6 +212,13 @@ The prefix is sent on the first prompt and every Nth prompt thereafter."
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-docker-image "docker/sandbox-templates:claude-code"
+  "Docker image used for sandboxed worktree workspaces.
+When a workspace has :worktree-p set (created via `claude-repl-create-worktree-workspace'),
+Claude is launched inside this image with the worktree mounted at /workspace."
+  :type 'string
+  :group 'claude-repl)
+
 (defvar claude-repl-paste-delay 0.25
   "Seconds to wait after pasting before sending Return.
 Used by `claude-repl--send-input-to-vterm' for large inputs.")
@@ -320,14 +327,24 @@ Tries git root, then buffer-local project root, then `default-directory'."
 (defun claude-repl--start-claude ()
   "Send the claude startup command to the current vterm buffer.
 On a fresh worktree workspace (:fresh-start t) the -c flag is omitted so
-Claude starts a new conversation rather than resuming a prior one."
+Claude starts a new conversation rather than resuming a prior one.
+For worktree workspaces (:worktree-p t), Claude runs inside a Docker sandbox
+with the worktree mounted at /workspace and ~/.claude mounted read-only."
   (let* ((ws (+workspace-current-name))
          (fresh (claude-repl--ws-get ws :fresh-start))
-         (cmd (concat (if fresh "claude" "claude -c")
-                      (when claude-repl-skip-permissions " --dangerously-skip-permissions"))))
+         (worktree-p (claude-repl--ws-get ws :worktree-p))
+         (worktree-path (claude-repl--ws-get ws :worktree-path))
+         (cmd (if worktree-p
+                  (format "docker run --rm -it -v %s:/workspace -v %s:/root/.claude:ro -w /workspace %s"
+                          (shell-quote-argument worktree-path)
+                          (shell-quote-argument (expand-file-name "~/.claude"))
+                          claude-repl-docker-image)
+                (concat (if fresh "claude" "claude -c")
+                        (when claude-repl-skip-permissions " --dangerously-skip-permissions")))))
     (when fresh
       (claude-repl--ws-put ws :fresh-start nil))
-    (message "[claude-repl] start-claude dir=%s fresh=%s cmd=%s" default-directory (if fresh "yes" "no") cmd)
+    (message "[claude-repl] start-claude dir=%s fresh=%s worktree=%s cmd=%s"
+             default-directory (if fresh "yes" "no") (if worktree-p "yes" "no") cmd)
     (vterm-send-string (concat "clear && " cmd))
     (vterm-send-return)))
 
