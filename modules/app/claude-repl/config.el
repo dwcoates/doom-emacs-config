@@ -141,7 +141,7 @@ If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirn
                               (make-directory wt-dir t)
                               wt-dir)))
          (path (expand-file-name dirname worktree-parent)))
-    (message "[worktree] git-root=%s name=%s dirname=%s branch=%s in-worktree=%s path=%s old-ws=%s old-ws-id=%s"
+    (claude-repl--log "worktree git-root=%s name=%s dirname=%s branch=%s in-worktree=%s path=%s old-ws=%s old-ws-id=%s"
              git-root name dirname (or branch-name "none") in-worktree path
              (+workspace-current-name) (claude-repl--workspace-id))
     (when (projectile-project-p path)
@@ -155,29 +155,27 @@ If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirn
                           (shell-quote-argument git-root)
                           (shell-quote-argument path))))
            (result (shell-command-to-string cmd)))
-      (message "[worktree] git cmd: %s" cmd)
-      (message "[worktree] git result: %s" (string-trim result))
+      (claude-repl--log "worktree git cmd: %s" cmd)
+      (claude-repl--log "worktree git result: %s" (string-trim result))
       (when (string-match-p "^fatal\\|^error" result)
         (user-error "git worktree add failed: %s" (string-trim result))))
     (write-region dirname nil (expand-file-name ".projectile" path))
-    (message "[worktree] wrote .projectile, adding to projectile known projects")
+    (claude-repl--log "worktree wrote .projectile, adding to projectile known projects")
     (projectile-add-known-project (file-name-as-directory path))
-    (message "[worktree] switching to project: %s" (file-name-as-directory path))
+    (claude-repl--log "worktree switching to project: %s" (file-name-as-directory path))
     (projectile-switch-project-by-name (file-name-as-directory path))
     (let* ((canonical (claude-repl--path-canonical path))
            (ws-id (substring (md5 canonical) 0 8)))
-      (message "[worktree] registering ws-id=%s canonical=%s" ws-id canonical)
+      (claude-repl--log "worktree registering ws-id=%s canonical=%s" ws-id canonical)
       (claude-repl--register-worktree-ws ws-id path)
       (when source-session-id
         (claude-repl--ws-put (+workspace-current-name) :prime-session-id source-session-id)
-        (message "[worktree] will fork session %s into new workspace" source-session-id))
+        (claude-repl--log "worktree will fork session %s into new workspace" source-session-id))
       (let ((default-directory (file-name-as-directory path)))
         (claude-repl--ensure-session))
-      (message "Starting Claude... ws=%s ws-id=%s dir=%s cmd=%s"
-               (+workspace-current-name)
-               (claude-repl--workspace-id)
-               path
-               (claude-repl--ws-get (+workspace-current-name) :start-cmd)))))
+      (claude-repl--log "worktree pre-started Claude ws=%s cmd=%s"
+                        (+workspace-current-name)
+                        (claude-repl--ws-get (+workspace-current-name) :start-cmd)))))
 
 (defvar claude-repl--fullscreen-config nil
   "Saved window configuration before fullscreen toggle.")
@@ -416,11 +414,13 @@ if a .claude/sandbox/image file exists.  Falls back to bare-metal Claude otherwi
                                       'face '(:foreground "green" :weight bold))
                         (propertize (format " BARE METAL: %s" (system-name))
                                     'face '(:foreground "red" :weight bold)))))
-    (message "[claude-repl] start-claude dir=%s fresh=%s worktree=%s prime=%s cmd=%s"
-             default-directory (if fresh "yes" "no") (if worktree-p "yes" "no")
-             (or prime-id "none") cmd)
+    (claude-repl--log "start-claude dir=%s fresh=%s worktree=%s prime=%s cmd=%s"
+                      default-directory (if fresh "yes" "no") (if worktree-p "yes" "no")
+                      (or prime-id "none") cmd)
+    (setq-local claude-repl--ready nil)
     (vterm-send-string (concat "clear && " cmd))
-    (vterm-send-return)))
+    (vterm-send-return)
+    (claude-repl--schedule-ready-timer ws)))
 
 ;; Instructions bar face
 (defface claude-repl-header-line
@@ -1579,14 +1579,20 @@ Sets done state if buffer is hidden, refreshes display."
 
 (defun claude-repl--handle-first-ready ()
   "Handle the first terminal title set — Claude is now ready.
-Swaps the loading placeholder for the real vterm buffer."
+Cancels the ready-timer, swaps the loading placeholder, and auto-opens panels
+if the owning workspace is currently active."
   (unless claude-repl--ready
-    (claude-repl--log "first-ready buf=%s" (buffer-name))
+    (claude-repl--log "first-ready buf=%s ws=%s" (buffer-name) claude-repl--owning-workspace)
     (setq claude-repl--ready t)
-    (claude-repl--swap-placeholder)))
+    (when claude-repl--owning-workspace
+      (claude-repl--cancel-ready-timer claude-repl--owning-workspace))
+    (claude-repl--swap-placeholder)
+    (when (string= claude-repl--owning-workspace (+workspace-current-name))
+      (claude-repl))))
 
 (defun claude-repl--on-title-change (title)
   "Detect thinking->idle transition from vterm title changes."
+  (claude-repl--log "title-change buf=%s title=%s" (buffer-name) title)
   (when (claude-repl--claude-buffer-p)
     (claude-repl--handle-first-ready)
     (let* ((info (claude-repl--detect-title-transition title))
@@ -1834,6 +1840,41 @@ session releases it."
   (let ((buf (claude-repl--ws-get (+workspace-current-name) :vterm-buffer)))
     (and buf (buffer-live-p buf) (get-buffer-process buf))))
 
+(defun claude-repl--session-starting-p (&optional ws)
+  "Return t if vterm exists with a live process but Claude is not yet ready.
+WS defaults to the current workspace name."
+  (let* ((ws (or ws (+workspace-current-name)))
+         (buf (claude-repl--ws-get ws :vterm-buffer)))
+    (and buf
+         (buffer-live-p buf)
+         (get-buffer-process buf)
+         (not (buffer-local-value 'claude-repl--ready buf)))))
+
+(defun claude-repl--cancel-ready-timer (ws)
+  "Cancel the readiness-poll timer for workspace WS, if any."
+  (when-let ((timer (claude-repl--ws-get ws :ready-timer)))
+    (when (timerp timer) (cancel-timer timer))
+    (claude-repl--ws-put ws :ready-timer nil)))
+
+(defun claude-repl--schedule-ready-timer (ws)
+  "Poll every 0.5s until Claude is ready in WS, then auto-open panels.
+Gives up after 30s. This is a fallback — the title-change path is the happy path."
+  (claude-repl--cancel-ready-timer ws)
+  (let ((start-time (float-time)))
+    (claude-repl--ws-put ws :ready-timer
+      (run-at-time
+       0.5 0.5
+       (lambda ()
+         (cond
+          ((> (- (float-time) start-time) 30.0)
+           (claude-repl--cancel-ready-timer ws)
+           (claude-repl--log "ready-timer: timed out for ws=%s" ws))
+          ((claude-repl--session-starting-p ws) nil)
+          (t
+           (claude-repl--cancel-ready-timer ws)
+           (when (string= ws (+workspace-current-name))
+             (claude-repl)))))))))
+
 (defun claude-repl--input-visible-p ()
   "Return t if input buffer for the current workspace is visible in a window."
   (let ((buf (claude-repl--ws-get (+workspace-current-name) :input-buffer)))
@@ -2058,11 +2099,12 @@ If panels hidden: show both panels."
   (interactive)
   (claude-repl--remember-return-window)
   (let ((vterm-running (claude-repl--vterm-running-p))
+        (session-starting (claude-repl--session-starting-p))
         (panels-visible (claude-repl--panels-visible-p))
         (selection (when (use-region-p)
                     (buffer-substring-no-properties (region-beginning) (region-end)))))
-    (claude-repl--log "claude-repl running=%s visible=%s selection=%s"
-                      vterm-running panels-visible (if selection "yes" "no"))
+    (claude-repl--log "claude-repl running=%s starting=%s visible=%s selection=%s"
+                      vterm-running session-starting panels-visible (if selection "yes" "no"))
     (cond
      ;; Text selected - send directly to Claude
      (selection
@@ -2071,6 +2113,9 @@ If panels hidden: show both panels."
      ;; Nothing running - start fresh with placeholder until Claude is ready
      ((not vterm-running)
       (claude-repl--start-fresh))
+     ;; Vterm alive but Claude not yet ready - hold off, panels will open automatically
+     (session-starting
+      (message "Claude is loading…"))
      ;; Panels visible - hide both, restore window layout
      (panels-visible
       (let ((ws (+workspace-current-name)))
@@ -2145,6 +2190,7 @@ If panels hidden: show both panels."
   (interactive)
   (claude-repl--log "kill")
   (let* ((ws (+workspace-current-name))
+         (_ (claude-repl--cancel-ready-timer ws))
          (vterm-buf (claude-repl--ws-get ws :vterm-buffer))
          (input-buf (claude-repl--ws-get ws :input-buffer))
          (saved-wconf (claude-repl--ws-get ws :saved-window-config))

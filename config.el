@@ -423,9 +423,10 @@
   (defun +dwc/refresh-tab-bar ()
     "Force the tab-bar to re-render with current face/theme colors."
     (interactive)
-    (setq +dwc/tab-bar-refresh-toggle (not +dwc/tab-bar-refresh-toggle))
-    (tab-bar-tabs-set (tab-bar-tabs))
-    (tab-bar--update-tab-bar-lines t))
+    (when (and (bound-and-true-p tab-bar-mode) (display-graphic-p))
+      (setq +dwc/tab-bar-refresh-toggle (not +dwc/tab-bar-refresh-toggle))
+      (tab-bar-tabs-set (tab-bar-tabs))
+      (tab-bar--update-tab-bar-lines t)))
 
   (run-with-timer 1 1 #'+dwc/refresh-tab-bar)
 
