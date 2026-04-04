@@ -196,7 +196,7 @@ FMT and ARGS are passed to `message', prefixed with timestamp and [claude-repl].
     (apply #'message (concat (format-time-string "%H:%M:%S.%3N") " [claude-repl] " fmt) args)))
 
 (defcustom claude-repl-skip-permissions t
-  "When non-nil, start Claude with --dangerously-skip-permissions and prepend the command prefix metaprompt."
+  "When non-nil, prepend the command prefix metaprompt to each input sent to Claude."
   :type 'boolean
   :group 'claude-repl)
 
@@ -229,7 +229,7 @@ Used by `claude-repl--send-input-to-vterm' for large inputs.")
   :group 'claude-repl)
 
 (defvar claude-repl--command-prefix (format "<<*this is a metaprompt. I will periodically prefix my prompts with this to remind you of our restrictions for freely making changes. Do not be alarmed, this is merely a periodic reminder*: %s *metaprompt over* (rest is actual user request that you should respond to directly)>>\n\n" claude-repl-command-prefix)
-  "Formatted metaprompt string prepended before every input when `claude-repl-skip-permissions' is non-nil.")
+  "Formatted metaprompt string prepended before every input when `claude-repl-skip-permissions' is non-nil (see `claude-repl-prefix-period').")
 
 
 ;; Set to t once Claude has set its terminal title (meaning it's ready).
@@ -358,9 +358,17 @@ if a sandbox-image file exists.  Falls back to bare-metal Claude otherwise."
                            (claude-repl--resolve-sandbox-config
                             (claude-repl--git-root worktree-path))))
          (docker-image (plist-get sandbox-config :image))
+         ;; For docker: claude-sandbox script handles permission mode automatically.
+         ;; For bare-metal: detect by path — ChessCom repos use --permission-mode auto,
+         ;; personal repos use --dangerously-skip-permissions.
+         (perm-flag (unless (and worktree-p docker-image)
+                      (if (string-match-p "ChessCom" (expand-file-name (or worktree-path default-directory)))
+                          "--permission-mode auto"
+                        "--dangerously-skip-permissions")))
          (claude-flags (string-trim
-                        (concat (unless fresh "-c ")
-                                (when claude-repl-skip-permissions "--dangerously-skip-permissions"))))
+                        (mapconcat #'identity
+                                   (delq nil (list (unless fresh "-c") perm-flag))
+                                   " ")))
          (cmd (if (and worktree-p docker-image)
                   (string-trim (concat (plist-get sandbox-config :script) " " claude-flags))
                 (string-trim (concat "claude " claude-flags)))))

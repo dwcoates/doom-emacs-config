@@ -2,6 +2,13 @@
 # claude-sandbox — run Claude Code inside the doom-sandbox Docker sandbox.
 # All arguments are forwarded transparently to the claude invocation.
 # Usage: claude-sandbox [claude-args...]
+#
+# Permission mode is auto-detected from the repo path:
+#   ChessCom repos → --permission-mode auto
+#   all others     → --dangerously-skip-permissions
+# Override by passing --permission-mode or --dangerously-skip-permissions explicitly.
+#
+# Extra mounts: edit .claude/sandbox-mounts (JSON with "defaults" and "custom" arrays).
 
 set -euo pipefail
 
@@ -10,10 +17,45 @@ GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) \
 DIRNAME=$(basename "$GIT_ROOT")
 IMAGE=$(tr -d '[:space:]' < "$GIT_ROOT/.claude/sandbox-image")
 
+# Check if caller already specified a permission mode
+HAS_PERM_FLAG=false
+for arg in "$@"; do
+  if [[ "$arg" == "--permission-mode" || "$arg" == "--dangerously-skip-permissions" ]]; then
+    HAS_PERM_FLAG=true
+    break
+  fi
+done
+
+if [[ "$HAS_PERM_FLAG" == "false" ]]; then
+  if [[ "$GIT_ROOT" == *"ChessCom"* ]]; then
+    PERM_ARGS=(--permission-mode auto)
+  else
+    PERM_ARGS=(--dangerously-skip-permissions)
+  fi
+else
+  PERM_ARGS=()
+fi
+
+# Build extra mount args from .claude/sandbox-mounts JSON (optional).
+# Format: {"defaults": [...], "custom": [...]}  each entry: "host_path" or "host_path:container_path"
+EXTRA_MOUNTS=()
+MOUNTS_FILE="$GIT_ROOT/.claude/sandbox-mounts"
+if [[ -f "$MOUNTS_FILE" ]]; then
+  while IFS= read -r entry; do
+    [[ -z "$entry" ]] && continue
+    if [[ "$entry" == *":"* ]]; then
+      EXTRA_MOUNTS+=(-v "$entry")
+    else
+      EXTRA_MOUNTS+=(-v "$entry:$entry")
+    fi
+  done < <(jq -r '(.defaults + .custom)[]' "$MOUNTS_FILE")
+fi
+
 exec docker run --rm -it \
   -v "$GIT_ROOT:/$DIRNAME" \
   -v "$HOME/.claude:/home/claude/.claude" \
   -v "$HOME/.claude.json:/home/claude/.claude.json" \
+  "${EXTRA_MOUNTS[@]}" \
   -w "/$DIRNAME" \
   "$IMAGE" \
-  claude "$@"
+  claude "${PERM_ARGS[@]}" "$@"
