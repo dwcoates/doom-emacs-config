@@ -1685,9 +1685,31 @@ Uses cached git status (`:git-clean') and kicks off async refreshes."
 
 ;; Save window state for current workspace before switching away,
 ;; so update-all-workspace-states can inspect the saved config.
+
+(defun claude-repl--redirect-from-claude-before-save ()
+  "If the selected window shows a Claude buffer, select a real window instead.
+Called before persp saves window state so the saved config has a non-claude
+buffer selected. This prevents Doom's `+workspace/kill' from trying to display
+its fallback buffer in a dedicated window on workspace restore, which would
+otherwise split the first real window (e.g. a repl) and show a doom buffer.
+Skips redirect if claude is the only window (fullscreen case)."
+  (let* ((sel (selected-window))
+         (name (buffer-name (window-buffer sel)))
+         (claude-p (or (string-match-p "^\\*claude-[0-9a-f]+\\*$" name)
+                       (string-match-p "^\\*claude-input-[0-9a-f]+\\*$" name))))
+    (when claude-p
+      (when-let ((target (cl-find-if
+                          (lambda (w)
+                            (let ((n (buffer-name (window-buffer w))))
+                              (not (or (string-match-p "^\\*claude-[0-9a-f]+\\*$" n)
+                                       (string-match-p "^\\*claude-input-[0-9a-f]+\\*$" n)))))
+                          (window-list))))
+        (select-window target)))))
+
 (when (modulep! :ui workspaces)
   (add-hook 'persp-before-deactivate-functions
             (lambda (&rest _)
+              (claude-repl--redirect-from-claude-before-save)
               (ignore-errors (persp-frame-save-state))))
   (add-hook 'persp-activated-functions
             (lambda (&rest _)
@@ -2421,6 +2443,13 @@ Reports comprehensive diagnostics."
                (or owning-ws "nil") title-thinking (if has-window "yes" "no")
                (if open "yes" "no") (if dirty "yes" "no")
                (or before "nil") (or after "nil")))))
+
+;; Kill Claude session before workspace deletion so buffers/windows are cleaned
+;; up while the workspace is still current.
+(advice-add #'+workspace/kill :before
+            (lambda (&rest _)
+              (when (claude-repl--vterm-running-p)
+                (claude-repl-kill))))
 
 (provide 'claude-repl)
 ;;; config.el ends here
