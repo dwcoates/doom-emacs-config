@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# claude-sandbox — run Claude Code inside the doom-sandbox Docker sandbox.
+# All arguments are forwarded transparently to the claude invocation.
+# Usage: claude-sandbox [claude-args...]
+
+set -euo pipefail
+
+GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) \
+  || { echo "claude-sandbox: not in a git repo" >&2; exit 1; }
+DIRNAME=$(basename "$GIT_ROOT")
+IMAGE=$(tr -d '[:space:]' < "$GIT_ROOT/.claude/sandbox-image")
+
+exec docker run --rm -it \
+  -v "$GIT_ROOT:/$DIRNAME" \
+  -v "$HOME/.claude:/home/claude/.claude" \
+  -v "$HOME/.claude.json:/home/claude/.claude.json" \
+  -w "/$DIRNAME" \
+  "$IMAGE" \
+  claude "$@"

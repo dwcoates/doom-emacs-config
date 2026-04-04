@@ -88,13 +88,11 @@ Internally uses plist-put (which returns a new list) threaded into puthash."
 (defun claude-repl--register-worktree-ws (ws-id path)
   "Mark the current workspace as a worktree workspace rooted at PATH.
 WS-ID is the hash identifier (used for logging/buffer naming); the state
-is stored under the workspace name from `+workspace-current-name'.
-Sets :fresh-start t so the first SPC o c opens Claude without -c."
+is stored under the workspace name from `+workspace-current-name'."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log "register-worktree-ws ws-id=%s ws=%s path=%s" ws-id ws path)
     (claude-repl--ws-put ws :worktree-p t)
-    (claude-repl--ws-put ws :worktree-path path)
-    (claude-repl--ws-put ws :fresh-start t)))
+    (claude-repl--ws-put ws :worktree-path path)))
 
 (defun claude-repl-create-worktree-workspace ()
   "Create a new git worktree and switch to it as a project workspace.
@@ -212,11 +210,10 @@ The prefix is sent on the first prompt and every Nth prompt thereafter."
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-docker-image "claude-repl-sandbox:latest"
-  "Docker image used for sandboxed worktree workspaces.
-When a workspace has :worktree-p set (created via `claude-repl-create-worktree-workspace'),
-Claude is launched inside this image with the worktree mounted at /workspace.
-Build with: docker build -f ~/workspace/ChessCom/explanation-engine/.claude/Dockerfile.claude-sandbox -t claude-repl-sandbox ~/workspace/ChessCom/explanation-engine/"
+(defcustom claude-repl-docker-image ""
+  "Fallback Docker image for sandboxed worktree workspaces with no .claude/sandbox-image.
+Prefer per-repo .claude/sandbox-image files over this global setting.
+If empty (the default), worktrees without a .claude/sandbox-image run Claude directly."
   :type 'string
   :group 'claude-repl)
 
@@ -325,51 +322,53 @@ Tries git root, then buffer-local project root, then `default-directory'."
   (face-remap-add-relative 'default :background (claude-repl--grey grey-level))
   (face-remap-add-relative 'fringe :background (claude-repl--grey grey-level)))
 
-(defun claude-repl--resolve-docker-image (git-root)
-  "Return the Docker image to use for a worktree rooted at GIT-ROOT.
-Checks GIT-ROOT/.claude/sandbox-image first; falls back to
-`claude-repl-docker-image'.  Returns nil if neither is set."
+(defun claude-repl--docker-image-exists-p (image)
+  "Return non-nil if IMAGE exists in the local Docker image store."
+  (= 0 (call-process "docker" nil nil nil "image" "inspect" "--format" "." image)))
+
+(defun claude-repl--resolve-sandbox-config (git-root)
+  "Return a plist (:image IMAGE :script SCRIPT) for a worktree at GIT-ROOT.
+Reads the image name from GIT-ROOT/.claude/sandbox-image.  All other Docker
+options (platform, extra flags, mounts) live in GIT-ROOT/.claude/claude-sandbox.
+Returns nil if no sandbox-image file exists or the image is not present locally."
   (let ((sandbox-image-file (expand-file-name ".claude/sandbox-image" git-root)))
-    (if (file-readable-p sandbox-image-file)
-        (string-trim (with-temp-buffer
-                       (insert-file-contents sandbox-image-file)
-                       (buffer-string)))
-      (when (and claude-repl-docker-image
-                 (not (string-empty-p claude-repl-docker-image)))
-        claude-repl-docker-image))))
+    (when (file-readable-p sandbox-image-file)
+      (let* ((image (string-trim (with-temp-buffer
+                                   (insert-file-contents sandbox-image-file)
+                                   (buffer-string))))
+             (script (expand-file-name ".claude/claude-sandbox" git-root)))
+        (if (string-empty-p image)
+            (progn (message "[claude-repl] .claude/sandbox-image is empty in %s" git-root) nil)
+          (if (claude-repl--docker-image-exists-p image)
+              (list :image image :script script)
+            (message "[claude-repl] image %s not found — run .claude/install.sh to build it" image)
+            nil))))))
 
 (defun claude-repl--start-claude ()
   "Send the claude startup command to the current vterm buffer.
-On a fresh worktree workspace (:fresh-start t) the -c flag is omitted so
-Claude starts a new conversation rather than resuming a prior one.
-For worktree workspaces (:worktree-p t), checks for a .claude/sandbox-image
-file in the git root to determine the Docker image; falls back to
-`claude-repl-docker-image'.  If no image is resolved, runs Claude directly."
+For worktree workspaces (:worktree-p t), delegates to .claude/claude-sandbox
+if a sandbox-image file exists.  Falls back to bare-metal Claude otherwise."
   (let* ((ws (+workspace-current-name))
-         (fresh (claude-repl--ws-get ws :fresh-start))
+         (fresh (null (claude-repl--ws-get ws :start-cmd)))
          (worktree-p (claude-repl--ws-get ws :worktree-p))
          (worktree-path (claude-repl--ws-get ws :worktree-path))
-         (worktree-dirname (when worktree-path
-                             (file-name-nondirectory (directory-file-name worktree-path))))
-         (docker-image (when worktree-p
-                         (claude-repl--resolve-docker-image
-                          (claude-repl--git-root worktree-path))))
+         (sandbox-config (when worktree-p
+                           (claude-repl--resolve-sandbox-config
+                            (claude-repl--git-root worktree-path))))
+         (docker-image (plist-get sandbox-config :image))
+         (claude-flags (string-trim
+                        (concat (unless fresh "-c ")
+                                (when claude-repl-skip-permissions "--dangerously-skip-permissions"))))
          (cmd (if (and worktree-p docker-image)
-                  (format "docker run --rm -it -v %s:/%s -v %s:/root/.claude -w /%s %s"
-                          (shell-quote-argument worktree-path)
-                          worktree-dirname
-                          (shell-quote-argument (expand-file-name "~/.claude"))
-                          worktree-dirname
-                          docker-image)
-                (concat (if fresh "claude" "claude -c")
-                        (when claude-repl-skip-permissions " --dangerously-skip-permissions")))))
-    (when fresh
-      (claude-repl--ws-put ws :fresh-start nil))
+                  (string-trim (concat (plist-get sandbox-config :script) " " claude-flags))
+                (string-trim (concat "claude " claude-flags)))))
     (claude-repl--ws-put ws :start-cmd cmd)
-    (when worktree-p
-      (setq-local mode-line-format
-                  (list (propertize (format " SANDBOX: %s" cmd)
-                                    'face '(:foreground "green" :weight bold)))))
+    (setq-local mode-line-format
+                (list (if (and worktree-p docker-image)
+                          (propertize (format " DOCKER SANDBOX: %s" docker-image)
+                                      'face '(:foreground "green" :weight bold))
+                        (propertize " BARE METAL"
+                                    'face '(:foreground "red" :weight bold)))))
     (message "[claude-repl] start-claude dir=%s fresh=%s worktree=%s cmd=%s"
              default-directory (if fresh "yes" "no") (if worktree-p "yes" "no") cmd)
     (vterm-send-string (concat "clear && " cmd))
