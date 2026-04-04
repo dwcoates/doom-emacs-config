@@ -401,9 +401,15 @@
     "Format workspace list for tab-bar display."
     (+doom-dashboard--center (frame-width) (+workspace--tabline)))
 
+  (defvar +dwc/tab-bar-refresh-toggle nil
+    "Toggled each call to `+dwc/refresh-tab-bar' to force tab-bar redraw.")
+
   (defun +dwc/current-workspace-name ()
     "Return current workspace name (invisible, for triggering updates)."
-    (propertize (safe-persp-name (get-current-persp)) 'invisible t))
+    (propertize (if +dwc/tab-bar-refresh-toggle
+                    (concat (safe-persp-name (get-current-persp)) " ")
+                  (safe-persp-name (get-current-persp)))
+                'invisible t))
 
   (setq tab-bar-format '(+dwc/workspace-tabline-formatted
                          tab-bar-format-align-right
@@ -417,8 +423,11 @@
   (defun +dwc/refresh-tab-bar ()
     "Force the tab-bar to re-render with current face/theme colors."
     (interactive)
+    (setq +dwc/tab-bar-refresh-toggle (not +dwc/tab-bar-refresh-toggle))
     (tab-bar-tabs-set (tab-bar-tabs))
     (tab-bar--update-tab-bar-lines t))
+
+  (run-with-timer 1 1 #'+dwc/refresh-tab-bar)
 
   ;; Delete the "main" workspace after session restore.
   (add-hook 'persp-after-load-state-functions
