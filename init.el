@@ -188,7 +188,6 @@
 
        :app
        chess
-       agents-repl       ; AI agent CLI frontend
        ;;calendar
        ;;emms
        ;;everywhere        ; *leave* Emacs!? You must be joking

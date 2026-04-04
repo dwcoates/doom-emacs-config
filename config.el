@@ -374,24 +374,6 @@
           (magit-status dir))))
 
 (after! magit
-  ;; Close agents-repl panels before opening magit-status, restore on quit
-  (defvar +dwc/magit--agents-repl-was-visible nil)
-
-  (advice-add #'magit-status :before
-              (lambda (&rest _)
-                (setq +dwc/magit--agents-repl-was-visible
-                      (and (fboundp 'agents-repl--panels-visible-p)
-                           (agents-repl--panels-visible-p)))
-                (when +dwc/magit--agents-repl-was-visible
-                  (agents-repl--restore-layout))))
-
-  (advice-add #'magit-mode-bury-buffer :after
-              (lambda (&rest _)
-                (when +dwc/magit--agents-repl-was-visible
-                  (setq +dwc/magit--agents-repl-was-visible nil)
-                  (when (fboundp 'agents-repl--show-existing-panels)
-                    (agents-repl--show-existing-panels)))))
-
   (setq magit-no-confirm (append magit-no-confirm '(abort-revert abort-rebase abort-merge))
         magit-diff-visit-previous-blob nil)
 
