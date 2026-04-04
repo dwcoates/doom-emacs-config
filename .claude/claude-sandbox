@@ -51,6 +51,13 @@ if [[ -f "$MOUNTS_FILE" ]]; then
   done < <(jq -r '(.defaults + .custom)[]' "$MOUNTS_FILE")
 fi
 
+# Pre-accept the directory trust dialog for the container working directory.
+CLAUDE_JSON="$HOME/.claude.json"
+if [[ -f "$CLAUDE_JSON" ]] && command -v jq &>/dev/null; then
+  jq --arg p "/$DIRNAME" '.projects[$p].hasTrustDialogAccepted = true' "$CLAUDE_JSON" \
+    > "$CLAUDE_JSON.tmp" && mv "$CLAUDE_JSON.tmp" "$CLAUDE_JSON"
+fi
+
 exec docker run --rm -it \
   -v "$GIT_ROOT:/$DIRNAME" \
   -v "$HOME/.claude:/home/claude/.claude" \

@@ -41,6 +41,7 @@ Cancelled and reset whenever this file is re-evaluated.")
   "Buffer-local git root for Claude REPL buffers.
 Set when vterm/input buffers are created so workspace-id works from them.")
 
+
 (defun claude-repl--git-root (&optional dir)
   "Find the git root by walking up from DIR (default `default-directory').
 Checks for both .git directory and .git file (worktrees)."
@@ -171,7 +172,12 @@ If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirn
         (claude-repl--ws-put (+workspace-current-name) :prime-session-id source-session-id)
         (message "[worktree] will fork session %s into new workspace" source-session-id))
       (let ((default-directory (file-name-as-directory path)))
-        (claude-repl--ensure-session)))))
+        (claude-repl--ensure-session))
+      (message "Starting Claude... ws=%s ws-id=%s dir=%s cmd=%s"
+               (+workspace-current-name)
+               (claude-repl--workspace-id)
+               path
+               (claude-repl--ws-get (+workspace-current-name) :start-cmd)))))
 
 (defvar claude-repl--fullscreen-config nil
   "Saved window configuration before fullscreen toggle.")
@@ -235,9 +241,9 @@ The prefix is sent on the first prompt and every Nth prompt thereafter."
   :group 'claude-repl)
 
 (defcustom claude-repl-docker-image ""
-  "Fallback Docker image for sandboxed worktree workspaces with no .claude/sandbox-image.
-Prefer per-repo .claude/sandbox-image files over this global setting.
-If empty (the default), worktrees without a .claude/sandbox-image run Claude directly."
+  "Fallback Docker image for sandboxed worktree workspaces with no .claude/sandbox/image.
+Prefer per-repo .claude/sandbox/image files over this global setting.
+If empty (the default), worktrees without a .claude/sandbox/image run Claude directly."
   :type 'string
   :group 'claude-repl)
 
@@ -352,26 +358,32 @@ Tries git root, then buffer-local project root, then `default-directory'."
 
 (defun claude-repl--resolve-sandbox-config (git-root)
   "Return a plist (:image IMAGE :script SCRIPT) for a worktree at GIT-ROOT.
-Reads the image name from GIT-ROOT/.claude/sandbox-image.  All other Docker
-options (platform, extra flags, mounts) live in GIT-ROOT/.claude/claude-sandbox.
-Returns nil if no sandbox-image file exists or the image is not present locally."
-  (let ((sandbox-image-file (expand-file-name ".claude/sandbox-image" git-root)))
-    (when (file-readable-p sandbox-image-file)
+Tries .claude/sandbox/image first (new layout), then .claude/sandbox-image (legacy).
+Returns nil if no image file exists or the image is not present locally."
+  (let* ((new-image-file (expand-file-name ".claude/sandbox/image" git-root))
+         (old-image-file (expand-file-name ".claude/sandbox-image" git-root))
+         (image-file (cond ((file-readable-p new-image-file) new-image-file)
+                           ((file-readable-p old-image-file) old-image-file)))
+         (new-layout (equal image-file new-image-file)))
+    (when image-file
       (let* ((image (string-trim (with-temp-buffer
-                                   (insert-file-contents sandbox-image-file)
+                                   (insert-file-contents image-file)
                                    (buffer-string))))
-             (script (expand-file-name ".claude/claude-sandbox" git-root)))
+             (script (expand-file-name (if new-layout
+                                           ".claude/sandbox/claude-sandbox"
+                                         ".claude/claude-sandbox")
+                                       git-root)))
         (if (string-empty-p image)
-            (progn (message "[claude-repl] .claude/sandbox-image is empty in %s" git-root) nil)
+            (progn (message "[claude-repl] sandbox image file is empty in %s" git-root) nil)
           (if (claude-repl--docker-image-exists-p image)
               (list :image image :script script)
-            (message "[claude-repl] image %s not found — run .claude/install.sh to build it" image)
+            (message "[claude-repl] image %s not found — run .claude/sandbox/install.sh to build it" image)
             nil))))))
 
 (defun claude-repl--start-claude ()
   "Send the claude startup command to the current vterm buffer.
-For worktree workspaces (:worktree-p t), delegates to .claude/claude-sandbox
-if a sandbox-image file exists.  Falls back to bare-metal Claude otherwise."
+For worktree workspaces (:worktree-p t), delegates to .claude/sandbox/claude-sandbox
+if a .claude/sandbox/image file exists.  Falls back to bare-metal Claude otherwise."
   (let* ((ws (+workspace-current-name))
          (fresh (null (claude-repl--ws-get ws :start-cmd)))
          (worktree-p (claude-repl--ws-get ws :worktree-p))
