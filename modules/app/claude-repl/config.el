@@ -2195,6 +2195,11 @@ Without region: copies file:line."
       (:prefix "p"
        :desc "Create worktree workspace" "w" #'claude-repl-create-worktree-workspace))
 
+(map! :leader
+      (:prefix "TAB"
+       :desc "Create worktree workspace" "n" #'claude-repl-create-worktree-workspace
+       :desc "New workspace" "N" #'+workspace/new))
+
 ;; SPC j — Tell Claude to do a predefined thing
 (map! :leader
       (:prefix ("j" . "claude")
