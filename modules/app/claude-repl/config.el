@@ -2005,11 +2005,14 @@ so the user can select and copy text from the output."
     (let ((vterm-buf (get-buffer-create (claude-repl--buffer-name))))
       (claude-repl--ws-put ws :vterm-buffer vterm-buf)
       (with-current-buffer vterm-buf
-        (setq-local claude-repl--project-root root)
-        (setq-local claude-repl--owning-workspace ws)
         (if (eq major-mode 'vterm-mode)
-            (claude-repl--log "ensure-vterm reusing existing buffer %s" (buffer-name vterm-buf))
+            (progn
+              (setq-local claude-repl--project-root root)
+              (setq-local claude-repl--owning-workspace ws)
+              (claude-repl--log "ensure-vterm reusing existing buffer %s" (buffer-name vterm-buf)))
           (vterm-mode)
+          (setq-local claude-repl--project-root root)
+          (setq-local claude-repl--owning-workspace ws)
           (setq-local truncate-lines nil)
           (setq-local word-wrap t)
           (claude-repl--set-buffer-background 15)
@@ -2149,7 +2152,8 @@ If panels hidden: show both panels."
     (setq claude-repl--sync-timer nil))
   (claude-repl--ws-put ws :vterm-buffer nil)
   (claude-repl--ws-put ws :input-buffer nil)
-  (claude-repl--ws-put ws :saved-window-config nil))
+  (claude-repl--ws-put ws :saved-window-config nil)
+  (claude-repl--ws-put ws :start-cmd nil))
 
 (defun claude-repl--destroy-session-buffers (vterm-buf input-buf)
   "Close windows and kill VTERM-BUF, INPUT-BUF, and any placeholder."
