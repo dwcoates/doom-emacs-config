@@ -10,14 +10,43 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GIT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
-INSTALL_DIR="${1:-/usr/local/bin}"
+FORCE=false
+INSTALL_DIR=/usr/local/bin
+for arg in "$@"; do
+  case "$arg" in
+    --force) FORCE=true ;;
+    --*)     echo "Unknown option: $arg" >&2; exit 1 ;;
+    *)       INSTALL_DIR="$arg" ;;
+  esac
+done
+
+if ! command -v jq &>/dev/null; then
+  echo "==> Installing jq..."
+  case "$(uname -s)" in
+    Darwin) brew install jq ;;
+    Linux)
+      if command -v apt-get &>/dev/null; then
+        sudo apt-get install -y jq
+      elif command -v yum &>/dev/null; then
+        sudo yum install -y jq
+      else
+        echo "    Cannot install jq: no known package manager found. Install it manually." >&2
+        exit 1
+      fi
+      ;;
+    *) echo "    Unsupported platform for auto-install. Install jq manually." >&2; exit 1 ;;
+  esac
+fi
 
 IMAGE=$(tr -d '[:space:]' < "$SCRIPT_DIR/image")
 DOCKERFILE_HASH=$(sha256sum "$SCRIPT_DIR/Dockerfile" | awk '{print $1}')
 
 echo "==> Checking Docker image: $IMAGE"
 needs_build=false
-if ! docker image inspect "$IMAGE" &>/dev/null; then
+if [[ "$FORCE" == "true" ]]; then
+  echo "    --force specified, rebuilding..."
+  needs_build=true
+elif ! docker image inspect "$IMAGE" &>/dev/null; then
   needs_build=true
 else
   BUILT_HASH=$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "dockerfile.sha256"}}' 2>/dev/null || true)
@@ -57,8 +86,8 @@ echo "==> Installing claude-sandbox to $INSTALL_DIR"
 if [[ ! -w "$INSTALL_DIR" ]]; then
   if [[ $EUID -ne 0 ]]; then
     echo "    $INSTALL_DIR is not writable. Re-running with sudo..."
-    exec sudo "$0" "$INSTALL_DIR"
+    exec sudo "$0" "$@"
   fi
 fi
-ln -sf "$SCRIPT_DIR/claude-sandbox" "$INSTALL_DIR/claude-sandbox"
+install -m 755 "$SCRIPT_DIR/claude-sandbox" "$INSTALL_DIR/claude-sandbox"
 echo "    Done. Run 'claude-sandbox' from any worktree of this repo."
