@@ -65,23 +65,6 @@ Uses an MD5 hash of the canonical git root path.  Falls back to the buffer-local
     (when root
       (substring (md5 (claude-repl--path-canonical root)) 0 8))))
 
-(defun claude-repl--latest-session-id (project-root)
-  "Return the most recent Claude session ID for PROJECT-ROOT, or nil.
-Finds the newest .jsonl in ~/.claude/projects/<encoded>/ where the encoding
-replaces every non-alphanumeric character with a hyphen, matching Claude's own
-path-to-directory convention."
-  (let* ((canonical (directory-file-name (file-truename project-root)))
-         (encoded (replace-regexp-in-string "[^a-zA-Z0-9]" "-" canonical))
-         (dir (expand-file-name encoded "~/.claude/projects/"))
-         (files (when (file-directory-p dir)
-                  (directory-files dir t "\\.jsonl\\'"))))
-    (when files
-      (let ((newest (car (sort files
-                               (lambda (a b)
-                                 (time-less-p
-                                  (file-attribute-modification-time (file-attributes b))
-                                  (file-attribute-modification-time (file-attributes a))))))))
-        (file-name-sans-extension (file-name-nondirectory newest))))))
 
 ;; Single hash table for all per-workspace state.
 (defvar claude-repl--workspaces (make-hash-table :test 'equal)
@@ -126,7 +109,6 @@ If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirn
                     (shell-command-to-string "git rev-parse --show-toplevel")))
          (_ (when (string-match-p "^fatal" git-root)
               (user-error "Not in a git repository")))
-         (source-session-id (claude-repl--latest-session-id git-root))
          (name (read-string "Worktree name: "))
          (_ (when (string-empty-p name)
               (user-error "Name cannot be empty")))
@@ -168,9 +150,6 @@ If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirn
            (ws-id (substring (md5 canonical) 0 8)))
       (claude-repl--log "worktree registering ws-id=%s canonical=%s" ws-id canonical)
       (claude-repl--register-worktree-ws ws-id path)
-      (when source-session-id
-        (claude-repl--ws-put (+workspace-current-name) :prime-session-id source-session-id)
-        (claude-repl--log "worktree will fork session %s into new workspace" source-session-id))
       (let ((default-directory (file-name-as-directory path)))
         (claude-repl--ensure-session))
       (claude-repl--log "worktree pre-started Claude ws=%s cmd=%s"
@@ -397,16 +376,13 @@ if a .claude/sandbox/image file exists.  Falls back to bare-metal Claude otherwi
                       (if (string-match-p "ChessCom" (expand-file-name (or worktree-path default-directory)))
                           "--permission-mode auto"
                         "--dangerously-skip-permissions")))
-         (prime-id (when fresh (claude-repl--ws-get ws :prime-session-id)))
          (claude-flags (string-trim
                         (mapconcat #'identity
                                    (delq nil (list (unless fresh "-c") perm-flag))
                                    " ")))
-         (resume-flags (when prime-id (format "--resume %s --fork-session " prime-id)))
          (cmd (if (and worktree-p docker-image)
-                  (string-trim (concat (plist-get sandbox-config :script) " "
-                                       resume-flags claude-flags))
-                (string-trim (concat "claude " resume-flags claude-flags)))))
+                  (string-trim (concat (plist-get sandbox-config :script) " " claude-flags))
+                (string-trim (concat "claude " claude-flags)))))
     (claude-repl--ws-put ws :start-cmd cmd)
     (setq-local mode-line-format
                 (list (if (and worktree-p docker-image)
@@ -414,9 +390,8 @@ if a .claude/sandbox/image file exists.  Falls back to bare-metal Claude otherwi
                                       'face '(:foreground "green" :weight bold))
                         (propertize (format " BARE METAL: %s" (system-name))
                                     'face '(:foreground "red" :weight bold)))))
-    (claude-repl--log "start-claude dir=%s fresh=%s worktree=%s prime=%s cmd=%s"
-                      default-directory (if fresh "yes" "no") (if worktree-p "yes" "no")
-                      (or prime-id "none") cmd)
+    (claude-repl--log "start-claude dir=%s fresh=%s worktree=%s cmd=%s"
+                      default-directory (if fresh "yes" "no") (if worktree-p "yes" "no") cmd)
     (setq-local claude-repl--ready nil)
     (vterm-send-string (concat "clear && " cmd))
     (vterm-send-return)
