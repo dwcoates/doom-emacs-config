@@ -336,7 +336,9 @@ Tries git root, then buffer-local project root, then `default-directory'."
 (defun claude-repl--resolve-sandbox-config (git-root)
   "Return a plist (:image IMAGE :script SCRIPT) for a worktree at GIT-ROOT.
 Tries .claude/sandbox/image first (new layout), then .claude/sandbox-image (legacy).
-Returns nil if no image file exists or the image is not present locally."
+Returns nil if no image file exists or the image is not present locally.
+Returns (:needs-build t :install-script PATH) if the image file exists but the
+Docker image has not been built yet."
   (let* ((new-image-file (expand-file-name ".claude/sandbox/image" git-root))
          (old-image-file (expand-file-name ".claude/sandbox-image" git-root))
          (image-file (cond ((file-readable-p new-image-file) new-image-file)
@@ -354,8 +356,10 @@ Returns nil if no image file exists or the image is not present locally."
             (progn (message "[claude-repl] sandbox image file is empty in %s" git-root) nil)
           (if (claude-repl--docker-image-exists-p image)
               (list :image image :script script)
-            (message "[claude-repl] image %s not found — run .claude/sandbox/install.sh to build it" image)
-            nil))))))
+            (let ((install-script (expand-file-name ".claude/sandbox/install.sh" git-root)))
+              (list :needs-build t
+                    :image image
+                    :install-script (when (file-executable-p install-script) install-script)))))))))
 
 (defun claude-repl--start-claude ()
   "Send the claude startup command to the current vterm buffer.
@@ -368,7 +372,16 @@ if a .claude/sandbox/image file exists.  Falls back to bare-metal Claude otherwi
          (sandbox-config (when worktree-p
                            (claude-repl--resolve-sandbox-config
                             (claude-repl--git-root worktree-path))))
-         (docker-image (plist-get sandbox-config :image))
+         (_ (when (plist-get sandbox-config :needs-build)
+              (let* ((image (plist-get sandbox-config :image))
+                     (install-script (plist-get sandbox-config :install-script)))
+                (if install-script
+                    (when (y-or-n-p (format "Sandbox image '%s' not built. Run install.sh now? " image))
+                      (compile (format "bash %s" install-script))
+                      (user-error "Run 'SPC o c' again once the build completes"))
+                  (user-error "Sandbox image '%s' not built — run .claude/sandbox/install.sh manually" image)))))
+         (docker-image (and (not (plist-get sandbox-config :needs-build))
+                            (plist-get sandbox-config :image)))
          ;; For docker: claude-sandbox script handles permission mode automatically.
          ;; For bare-metal: detect by path — ChessCom repos use --permission-mode auto,
          ;; personal repos use --dangerously-skip-permissions.
