@@ -1,0 +1,6 @@
+.claude/sandbox/mounts
+.claude/sandbox/sandbox.log
+.claude-code-emacs-mcp.log
+.claude-repl-history
+.projectile
+**/.DS_Store

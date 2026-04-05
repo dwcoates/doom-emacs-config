@@ -96,20 +96,11 @@ is stored under the workspace name from `+workspace-current-name'."
     (claude-repl--ws-put ws :worktree-p t)
     (claude-repl--ws-put ws :worktree-path path)))
 
-(defun claude-repl-create-worktree-workspace ()
-  "Create a new git worktree and switch to it as a project workspace.
-Prompts for a name (may use branch-style slashes like DC/CV-100/cool-branch).
-The worktree directory uses only the last path component; the full name becomes
-the branch name.
-
-If called from a worktree, the new worktree is created as a sibling (../<dirname>).
-If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirname>."
-  (interactive)
+(defun claude-repl--do-create-worktree-workspace (name)
   (let* ((git-root (string-trim
                     (shell-command-to-string "git rev-parse --show-toplevel")))
          (_ (when (string-match-p "^fatal" git-root)
               (user-error "Not in a git repository")))
-         (name (read-string "Worktree name: "))
          (_ (when (string-empty-p name)
               (user-error "Name cannot be empty")))
          (dirname (file-name-nondirectory (directory-file-name name)))
@@ -156,6 +147,34 @@ If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirn
                         (+workspace-current-name)
                         (claude-repl--ws-get (+workspace-current-name) :start-cmd)))))
 
+(defun claude-repl-create-worktree-workspace ()
+  "Create a new git worktree and switch to it as a project workspace.
+Prompts for a name (may use branch-style slashes like DC/CV-100/cool-branch).
+The worktree directory uses only the last path component; the full name becomes
+the branch name.
+
+If called from a worktree, the new worktree is created as a sibling (../<dirname>).
+If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirname>."
+  (interactive)
+  (claude-repl--do-create-worktree-workspace (read-string "Worktree name: ")))
+
+(defun claude-repl--process-workspace-generation-file ()
+  (interactive)
+  (let ((file (expand-file-name "~/.claude/output/workspace_generation.json")))
+    (if (not (file-exists-p file))
+        (claude-repl--log "workspace-generation-file not found: %s" file)
+      (claude-repl--log "workspace-generation-file processing: %s" file)
+      (let ((names (json-read-file file)))
+        (claude-repl--log "workspace-generation-file names: %s" names)
+        (mapc (lambda (name)
+                (claude-repl--log "workspace-generation-file creating workspace: %s" name)
+                (claude-repl--do-create-worktree-workspace name))
+              names)
+        (delete-file file)
+        (claude-repl--log "workspace-generation-file deleted: %s" file)))))
+
+(defvar claude-repl--workspace-generation-watch nil)
+
 (defvar claude-repl--fullscreen-config nil
   "Saved window configuration before fullscreen toggle.")
 
@@ -199,6 +218,20 @@ state changes regardless of which persp the buffer drifts into.")
 FMT and ARGS are passed to `message', prefixed with timestamp and [claude-repl]."
   (when claude-repl-debug
     (apply #'message (concat (format-time-string "%H:%M:%S.%3N") " [claude-repl] " fmt) args)))
+
+(make-directory (expand-file-name "~/.claude/output/") t)
+(claude-repl--log "workspace-generation-watch: registering watch on %s for workspace_generation.json"
+                  (expand-file-name "~/.claude/output/"))
+(setq claude-repl--workspace-generation-watch
+      (file-notify-add-watch
+       (expand-file-name "~/.claude/output/")
+       '(change)
+       (lambda (event)
+         (let ((action (nth 1 event))
+               (file (nth 2 event)))
+           (when (and (memq action '(changed created))
+                      (string-equal (file-name-nondirectory file) "workspace_generation.json"))
+             (claude-repl--process-workspace-generation-file))))))
 
 (defcustom claude-repl-skip-permissions t
   "When non-nil, prepend the command prefix metaprompt to each input sent to Claude."
@@ -2384,6 +2417,18 @@ This lets Claude CLI handle paste natively, including images."
 
 ;;; Debug helpers — interactive commands for diagnosing workspace state issues.
 ;;; Call via M-x claude-repl-debug/...
+
+(defun claude-repl-debug/mock-workspace-generation (&optional names)
+  "Write a mock workspace_generation.json to trigger the file watcher.
+NAMES is an optional list of branch name strings; defaults to a single test entry."
+  (interactive)
+  (let ((file (expand-file-name "~/.claude/output/workspace_generation.json"))
+        (names (or names '("DWC/mock-test"))))
+    (make-directory (expand-file-name "~/.claude/output/") t)
+    (with-temp-file file
+      (insert (json-encode names)))
+    (claude-repl--log "mock workspace-generation file written: %s names=%s" file names)
+    (message "Wrote mock workspace_generation.json: %s" names)))
 
 (defun claude-repl-debug/workspace-states ()
   "Display all workspace states."
