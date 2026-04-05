@@ -848,9 +848,13 @@ If found, the class name is returned, otherwise STR is returned"
   )
 
 (defun +dwc/toggle-last-buffer ()
-  "Toggle between the last two buffers, including popups."
+  "Toggle between the last two buffers, excluding Claude REPL buffers."
   (interactive)
-  (switch-to-buffer (other-buffer (current-buffer) t)))
+  (let ((buf (cl-find-if (lambda (b)
+                           (and (not (eq b (current-buffer)))
+                                (not (string-prefix-p "*claude" (buffer-name b)))))
+                         (buffer-list))))
+    (when buf (switch-to-buffer buf))))
 
 (map! :leader "b p" #'+dwc/toggle-last-buffer)
 
