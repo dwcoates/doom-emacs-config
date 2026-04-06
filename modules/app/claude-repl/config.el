@@ -833,31 +833,49 @@ Uses paste mode for large inputs to avoid truncation."
         (claude-repl--history-reset)
         (erase-buffer)))))
 
+(defun claude-repl--do-send (ws input raw)
+  "Core send: dispatch INPUT to WS's vterm.
+Increments the prefix counter, pins the owning workspace, marks the workspace
+as thinking, sends INPUT, and runs posthooks with RAW (the undecorated text)."
+  (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+    (claude-repl--log "do-send ws=%s len=%d" ws (length input))
+    (claude-repl--ws-put ws :prefix-counter
+                         (1+ (or (claude-repl--ws-get ws :prefix-counter) 0)))
+    ;; Pin the owning workspace on the vterm buffer so title-change
+    ;; clears the correct workspace even if the buffer drifts between persps.
+    (when vterm-buf
+      (with-current-buffer vterm-buf
+        (setq-local claude-repl--owning-workspace ws)))
+    (claude-repl--mark-ws-thinking ws)
+    (claude-repl--send-input-to-vterm vterm-buf input)
+    (claude-repl--run-send-posthooks ws raw)))
+
+(defun claude-repl--send-prompt-to-workspace (ws prompt)
+  "Programmatically send PROMPT string to workspace WS.
+Intended for non-interactive callers (e.g. file-based dispatch).
+Signals an error if WS has no live vterm buffer."
+  (unless (claude-repl--ws-get ws :vterm-buffer)
+    (error "claude-repl--send-prompt-to-workspace: no vterm buffer for workspace %s" ws))
+  (claude-repl--do-send ws prompt prompt))
+
 (defun claude-repl-send ()
   "Send input buffer contents to Claude, clear buffer, and return to previous window."
   (interactive)
   (let* ((ws (+workspace-current-name)))
     (unless ws (error "claude-repl-send: no active workspace"))
-    (let* ((input-buf (claude-repl--ws-get ws :input-buffer))
-           (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+    (let* ((input-buf (claude-repl--ws-get ws :input-buffer)))
       (when (and input-buf (claude-repl--vterm-live-p))
         (let* ((raw (with-current-buffer input-buf (buffer-string)))
                (input (claude-repl--prepare-input ws)))
-        (claude-repl--log "send ws=%s len=%d" ws (length input))
-        (claude-repl--ws-put ws :prefix-counter
-                             (1+ (or (claude-repl--ws-get ws :prefix-counter) 0)))
-        ;; Pin the owning workspace on the vterm buffer so title-change
-        ;; clears the correct workspace even if the buffer drifts between persps.
-        (when vterm-buf
-          (with-current-buffer vterm-buf
-            (setq-local claude-repl--owning-workspace ws)))
-        (claude-repl--mark-ws-thinking ws)
-        (claude-repl--send-input-to-vterm vterm-buf input)
-        (claude-repl--clear-input ws)
-        (claude-repl--run-send-posthooks ws raw)
-        (let ((ret (claude-repl--ws-get ws :return-window)))
-          (when (and ret (window-live-p ret))
-            (select-window ret))))))))
+          (claude-repl--do-send ws input raw)
+          (claude-repl--clear-input ws)
+          (claude-repl--select-return-window ws)))))))
+
+(defun claude-repl--select-return-window (ws)
+  "Select the saved return window for WS if it is still live."
+  (let ((ret (claude-repl--ws-get ws :return-window)))
+    (when (and ret (window-live-p ret))
+      (select-window ret))))
 
 (defun claude-repl--remember-return-window ()
   "Save the current window as the return target, unless we're in the input buffer."
@@ -892,27 +910,16 @@ Falls back to hiding panels and selecting the return window."
   "Send input with the metaprompt prefix, bypassing the counter."
   (interactive)
   (let* ((ws (+workspace-current-name))
-         (input-buf (claude-repl--ws-get ws :input-buffer))
-         (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+         (input-buf (claude-repl--ws-get ws :input-buffer)))
     (when (and input-buf (claude-repl--vterm-live-p))
       (let* ((raw (with-current-buffer input-buf (buffer-string)))
              (input (if (and claude-repl-skip-permissions claude-repl-command-prefix
                              (not (claude-repl--skip-metaprompt-p raw)))
                         (concat claude-repl--command-prefix raw)
                       raw)))
-        (claude-repl--log "send-with-metaprompt ws=%s len=%d" ws (length input))
-        (claude-repl--ws-put ws :prefix-counter
-                             (1+ (or (claude-repl--ws-get ws :prefix-counter) 0)))
-        (when vterm-buf
-          (with-current-buffer vterm-buf
-            (setq-local claude-repl--owning-workspace ws)))
-        (claude-repl--mark-ws-thinking ws)
-        (claude-repl--send-input-to-vterm vterm-buf input)
+        (claude-repl--do-send ws input raw)
         (claude-repl--clear-input ws)
-        (claude-repl--run-send-posthooks ws raw)
-        (let ((ret (claude-repl--ws-get ws :return-window)))
-          (when (and ret (window-live-p ret))
-            (select-window ret)))))))
+        (claude-repl--select-return-window ws))))))
 
 (defun claude-repl-send-with-postfix ()
   "Append `claude-repl-send-postfix' to the input buffer, then send."
