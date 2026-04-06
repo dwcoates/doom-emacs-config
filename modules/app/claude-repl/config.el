@@ -80,7 +80,10 @@ Uses an MD5 hash of the canonical git root path.  Falls back to the buffer-local
   "Hash table mapping workspace name → state plist.
 Keys: :vterm-buffer :input-buffer :saved-window-config
       :return-window :prefix-counter :status :activity-time
-      :git-clean :git-proc :worktree-p :worktree-path :force-bare-metal")
+      :git-clean :git-proc :worktree-p :worktree-path
+      :force-bare-metal :fork-session-id :had-session
+      :start-cmd :ready-timer :thinking :done
+      :preemptive-prompt :pending-show-panels")
 
 (defun claude-repl--ws-get (ws key)
   "Get KEY from workspace WS's plist."
@@ -96,16 +99,27 @@ Internally uses plist-put (which returns a new list) threaded into puthash."
   "Remove all state for workspace WS."
   (remhash ws claude-repl--workspaces))
 
-(defun claude-repl--register-worktree-ws (ws-id path)
-  "Mark the current workspace as a worktree workspace rooted at PATH.
+(defun claude-repl--register-worktree-ws (ws-id path &optional ws)
+  "Mark workspace WS as a worktree workspace rooted at PATH.
 WS-ID is the hash identifier (used for logging/buffer naming); the state
-is stored under the workspace name from `+workspace-current-name'."
-  (let ((ws (+workspace-current-name)))
+is stored under WS, defaulting to `+workspace-current-name'."
+  (let ((ws (or ws (+workspace-current-name))))
     (claude-repl--log "register-worktree-ws ws-id=%s ws=%s path=%s" ws-id ws path)
     (claude-repl--ws-put ws :worktree-p t)
     (claude-repl--ws-put ws :worktree-path path)))
 
-(defun claude-repl--do-create-worktree-workspace (name &optional force-bare-metal fork-session-id)
+(defun claude-repl--setup-worktree-session (ws-id path ws force-bare-metal)
+  "Register WS as a worktree at PATH and start its Claude session.
+Sets :force-bare-metal if requested, then starts the session from PATH."
+  (claude-repl--register-worktree-ws ws-id path ws)
+  (when force-bare-metal
+    (claude-repl--ws-put ws :force-bare-metal t))
+  (let ((default-directory (file-name-as-directory path)))
+    (claude-repl--ensure-session ws))
+  (claude-repl--log "worktree pre-started Claude ws=%s cmd=%s"
+                    ws (claude-repl--ws-get ws :start-cmd)))
+
+(defun claude-repl--do-create-worktree-workspace (name &optional force-bare-metal fork-session-id preemptive-prompt)
   (let* ((git-root (string-trim
                     (shell-command-to-string "git rev-parse --show-toplevel")))
          (_ (when (string-match-p "^fatal" git-root)
@@ -122,10 +136,11 @@ is stored under the workspace name from `+workspace-current-name'."
                                    (wt-dir (expand-file-name (concat repo-name "-worktrees") git-root-parent)))
                               (make-directory wt-dir t)
                               wt-dir)))
-         (path (expand-file-name dirname worktree-parent)))
-    (claude-repl--log "worktree git-root=%s name=%s dirname=%s branch=%s in-worktree=%s path=%s old-ws=%s old-ws-id=%s"
+         (path (expand-file-name dirname worktree-parent))
+         (preemptive-p (and preemptive-prompt (not (string-empty-p preemptive-prompt)))))
+    (claude-repl--log "worktree git-root=%s name=%s dirname=%s branch=%s in-worktree=%s path=%s old-ws=%s old-ws-id=%s preemptive=%s"
              git-root name dirname (or branch-name "none") in-worktree path
-             (+workspace-current-name) (claude-repl--workspace-id))
+             (+workspace-current-name) (claude-repl--workspace-id) (if preemptive-p "yes" "no"))
     (when (projectile-project-p path)
       (user-error "Worktree '%s' already exists — use SPC p p to switch to it" dirname))
     (let* ((cmd (if branch-name
@@ -144,21 +159,24 @@ is stored under the workspace name from `+workspace-current-name'."
     (write-region dirname nil (expand-file-name ".projectile" path))
     (claude-repl--log "worktree wrote .projectile, adding to projectile known projects")
     (projectile-add-known-project (file-name-as-directory path))
-    (claude-repl--log "worktree switching to project: %s" (file-name-as-directory path))
-    (projectile-switch-project-by-name (file-name-as-directory path))
     (let* ((canonical (claude-repl--path-canonical path))
            (ws-id (substring (md5 canonical) 0 8)))
-      (claude-repl--log "worktree registering ws-id=%s canonical=%s" ws-id canonical)
-      (claude-repl--register-worktree-ws ws-id path)
-      (when force-bare-metal
-        (claude-repl--ws-put (+workspace-current-name) :force-bare-metal t))
-      (when fork-session-id
-        (claude-repl--ws-put (+workspace-current-name) :fork-session-id fork-session-id))
-      (let ((default-directory (file-name-as-directory path)))
-        (claude-repl--ensure-session))
-      (claude-repl--log "worktree pre-started Claude ws=%s cmd=%s"
-                        (+workspace-current-name)
-                        (claude-repl--ws-get (+workspace-current-name) :start-cmd)))))
+      (if preemptive-p
+          ;; Background path: create workspace without switching to it.
+          ;; Claude starts silently; the preemptive prompt is sent once it's ready.
+          (let ((ws dirname))
+            (claude-repl--log "worktree background path: creating workspace %s" ws)
+            (+workspace-new ws)
+            (claude-repl--ws-put ws :preemptive-prompt preemptive-prompt)
+            (when fork-session-id
+              (claude-repl--ws-put ws :fork-session-id fork-session-id))
+            (claude-repl--setup-worktree-session ws-id path ws force-bare-metal))
+        ;; Normal path: switch to the new workspace immediately.
+        (claude-repl--log "worktree normal path: switching to project: %s" (file-name-as-directory path))
+        (projectile-switch-project-by-name (file-name-as-directory path))
+        (when fork-session-id
+          (claude-repl--ws-put dirname :fork-session-id fork-session-id))
+        (claude-repl--setup-worktree-session ws-id path dirname force-bare-metal))))))
 
 (defun claude-repl-create-worktree-workspace (arg)
   "Create a new git worktree and switch to it as a project workspace.
@@ -172,7 +190,12 @@ If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirn
 Prefix arguments:
   \\[universal-argument]       — force bare-metal (skip Docker sandbox)
   \\[universal-argument] \\[universal-argument]     — fork current Claude session into new worktree
-  \\[universal-argument] \\[universal-argument] \\[universal-argument]   — fork + force bare-metal"
+  \\[universal-argument] \\[universal-argument] \\[universal-argument]   — fork + force bare-metal
+
+Optionally prompts for a preemptive prompt.  If provided, the new workspace is
+created in the background (no switch) and the prompt is sent to Claude the moment
+its session becomes ready.  If left blank, behavior is the same as before: switch
+to the new workspace immediately."
   (interactive "P")
   (let* ((raw (prefix-numeric-value arg))
          (force-bare-metal (memq raw '(4 64)))
@@ -182,9 +205,10 @@ Prefix arguments:
             (let ((sid (claude-repl--ws-get (+workspace-current-name) :session-id)))
               (unless sid
                 (user-error "No session ID for current workspace — cannot fork"))
-              sid))))
-    (claude-repl--do-create-worktree-workspace
-     (read-string "Worktree name: ") force-bare-metal fork-session-id)))
+              sid)))
+         (name (read-string "Worktree name: "))
+         (preemptive-prompt (read-string "Preemptive prompt (blank to switch there normally): ")))
+    (claude-repl--do-create-worktree-workspace name force-bare-metal fork-session-id preemptive-prompt)))
 
 (defun claude-repl--process-workspace-generation-file ()
   (interactive)
@@ -426,7 +450,7 @@ Docker image has not been built yet."
   "Send the claude startup command to the current vterm buffer.
 For worktree workspaces (:worktree-p t), delegates to .claude/sandbox/claude-sandbox
 if a .claude/sandbox/image file exists.  Falls back to bare-metal Claude otherwise."
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (or claude-repl--owning-workspace (+workspace-current-name)))
          (fresh (not (claude-repl--ws-get ws :had-session)))
          (worktree-p (claude-repl--ws-get ws :worktree-p))
          (worktree-path (claude-repl--ws-get ws :worktree-path))
@@ -1019,12 +1043,12 @@ all characters are sent directly to vterm."
       :ni "<up>"   #'ignore
       :ni "<down>" #'ignore)
 
-(defun claude-repl--ensure-session ()
-  "Ensure a Claude session exists (vterm + input + overlay).
-No-op if already running."
-  (unless (claude-repl--vterm-running-p)
+(defun claude-repl--ensure-session (&optional ws)
+  "Ensure a Claude session exists (vterm + input + overlay) for WS.
+WS defaults to the current workspace name.  No-op if already running."
+  (unless (claude-repl--vterm-running-p ws)
     (claude-repl--log "ensure-session: starting new session")
-    (let ((ws (+workspace-current-name)))
+    (let ((ws (or ws (+workspace-current-name))))
       (unless ws (error "claude-repl--ensure-session: no active workspace"))
       (claude-repl--ensure-vterm-buffer ws)
       (claude-repl--ensure-input-buffer ws)
@@ -1671,8 +1695,9 @@ Stores the session ID as :session-id on the workspace plist."
 
 (defun claude-repl--handle-first-ready ()
   "Handle the first terminal title set — Claude is now ready.
-Cancels the ready-timer, swaps the loading placeholder, and auto-opens panels
-if the owning workspace is currently active."
+Cancels the ready-timer, swaps the loading placeholder, and either sends the
+preemptive prompt (background workspace case) or auto-opens panels if the
+owning workspace is currently active."
   (unless claude-repl--ready
     (claude-repl--log "first-ready buf=%s ws=%s" (buffer-name) claude-repl--owning-workspace)
     (setq claude-repl--ready t)
@@ -1680,8 +1705,25 @@ if the owning workspace is currently active."
       (claude-repl--cancel-ready-timer claude-repl--owning-workspace)
       (claude-repl--capture-session-id claude-repl--owning-workspace))
     (claude-repl--swap-placeholder)
-    (when (string= claude-repl--owning-workspace (+workspace-current-name))
-      (claude-repl))))
+    (let* ((ws claude-repl--owning-workspace)
+           (prompt (claude-repl--ws-get ws :preemptive-prompt)))
+      (if prompt
+          (progn
+            (claude-repl--log "first-ready sending preemptive prompt to ws=%s" ws)
+            (claude-repl--ws-put ws :preemptive-prompt nil)
+            (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+              (run-at-time 0.3 nil
+                           (lambda ()
+                             (when (buffer-live-p vterm-buf)
+                               (claude-repl--send-input-to-vterm vterm-buf prompt)))))
+            ;; Open panels now if the user is already on this workspace, otherwise
+            ;; defer until they switch here — claude-repl--on-workspace-switch checks
+            ;; the flag and opens them then.
+            (if (string= ws (+workspace-current-name))
+                (claude-repl)
+              (claude-repl--ws-put ws :pending-show-panels t)))
+        (when (string= ws (+workspace-current-name))
+          (claude-repl))))))
 
 (defun claude-repl--on-title-change (title)
   "Detect thinking->idle transition from vterm title changes."
@@ -1853,11 +1895,16 @@ Uses cached git status (`:git-clean') and kicks off async refreshes."
 
 ;; Refresh vterm on workspace switch
 (defun claude-repl--on-workspace-switch ()
-  "Handle workspace switch: update all workspace states, refresh vterm, reset cursors."
+  "Handle workspace switch: update all workspace states, refresh vterm, reset cursors.
+Also opens panels for workspaces that were created with a preemptive prompt."
   (claude-repl--log "workspace-switch ws=%s" (+workspace-current-name))
   (claude-repl--update-all-workspace-states)
   (claude-repl--refresh-vterm)
-  (claude-repl--reset-vterm-cursors))
+  (claude-repl--reset-vterm-cursors)
+  (let ((ws (+workspace-current-name)))
+    (when (claude-repl--ws-get ws :pending-show-panels)
+      (claude-repl--ws-put ws :pending-show-panels nil)
+      (claude-repl))))
 
 ;; Save window state for current workspace before switching away,
 ;; so update-all-workspace-states can inspect the saved config.
@@ -1928,9 +1975,10 @@ session releases it."
     (advice-remove 'vterm--redraw #'claude-repl--after-vterm-redraw))
   (claude-repl--delete-hide-overlay))
 
-(defun claude-repl--vterm-running-p ()
-  "Return t if Claude vterm buffer for the current workspace exists with a live process."
-  (let ((buf (claude-repl--ws-get (+workspace-current-name) :vterm-buffer)))
+(defun claude-repl--vterm-running-p (&optional ws)
+  "Return t if Claude vterm buffer for WS exists with a live process.
+WS defaults to the current workspace name."
+  (let ((buf (claude-repl--ws-get (or ws (+workspace-current-name)) :vterm-buffer)))
     (and buf (buffer-live-p buf) (get-buffer-process buf))))
 
 (defun claude-repl--session-starting-p (&optional ws)
