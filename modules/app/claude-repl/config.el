@@ -67,11 +67,20 @@ Uses an MD5 hash of the canonical git root path.  Falls back to the buffer-local
 
 
 ;; Single hash table for all per-workspace state.
+;;
+;; NOTE: workspace name ≠ git branch name.
+;; `claude-repl--do-create-worktree-workspace' derives the persp name from the
+;; *last path component* of the input (e.g. "DWC/fix-login" → persp "fix-login"),
+;; while the full input becomes the branch name ("DWC/fix-login").  Never assume
+;; the two are equal.  To resolve a workspace to its branch, retrieve its
+;; :worktree-path from this hash and run `git rev-parse --abbrev-ref HEAD' there.
+;; If :worktree-path is absent (e.g. after session restore), fall back to
+;; `claude-repl--workspace-dir', which scans the workspace's live buffers.
 (defvar claude-repl--workspaces (make-hash-table :test 'equal)
   "Hash table mapping workspace name → state plist.
 Keys: :vterm-buffer :input-buffer :saved-window-config
       :return-window :prefix-counter :status :activity-time
-      :git-clean :git-proc")
+      :git-clean :git-proc :worktree-p :worktree-path :force-bare-metal")
 
 (defun claude-repl--ws-get (ws key)
   "Get KEY from workspace WS's plist."
@@ -2385,6 +2394,89 @@ Without region: copies file:line."
     (kill-new ref)
     (message "Copied: %s" ref)))
 
+;; Workspace merge
+
+(defun +dwc/workspace->branch (ws)
+  "Return the git branch checked out in workspace WS's worktree, or nil.
+Workspace name ≠ branch name: e.g. persp \"fix-login\" was created from
+\"DWC/fix-login\", so the branch is \"DWC/fix-login\" but the persp is \"fix-login\".
+Resolves via :worktree-path stored in `claude-repl--workspaces'; falls back to
+buffer-scanning via `claude-repl--ws-dir' for session-restored workspaces."
+  (let ((path (or (claude-repl--ws-get ws :worktree-path)
+                  (claude-repl--ws-dir ws))))
+    (when path
+      (let ((branch (string-trim
+                     (shell-command-to-string
+                      (format "git -C %s rev-parse --abbrev-ref HEAD"
+                              (shell-quote-argument path))))))
+        (unless (or (string-empty-p branch) (string-prefix-p "fatal" branch))
+          branch)))))
+
+(defun +dwc/workspace-merge ()
+  "Cherry-pick another workspace's branch commits onto the current branch.
+Replays each commit from the target branch (since it diverged from master)
+individually. Aborts cleanly if any commit conflicts."
+  (interactive)
+  (let* ((current-ws (+workspace-current-name))
+         (other-ws (remove current-ws (+workspace-list-names))))
+    (unless other-ws
+      (user-error "No other workspaces to merge"))
+    ;; Guard: uncommitted changes would interfere with cherry-pick.
+    (let ((project-root (or (projectile-project-root) (user-error "Not in a project"))))
+      (unless (and (= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--quiet"))
+                   (= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--cached" "--quiet")))
+        (user-error "Uncommitted changes present — stash or commit them before merging a workspace")))
+    (let* ((target-ws (completing-read "Merge workspace into current: " other-ws nil t))
+           (target-branch (+dwc/workspace->branch target-ws)))
+      (unless target-branch
+        (user-error "Cannot resolve branch for workspace '%s'" target-ws))
+      (let* ((project-root (or (projectile-project-root)
+                               (user-error "Not in a project"))))
+        (unless (= 0 (call-process "git" nil nil nil
+                                   "-C" project-root
+                                   "rev-parse" "--verify" target-branch))
+          (user-error "Branch '%s' not found in this repo" target-branch))
+        (let ((ahead (string-trim
+                      (shell-command-to-string
+                       (format "git -C %s rev-list --count master..%s"
+                               (shell-quote-argument project-root)
+                               target-branch)))))
+          (when (string= ahead "0")
+            (user-error "Workspace '%s' has no commits beyond master" target-ws)))
+        (let* ((fork (string-trim
+                      (shell-command-to-string
+                       (format "git -C %s merge-base master %s"
+                               (shell-quote-argument project-root)
+                               target-branch))))
+               (range (format "%s..%s" fork target-branch)))
+          (claude-repl--log "workspace-merge target-ws=%s target-branch=%s fork=%s range=%s"
+                            target-ws target-branch fork range)
+          (let ((exit-code (call-process "git" nil nil nil "-C" project-root "cherry-pick" range)))
+            (claude-repl--log "workspace-merge cherry-pick exit-code=%s" exit-code))
+          ;; Non-zero exit doesn't always mean conflict — git also exits non-zero for
+          ;; empty commits (already applied). Only abort if CHERRY_PICK_HEAD exists,
+          ;; which git writes only when stopped mid-way on a real conflict.
+          (let* ((git-dir (string-trim (shell-command-to-string
+                                        (format "git -C %s rev-parse --git-dir"
+                                                (shell-quote-argument project-root)))))
+                 (cherry-pick-head (expand-file-name "CHERRY_PICK_HEAD" git-dir))
+                 (head-exists (file-exists-p cherry-pick-head)))
+            (claude-repl--log "workspace-merge git-dir=%s cherry-pick-head=%s exists=%s"
+                              git-dir cherry-pick-head head-exists)
+            (when head-exists
+              (let ((conflicting-commit (string-trim
+                                         (shell-command-to-string
+                                          (format "git -C %s rev-parse --short CHERRY_PICK_HEAD"
+                                                  (shell-quote-argument project-root))))))
+                (magit-status)
+                (user-error "Conflict cherry-picking %s from '%s' — resolve in magit" conflicting-commit target-ws))))
+          (when (member target-ws (+workspace-list-names))
+            ;; Kill Claude process first to suppress vterm's "process running" prompt.
+            (claude-repl--kill-vterm-process (claude-repl--ws-get target-ws :vterm-buffer))
+            (persp-kill target-ws))
+          (message "Merged workspace '%s' → '%s'." target-ws current-ws)
+          (magit-status))))))
+
 ;; Keybindings
 ;; SPC o — Claude session control (open, focus, kill, interrupt, utilities)
 (map! :leader
@@ -2401,7 +2493,8 @@ Without region: copies file:line."
 (map! :leader
       (:prefix "TAB"
        :desc "Create worktree workspace" "n" #'claude-repl-create-worktree-workspace
-       :desc "New workspace" "N" #'+workspace/new))
+       :desc "New workspace"             "N" #'+workspace/new
+       :desc "Merge workspace into current" "m" #'+dwc/workspace-merge))
 
 ;; SPC j — Tell Claude to do a predefined thing
 (map! :leader
