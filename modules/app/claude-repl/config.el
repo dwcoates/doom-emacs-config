@@ -83,7 +83,7 @@ Keys: :vterm-buffer :input-buffer :saved-window-config
       :git-clean :git-proc :worktree-p :worktree-path
       :force-bare-metal :fork-session-id :had-session
       :start-cmd :ready-timer :thinking :done
-      :preemptive-prompt :pending-show-panels")
+      :pending-prompts :pending-show-panels")
 
 (defun claude-repl--ws-get (ws key)
   "Get KEY from workspace WS's plist."
@@ -167,7 +167,8 @@ Sets :force-bare-metal if requested, then starts the session from PATH."
           (let ((ws dirname))
             (claude-repl--log "worktree background path: creating workspace %s" ws)
             (+workspace-new ws)
-            (claude-repl--ws-put ws :preemptive-prompt preemptive-prompt)
+            (claude-repl--ws-put ws :pending-prompts (list preemptive-prompt))
+            (claude-repl--ws-put ws :pending-show-panels t)
             (when fork-session-id
               (claude-repl--ws-put ws :fork-session-id fork-session-id))
             (claude-repl--setup-worktree-session ws-id path ws force-bare-metal))
@@ -210,20 +211,41 @@ to the new workspace immediately."
          (preemptive-prompt (read-string "Preemptive prompt (blank to switch there normally): ")))
     (claude-repl--do-create-worktree-workspace name force-bare-metal fork-session-id preemptive-prompt)))
 
-(defun claude-repl--process-workspace-generation-file ()
-  (interactive)
-  (let ((file (expand-file-name "~/.claude/output/workspace_generation.json")))
-    (if (not (file-exists-p file))
-        (claude-repl--log "workspace-generation-file not found: %s" file)
-      (claude-repl--log "workspace-generation-file processing: %s" file)
-      (let ((names (json-read-file file)))
-        (claude-repl--log "workspace-generation-file names: %s" names)
-        (mapc (lambda (name)
-                (claude-repl--log "workspace-generation-file creating workspace: %s" name)
-                (claude-repl--do-create-worktree-workspace name))
-              names)
-        (delete-file file)
-        (claude-repl--log "workspace-generation-file deleted: %s" file)))))
+(defun claude-repl--dispatch-prompt-command (ws prompt)
+  "Send PROMPT to WS immediately if ready, otherwise enqueue on :pending-prompts."
+  (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+    (if (and vterm-buf (buffer-local-value 'claude-repl--ready vterm-buf))
+        (claude-repl--send-prompt-to-workspace ws prompt)
+      (claude-repl--log "dispatch-prompt-command: ws=%s not ready, enqueuing" ws)
+      (claude-repl--ws-put ws :pending-prompts
+                           (append (claude-repl--ws-get ws :pending-prompts)
+                                   (list prompt))))))
+
+(defun claude-repl--process-workspace-commands-file (file)
+  "Process a workspace commands file FILE, dispatching each typed command."
+  (if (not (file-exists-p file))
+      (claude-repl--log "workspace-commands-file not found: %s" file)
+    (claude-repl--log "workspace-commands-file processing: %s" file)
+    (let ((commands (json-read-file file)))
+      (mapc (lambda (cmd)
+              (let ((type (alist-get 'type cmd)))
+                (cond
+                 ((string= type "create")
+                  (claude-repl--log "workspace-commands-file create: %s" (alist-get 'name cmd))
+                  (claude-repl--do-create-worktree-workspace
+                   (alist-get 'name cmd)
+                   nil
+                   (alist-get 'prompt cmd nil)))
+                 ((string= type "prompt")
+                  (claude-repl--log "workspace-commands-file prompt: ws=%s" (alist-get 'workspace cmd))
+                  (claude-repl--dispatch-prompt-command
+                   (alist-get 'workspace cmd)
+                   (alist-get 'prompt cmd)))
+                 (t
+                  (claude-repl--log "workspace-commands-file unknown type: %s" type)))))
+            commands))
+    (delete-file file)
+    (claude-repl--log "workspace-commands-file deleted: %s" file)))
 
 (defvar claude-repl--workspace-generation-watch nil)
 
@@ -272,18 +294,23 @@ FMT and ARGS are passed to `message', prefixed with timestamp and [claude-repl].
     (apply #'message (concat (format-time-string "%H:%M:%S.%3N") " [claude-repl] " fmt) args)))
 
 (make-directory (expand-file-name "~/.claude/output/") t)
-(claude-repl--log "workspace-generation-watch: registering watch on %s for workspace_generation.json"
+(claude-repl--log "workspace-commands-watch: registering watch on %s for workspace_commands_*.json"
                   (expand-file-name "~/.claude/output/"))
 (setq claude-repl--workspace-generation-watch
       (file-notify-add-watch
        (expand-file-name "~/.claude/output/")
        '(change)
        (lambda (event)
-         (let ((action (nth 1 event))
-               (file (nth 2 event)))
-           (when (and (memq action '(changed created))
-                      (string-equal (file-name-nondirectory file) "workspace_generation.json"))
-             (claude-repl--process-workspace-generation-file))))))
+         (let* ((action (nth 1 event))
+                ;; renamed events carry (descriptor renamed old-file new-file)
+                ;; all other events carry (descriptor action file)
+                (file (if (eq action 'renamed)
+                          (nth 3 event)
+                        (nth 2 event))))
+           (when (and (memq action '(changed created renamed))
+                      (string-prefix-p "workspace_commands_"
+                                       (file-name-nondirectory file)))
+             (claude-repl--process-workspace-commands-file file))))))
 
 (defcustom claude-repl-skip-permissions t
   "When non-nil, prepend the command prefix metaprompt to each input sent to Claude."
@@ -869,7 +896,7 @@ Signals an error if WS has no live vterm buffer."
                (input (claude-repl--prepare-input ws)))
           (claude-repl--do-send ws input raw)
           (claude-repl--clear-input ws)
-          (claude-repl--select-return-window ws)))))))
+          (claude-repl--select-return-window ws))))))
 
 (defun claude-repl--select-return-window (ws)
   "Select the saved return window for WS if it is still live."
@@ -919,7 +946,7 @@ Falls back to hiding panels and selecting the return window."
                       raw)))
         (claude-repl--do-send ws input raw)
         (claude-repl--clear-input ws)
-        (claude-repl--select-return-window ws))))))
+        (claude-repl--select-return-window ws)))))
 
 (defun claude-repl-send-with-postfix ()
   "Append `claude-repl-send-postfix' to the input buffer, then send."
@@ -1702,9 +1729,8 @@ Stores the session ID as :session-id on the workspace plist."
 
 (defun claude-repl--handle-first-ready ()
   "Handle the first terminal title set — Claude is now ready.
-Cancels the ready-timer, swaps the loading placeholder, and either sends the
-preemptive prompt (background workspace case) or auto-opens panels if the
-owning workspace is currently active."
+Cancels the ready-timer, swaps the loading placeholder, drains any pending
+prompts (with a 0.3s delay), and auto-opens panels if appropriate."
   (unless claude-repl--ready
     (claude-repl--log "first-ready buf=%s ws=%s" (buffer-name) claude-repl--owning-workspace)
     (setq claude-repl--ready t)
@@ -1713,19 +1739,19 @@ owning workspace is currently active."
       (claude-repl--capture-session-id claude-repl--owning-workspace))
     (claude-repl--swap-placeholder)
     (let* ((ws claude-repl--owning-workspace)
-           (prompt (claude-repl--ws-get ws :preemptive-prompt)))
-      (if prompt
+           (pending (when ws (claude-repl--ws-get ws :pending-prompts))))
+      (if pending
           (progn
-            (claude-repl--log "first-ready sending preemptive prompt to ws=%s" ws)
-            (claude-repl--ws-put ws :preemptive-prompt nil)
+            (claude-repl--log "first-ready draining %d pending prompt(s) for ws=%s" (length pending) ws)
+            (claude-repl--ws-put ws :pending-prompts nil)
             (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
               (run-at-time 0.3 nil
                            (lambda ()
                              (when (buffer-live-p vterm-buf)
-                               (claude-repl--send-input-to-vterm vterm-buf prompt)))))
-            ;; Open panels now if the user is already on this workspace, otherwise
-            ;; defer until they switch here — claude-repl--on-workspace-switch checks
-            ;; the flag and opens them then.
+                               (dolist (p pending)
+                                 (claude-repl--send-prompt-to-workspace ws p))))))
+            ;; Open panels now if on this workspace, otherwise defer until switch.
+            ;; claude-repl--on-workspace-switch checks :pending-show-panels.
             (if (string= ws (+workspace-current-name))
                 (claude-repl)
               (claude-repl--ws-put ws :pending-show-panels t)))
@@ -2641,6 +2667,20 @@ NAMES is an optional list of branch name strings; defaults to a single test entr
       (insert (json-encode names)))
     (claude-repl--log "mock workspace-generation file written: %s names=%s" file names)
     (message "Wrote mock workspace_generation.json: %s" names)))
+
+(defun claude-repl-debug/process-pending-commands ()
+  "Manually scan ~/.claude/output/ and process any workspace_commands_*.json files.
+Use this to verify the processor works independently of the file watcher."
+  (interactive)
+  (let* ((dir (expand-file-name "~/.claude/output/"))
+         (files (when (file-directory-p dir)
+                  (directory-files dir t "^workspace_commands_.*\\.json$"))))
+    (if (not files)
+        (message "No workspace_commands_*.json files found in %s" dir)
+      (message "Found %d file(s), processing..." (length files))
+      (dolist (file files)
+        (message "Processing: %s" file)
+        (claude-repl--process-workspace-commands-file file)))))
 
 (defun claude-repl-debug/workspace-states ()
   "Display all workspace states."
