@@ -404,7 +404,7 @@ Docker image has not been built yet."
 For worktree workspaces (:worktree-p t), delegates to .claude/sandbox/claude-sandbox
 if a .claude/sandbox/image file exists.  Falls back to bare-metal Claude otherwise."
   (let* ((ws (+workspace-current-name))
-         (fresh (null (claude-repl--ws-get ws :start-cmd)))
+         (fresh (not (claude-repl--ws-get ws :had-session)))
          (worktree-p (claude-repl--ws-get ws :worktree-p))
          (worktree-path (claude-repl--ws-get ws :worktree-path))
          (force-bare-metal (claude-repl--ws-get ws :force-bare-metal))
@@ -2205,7 +2205,8 @@ If panels hidden: show both panels."
   (claude-repl--ws-put ws :vterm-buffer nil)
   (claude-repl--ws-put ws :input-buffer nil)
   (claude-repl--ws-put ws :saved-window-config nil)
-  (claude-repl--ws-put ws :start-cmd nil))
+  (claude-repl--ws-put ws :start-cmd nil)
+  (claude-repl--ws-put ws :had-session t))
 
 (defun claude-repl--destroy-session-buffers (vterm-buf input-buf)
   "Close windows and kill VTERM-BUF, INPUT-BUF, and any placeholder."
