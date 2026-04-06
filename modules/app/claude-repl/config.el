@@ -1519,10 +1519,7 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
                      (selected (equal current-name name))
                      (state (claude-repl--ws-state name))
                      (claude-face (pcase state
-                                   ;; Permission: always visible (even when selected), green + ❓
                                    (:permission 'claude-repl-tab-permission)
-                                   ;; Remaining states only on background tabs
-                                   ((guard selected) nil)
                                    (:done       'claude-repl-tab-done)
                                    (:thinking   'claude-repl-tab-thinking)
                                    (:stale      'claude-repl-tab-stale)))
@@ -1533,7 +1530,19 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
                                     '+workspace-tab-selected-face
                                   '+workspace-tab-face))
                      (face (or claude-face base-face)))
-                (propertize (format " [%s] %s " label name) 'face face)))
+                (if selected
+                    ;; Selected: light grey background on whole tab, state foreground on all text
+                    (let ((fg (pcase state
+                                (:thinking   "#cc3333")
+                                (:done       "#44bb44")
+                                (:permission "#44bb44")
+                                (:stale      "#cc8800"))))
+                      (propertize (format " [%s] %s " label name)
+                                  'face `(:background "#555555"
+                                          ,@(when fg `(:foreground ,fg))
+                                          :weight bold)))
+                  ;; Unselected: full background across the whole tab
+                  (propertize (format " [%s] %s " label name) 'face face))))
      " ")))
 
 (advice-add '+workspace--tabline :override #'claude-repl--tabline-advice)
