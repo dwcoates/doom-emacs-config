@@ -96,7 +96,7 @@ is stored under the workspace name from `+workspace-current-name'."
     (claude-repl--ws-put ws :worktree-p t)
     (claude-repl--ws-put ws :worktree-path path)))
 
-(defun claude-repl--do-create-worktree-workspace (name &optional force-bare-metal)
+(defun claude-repl--do-create-worktree-workspace (name &optional force-bare-metal fork-session-id)
   (let* ((git-root (string-trim
                     (shell-command-to-string "git rev-parse --show-toplevel")))
          (_ (when (string-match-p "^fatal" git-root)
@@ -143,13 +143,15 @@ is stored under the workspace name from `+workspace-current-name'."
       (claude-repl--register-worktree-ws ws-id path)
       (when force-bare-metal
         (claude-repl--ws-put (+workspace-current-name) :force-bare-metal t))
+      (when fork-session-id
+        (claude-repl--ws-put (+workspace-current-name) :fork-session-id fork-session-id))
       (let ((default-directory (file-name-as-directory path)))
         (claude-repl--ensure-session))
       (claude-repl--log "worktree pre-started Claude ws=%s cmd=%s"
                         (+workspace-current-name)
                         (claude-repl--ws-get (+workspace-current-name) :start-cmd)))))
 
-(defun claude-repl-create-worktree-workspace (force-bare-metal)
+(defun claude-repl-create-worktree-workspace (arg)
   "Create a new git worktree and switch to it as a project workspace.
 Prompts for a name (may use branch-style slashes like DC/CV-100/cool-branch).
 The worktree directory uses only the last path component; the full name becomes
@@ -158,10 +160,22 @@ the branch name.
 If called from a worktree, the new worktree is created as a sibling (../<dirname>).
 If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirname>.
 
-With a prefix argument (\\[universal-argument]), force bare-metal Claude even if a
-Docker sandbox image is configured for the repo."
+Prefix arguments:
+  \\[universal-argument]       — force bare-metal (skip Docker sandbox)
+  \\[universal-argument] \\[universal-argument]     — fork current Claude session into new worktree
+  \\[universal-argument] \\[universal-argument] \\[universal-argument]   — fork + force bare-metal"
   (interactive "P")
-  (claude-repl--do-create-worktree-workspace (read-string "Worktree name: ") force-bare-metal))
+  (let* ((raw (prefix-numeric-value arg))
+         (force-bare-metal (memq raw '(4 64)))
+         (fork-p (>= raw 16))
+         (fork-session-id
+          (when fork-p
+            (let ((sid (claude-repl--ws-get (+workspace-current-name) :session-id)))
+              (unless sid
+                (user-error "No session ID for current workspace — cannot fork"))
+              sid))))
+    (claude-repl--do-create-worktree-workspace
+     (read-string "Worktree name: ") force-bare-metal fork-session-id)))
 
 (defun claude-repl--process-workspace-generation-file ()
   (interactive)
@@ -408,6 +422,7 @@ if a .claude/sandbox/image file exists.  Falls back to bare-metal Claude otherwi
          (worktree-p (claude-repl--ws-get ws :worktree-p))
          (worktree-path (claude-repl--ws-get ws :worktree-path))
          (force-bare-metal (claude-repl--ws-get ws :force-bare-metal))
+         (fork-session-id (claude-repl--ws-get ws :fork-session-id))
          (sandbox-config (when (and worktree-p (not force-bare-metal))
                            (claude-repl--resolve-sandbox-config
                             (claude-repl--git-root worktree-path))))
@@ -430,12 +445,19 @@ if a .claude/sandbox/image file exists.  Falls back to bare-metal Claude otherwi
                         "--dangerously-skip-permissions")))
          (claude-flags (string-trim
                         (mapconcat #'identity
-                                   (delq nil (list (unless fresh "-c") perm-flag))
+                                   (delq nil (list
+                                              (when (and fresh fork-session-id)
+                                                (format "--resume %s --fork-session"
+                                                        fork-session-id))
+                                              (unless fresh "-c")
+                                              perm-flag))
                                    " ")))
          (cmd (if (and worktree-p docker-image)
                   (string-trim (concat (plist-get sandbox-config :script) " " claude-flags))
                 (string-trim (concat "claude " claude-flags)))))
     (claude-repl--ws-put ws :start-cmd cmd)
+    (when fork-session-id
+      (claude-repl--ws-put ws :fork-session-id nil))
     (setq-local mode-line-format
                 (list (if (and worktree-p docker-image)
                           (propertize (format " DOCKER SANDBOX: %s" docker-image)
@@ -1604,6 +1626,31 @@ Sets done state if buffer is hidden, refreshes display."
     (run-at-time 0.1 nil #'claude-repl--notify "Claude REPL"
                  (format "%s: Claude ready" ws))))
 
+(defun claude-repl--capture-session-id (ws)
+  "Scan ~/.claude/sessions/ for a running session matching WS's project root.
+Stores the session ID as :session-id on the workspace plist."
+  (let* ((root (claude-repl--path-canonical
+                (or (claude-repl--ws-get ws :worktree-path)
+                    claude-repl--project-root
+                    default-directory)))
+         (sessions-dir (expand-file-name "~/.claude/sessions/"))
+         (found-id nil))
+    (when (file-directory-p sessions-dir)
+      (dolist (file (directory-files sessions-dir t "\\.json\\'"))
+        (condition-case nil
+            (let* ((json (json-read-file file))
+                   (cwd (cdr (assq 'cwd json)))
+                   (session-id (cdr (assq 'sessionId json))))
+              (when (and cwd session-id
+                         (string= (claude-repl--path-canonical cwd) root))
+                (setq found-id session-id)))
+          (error nil))))
+    (if found-id
+        (progn
+          (claude-repl--ws-put ws :session-id found-id)
+          (claude-repl--log "capture-session-id ws=%s id=%s" ws found-id))
+      (claude-repl--log "capture-session-id ws=%s: no matching session found" ws))))
+
 (defun claude-repl--handle-first-ready ()
   "Handle the first terminal title set — Claude is now ready.
 Cancels the ready-timer, swaps the loading placeholder, and auto-opens panels
@@ -1612,7 +1659,8 @@ if the owning workspace is currently active."
     (claude-repl--log "first-ready buf=%s ws=%s" (buffer-name) claude-repl--owning-workspace)
     (setq claude-repl--ready t)
     (when claude-repl--owning-workspace
-      (claude-repl--cancel-ready-timer claude-repl--owning-workspace))
+      (claude-repl--cancel-ready-timer claude-repl--owning-workspace)
+      (claude-repl--capture-session-id claude-repl--owning-workspace))
     (claude-repl--swap-placeholder)
     (when (string= claude-repl--owning-workspace (+workspace-current-name))
       (claude-repl))))
