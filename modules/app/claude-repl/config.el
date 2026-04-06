@@ -96,7 +96,7 @@ is stored under the workspace name from `+workspace-current-name'."
     (claude-repl--ws-put ws :worktree-p t)
     (claude-repl--ws-put ws :worktree-path path)))
 
-(defun claude-repl--do-create-worktree-workspace (name)
+(defun claude-repl--do-create-worktree-workspace (name &optional force-bare-metal)
   (let* ((git-root (string-trim
                     (shell-command-to-string "git rev-parse --show-toplevel")))
          (_ (when (string-match-p "^fatal" git-root)
@@ -141,22 +141,27 @@ is stored under the workspace name from `+workspace-current-name'."
            (ws-id (substring (md5 canonical) 0 8)))
       (claude-repl--log "worktree registering ws-id=%s canonical=%s" ws-id canonical)
       (claude-repl--register-worktree-ws ws-id path)
+      (when force-bare-metal
+        (claude-repl--ws-put (+workspace-current-name) :force-bare-metal t))
       (let ((default-directory (file-name-as-directory path)))
         (claude-repl--ensure-session))
       (claude-repl--log "worktree pre-started Claude ws=%s cmd=%s"
                         (+workspace-current-name)
                         (claude-repl--ws-get (+workspace-current-name) :start-cmd)))))
 
-(defun claude-repl-create-worktree-workspace ()
+(defun claude-repl-create-worktree-workspace (force-bare-metal)
   "Create a new git worktree and switch to it as a project workspace.
 Prompts for a name (may use branch-style slashes like DC/CV-100/cool-branch).
 The worktree directory uses only the last path component; the full name becomes
 the branch name.
 
 If called from a worktree, the new worktree is created as a sibling (../<dirname>).
-If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirname>."
-  (interactive)
-  (claude-repl--do-create-worktree-workspace (read-string "Worktree name: ")))
+If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirname>.
+
+With a prefix argument (\\[universal-argument]), force bare-metal Claude even if a
+Docker sandbox image is configured for the repo."
+  (interactive "P")
+  (claude-repl--do-create-worktree-workspace (read-string "Worktree name: ") force-bare-metal))
 
 (defun claude-repl--process-workspace-generation-file ()
   (interactive)
@@ -402,7 +407,8 @@ if a .claude/sandbox/image file exists.  Falls back to bare-metal Claude otherwi
          (fresh (null (claude-repl--ws-get ws :start-cmd)))
          (worktree-p (claude-repl--ws-get ws :worktree-p))
          (worktree-path (claude-repl--ws-get ws :worktree-path))
-         (sandbox-config (when worktree-p
+         (force-bare-metal (claude-repl--ws-get ws :force-bare-metal))
+         (sandbox-config (when (and worktree-p (not force-bare-metal))
                            (claude-repl--resolve-sandbox-config
                             (claude-repl--git-root worktree-path))))
          (_ (when (plist-get sandbox-config :needs-build)
