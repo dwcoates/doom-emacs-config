@@ -1233,4 +1233,202 @@ see the updated title-thinking and detect no transition."
   "`claude-repl--in-redraw-advice' should be `boundp'."
   (should (boundp 'claude-repl--in-redraw-advice)))
 
+;;;; ---- Tests: Workspace merge fork computation ----
+
+;; These tests exercise +dwc/workspace-merge--fork against real git repos
+;; created in temp directories, since the function shells out to git entirely.
+
+(defmacro claude-repl-test--with-temp-git-repo (var &rest body)
+  "Create a temporary git repo, bind its path to VAR, execute BODY, then delete it."
+  (declare (indent 1))
+  `(let ((,var (make-temp-file "claude-repl-test-repo-" t)))
+     (unwind-protect
+         (progn
+           (call-process "git" nil nil nil "-C" ,var "init" "-q")
+           (call-process "git" nil nil nil "-C" ,var "config" "user.email" "test@test.com")
+           (call-process "git" nil nil nil "-C" ,var "config" "user.name" "Test")
+           (call-process "git" nil nil nil "-C" ,var "config" "commit.gpgsign" "false")
+           ,@body)
+       (delete-directory ,var t))))
+
+(defun claude-repl-test--git-commit (repo msg &optional content)
+  "Write CONTENT (default MSG) to a file named MSG in REPO, stage, and commit.
+Using a per-commit filename ensures cherry-picks never conflict by default.
+Returns the full SHA of the new commit."
+  (let ((file (expand-file-name msg repo)))
+    (write-region (or content msg) nil file)
+    (call-process "git" nil nil nil "-C" repo "add" msg)
+    (call-process "git" nil nil nil "-C" repo "commit" "-qm" msg))
+  (string-trim (shell-command-to-string
+                (format "git -C %s rev-parse HEAD" (shell-quote-argument repo)))))
+
+(defun claude-repl-test--git-checkout (repo branch &optional create-p)
+  "Checkout BRANCH in REPO. If CREATE-P, create it first."
+  (if create-p
+      (call-process "git" nil nil nil "-C" repo "checkout" "-qb" branch)
+    (call-process "git" nil nil nil "-C" repo "checkout" "-q" branch)))
+
+(defun claude-repl-test--git-cherry-pick-x (repo sha)
+  "Cherry-pick SHA into REPO with -x. Returns exit code."
+  (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha))
+
+(ert-deftest claude-repl-test-merge-fork-no-annotations-fallback ()
+  "When HEAD has no -x annotations, fork falls back to merge-base HEAD TARGET."
+  ;; Arrange: M on branch-a, B1 on branch-b (no cherry-picks yet)
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((sha-m (claude-repl-test--git-commit repo "M" "base")))
+      (claude-repl-test--git-checkout repo "branch-b" t)
+      (claude-repl-test--git-commit repo "B1" "b1")
+      (claude-repl-test--git-checkout repo "master")
+      ;; Act
+      (let ((fork (+dwc/workspace-merge--fork repo "branch-b")))
+        ;; Assert: should be merge-base = sha-m
+        (should (equal fork sha-m))))))
+
+(ert-deftest claude-repl-test-merge-fork-clean-chain ()
+  "After merging B (with -x), fork for C (descends from B) is B's tip SHA."
+  ;; Arrange:
+  ;;   branch-b: M → B1 → B2
+  ;;   branch-c: M → B1 → B2 → C1   (branched from branch-b)
+  ;;   branch-a: M → A1 → B1'(-x B1) → B2'(-x B2)
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "M" "base")
+    (claude-repl-test--git-checkout repo "branch-b" t)
+    (claude-repl-test--git-commit repo "B1" "b1")
+    (let ((sha-b2 (claude-repl-test--git-commit repo "B2" "b2")))
+      (claude-repl-test--git-checkout repo "branch-c" t)
+      (claude-repl-test--git-commit repo "C1" "c1")
+      (claude-repl-test--git-checkout repo "master")
+      (claude-repl-test--git-checkout repo "branch-a" t)
+      (claude-repl-test--git-commit repo "A1" "a1")
+      ;; Cherry-pick B1 then B2 with -x onto branch-a
+      (let ((sha-b1 (string-trim (shell-command-to-string
+                                  (format "git -C %s rev-parse branch-b~1"
+                                          (shell-quote-argument repo))))))
+        (claude-repl-test--git-cherry-pick-x repo sha-b1)
+        (claude-repl-test--git-cherry-pick-x repo sha-b2))
+      ;; Act: compute fork for branch-c
+      (let ((fork (+dwc/workspace-merge--fork repo "branch-c")))
+        ;; Assert: fork should be sha-b2 (last incorporated commit in branch-c's history)
+        (should (equal fork sha-b2))))))
+
+(ert-deftest claude-repl-test-merge-fork-already-fully-merged ()
+  "When all TARGET commits are incorporated, fork equals TARGET tip → empty range."
+  ;; Arrange: same as clean-chain but test against branch-b directly
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "M" "base")
+    (claude-repl-test--git-checkout repo "branch-b" t)
+    (let ((sha-b1 (claude-repl-test--git-commit repo "B1" "b1"))
+          (sha-b2 (claude-repl-test--git-commit repo "B2" "b2")))
+      (claude-repl-test--git-checkout repo "master")
+      (claude-repl-test--git-checkout repo "branch-a" t)
+      (claude-repl-test--git-commit repo "A1" "a1")
+      (claude-repl-test--git-cherry-pick-x repo sha-b1)
+      (claude-repl-test--git-cherry-pick-x repo sha-b2)
+      ;; Act
+      (let* ((fork (+dwc/workspace-merge--fork repo "branch-b"))
+             (range-count (string-trim
+                           (shell-command-to-string
+                            (format "git -C %s rev-list --count %s..branch-b"
+                                    (shell-quote-argument repo)
+                                    fork)))))
+        ;; Assert: fork = sha-b2 (tip), range is empty
+        (should (equal fork sha-b2))
+        (should (equal range-count "0"))))))
+
+(ert-deftest claude-repl-test-merge-fork-growing-workspace ()
+  "After B is merged, adding B3 to branch-b; fork stays at B2 → only B3 is new."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "M" "base")
+    (claude-repl-test--git-checkout repo "branch-b" t)
+    (let ((sha-b1 (claude-repl-test--git-commit repo "B1" "b1"))
+          (sha-b2 (claude-repl-test--git-commit repo "B2" "b2")))
+      (claude-repl-test--git-checkout repo "master")
+      (claude-repl-test--git-checkout repo "branch-a" t)
+      (claude-repl-test--git-commit repo "A1" "a1")
+      (claude-repl-test--git-cherry-pick-x repo sha-b1)
+      (claude-repl-test--git-cherry-pick-x repo sha-b2)
+      ;; Simulate branch-b growing: add B3
+      (claude-repl-test--git-checkout repo "branch-b")
+      (claude-repl-test--git-commit repo "B3" "b3")
+      (claude-repl-test--git-checkout repo "branch-a")
+      ;; Act
+      (let* ((fork (+dwc/workspace-merge--fork repo "branch-b"))
+             (range-count (string-trim
+                           (shell-command-to-string
+                            (format "git -C %s rev-list --count %s..branch-b"
+                                    (shell-quote-argument repo)
+                                    fork)))))
+        ;; Assert: fork = sha-b2, only B3 is in range
+        (should (equal fork sha-b2))
+        (should (equal range-count "1"))))))
+
+(ert-deftest claude-repl-test-merge-fork-deep-chain ()
+  "After merging B then C, fork for D (descends from C) is C's tip SHA."
+  ;; branch-d: M → B1 → B2 → C1 → D1
+  ;; branch-a has cherry-picked B1, B2, C1 with -x
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "M" "base")
+    (claude-repl-test--git-checkout repo "branch-b" t)
+    (let ((sha-b1 (claude-repl-test--git-commit repo "B1" "b1"))
+          (sha-b2 (claude-repl-test--git-commit repo "B2" "b2")))
+      (claude-repl-test--git-checkout repo "branch-c" t)
+      (let ((sha-c1 (claude-repl-test--git-commit repo "C1" "c1")))
+        (claude-repl-test--git-checkout repo "branch-d" t)
+        (claude-repl-test--git-commit repo "D1" "d1")
+        (claude-repl-test--git-checkout repo "master")
+        (claude-repl-test--git-checkout repo "branch-a" t)
+        (claude-repl-test--git-commit repo "A1" "a1")
+        (claude-repl-test--git-cherry-pick-x repo sha-b1)
+        (claude-repl-test--git-cherry-pick-x repo sha-b2)
+        (claude-repl-test--git-cherry-pick-x repo sha-c1)
+        ;; Act
+        (let ((fork (+dwc/workspace-merge--fork repo "branch-d")))
+          ;; Assert: fork = sha-c1 (most recently incorporated commit in branch-d)
+          (should (equal fork sha-c1)))))))
+
+(ert-deftest claude-repl-test-merge-fork-annotation-survives-conflict-resolution ()
+  "Annotation is written even when cherry-pick required conflict resolution via --continue."
+  ;; Arrange: both branch-a and branch-b modify the same file explicitly → conflict.
+  ;; We use a shared "conflict-file" written by both branches, unlike the normal helpers
+  ;; which use per-commit filenames to avoid conflicts.
+  (claude-repl-test--with-temp-git-repo repo
+    ;; M: create conflict-file with base content
+    (write-region "base" nil (expand-file-name "conflict-file" repo))
+    (call-process "git" nil nil nil "-C" repo "add" "conflict-file")
+    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
+    (claude-repl-test--git-checkout repo "branch-b" t)
+    ;; B1: modify conflict-file on branch-b
+    (write-region "branch-b-content" nil (expand-file-name "conflict-file" repo))
+    (call-process "git" nil nil nil "-C" repo "add" "conflict-file")
+    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "B1")
+    (let ((sha-b1 (string-trim (shell-command-to-string
+                                (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
+      (claude-repl-test--git-checkout repo "branch-c" t)
+      (claude-repl-test--git-commit repo "C1" "c1")
+      (claude-repl-test--git-checkout repo "master")
+      (claude-repl-test--git-checkout repo "branch-a" t)
+      ;; A1: also modify conflict-file on branch-a → cherry-pick of B1 will conflict
+      (write-region "branch-a-content" nil (expand-file-name "conflict-file" repo))
+      (call-process "git" nil nil nil "-C" repo "add" "conflict-file")
+      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "A1")
+      ;; Cherry-pick B1 → conflict (both modified conflict-file)
+      (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-b1)
+      ;; Resolve: write resolved content and stage
+      (write-region "resolved" nil (expand-file-name "conflict-file" repo))
+      (call-process "git" nil nil nil "-C" repo "add" "conflict-file")
+      ;; Continue — sequencer writes -x annotation on finalization
+      (call-process "git" nil nil nil
+                    "-C" repo "-c" "core.editor=true"
+                    "cherry-pick" "--continue" "--no-edit")
+      ;; Assert: annotation present despite conflict resolution
+      (let ((log-msg (shell-command-to-string
+                      (format "git -C %s log --pretty=%%B -1" (shell-quote-argument repo)))))
+        (should (string-match-p
+                 (format "(cherry picked from commit %s)" sha-b1)
+                 log-msg)))
+      ;; Fork computation for branch-c correctly identifies sha-b1 as incorporated
+      (let ((fork (+dwc/workspace-merge--fork repo "branch-c")))
+        (should (equal fork sha-b1))))))
+
 ;;; test-claude-repl.el ends here

@@ -2524,6 +2524,43 @@ Without region: copies file:line."
 
 ;; Workspace merge
 
+(defun +dwc/workspace-merge--fork (project-root target-branch)
+  "Compute cherry-pick start point for incorporating TARGET-BRANCH into HEAD.
+Scans HEAD's unique commits (HEAD...TARGET-BRANCH left-only) for -x annotations
+of the form \"(cherry picked from commit SHA)\". Returns the most recent TARGET
+commit whose SHA appears in those annotations — so only genuinely new commits are
+replayed. Falls back to `merge-base HEAD TARGET-BRANCH' when no annotations match
+(first-time merge, or pre-annotation history)."
+  (let* ((target-commits
+          (split-string
+           (string-trim
+            (shell-command-to-string
+             (format "git -C %s log --right-only --pretty=%%H --no-merges HEAD...%s"
+                     (shell-quote-argument project-root)
+                     target-branch)))
+           "\n" t))
+         (head-log
+          (shell-command-to-string
+           (format "git -C %s log --left-only --pretty=%%B HEAD...%s"
+                   (shell-quote-argument project-root)
+                   target-branch)))
+         (incorporated
+          (let (shas)
+            (with-temp-buffer
+              (insert head-log)
+              (goto-char (point-min))
+              (while (re-search-forward
+                      "(cherry picked from commit \\([0-9a-f]\\{40\\}\\))"
+                      nil t)
+                (push (match-string 1) shas)))
+            shas)))
+    (or (cl-find-if (lambda (sha) (member sha incorporated)) target-commits)
+        (string-trim
+         (shell-command-to-string
+          (format "git -C %s merge-base HEAD %s"
+                  (shell-quote-argument project-root)
+                  target-branch))))))
+
 (defun +dwc/workspace->branch (ws)
   "Return the git branch checked out in workspace WS's worktree, or nil.
 Workspace name ≠ branch name: e.g. persp \"fix-login\" was created from
@@ -2564,22 +2601,18 @@ individually. Aborts cleanly if any commit conflicts."
                                    "-C" project-root
                                    "rev-parse" "--verify" target-branch))
           (user-error "Branch '%s' not found in this repo" target-branch))
-        (let ((ahead (string-trim
-                      (shell-command-to-string
-                       (format "git -C %s rev-list --count HEAD..%s"
-                               (shell-quote-argument project-root)
-                               target-branch)))))
-          (when (string= ahead "0")
-            (user-error "Workspace '%s' has no commits beyond master" target-ws)))
-        (let* ((fork (string-trim
-                      (shell-command-to-string
-                       (format "git -C %s merge-base HEAD %s"
-                               (shell-quote-argument project-root)
-                               target-branch))))
+        (let* ((fork (+dwc/workspace-merge--fork project-root target-branch))
                (range (format "%s..%s" fork target-branch)))
+          (let ((range-count (string-trim
+                              (shell-command-to-string
+                               (format "git -C %s rev-list --count %s"
+                                       (shell-quote-argument project-root)
+                                       range)))))
+            (when (string= range-count "0")
+              (user-error "All commits from workspace '%s' are already incorporated" target-ws)))
           (claude-repl--log "workspace-merge target-ws=%s target-branch=%s fork=%s range=%s"
                             target-ws target-branch fork range)
-          (let ((exit-code (call-process "git" nil nil nil "-C" project-root "cherry-pick" range)))
+          (let ((exit-code (call-process "git" nil nil nil "-C" project-root "cherry-pick" "-x" range)))
             (claude-repl--log "workspace-merge cherry-pick exit-code=%s" exit-code))
           ;; Non-zero exit doesn't always mean conflict — git also exits non-zero for
           ;; empty commits (already applied). Only abort if CHERRY_PICK_HEAD exists,
