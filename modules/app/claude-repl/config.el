@@ -1627,22 +1627,23 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
                                   '+workspace-tab-face))
                      (face (or claude-face base-face)))
                 (if selected
-                    ;; Selected: light grey background on whole tab, state foreground on all text
-                    (let* ((fg (pcase state
-                                 (:thinking   "#cc3333")
-                                 (:done       "#2a8c2a")
-                                 (:permission "#2a8c2a")
-                                 (:stale      "#cc8800")))
-                           (fg "black")
+                    ;; Selected: light grey background on whole tab, status color only on [N]
+                    (let* ((status-fg (pcase state
+                                        (:thinking   "#cc3333")
+                                        (:done       "#2a8c2a")
+                                        (:permission "#2a8c2a")
+                                        (:stale      "#cc8800")))
+                           (bracket-fg (or status-fg "black"))
+                           (text-fg "black")
                            (base-face `(:background "#c0c0c0"
-                                        :foreground ,fg
+                                        :foreground ,text-fg
                                         :weight bold))
                            (no-bg-face `(:background nil
-                                         :foreground ,fg
+                                         :foreground ,text-fg
                                          :weight bold)))
                       (concat (propertize " " 'face no-bg-face)
                               (propertize (format "[%s]" label)
-                                          'face `(:foreground ,fg :weight bold
+                                          'face `(:foreground ,bracket-fg :weight bold
                                                   :background ,(plist-get base-face :background)))
                               (propertize (format " %s " name) 'face base-face)))
                   ;; Unselected: full background across the whole tab
