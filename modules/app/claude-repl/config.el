@@ -1633,15 +1633,16 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
                                  (:done       "#2a8c2a")
                                  (:permission "#2a8c2a")
                                  (:stale      "#cc8800")))
+                           (fg "black")
                            (base-face `(:background "#c0c0c0"
-                                        ,@(when fg `(:foreground ,fg))
+                                        :foreground ,fg
                                         :weight bold))
                            (no-bg-face `(:background nil
-                                         ,@(when fg `(:foreground ,fg))
+                                         :foreground ,fg
                                          :weight bold)))
                       (concat (propertize " " 'face no-bg-face)
                               (propertize (format "[%s]" label)
-                                          'face `(:foreground ,(or fg "#4477cc") :weight bold
+                                          'face `(:foreground ,fg :weight bold
                                                   :background ,(plist-get base-face :background)))
                               (propertize (format " %s " name) 'face base-face)))
                   ;; Unselected: full background across the whole tab
