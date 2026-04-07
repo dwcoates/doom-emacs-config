@@ -213,7 +213,17 @@ to the new workspace immediately."
          (dirname (file-name-nondirectory (directory-file-name name))))
     (claude-repl--do-create-worktree-workspace name force-bare-metal fork-session-id preemptive-prompt)
     (unless (and preemptive-prompt (not (string-empty-p preemptive-prompt)))
-      (+workspace-switch-to dirname))))
+      (message "[claude-repl] pre-switch: fboundp(+workspace-switch-to)=%s current-ws=%s target=%s"
+               (fboundp '+workspace-switch-to) (+workspace-current-name) dirname)
+      (condition-case err
+          (+workspace-switch-to dirname)
+        (error
+         (message "[claude-repl] +workspace-switch-to FAILED: %s — trying fallback (+workspace/switch-to)"
+                  (error-message-string err))
+         (condition-case err2
+             (+workspace/switch-to dirname)
+           (error
+            (message "[claude-repl] fallback also FAILED: %s" (error-message-string err2)))))))))
 
 (defun claude-repl--dispatch-prompt-command (ws prompt)
   "Send PROMPT to WS immediately if ready, otherwise enqueue on :pending-prompts.
@@ -549,6 +559,9 @@ if a .claude/sandbox/image file exists.  Falls back to bare-metal Claude otherwi
                                       'face '(:foreground "green" :weight bold))
                         (propertize (format " BARE METAL: %s" (system-name))
                                     'face '(:foreground "red" :weight bold)))))
+    (message "[claude-repl] start-claude ws=%s had-session=%s fork-session-id=%s fresh=%s worktree=%s cmd=%s"
+             ws (claude-repl--ws-get ws :had-session) fork-session-id
+             (if fresh "yes" "no") (if worktree-p "yes" "no") cmd)
     (claude-repl--log "start-claude dir=%s fresh=%s worktree=%s cmd=%s"
                       default-directory (if fresh "yes" "no") (if worktree-p "yes" "no") cmd)
     (setq-local claude-repl--ready nil)
@@ -1745,6 +1758,9 @@ Stores the session ID as :session-id on the workspace plist."
                 (or (claude-repl--ws-get ws :worktree-path)
                     claude-repl--project-root
                     default-directory)))
+         ;; Docker sandbox mounts the worktree at /<dirname>, so session files
+         ;; record a container path rather than the full host path.
+         (container-path (concat "/" (file-name-nondirectory root)))
          (sessions-dir (expand-file-name "~/.claude/sessions/"))
          (found-id nil))
     (when (file-directory-p sessions-dir)
@@ -1754,7 +1770,8 @@ Stores the session ID as :session-id on the workspace plist."
                    (cwd (cdr (assq 'cwd json)))
                    (session-id (cdr (assq 'sessionId json))))
               (when (and cwd session-id
-                         (string= (claude-repl--path-canonical cwd) root))
+                         (or (string= (claude-repl--path-canonical cwd) root)
+                             (string= cwd container-path)))
                 (setq found-id session-id)))
           (error nil))))
     (if found-id
@@ -2246,6 +2263,7 @@ so the user can select and copy text from the output."
             (progn
               (setq-local claude-repl--project-root root)
               (setq-local claude-repl--owning-workspace ws)
+              (message "[claude-repl] ensure-vterm REUSING existing buffer %s for ws=%s (no --start-claude)" (buffer-name vterm-buf) ws)
               (claude-repl--log "ensure-vterm reusing existing buffer %s" (buffer-name vterm-buf)))
           (vterm-mode)
           (setq-local claude-repl--project-root root)
@@ -2381,6 +2399,7 @@ If panels hidden: show both panels."
 
 (defun claude-repl--teardown-session-state (ws)
   "Save history, disable overlay, cancel timers, and clear session state for workspace WS."
+  (message "[claude-repl] teardown-session-state ws=%s (setting :had-session t)" ws)
   (claude-repl--log "teardown-session-state")
   (ignore-errors (claude-repl--history-save ws))
   (ignore-errors (claude-repl--disable-hide-overlay))
