@@ -2536,14 +2536,14 @@ individually. Aborts cleanly if any commit conflicts."
           (user-error "Branch '%s' not found in this repo" target-branch))
         (let ((ahead (string-trim
                       (shell-command-to-string
-                       (format "git -C %s rev-list --count master..%s"
+                       (format "git -C %s rev-list --count HEAD..%s"
                                (shell-quote-argument project-root)
                                target-branch)))))
           (when (string= ahead "0")
             (user-error "Workspace '%s' has no commits beyond master" target-ws)))
         (let* ((fork (string-trim
                       (shell-command-to-string
-                       (format "git -C %s merge-base master %s"
+                       (format "git -C %s merge-base HEAD %s"
                                (shell-quote-argument project-root)
                                target-branch))))
                (range (format "%s..%s" fork target-branch)))
