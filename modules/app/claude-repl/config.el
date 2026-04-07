@@ -178,7 +178,8 @@ Sets :force-bare-metal if requested, then starts the session from PATH."
         (claude-repl--ws-put ws :pending-show-panels t))
       (when fork-session-id
         (claude-repl--ws-put ws :fork-session-id fork-session-id))
-      (claude-repl--setup-worktree-session ws-id path ws force-bare-metal))))
+      (claude-repl--setup-worktree-session ws-id path ws force-bare-metal)
+      path)))
 
 (defun claude-repl-create-worktree-workspace (arg)
   "Create a new git worktree and switch to it as a project workspace.
@@ -211,19 +212,27 @@ to the new workspace immediately."
          (name (read-string "Worktree name: "))
          (preemptive-prompt (read-string "Preemptive prompt (blank to switch there normally): "))
          (dirname (file-name-nondirectory (directory-file-name name))))
-    (claude-repl--do-create-worktree-workspace name force-bare-metal fork-session-id preemptive-prompt)
-    (unless (and preemptive-prompt (not (string-empty-p preemptive-prompt)))
-      (message "[claude-repl] pre-switch: fboundp(+workspace-switch-to)=%s current-ws=%s target=%s"
-               (fboundp '+workspace-switch-to) (+workspace-current-name) dirname)
-      (condition-case err
-          (+workspace-switch-to dirname)
-        (error
-         (message "[claude-repl] +workspace-switch-to FAILED: %s — trying fallback (+workspace/switch-to)"
-                  (error-message-string err))
-         (condition-case err2
-             (+workspace/switch-to dirname)
-           (error
-            (message "[claude-repl] fallback also FAILED: %s" (error-message-string err2)))))))))
+    (let ((path (claude-repl--do-create-worktree-workspace name force-bare-metal fork-session-id preemptive-prompt)))
+      (unless (and preemptive-prompt (not (string-empty-p preemptive-prompt)))
+        (message "[claude-repl] pre-switch: fboundp(+workspace-switch-to)=%s current-ws=%s target=%s"
+                 (fboundp '+workspace-switch-to) (+workspace-current-name) dirname)
+        (condition-case err
+            (+workspace-switch-to dirname)
+          (error
+           (message "[claude-repl] +workspace-switch-to FAILED: %s — trying fallback (+workspace/switch-to)"
+                    (error-message-string err))
+           (condition-case err2
+               (+workspace/switch-to dirname)
+             (error
+              (message "[claude-repl] fallback also FAILED: %s" (error-message-string err2))))))
+        (magit-status path)))))
+
+(defun claude-repl--new-workspace ()
+  "Create a new workspace and open magit-status in it, mirroring
+the behavior of `+workspaces-switch-project-function'."
+  (interactive)
+  (+workspace/new)
+  (magit-status default-directory))
 
 (defun claude-repl--dispatch-prompt-command (ws prompt)
   "Send PROMPT to WS immediately if ready, otherwise enqueue on :pending-prompts.
@@ -2674,7 +2683,7 @@ individually. Aborts cleanly if any commit conflicts."
 (map! :leader
       (:prefix "TAB"
        :desc "Create worktree workspace" "n" #'claude-repl-create-worktree-workspace
-       :desc "New workspace"             "N" #'+workspace/new
+       :desc "New workspace"             "N" #'claude-repl--new-workspace
        :desc "Merge workspace into current" "m" #'+dwc/workspace-merge))
 
 ;; SPC j — Tell Claude to do a predefined thing
