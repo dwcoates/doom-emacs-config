@@ -1605,17 +1605,28 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
                      (face (or claude-face base-face)))
                 (if selected
                     ;; Selected: light grey background on whole tab, state foreground on all text
-                    (let ((fg (pcase state
-                                (:thinking   "#cc3333")
-                                (:done       "#44bb44")
-                                (:permission "#44bb44")
-                                (:stale      "#cc8800"))))
-                      (propertize (format " [%s] %s " label name)
-                                  'face `(:background "#555555"
-                                          ,@(when fg `(:foreground ,fg))
-                                          :weight bold)))
+                    (let* ((fg (pcase state
+                                 (:thinking   "#cc3333")
+                                 (:done       "#44bb44")
+                                 (:permission "#44bb44")
+                                 (:stale      "#cc8800")))
+                           (base-face `(:background "#1e4275"
+                                        ,@(when fg `(:foreground ,fg))
+                                        :weight bold))
+                           (no-bg-face `(:background nil
+                                         ,@(when fg `(:foreground ,fg))
+                                         :weight bold)))
+                      (concat (propertize " " 'face no-bg-face)
+                              (propertize (format "[%s]" label)
+                                          'face `(:foreground "#4477cc" :weight bold :background nil))
+                              (propertize " " 'face no-bg-face)
+                              (propertize name 'face base-face)
+                              (propertize " " 'face no-bg-face)))
                   ;; Unselected: full background across the whole tab
-                  (propertize (format " [%s] %s " label name) 'face face))))
+                  (concat (propertize " " 'face '(:background nil))
+                          (propertize (format "[%s]" label)
+                                      'face '(:foreground "#4477cc" :background nil))
+                          (propertize (format " %s " name) 'face face)))))
      " ")))
 
 (advice-add '+workspace--tabline :override #'claude-repl--tabline-advice)
