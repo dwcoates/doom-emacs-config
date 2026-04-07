@@ -137,10 +137,10 @@ Sets :force-bare-metal if requested, then starts the session from PATH."
                               (make-directory wt-dir t)
                               wt-dir)))
          (path (expand-file-name dirname worktree-parent))
-         (preemptive-p (and preemptive-prompt (not (string-empty-p preemptive-prompt)))))
-    (claude-repl--log "worktree git-root=%s name=%s dirname=%s branch=%s in-worktree=%s path=%s old-ws=%s old-ws-id=%s preemptive=%s"
+         (has-prompt (and preemptive-prompt (not (string-empty-p preemptive-prompt)))))
+    (claude-repl--log "worktree git-root=%s name=%s dirname=%s branch=%s in-worktree=%s path=%s old-ws=%s old-ws-id=%s"
              git-root name dirname (or branch-name "none") in-worktree path
-             (+workspace-current-name) (claude-repl--workspace-id) (if preemptive-p "yes" "no"))
+             (+workspace-current-name) (claude-repl--workspace-id))
     (when (projectile-project-p path)
       (user-error "Worktree '%s' already exists — use SPC p p to switch to it" dirname))
     (let* ((cmd (if branch-name
@@ -160,24 +160,16 @@ Sets :force-bare-metal if requested, then starts the session from PATH."
     (claude-repl--log "worktree wrote .projectile, adding to projectile known projects")
     (projectile-add-known-project (file-name-as-directory path))
     (let* ((canonical (claude-repl--path-canonical path))
-           (ws-id (substring (md5 canonical) 0 8)))
-      (if preemptive-p
-          ;; Background path: create workspace without switching to it.
-          ;; Claude starts silently; the preemptive prompt is sent once it's ready.
-          (let ((ws dirname))
-            (claude-repl--log "worktree background path: creating workspace %s" ws)
-            (+workspace-new ws)
-            (claude-repl--ws-put ws :pending-prompts (list preemptive-prompt))
-            (claude-repl--ws-put ws :pending-show-panels t)
-            (when fork-session-id
-              (claude-repl--ws-put ws :fork-session-id fork-session-id))
-            (claude-repl--setup-worktree-session ws-id path ws force-bare-metal))
-        ;; Normal path: switch to the new workspace immediately.
-        (claude-repl--log "worktree normal path: switching to project: %s" (file-name-as-directory path))
-        (projectile-switch-project-by-name (file-name-as-directory path))
-        (when fork-session-id
-          (claude-repl--ws-put dirname :fork-session-id fork-session-id))
-        (claude-repl--setup-worktree-session ws-id path dirname force-bare-metal))))))
+           (ws-id (substring (md5 canonical) 0 8))
+           (ws dirname))
+      (claude-repl--log "worktree creating workspace %s" ws)
+      (+workspace-new ws)
+      (when has-prompt
+        (claude-repl--ws-put ws :pending-prompts (list preemptive-prompt))
+        (claude-repl--ws-put ws :pending-show-panels t))
+      (when fork-session-id
+        (claude-repl--ws-put ws :fork-session-id fork-session-id))
+      (claude-repl--setup-worktree-session ws-id path ws force-bare-metal))))
 
 (defun claude-repl-create-worktree-workspace (arg)
   "Create a new git worktree and switch to it as a project workspace.
@@ -208,8 +200,11 @@ to the new workspace immediately."
                 (user-error "No session ID for current workspace — cannot fork"))
               sid)))
          (name (read-string "Worktree name: "))
-         (preemptive-prompt (read-string "Preemptive prompt (blank to switch there normally): ")))
-    (claude-repl--do-create-worktree-workspace name force-bare-metal fork-session-id preemptive-prompt)))
+         (preemptive-prompt (read-string "Preemptive prompt (blank to switch there normally): "))
+         (dirname (file-name-nondirectory (directory-file-name name))))
+    (claude-repl--do-create-worktree-workspace name force-bare-metal fork-session-id preemptive-prompt)
+    (unless (and preemptive-prompt (not (string-empty-p preemptive-prompt)))
+      (+workspace-switch-to dirname))))
 
 (defun claude-repl--dispatch-prompt-command (ws prompt)
   "Send PROMPT to WS immediately if ready, otherwise enqueue on :pending-prompts."
@@ -222,20 +217,26 @@ to the new workspace immediately."
                                    (list prompt))))))
 
 (defun claude-repl--process-workspace-commands-file (file)
-  "Process a workspace commands file FILE, dispatching each typed command."
+  "Process a workspace commands file FILE, dispatching each typed command.
+Create commands are staggered by 5 seconds each to avoid concurrent Claude
+startup writes corrupting ~/.claude.json."
   (if (not (file-exists-p file))
       (claude-repl--log "workspace-commands-file not found: %s" file)
     (claude-repl--log "workspace-commands-file processing: %s" file)
-    (let ((commands (json-read-file file)))
+    (let ((commands (json-read-file file))
+          (create-delay 0))
       (mapc (lambda (cmd)
               (let ((type (alist-get 'type cmd)))
                 (cond
                  ((string= type "create")
-                  (claude-repl--log "workspace-commands-file create: %s" (alist-get 'name cmd))
-                  (claude-repl--do-create-worktree-workspace
-                   (alist-get 'name cmd)
-                   nil
-                   (alist-get 'prompt cmd nil)))
+                  (let ((name (alist-get 'name cmd))
+                        (prompt (alist-get 'prompt cmd nil))
+                        (delay create-delay))
+                    (claude-repl--log "workspace-commands-file create: %s (delay %.1fs)" name delay)
+                    (run-with-timer delay nil
+                                    (lambda ()
+                                      (claude-repl--do-create-worktree-workspace name nil prompt))))
+                  (cl-incf create-delay 5))
                  ((string= type "prompt")
                   (claude-repl--log "workspace-commands-file prompt: ws=%s" (alist-get 'workspace cmd))
                   (claude-repl--dispatch-prompt-command
