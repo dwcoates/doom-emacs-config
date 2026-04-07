@@ -2896,5 +2896,14 @@ Reports comprehensive diagnostics."
               (when (claude-repl--vterm-running-p)
                 (claude-repl-kill))))
 
+;; SPC b R — revert buffer from disk then eval as Elisp (fast config reload)
+(defun claude-repl-revert-and-eval-buffer ()
+  "Revert the current buffer from disk, then evaluate it as Elisp."
+  (interactive)
+  (revert-buffer :ignore-auto :noconfirm)
+  (eval-buffer))
+
+(map! :leader "b R" #'claude-repl-revert-and-eval-buffer)
+
 (provide 'claude-repl)
 ;;; config.el ends here
