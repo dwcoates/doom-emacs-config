@@ -298,14 +298,24 @@ state changes regardless of which persp the buffer drifts into.")
   :group 'claude-repl)
 
 (defcustom claude-repl-debug nil
-  "When non-nil, emit debug messages to *Messages*."
-  :type 'boolean
+  "Controls debug logging level.
+nil means no logging; t means standard logging; \\='verbose also includes
+high-frequency events (window changes, title spinner, resolve-root, poll-thinking)."
+  :type '(choice (const :tag "Off" nil)
+                 (const :tag "On" t)
+                 (const :tag "Verbose" verbose))
   :group 'claude-repl)
 
 (defun claude-repl--log (fmt &rest args)
   "Log a timestamped debug message when `claude-repl-debug' is non-nil.
 FMT and ARGS are passed to `message', prefixed with timestamp and [claude-repl]."
   (when claude-repl-debug
+    (apply #'message (concat (format-time-string "%H:%M:%S.%3N") " [claude-repl] " fmt) args)))
+
+(defun claude-repl--log-verbose (fmt &rest args)
+  "Log a timestamped debug message only when `claude-repl-debug' is \\='verbose.
+Used for high-frequency, low-signal events."
+  (when (eq claude-repl-debug 'verbose)
     (apply #'message (concat (format-time-string "%H:%M:%S.%3N") " [claude-repl] " fmt) args)))
 
 (make-directory (expand-file-name "~/.claude/output/") t)
@@ -443,7 +453,7 @@ Tries git root, then buffer-local project root, then `default-directory'."
   (let* ((git (claude-repl--git-root))
          (root (or git claude-repl--project-root default-directory))
          (source (cond (git "git") (claude-repl--project-root "buffer-local") (t "default-directory"))))
-    (claude-repl--log "resolve-root source=%s root=%s" source root)
+    (claude-repl--log-verbose "resolve-root source=%s root=%s" source root)
     root))
 
 (defun claude-repl--vterm-live-p ()
@@ -1650,7 +1660,7 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
       (let ((ws (or (buffer-local-value 'claude-repl--owning-workspace buf)
                      (claude-repl--workspace-for-buffer buf))))
         (when (and ws (eq (claude-repl--ws-state ws) :thinking))
-          (claude-repl--log "poll-thinking: redrawing %s (ws=%s)" (buffer-name buf) ws)
+          (claude-repl--log-verbose "poll-thinking: redrawing %s (ws=%s)" (buffer-name buf) ws)
           (with-current-buffer buf
             (claude-repl--do-refresh)))))))
 
@@ -1788,7 +1798,7 @@ prompts (with a 0.3s delay), and auto-opens panels if appropriate."
 
 (defun claude-repl--on-title-change (title)
   "Detect thinking->idle transition from vterm title changes."
-  (claude-repl--log "title-change buf=%s title=%s" (buffer-name) title)
+  (claude-repl--log-verbose "title-change buf=%s title=%s" (buffer-name) title)
   (when (claude-repl--claude-buffer-p)
     (claude-repl--handle-first-ready)
     (let* ((info (claude-repl--detect-title-transition title))
@@ -2165,7 +2175,7 @@ Resets cursor, redraws, and syncs window point."
 (defun claude-repl--on-window-change ()
   "Deferred handler for window configuration changes.
 Syncs orphaned panels, refreshes overlay, and resets cursors."
-  (claude-repl--log "on-window-change")
+  (claude-repl--log-verbose "on-window-change")
   (condition-case nil
       (claude-repl--sync-panels)
     (error nil))
@@ -2776,11 +2786,21 @@ Kills claude buffers, closes windows, and removes all state."
       (setq-local claude-repl--owning-workspace ws))
     (message "Set %s owning workspace to %s" buf-name ws)))
 
-(defun claude-repl-debug/toggle-logging ()
-  "Toggle debug logging."
-  (interactive)
-  (setq claude-repl-debug (not claude-repl-debug))
-  (message "Claude REPL debug logging: %s" (if claude-repl-debug "ON" "OFF")))
+(defun claude-repl-debug/toggle-logging (&optional verbose)
+  "Toggle debug logging.
+With prefix argument (\\[universal-argument]), toggle verbose mode instead, which
+additionally logs high-frequency events: window changes, title spinner,
+resolve-root, and poll-thinking redraws."
+  (interactive "P")
+  (setq claude-repl-debug
+        (if verbose
+            (if (eq claude-repl-debug 'verbose) nil 'verbose)
+          (if claude-repl-debug nil t)))
+  (message "Claude REPL debug logging: %s"
+           (pcase claude-repl-debug
+             ('nil "OFF")
+             ('t   "ON")
+             ('verbose "ON (verbose)"))))
 
 (defun claude-repl-debug/toggle-metaprompt ()
   "Toggle the metaprompt prefix injection."
