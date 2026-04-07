@@ -3,6 +3,15 @@
 ;; Place your private configuration here! Remember, you do not need to run 'doom
 ;; sync' after modifying this file!
 
+(defvar doom-config-git-branch
+  (string-trim (shell-command-to-string "git rev-parse --abbrev-ref HEAD 2>/dev/null"))
+  "The git branch active when config.el was loaded.")
+
+(defun doom-config-print-git-branch ()
+  "Print the git branch that was active when config.el was loaded."
+  (interactive)
+  (message "config.el loaded on branch: %s" doom-config-git-branch))
+
 (toggle-frame-maximized)
 
 ;; Some functionality uses this to identify you, e.g. GPG configuration, email

@@ -51,6 +51,15 @@ Checks for both .git directory and .git file (worktrees)."
         (let ((git (expand-file-name ".git" d)))
           (or (file-directory-p git) (file-regular-p git)))))))
 
+(defvar claude-repl-git-branch
+  (string-trim (shell-command-to-string "git rev-parse --abbrev-ref HEAD 2>/dev/null"))
+  "The git branch active when claude-repl config was loaded.")
+
+(defun claude-repl-print-git-branch ()
+  "Print the git branch that was active when claude-repl config was loaded."
+  (interactive)
+  (message "claude-repl loaded on branch: %s" claude-repl-git-branch))
+
 (defun claude-repl--path-canonical (path)
   "Return a canonical, stable string for PATH suitable for hashing.
 Expands tildes and symlinks via `file-truename', then strips any trailing slash
