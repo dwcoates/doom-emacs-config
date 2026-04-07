@@ -207,11 +207,16 @@ to the new workspace immediately."
       (+workspace-switch-to dirname))))
 
 (defun claude-repl--dispatch-prompt-command (ws prompt)
-  "Send PROMPT to WS immediately if ready, otherwise enqueue on :pending-prompts."
-  (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+  "Send PROMPT to WS immediately if ready, otherwise enqueue on :pending-prompts.
+WS may be a full branch name (e.g. DWC/foo) or a bare workspace name (e.g. foo);
+it is normalized to the dirname before lookup."
+  (let* ((ws (file-name-nondirectory (directory-file-name ws)))
+         (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (if (and vterm-buf (buffer-local-value 'claude-repl--ready vterm-buf))
         (claude-repl--send-prompt-to-workspace ws prompt)
-      (claude-repl--log "dispatch-prompt-command: ws=%s not ready, enqueuing" ws)
+      (if (not vterm-buf)
+          (claude-repl--log "dispatch-prompt-command: ws=%s not in registry, enqueuing" ws)
+        (claude-repl--log "dispatch-prompt-command: ws=%s not ready, enqueuing" ws))
       (claude-repl--ws-put ws :pending-prompts
                            (append (claude-repl--ws-get ws :pending-prompts)
                                    (list prompt))))))
@@ -1756,8 +1761,10 @@ prompts (with a 0.3s delay), and auto-opens panels if appropriate."
             (if (string= ws (+workspace-current-name))
                 (claude-repl)
               (claude-repl--ws-put ws :pending-show-panels t)))
-        (when (string= ws (+workspace-current-name))
-          (claude-repl))))))
+        (progn
+          (claude-repl--log "first-ready no pending prompts for ws=%s" ws)
+          (when (string= ws (+workspace-current-name))
+            (claude-repl)))))))
 
 (defun claude-repl--on-title-change (title)
   "Detect thinking->idle transition from vterm title changes."
