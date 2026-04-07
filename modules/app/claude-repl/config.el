@@ -1630,10 +1630,10 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
                     ;; Selected: light grey background on whole tab, state foreground on all text
                     (let* ((fg (pcase state
                                  (:thinking   "#cc3333")
-                                 (:done       "#44bb44")
-                                 (:permission "#44bb44")
+                                 (:done       "#2a8c2a")
+                                 (:permission "#2a8c2a")
                                  (:stale      "#cc8800")))
-                           (base-face `(:background "#1e4275"
+                           (base-face `(:background "#c0c0c0"
                                         ,@(when fg `(:foreground ,fg))
                                         :weight bold))
                            (no-bg-face `(:background nil
@@ -1641,10 +1641,9 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
                                          :weight bold)))
                       (concat (propertize " " 'face no-bg-face)
                               (propertize (format "[%s]" label)
-                                          'face `(:foreground "#4477cc" :weight bold :background nil))
-                              (propertize " " 'face no-bg-face)
-                              (propertize name 'face base-face)
-                              (propertize " " 'face no-bg-face)))
+                                          'face `(:foreground ,(or fg "#4477cc") :weight bold
+                                                  :background ,(plist-get base-face :background)))
+                              (propertize (format " %s " name) 'face base-face)))
                   ;; Unselected: full background across the whole tab
                   (concat (propertize " " 'face '(:background nil))
                           (propertize (format "[%s]" label)
