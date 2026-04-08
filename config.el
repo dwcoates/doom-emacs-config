@@ -437,6 +437,16 @@
       (tab-bar-tabs-set (tab-bar-tabs))
       (tab-bar--update-tab-bar-lines t)))
 
+  (defun +dwc/workspace-push-to-back ()
+    "Push the current workspace to the back (end) of the tab-bar."
+    (interactive)
+    (let* ((current (+workspace-current-name))
+           (names (persp-names-current-frame-fast-ordered))
+           (reordered (append (remove current names) (list current))))
+      (set-frame-parameter nil 'persp-names-cache reordered)
+      (+dwc/refresh-tab-bar)
+      (message "Pushed '%s' to back of workspace list." current)))
+
   (run-with-timer 1 1 #'+dwc/refresh-tab-bar)
 
   ;; Delete the "main" workspace after session restore.
