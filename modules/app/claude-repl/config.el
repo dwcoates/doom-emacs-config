@@ -85,14 +85,23 @@ Uses an MD5 hash of the canonical git root path.  Falls back to the buffer-local
 ;; :worktree-path from this hash and run `git rev-parse --abbrev-ref HEAD' there.
 ;; If :worktree-path is absent (e.g. after session restore), fall back to
 ;; `claude-repl--workspace-dir', which scans the workspace's live buffers.
+(cl-defstruct claude-repl-instantiation
+  "Per-environment session state for a Claude REPL workspace.
+Each workspace has one instantiation for :sandbox and one for :bare-metal."
+  had-session   ; non-nil once Claude has run in this environment
+  session-id    ; session ID captured from ~/.claude/sessions/
+  start-cmd)    ; last startup command (for logging/display)
+
 (defvar claude-repl--workspaces (make-hash-table :test 'equal)
   "Hash table mapping workspace name → state plist.
 Keys: :vterm-buffer :input-buffer :saved-window-config
       :return-window :prefix-counter :status :activity-time
       :git-clean :git-proc :worktree-p :worktree-path
-      :force-bare-metal :fork-session-id :had-session
-      :start-cmd :ready-timer :thinking :done
-      :pending-prompts :pending-show-panels")
+      :active-env :sandbox :bare-metal :fork-session-id
+      :ready-timer :thinking :done
+      :pending-prompts :pending-show-panels
+:active-env is :sandbox or :bare-metal; :sandbox and :bare-metal are
+`claude-repl-instantiation' structs holding per-environment session state.")
 
 (defun claude-repl--ws-get (ws key)
   "Get KEY from workspace WS's plist."
@@ -108,6 +117,15 @@ Internally uses plist-put (which returns a new list) threaded into puthash."
   "Remove all state for workspace WS."
   (remhash ws claude-repl--workspaces))
 
+(defun claude-repl--active-inst (ws)
+  "Return the active `claude-repl-instantiation' for workspace WS.
+Creates the struct if not yet initialized for the current environment."
+  (let ((env (or (claude-repl--ws-get ws :active-env) :bare-metal)))
+    (or (claude-repl--ws-get ws env)
+        (let ((inst (make-claude-repl-instantiation)))
+          (claude-repl--ws-put ws env inst)
+          inst))))
+
 (defun claude-repl--register-worktree-ws (ws-id path &optional ws)
   "Mark workspace WS as a worktree workspace rooted at PATH.
 WS-ID is the hash identifier (used for logging/buffer naming); the state
@@ -119,14 +137,15 @@ is stored under WS, defaulting to `+workspace-current-name'."
 
 (defun claude-repl--setup-worktree-session (ws-id path ws force-bare-metal)
   "Register WS as a worktree at PATH and start its Claude session.
-Sets :force-bare-metal if requested, then starts the session from PATH."
+Initializes sandbox and bare-metal instantiations; sets :active-env."
   (claude-repl--register-worktree-ws ws-id path ws)
-  (when force-bare-metal
-    (claude-repl--ws-put ws :force-bare-metal t))
+  (claude-repl--ws-put ws :sandbox (make-claude-repl-instantiation))
+  (claude-repl--ws-put ws :bare-metal (make-claude-repl-instantiation))
+  (claude-repl--ws-put ws :active-env (if force-bare-metal :bare-metal :sandbox))
   (let ((default-directory (file-name-as-directory path)))
     (claude-repl--ensure-session ws))
   (claude-repl--log "worktree pre-started Claude ws=%s cmd=%s"
-                    ws (claude-repl--ws-get ws :start-cmd)))
+                    ws (claude-repl-instantiation-start-cmd (claude-repl--active-inst ws))))
 
 (defun claude-repl--do-create-worktree-workspace (name &optional force-bare-metal fork-session-id preemptive-prompt)
   (let* ((git-root (string-trim
@@ -205,7 +224,8 @@ to the new workspace immediately."
          (fork-p (>= raw 16))
          (fork-session-id
           (when fork-p
-            (let ((sid (claude-repl--ws-get (+workspace-current-name) :session-id)))
+            (let ((sid (claude-repl-instantiation-session-id
+                        (claude-repl--active-inst (+workspace-current-name)))))
               (unless sid
                 (user-error "No session ID for current workspace — cannot fork"))
               sid)))
@@ -519,15 +539,22 @@ Docker image has not been built yet."
 
 (defun claude-repl--start-claude ()
   "Send the claude startup command to the current vterm buffer.
-For worktree workspaces (:worktree-p t), delegates to .claude/sandbox/claude-sandbox
-if a .claude/sandbox/image file exists.  Falls back to bare-metal Claude otherwise."
+For worktree workspaces with :active-env :sandbox, delegates to
+.claude/sandbox/claude-sandbox if a sandbox image is configured.
+Falls back to bare-metal Claude otherwise."
   (let* ((ws (or claude-repl--owning-workspace (+workspace-current-name)))
-         (fresh (not (claude-repl--ws-get ws :had-session)))
+         ;; Initialize env state for non-worktree workspaces (default: bare-metal).
+         (_ (unless (claude-repl--ws-get ws :active-env)
+              (claude-repl--ws-put ws :active-env :bare-metal)
+              (claude-repl--ws-put ws :sandbox (make-claude-repl-instantiation))
+              (claude-repl--ws-put ws :bare-metal (make-claude-repl-instantiation))))
+         (inst (claude-repl--active-inst ws))
+         (session-id (claude-repl-instantiation-session-id inst))
          (worktree-p (claude-repl--ws-get ws :worktree-p))
          (worktree-path (claude-repl--ws-get ws :worktree-path))
-         (force-bare-metal (claude-repl--ws-get ws :force-bare-metal))
+         (active-env (claude-repl--ws-get ws :active-env))
          (fork-session-id (claude-repl--ws-get ws :fork-session-id))
-         (sandbox-config (when (and worktree-p (not force-bare-metal))
+         (sandbox-config (when (and worktree-p (eq active-env :sandbox))
                            (claude-repl--resolve-sandbox-config
                             (claude-repl--git-root worktree-path))))
          (_ (when (plist-get sandbox-config :needs-build)
@@ -550,16 +577,18 @@ if a .claude/sandbox/image file exists.  Falls back to bare-metal Claude otherwi
          (claude-flags (string-trim
                         (mapconcat #'identity
                                    (delq nil (list
-                                              (when (and fresh fork-session-id)
-                                                (format "--resume %s --fork-session"
-                                                        fork-session-id))
-                                              (unless fresh "-c")
+                                              ;; Fork from another session (worktree creation).
+                                              (when fork-session-id
+                                                (format "--resume %s --fork-session" fork-session-id))
+                                              ;; Resume known session in this environment.
+                                              (when (and (not fork-session-id) session-id)
+                                                (format "--resume %s" session-id))
                                               perm-flag))
                                    " ")))
          (cmd (if (and worktree-p docker-image)
                   (string-trim (concat (plist-get sandbox-config :script) " " claude-flags))
                 (string-trim (concat "claude " claude-flags)))))
-    (claude-repl--ws-put ws :start-cmd cmd)
+    (setf (claude-repl-instantiation-start-cmd inst) cmd)
     (when fork-session-id
       (claude-repl--ws-put ws :fork-session-id nil))
     (setq-local mode-line-format
@@ -568,11 +597,11 @@ if a .claude/sandbox/image file exists.  Falls back to bare-metal Claude otherwi
                                       'face '(:foreground "green" :weight bold))
                         (propertize (format " BARE METAL: %s" (system-name))
                                     'face '(:foreground "red" :weight bold)))))
-    (message "[claude-repl] start-claude ws=%s had-session=%s fork-session-id=%s fresh=%s worktree=%s cmd=%s"
-             ws (claude-repl--ws-get ws :had-session) fork-session-id
-             (if fresh "yes" "no") (if worktree-p "yes" "no") cmd)
-    (claude-repl--log "start-claude dir=%s fresh=%s worktree=%s cmd=%s"
-                      default-directory (if fresh "yes" "no") (if worktree-p "yes" "no") cmd)
+    (message "[claude-repl] start-claude ws=%s session-id=%s fork-session-id=%s worktree=%s env=%s cmd=%s"
+             ws session-id fork-session-id
+             (if worktree-p "yes" "no") active-env cmd)
+    (claude-repl--log "start-claude dir=%s worktree=%s env=%s cmd=%s"
+                      default-directory (if worktree-p "yes" "no") active-env cmd)
     (setq-local claude-repl--ready nil)
     (vterm-send-string (concat "clear && " cmd))
     (vterm-send-return)
@@ -1786,9 +1815,11 @@ Stores the session ID as :session-id on the workspace plist."
           (error nil))))
     (if found-id
         (progn
-          (claude-repl--ws-put ws :session-id found-id)
-          (claude-repl--log "capture-session-id ws=%s id=%s" ws found-id))
-      (claude-repl--log "capture-session-id ws=%s: no matching session found" ws))))
+          (setf (claude-repl-instantiation-session-id (claude-repl--active-inst ws)) found-id)
+          (claude-repl--log "capture-session-id ws=%s env=%s id=%s"
+                            ws (claude-repl--ws-get ws :active-env) found-id))
+      (claude-repl--log "capture-session-id ws=%s env=%s: no matching session found"
+                        ws (claude-repl--ws-get ws :active-env)))))
 
 (defun claude-repl--handle-first-ready ()
   "Handle the first terminal title set — Claude is now ready.
@@ -2310,7 +2341,7 @@ The placeholder is swapped for the real vterm buffer once Claude is ready."
   (claude-repl--ensure-session)
   (claude-repl--show-panels-with-placeholder)
   (let* ((ws (+workspace-current-name))
-         (start-cmd (claude-repl--ws-get ws :start-cmd)))
+         (start-cmd (claude-repl-instantiation-start-cmd (claude-repl--active-inst ws))))
     (message "Starting Claude... ws=%s ws-id=%s dir=%s cmd=%s"
              ws
              (claude-repl--workspace-id)
@@ -2409,7 +2440,8 @@ If panels hidden: show both panels."
 
 (defun claude-repl--teardown-session-state (ws)
   "Save history, disable overlay, cancel timers, and clear session state for workspace WS."
-  (message "[claude-repl] teardown-session-state ws=%s (setting :had-session t)" ws)
+  (message "[claude-repl] teardown-session-state ws=%s env=%s (setting had-session t)"
+           ws (claude-repl--ws-get ws :active-env))
   (claude-repl--log "teardown-session-state")
   (ignore-errors (claude-repl--history-save ws))
   (ignore-errors (claude-repl--disable-hide-overlay))
@@ -2419,8 +2451,9 @@ If panels hidden: show both panels."
   (claude-repl--ws-put ws :vterm-buffer nil)
   (claude-repl--ws-put ws :input-buffer nil)
   (claude-repl--ws-put ws :saved-window-config nil)
-  (claude-repl--ws-put ws :start-cmd nil)
-  (claude-repl--ws-put ws :had-session t))
+  (let ((inst (claude-repl--active-inst ws)))
+    (setf (claude-repl-instantiation-start-cmd inst) nil)
+    (setf (claude-repl-instantiation-had-session inst) t)))
 
 (defun claude-repl--destroy-session-buffers (vterm-buf input-buf)
   "Close windows and kill VTERM-BUF, INPUT-BUF, and any placeholder."
@@ -2530,6 +2563,50 @@ Claude panels to fill the frame.  Calling again restores the layout."
   (when (claude-repl--vterm-live-p)
     (with-current-buffer (claude-repl--ws-get (+workspace-current-name) :vterm-buffer)
       (vterm-send-key "<backtab>"))))
+
+(defun claude-repl-switch-environment ()
+  "Switch the current workspace between Docker sandbox and bare-metal.
+Kills the current Claude process and resumes it in the other environment.
+On the first switch, the new environment seeds its session-id from the
+current one so --resume carries the conversation across.  On subsequent
+switches each environment resumes its own prior session independently.
+Requires a worktree workspace with a captured session ID."
+  (interactive)
+  (let* ((ws (+workspace-current-name))
+         (active-env (claude-repl--ws-get ws :active-env))
+         (worktree-p (claude-repl--ws-get ws :worktree-p))
+         (inst (claude-repl--active-inst ws))
+         (session-id (claude-repl-instantiation-session-id inst))
+         (new-env (if (eq active-env :sandbox) :bare-metal :sandbox)))
+    (unless worktree-p
+      (user-error "Sandbox switching requires a worktree workspace"))
+    (unless session-id
+      (user-error "No session ID captured yet — session may still be starting"))
+    (when (claude-repl--ws-get ws :thinking)
+      (user-error "Cannot switch environment while Claude is thinking"))
+    (when (and (eq new-env :sandbox)
+               (not (claude-repl--resolve-sandbox-config
+                     (claude-repl--git-root (claude-repl--ws-get ws :worktree-path)))))
+      (user-error "No sandbox configuration found for this workspace"))
+    ;; Seed the new env's session-id from current if this is the first switch.
+    (let ((new-inst (or (claude-repl--ws-get ws new-env)
+                        (make-claude-repl-instantiation))))
+      (unless (claude-repl-instantiation-session-id new-inst)
+        (setf (claude-repl-instantiation-session-id new-inst) session-id))
+      (claude-repl--ws-put ws new-env new-inst))
+    ;; Kill current session, switch active env, restart.
+    (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer))
+          (input-buf (claude-repl--ws-get ws :input-buffer)))
+      (claude-repl--cancel-ready-timer ws)
+      (claude-repl--teardown-session-state ws)
+      (claude-repl--destroy-session-buffers vterm-buf input-buf)
+      (claude-repl--ws-put ws :active-env new-env)
+      (message "Switching to %s (resuming session %s...)"
+               (if (eq new-env :sandbox) "Docker sandbox" "bare-metal")
+               (substring session-id 0 8))
+      (claude-repl--ensure-session ws)
+      (claude-repl--show-panels)
+      (claude-repl--focus-input-panel))))
 
 ;; Global bindings
 (map! :nvi "C-S-m" #'claude-repl-cycle)
@@ -2674,7 +2751,8 @@ individually. Aborts cleanly if any commit conflicts."
       :desc "Claude input" "o v" #'claude-repl-focus-input
       :desc "Kill Claude" "o C" #'claude-repl-kill
       :desc "Claude interrupt" "o x" #'claude-repl-interrupt
-      :desc "Copy file reference" "o r" #'claude-repl-copy-reference)
+      :desc "Copy file reference" "o r" #'claude-repl-copy-reference
+      :desc "Switch sandbox/bare-metal" "o s" #'claude-repl-switch-environment)
 
 (map! :leader
       (:prefix "p"
