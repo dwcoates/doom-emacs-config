@@ -2683,10 +2683,56 @@ buffer-scanning via `claude-repl--ws-dir' for session-restored workspaces."
         (unless (or (string-empty-p branch) (string-prefix-p "fatal" branch))
           branch)))))
 
-(defun +dwc/workspace-merge ()
-  "Cherry-pick another workspace's branch commits onto the current branch.
+(defun +dwc/workspace-merge--do (target-ws)
+  "Cherry-pick TARGET-WS's branch commits onto the current branch.
 Replays each commit from the target branch (since it diverged from master)
 individually. Aborts cleanly if any commit conflicts."
+  (let* ((current-ws (+workspace-current-name))
+         (target-branch (+dwc/workspace->branch target-ws)))
+    (unless target-branch
+      (user-error "Cannot resolve branch for workspace '%s'" target-ws))
+    (let* ((project-root (or (projectile-project-root)
+                             (user-error "Not in a project"))))
+      (unless (= 0 (call-process "git" nil nil nil
+                                 "-C" project-root
+                                 "rev-parse" "--verify" target-branch))
+        (user-error "Branch '%s' not found in this repo" target-branch))
+      (let* ((fork (+dwc/workspace-merge--fork project-root target-branch))
+             (range (format "%s..%s" fork target-branch)))
+        (let ((range-count (string-trim
+                            (shell-command-to-string
+                             (format "git -C %s rev-list --count %s"
+                                     (shell-quote-argument project-root)
+                                     range)))))
+          (when (string= range-count "0")
+            (user-error "All commits from workspace '%s' are already incorporated" target-ws)))
+        (claude-repl--log "workspace-merge target-ws=%s target-branch=%s fork=%s range=%s"
+                          target-ws target-branch fork range)
+        (let ((exit-code (call-process "git" nil nil nil "-C" project-root "cherry-pick" "-x" range)))
+          (claude-repl--log "workspace-merge cherry-pick exit-code=%s" exit-code))
+        (let* ((git-dir (string-trim (shell-command-to-string
+                                      (format "git -C %s rev-parse --git-dir"
+                                              (shell-quote-argument project-root)))))
+               (cherry-pick-head (expand-file-name "CHERRY_PICK_HEAD" git-dir))
+               (head-exists (file-exists-p cherry-pick-head)))
+          (claude-repl--log "workspace-merge git-dir=%s cherry-pick-head=%s exists=%s"
+                            git-dir cherry-pick-head head-exists)
+          (when head-exists
+            (let ((conflicting-commit (string-trim
+                                       (shell-command-to-string
+                                        (format "git -C %s rev-parse --short CHERRY_PICK_HEAD"
+                                                (shell-quote-argument project-root))))))
+              (magit-status)
+              (user-error "Conflict cherry-picking %s from '%s' — resolve in magit" conflicting-commit target-ws))))
+        (when (member target-ws (+workspace-list-names))
+          (claude-repl--kill-vterm-process (claude-repl--ws-get target-ws :vterm-buffer))
+          (persp-kill target-ws))
+        (message "Merged workspace '%s' → '%s'." target-ws current-ws)
+        (magit-status)))))
+
+(defun +dwc/workspace-merge ()
+  "Cherry-pick another workspace's branch commits onto the current branch.
+Prompts for which workspace to merge in."
   (interactive)
   (let* ((current-ws (+workspace-current-name))
          (other-ws (remove current-ws (+workspace-list-names))))
@@ -2697,52 +2743,35 @@ individually. Aborts cleanly if any commit conflicts."
       (unless (and (= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--quiet"))
                    (= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--cached" "--quiet")))
         (user-error "Uncommitted changes present — stash or commit them before merging a workspace")))
-    (let* ((target-ws (completing-read "Merge workspace into current: " other-ws nil t))
-           (target-branch (+dwc/workspace->branch target-ws)))
-      (unless target-branch
-        (user-error "Cannot resolve branch for workspace '%s'" target-ws))
-      (let* ((project-root (or (projectile-project-root)
-                               (user-error "Not in a project"))))
-        (unless (= 0 (call-process "git" nil nil nil
-                                   "-C" project-root
-                                   "rev-parse" "--verify" target-branch))
-          (user-error "Branch '%s' not found in this repo" target-branch))
-        (let* ((fork (+dwc/workspace-merge--fork project-root target-branch))
-               (range (format "%s..%s" fork target-branch)))
-          (let ((range-count (string-trim
-                              (shell-command-to-string
-                               (format "git -C %s rev-list --count %s"
-                                       (shell-quote-argument project-root)
-                                       range)))))
-            (when (string= range-count "0")
-              (user-error "All commits from workspace '%s' are already incorporated" target-ws)))
-          (claude-repl--log "workspace-merge target-ws=%s target-branch=%s fork=%s range=%s"
-                            target-ws target-branch fork range)
-          (let ((exit-code (call-process "git" nil nil nil "-C" project-root "cherry-pick" "-x" range)))
-            (claude-repl--log "workspace-merge cherry-pick exit-code=%s" exit-code))
-          ;; Non-zero exit doesn't always mean conflict — git also exits non-zero for
-          ;; empty commits (already applied). Only abort if CHERRY_PICK_HEAD exists,
-          ;; which git writes only when stopped mid-way on a real conflict.
-          (let* ((git-dir (string-trim (shell-command-to-string
-                                        (format "git -C %s rev-parse --git-dir"
-                                                (shell-quote-argument project-root)))))
-                 (cherry-pick-head (expand-file-name "CHERRY_PICK_HEAD" git-dir))
-                 (head-exists (file-exists-p cherry-pick-head)))
-            (claude-repl--log "workspace-merge git-dir=%s cherry-pick-head=%s exists=%s"
-                              git-dir cherry-pick-head head-exists)
-            (when head-exists
-              (let ((conflicting-commit (string-trim
-                                         (shell-command-to-string
-                                          (format "git -C %s rev-parse --short CHERRY_PICK_HEAD"
-                                                  (shell-quote-argument project-root))))))
-                (magit-status)
-                (user-error "Conflict cherry-picking %s from '%s' — resolve in magit" conflicting-commit target-ws))))
-          (when (member target-ws (+workspace-list-names))
-            ;; Kill Claude process first to suppress vterm's "process running" prompt.
-            (claude-repl--kill-vterm-process (claude-repl--ws-get target-ws :vterm-buffer))
-            (persp-kill target-ws))
-          (message "Merged workspace '%s' → '%s'." target-ws current-ws)
-          (magit-status))))))
+    (let ((target-ws (completing-read "Merge workspace into current: " other-ws nil t)))
+      (+dwc/workspace-merge--do target-ws))))
+
+(defun +dwc/workspace-merge-current-into-master ()
+  "Merge the current workspace's branch into the master workspace.
+Switches to master, then cherry-picks commits from the current workspace."
+  (interactive)
+  (let* ((source-ws (+workspace-current-name))
+         (master-ws "master"))
+    (unless (member master-ws (+workspace-list-names))
+      (user-error "No workspace named 'master' found"))
+    (when (string= source-ws master-ws)
+      (user-error "Already on the master workspace"))
+    ;; Guard: uncommitted changes would interfere with cherry-pick.
+    (let ((project-root (or (projectile-project-root) (user-error "Not in a project"))))
+      (unless (and (= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--quiet"))
+                   (= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--cached" "--quiet")))
+        (user-error "Uncommitted changes present — stash or commit them before merging a workspace")))
+    (condition-case err
+        (+workspace-switch-to master-ws)
+      (error
+       (+workspace/switch-to master-ws)))
+    ;; After switching, default-directory still points to the source workspace.
+    ;; Bind it to master's directory so projectile-project-root resolves correctly.
+    (let ((master-dir (or (claude-repl--ws-get master-ws :worktree-path)
+                          (claude-repl--ws-dir master-ws)
+                          (user-error "Cannot determine master workspace directory"))))
+      (let ((default-directory (file-name-as-directory master-dir)))
+        (+dwc/workspace-merge--do source-ws)))))
 
 ;; Keybindings
 ;; SPC o — Claude session control (open, focus, kill, interrupt, utilities)
@@ -2762,7 +2791,8 @@ individually. Aborts cleanly if any commit conflicts."
       (:prefix "TAB"
        :desc "Create worktree workspace" "n" #'claude-repl-create-worktree-workspace
        :desc "New workspace"             "N" #'claude-repl--new-workspace
-       :desc "Merge workspace into current" "m" #'+dwc/workspace-merge))
+       :desc "Merge workspace into current" "m" #'+dwc/workspace-merge
+       :desc "Merge current workspace into master" "M" #'+dwc/workspace-merge-current-into-master))
 
 ;; SPC j — Tell Claude to do a predefined thing
 (map! :leader

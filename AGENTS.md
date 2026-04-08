@@ -2,7 +2,7 @@
 
 Always explain at the end of your response if there were changes whether or not the changes are persistent after unloading then. That is, whether resetting them and the re-loading will undo all the runtime changes. For example, if your changes add to some hook, then resetting your changes and reloading will not un-add that thing to the hook -- i'll still be there -- and thus the changes are "persistent after unloading"
 
-Begin the persistence message with ✅ if the changes are not persistent after reloading (i.e. a reload fully resets them), or ❌ if any changes persist after reloading.
+Begin the persistence message with ✅ if the changes are not persistent after reloading (i.e. a reload fully resets them), or ❌ if any changes persist after reloading. When using ❌, briefly summarize which specific changes persist and why (e.g. "file written to disk", "entry added to hook").
 
 ## Claude REPL
 
@@ -19,4 +19,16 @@ After any changes to `modules/app/claude-repl/`, always run the claude-repl test
 ```bash
 emacs -batch -Q -l ert -l modules/app/claude-repl/test-claude-repl.el -f ert-run-tests-batch-and-exit
 ```
+
+## Paren Checking
+
+To verify parenthesis balance in an `.el` file (skipping strings and comments):
+
+```bash
+python3 .claude/check-parens.py <file.el>
+```
+
+## AGENTS.md Updates
+
+Keep entries minimal — one short sentence or a brief code block per rule.
 
