@@ -582,7 +582,17 @@ Otherwise, copy to the kill ring."
     (kill-new branch)
     (message "Branch copied: %s" branch)))
 
+(defun +dwc/magit-status-workspace ()
+  "Open magit-status for the current workspace's project root."
+  (interactive)
+  (let ((dir (claude-repl--ws-get (+workspace-current-name) :project-dir)))
+    (magit-status (or dir default-directory))))
+
 (map! :leader
+      :desc "Magit status for workspace"
+      "g g" #'+dwc/magit-status-workspace
+      :desc "Magit status"
+      "g G" #'magit-status
       :desc "Generate GitHub link for current line"
       "g h" #'+dwc/generate-github-link
       :desc "Generate and open GitHub link in browser"

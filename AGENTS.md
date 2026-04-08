@@ -8,6 +8,8 @@ Begin the persistence message with ✅ if the changes are not persistent after r
 
 All Claude REPL functionality (commands, keybindings, functions) must be added to `modules/app/claude-repl/config.el`. Never add Claude REPL features to `config.el` or any other file without first asking the user.
 
+Functions defined in `modules/app/claude-repl/config.el` must use the `claude-repl-` prefix (public) or `claude-repl--` prefix (private). Never use `+dwc/` prefixed functions in that file — `+dwc/` functions belong in `config.el`.
+
 ## Claude REPL instrumentation
 
 New code added to the claude-repl module must include instrumentation via `claude-repl--log`. Every dynamic aspect of the call site must be included in the log message — variable values, resolved paths, computed flags, branch outcomes, etc. The goal is that a log trace alone should be sufficient to diagnose any behavioral issue without needing to add instrumentation after the fact.

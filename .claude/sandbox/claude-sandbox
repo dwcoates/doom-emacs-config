@@ -51,7 +51,9 @@ fi
 
 # Inject GH_TOKEN into the container when CLAUDE_SANDBOX_GH_AUTH=1 is set.
 # Token is sourced from ~/.config/gh/token, falling back to $GITHUB_TOKEN.
+# Also injects git identity and a credential helper so git operations work.
 GH_TOKEN_ENV=()
+GIT_AUTH_ENV=()
 if [[ -n "${CLAUDE_SANDBOX_GH_AUTH:-}" ]]; then
   GH_TOKEN_FILE="$HOME/.config/gh/token"
   if [[ -f "$GH_TOKEN_FILE" ]]; then
@@ -60,6 +62,22 @@ if [[ -n "${CLAUDE_SANDBOX_GH_AUTH:-}" ]]; then
     GH_TOKEN_ENV=(-e "GH_TOKEN=$GITHUB_TOKEN")
   else
     echo "claude-sandbox: warning: CLAUDE_SANDBOX_GH_AUTH is set but no token found (tried ~/.config/gh/token and \$GITHUB_TOKEN)" >&2
+  fi
+
+  if [[ "${#GH_TOKEN_ENV[@]}" -gt 0 ]]; then
+    # Propagate git identity from host config so commits have proper author/email.
+    git_name=$(git config --global user.name 2>/dev/null || true)
+    git_email=$(git config --global user.email 2>/dev/null || true)
+    [[ -n "$git_name" ]]  && GIT_AUTH_ENV+=(-e "GIT_AUTHOR_NAME=$git_name"    -e "GIT_COMMITTER_NAME=$git_name")
+    [[ -n "$git_email" ]] && GIT_AUTH_ENV+=(-e "GIT_AUTHOR_EMAIL=$git_email"  -e "GIT_COMMITTER_EMAIL=$git_email")
+
+    # Configure a credential helper that returns GH_TOKEN for github.com.
+    # GIT_CONFIG_* vars are supported since git 2.32 (Ubuntu 22.04 ships 2.34).
+    GIT_AUTH_ENV+=(
+      -e "GIT_CONFIG_COUNT=1"
+      -e "GIT_CONFIG_KEY_0=credential.https://github.com.helper"
+      -e "GIT_CONFIG_VALUE_0=!f() { echo username=x-access-token; echo password=\$GH_TOKEN; }; f"
+    )
   fi
 fi
 
@@ -104,6 +122,7 @@ LOG_FILE="$GIT_ROOT/.claude/sandbox/sandbox.log"
   echo "  $HOME/.claude:/home/claude/.claude"
   echo "  $HOME/.claude.json:/home/claude/.claude.json"
   [[ "${#GH_TOKEN_ENV[@]}" -gt 0 ]] && echo "  GH_TOKEN: injected"
+  [[ "${#GIT_AUTH_ENV[@]}" -gt 0 ]] && echo "  git identity+credential: injected"
   for m in "${WORKTREE_MOUNTS[@]}"; do [[ "$m" != "-v" ]] && echo "  $m (worktree)"; done
   for m in "${EXTRA_MOUNTS[@]}";    do [[ "$m" != "-v" ]] && echo "  $m (extra)";    done
   echo "claude args: ${PERM_ARGS[*]} $*"
@@ -116,6 +135,7 @@ exec docker run --rm -it \
   -v "$HOME/.claude:/home/claude/.claude" \
   -v "$HOME/.claude.json:/home/claude/.claude.json" \
   "${GH_TOKEN_ENV[@]+"${GH_TOKEN_ENV[@]}"}" \
+  "${GIT_AUTH_ENV[@]+"${GIT_AUTH_ENV[@]}"}" \
   "${WORKTREE_MOUNTS[@]}" \
   "${EXTRA_MOUNTS[@]}" \
   -w "/$DIRNAME" \

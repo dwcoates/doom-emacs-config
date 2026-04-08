@@ -3120,6 +3120,14 @@ Reports comprehensive diagnostics."
                (if open "yes" "no") (if dirty "yes" "no")
                (or before "nil") (or after "nil")))))
 
+;; Store project root in ws hashtable when switching projects, so workspace-aware
+;; commands (e.g. magit-status) can find the correct directory from any buffer.
+(add-hook 'projectile-after-switch-project-hook
+          (lambda ()
+            (let ((ws (+workspace-current-name)))
+              (claude-repl--log "after-switch-project ws=%s dir=%s" ws default-directory)
+              (claude-repl--ws-put ws :project-dir default-directory))))
+
 ;; Kill Claude session before workspace deletion so buffers/windows are cleaned
 ;; up while the workspace is still current.
 (advice-add #'+workspace/kill :before
