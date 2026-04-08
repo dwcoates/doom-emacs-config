@@ -171,14 +171,23 @@ Initializes sandbox and bare-metal instantiations; sets :active-env."
              (+workspace-current-name) (claude-repl--workspace-id))
     (when (projectile-project-p path)
       (user-error "Worktree '%s' already exists — use SPC p p to switch to it" dirname))
+    ;; Fetch origin/master so new worktrees start from the latest upstream.
+    ;; Skip for forks — those branch from the current session's state.
+    (unless fork-session-id
+      (let ((fetch-result (shell-command-to-string
+                           (format "git -C %s fetch origin master 2>&1"
+                                   (shell-quote-argument git-root)))))
+        (claude-repl--log "worktree fetch: %s" (string-trim fetch-result))))
     (let* ((cmd (if branch-name
-                    (format "git -C %s worktree add -b %s %s 2>&1"
+                    (format "git -C %s worktree add -b %s %s %s 2>&1"
                             (shell-quote-argument git-root)
                             (shell-quote-argument branch-name)
-                            (shell-quote-argument path))
-                  (format "git -C %s worktree add %s 2>&1"
+                            (shell-quote-argument path)
+                            (if fork-session-id "HEAD" "origin/master"))
+                  (format "git -C %s worktree add %s %s 2>&1"
                           (shell-quote-argument git-root)
-                          (shell-quote-argument path))))
+                          (shell-quote-argument path)
+                          (if fork-session-id "HEAD" "origin/master"))))
            (result (shell-command-to-string cmd)))
       (claude-repl--log "worktree git cmd: %s" cmd)
       (claude-repl--log "worktree git result: %s" (string-trim result))
