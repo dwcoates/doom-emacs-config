@@ -479,6 +479,50 @@ Switch focus to the workspace that now occupies the old position."
       :i "s-9" #'+workspace/switch-to-8
       :i "s-0" #'+workspace/switch-to-final)
 
+;; Open-most-recent-workspace: non-idempotent workspace switcher
+(defvar +dwc/workspace-history nil
+  "Workspace names ordered by most-recently-visited first.
+Updated automatically on every workspace switch.")
+
+(defvar +dwc/opened-recent-workspaces nil
+  "Workspaces already returned by `+dwc/open-most-recent-workspace' this session.
+Prevents the function from returning the same workspace twice.")
+
+(after! persp-mode
+  (add-hook 'persp-activated-functions
+            (lambda (&rest _)
+              (let ((name (+workspace-current-name)))
+                (when name
+                  (setq +dwc/workspace-history
+                        (cons name (cl-remove name +dwc/workspace-history
+                                              :test #'string=))))))))
+
+(defun +dwc/open-most-recent-workspace ()
+  "Switch to the most recently visited workspace not yet opened by this command.
+Each call returns a different workspace, cycling through the history.
+When all workspaces have been visited, resets the cycle."
+  (interactive)
+  (let* ((current (+workspace-current-name))
+         (candidates (cl-remove-if
+                      (lambda (name)
+                        (or (string= name current)
+                            (member name +dwc/opened-recent-workspaces)))
+                      +dwc/workspace-history))
+         ;; Fall back to workspace list if history is empty (e.g. fresh session)
+         (candidates (or candidates
+                        (cl-remove-if
+                         (lambda (name)
+                           (or (string= name current)
+                               (member name +dwc/opened-recent-workspaces)))
+                         (+workspace-list-names))))
+         (target (car candidates)))
+    (if target
+        (progn
+          (push target +dwc/opened-recent-workspaces)
+          (+workspace/switch-to target))
+      (setq +dwc/opened-recent-workspaces nil)
+      (message "All workspaces visited — cycle reset"))))
+
 (unless (display-graphic-p)
   ;; activate mouse-based scrolling
   (xterm-mouse-mode 1)
