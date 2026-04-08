@@ -270,7 +270,7 @@ it is normalized to the dirname before lookup."
   (let* ((ws (file-name-nondirectory (directory-file-name ws)))
          (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (if (and vterm-buf (buffer-local-value 'claude-repl--ready vterm-buf))
-        (claude-repl--send-prompt-to-workspace ws prompt)
+        (claude-repl--send prompt ws)
       (if (not vterm-buf)
           (claude-repl--log "dispatch-prompt-command: ws=%s not in registry, enqueuing" ws)
         (claude-repl--log "dispatch-prompt-command: ws=%s not ready, enqueuing" ws))
@@ -694,6 +694,7 @@ Emacs to call our handler instead of the originally resolved command."
     (claude-slash-input-mode -1))
   (claude-repl--history-push)
   (claude-repl--history-reset)
+  (claude-repl--history-save (+workspace-current-name))
   (erase-buffer)
   (evil-insert-state))
 
@@ -766,7 +767,7 @@ Emacs to call our handler instead of the originally resolved command."
           (scroll-up 3))))))
 
 (map! :map claude-input-mode-map
-      :ni "RET"       #'claude-repl-send
+      :ni "RET"       #'claude-repl--send
       :ni "S-RET"     #'newline
       :i  "/"         #'claude-repl--slash-start
       :ni "C-RET"     #'claude-repl-send-with-postfix
@@ -841,10 +842,10 @@ WS defaults to the current workspace name."
               (read (current-buffer)))))))
 
 ;; Input history functions
-(defun claude-repl--history-push ()
-  "Save current input buffer text to history.
+(defun claude-repl--history-push (&optional text)
+  "Save TEXT (or current buffer text) to history.
 Skips empty strings and duplicates of the most recent entry."
-  (let ((text (string-trim (buffer-string))))
+  (let ((text (string-trim (or text (buffer-string)))))
     (unless (string-empty-p text)
       (unless (equal text (car claude-repl--input-history))
         (push text claude-repl--input-history)))))
@@ -926,16 +927,15 @@ immediately re-trigger the metaprompt."
         (claude-repl--log "posthook matched pattern=%s" (car hook))
         (funcall (cdr hook) ws raw)))))
 
-(defun claude-repl--prepare-input (ws)
-  "Read and return input from the input buffer for workspace WS.
-Periodically prepends the metaprompt prefix when `claude-repl-skip-permissions' is on."
-  (let* ((input-buf (claude-repl--ws-get ws :input-buffer))
-         (counter (or (claude-repl--ws-get ws :prefix-counter) 0))
-         (raw (with-current-buffer input-buf (buffer-string))))
+(defun claude-repl--prepare-input (ws raw &optional force-metaprompt)
+  "Optionally prepend metaprompt prefix to RAW for workspace WS.
+When FORCE-METAPROMPT is non-nil, always prepend (ignoring the counter)."
+  (let ((counter (or (claude-repl--ws-get ws :prefix-counter) 0)))
     (claude-repl--log "prepare-input counter=%d period=%d" counter claude-repl-prefix-period)
     (if (and claude-repl-skip-permissions claude-repl-command-prefix
              (not (claude-repl--skip-metaprompt-p raw))
-             (zerop (mod counter claude-repl-prefix-period)))
+             (or force-metaprompt
+                 (zerop (mod counter claude-repl-prefix-period))))
         (concat claude-repl--command-prefix raw)
       raw)))
 
@@ -969,16 +969,6 @@ Uses paste mode for large inputs to avoid truncation."
   (claude-repl--ws-set ws :thinking)
   (claude-repl--touch-activity ws))
 
-(defun claude-repl--clear-input (ws)
-  "Push current input to history, reset browsing, and clear the input buffer for workspace WS."
-  (claude-repl--log "clear-input")
-  (let ((input-buf (claude-repl--ws-get ws :input-buffer)))
-    (when input-buf
-      (with-current-buffer input-buf
-        (claude-repl--history-push)
-        (claude-repl--history-reset)
-        (erase-buffer)))))
-
 (defun claude-repl--do-send (ws input raw)
   "Core send: dispatch INPUT to WS's vterm.
 Increments the prefix counter, pins the owning workspace, marks the workspace
@@ -996,26 +986,34 @@ as thinking, sends INPUT, and runs posthooks with RAW (the undecorated text)."
     (claude-repl--send-input-to-vterm vterm-buf input)
     (claude-repl--run-send-posthooks ws raw)))
 
-(defun claude-repl--send-prompt-to-workspace (ws prompt)
-  "Programmatically send PROMPT string to workspace WS.
-Intended for non-interactive callers (e.g. file-based dispatch).
-Signals an error if WS has no live vterm buffer."
-  (unless (claude-repl--ws-get ws :vterm-buffer)
-    (error "claude-repl--send-prompt-to-workspace: no vterm buffer for workspace %s" ws))
-  (claude-repl--do-send ws prompt prompt))
-
-(defun claude-repl-send ()
-  "Send input buffer contents to Claude, clear buffer, and return to previous window."
+(defun claude-repl--send (&optional prompt ws force-metaprompt)
+  "Send PROMPT (or input buffer contents) to Claude in workspace WS.
+When PROMPT is nil, reads from the input buffer and clears it after sending.
+When WS is nil, uses the current workspace.
+When FORCE-METAPROMPT is non-nil, always prepend the metaprompt prefix.
+Handles input preparation, sending, history, and persistence."
   (interactive)
-  (let* ((ws (+workspace-current-name)))
-    (unless ws (error "claude-repl-send: no active workspace"))
-    (let* ((input-buf (claude-repl--ws-get ws :input-buffer)))
-      (when (and input-buf (claude-repl--vterm-live-p))
-        (let* ((raw (with-current-buffer input-buf (buffer-string)))
-               (input (claude-repl--prepare-input ws)))
+  (let ((ws (or ws (+workspace-current-name))))
+    (unless ws (error "claude-repl--send: no active workspace"))
+    (let* ((from-buffer (null prompt))
+           (input-buf (claude-repl--ws-get ws :input-buffer))
+           (vterm-buf (claude-repl--ws-get ws :vterm-buffer))
+           (raw (or prompt
+                    (when input-buf
+                      (with-current-buffer input-buf (buffer-string))))))
+      (when (and raw vterm-buf (buffer-live-p vterm-buf))
+        (let ((input (claude-repl--prepare-input ws raw force-metaprompt)))
           (claude-repl--do-send ws input raw)
-          (claude-repl--clear-input ws)
-          (claude-repl--select-return-window ws))))))
+          (when (and input-buf (buffer-live-p input-buf))
+            (with-current-buffer input-buf
+              (claude-repl--history-push raw)
+              (claude-repl--history-reset)))
+          (claude-repl--history-save ws)
+          (when from-buffer
+            (when (and input-buf (buffer-live-p input-buf))
+              (with-current-buffer input-buf
+                (erase-buffer)))
+            (claude-repl--select-return-window ws)))))))
 
 (defun claude-repl--select-return-window (ws)
   "Select the saved return window for WS if it is still live."
@@ -1049,23 +1047,13 @@ Falls back to hiding panels and selecting the return window."
   "Send input to Claude and hide both panels."
   (interactive)
   (claude-repl--log "send-and-hide")
-  (claude-repl-send)
+  (claude-repl--send)
   (claude-repl--restore-layout))
 
 (defun claude-repl-send-with-metaprompt ()
   "Send input with the metaprompt prefix, bypassing the counter."
   (interactive)
-  (let* ((ws (+workspace-current-name))
-         (input-buf (claude-repl--ws-get ws :input-buffer)))
-    (when (and input-buf (claude-repl--vterm-live-p))
-      (let* ((raw (with-current-buffer input-buf (buffer-string)))
-             (input (if (and claude-repl-skip-permissions claude-repl-command-prefix
-                             (not (claude-repl--skip-metaprompt-p raw)))
-                        (concat claude-repl--command-prefix raw)
-                      raw)))
-        (claude-repl--do-send ws input raw)
-        (claude-repl--clear-input ws)
-        (claude-repl--select-return-window ws)))))
+  (claude-repl--send nil nil t))
 
 (defun claude-repl-send-with-postfix ()
   "Append `claude-repl-send-postfix' to the input buffer, then send."
@@ -1076,7 +1064,7 @@ Falls back to hiding panels and selecting the return window."
       (with-current-buffer input-buf
         (goto-char (point-max))
         (insert claude-repl-send-postfix))))
-  (claude-repl-send))
+  (claude-repl--send))
 
 (defun claude-repl-send-char (char)
   "Send a single character to Claude."
@@ -1192,7 +1180,7 @@ all characters are sent directly to vterm."
       [remap evil-delete-backward-char-and-join] #'claude-repl--slash-backspace
       [remap delete-backward-char]               #'claude-repl--slash-backspace
       [remap backward-delete-char-untabify]      #'claude-repl--slash-backspace
-      [remap claude-repl-send]                   #'claude-repl--slash-return
+      [remap claude-repl--send]                   #'claude-repl--slash-return
       :ni "<up>"   #'ignore
       :ni "<down>" #'ignore)
 
@@ -1886,7 +1874,7 @@ prompts (with a 0.3s delay), and auto-opens panels if appropriate."
                            (lambda ()
                              (when (buffer-live-p vterm-buf)
                                (dolist (p pending)
-                                 (claude-repl--send-prompt-to-workspace ws p))))))
+                                 (claude-repl--send p ws))))))
             ;; Open panels now if on this workspace, otherwise defer until switch.
             ;; claude-repl--on-workspace-switch checks :pending-show-panels.
             (if (string= ws (+workspace-current-name))
@@ -2482,11 +2470,10 @@ If panels hidden: show both panels."
         (claude-repl--schedule-sigkill proc)))))
 
 (defun claude-repl--teardown-session-state (ws)
-  "Save history, disable overlay, cancel timers, and clear session state for workspace WS."
+  "Disable overlay, cancel timers, and clear session state for workspace WS."
   (message "[claude-repl] teardown-session-state ws=%s env=%s (setting had-session t)"
            ws (claude-repl--ws-get ws :active-env))
   (claude-repl--log "teardown-session-state")
-  (ignore-errors (claude-repl--history-save ws))
   (ignore-errors (claude-repl--disable-hide-overlay))
   (when claude-repl--sync-timer
     (cancel-timer claude-repl--sync-timer)
