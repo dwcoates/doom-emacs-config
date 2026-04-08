@@ -2935,6 +2935,7 @@ Switches to master, then cherry-picks commits from the current workspace."
        :desc "Merge workspace into current" "m" #'+dwc/workspace-merge
        :desc "Merge current workspace into master" "M" #'+dwc/workspace-merge-current-into-master
        :desc "Push workspace to second-to-last" "p" #'+dwc/workspace-push-to-back
+       :desc "Pull workspace to second" "P" #'+dwc/workspace-pull-to-front
        :desc "Open most recent workspace" "R" #'+dwc/open-most-recent-workspace))
 
 ;; SPC j — Tell Claude to do a predefined thing

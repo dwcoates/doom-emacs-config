@@ -453,6 +453,21 @@ Switch focus to the workspace that now occupies the old position."
         (+workspace/switch-to next-name))
       (message "Pushed '%s' to second-to-last; switched to '%s'." current (or next-name current))))
 
+  (defun +dwc/workspace-pull-to-front ()
+    "Pull the current workspace to the second position in the tab-bar.
+Switch focus to the workspace that now occupies the old position."
+    (interactive)
+    (let* ((current (+workspace-current-name))
+           (names (persp-names-current-frame-fast-ordered))
+           (old-index (cl-position current names :test #'string=))
+           (without-current (remove current names))
+           (reordered (append (list (car without-current)) (list current) (cdr without-current)))
+           (next-name (nth (min old-index (1- (length without-current))) without-current)))
+      (persp-update-names-cache reordered)
+      (+dwc/refresh-tab-bar)
+      (when next-name
+        (+workspace/switch-to next-name))
+      (message "Pulled '%s' to second position; switched to '%s'." current (or next-name current))))
   (run-with-timer 1 1 #'+dwc/refresh-tab-bar)
 
   ;; Delete the "main" workspace after session restore.
