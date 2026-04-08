@@ -1705,8 +1705,7 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
                            (bracket-fg (or status-fg "black"))
                            (text-fg "black")
                            (base-face `(:background "#c0c0c0"
-                                        :foreground ,text-fg
-                                        :weight bold))
+                                        :foreground ,text-fg))
                            (no-bg-face `(:background nil
                                          :foreground ,text-fg
                                          :weight bold)))
@@ -1718,7 +1717,7 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
                   ;; Unselected: full background across the whole tab
                   (concat (propertize " " 'face '(:background nil))
                           (propertize (format "[%s]" label)
-                                      'face '(:foreground "#4477cc" :background nil))
+                                      'face '(:foreground "#4477cc" :background nil :weight bold))
                           (propertize (format " %s " name) 'face face)))))
      " ")))
 
