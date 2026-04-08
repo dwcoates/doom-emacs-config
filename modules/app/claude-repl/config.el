@@ -2809,7 +2809,7 @@ Switches to master, then cherry-picks commits from the current workspace."
        :desc "New workspace"             "N" #'claude-repl--new-workspace
        :desc "Merge workspace into current" "m" #'+dwc/workspace-merge
        :desc "Merge current workspace into master" "M" #'+dwc/workspace-merge-current-into-master
-       :desc "Push workspace to back" "p" #'+dwc/workspace-push-to-back))
+       :desc "Push workspace to second-to-last" "p" #'+dwc/workspace-push-to-back))
 
 ;; SPC j — Tell Claude to do a predefined thing
 (map! :leader

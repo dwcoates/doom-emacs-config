@@ -438,14 +438,14 @@
       (tab-bar--update-tab-bar-lines t)))
 
   (defun +dwc/workspace-push-to-back ()
-    "Push the current workspace to the back (end) of the tab-bar."
+    "Push the current workspace to the second-to-last position in the tab-bar."
     (interactive)
     (let* ((current (+workspace-current-name))
-           (names (persp-names-current-frame-fast-ordered))
-           (reordered (append (remove current names) (list current))))
-      (set-frame-parameter nil 'persp-names-cache reordered)
+           (without-current (remove current (persp-names-current-frame-fast-ordered)))
+           (reordered (append (butlast without-current) (list current) (last without-current))))
+      (persp-update-names-cache reordered)
       (+dwc/refresh-tab-bar)
-      (message "Pushed '%s' to back of workspace list." current)))
+      (message "Pushed '%s' to second-to-last in workspace list." current)))
 
   (run-with-timer 1 1 #'+dwc/refresh-tab-bar)
 
