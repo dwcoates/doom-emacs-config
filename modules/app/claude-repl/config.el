@@ -36,6 +36,30 @@ Cancelled and reset whenever this file is re-evaluated.")
   :group 'tools
   :prefix "claude-repl-")
 
+(defcustom claude-repl-workspace-initial-buffers nil
+  "Alist mapping repo path patterns to files opened when a worktree workspace is created.
+Each entry is (PATTERN . FILES) where PATTERN is a regexp matched against the
+worktree path with `string-match-p', and FILES is a list of paths relative to
+the worktree root.  Files are added to the new workspace's perspective via
+`persp-add-buffer' without being displayed.  Missing files emit a warning but
+do not abort workspace creation."
+  :type '(alist :key-type regexp :value-type (repeat string))
+  :group 'claude-repl)
+
+(defun claude-repl--open-initial-buffers (ws path)
+  "Open configured initial buffers for workspace WS rooted at PATH.
+Checks `claude-repl-workspace-initial-buffers' for entries whose PATTERN
+matches PATH, then opens each listed file with `find-file-noselect' and adds
+it to the WS perspective without displaying it."
+  (when-let ((persp (persp-get-by-name ws)))
+    (dolist (entry claude-repl-workspace-initial-buffers)
+      (when (string-match-p (car entry) path)
+        (dolist (relpath (cdr entry))
+          (let ((fullpath (expand-file-name relpath path)))
+            (if (file-exists-p fullpath)
+                (persp-add-buffer (find-file-noselect fullpath) persp t)
+              (message "[claude-repl] initial buffer not found in worktree: %s" fullpath))))))))
+
 ;; Workspace identity
 (defvar-local claude-repl--project-root nil
   "Buffer-local git root for Claude REPL buffers.
@@ -201,6 +225,7 @@ Initializes sandbox and bare-metal instantiations; sets :active-env."
            (ws dirname))
       (claude-repl--log "worktree creating workspace %s" ws)
       (+workspace-new ws)
+      (claude-repl--open-initial-buffers ws path)
       (when has-prompt
         (claude-repl--ws-put ws :pending-prompts (list preemptive-prompt))
         (claude-repl--ws-put ws :pending-show-panels t))

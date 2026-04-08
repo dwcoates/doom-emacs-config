@@ -967,3 +967,8 @@ If found, the class name is returned, otherwise STR is returned"
   (setq which-key-idle-delay 0.2
         which-key-max-description-length 60
         which-key-side-window-max-width 0.5))
+
+;; Per-repo initial buffers for new worktree workspaces.
+(after! claude-repl
+  (add-to-list 'claude-repl-workspace-initial-buffers
+               '("open-claude-config" . ("modules/app/claude-repl/config.el"))))
