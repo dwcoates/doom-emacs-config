@@ -2724,7 +2724,14 @@ buffer-scanning via `claude-repl--ws-dir' for session-restored workspaces."
                       (format "git -C %s rev-parse --abbrev-ref HEAD"
                               (shell-quote-argument path))))))
         (unless (or (string-empty-p branch) (string-prefix-p "fatal" branch))
-          branch)))))
+          (if (string= branch "HEAD")
+              ;; Detached HEAD — return the raw SHA so it resolves correctly
+              ;; from any -C path (all worktrees share the object store).
+              (string-trim
+               (shell-command-to-string
+                (format "git -C %s rev-parse HEAD"
+                        (shell-quote-argument path))))
+            branch))))))
 
 (defun +dwc/workspace-merge--do (target-ws)
   "Cherry-pick TARGET-WS's branch commits onto the current branch.
