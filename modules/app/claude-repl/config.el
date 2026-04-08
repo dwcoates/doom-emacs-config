@@ -269,6 +269,37 @@ it is normalized to the dirname before lookup."
                            (append (claude-repl--ws-get ws :pending-prompts)
                                    (list prompt))))))
 
+(defun claude-repl--finish-workspace (ws)
+  "Tear down workspace WS: kill Claude session, remove state, kill persp, remove worktree.
+WS may be a full branch name (e.g. DWC/foo) or a bare workspace name (e.g. foo);
+it is normalized to the dirname before lookup."
+  (let* ((ws (file-name-nondirectory (directory-file-name ws)))
+         (worktree-p (claude-repl--ws-get ws :worktree-p))
+         (worktree-path (claude-repl--ws-get ws :worktree-path))
+         (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+    (claude-repl--log "finish-workspace ws=%s worktree-p=%s path=%s"
+                      ws worktree-p (or worktree-path "nil"))
+    ;; Kill the Claude vterm process.
+    (when vterm-buf
+      (claude-repl--kill-vterm-process vterm-buf))
+    ;; Remove all claude-repl tracking state.
+    (claude-repl--ws-del ws)
+    ;; Kill the Doom perspective.
+    (when (member ws (+workspace-list-names))
+      (persp-kill ws))
+    ;; Remove the git worktree and projectile entry.
+    (when (and worktree-p worktree-path (file-directory-p worktree-path))
+      (let* ((parent (file-name-directory (directory-file-name worktree-path)))
+             (git-root (locate-dominating-file parent ".git")))
+        (when git-root
+          (let ((result (shell-command-to-string
+                         (format "git -C %s worktree remove %s 2>&1"
+                                 (shell-quote-argument (expand-file-name git-root))
+                                 (shell-quote-argument (expand-file-name worktree-path))))))
+            (claude-repl--log "finish-workspace worktree-remove: %s" (string-trim result)))))
+      (projectile-remove-known-project (file-name-as-directory worktree-path)))
+    (message "Finished workspace: %s" ws)))
+
 (defun claude-repl--process-workspace-commands-file (file)
   "Process a workspace commands file FILE, dispatching each typed command.
 Create commands are staggered by 5 seconds each to avoid concurrent Claude
@@ -295,6 +326,9 @@ startup writes corrupting ~/.claude.json."
                   (claude-repl--dispatch-prompt-command
                    (alist-get 'workspace cmd)
                    (alist-get 'prompt cmd)))
+                 ((string= type "finish")
+                  (claude-repl--log "workspace-commands-file finish: ws=%s" (alist-get 'workspace cmd))
+                  (claude-repl--finish-workspace (alist-get 'workspace cmd)))
                  (t
                   (claude-repl--log "workspace-commands-file unknown type: %s" type)))))
             commands))
