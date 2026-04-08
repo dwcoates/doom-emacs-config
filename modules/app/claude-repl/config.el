@@ -225,6 +225,7 @@ Initializes sandbox and bare-metal instantiations; sets :active-env."
            (ws dirname))
       (claude-repl--log "worktree creating workspace %s" ws)
       (+workspace-new ws)
+      (claude-repl--ws-put ws :project-dir (file-name-as-directory path))
       (claude-repl--open-initial-buffers ws path)
       (when has-prompt
         (claude-repl--ws-put ws :pending-prompts (list preemptive-prompt))
@@ -285,8 +286,10 @@ to the new workspace immediately."
   "Create a new workspace and open magit-status in it, mirroring
 the behavior of `+workspaces-switch-project-function'."
   (interactive)
-  (+workspace/new)
-  (magit-status default-directory))
+  (let ((root (or (claude-repl--git-root) default-directory)))
+    (+workspace/new)
+    (claude-repl--ws-put (+workspace-current-name) :project-dir (file-name-as-directory root))
+    (magit-status root)))
 
 (defun claude-repl--dispatch-prompt-command (ws prompt)
   "Send PROMPT to WS immediately if ready, otherwise enqueue on :pending-prompts.
@@ -1731,7 +1734,7 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
                            (text-fg "black")
                            (base-face `(:background "#c0c0c0"
                                         :foreground ,text-fg))
-                           (no-bg-face `(:background nil
+                           (no-bg-face `(:background unspecified
                                          :foreground ,text-fg
                                          :weight bold)))
                       (concat (propertize " " 'face no-bg-face)
@@ -1740,9 +1743,9 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
                                                   :background ,(plist-get base-face :background)))
                               (propertize (format " %s " name) 'face base-face)))
                   ;; Unselected: full background across the whole tab
-                  (concat (propertize " " 'face '(:background nil))
+                  (concat (propertize " " 'face '(:background unspecified))
                           (propertize (format "[%s]" label)
-                                      'face '(:foreground "#4477cc" :background nil :weight bold))
+                                      'face '(:foreground "#4477cc" :background unspecified :weight bold))
                           (propertize (format " %s " name) 'face face)))))
      " ")))
 
@@ -3120,13 +3123,17 @@ Reports comprehensive diagnostics."
                (if open "yes" "no") (if dirty "yes" "no")
                (or before "nil") (or after "nil")))))
 
-;; Store project root in ws hashtable when switching projects, so workspace-aware
-;; commands (e.g. magit-status) can find the correct directory from any buffer.
-(add-hook 'projectile-after-switch-project-hook
-          (lambda ()
-            (let ((ws (+workspace-current-name)))
-              (claude-repl--log "after-switch-project ws=%s dir=%s" ws default-directory)
-              (claude-repl--ws-put ws :project-dir default-directory))))
+(defun claude-repl--project-dir (ws)
+  "Return the project root directory for workspace WS.
+Falls back to git root / projectile root for the default workspace and caches
+it.  Errors loudly if no root can be determined."
+  (or (claude-repl--ws-get ws :project-dir)
+      (let ((root (or (claude-repl--git-root)
+                      (and (projectile-project-p) (projectile-project-root)))))
+        (unless root
+          (error "claude-repl: workspace %s has no :project-dir and no git/project root found" ws))
+        (claude-repl--ws-put ws :project-dir (file-name-as-directory root))
+        (file-name-as-directory root))))
 
 ;; Kill Claude session before workspace deletion so buffers/windows are cleaned
 ;; up while the workspace is still current.
