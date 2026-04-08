@@ -2285,23 +2285,9 @@ Syncs orphaned panels, refreshes overlay, and resets cursors."
   (add-hook 'window-selection-change-functions debounced)
   (add-hook 'buffer-list-update-hook debounced))
 
-;; Redirect focus from vterm output to input buffer (keyboard only, not mouse)
-(defun claude-repl--redirect-to-input (_frame)
-  "If the selected window shows a Claude vterm buffer, jump to its input window.
-Only redirects for keyboard navigation; mouse clicks are allowed through
-so the user can select and copy text from the output."
-  (unless (mouse-event-p last-input-event)
-    (let ((name (buffer-name (window-buffer (selected-window)))))
-      (when (string-match "^\\*claude-\\([0-9a-f]+\\)\\*$" name)
-        (let* ((id (match-string 1 name))
-               (input-buf (get-buffer (format "*claude-input-%s*" id))))
-          (when-let ((input-win (and input-buf (get-buffer-window input-buf))))
-            (claude-repl--log "redirect-to-input from %s" name)
-            (select-window input-win)
-            (when (bound-and-true-p evil-mode)
-              (evil-insert-state))))))))
-
-(add-hook 'window-selection-change-functions #'claude-repl--redirect-to-input)
+;; Intentionally not hooking any automatic redirect from vterm → input.
+;; The vterm windows have no-other-window=t which prevents most navigation to them.
+;; Entry to the REPL is only via explicit claude-repl commands or SPC ,.
 
 (defun claude-repl--ensure-input-buffer (ws)
   "Create input buffer for workspace WS if needed, put in claude-input-mode."
@@ -2470,7 +2456,7 @@ If panels hidden: show both panels."
         (claude-repl--schedule-sigkill proc)))))
 
 (defun claude-repl--teardown-session-state (ws)
-  "Disable overlay, cancel timers, and clear session state for workspace WS."
+  "Save history, disable overlay, cancel timers, and clear session state for workspace WS."
   (message "[claude-repl] teardown-session-state ws=%s env=%s (setting had-session t)"
            ws (claude-repl--ws-get ws :active-env))
   (claude-repl--log "teardown-session-state")
