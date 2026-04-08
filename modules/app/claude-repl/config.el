@@ -1781,6 +1781,27 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
 (push (run-with-timer 1 1 #'claude-repl--update-all-workspace-states)
       claude-repl--timers)
 
+;; Periodically autosave modified file-visiting buffers in all workspaces.
+(defun claude-repl--autosave-workspace-buffers ()
+  "Save all modified file-visiting buffers across all workspaces.
+Runs silently every 5 minutes to prevent data loss."
+  (when (bound-and-true-p persp-mode)
+    (let ((saved 0))
+      (dolist (persp (persp-persps))
+        (dolist (buf (persp-buffers persp))
+          (when (and (buffer-live-p buf)
+                     (buffer-file-name buf)
+                     (buffer-modified-p buf))
+            (with-current-buffer buf
+              (let ((inhibit-message t))
+                (save-buffer)))
+            (cl-incf saved))))
+      (when (> saved 0)
+        (claude-repl--log "autosave: saved %d buffer(s)" saved)))))
+
+(push (run-with-timer 300 300 #'claude-repl--autosave-workspace-buffers)
+      claude-repl--timers)
+
 ;; Title-based "Claude is done" detection.
 ;; Claude Code sets the terminal title to "<spinner> Claude Code" while thinking
 ;; and plain "Claude Code" when idle.  We poll via vterm--set-title advice.
