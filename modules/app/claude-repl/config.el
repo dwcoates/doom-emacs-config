@@ -619,6 +619,10 @@ Falls back to bare-metal Claude otherwise."
               (claude-repl--ws-put ws :active-env :bare-metal)
               (claude-repl--ws-put ws :sandbox (make-claude-repl-instantiation))
               (claude-repl--ws-put ws :bare-metal (make-claude-repl-instantiation))))
+         ;; Restore persisted state (session-id, had-session) from disk,
+         ;; then verify/update session-id against live ~/.claude/sessions/.
+         (_ (claude-repl--state-restore ws))
+         (_ (claude-repl--capture-session-id ws))
          (inst (claude-repl--active-inst ws))
          (session-id (claude-repl-instantiation-session-id inst))
          (worktree-p (claude-repl--ws-get ws :worktree-p))
@@ -868,6 +872,65 @@ WS defaults to the current workspace name."
             (with-temp-buffer
               (insert-file-contents file)
               (read (current-buffer)))))))
+
+;; Session state persistence
+(defun claude-repl--state-save (ws)
+  "Persist session state for workspace WS to disk.
+Saves session-id and had-session for each environment so they
+survive Emacs restarts.  Written to .claude-repl-state in the
+project root (alongside .claude-repl-history)."
+  (let* ((vterm-buf (claude-repl--ws-get ws :vterm-buffer))
+         (root (or (claude-repl--ws-get ws :worktree-path)
+                   (and vterm-buf (buffer-live-p vterm-buf)
+                        (buffer-local-value 'claude-repl--project-root vterm-buf))
+                   claude-repl--project-root
+                   default-directory))
+         (file (expand-file-name ".claude-repl-state" root))
+         (inst-bm (claude-repl--ws-get ws :bare-metal))
+         (inst-sb (claude-repl--ws-get ws :sandbox))
+         (state `(:active-env ,(claude-repl--ws-get ws :active-env)
+                  :bare-metal ,(when inst-bm
+                                 `(:session-id ,(claude-repl-instantiation-session-id inst-bm)
+                                   :had-session ,(claude-repl-instantiation-had-session inst-bm)))
+                  :sandbox ,(when inst-sb
+                              `(:session-id ,(claude-repl-instantiation-session-id inst-sb)
+                                :had-session ,(claude-repl-instantiation-had-session inst-sb))))))
+    (claude-repl--log "state-save ws=%s file=%s" ws file)
+    (condition-case err
+        (with-temp-file file
+          (prin1 state (current-buffer)))
+      (error (claude-repl--log "state-save error: %S" err)))))
+
+(defun claude-repl--state-restore (ws)
+  "Restore persisted session state for workspace WS from disk.
+Populates had-session and session-id on the workspace's
+instantiation structs from .claude-repl-state."
+  (let* ((root (or (claude-repl--ws-get ws :worktree-path)
+                   claude-repl--project-root
+                   default-directory))
+         (file (expand-file-name ".claude-repl-state" root)))
+    (when (file-exists-p file)
+      (condition-case err
+          (let* ((state (with-temp-buffer
+                          (insert-file-contents file)
+                          (read (current-buffer))))
+                 (bm-state (plist-get state :bare-metal))
+                 (sb-state (plist-get state :sandbox))
+                 (inst-bm (claude-repl--ws-get ws :bare-metal))
+                 (inst-sb (claude-repl--ws-get ws :sandbox)))
+            (when (and inst-bm bm-state)
+              (setf (claude-repl-instantiation-session-id inst-bm)
+                    (plist-get bm-state :session-id))
+              (setf (claude-repl-instantiation-had-session inst-bm)
+                    (plist-get bm-state :had-session)))
+            (when (and inst-sb sb-state)
+              (setf (claude-repl-instantiation-session-id inst-sb)
+                    (plist-get sb-state :session-id))
+              (setf (claude-repl-instantiation-had-session inst-sb)
+                    (plist-get sb-state :had-session)))
+            (claude-repl--log "state-restore ws=%s file=%s bm=%S sb=%S"
+                              ws file bm-state sb-state))
+        (error (claude-repl--log "state-restore error: %S" err))))))
 
 ;; Input history functions
 (defun claude-repl--history-push (&optional text)
@@ -1896,8 +1959,12 @@ Stores the session ID as :session-id on the workspace plist."
         (progn
           (setf (claude-repl-instantiation-session-id (claude-repl--active-inst ws)) found-id)
           (claude-repl--log "capture-session-id ws=%s env=%s id=%s"
-                            ws (claude-repl--ws-get ws :active-env) found-id))
-      (claude-repl--log "capture-session-id ws=%s env=%s: no matching session found"
+                            ws (claude-repl--ws-get ws :active-env) found-id)
+          (claude-repl--state-save ws))
+      ;; Clear stale session-id so a restored-from-disk value doesn't
+      ;; cause --resume with a dead session.
+      (setf (claude-repl-instantiation-session-id (claude-repl--active-inst ws)) nil)
+      (claude-repl--log "capture-session-id ws=%s env=%s: no matching session found (cleared)"
                         ws (claude-repl--ws-get ws :active-env)))))
 
 (defun claude-repl--handle-first-ready ()
@@ -2512,12 +2579,15 @@ If panels hidden: show both panels."
   (when claude-repl--sync-timer
     (cancel-timer claude-repl--sync-timer)
     (setq claude-repl--sync-timer nil))
-  (claude-repl--ws-put ws :vterm-buffer nil)
-  (claude-repl--ws-put ws :input-buffer nil)
-  (claude-repl--ws-put ws :saved-window-config nil)
+  ;; Update instantiation and persist state BEFORE clearing buffer refs,
+  ;; since state-save needs the vterm buffer to resolve the project root.
   (let ((inst (claude-repl--active-inst ws)))
     (setf (claude-repl-instantiation-start-cmd inst) nil)
-    (setf (claude-repl-instantiation-had-session inst) t)))
+    (setf (claude-repl-instantiation-had-session inst) t))
+  (claude-repl--state-save ws)
+  (claude-repl--ws-put ws :vterm-buffer nil)
+  (claude-repl--ws-put ws :input-buffer nil)
+  (claude-repl--ws-put ws :saved-window-config nil))
 
 (defun claude-repl--destroy-session-buffers (vterm-buf input-buf)
   "Close windows and kill VTERM-BUF, INPUT-BUF, and any placeholder."
