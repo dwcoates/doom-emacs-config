@@ -1042,6 +1042,12 @@ If found, the class name is returned, otherwise STR is returned"
         which-key-max-description-length 60
         which-key-side-window-max-width 0.5))
 
+;; Suppress undo-fu-session mismatch warnings for files that get edited
+;; externally by Claude Code.
+(after! undo-fu-session
+  (add-to-list 'undo-fu-session-incompatible-files
+               (concat "\\`" (regexp-quote (expand-file-name "~/.config/doom/")))))
+
 ;; Per-repo initial buffers for new worktree workspaces.
 (after! claude-repl
   (add-to-list 'claude-repl-workspace-initial-buffers

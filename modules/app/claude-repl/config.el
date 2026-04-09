@@ -429,6 +429,9 @@ Used for high-frequency, low-signal events."
     (apply #'message (concat (format-time-string "%H:%M:%S.%3N") " [claude-repl] " fmt) args)))
 
 (make-directory (expand-file-name "~/.claude/output/") t)
+(when (and claude-repl--workspace-generation-watch
+           (file-notify-valid-p claude-repl--workspace-generation-watch))
+  (file-notify-rm-watch claude-repl--workspace-generation-watch))
 (claude-repl--log "workspace-commands-watch: registering watch on %s for workspace_commands_*.json"
                   (expand-file-name "~/.claude/output/"))
 (setq claude-repl--workspace-generation-watch
