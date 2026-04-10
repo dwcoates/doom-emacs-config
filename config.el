@@ -386,10 +386,18 @@
   (setq magit-no-confirm (append magit-no-confirm '(abort-revert abort-rebase abort-merge))
         magit-diff-visit-previous-blob nil)
 
+  (advice-add 'magit-display-buffer :before #'+dwc/hide-claude-repl-for-magit)
+
   (map! :map (magit-unstaged-section-map magit-staged-section-map magit-untracked-section-map magit-mode-map)
         :desc "Jump to recent commits"
         "g r"
         #'magit-jump-to-unpushed-to-upstream))
+
+(defun +dwc/hide-claude-repl-for-magit (&rest _)
+  "Hide claude-repl panels before opening magit, giving magit full window control."
+  (when (and (fboundp 'claude-repl--panels-visible-p)
+             (claude-repl--panels-visible-p))
+    (claude-repl--hide-panels)))
 
 ;; Section map bindings must be done after magit-diff loads
 (after! magit-diff

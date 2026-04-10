@@ -445,16 +445,6 @@
              (lambda () "/project/")))
     (should (equal (claude-repl--rel-path) "src/foo.el"))))
 
-(ert-deftest claude-repl-test-bug6-stale-window ()
-  "Bug 6: live-return-window should fall back to selected-window."
-  (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-      ;; No return-window stored → fall back to selected-window
-      (should (eq (claude-repl--live-return-window) (selected-window)))
-      ;; Live window stored → return it
-      (claude-repl--ws-put "ws1" :return-window (selected-window))
-      (should (eq (claude-repl--live-return-window) (selected-window))))))
-
 (ert-deftest claude-repl-test-bug7-prefix-counter-persists ()
   "Bug 7: prefix counter should persist in the workspaces hash across lookups."
   (claude-repl-test--with-clean-state
@@ -814,23 +804,6 @@ When t, it should call `message'."
         (should (= claude-repl--history-index -1))
         (should (equal (buffer-string) ""))
         (should evil-called)))))
-
-(ert-deftest claude-repl-test-remember-return-window-saves ()
-  "`claude-repl--remember-return-window' stores return-window when not in input buffer."
-  (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-      ;; No input buffer stored — any buffer qualifies as non-input
-      (claude-repl--remember-return-window)
-      (should (eq (claude-repl--ws-get "ws1" :return-window) (selected-window))))))
-
-(ert-deftest claude-repl-test-remember-return-window-skips-input ()
-  "When current buffer IS the workspace's input buffer, should NOT change return-window."
-  (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer " *test-skip-input*"
-      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-        (claude-repl--remember-return-window)
-        (should-not (claude-repl--ws-get "ws1" :return-window))))))
 
 ;;;; ---- Tests: Title change handling ----
 

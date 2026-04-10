@@ -153,7 +153,7 @@ Each workspace has one instantiation for :sandbox and one for :bare-metal."
 (defvar claude-repl--workspaces (make-hash-table :test 'equal)
   "Hash table mapping workspace name → state plist.
 Keys: :vterm-buffer :input-buffer
-      :return-window :prefix-counter :status :activity-time
+      :prefix-counter :status :activity-time
       :git-clean :git-proc :worktree-p :worktree-path
       :active-env :sandbox :bare-metal :fork-session-id
       :ready-timer :thinking :done :priority
@@ -588,11 +588,6 @@ SUFFIX, if provided, is inserted before the hash (e.g. \"-input\")."
                       (claude-repl--grey 15)
                     result)))))
 
-(defun claude-repl--live-return-window ()
-  "Return the return-window for the current workspace if live, else `selected-window'."
-  (let ((win (claude-repl--ws-get (+workspace-current-name) :return-window)))
-    (if (and win (window-live-p win)) win (selected-window))))
-
 ;; Manual window layout: vterm on the right (full height), input below vterm.
 (defun claude-repl--show-panels ()
   "Display vterm and input panels to the right of the current window.
@@ -603,7 +598,7 @@ Splits right for vterm (60% width to work window), then splits vterm bottom for 
     (claude-repl--log "show-panels vterm=%s input=%s"
                       (and vterm-buf (buffer-name vterm-buf))
                       (and input-buf (buffer-name input-buf)))
-    (let* ((work-win (claude-repl--live-return-window))
+    (let* ((work-win (selected-window))
            (vterm-win (split-window work-win (round (* 0.6 (window-total-width work-win))) 'right))
            (input-win (split-window vterm-win (round (* -0.15 (window-total-height vterm-win))) 'below)))
       (claude-repl--refresh-vterm)
@@ -1184,36 +1179,14 @@ Handles input preparation, sending, history, and persistence."
           (when from-buffer
             (when (and input-buf (buffer-live-p input-buf))
               (with-current-buffer input-buf
-                (erase-buffer)))
-            (claude-repl--select-return-window ws)))))))
-
-(defun claude-repl--select-return-window (ws)
-  "Select the saved return window for WS if it is still live."
-  (let ((ret (claude-repl--ws-get ws :return-window)))
-    (when (and ret (window-live-p ret))
-      (select-window ret))))
-
-(defun claude-repl--remember-return-window ()
-  "Save the current window as the return target, unless we're in the input buffer."
-  (let ((ws (+workspace-current-name)))
-    (unless (eq (current-buffer) (claude-repl--ws-get ws :input-buffer))
-      (claude-repl--log "remember-return-window %s" (selected-window))
-      (claude-repl--ws-put ws :return-window (selected-window)))))
-
-(defun claude-repl--restore-layout ()
-  "Hide Claude panels and select the return window."
-  (claude-repl--log "restore-layout")
-  (claude-repl--hide-panels)
-  (let ((ret (claude-repl--ws-get (+workspace-current-name) :return-window)))
-    (when (and ret (window-live-p ret))
-      (select-window ret))))
+                (erase-buffer)))))))))
 
 (defun claude-repl-send-and-hide ()
   "Send input to Claude and hide both panels."
   (interactive)
   (claude-repl--log "send-and-hide")
   (claude-repl--send)
-  (claude-repl--restore-layout))
+  (claude-repl--hide-panels))
 
 (defun claude-repl-send-with-metaprompt ()
   "Send input with the metaprompt prefix, bypassing the counter."
@@ -2531,7 +2504,7 @@ The placeholder is swapped for the real vterm buffer once Claude is ready."
   (let ((ws (+workspace-current-name)))
     (unless ws (error "claude-repl--start-fresh: no active workspace"))
     (claude-repl--touch-activity ws))
-  (delete-other-windows (claude-repl--live-return-window))
+  (delete-other-windows)
   (claude-repl--ensure-session)
   (claude-repl--show-panels-with-placeholder)
   (let* ((ws (+workspace-current-name))
@@ -2550,7 +2523,7 @@ Demotes indicators, refreshes display, and restores panel layout."
     (unless ws (error "claude-repl--show-existing-panels: no active workspace"))
     (claude-repl--touch-activity ws)
     (claude-repl--refresh-vterm)
-    (delete-other-windows (claude-repl--live-return-window))
+    (delete-other-windows)
     (claude-repl--ensure-input-buffer ws)
     (claude-repl--show-panels)
     (claude-repl--focus-input-panel)
@@ -2564,7 +2537,6 @@ If not running: start Claude and show both panels.
 If panels visible: hide both panels.
 If panels hidden: show both panels."
   (interactive)
-  (claude-repl--remember-return-window)
   (let ((vterm-running (claude-repl--vterm-running-p))
         (session-starting (claude-repl--session-starting-p))
         (panels-visible (claude-repl--panels-visible-p))
@@ -2591,7 +2563,7 @@ If panels hidden: show both panels."
         (claude-repl--ws-clear ws :done)
         (claude-repl--ws-clear ws :permission)
         (claude-repl--ws-clear ws :stale))
-      (claude-repl--restore-layout))
+      (claude-repl--hide-panels))
      ;; Panels hidden - show both
      (t
       (claude-repl--show-existing-panels)))))
@@ -2666,16 +2638,13 @@ If panels hidden: show both panels."
   (let* ((ws (+workspace-current-name))
          (_ (claude-repl--cancel-ready-timer ws))
          (vterm-buf (claude-repl--ws-get ws :vterm-buffer))
-         (input-buf (claude-repl--ws-get ws :input-buffer))
-         (ret-win (claude-repl--ws-get ws :return-window)))
+         (input-buf (claude-repl--ws-get ws :input-buffer)))
     (unless ws (error "claude-repl-kill: no active workspace"))
     (claude-repl--ws-put ws :status nil)
     (claude-repl--ws-put ws :activity-time nil)
     (force-mode-line-update t)
     (claude-repl--teardown-session-state ws)
-    (claude-repl--destroy-session-buffers vterm-buf input-buf)
-    (when (and ret-win (window-live-p ret-win))
-      (select-window ret-win))))
+    (claude-repl--destroy-session-buffers vterm-buf input-buf)))
 
 (defun claude-repl-restart ()
   "Kill Claude REPL and restart with `claude -c` to continue session."
@@ -2698,10 +2667,7 @@ If Claude isn't running, start it (same as `claude-repl')."
      ;; Already in the input buffer — jump back
      ((eq (current-buffer) (claude-repl--ws-get ws :input-buffer))
       (claude-repl--log "focus-input branch=jump-back")
-      (let ((ret (claude-repl--ws-get ws :return-window)))
-        (if (and ret (window-live-p ret))
-            (select-window ret)
-          (evil-window-left 1))))
+      (evil-window-left 1))
      ;; Not running — start fresh
      ((not (claude-repl--vterm-running-p))
       (claude-repl--log "focus-input branch=start-fresh")
@@ -2712,7 +2678,6 @@ If Claude isn't running, start it (same as `claude-repl')."
       (unless (claude-repl--panels-visible-p)
         (claude-repl--ensure-input-buffer ws)
         (claude-repl--show-panels))
-      (claude-repl--ws-put ws :return-window (selected-window))
       (when-let ((win (get-buffer-window (claude-repl--ws-get ws :input-buffer))))
         (select-window win)
         (when (bound-and-true-p evil-mode)
