@@ -118,7 +118,7 @@ Each workspace has one instantiation for :sandbox and one for :bare-metal."
 
 (defvar claude-repl--workspaces (make-hash-table :test 'equal)
   "Hash table mapping workspace name → state plist.
-Keys: :vterm-buffer :input-buffer :saved-window-config
+Keys: :vterm-buffer :input-buffer
       :return-window :prefix-counter :status :activity-time
       :git-clean :git-proc :worktree-p :worktree-path
       :active-env :sandbox :bare-metal :fork-session-id
@@ -1123,19 +1123,12 @@ Handles input preparation, sending, history, and persistence."
       (claude-repl--ws-put ws :return-window (selected-window)))))
 
 (defun claude-repl--restore-layout ()
-  "Restore the window layout from before panels were shown.
-Falls back to hiding panels and selecting the return window."
-  (let* ((ws (+workspace-current-name))
-         (saved (claude-repl--ws-get ws :saved-window-config)))
-    (claude-repl--log "restore-layout saved-config=%s" (if saved "yes" "no"))
-    (if saved
-        (progn
-          (set-window-configuration saved)
-          (claude-repl--ws-put ws :saved-window-config nil))
-      (claude-repl--hide-panels)
-      (let ((ret (claude-repl--ws-get ws :return-window)))
-        (when (and ret (window-live-p ret))
-          (select-window ret))))))
+  "Hide Claude panels and select the return window."
+  (claude-repl--log "restore-layout")
+  (claude-repl--hide-panels)
+  (let ((ret (claude-repl--ws-get (+workspace-current-name) :return-window)))
+    (when (and ret (window-live-p ret))
+      (select-window ret))))
 
 (defun claude-repl-send-and-hide ()
   "Send input to Claude and hide both panels."
@@ -2470,8 +2463,7 @@ The placeholder is swapped for the real vterm buffer once Claude is ready."
   (claude-repl--log "start-fresh")
   (let ((ws (+workspace-current-name)))
     (unless ws (error "claude-repl--start-fresh: no active workspace"))
-    (claude-repl--touch-activity ws)
-    (claude-repl--ws-put ws :saved-window-config (current-window-configuration)))
+    (claude-repl--touch-activity ws))
   (delete-other-windows (claude-repl--live-return-window))
   (claude-repl--ensure-session)
   (claude-repl--show-panels-with-placeholder)
@@ -2491,7 +2483,6 @@ Demotes indicators, refreshes display, and restores panel layout."
     (unless ws (error "claude-repl--show-existing-panels: no active workspace"))
     (claude-repl--touch-activity ws)
     (claude-repl--refresh-vterm)
-    (claude-repl--ws-put ws :saved-window-config (current-window-configuration))
     (delete-other-windows (claude-repl--live-return-window))
     (claude-repl--ensure-input-buffer ws)
     (claude-repl--show-panels)
@@ -2590,7 +2581,7 @@ If panels hidden: show both panels."
   (claude-repl--state-save ws)
   (claude-repl--ws-put ws :vterm-buffer nil)
   (claude-repl--ws-put ws :input-buffer nil)
-  (claude-repl--ws-put ws :saved-window-config nil))
+)
 
 (defun claude-repl--destroy-session-buffers (vterm-buf input-buf)
   "Close windows and kill VTERM-BUF, INPUT-BUF, and any placeholder."
@@ -2609,20 +2600,15 @@ If panels hidden: show both panels."
          (_ (claude-repl--cancel-ready-timer ws))
          (vterm-buf (claude-repl--ws-get ws :vterm-buffer))
          (input-buf (claude-repl--ws-get ws :input-buffer))
-         (saved-wconf (claude-repl--ws-get ws :saved-window-config))
          (ret-win (claude-repl--ws-get ws :return-window)))
     (unless ws (error "claude-repl-kill: no active workspace"))
     (claude-repl--ws-put ws :status nil)
     (claude-repl--ws-put ws :activity-time nil)
     (force-mode-line-update t)
     (claude-repl--teardown-session-state ws)
-    (if saved-wconf
-        (progn
-          (set-window-configuration saved-wconf)
-          (claude-repl--destroy-session-buffers vterm-buf input-buf))
-      (claude-repl--destroy-session-buffers vterm-buf input-buf)
-      (when (and ret-win (window-live-p ret-win))
-        (select-window ret-win)))))
+    (claude-repl--destroy-session-buffers vterm-buf input-buf)
+    (when (and ret-win (window-live-p ret-win))
+      (select-window ret-win))))
 
 (defun claude-repl-restart ()
   "Kill Claude REPL and restart with `claude -c` to continue session."
@@ -2657,7 +2643,6 @@ If Claude isn't running, start it (same as `claude-repl')."
      (t
       (claude-repl--log "focus-input branch=show-or-focus")
       (unless (claude-repl--panels-visible-p)
-        (claude-repl--ws-put ws :saved-window-config (current-window-configuration))
         (claude-repl--ensure-input-buffer ws)
         (claude-repl--show-panels))
       (claude-repl--ws-put ws :return-window (selected-window))
