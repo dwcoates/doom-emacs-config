@@ -31,6 +31,7 @@ Do NOT attempt to generate git branches or worktrees yourself in git. Under NO c
   - Always emit one `"create"` entry per workspace.
   - If the user **explicitly** asked to send a message to the generated workspaces, attach it as an inline `"prompt"` field on each `"create"` entry. Do **not** emit separate `"prompt"` entries for newly created workspaces — the inline form is preferred.
   - Separate `"prompt"` entries (without a `"create"`) are only for targeting **existing** workspaces by name.
+  - If the user specifies a priority for a workspace, include a `"priority"` field on the `"create"` entry. Valid values are `"p05"`, `"p1"`, `"p2"`, `"p3"`. This displays a priority badge image in the tab-bar. The field is optional — omit it if no priority is specified.
 
    Example — create with initial prompt (inline, preferred):
    ```json
@@ -45,6 +46,15 @@ Do NOT attempt to generate git branches or worktrees yourself in git. Under NO c
    [
      {"type": "create", "name": "DWC/feature-one"},
      {"type": "create", "name": "DWC/feature-two"}
+   ]
+   ```
+
+   Example — create with priority:
+   ```json
+   [
+     {"type": "create", "name": "DWC/urgent-fix", "priority": "p05"},
+     {"type": "create", "name": "DWC/feature-one", "priority": "p1"},
+     {"type": "create", "name": "DWC/nice-to-have", "priority": "p3"}
    ]
    ```
 
