@@ -3253,6 +3253,7 @@ it.  Errors loudly if no root can be determined."
   (eval-buffer))
 
 (map! :leader "b R" #'claude-repl-revert-and-eval-buffer)
+(map! :leader "m e B" #'claude-repl-revert-and-eval-buffer)
 
 (provide 'claude-repl)
 ;;; config.el ends here
