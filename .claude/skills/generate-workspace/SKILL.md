@@ -9,6 +9,70 @@ The user will describe work they want to do across one or more workspaces in pla
 
 Do NOT attempt to generate git branches or worktrees yourself in git. Under NO circumstances. The handling of branch/worktree generation is EXCLUSIVELY the responsibility and right of downstream consumers. Your EXCLUSIVE job is to generate the aforementioned JSON file, and NOTHING else. To that end, no code or any other files or mutating effects should be done, either.
 
+## Gathering Context via GNS
+
+When the user's request references external resources (Slack messages, GitHub PRs, etc.), use the `gns` CLI to fetch context before generating workspaces. Use `gns --help` and `gns <subcommand> --help` for full details beyond what's listed here.
+
+### Slack
+
+Read a Slack conversation (root message + all replies) given a link:
+```bash
+gns slack convo <slack_link> --all --json
+```
+
+Parse a Slack link into channel ID and timestamps:
+```bash
+gns slack link <slack_url> --json
+```
+
+Read thread replies by channel and timestamp:
+```bash
+gns slack thread <channel_id> <thread_ts> --all --json
+```
+
+Search Slack messages:
+```bash
+gns slack search "<query>" --count 20 --json
+```
+
+Look up a Slack user by ID:
+```bash
+gns slack user get <user_id> --json
+```
+
+Look up a Slack channel by name:
+```bash
+gns slack channel lookup <name> --json
+```
+
+Get your own identity:
+```bash
+gns whoami --json
+```
+
+### GitHub
+
+Use the `gh` CLI for GitHub operations:
+```bash
+gh pr view <number> --json title,body,url,files
+gh issue view <number> --json title,body,url
+```
+
+### Knowledge Base
+
+Search the company knowledge base:
+```bash
+gns search "<query>" --limit 10 --json
+```
+
+### Following Links
+
+When analyzing Slack threads, **follow all links exhaustively**:
+- **Slack links** (`chesscom.slack.com/archives/...`): use `gns slack convo <link>`
+- **GitHub PR/issue links** (`github.com/org/repo/pull/N`): use `gh pr view` or `gh issue view`
+- **Jira links**: extract the ticket ID for branch naming
+- **Other URLs**: use `WebFetch` if available, or note them for the workspace prompt
+
 ## Steps
 
 1. **Interpret** the user's description as a description of the branches or a description of the process to generate the branch names. 
