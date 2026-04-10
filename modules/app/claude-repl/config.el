@@ -535,10 +535,10 @@ Splits right for vterm (60% width to work window), then splits vterm bottom for 
       (set-window-buffer input-win input-buf)
       (set-window-dedicated-p vterm-win t)
       (set-window-dedicated-p input-win t)
-      ;; Hide from other-window, display-buffer, etc. so magit and friends
-      ;; never try to reuse these windows.
+      ;; Hide vterm from other-window / windmove so keyboard navigation
+      ;; (C-l etc.) skips it; the redirect hook bounces to input if needed.
+      ;; Input window stays reachable — dedicated-p already prevents reuse.
       (set-window-parameter vterm-win 'no-other-window t)
-      (set-window-parameter input-win 'no-other-window t)
       ;; Lock width to prevent resize-triggered reflow in vterm
       (set-window-parameter vterm-win 'window-size-fixed 'width)))
   (claude-repl--update-all-workspace-states))
