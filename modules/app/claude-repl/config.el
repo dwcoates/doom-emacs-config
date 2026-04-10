@@ -179,7 +179,7 @@ Initializes sandbox and bare-metal instantiations; sets :active-env."
          (_ (when (string-empty-p name)
               (user-error "Name cannot be empty")))
          (dirname (file-name-nondirectory (directory-file-name name)))
-         (branch-name (if (string-match-p "/" name) name nil))
+         (branch-name name)
          (git-root-parent (file-name-directory (directory-file-name git-root)))
          (in-worktree (file-regular-p (expand-file-name ".git" git-root)))
          (worktree-parent (if in-worktree
