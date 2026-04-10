@@ -198,7 +198,30 @@ Initializes sandbox and bare-metal instantiations; sets :active-env."
   (claude-repl--log "worktree pre-started Claude ws=%s cmd=%s"
                     ws (claude-repl-instantiation-start-cmd (claude-repl--active-inst ws))))
 
-(defun claude-repl--do-create-worktree-workspace (name &optional force-bare-metal fork-session-id preemptive-prompt priority)
+(defun claude-repl--async-git (label git-root args callback)
+  "Run git -C GIT-ROOT with ARGS asynchronously.
+LABEL names the process and temp buffer.
+CALLBACK is called with (SUCCESS-P OUTPUT) when the process exits."
+  (let* ((buf (generate-new-buffer (format " *claude-repl-%s*" label)))
+         (proc (apply #'start-process
+                      (format "claude-repl-%s" label)
+                      buf
+                      "git" "-C" git-root
+                      args)))
+    (set-process-sentinel
+     proc
+     (lambda (proc _event)
+       (when (memq (process-status proc) '(exit signal))
+         (let ((ok (zerop (process-exit-status proc)))
+               (output (with-current-buffer (process-buffer proc)
+                         (string-trim (buffer-string)))))
+           (kill-buffer (process-buffer proc))
+           (funcall callback ok output)))))))
+
+(defun claude-repl--do-create-worktree-workspace (name &optional force-bare-metal fork-session-id preemptive-prompt callback priority)
+  "Create a git worktree and Doom workspace for NAME.
+Git fetch and worktree-add run asynchronously so Emacs is not blocked.
+When everything is ready, CALLBACK (if non-nil) is called with (PATH DIRNAME)."
   (let* ((git-root (string-trim
                     (shell-command-to-string "git rev-parse --show-toplevel")))
          (_ (when (string-match-p "^fatal" git-root)
@@ -223,54 +246,57 @@ Initializes sandbox and bare-metal instantiations; sets :active-env."
     (when (projectile-project-p path)
       (user-error "Worktree '%s' already exists — use SPC p p to switch to it" dirname))
     ;; Check if the branch already exists before attempting to create it.
-    (when (and branch-name
-               (= 0 (call-process "git" nil nil nil
-                                   "-C" git-root
-                                   "rev-parse" "--verify" branch-name)))
+    (when (= 0 (call-process "git" nil nil nil
+                              "-C" git-root
+                              "rev-parse" "--verify" branch-name))
       (message "%s [claude-repl] ERROR: branch '%s' already exists — cannot create worktree"
                (format-time-string "%H:%M:%S.%3N") branch-name)
       (user-error "Branch '%s' already exists — delete it first or choose a different name" branch-name))
-    ;; Fetch origin/master so new worktrees start from the latest upstream.
-    ;; Skip for forks — those branch from the current session's state.
-    (unless fork-session-id
-      (let ((fetch-result (shell-command-to-string
-                           (format "git -C %s fetch origin master 2>&1"
-                                   (shell-quote-argument git-root)))))
-        (claude-repl--log "worktree fetch: %s" (string-trim fetch-result))))
-    (let* ((cmd (if branch-name
-                    (format "git -C %s worktree add -b %s %s %s 2>&1"
-                            (shell-quote-argument git-root)
-                            (shell-quote-argument branch-name)
-                            (shell-quote-argument path)
-                            (if fork-session-id "HEAD" "origin/master"))
-                  (format "git -C %s worktree add %s %s 2>&1"
-                          (shell-quote-argument git-root)
-                          (shell-quote-argument path)
-                          (if fork-session-id "HEAD" "origin/master"))))
-           (result (shell-command-to-string cmd)))
-      (claude-repl--log "worktree git cmd: %s" cmd)
-      (claude-repl--log "worktree git result: %s" (string-trim result))
-      (when (string-match-p "^fatal\\|^error" result)
-        (user-error "git worktree add failed: %s" (string-trim result))))
-    (write-region dirname nil (expand-file-name ".projectile" path))
-    (claude-repl--log "worktree wrote .projectile, adding to projectile known projects")
-    (projectile-add-known-project (file-name-as-directory path))
-    (let* ((canonical (claude-repl--path-canonical path))
-           (ws-id (substring (md5 canonical) 0 8))
-           (ws dirname))
-      (claude-repl--log "worktree creating workspace %s" ws)
-      (+workspace-new ws)
-      (claude-repl--ws-put ws :project-dir (file-name-as-directory path))
-      (claude-repl--open-initial-buffers ws path)
-      (when has-prompt
-        (claude-repl--ws-put ws :pending-prompts (list preemptive-prompt))
-        (claude-repl--ws-put ws :pending-show-panels t))
-      (when priority
-        (claude-repl--ws-put ws :priority priority))
-      (when fork-session-id
-        (claude-repl--ws-put ws :fork-session-id fork-session-id))
-      (claude-repl--setup-worktree-session ws-id path ws force-bare-metal)
-      path)))
+    ;; --- post-git continuation -------------------------------------------
+    (let ((finish-fn
+           (lambda ()
+             (write-region dirname nil (expand-file-name ".projectile" path))
+             (claude-repl--log "worktree wrote .projectile, adding to projectile known projects")
+             (projectile-add-known-project (file-name-as-directory path))
+             (let* ((canonical (claude-repl--path-canonical path))
+                    (ws-id (substring (md5 canonical) 0 8))
+                    (ws dirname))
+               (claude-repl--log "worktree creating workspace %s" ws)
+               (+workspace-new ws)
+               (claude-repl--ws-put ws :project-dir (file-name-as-directory path))
+               (claude-repl--open-initial-buffers ws path)
+               (when has-prompt
+                 (claude-repl--ws-put ws :pending-prompts (list preemptive-prompt))
+                 (claude-repl--ws-put ws :pending-show-panels t))
+               (when priority
+                 (claude-repl--ws-put ws :priority priority))
+               (when fork-session-id
+                 (claude-repl--ws-put ws :fork-session-id fork-session-id))
+               (claude-repl--setup-worktree-session ws-id path ws force-bare-metal)
+               (message "Worktree '%s' ready." dirname)
+               (when callback (funcall callback path dirname))))))
+      ;; --- async worktree-add step ----------------------------------------
+      (let ((add-fn
+             (lambda ()
+               (let ((add-args (list "worktree" "add" "-b" branch-name path
+                                     (if fork-session-id "HEAD" "origin/master"))))
+                 (claude-repl--log "worktree async git add: %S" add-args)
+                 (claude-repl--async-git
+                  "worktree-add" git-root add-args
+                  (lambda (ok output)
+                    (claude-repl--log "worktree git result: %s" output)
+                    (if ok
+                        (funcall finish-fn)
+                      (message "git worktree add failed: %s" output))))))))
+        ;; --- kick off: fetch (unless fork) then add -----------------------
+        (message "Creating worktree '%s'..." dirname)
+        (if fork-session-id
+            (funcall add-fn)
+          (claude-repl--async-git
+           "fetch" git-root (list "fetch" "origin" "master")
+           (lambda (_ok output)
+             (claude-repl--log "worktree fetch: %s" output)
+             (funcall add-fn))))))))
 
 (defun claude-repl-create-worktree-workspace (arg)
   "Create a new git worktree and switch to it as a project workspace.
@@ -289,7 +315,9 @@ Prefix arguments:
 Optionally prompts for a preemptive prompt.  If provided, the new workspace is
 created in the background (no switch) and the prompt is sent to Claude the moment
 its session becomes ready.  If left blank, behavior is the same as before: switch
-to the new workspace immediately."
+to the new workspace immediately.
+
+Git operations (fetch, worktree add) run asynchronously so Emacs is not blocked."
   (interactive "P")
   (let* ((raw (prefix-numeric-value arg))
          (force-bare-metal (memq raw '(4 64)))
@@ -303,21 +331,23 @@ to the new workspace immediately."
               sid)))
          (name (read-string "Worktree name: "))
          (preemptive-prompt (read-string "Preemptive prompt (blank to switch there normally): "))
-         (dirname (file-name-nondirectory (directory-file-name name))))
-    (let ((path (claude-repl--do-create-worktree-workspace name force-bare-metal fork-session-id preemptive-prompt)))
-      (unless (and preemptive-prompt (not (string-empty-p preemptive-prompt)))
-        (message "[claude-repl] pre-switch: fboundp(+workspace-switch-to)=%s current-ws=%s target=%s"
-                 (fboundp '+workspace-switch-to) (+workspace-current-name) dirname)
-        (condition-case err
-            (+workspace-switch-to dirname)
-          (error
-           (message "[claude-repl] +workspace-switch-to FAILED: %s — trying fallback (+workspace/switch-to)"
-                    (error-message-string err))
-           (condition-case err2
-               (+workspace/switch-to dirname)
-             (error
-              (message "[claude-repl] fallback also FAILED: %s" (error-message-string err2))))))
-        (magit-status path)))))
+         (has-preemptive (and preemptive-prompt (not (string-empty-p preemptive-prompt)))))
+    (claude-repl--do-create-worktree-workspace
+     name force-bare-metal fork-session-id preemptive-prompt
+     (unless has-preemptive
+       (lambda (path dirname)
+         (message "[claude-repl] pre-switch: fboundp(+workspace-switch-to)=%s current-ws=%s target=%s"
+                  (fboundp '+workspace-switch-to) (+workspace-current-name) dirname)
+         (condition-case err
+             (+workspace-switch-to dirname)
+           (error
+            (message "[claude-repl] +workspace-switch-to FAILED: %s — trying fallback (+workspace/switch-to)"
+                     (error-message-string err))
+            (condition-case err2
+                (+workspace/switch-to dirname)
+              (error
+               (message "[claude-repl] fallback also FAILED: %s" (error-message-string err2))))))
+         (magit-status path))))))
 
 (defun claude-repl--new-workspace ()
   "Create a new workspace and open magit-status in it, mirroring
@@ -1083,14 +1113,16 @@ Uses paste mode for large inputs to avoid truncation."
           (run-at-time claude-repl-paste-delay nil
                        (lambda ()
                          (when (buffer-live-p buf)
-                           (with-current-buffer buf
-                             (vterm-send-return)
-                             (run-at-time 0.05 nil
-                                          (lambda ()
-                                            (when (buffer-live-p buf)
-                                              (with-current-buffer buf
-                                                (vterm-send-return)
-                                                (claude-repl--refresh-vterm))))))))))
+                           (let ((inhibit-quit t))
+                             (with-current-buffer buf
+                               (vterm-send-return)
+                               (run-at-time 0.05 nil
+                                            (lambda ()
+                                              (when (buffer-live-p buf)
+                                                (let ((inhibit-quit t))
+                                                  (with-current-buffer buf
+                                                    (vterm-send-return)
+                                                    (claude-repl--refresh-vterm))))))))))))
       (vterm-send-string input)
       (vterm-send-return)
       (claude-repl--refresh-vterm))))
