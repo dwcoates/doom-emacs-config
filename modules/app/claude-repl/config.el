@@ -99,6 +99,33 @@ Uses an MD5 hash of the canonical git root path.  Falls back to the buffer-local
       (substring (md5 (claude-repl--path-canonical root)) 0 8))))
 
 
+;; Priority badge images for tab-bar display.
+;; Each image is a small PNG loaded from the module's images/ directory and
+;; scaled to fit the tab-bar line height.
+(defvar claude-repl--priority-images nil
+  "Alist mapping priority strings (\"p05\" \"p1\" \"p2\" \"p3\") to Emacs image specs.")
+
+(defun claude-repl--load-priority-images ()
+  "Load priority badge PNGs from the module images/ directory.
+Populates `claude-repl--priority-images' with display-ready image specs."
+  (let* ((dir (file-name-directory (or load-file-name buffer-file-name)))
+         (img-dir (expand-file-name "images/" dir))
+         (names '("p05" "p1" "p2" "p3"))
+         (height (frame-char-height)))
+    (setq claude-repl--priority-images
+          (cl-loop for name in names
+                   for file = (expand-file-name (concat name ".png") img-dir)
+                   when (file-exists-p file)
+                   collect (cons name (create-image file 'png nil
+                                                    :height height
+                                                    :ascent 'center))))))
+
+(claude-repl--load-priority-images)
+
+(defun claude-repl--priority-image (priority)
+  "Return the Emacs image spec for PRIORITY string, or nil."
+  (cdr (assoc priority claude-repl--priority-images)))
+
 ;; Single hash table for all per-workspace state.
 ;;
 ;; NOTE: workspace name ≠ git branch name.
@@ -122,7 +149,7 @@ Keys: :vterm-buffer :input-buffer
       :return-window :prefix-counter :status :activity-time
       :git-clean :git-proc :worktree-p :worktree-path
       :active-env :sandbox :bare-metal :fork-session-id
-      :ready-timer :thinking :done
+      :ready-timer :thinking :done :priority
       :pending-prompts :pending-show-panels
 :active-env is :sandbox or :bare-metal; :sandbox and :bare-metal are
 `claude-repl-instantiation' structs holding per-environment session state.")
@@ -171,7 +198,7 @@ Initializes sandbox and bare-metal instantiations; sets :active-env."
   (claude-repl--log "worktree pre-started Claude ws=%s cmd=%s"
                     ws (claude-repl-instantiation-start-cmd (claude-repl--active-inst ws))))
 
-(defun claude-repl--do-create-worktree-workspace (name &optional force-bare-metal fork-session-id preemptive-prompt)
+(defun claude-repl--do-create-worktree-workspace (name &optional force-bare-metal fork-session-id preemptive-prompt priority)
   (let* ((git-root (string-trim
                     (shell-command-to-string "git rev-parse --show-toplevel")))
          (_ (when (string-match-p "^fatal" git-root)
@@ -238,6 +265,8 @@ Initializes sandbox and bare-metal instantiations; sets :active-env."
       (when has-prompt
         (claude-repl--ws-put ws :pending-prompts (list preemptive-prompt))
         (claude-repl--ws-put ws :pending-show-panels t))
+      (when priority
+        (claude-repl--ws-put ws :priority priority))
       (when fork-session-id
         (claude-repl--ws-put ws :fork-session-id fork-session-id))
       (claude-repl--setup-worktree-session ws-id path ws force-bare-metal)
@@ -360,11 +389,12 @@ startup writes corrupting ~/.claude.json."
                  ((string= type "create")
                   (let ((name (alist-get 'name cmd))
                         (prompt (alist-get 'prompt cmd nil))
+                        (priority (alist-get 'priority cmd nil))
                         (delay create-delay))
-                    (claude-repl--log "workspace-commands-file create: %s (delay %.1fs)" name delay)
+                    (claude-repl--log "workspace-commands-file create: %s (delay %.1fs) priority=%s" name delay priority)
                     (run-with-timer delay nil
                                     (lambda ()
-                                      (claude-repl--do-create-worktree-workspace name nil nil prompt))))
+                                      (claude-repl--do-create-worktree-workspace name nil nil prompt priority))))
                   (cl-incf create-delay 5))
                  ((string= type "prompt")
                   (claude-repl--log "workspace-commands-file prompt: ws=%s" (alist-get 'workspace cmd))
@@ -1778,6 +1808,9 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
               (let* ((num (number-to-string (1+ i)))
                      (selected (equal current-name name))
                      (state (claude-repl--ws-state name))
+                     (priority (claude-repl--ws-get name :priority))
+                     (priority-img (when priority
+                                     (claude-repl--priority-image priority)))
                      (claude-face (pcase state
                                    (:permission 'claude-repl-tab-permission)
                                    (:done       'claude-repl-tab-done)
@@ -1789,7 +1822,9 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
                      (base-face (if (and selected (not claude-face))
                                     '+workspace-tab-selected-face
                                   '+workspace-tab-face))
-                     (face (or claude-face base-face)))
+                     (face (or claude-face base-face))
+                     (img-str (when priority-img
+                                (propertize " " 'display priority-img))))
                 (if selected
                     ;; Selected: light grey background on whole tab, status color only on [N]
                     (let* ((status-fg (pcase state
@@ -1808,11 +1843,13 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
                               (propertize (format "[%s]" label)
                                           'face `(:foreground ,bracket-fg :weight bold
                                                   :background ,(plist-get base-face :background)))
+                              (when img-str (concat " " img-str))
                               (propertize (format " %s " name) 'face base-face)))
                   ;; Unselected: full background across the whole tab
                   (concat (propertize " " 'face '(:background unspecified))
                           (propertize (format "[%s]" label)
                                       'face '(:foreground "#4477cc" :background unspecified :weight bold))
+                          (when img-str (concat " " img-str))
                           (propertize (format " %s " name) 'face face)))))
      " ")))
 
@@ -3005,6 +3042,16 @@ This lets Claude CLI handle paste natively, including images."
     (with-current-buffer (claude-repl--ws-get (+workspace-current-name) :vterm-buffer)
       (vterm-send-key "v" nil nil t))))
 
+(defun claude-repl-set-priority (priority)
+  "Set the priority badge for the current workspace.
+PRIORITY is one of \"p05\", \"p1\", \"p2\", \"p3\", or \"\" to clear."
+  (interactive
+   (list (completing-read "Priority: " '("p05" "p1" "p2" "p3" "") nil t)))
+  (let ((ws (+workspace-current-name)))
+    (claude-repl--ws-put ws :priority (if (string-empty-p priority) nil priority))
+    (force-mode-line-update t)
+    (message "Workspace '%s' priority: %s" ws (if (string-empty-p priority) "cleared" priority))))
+
 ;;; Debug helpers — interactive commands for diagnosing workspace state issues.
 ;;; Call via M-x claude-repl-debug/...
 
@@ -3019,6 +3066,22 @@ NAMES is an optional list of branch name strings; defaults to a single test entr
       (insert (json-encode names)))
     (claude-repl--log "mock workspace-generation file written: %s names=%s" file names)
     (message "Wrote mock workspace_generation.json: %s" names)))
+
+(defun claude-repl-debug/mock-workspace-commands-with-priority ()
+  "Write a mock workspace_commands file with a priority field to test image badges."
+  (interactive)
+  (let* ((priority (completing-read "Priority: " '("p05" "p1" "p2" "p3") nil t))
+         (name (read-string "Branch name: " "DWC/mock-priority-test"))
+         (file (expand-file-name
+                (format "~/.claude/output/workspace_commands_%s.json"
+                        (format-time-string "%s"))))
+         (commands (vector `((type . "create")
+                             (name . ,name)
+                             (priority . ,priority)))))
+    (make-directory (expand-file-name "~/.claude/output/") t)
+    (with-temp-file file
+      (insert (json-encode commands)))
+    (message "Wrote %s with priority=%s" file priority)))
 
 (defun claude-repl-debug/process-pending-commands ()
   "Manually scan ~/.claude/output/ and process any workspace_commands_*.json files.
