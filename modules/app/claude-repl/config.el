@@ -195,6 +195,14 @@ Initializes sandbox and bare-metal instantiations; sets :active-env."
              (+workspace-current-name) (claude-repl--workspace-id))
     (when (projectile-project-p path)
       (user-error "Worktree '%s' already exists — use SPC p p to switch to it" dirname))
+    ;; Check if the branch already exists before attempting to create it.
+    (when (and branch-name
+               (= 0 (call-process "git" nil nil nil
+                                   "-C" git-root
+                                   "rev-parse" "--verify" branch-name)))
+      (message "%s [claude-repl] ERROR: branch '%s' already exists — cannot create worktree"
+               (format-time-string "%H:%M:%S.%3N") branch-name)
+      (user-error "Branch '%s' already exists — delete it first or choose a different name" branch-name))
     ;; Fetch origin/master so new worktrees start from the latest upstream.
     ;; Skip for forks — those branch from the current session's state.
     (unless fork-session-id
@@ -356,7 +364,7 @@ startup writes corrupting ~/.claude.json."
                     (claude-repl--log "workspace-commands-file create: %s (delay %.1fs)" name delay)
                     (run-with-timer delay nil
                                     (lambda ()
-                                      (claude-repl--do-create-worktree-workspace name nil prompt))))
+                                      (claude-repl--do-create-worktree-workspace name nil nil prompt))))
                   (cl-incf create-delay 5))
                  ((string= type "prompt")
                   (claude-repl--log "workspace-commands-file prompt: ws=%s" (alist-get 'workspace cmd))
@@ -1847,14 +1855,18 @@ Runs silently every 5 minutes to prevent data loss."
   (when (bound-and-true-p persp-mode)
     (let ((saved 0))
       (dolist (persp (persp-persps))
-        (dolist (buf (persp-buffers persp))
-          (when (and (buffer-live-p buf)
-                     (buffer-file-name buf)
-                     (buffer-modified-p buf))
-            (with-current-buffer buf
-              (let ((inhibit-message t))
-                (save-buffer)))
-            (cl-incf saved))))
+        (unless (and persp (not (symbolp persp)))
+          (message "%s [claude-repl] WARN: autosave encountered non-perspective entry: %S"
+                   (format-time-string "%H:%M:%S.%3N") persp))
+        (when (and persp (not (symbolp persp)))
+          (dolist (buf (persp-buffers persp))
+            (when (and (buffer-live-p buf)
+                       (buffer-file-name buf)
+                       (buffer-modified-p buf))
+              (with-current-buffer buf
+                (let ((inhibit-message t))
+                  (save-buffer)))
+              (cl-incf saved)))))
       (when (> saved 0)
         (claude-repl--log "autosave: saved %d buffer(s)" saved)))))
 
