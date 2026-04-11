@@ -79,6 +79,13 @@ Checks for both .git directory and .git file (worktrees)."
   (string-trim (shell-command-to-string "git rev-parse --abbrev-ref HEAD 2>/dev/null"))
   "The git branch active when claude-repl config was loaded.")
 
+(defvar claude-repl--main-git-root
+  (file-name-as-directory
+   (string-trim (shell-command-to-string "git rev-parse --show-toplevel 2>/dev/null")))
+  "The main git root captured at module load time.
+Used by the workspace-generation file watcher so new sessions are always
+created from the main repo, not the currently selected worktree.")
+
 (defun claude-repl-print-git-branch ()
   "Print the git branch that was active when claude-repl config was loaded."
   (interactive)
@@ -424,7 +431,8 @@ startup writes corrupting ~/.claude.json."
                     (claude-repl--log "workspace-commands-file create: %s (delay %.1fs) priority=%s" name delay priority)
                     (run-with-timer delay nil
                                     (lambda ()
-                                      (claude-repl--do-create-worktree-workspace name nil nil prompt priority))))
+                                      (let ((default-directory claude-repl--main-git-root))
+                                        (claude-repl--do-create-worktree-workspace name nil nil prompt nil priority))))))
                   (cl-incf create-delay 5))
                  ((string= type "prompt")
                   (claude-repl--log "workspace-commands-file prompt: ws=%s" (alist-get 'workspace cmd))
