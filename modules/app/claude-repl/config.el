@@ -2909,8 +2909,7 @@ individually. Aborts cleanly if any commit conflicts."
          (target-branch (+dwc/workspace->branch target-ws)))
     (unless target-branch
       (user-error "Cannot resolve branch for workspace '%s'" target-ws))
-    (let* ((project-root (or (projectile-project-root)
-                             (user-error "Not in a project"))))
+    (let* ((project-root (claude-repl--project-dir current-ws)))
       (unless (= 0 (call-process "git" nil nil nil
                                  "-C" project-root
                                  "rev-parse" "--verify" target-branch))
@@ -2957,7 +2956,7 @@ Prompts for which workspace to merge in."
     (unless other-ws
       (user-error "No other workspaces to merge"))
     ;; Guard: uncommitted changes would interfere with cherry-pick.
-    (let ((project-root (or (projectile-project-root) (user-error "Not in a project"))))
+    (let ((project-root (claude-repl--project-dir current-ws)))
       (unless (and (= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--quiet"))
                    (= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--cached" "--quiet")))
         (user-error "Uncommitted changes present — stash or commit them before merging a workspace")))
@@ -2975,7 +2974,7 @@ Switches to master, then cherry-picks commits from the current workspace."
     (when (string= source-ws master-ws)
       (user-error "Already on the master workspace"))
     ;; Guard: uncommitted changes would interfere with cherry-pick.
-    (let ((project-root (or (projectile-project-root) (user-error "Not in a project"))))
+    (let ((project-root (claude-repl--project-dir source-ws)))
       (unless (and (= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--quiet"))
                    (= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--cached" "--quiet")))
         (user-error "Uncommitted changes present — stash or commit them before merging a workspace")))
