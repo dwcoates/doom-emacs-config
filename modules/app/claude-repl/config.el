@@ -140,9 +140,7 @@ Populates `claude-repl--priority-images' with display-ready image specs."
 ;; *last path component* of the input (e.g. "DWC/fix-login" → persp "fix-login"),
 ;; while the full input becomes the branch name ("DWC/fix-login").  Never assume
 ;; the two are equal.  To resolve a workspace to its branch, retrieve its
-;; :worktree-path from this hash and run `git rev-parse --abbrev-ref HEAD' there.
-;; If :worktree-path is absent (e.g. after session restore), fall back to
-;; `claude-repl--workspace-dir', which scans the workspace's live buffers.
+;; :project-dir from this hash and run `git rev-parse --abbrev-ref HEAD' there.
 (cl-defstruct claude-repl-instantiation
   "Per-environment session state for a Claude REPL workspace.
 Each workspace has one instantiation for :sandbox and one for :bare-metal."
@@ -154,9 +152,9 @@ Each workspace has one instantiation for :sandbox and one for :bare-metal."
   "Hash table mapping workspace name → state plist.
 Keys: :vterm-buffer :input-buffer
       :prefix-counter :status :activity-time
-      :git-clean :git-proc :worktree-p :worktree-path
+      :git-clean :git-proc :worktree-p :project-dir
       :active-env :sandbox :bare-metal :fork-session-id
-      :ready-timer :thinking :done :priority
+      :ready-timer :thinking :done :priority :viewed
       :pending-prompts :pending-show-panels
 :active-env is :sandbox or :bare-metal; :sandbox and :bare-metal are
 `claude-repl-instantiation' structs holding per-environment session state.")
@@ -191,7 +189,7 @@ is stored under WS, defaulting to `+workspace-current-name'."
   (let ((ws (or ws (+workspace-current-name))))
     (claude-repl--log "register-worktree-ws ws-id=%s ws=%s path=%s" ws-id ws path)
     (claude-repl--ws-put ws :worktree-p t)
-    (claude-repl--ws-put ws :worktree-path path)))
+    (claude-repl--ws-put ws :project-dir (file-name-as-directory path))))
 
 (defun claude-repl--setup-worktree-session (ws-id path ws force-bare-metal)
   "Register WS as a worktree at PATH and start its Claude session.
@@ -270,7 +268,6 @@ When everything is ready, CALLBACK (if non-nil) is called with (PATH DIRNAME)."
                     (ws dirname))
                (claude-repl--log "worktree creating workspace %s" ws)
                (+workspace-new ws)
-               (claude-repl--ws-put ws :project-dir (file-name-as-directory path))
                (claude-repl--open-initial-buffers ws path)
                (when has-prompt
                  (claude-repl--ws-put ws :pending-prompts (list preemptive-prompt))
@@ -386,10 +383,10 @@ WS may be a full branch name (e.g. DWC/foo) or a bare workspace name (e.g. foo);
 it is normalized to the dirname before lookup."
   (let* ((ws (file-name-nondirectory (directory-file-name ws)))
          (worktree-p (claude-repl--ws-get ws :worktree-p))
-         (worktree-path (claude-repl--ws-get ws :worktree-path))
+         (project-dir (claude-repl--ws-get ws :project-dir))
          (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (claude-repl--log "finish-workspace ws=%s worktree-p=%s path=%s"
-                      ws worktree-p (or worktree-path "nil"))
+                      ws worktree-p (or project-dir "nil"))
     ;; Kill the Claude vterm process.
     (when vterm-buf
       (claude-repl--kill-vterm-process vterm-buf))
@@ -399,16 +396,16 @@ it is normalized to the dirname before lookup."
     (when (member ws (+workspace-list-names))
       (persp-kill ws))
     ;; Remove the git worktree and projectile entry.
-    (when (and worktree-p worktree-path (file-directory-p worktree-path))
-      (let* ((parent (file-name-directory (directory-file-name worktree-path)))
+    (when (and worktree-p project-dir (file-directory-p project-dir))
+      (let* ((parent (file-name-directory (directory-file-name project-dir)))
              (git-root (locate-dominating-file parent ".git")))
         (when git-root
           (let ((result (shell-command-to-string
                          (format "git -C %s worktree remove %s 2>&1"
                                  (shell-quote-argument (expand-file-name git-root))
-                                 (shell-quote-argument (expand-file-name worktree-path))))))
+                                 (shell-quote-argument (expand-file-name project-dir))))))
             (claude-repl--log "finish-workspace worktree-remove: %s" (string-trim result)))))
-      (projectile-remove-known-project (file-name-as-directory worktree-path)))
+      (projectile-remove-known-project (file-name-as-directory project-dir)))
     (message "Finished workspace: %s" ws)))
 
 (defun claude-repl--process-workspace-commands-file (file)
@@ -700,12 +697,12 @@ Falls back to bare-metal Claude otherwise."
          (inst (claude-repl--active-inst ws))
          (session-id (claude-repl-instantiation-session-id inst))
          (worktree-p (claude-repl--ws-get ws :worktree-p))
-         (worktree-path (claude-repl--ws-get ws :worktree-path))
+         (project-dir (claude-repl--ws-get ws :project-dir))
          (active-env (claude-repl--ws-get ws :active-env))
          (fork-session-id (claude-repl--ws-get ws :fork-session-id))
          (sandbox-config (when (and worktree-p (eq active-env :sandbox))
                            (claude-repl--resolve-sandbox-config
-                            (claude-repl--git-root worktree-path))))
+                            (claude-repl--git-root project-dir))))
          (_ (when (plist-get sandbox-config :needs-build)
               (let* ((image (plist-get sandbox-config :image))
                      (install-script (plist-get sandbox-config :install-script)))
@@ -720,7 +717,7 @@ Falls back to bare-metal Claude otherwise."
          ;; For bare-metal: detect by path — ChessCom repos use --permission-mode auto,
          ;; personal repos use --dangerously-skip-permissions.
          (perm-flag (unless (and worktree-p docker-image)
-                      (if (string-match-p "ChessCom" (expand-file-name (or worktree-path default-directory)))
+                      (if (string-match-p "ChessCom" (expand-file-name (or project-dir default-directory)))
                           "--permission-mode auto"
                         "--dangerously-skip-permissions")))
          (claude-flags (string-trim
@@ -953,13 +950,8 @@ WS defaults to the current workspace name."
 Saves session-id and had-session for each environment so they
 survive Emacs restarts.  Written to .claude-repl-state in the
 project root (alongside .claude-repl-history)."
-  (let* ((vterm-buf (claude-repl--ws-get ws :vterm-buffer))
-         (root (or (claude-repl--ws-get ws :worktree-path)
-                   (and vterm-buf (buffer-live-p vterm-buf)
-                        (buffer-local-value 'claude-repl--project-root vterm-buf))
-                   claude-repl--project-root
-                   default-directory))
-         (file (expand-file-name ".claude-repl-state" root))
+  (let* ((root (claude-repl--ws-get ws :project-dir))
+         (file (when root (expand-file-name ".claude-repl-state" root)))
          (inst-bm (claude-repl--ws-get ws :bare-metal))
          (inst-sb (claude-repl--ws-get ws :sandbox))
          (state `(:active-env ,(claude-repl--ws-get ws :active-env)
@@ -970,20 +962,20 @@ project root (alongside .claude-repl-history)."
                               `(:session-id ,(claude-repl-instantiation-session-id inst-sb)
                                 :had-session ,(claude-repl-instantiation-had-session inst-sb))))))
     (claude-repl--log "state-save ws=%s file=%s" ws file)
-    (condition-case err
-        (with-temp-file file
-          (prin1 state (current-buffer)))
-      (error (claude-repl--log "state-save error: %S" err)))))
+    (if (null file)
+        (claude-repl--log "state-save: no :project-dir for ws=%s, skipping" ws)
+      (condition-case err
+          (with-temp-file file
+            (prin1 state (current-buffer)))
+        (error (claude-repl--log "state-save error: %S" err))))))
 
 (defun claude-repl--state-restore (ws)
   "Restore persisted session state for workspace WS from disk.
 Populates had-session and session-id on the workspace's
 instantiation structs from .claude-repl-state."
-  (let* ((root (or (claude-repl--ws-get ws :worktree-path)
-                   claude-repl--project-root
-                   default-directory))
-         (file (expand-file-name ".claude-repl-state" root)))
-    (when (file-exists-p file)
+  (let* ((root (claude-repl--ws-get ws :project-dir))
+         (file (when root (expand-file-name ".claude-repl-state" root))))
+    (when (and file (file-exists-p file))
       (condition-case err
           (let* ((state (with-temp-buffer
                           (insert-file-contents file)
@@ -1132,7 +1124,7 @@ Uses paste mode for large inputs to avoid truncation."
 
 (defun claude-repl--mark-ws-thinking (ws)
   "Mark workspace WS as thinking: set state and record activity."
-  (claude-repl--log "mark-ws-thinking ws=%s" ws)
+  (message "[claude-repl] mark-ws-thinking ws=%s" ws)
   (claude-repl--ws-set ws :thinking)
   (claude-repl--touch-activity ws))
 
@@ -1734,14 +1726,10 @@ STATE is one of: :thinking, :done, :permission, :stale."
   (force-mode-line-update t))
 
 (defun claude-repl--ws-dir (ws)
-  "Return a directory associated with workspace WS, used for git checks.
-Returns the `default-directory' of the first live buffer in WS, or nil."
-  (ignore-errors
-    (let* ((persp (persp-get-by-name ws))
-           (bufs (and persp (not (symbolp persp)) (persp-buffers persp))))
-      (cl-loop for buf in bufs
-               when (buffer-live-p buf)
-               return (buffer-local-value 'default-directory buf)))))
+  "Return the project root directory for workspace WS.
+Reads :project-dir from the workspace plist.  Errors if not set."
+  (or (claude-repl--ws-get ws :project-dir)
+      (error "claude-repl--ws-dir: no :project-dir for workspace %s" ws)))
 
 (defun claude-repl--workspace-clean-p (ws)
   "Return non-nil if workspace WS has no unstaged changes to tracked files.
@@ -1941,6 +1929,7 @@ Looks up the vterm buffer from the workspace plist."
                       ws (if (and vterm-buf (get-buffer-window vterm-buf t)) "yes" "no"))
     (when (and vterm-buf
                (not (get-buffer-window vterm-buf t)))
+      (claude-repl--ws-put ws :viewed nil)
       (claude-repl--ws-set ws :done))
     (when (and vterm-buf (buffer-live-p vterm-buf))
       (with-current-buffer vterm-buf
@@ -1954,37 +1943,37 @@ Looks up the vterm buffer from the workspace plist."
 (defun claude-repl--capture-session-id (ws)
   "Scan ~/.claude/sessions/ for a running session matching WS's project root.
 Stores the session ID as :session-id on the workspace plist."
-  (let* ((root (claude-repl--path-canonical
-                (or (claude-repl--ws-get ws :worktree-path)
-                    claude-repl--project-root
-                    default-directory)))
-         ;; Docker sandbox mounts the worktree at /<dirname>, so session files
-         ;; record a container path rather than the full host path.
-         (container-path (concat "/" (file-name-nondirectory root)))
-         (sessions-dir (expand-file-name "~/.claude/sessions/"))
-         (found-id nil))
-    (when (file-directory-p sessions-dir)
-      (dolist (file (directory-files sessions-dir t "\\.json\\'"))
-        (condition-case nil
-            (let* ((json (json-read-file file))
-                   (cwd (cdr (assq 'cwd json)))
-                   (session-id (cdr (assq 'sessionId json))))
-              (when (and cwd session-id
-                         (or (string= (claude-repl--path-canonical cwd) root)
-                             (string= cwd container-path)))
-                (setq found-id session-id)))
-          (error nil))))
-    (if found-id
-        (progn
-          (setf (claude-repl-instantiation-session-id (claude-repl--active-inst ws)) found-id)
-          (claude-repl--log "capture-session-id ws=%s env=%s id=%s"
-                            ws (claude-repl--ws-get ws :active-env) found-id)
-          (claude-repl--state-save ws))
-      ;; Clear stale session-id so a restored-from-disk value doesn't
-      ;; cause --resume with a dead session.
-      (setf (claude-repl-instantiation-session-id (claude-repl--active-inst ws)) nil)
-      (claude-repl--log "capture-session-id ws=%s env=%s: no matching session found (cleared)"
-                        ws (claude-repl--ws-get ws :active-env)))))
+  (let ((project-dir (claude-repl--ws-get ws :project-dir)))
+    (if (null project-dir)
+        (claude-repl--log "capture-session-id: no :project-dir for ws=%s, skipping" ws)
+      (let* ((root (claude-repl--path-canonical project-dir))
+             ;; Docker sandbox mounts the worktree at /<dirname>, so session files
+             ;; record a container path rather than the full host path.
+             (container-path (concat "/" (file-name-nondirectory root)))
+             (sessions-dir (expand-file-name "~/.claude/sessions/"))
+             (found-id nil))
+        (when (file-directory-p sessions-dir)
+          (dolist (file (directory-files sessions-dir t "\\.json\\'"))
+            (condition-case nil
+                (let* ((json (json-read-file file))
+                       (cwd (cdr (assq 'cwd json)))
+                       (session-id (cdr (assq 'sessionId json))))
+                  (when (and cwd session-id
+                             (or (string= (claude-repl--path-canonical cwd) root)
+                                 (string= cwd container-path)))
+                    (setq found-id session-id)))
+              (error nil))))
+        (if found-id
+            (progn
+              (setf (claude-repl-instantiation-session-id (claude-repl--active-inst ws)) found-id)
+              (claude-repl--log "capture-session-id ws=%s env=%s id=%s"
+                                ws (claude-repl--ws-get ws :active-env) found-id)
+              (claude-repl--state-save ws))
+          ;; Clear stale session-id so a restored-from-disk value doesn't
+          ;; cause --resume with a dead session.
+          (setf (claude-repl-instantiation-session-id (claude-repl--active-inst ws)) nil)
+          (claude-repl--log "capture-session-id ws=%s env=%s: no matching session found (cleared)"
+                            ws (claude-repl--ws-get ws :active-env)))))))
 
 (defun claude-repl--handle-first-ready ()
   "Handle the first terminal title set — Claude is now ready.
@@ -2033,27 +2022,73 @@ prompts (with a 0.3s delay), and auto-opens panels if appropriate."
 ;; ~/.claude/workspace-notifications/; we watch the directory and dispatch
 ;; by filename: permission_prompt, stop_*, prompt_submit_*.
 (defun claude-repl--ws-for-dir (dir)
-  "Return the workspace name for a Claude session rooted at DIR, or nil."
-  (when-let* ((root (claude-repl--git-root dir))
-              (hash (substring (md5 (claude-repl--path-canonical root)) 0 8))
-              (buf (get-buffer (format "*claude-%s*" hash))))
-    (claude-repl--workspace-for-buffer buf)))
+  "Return the workspace name for a Claude session rooted at DIR, or nil.
+First tries the fast path: git-root → hash → buffer → workspace.
+Falls back to container-path matching: Docker sandboxes mount worktrees
+at /<dirname>, so the sentinel CWD won't match any host path.  In that
+case, match DIR against the container-path form of each workspace's
+`:project-dir'."
+  (or
+   ;; Fast path: DIR is a valid host path inside a git repo.
+   (let* ((root (claude-repl--git-root dir))
+          (hash (when root (substring (md5 (claude-repl--path-canonical root)) 0 8)))
+          (buf-name (when hash (format "*claude-%s*" hash)))
+          (buf (when buf-name (get-buffer buf-name)))
+          (ws (when buf (claude-repl--workspace-for-buffer buf))))
+     (when ws
+       (claude-repl--log "ws-for-dir fast-path: dir=%S root=%S hash=%s ws=%s" dir root hash ws))
+     ws)
+   ;; Fallback: container-path matching for Docker sandbox workspaces.
+   ;; Docker mounts the worktree at /<dirname>, but the CWD may be a
+   ;; subdirectory (e.g. /<dirname>/src/foo).  Extract the first path
+   ;; component after / as the container root name.
+   (when (bound-and-true-p persp-mode)
+     (let* ((container-root (car (split-string (substring dir 1) "/")))
+            (all-ws (+workspace-list-names))
+            (ws-dirs (mapcar (lambda (ws)
+                               (cons ws (claude-repl--ws-get ws :project-dir)))
+                             all-ws))
+            (match (cl-loop for (ws . proj-dir) in ws-dirs
+                            when (and proj-dir
+                                      (string= container-root
+                                               (file-name-nondirectory
+                                                (directory-file-name proj-dir))))
+                            return ws)))
+       (if match
+           (progn
+             (claude-repl--log "ws-for-dir container-path match: dir=%S root=%S ws=%s"
+                               dir container-root match)
+             match)
+         (claude-repl--log "ws-for-dir fallback FAILED: dir=%S container-root=%S workspaces=%S"
+                           dir container-root ws-dirs)
+         nil)))))
 
 (defun claude-repl--read-sentinel-file (file)
   "Read and trim the contents of sentinel FILE, or nil on error."
-  (condition-case nil
+  (condition-case err
       (string-trim (with-temp-buffer
                      (insert-file-contents file)
                      (buffer-string)))
-    (error nil)))
+    (file-missing
+     ;; Race: file-notify fired but file was deleted between exists-p and read.
+     (claude-repl--log "read-sentinel-file race: %s gone" (file-name-nondirectory file))
+     nil)
+    (error
+     (message "[claude-repl] WARNING: failed to read sentinel %s: %S"
+              (file-name-nondirectory file) err)
+     nil)))
 
 (defun claude-repl--handle-permission-file (file)
   "Process a permission_prompt sentinel FILE."
-  (let ((ws (claude-repl--ws-for-dir (claude-repl--read-sentinel-file file))))
+  (let* ((dir (claude-repl--read-sentinel-file file))
+         (ws  (when dir (claude-repl--ws-for-dir dir))))
     (claude-repl--log "permission notify ws=%s" ws)
-    (if ws
-        (claude-repl--ws-set ws :permission)
-      (claude-repl--log "handle-permission-file: no workspace for %s" file))
+    (cond
+     ((null dir)) ; read-sentinel-file already warned
+     ((null ws)
+      (message "[claude-repl] WARNING: permission dir=%s matched no workspace" dir))
+     (t
+      (claude-repl--ws-set ws :permission)))
     (ignore-errors (delete-file file))))
 
 (defun claude-repl--handle-stop-file (file)
@@ -2061,10 +2096,15 @@ prompts (with a 0.3s delay), and auto-opens panels if appropriate."
 Clears :thinking, runs the hook-aware finished handler, deletes FILE."
   (let* ((dir (claude-repl--read-sentinel-file file))
          (ws  (when dir (claude-repl--ws-for-dir dir))))
-    (claude-repl--log "stop notify ws=%s dir=%s" ws dir)
-    (when ws
+    (cond
+     ((null dir)) ; read-sentinel-file already warned
+     ((null ws)
+      (message "[claude-repl] WARNING: stop sentinel dir=%s matched no workspace (tab may be stuck red)"
+               dir))
+     (t
+      (message "[claude-repl] stop resolved: dir=%s → ws=%s" dir ws)
       (claude-repl--ws-clear ws :thinking)
-      (claude-repl--on-claude-finished-from-hook ws))
+      (claude-repl--on-claude-finished-from-hook ws)))
     (ignore-errors (delete-file file))))
 
 (defun claude-repl--handle-prompt-submit-file (file)
@@ -2073,16 +2113,24 @@ Sets :thinking on the matching workspace."
   (let* ((dir (claude-repl--read-sentinel-file file))
          (ws  (when dir (claude-repl--ws-for-dir dir))))
     (claude-repl--log "prompt-submit notify ws=%s dir=%s" ws dir)
-    (when ws
-      (claude-repl--mark-ws-thinking ws))
+    (cond
+     ((null dir)) ; read-sentinel-file already warned
+     ((null ws)
+      (message "[claude-repl] WARNING: prompt-submit dir=%s matched no workspace"
+               dir))
+     (t
+      (claude-repl--mark-ws-thinking ws)))
     (ignore-errors (delete-file file))))
 
 (defun claude-repl--on-workspace-notify (event)
   "Handle file-notify event for workspace notification sentinel files.
-Dispatches by filename: permission_prompt, stop_*, prompt_submit_*."
+Dispatches by filename: permission_prompt, stop_*, prompt_submit_*.
+Skips files that no longer exist (file-notify often fires multiple events
+for a single file creation; the first handler deletes the file)."
   (let ((action (nth 1 event))
         (file   (nth 2 event)))
-    (when (memq action '(created changed))
+    (when (and (memq action '(created changed))
+               (file-exists-p file))
       (cond
        ((string-match-p "/permission_prompt$" file)
         (claude-repl--handle-permission-file file))
@@ -2155,27 +2203,31 @@ For background workspaces, inspects the saved persp window configuration."
 (defun claude-repl--update-ws-state (ws)
   "Update workspace WS state according to claude visibility and git status.
 State table:
-  :thinking  → unchanged (never touch)
-  :done      + clean → :stale  |  :done      + dirty → :done
-  :permission         → unchanged
-  :stale     + dirty → :done   |  :stale     + clean → :stale
-  nil        + dirty → :done   |  nil        + clean → nil"
+  :thinking   → unchanged (never touch)
+  :done+clean → :stale (only if :viewed)  |  :done+dirty → :done
+  :permission → unchanged
+  :stale+dirty → :done   |  :stale+clean → :stale
+  nil+dirty   → :done    |  nil+clean    → nil"
   (let ((state (claude-repl--ws-state ws))
         (dirty (not (claude-repl--workspace-clean-p ws))))
     (pcase (cons state dirty)
-      ;; :done + clean → :stale
+      ;; :done + clean → :stale, but only after the user has viewed the workspace
       (`(:done . nil)
-       (claude-repl--log "update-ws-state ws=%s :done->:stale" ws)
-       (claude-repl--ws-clear ws :done)
-       (claude-repl--touch-activity ws))
+       (when (claude-repl--ws-get ws :viewed)
+         (claude-repl--log "update-ws-state ws=%s :done->:stale (viewed)" ws)
+         (claude-repl--ws-clear ws :done)
+         (claude-repl--ws-put ws :viewed nil)
+         (claude-repl--touch-activity ws)))
       ;; :stale + dirty → :done
       (`(:stale . t)
        (claude-repl--log "update-ws-state ws=%s :stale->:done" ws)
        (claude-repl--ws-clear ws :stale)
+       (claude-repl--ws-put ws :viewed nil)
        (claude-repl--ws-set ws :done))
       ;; nil + dirty → :done
       (`(nil . t)
        (claude-repl--log "update-ws-state ws=%s nil->:done" ws)
+       (claude-repl--ws-put ws :viewed nil)
        (claude-repl--ws-set ws :done))
       ;; :thinking, :permission, :done+dirty, :stale+clean, nil+clean → no-op
       (_ nil))))
@@ -2207,8 +2259,12 @@ Uses cached git status (`:git-clean') and kicks off async refreshes."
 ;; Refresh vterm on workspace switch
 (defun claude-repl--on-workspace-switch ()
   "Handle workspace switch: update all workspace states, refresh vterm, reset cursors.
-Also opens panels for workspaces that were created with a preemptive prompt."
-  (claude-repl--log "workspace-switch ws=%s" (+workspace-current-name))
+Also opens panels for workspaces that were created with a preemptive prompt.
+Marks the switched-to workspace as :viewed so :done→:stale can proceed."
+  (let ((ws (+workspace-current-name)))
+    (claude-repl--log "workspace-switch ws=%s" ws)
+    (when (and ws (eq (claude-repl--ws-get ws :status) :done))
+      (claude-repl--ws-put ws :viewed t)))
   (claude-repl--update-all-workspace-states)
   (claude-repl--refresh-vterm)
   (claude-repl--reset-vterm-cursors)
@@ -2753,7 +2809,7 @@ Requires a worktree workspace with a captured session ID."
       (user-error "Cannot switch environment while Claude is thinking"))
     (when (and (eq new-env :sandbox)
                (not (claude-repl--resolve-sandbox-config
-                     (claude-repl--git-root (claude-repl--ws-get ws :worktree-path)))))
+                     (claude-repl--git-root (claude-repl--ws-get ws :project-dir)))))
       (user-error "No sandbox configuration found for this workspace"))
     ;; Seed the new env's session-id from current if this is the first switch.
     (let ((new-inst (or (claude-repl--ws-get ws new-env)
@@ -2838,10 +2894,8 @@ replayed. Falls back to `merge-base HEAD TARGET-BRANCH' when no annotations matc
   "Return the git branch checked out in workspace WS's worktree, or nil.
 Workspace name ≠ branch name: e.g. persp \"fix-login\" was created from
 \"DWC/fix-login\", so the branch is \"DWC/fix-login\" but the persp is \"fix-login\".
-Resolves via :worktree-path stored in `claude-repl--workspaces'; falls back to
-buffer-scanning via `claude-repl--ws-dir' for session-restored workspaces."
-  (let ((path (or (claude-repl--ws-get ws :worktree-path)
-                  (claude-repl--ws-dir ws))))
+Resolves via :project-dir stored in `claude-repl--workspaces'."
+  (let ((path (claude-repl--ws-get ws :project-dir)))
     (when path
       (let ((branch (string-trim
                      (shell-command-to-string
@@ -2940,8 +2994,7 @@ Switches to master, then cherry-picks commits from the current workspace."
        (+workspace/switch-to master-ws)))
     ;; After switching, default-directory still points to the source workspace.
     ;; Bind it to master's directory so projectile-project-root resolves correctly.
-    (let ((master-dir (or (claude-repl--ws-get master-ws :worktree-path)
-                          (claude-repl--ws-dir master-ws)
+    (let ((master-dir (or (claude-repl--ws-get master-ws :project-dir)
                           (user-error "Cannot determine master workspace directory"))))
       (let ((default-directory (file-name-as-directory master-dir)))
         (+dwc/workspace-merge--do source-ws)))))
@@ -3278,15 +3331,8 @@ Reports comprehensive diagnostics."
 
 (defun claude-repl--project-dir (ws)
   "Return the project root directory for workspace WS.
-Falls back to git root / projectile root for the default workspace and caches
-it.  Errors loudly if no root can be determined."
-  (or (claude-repl--ws-get ws :project-dir)
-      (let ((root (or (claude-repl--git-root)
-                      (and (projectile-project-p) (projectile-project-root)))))
-        (unless root
-          (error "claude-repl: workspace %s has no :project-dir and no git/project root found" ws))
-        (claude-repl--ws-put ws :project-dir (file-name-as-directory root))
-        (file-name-as-directory root))))
+Alias for `claude-repl--ws-dir'."
+  (claude-repl--ws-dir ws))
 
 ;; Kill Claude session before workspace deletion so buffers/windows are cleaned
 ;; up while the workspace is still current.
