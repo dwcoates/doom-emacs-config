@@ -2436,9 +2436,22 @@ Syncs orphaned panels, refreshes overlay, and resets cursors."
   (add-hook 'window-selection-change-functions debounced)
   (add-hook 'buffer-list-update-hook debounced))
 
-;; Intentionally not hooking any automatic redirect from vterm → input.
-;; The vterm windows have no-other-window=t which prevents most navigation to them.
-;; Entry to the REPL is only via explicit claude-repl commands or SPC ,.
+;; Redirect keyboard navigation away from the vterm output window.
+;; Mouse clicks (checked via last-input-event) are allowed through so the
+;; user can still click into the output when needed.
+(defun claude-repl--bounce-from-vterm (_frame)
+  "If the selected window is a no-other-window vterm, redirect to the input window.
+Allows mouse-initiated selection through."
+  (let ((win (selected-window)))
+    (when (and (window-parameter win 'no-other-window)
+               (not (mouse-event-p last-input-event)))
+      (let* ((ws (+workspace-current-name))
+             (input-buf (and ws (claude-repl--ws-get ws :input-buffer)))
+             (input-win (and input-buf (get-buffer-window input-buf))))
+        (when input-win
+          (select-window input-win))))))
+
+(add-hook 'window-selection-change-functions #'claude-repl--bounce-from-vterm)
 
 (defun claude-repl--ensure-input-buffer (ws)
   "Create input buffer for workspace WS if needed, put in claude-input-mode."
