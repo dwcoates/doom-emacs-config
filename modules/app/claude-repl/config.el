@@ -191,6 +191,7 @@ is stored under WS, defaulting to `+workspace-current-name'."
     (claude-repl--ws-put ws :worktree-p t)
     (claude-repl--ws-put ws :project-dir (file-name-as-directory path))))
 
+
 (defun claude-repl--setup-worktree-session (ws-id path ws force-bare-metal)
   "Register WS as a worktree at PATH and start its Claude session.
 Initializes sandbox and bare-metal instantiations; sets :active-env."
@@ -954,7 +955,8 @@ project root (alongside .claude-repl-history)."
          (file (when root (expand-file-name ".claude-repl-state" root)))
          (inst-bm (claude-repl--ws-get ws :bare-metal))
          (inst-sb (claude-repl--ws-get ws :sandbox))
-         (state `(:active-env ,(claude-repl--ws-get ws :active-env)
+         (state `(:project-dir ,root
+                  :active-env ,(claude-repl--ws-get ws :active-env)
                   :bare-metal ,(when inst-bm
                                  `(:session-id ,(claude-repl-instantiation-session-id inst-bm)
                                    :had-session ,(claude-repl-instantiation-had-session inst-bm)))
@@ -971,19 +973,25 @@ project root (alongside .claude-repl-history)."
 
 (defun claude-repl--state-restore (ws)
   "Restore persisted session state for workspace WS from disk.
-Populates had-session and session-id on the workspace's
-instantiation structs from .claude-repl-state."
-  (let* ((root (claude-repl--ws-get ws :project-dir))
+Populates had-session, session-id, and :project-dir on the workspace
+from .claude-repl-state.  After Emacs restart the in-memory hash table
+has no :project-dir yet, so we fall back to `default-directory' (which
+persp-mode restores per workspace) to locate the state file."
+  (let* ((root (or (claude-repl--ws-get ws :project-dir)
+                   (claude-repl--git-root default-directory)))
          (file (when root (expand-file-name ".claude-repl-state" root))))
     (when (and file (file-exists-p file))
       (condition-case err
           (let* ((state (with-temp-buffer
                           (insert-file-contents file)
                           (read (current-buffer))))
+                 (saved-dir (plist-get state :project-dir))
                  (bm-state (plist-get state :bare-metal))
                  (sb-state (plist-get state :sandbox))
                  (inst-bm (claude-repl--ws-get ws :bare-metal))
                  (inst-sb (claude-repl--ws-get ws :sandbox)))
+            (when saved-dir
+              (claude-repl--ws-put ws :project-dir saved-dir))
             (when (and inst-bm bm-state)
               (setf (claude-repl-instantiation-session-id inst-bm)
                     (plist-get bm-state :session-id))
@@ -994,8 +1002,8 @@ instantiation structs from .claude-repl-state."
                     (plist-get sb-state :session-id))
               (setf (claude-repl-instantiation-had-session inst-sb)
                     (plist-get sb-state :had-session)))
-            (claude-repl--log "state-restore ws=%s file=%s bm=%S sb=%S"
-                              ws file bm-state sb-state))
+            (claude-repl--log "state-restore ws=%s file=%s project-dir=%s bm=%S sb=%S"
+                              ws file saved-dir bm-state sb-state))
         (error (claude-repl--log "state-restore error: %S" err))))))
 
 ;; Input history functions
@@ -2901,14 +2909,15 @@ Resolves via :project-dir stored in `claude-repl--workspaces'."
                      (shell-command-to-string
                       (format "git -C %s rev-parse --abbrev-ref HEAD"
                               (shell-quote-argument path))))))
+        (claude-repl--log "workspace->branch ws=%s path=%s branch=%s" ws path branch)
         (unless (or (string-empty-p branch) (string-prefix-p "fatal" branch))
           (if (string= branch "HEAD")
-              ;; Detached HEAD — return the raw SHA so it resolves correctly
-              ;; from any -C path (all worktrees share the object store).
-              (string-trim
-               (shell-command-to-string
-                (format "git -C %s rev-parse HEAD"
-                        (shell-quote-argument path))))
+              (let ((sha (string-trim
+                          (shell-command-to-string
+                           (format "git -C %s rev-parse HEAD"
+                                   (shell-quote-argument path))))))
+                (claude-repl--log "workspace->branch ws=%s detached HEAD, sha=%s" ws sha)
+                sha)
             branch))))))
 
 (defun +dwc/workspace-merge--do (target-ws)
@@ -2917,13 +2926,16 @@ Replays each commit from the target branch (since it diverged from master)
 individually. Aborts cleanly if any commit conflicts."
   (let* ((current-ws (+workspace-current-name))
          (target-branch (+dwc/workspace->branch target-ws)))
+    (claude-repl--log "workspace-merge--do current-ws=%s target-ws=%s target-branch=%s"
+                      current-ws target-ws target-branch)
     (unless target-branch
       (user-error "Cannot resolve branch for workspace '%s'" target-ws))
     (let* ((project-root (claude-repl--project-dir current-ws)))
+      (claude-repl--log "workspace-merge--do project-root=%s (for ws=%s)" project-root current-ws)
       (unless (= 0 (call-process "git" nil nil nil
                                  "-C" project-root
                                  "rev-parse" "--verify" target-branch))
-        (user-error "Branch '%s' not found in this repo" target-branch))
+        (user-error "Branch '%s' not found in repo %s" target-branch project-root))
       (let* ((fork (+dwc/workspace-merge--fork project-root target-branch))
              (range (format "%s..%s" fork target-branch)))
         (let ((range-count (string-trim
@@ -2967,9 +2979,11 @@ Prompts for which workspace to merge in."
       (user-error "No other workspaces to merge"))
     ;; Guard: uncommitted changes would interfere with cherry-pick.
     (let ((project-root (claude-repl--project-dir current-ws)))
-      (unless (and (= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--quiet"))
-                   (= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--cached" "--quiet")))
-        (user-error "Uncommitted changes present — stash or commit them before merging a workspace")))
+      (let ((unstaged (/= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--quiet")))
+            (staged   (/= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--cached" "--quiet"))))
+        (when (or unstaged staged)
+          (user-error "Uncommitted changes in workspace '%s' (dir: %s) [unstaged=%s staged=%s] — stash or commit before merging"
+                      current-ws project-root unstaged staged))))
     (let ((target-ws (completing-read "Merge workspace into current: " other-ws nil t)))
       (+dwc/workspace-merge--do target-ws))))
 
@@ -2985,9 +2999,11 @@ Switches to master, then cherry-picks commits from the current workspace."
       (user-error "Already on the master workspace"))
     ;; Guard: uncommitted changes would interfere with cherry-pick.
     (let ((project-root (claude-repl--project-dir source-ws)))
-      (unless (and (= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--quiet"))
-                   (= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--cached" "--quiet")))
-        (user-error "Uncommitted changes present — stash or commit them before merging a workspace")))
+      (let ((unstaged (/= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--quiet")))
+            (staged   (/= 0 (call-process "git" nil nil nil "-C" project-root "diff" "--cached" "--quiet"))))
+        (when (or unstaged staged)
+          (user-error "Uncommitted changes in workspace '%s' (dir: %s) [unstaged=%s staged=%s] — stash or commit before merging"
+                      source-ws project-root unstaged staged))))
     (condition-case err
         (+workspace-switch-to master-ws)
       (error
