@@ -151,7 +151,7 @@ Each workspace has one instantiation for :sandbox and one for :bare-metal."
 (defvar claude-repl--workspaces (make-hash-table :test 'equal)
   "Hash table mapping workspace name → state plist.
 Keys: :vterm-buffer :input-buffer
-      :prefix-counter :status :activity-time
+      :prefix-counter :status :activity-time :panels-hidden
       :git-clean :git-proc :worktree-p :project-dir
       :active-env :sandbox :bare-metal :fork-session-id
       :ready-timer :thinking :done :priority :viewed
@@ -1829,7 +1829,8 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
               collect
               (let* ((num (number-to-string (1+ i)))
                      (selected (equal current-name name))
-                     (state (claude-repl--ws-state name))
+                     (hidden (claude-repl--ws-get name :panels-hidden))
+                     (state (unless hidden (claude-repl--ws-state name)))
                      (priority (claude-repl--ws-get name :priority))
                      (priority-img (when priority
                                      (claude-repl--priority-image priority)))
@@ -2165,6 +2166,31 @@ for a single file creation; the first handler deletes the file)."
   (make-directory dir t)
   (file-notify-add-watch dir '(change) #'claude-repl--on-workspace-notify))
 
+(defun claude-repl--poll-workspace-notifications ()
+  "Scan the sentinel directory for files that file-notify may have missed.
+Called periodically as a fallback; any file still present was not picked up
+by the file-notify watcher and needs processing."
+  (let* ((dir (expand-file-name "~/.claude/workspace-notifications"))
+         (files (and (file-directory-p dir)
+                     (directory-files dir t "\\`[^.]" t))))
+    (when files
+      (claude-repl--log "poll-notifications: found %d orphaned file(s): %s"
+                        (length files)
+                        (mapconcat #'file-name-nondirectory files ", "))
+      (dolist (file files)
+        (when (file-exists-p file)
+          (let ((name (file-name-nondirectory file)))
+            (claude-repl--log "poll-notifications: processing %s" name)
+            (cond
+             ((string-match-p "\\`permission_prompt\\'" name)
+              (claude-repl--handle-permission-file file))
+             ((string-match-p "\\`stop_" name)
+              (claude-repl--handle-stop-file file))
+             ((string-match-p "\\`prompt_submit_" name)
+              (claude-repl--handle-prompt-submit-file file))
+             (t
+              (claude-repl--log "poll-notifications: ignoring unknown file %s" name)))))))))
+
 (defun claude-repl--do-refresh ()
   "Low-level refresh of the current vterm buffer.
 Must be called with a vterm-mode buffer current."
@@ -2255,17 +2281,21 @@ State table:
 
 (defun claude-repl--update-all-workspace-states ()
   "Update state for all workspaces based on claude visibility and git status.
-Uses cached git status (`:git-clean') and kicks off async refreshes."
+Uses cached git status (`:git-clean') and kicks off async refreshes.
+Also polls for orphaned sentinel files that file-notify may have missed.
+State machine runs whenever a live vterm process exists, regardless of
+panel visibility (panels may be hidden via `SPC o c')."
+  (claude-repl--poll-workspace-notifications)
   (when (bound-and-true-p persp-mode)
     (dolist (ws (+workspace-list-names))
-      (if (claude-repl--ws-claude-open-p ws)
+      (if (claude-repl--vterm-running-p ws)
           (progn
             (claude-repl--update-ws-state ws)
             (claude-repl--async-refresh-git-status ws))
-        ;; Claude not open on this workspace → clear all state
+        ;; No live vterm process → clear all state
         (let ((state (claude-repl--ws-state ws)))
           (when (and state (not (eq state :thinking)))
-            (claude-repl--log "update-all: ws=%s clearing %s (claude not open)" ws state)
+            (claude-repl--log "update-all: ws=%s clearing %s (no vterm process)" ws state)
             (claude-repl--ws-clear ws state)))))))
 
 (defun claude-repl--on-frame-focus ()
@@ -2649,13 +2679,20 @@ If panels hidden: show both panels."
      (panels-visible
       (let ((ws (+workspace-current-name)))
         (unless ws (error "claude-repl: no active workspace when hiding panels"))
-        (claude-repl--ws-clear ws :thinking)
-        (claude-repl--ws-clear ws :done)
-        (claude-repl--ws-clear ws :permission)
-        (claude-repl--ws-clear ws :stale))
+        (claude-repl--log "hiding panels ws=%s state=%s (preserving status)"
+                          ws (claude-repl--ws-state ws))
+        (claude-repl--ws-put ws :panels-hidden t))
       (claude-repl--hide-panels))
      ;; Panels hidden - show both
      (t
+      (let ((ws (+workspace-current-name)))
+        (claude-repl--log "showing panels ws=%s state=%s (restoring status)"
+                          ws (claude-repl--ws-state ws))
+        (claude-repl--ws-put ws :panels-hidden nil)
+        ;; Mark as viewed so :done→:stale can proceed (same as workspace switch).
+        (when (eq (claude-repl--ws-get ws :status) :done)
+          (claude-repl--log "showing panels: marking ws=%s as viewed" ws)
+          (claude-repl--ws-put ws :viewed t)))
       (claude-repl--show-existing-panels)))))
 
 (defun claude-repl--close-buffer-windows (&rest bufs)
@@ -2732,6 +2769,7 @@ If panels hidden: show both panels."
     (unless ws (error "claude-repl-kill: no active workspace"))
     (claude-repl--ws-put ws :status nil)
     (claude-repl--ws-put ws :activity-time nil)
+    (claude-repl--ws-put ws :panels-hidden nil)
     (force-mode-line-update t)
     (claude-repl--teardown-session-state ws)
     (claude-repl--destroy-session-buffers vterm-buf input-buf)))
