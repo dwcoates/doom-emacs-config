@@ -629,6 +629,18 @@ Splits right for vterm (60% width to work window), then splits vterm bottom for 
   (string-match-p "^\\*claude-[0-9a-f]+\\*$"
                   (buffer-name (or buf (current-buffer)))))
 
+(defun claude-repl--user-buffers (buffers)
+  "Return BUFFERS with Claude panels and minibuffers removed.
+BUFFERS may be buffer objects or name strings."
+  (cl-remove-if (lambda (buf)
+                  (let* ((b (if (stringp buf) (get-buffer buf) buf))
+                         (name (and b (buffer-name b))))
+                    (or (not name)
+                        (claude-repl--claude-buffer-p b)
+                        (string-match-p "^\\*claude-input-[0-9a-f]+\\*$" name)
+                        (string-match-p "^ \\*Minibuf" name))))
+                buffers))
+
 (defun claude-repl--resolve-root ()
   "Return the project root directory.
 Tries git root, then buffer-local project root, then `default-directory'."
