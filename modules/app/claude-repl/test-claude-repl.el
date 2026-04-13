@@ -302,34 +302,6 @@
   (claude-repl-test--with-clean-state
     (should-error (claude-repl--ws-set nil :thinking) :type 'error)))
 
-;;;; ---- Tests: Title spinner detection ----
-
-(ert-deftest claude-repl-test-title-has-spinner-p ()
-  "Spinner detection: Unicode prefix = spinner, ✳ prefix = idle, ASCII = no spinner."
-  (should (claude-repl--title-has-spinner-p "⠋ Claude Code"))
-  (should (claude-repl--title-has-spinner-p "🔄 Claude Code"))
-  (should-not (claude-repl--title-has-spinner-p "✳ Claude Code"))
-  (should-not (claude-repl--title-has-spinner-p "Claude Code"))
-  (should-not (claude-repl--title-has-spinner-p "")))
-
-(ert-deftest claude-repl-test-detect-title-transition-started ()
-  "Transition from idle to spinner should be 'started."
-  (claude-repl-test--with-temp-buffer " *test-title-tr*"
-    (setq-local claude-repl--title-thinking nil)
-    (cl-letf (((symbol-function 'claude-repl--workspace-for-buffer) (lambda (_buf) "ws1")))
-      (let ((info (claude-repl--detect-title-transition "⠋ Claude Code")))
-        (should (eq (plist-get info :transition) 'started))
-        (should (plist-get info :thinking))))))
-
-(ert-deftest claude-repl-test-detect-title-transition-finished ()
-  "Transition from spinner to idle should be 'finished."
-  (claude-repl-test--with-temp-buffer " *test-title-fin*"
-    (setq-local claude-repl--title-thinking t)
-    (cl-letf (((symbol-function 'claude-repl--workspace-for-buffer) (lambda (_buf) "ws1")))
-      (let ((info (claude-repl--detect-title-transition "✳ Claude Code")))
-        (should (eq (plist-get info :transition) 'finished))
-        (should-not (plist-get info :thinking))))))
-
 ;;;; ---- Tests: Prefix injection counter ----
 
 (ert-deftest claude-repl-test-prefix-injection-counter ()
@@ -460,29 +432,6 @@
   "Bug 1: claude-repl--cursor-reset-timer should be defined (not void)."
   (should (boundp 'claude-repl--cursor-reset-timer)))
 
-(ert-deftest claude-repl-test-bug2-title-thinking-buffer-local ()
-  "Bug 2: claude-repl--title-thinking should be buffer-local."
-  (claude-repl-test--with-temp-buffer " *test-bl-1*"
-    (setq claude-repl--title-thinking t)
-    (claude-repl-test--with-temp-buffer " *test-bl-2*"
-      ;; Should be nil in a different buffer (default value)
-      (should-not claude-repl--title-thinking))))
-
-(ert-deftest claude-repl-test-bug3-title-change-no-ws ()
-  "Bug 3: on-title-change should silently skip (not error) when workspace is nil during a transition."
-  (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
-      (setq-local claude-repl--ready t)  ;; skip first-ready handling
-      (setq-local claude-repl--title-thinking nil)
-      (cl-letf (((symbol-function 'claude-repl--workspace-for-buffer)
-                 (lambda (_buf) nil))
-                ((symbol-function 'claude-repl--handle-first-ready)
-                 (lambda () nil)))
-        ;; Should log and return nil, not error, when ws is nil during a transition
-        (should-not (claude-repl--on-title-change "⠋ Claude Code"))
-        ;; title-thinking should still be updated (setq is before the guard)
-        (should claude-repl--title-thinking)))))
-
 (ert-deftest claude-repl-test-bug5-rel-path-non-file-buffer ()
   "Bug 5: rel-path should signal user-error for non-file buffers."
   (claude-repl-test--with-temp-buffer " *test-no-file*"
@@ -539,8 +488,7 @@
   (should (boundp 'claude-repl--workspaces))
   (should (boundp 'claude-repl-hide-input-box))
   (should (boundp 'claude-repl--notify-fn))
-  (should (boundp 'claude-repl--sync-timer))
-  (should (boundp 'claude-repl--title-thinking)))
+  (should (boundp 'claude-repl--sync-timer)))
 
 (ert-deftest claude-repl-test-bug11-fullscreen-config-declared ()
   "Bug 11: claude-repl--fullscreen-config should be declared before use."
@@ -886,71 +834,6 @@ When t, it should call `message'."
 
 ;;;; ---- Tests: Title change handling ----
 
-(ert-deftest claude-repl-test-on-title-change-started-sets-thinking ()
-  "In a claude buffer with `title-thinking' nil, spinner title sets workspace to :thinking."
-  (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
-      (setq-local claude-repl--title-thinking nil)
-      (setq-local claude-repl--ready t)
-      (cl-letf (((symbol-function 'claude-repl--workspace-for-buffer)
-                 (lambda (_buf) "ws1"))
-                ((symbol-function 'claude-repl--handle-first-ready) #'ignore))
-        (claude-repl--on-title-change "⠋ Claude Code")
-        (should (eq (claude-repl--ws-state "ws1") :thinking))))))
-
-(ert-deftest claude-repl-test-on-title-change-finished-clears-thinking ()
-  "With `title-thinking' t, idle title clears :thinking and calls `on-claude-finished'."
-  (claude-repl-test--with-clean-state
-    (let ((finished-called nil))
-      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
-        (setq-local claude-repl--title-thinking t)
-        (setq-local claude-repl--ready t)
-        (claude-repl--ws-set "ws1" :thinking)
-        (cl-letf (((symbol-function 'claude-repl--workspace-for-buffer)
-                   (lambda (_buf) "ws1"))
-                  ((symbol-function 'claude-repl--handle-first-ready) #'ignore)
-                  ((symbol-function 'claude-repl--on-claude-finished)
-                   (lambda (ws) (setq finished-called ws))))
-          (claude-repl--on-title-change "✳ Claude Code")
-          (should-not (eq (claude-repl--ws-get "ws1" :status) :thinking))
-          (should (equal finished-called "ws1")))))))
-
-(ert-deftest claude-repl-test-on-title-change-no-reentrant-recursion ()
-  "Regression: on-title-change updates title-thinking BEFORE side effects.
-If on-claude-finished triggers a re-entrant on-title-change (via
-refresh-vterm -> vterm--redraw -> set-title), the re-entrant call should
-see the updated title-thinking and detect no transition."
-  (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
-      (setq-local claude-repl--title-thinking t)
-      (setq-local claude-repl--ready t)
-      (claude-repl--ws-set "ws1" :thinking)
-      (let ((reentrant-transition nil))
-        (cl-letf (((symbol-function 'claude-repl--workspace-for-buffer)
-                   (lambda (_buf) "ws1"))
-                  ((symbol-function 'claude-repl--handle-first-ready) #'ignore)
-                  ((symbol-function 'claude-repl--on-claude-finished)
-                   (lambda (_ws)
-                     ;; Simulate re-entrant call: on-claude-finished would
-                     ;; normally call refresh-vterm -> vterm--redraw, which
-                     ;; triggers vterm--set-title -> on-title-change again.
-                     ;; title-thinking must already be nil at this point.
-                     (let ((info (claude-repl--detect-title-transition "✳ Claude Code")))
-                       (setq reentrant-transition (plist-get info :transition))))))
-          (claude-repl--on-title-change "✳ Claude Code")
-          ;; The re-entrant detect-title-transition should see title-thinking=nil
-          ;; (already updated) and return nil transition — not 'finished again.
-          (should-not reentrant-transition))))))
-
-(ert-deftest claude-repl-test-on-title-change-non-claude-buffer ()
-  "In a non-claude buffer, `on-title-change' should do nothing."
-  (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*scratch*"
-      (setq-local claude-repl--title-thinking nil)
-      ;; Should not error or change state
-      (claude-repl--on-title-change "⠋ Claude Code")
-      (should-not claude-repl--title-thinking))))
-
 (ert-deftest claude-repl-test-handle-first-ready-idempotent ()
   "First call sets `claude-repl--ready' to t and calls `swap-placeholder'. Second call is a no-op."
   (claude-repl-test--with-temp-buffer " *test-first-ready*"
@@ -964,23 +847,6 @@ see the updated title-thinking and detect no transition."
         ;; Second call should be no-op
         (claude-repl--handle-first-ready)
         (should (= swap-count 1))))))
-
-(ert-deftest claude-repl-test-detect-title-transition-no-change ()
-  "When `title-thinking' is nil and title has no spinner, transition should be nil."
-  (claude-repl-test--with-temp-buffer " *test-no-change*"
-    (setq-local claude-repl--title-thinking nil)
-    (cl-letf (((symbol-function 'claude-repl--workspace-for-buffer) (lambda (_buf) "ws1")))
-      (let ((info (claude-repl--detect-title-transition "Claude Code")))
-        (should-not (plist-get info :transition))))))
-
-(ert-deftest claude-repl-test-detect-title-transition-still-thinking ()
-  "When `title-thinking' is t and title has spinner, transition should be nil."
-  (claude-repl-test--with-temp-buffer " *test-still-thinking*"
-    (setq-local claude-repl--title-thinking t)
-    (cl-letf (((symbol-function 'claude-repl--workspace-for-buffer) (lambda (_buf) "ws1")))
-      (let ((info (claude-repl--detect-title-transition "⠋ Claude Code")))
-        (should-not (plist-get info :transition))
-        (should (plist-get info :thinking))))))
 
 ;;;; ---- Tests: State machine completeness ----
 
@@ -1114,22 +980,22 @@ see the updated title-thinking and detect no transition."
 
 ;;;; ---- Tests: Permission notification handler ----
 
-(ert-deftest claude-repl-test-on-permission-notify-ignores-non-permission ()
-  "An event with a non-matching filename should not call `ws-set'."
+(ert-deftest claude-repl-test-workspace-notify-ignores-unknown-files ()
+  "An event with a non-matching filename should not call any handler."
   (claude-repl-test--with-clean-state
     (let ((ws-set-called nil))
       (cl-letf (((symbol-function 'claude-repl--ws-set)
                  (lambda (&rest _) (setq ws-set-called t))))
-        (claude-repl--on-permission-notify '(nil changed "/some/other-file"))
+        (claude-repl--on-workspace-notify '(nil changed "/some/other-file"))
         (should-not ws-set-called)))))
 
-(ert-deftest claude-repl-test-on-permission-notify-ignores-other-actions ()
+(ert-deftest claude-repl-test-workspace-notify-ignores-deleted-action ()
   "An event with action `deleted' should be ignored even if filename matches."
   (claude-repl-test--with-clean-state
     (let ((ws-set-called nil))
       (cl-letf (((symbol-function 'claude-repl--ws-set)
                  (lambda (&rest _) (setq ws-set-called t))))
-        (claude-repl--on-permission-notify '(nil deleted "/path/to/permission_prompt"))
+        (claude-repl--on-workspace-notify '(nil deleted "/path/to/permission_prompt"))
         (should-not ws-set-called)))))
 
 ;;;; ---- Tests: Overlay management ----
@@ -1192,40 +1058,6 @@ see the updated title-thinking and detect no transition."
   "When `persp-mode' is nil, `workspace-for-buffer' should return nil."
   (let ((persp-mode nil))
     (should-not (claude-repl--workspace-for-buffer (current-buffer)))))
-
-;;;; ---- Tests: on-claude-finished ----
-
-(ert-deftest claude-repl-test-on-claude-finished-hidden-sets-done ()
-  "When the buffer is NOT visible, `on-claude-finished' should call `ws-set' with :done."
-  (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer " *test-hidden-done*"
-      (let ((done-set nil))
-        (cl-letf (((symbol-function 'get-buffer-window) (lambda (_buf &rest _) nil))
-                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
-                  ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
-                  ((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
-                  ((symbol-function 'claude-repl--ws-set)
-                   (lambda (ws state)
-                     (when (eq state :done)
-                       (setq done-set ws)))))
-          (claude-repl--on-claude-finished "ws1")
-          (should (equal done-set "ws1")))))))
-
-(ert-deftest claude-repl-test-on-claude-finished-visible-no-done ()
-  "When the buffer IS visible, should NOT set :done."
-  (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer " *test-visible-no-done*"
-      (let ((done-set nil))
-        (cl-letf (((symbol-function 'get-buffer-window) (lambda (_buf &rest _) 'some-window))
-                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
-                  ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
-                  ((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
-                  ((symbol-function 'claude-repl--ws-set)
-                   (lambda (ws state)
-                     (when (eq state :done)
-                       (setq done-set ws)))))
-          (claude-repl--on-claude-finished "ws1")
-          (should-not done-set))))))
 
 ;;;; ---- Tests: Misc declared variables ----
 
@@ -1430,5 +1262,167 @@ Returns the full SHA of the new commit."
       ;; Fork computation for branch-c correctly identifies sha-b1 as incorporated
       (let ((fork (+dwc/workspace-merge--fork repo "branch-c")))
         (should (equal fork sha-b1))))))
+
+;;;; ---- Tests: Hook-based workspace notifications ----
+
+(ert-deftest claude-repl-test-workspace-notify-dispatches-permission ()
+  "An event for permission_prompt should call handle-permission-file."
+  (claude-repl-test--with-clean-state
+    (let ((called-file nil))
+      (cl-letf (((symbol-function 'claude-repl--handle-permission-file)
+                 (lambda (f) (setq called-file f))))
+        (claude-repl--on-workspace-notify '(nil created "/dir/permission_prompt"))
+        (should (equal called-file "/dir/permission_prompt"))))))
+
+(ert-deftest claude-repl-test-workspace-notify-dispatches-stop ()
+  "An event for stop_* should call handle-stop-file."
+  (claude-repl-test--with-clean-state
+    (let ((called-file nil))
+      (cl-letf (((symbol-function 'claude-repl--handle-stop-file)
+                 (lambda (f) (setq called-file f))))
+        (claude-repl--on-workspace-notify '(nil created "/dir/stop_12345"))
+        (should (equal called-file "/dir/stop_12345"))))))
+
+(ert-deftest claude-repl-test-workspace-notify-dispatches-prompt-submit ()
+  "An event for prompt_submit_* should call handle-prompt-submit-file."
+  (claude-repl-test--with-clean-state
+    (let ((called-file nil))
+      (cl-letf (((symbol-function 'claude-repl--handle-prompt-submit-file)
+                 (lambda (f) (setq called-file f))))
+        (claude-repl--on-workspace-notify '(nil changed "/dir/prompt_submit_99"))
+        (should (equal called-file "/dir/prompt_submit_99"))))))
+
+(ert-deftest claude-repl-test-handle-stop-clears-thinking-sets-done ()
+  "handle-stop-file should clear :thinking and set :done when vterm is invisible."
+  (claude-repl-test--with-clean-state
+    (let ((cleared nil) (finished-ws nil))
+      (claude-repl--ws-set "ws1" :thinking)
+      (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
+                 (lambda (_f) "/some/dir"))
+                ((symbol-function 'claude-repl--ws-for-dir)
+                 (lambda (_d) "ws1"))
+                ((symbol-function 'claude-repl--ws-clear)
+                 (lambda (ws state)
+                   (when (eq state :thinking)
+                     (setq cleared ws))))
+                ((symbol-function 'claude-repl--on-claude-finished-from-hook)
+                 (lambda (ws) (setq finished-ws ws)))
+                ((symbol-function 'delete-file) #'ignore))
+        (claude-repl--handle-stop-file "/tmp/stop_123")
+        (should (equal cleared "ws1"))
+        (should (equal finished-ws "ws1"))))))
+
+(ert-deftest claude-repl-test-handle-stop-tolerates-nil-workspace ()
+  "handle-stop-file should not error when ws-for-dir returns nil."
+  (claude-repl-test--with-clean-state
+    (let ((finished-called nil))
+      (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
+                 (lambda (_f) "/unknown/dir"))
+                ((symbol-function 'claude-repl--ws-for-dir)
+                 (lambda (_d) nil))
+                ((symbol-function 'claude-repl--on-claude-finished-from-hook)
+                 (lambda (_ws) (setq finished-called t)))
+                ((symbol-function 'delete-file) #'ignore))
+        (claude-repl--handle-stop-file "/tmp/stop_456")
+        (should-not finished-called)))))
+
+(ert-deftest claude-repl-test-handle-prompt-submit-sets-thinking ()
+  "handle-prompt-submit-file should set :thinking on the matching workspace."
+  (claude-repl-test--with-clean-state
+    (let ((thinking-ws nil))
+      (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
+                 (lambda (_f) "/some/dir"))
+                ((symbol-function 'claude-repl--ws-for-dir)
+                 (lambda (_d) "ws1"))
+                ((symbol-function 'claude-repl--mark-ws-thinking)
+                 (lambda (ws) (setq thinking-ws ws)))
+                ((symbol-function 'delete-file) #'ignore))
+        (claude-repl--handle-prompt-submit-file "/tmp/prompt_submit_789")
+        (should (equal thinking-ws "ws1"))))))
+
+(ert-deftest claude-repl-test-finished-from-hook-hidden-sets-done ()
+  "on-claude-finished-from-hook should set :done when vterm buffer is not visible."
+  (claude-repl-test--with-clean-state
+    (let ((done-set nil)
+          (fake-buf (generate-new-buffer " *test-hook-hidden*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
+            (cl-letf (((symbol-function 'get-buffer-window)
+                       (lambda (_buf &rest _) nil))
+                      ((symbol-function 'claude-repl--do-refresh) #'ignore)
+                      ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
+                      ((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
+                      ((symbol-function 'claude-repl--ws-set)
+                       (lambda (ws state)
+                         (when (eq state :done) (setq done-set ws)))))
+              (claude-repl--on-claude-finished-from-hook "ws1")
+              (should (equal done-set "ws1"))))
+        (kill-buffer fake-buf)))))
+
+(ert-deftest claude-repl-test-finished-from-hook-visible-no-done ()
+  "on-claude-finished-from-hook should NOT set :done when vterm buffer IS visible."
+  (claude-repl-test--with-clean-state
+    (let ((done-set nil)
+          (fake-buf (generate-new-buffer " *test-hook-visible*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
+            (cl-letf (((symbol-function 'get-buffer-window)
+                       (lambda (_buf &rest _) 'some-window))
+                      ((symbol-function 'claude-repl--do-refresh) #'ignore)
+                      ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
+                      ((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
+                      ((symbol-function 'claude-repl--ws-set)
+                       (lambda (ws state)
+                         (when (eq state :done) (setq done-set ws)))))
+              (claude-repl--on-claude-finished-from-hook "ws1")
+              (should-not done-set)))
+        (kill-buffer fake-buf)))))
+
+(ert-deftest claude-repl-test-maybe-notify-debounce ()
+  "maybe-notify-finished should debounce within 2 seconds."
+  (claude-repl-test--with-clean-state
+    (let ((notify-count 0))
+      (cl-letf (((symbol-function 'frame-focus-state) (lambda () nil))
+                ((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat fn &rest args)
+                   (cl-incf notify-count))))
+        ;; First call should notify
+        (claude-repl--maybe-notify-finished "ws1")
+        (should (= notify-count 1))
+        ;; Second call within 2s window should be suppressed
+        (claude-repl--maybe-notify-finished "ws1")
+        (should (= notify-count 1))
+        ;; Simulate time passing beyond debounce window
+        (claude-repl--ws-put "ws1" :last-notify-time (- (float-time) 3.0))
+        (claude-repl--maybe-notify-finished "ws1")
+        (should (= notify-count 2))))))
+
+(ert-deftest claude-repl-test-maybe-notify-skips-when-focused ()
+  "maybe-notify-finished should NOT send desktop notification when frame is focused."
+  (claude-repl-test--with-clean-state
+    (let ((notify-count 0))
+      (cl-letf (((symbol-function 'frame-focus-state) (lambda () t))
+                ((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat fn &rest args)
+                   (cl-incf notify-count))))
+        (claude-repl--maybe-notify-finished "ws1")
+        (should (= notify-count 0))))))
+
+(ert-deftest claude-repl-test-finished-from-hook-nil-vterm-no-done ()
+  "on-claude-finished-from-hook should NOT set :done when vterm-buf is nil."
+  (claude-repl-test--with-clean-state
+    (let ((done-set nil))
+      ;; Do NOT register :vterm-buffer for "ws1"
+      (cl-letf (((symbol-function 'claude-repl--do-refresh) #'ignore)
+                ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
+                ((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
+                ((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'claude-repl--ws-set)
+                 (lambda (ws state)
+                   (when (eq state :done) (setq done-set ws)))))
+        (claude-repl--on-claude-finished-from-hook "ws1")
+        (should-not done-set)))))
 
 ;;; test-claude-repl.el ends here

@@ -432,8 +432,8 @@ startup writes corrupting ~/.claude.json."
                     (run-with-timer delay nil
                                     (lambda ()
                                       (let ((default-directory claude-repl--main-git-root))
-                                        (claude-repl--do-create-worktree-workspace name nil nil prompt nil priority))))))
-                  (cl-incf create-delay 5))
+                                        (claude-repl--do-create-worktree-workspace name nil nil prompt nil priority))))
+                    (cl-incf create-delay 5)))
                  ((string= type "prompt")
                   (claude-repl--log "workspace-commands-file prompt: ws=%s" (alist-get 'workspace cmd))
                   (claude-repl--dispatch-prompt-command
@@ -486,7 +486,7 @@ state changes regardless of which persp the buffer drifts into.")
 (defcustom claude-repl-debug nil
   "Controls debug logging level.
 nil means no logging; t means standard logging; \\='verbose also includes
-high-frequency events (window changes, title spinner, resolve-root, poll-thinking)."
+high-frequency events (window changes, resolve-root)."
   :type '(choice (const :tag "Off" nil)
                  (const :tag "On" t)
                  (const :tag "Verbose" verbose))
@@ -1901,26 +1901,6 @@ Only sets stale if the workspace has no unstaged changes to tracked files."
 ;; already visible at the top, the bottom flash is redundant.
 (advice-add '+workspace/display :override #'ignore)
 
-;; Periodically redraw invisible claude vterm buffers in :thinking workspaces.
-;; This catches missed title transitions (e.g., Claude finished while we were
-;; on a different workspace and vterm never redrawed).
-(defun claude-repl--poll-thinking-workspaces ()
-  "Redraw invisible claude vterm buffers whose workspace is :thinking."
-  (dolist (buf (buffer-list))
-    (when (and (buffer-live-p buf)
-               (string-match-p "^\\*claude-[0-9a-f]+\\*$" (buffer-name buf))
-               (not (get-buffer-window buf))  ;; invisible
-               (with-current-buffer buf (eq major-mode 'vterm-mode)))
-      (let ((ws (or (buffer-local-value 'claude-repl--owning-workspace buf)
-                     (claude-repl--workspace-for-buffer buf))))
-        (when (and ws (eq (claude-repl--ws-state ws) :thinking))
-          (claude-repl--log-verbose "poll-thinking: redrawing %s (ws=%s)" (buffer-name buf) ws)
-          (with-current-buffer buf
-            (claude-repl--do-refresh)))))))
-
-(push (run-with-timer 5 5 #'claude-repl--poll-thinking-workspaces)
-      claude-repl--timers)
-
 ;; Periodically update all workspace states (catches git changes, etc.)
 (push (run-with-timer 1 1 #'claude-repl--update-all-workspace-states)
       claude-repl--timers)
@@ -1950,33 +1930,6 @@ Runs silently every 5 minutes to prevent data loss."
 (push (run-with-timer 300 300 #'claude-repl--autosave-workspace-buffers)
       claude-repl--timers)
 
-;; Title-based "Claude is done" detection.
-;; Claude Code sets the terminal title to "<spinner> Claude Code" while thinking
-;; and plain "Claude Code" when idle.  We poll via vterm--set-title advice.
-(defvar-local claude-repl--title-thinking nil
-  "Non-nil when the vterm title indicates Claude is thinking.
-Buffer-local so multiple Claude sessions don't interfere.")
-
-(defun claude-repl--title-has-spinner-p (title)
-  "Return non-nil if TITLE contains a spinner (i.e. not the idle ✳ icon)."
-  (and (> (length title) 0)
-       (not (string-prefix-p "✳" title))
-       (string-match-p "^[^[:ascii:]]" title)))
-
-(defun claude-repl--detect-title-transition (title)
-  "Classify a vterm TITLE change into a transition type.
-Returns a plist with:
-  :thinking    - non-nil if the new title has a spinner
-  :transition  - one of 'started, 'finished, or nil (no change)
-  :ws          - the owning workspace name for the current buffer, or nil"
-  (let* ((thinking (claude-repl--title-has-spinner-p title))
-         (ws (or claude-repl--owning-workspace
-                 (claude-repl--workspace-for-buffer (current-buffer))))
-         (transition (cond
-                      ((and thinking (not claude-repl--title-thinking)) 'started)
-                      ((and (not thinking) claude-repl--title-thinking) 'finished)
-                      (t nil))))
-    (list :thinking thinking :transition transition :ws ws)))
 
 (defun claude-repl--swap-placeholder ()
   "Replace the loading placeholder window with the real vterm buffer.
@@ -1995,27 +1948,35 @@ Called once when Claude sets its first terminal title (meaning it's ready)."
                        (kill-buffer placeholder)))))))
 
 (defun claude-repl--maybe-notify-finished (ws)
-  "Send a desktop notification that Claude finished in WS, if frame is unfocused."
+  "Send a desktop notification that Claude finished in WS, if frame is unfocused.
+Debounces per-workspace to avoid duplicate notifications when both the hook
+and title-change paths fire for the same turn completion."
   (claude-repl--log "maybe-notify-finished ws=%s focused=%s" ws (if (frame-focus-state) "yes" "no"))
-  (unless (frame-focus-state)
-    (run-at-time 0.1 nil #'claude-repl--notify "Claude REPL"
-                 (format "%s: Claude ready" ws))))
+  (let ((last (claude-repl--ws-get ws :last-notify-time))
+        (now  (float-time)))
+    (when (and (not (frame-focus-state))
+               (or (null last) (> (- now last) 2.0)))
+      (claude-repl--ws-put ws :last-notify-time now)
+      (run-at-time 0.1 nil #'claude-repl--notify "Claude REPL"
+                   (format "%s: Claude ready" ws)))))
 
-(defun claude-repl--on-claude-finished (ws)
-  "Handle Claude finishing work in workspace WS.
-Sets done state if buffer is hidden, refreshes display."
-  (claude-repl--log "on-claude-finished ws=%s visible=%s focused=%s"
-                    ws (if (get-buffer-window (current-buffer) t) "yes" "no")
-                    (if (frame-focus-state) "yes" "no"))
-  (unless (get-buffer-window (current-buffer) t)
-    (claude-repl--ws-set ws :done))
-  (claude-repl--refresh-vterm)
-  (claude-repl--update-hide-overlay)
-  (claude-repl--maybe-notify-finished ws)
-  (unless (string= ws (+workspace-current-name))
-    (message "Claude finished in workspace: %s" ws)
-    (run-at-time 0.1 nil #'claude-repl--notify "Claude REPL"
-                 (format "%s: Claude ready" ws))))
+(defun claude-repl--on-claude-finished-from-hook (ws)
+  "Handle Claude finishing in WS, called from file-notify hook.
+Looks up the vterm buffer from the workspace plist."
+  (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+    (claude-repl--log "on-claude-finished-from-hook ws=%s visible=%s"
+                      ws (if (and vterm-buf (get-buffer-window vterm-buf t)) "yes" "no"))
+    (when (and vterm-buf
+               (not (get-buffer-window vterm-buf t)))
+      (claude-repl--ws-set ws :done))
+    (when (and vterm-buf (buffer-live-p vterm-buf))
+      (with-current-buffer vterm-buf
+        (claude-repl--do-refresh)
+        (claude-repl--update-hide-overlay))
+      (claude-repl--fix-vterm-scroll vterm-buf))
+    (claude-repl--maybe-notify-finished ws)
+    (unless (string= ws (+workspace-current-name))
+      (message "Claude finished in workspace: %s" ws))))
 
 (defun claude-repl--capture-session-id (ws)
   "Scan ~/.claude/sessions/ for a running session matching WS's project root.
@@ -2086,37 +2047,18 @@ prompts (with a 0.3s delay), and auto-opens panels if appropriate."
             (claude-repl)))))))
 
 (defun claude-repl--on-title-change (title)
-  "Detect thinking->idle transition from vterm title changes."
-  (claude-repl--log-verbose "title-change buf=%s title=%s" (buffer-name) title)
+  "Detect first terminal title set to trigger ready handshake."
   (when (claude-repl--claude-buffer-p)
-    (claude-repl--handle-first-ready)
-    (let* ((info (claude-repl--detect-title-transition title))
-           (thinking (plist-get info :thinking))
-           (transition (plist-get info :transition))
-           (ws (plist-get info :ws)))
-      ;; Update buffer-local thinking state before side effects so
-      ;; re-entrant vterm--redraw calls see the current value and
-      ;; detect no transition (prevents infinite recursion).
-      (setq claude-repl--title-thinking thinking)
-      (when transition
-        (if (not ws)
-            (claude-repl--log "on-title-change: ws nil for buffer %s, transition %s skipped"
-                              (buffer-name) transition)
-          (claude-repl--log "title transition=%s ws=%s" transition ws)
-          (pcase transition
-            ('started  (claude-repl--ws-set ws :thinking))
-            ('finished (claude-repl--ws-clear ws :thinking)))
-          (when (eq transition 'finished)
-            (claude-repl--on-claude-finished ws))
-          (claude-repl--update-all-workspace-states))))))
+    (claude-repl--handle-first-ready)))
 
 
 (after! vterm
   (advice-add 'vterm--set-title :before #'claude-repl--on-title-change))
 
-;; Permission prompt detection via file-notify watcher.
-;; A Claude Code Notification hook writes the CWD to a sentinel file;
-;; we watch for it and set the permission state for the matching workspace.
+;; Workspace event detection via file-notify watcher.
+;; Claude Code hooks write the CWD to sentinel files in
+;; ~/.claude/workspace-notifications/; we watch the directory and dispatch
+;; by filename: permission_prompt, stop_*, prompt_submit_*.
 (defun claude-repl--ws-for-dir (dir)
   "Return the workspace name for a Claude session rooted at DIR, or nil."
   (when-let* ((root (claude-repl--git-root dir))
@@ -2124,26 +2066,62 @@ prompts (with a 0.3s delay), and auto-opens panels if appropriate."
               (buf (get-buffer (format "*claude-%s*" hash))))
     (claude-repl--workspace-for-buffer buf)))
 
-(defun claude-repl--on-permission-notify (event)
-  "Handle file-notify event for permission prompt sentinel file."
-  (let ((action (nth 1 event))
-        (file (nth 2 event)))
-    (when (and (memq action '(created changed))
-               (string-match-p "permission_prompt$" file))
-      (let ((ws (claude-repl--ws-for-dir
-                 (string-trim (with-temp-buffer
-                                (insert-file-contents file)
-                                (buffer-string))))))
-        (claude-repl--log "permission notify ws=%s" ws)
-        (unless ws
-          (error "claude-repl--on-permission-notify: no workspace for dir in %s" file))
+(defun claude-repl--read-sentinel-file (file)
+  "Read and trim the contents of sentinel FILE, or nil on error."
+  (condition-case nil
+      (string-trim (with-temp-buffer
+                     (insert-file-contents file)
+                     (buffer-string)))
+    (error nil)))
+
+(defun claude-repl--handle-permission-file (file)
+  "Process a permission_prompt sentinel FILE."
+  (let ((ws (claude-repl--ws-for-dir (claude-repl--read-sentinel-file file))))
+    (claude-repl--log "permission notify ws=%s" ws)
+    (if ws
         (claude-repl--ws-set ws :permission)
-        (delete-file file)))))
+      (claude-repl--log "handle-permission-file: no workspace for %s" file))
+    (ignore-errors (delete-file file))))
+
+(defun claude-repl--handle-stop-file (file)
+  "Process a stop sentinel FILE written by the Stop hook.
+Clears :thinking, runs the hook-aware finished handler, deletes FILE."
+  (let* ((dir (claude-repl--read-sentinel-file file))
+         (ws  (when dir (claude-repl--ws-for-dir dir))))
+    (claude-repl--log "stop notify ws=%s dir=%s" ws dir)
+    (when ws
+      (claude-repl--ws-clear ws :thinking)
+      (claude-repl--on-claude-finished-from-hook ws))
+    (ignore-errors (delete-file file))))
+
+(defun claude-repl--handle-prompt-submit-file (file)
+  "Process a prompt_submit sentinel FILE.
+Sets :thinking on the matching workspace."
+  (let* ((dir (claude-repl--read-sentinel-file file))
+         (ws  (when dir (claude-repl--ws-for-dir dir))))
+    (claude-repl--log "prompt-submit notify ws=%s dir=%s" ws dir)
+    (when ws
+      (claude-repl--mark-ws-thinking ws))
+    (ignore-errors (delete-file file))))
+
+(defun claude-repl--on-workspace-notify (event)
+  "Handle file-notify event for workspace notification sentinel files.
+Dispatches by filename: permission_prompt, stop_*, prompt_submit_*."
+  (let ((action (nth 1 event))
+        (file   (nth 2 event)))
+    (when (memq action '(created changed))
+      (cond
+       ((string-match-p "/permission_prompt$" file)
+        (claude-repl--handle-permission-file file))
+       ((string-match-p "/stop_" file)
+        (claude-repl--handle-stop-file file))
+       ((string-match-p "/prompt_submit_" file)
+        (claude-repl--handle-prompt-submit-file file))))))
 
 (require 'filenotify)
 (let ((dir (expand-file-name "~/.claude/workspace-notifications")))
   (make-directory dir t)
-  (file-notify-add-watch dir '(change) #'claude-repl--on-permission-notify))
+  (file-notify-add-watch dir '(change) #'claude-repl--on-workspace-notify))
 
 (defun claude-repl--do-refresh ()
   "Low-level refresh of the current vterm buffer.
@@ -3152,11 +3130,10 @@ Use this to verify the processor works independently of the file watcher."
   (let (result)
     (dolist (buf (buffer-list))
       (when (string-match-p "^\\*claude-[0-9a-f]+\\*$" (buffer-name buf))
-        (push (format "  %s  owning=%s  persp=%s  thinking=%s"
+        (push (format "  %s  owning=%s  persp=%s"
                       (buffer-name buf)
                       (or (buffer-local-value 'claude-repl--owning-workspace buf) "nil")
-                      (or (claude-repl--workspace-for-buffer buf) "nil")
-                      (buffer-local-value 'claude-repl--title-thinking buf))
+                      (or (claude-repl--workspace-for-buffer buf) "nil"))
               result)))
     (message "Claude buffers:\n%s"
              (if result (mapconcat #'identity (nreverse result) "\n") "  (none)"))))
@@ -3205,8 +3182,7 @@ Kills claude buffers, closes windows, and removes all state."
 (defun claude-repl-debug/toggle-logging (&optional verbose)
   "Toggle debug logging.
 With prefix argument (\\[universal-argument]), toggle verbose mode instead, which
-additionally logs high-frequency events: window changes, title spinner,
-resolve-root, and poll-thinking redraws."
+additionally logs high-frequency events: window changes and resolve-root."
   (interactive "P")
   (setq claude-repl-debug
         (if verbose
@@ -3297,9 +3273,6 @@ Reports comprehensive diagnostics."
                              when (and (buffer-live-p buf)
                                        (claude-repl--claude-buffer-p buf))
                              return buf))
-         ;; Read buffer-local state from the vterm buffer
-         (title-thinking (and vterm-buf
-                              (buffer-local-value 'claude-repl--title-thinking vterm-buf)))
          (proc (and vterm-buf (get-buffer-process vterm-buf)))
          (proc-alive (and proc (process-live-p proc)))
          (owning-ws (and vterm-buf
@@ -3315,13 +3288,13 @@ Reports comprehensive diagnostics."
       (force-mode-line-update t)
       (message (concat "Workspace %s:\n"
                        "  vterm-buf=%s process=%s\n"
-                       "  owning-ws=%s title-thinking=%s has-window=%s\n"
+                       "  owning-ws=%s has-window=%s\n"
                        "  claude-open=%s dirty=%s\n"
                        "  state=%s -> %s")
                ws-name
                (and vterm-buf (buffer-name vterm-buf))
                (if proc-alive "alive" "dead/nil")
-               (or owning-ws "nil") title-thinking (if has-window "yes" "no")
+               (or owning-ws "nil") (if has-window "yes" "no")
                (if open "yes" "no") (if dirty "yes" "no")
                (or before "nil") (or after "nil")))))
 
