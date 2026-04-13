@@ -654,31 +654,32 @@ Tries git root, then buffer-local project root, then `default-directory'."
 
 (defun claude-repl--resolve-sandbox-config (git-root)
   "Return a plist (:image IMAGE :script SCRIPT) for a worktree at GIT-ROOT.
-Tries .claude/sandbox/image first (new layout), then .claude/sandbox-image (legacy).
-Returns nil if no image file exists or the image is not present locally.
-Returns (:needs-build t :install-script PATH) if the image file exists but the
-Docker image has not been built yet."
-  (let* ((new-image-file (expand-file-name ".claude/sandbox/image" git-root))
-         (old-image-file (expand-file-name ".claude/sandbox-image" git-root))
-         (image-file (cond ((file-readable-p new-image-file) new-image-file)
-                           ((file-readable-p old-image-file) old-image-file)))
-         (new-layout (equal image-file new-image-file)))
-    (when image-file
-      (let* ((image (string-trim (with-temp-buffer
-                                   (insert-file-contents image-file)
-                                   (buffer-string))))
-             (script (expand-file-name (if new-layout
-                                           ".claude/sandbox/claude-sandbox"
-                                         ".claude/claude-sandbox")
-                                       git-root)))
-        (if (string-empty-p image)
-            (progn (message "[claude-repl] sandbox image file is empty in %s" git-root) nil)
-          (if (claude-repl--docker-image-exists-p image)
-              (list :image image :script script)
-            (let ((install-script (expand-file-name ".claude/sandbox/install.sh" git-root)))
-              (list :needs-build t
-                    :image image
-                    :install-script (when (file-executable-p install-script) install-script)))))))))
+Detects sandbox support by looking for the `claude-sandbox' launcher on PATH
+or `.agents-sandbox/sandbox' in the repo.  Queries the launcher's --image-name
+flag to determine the Docker image.
+Returns nil if no sandbox launcher is found.
+Returns (:needs-build t :install-script PATH) if the image is not built yet."
+  (let* ((installed (executable-find "claude-sandbox"))
+         (in-repo (let ((f (expand-file-name ".agents-sandbox/sandbox" git-root)))
+                    (when (file-executable-p f) f)))
+         (script (or installed in-repo)))
+    (when script
+      (let* ((image (string-trim
+                     (with-output-to-string
+                       (with-current-buffer standard-output
+                         (call-process script nil t nil "--image-name")))))
+             (install-script (let ((f (expand-file-name ".agents-sandbox/install-claude.sh" git-root)))
+                               (when (file-executable-p f) f))))
+        (cond
+         ((string-empty-p image)
+          (message "[claude-repl] sandbox launcher returned empty image name in %s" git-root)
+          nil)
+         ((claude-repl--docker-image-exists-p image)
+          (list :image image :script script))
+         (t
+          (list :needs-build t
+                :image image
+                :install-script install-script)))))))
 
 (defun claude-repl--start-claude ()
   "Send the claude startup command to the current vterm buffer.
@@ -711,7 +712,7 @@ Falls back to bare-metal Claude otherwise."
                     (when (y-or-n-p (format "Sandbox image '%s' not built. Run install.sh now? " image))
                       (compile (format "bash %s" install-script))
                       (user-error "Run 'SPC o c' again once the build completes"))
-                  (user-error "Sandbox image '%s' not built — run .claude/sandbox/install.sh manually" image)))))
+                  (user-error "Sandbox image '%s' not built — run .agents-sandbox/install-claude.sh manually" image)))))
          (docker-image (and (not (plist-get sandbox-config :needs-build))
                             (plist-get sandbox-config :image)))
          ;; For docker: claude-sandbox script handles permission mode automatically.
