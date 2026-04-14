@@ -502,6 +502,8 @@ Used for high-frequency, low-signal events."
   (when (eq claude-repl-debug 'verbose)
     (apply #'message (concat (format-time-string "%H:%M:%S.%3N") " [claude-repl] " fmt) args)))
 
+(require 'filenotify)
+
 (make-directory (expand-file-name "~/.claude/output/") t)
 (when (and claude-repl--workspace-generation-watch
            (file-notify-valid-p claude-repl--workspace-generation-watch))
@@ -2022,12 +2024,19 @@ prompts (with a 0.3s delay), and auto-opens panels if appropriate."
                                  (claude-repl--send p ws))))))
             ;; Open panels now if on this workspace, otherwise defer until switch.
             ;; claude-repl--on-workspace-switch checks :pending-show-panels.
+            ;; Skip if the loading placeholder is still visible — --swap-placeholder
+            ;; handles the visual transition and calling claude-repl here would
+            ;; trigger --show-existing-panels with the wrong selected window.
             (if (string= ws (+workspace-current-name))
-                (claude-repl)
+                (unless (when-let ((ph (get-buffer " *claude-loading*")))
+                          (get-buffer-window ph))
+                  (claude-repl))
               (claude-repl--ws-put ws :pending-show-panels t)))
         (progn
           (claude-repl--log "first-ready no pending prompts for ws=%s" ws)
-          (when (string= ws (+workspace-current-name))
+          (when (and (string= ws (+workspace-current-name))
+                     (not (when-let ((ph (get-buffer " *claude-loading*")))
+                            (get-buffer-window ph))))
             (claude-repl)))))))
 
 (defun claude-repl--on-title-change (title)
