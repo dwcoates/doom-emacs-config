@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 You may be running inside a Docker sandbox (`doom-sandbox`). If so:
 
 - **Never attempt to circumvent or escape the sandbox.** Do not try to access the host system, modify Docker configuration, or work around container restrictions in any way.
-- **If a tool or binary is missing**, stop immediately. Do not try to install it yourself or find workarounds. Instead, propose the exact change needed to `.claude/Dockerfile` and ask the user to rebuild the image by running `.claude/install.sh`. Wait for explicit confirmation before proceeding.
+- **If a tool or binary is missing**, stop immediately. Do not try to install it yourself or find workarounds. Instead, propose the exact change needed to `.agents-sandbox/Dockerfile` and ask the user to rebuild the image. Wait for explicit confirmation before proceeding.
+- The sandbox configuration lives in **`.agents-sandbox/`** (not `.claude/`). See that directory for the `Dockerfile`, `mounts.sample`, and other sandbox infrastructure.
 - The sandbox is intentional. Treat missing tools as a signal that the Dockerfile needs updating, not a problem to solve inline.
 
 ## Repository Overview
@@ -108,5 +109,14 @@ Set these environment variables for full functionality:
 - Idle GC collection every 5 seconds
 - Increased GC threshold during minibuffer operations
 - Projectile uses 'alien indexing for large projects
+
+## Testing Requirements
+
+- **Always run tests after making changes.** Before considering any code change complete, run the relevant test suite to verify nothing is broken. For `modules/app/claude-repl/`, run:
+  ```bash
+  emacs -batch -Q -l ert -l test-<module>.el -f ert-run-tests-batch-and-exit
+  ```
+- **Every new addition or change must have corresponding test cases.** New functions get new tests. Changed behavior requires updated or new tests that cover the change. One test per edge case -- no test should cover more than one edge case.
+- **One test file per source module.** Tests for `status.el` go in `test-status.el`, tests for `sentinel.el` go in `test-sentinel.el`, etc.
 
 DO NOT MAKE CHANGES TO CODE UNLESS EXPLICITLY ASKED OR SUGGESTED. If the prompt is a question or aside, do not come to own conclusions on changes to make -- answer question and, if you feel like it, suggest the change inferred while answering.

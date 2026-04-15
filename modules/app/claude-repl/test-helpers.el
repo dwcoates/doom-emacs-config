@@ -1,0 +1,173 @@
+;;; test-helpers.el --- Shared test infrastructure for claude-repl -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; Shared stub layer and test utilities for all claude-repl test files.
+;; Each per-module test file should load this before defining tests:
+;;
+;;   (load (expand-file-name "test-helpers.el" (file-name-directory
+;;                                               (or load-file-name buffer-file-name)))
+;;         nil t)
+
+;;; Code:
+
+(require 'ert)
+(require 'cl-lib)
+(require 'subr-x)
+
+;;;; ---- Stub layer ----
+;; Provide no-op stubs for Doom/vterm/evil/persp APIs so we can load
+;; config.el in a vanilla Emacs -Q environment.
+
+;; Doom macros
+(unless (fboundp 'after!)
+  (defmacro after! (_feature &rest body)
+    "No-op stub: ignore FEATURE, just execute BODY."
+    `(progn ,@body)))
+
+(unless (fboundp 'map!)
+  (defmacro map! (&rest _args)
+    "No-op stub: ignore all keybinding declarations."
+    nil))
+
+(unless (fboundp 'cmd!)
+  (defmacro cmd! (&rest body)
+    "No-op stub: return a lambda wrapping BODY."
+    `(lambda () (interactive) ,@body)))
+
+(unless (fboundp 'modulep!)
+  (defmacro modulep! (&rest _args)
+    "No-op stub: always return nil."
+    nil))
+
+(unless (fboundp 'load!)
+  (defmacro load! (filename &optional path noerror)
+    "Stub: load FILENAME relative to the current file's directory."
+    `(load (expand-file-name ,filename
+                             ,(or path '(file-name-directory
+                                         (or load-file-name buffer-file-name))))
+           nil ,(if noerror noerror t))))
+
+;; Doom workspace API
+(unless (fboundp '+workspace-current-name)
+  (defun +workspace-current-name ()
+    "Stub: return test workspace name."
+    "test-ws"))
+
+(unless (fboundp '+workspace-list-names)
+  (defun +workspace-list-names ()
+    "Stub: return list of workspace names."
+    '("test-ws" "other-ws")))
+
+(unless (fboundp '+workspace/display)
+  (defun +workspace/display ()
+    "Stub: no-op."
+    nil))
+
+(unless (fboundp '+workspace--tabline)
+  (defun +workspace--tabline (&optional _names)
+    "Stub: return empty string."
+    ""))
+
+;; Doom faces used by tabline
+(unless (facep '+workspace-tab-selected-face)
+  (defface +workspace-tab-selected-face '((t :weight bold)) "Stub face."))
+(unless (facep '+workspace-tab-face)
+  (defface +workspace-tab-face '((t)) "Stub face."))
+
+;; Doom leader map
+(unless (boundp 'doom-leader-map)
+  (defvar doom-leader-map (make-sparse-keymap) "Stub leader keymap."))
+
+;; vterm stubs
+(unless (fboundp 'vterm-mode)
+  (defun vterm-mode () "Stub." nil))
+(unless (fboundp 'vterm-send-string)
+  (defun vterm-send-string (&rest _args) "Stub." nil))
+(unless (fboundp 'vterm-send-return)
+  (defun vterm-send-return () "Stub." nil))
+(unless (fboundp 'vterm-send-key)
+  (defun vterm-send-key (&rest _args) "Stub." nil))
+(unless (fboundp 'vterm-send-down)
+  (defun vterm-send-down () "Stub." nil))
+(unless (fboundp 'vterm-send-up)
+  (defun vterm-send-up () "Stub." nil))
+(unless (fboundp 'vterm-reset-cursor-point)
+  (defun vterm-reset-cursor-point () "Stub." nil))
+(unless (fboundp 'vterm--redraw)
+  (defun vterm--redraw (&rest _args) "Stub." nil))
+(unless (fboundp 'vterm--set-title)
+  (defun vterm--set-title (&rest _args) "Stub." nil))
+(unless (boundp 'vterm--term)
+  (defvar vterm--term nil "Stub."))
+
+;; evil stubs
+(unless (fboundp 'evil-insert-state)
+  (defun evil-insert-state () "Stub." nil))
+(unless (fboundp 'evil-window-left)
+  (defun evil-window-left (&rest _args) "Stub." nil))
+(unless (fboundp 'evil-define-key)
+  (defun evil-define-key (&rest _args) "Stub." nil))
+
+;; persp-mode stubs
+(unless (boundp 'persp-mode)
+  (defvar persp-mode nil "Stub."))
+(unless (fboundp 'persp-persps)
+  (defun persp-persps () "Stub." nil))
+(unless (fboundp 'persp-contain-buffer-p)
+  (defun persp-contain-buffer-p (_buf _persp) "Stub." nil))
+(unless (fboundp 'safe-persp-name)
+  (defun safe-persp-name (persp) "Stub." persp))
+
+;; filenotify stub (prevent side effects at load time)
+(require 'filenotify)
+(unless (fboundp 'file-notify-add-watch--orig)
+  ;; Save original and replace with no-op during test loading
+  (defalias 'file-notify-add-watch--orig #'file-notify-add-watch)
+  (defun file-notify-add-watch--test-stub (_dir _flags _callback)
+    "Stub: no-op for tests."
+    nil)
+  (advice-add 'file-notify-add-watch :override #'file-notify-add-watch--test-stub))
+
+;; Suppress timers at load time
+(defvar claude-repl-test--orig-run-with-timer (symbol-function 'run-with-timer))
+(advice-add 'run-with-timer :override (lambda (&rest _) nil))
+
+;; Load the module
+(load (expand-file-name "config.el" (file-name-directory
+                                      (or load-file-name buffer-file-name)))
+      nil t)
+
+;; Restore run-with-timer after loading
+(advice-remove 'run-with-timer (lambda (&rest _) nil))
+
+;; Restore file-notify-add-watch after loading
+(advice-remove 'file-notify-add-watch #'file-notify-add-watch--test-stub)
+
+;;;; ---- Test utilities ----
+
+(defmacro claude-repl-test--with-clean-state (&rest body)
+  "Execute BODY with fresh claude-repl global state."
+  (declare (indent 0))
+  `(let ((claude-repl--workspaces (make-hash-table :test 'equal))
+         (claude-repl--fullscreen-config nil)
+         (claude-repl--sync-timer nil)
+         (claude-repl--cursor-reset-timer nil)
+         (claude-repl--hide-overlay-refcount 0)
+         (claude-repl-debug nil))
+     ,@body))
+
+(defmacro claude-repl-test--with-temp-buffer (name &rest body)
+  "Create a temp buffer named NAME, execute BODY, kill buffer after."
+  (declare (indent 1))
+  (let ((buf-sym (make-symbol "buf")))
+    `(let ((,buf-sym (get-buffer-create ,name)))
+       (unwind-protect
+           (with-current-buffer ,buf-sym
+             ,@body)
+         (when (buffer-live-p ,buf-sym)
+           (kill-buffer ,buf-sym))))))
+
+(provide 'test-helpers)
+
+;;; test-helpers.el ends here

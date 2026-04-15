@@ -847,7 +847,7 @@ If found, the class name is returned, otherwise STR is returned"
 (defun +dwc/switch-to-project-buffer ()
   "Switch to a project buffer, with file paths searchable in Ivy."
   (interactive)
-  (let* ((buffers (claude-repl--user-buffers (projectile-project-buffer-names)))
+  (let* ((buffers (claude-repl--non-claude-buffers (projectile-project-buffer-names)))
          (candidates
           (mapcar (lambda (name)
                     (let* ((buf (get-buffer name))
@@ -948,7 +948,7 @@ If found, the class name is returned, otherwise STR is returned"
 (defun +dwc/toggle-last-buffer ()
   "Toggle between the last two buffers, excluding Claude REPL and minibuffers."
   (interactive)
-  (let ((buf (car (claude-repl--user-buffers
+  (let ((buf (car (claude-repl--non-claude-buffers
                    (cl-remove (current-buffer) (buffer-list))))))
     (when buf (switch-to-buffer buf))))
 
