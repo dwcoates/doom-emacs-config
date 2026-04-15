@@ -109,6 +109,25 @@
 (unless (fboundp 'evil-define-key)
   (defun evil-define-key (&rest _args) "Stub." nil))
 
+;; magit stubs
+(unless (fboundp 'magit-current-section)
+  (defun magit-current-section () "Stub." nil))
+(unless (fboundp 'magit-file-at-point)
+  (defun magit-file-at-point () "Stub." nil))
+(unless (fboundp 'magit-toplevel)
+  (defun magit-toplevel () "Stub." nil))
+(unless (fboundp 'magit-section-match)
+  (defun magit-section-match (_type) "Stub." nil))
+(unless (fboundp 'magit-status)
+  (defun magit-status (&rest _args) "Stub." nil))
+
+;; eieio stubs — the source uses eieio-oref (the runtime function
+;; underlying the `oref' macro) so it can be stubbed in tests.
+(unless (fboundp 'eieio-oref)
+  (defun eieio-oref (_obj _slot)
+    "Stub: return nil."
+    nil))
+
 ;; persp-mode stubs
 (unless (boundp 'persp-mode)
   (defvar persp-mode nil "Stub."))

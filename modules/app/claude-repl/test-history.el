@@ -531,6 +531,7 @@
       (unwind-protect
           (claude-repl-test--with-temp-buffer " *test-hist-round-trip*"
             (setq-local claude-repl--project-root tmpdir)
+            (setq-local default-directory tmpdir)
             (setq-local claude-repl--input-history '("third" "second" "first"))
             (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
             ;; Save

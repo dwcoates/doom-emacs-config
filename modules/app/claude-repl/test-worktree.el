@@ -957,6 +957,8 @@ Returns the full SHA of the new commit."
           (with-current-buffer proc-buf
             (insert "  git output here  "))
           (let ((proc (start-process "test-sentinel" proc-buf "true")))
+            ;; Prevent default sentinel from inserting status text into buffer
+            (set-process-sentinel proc #'ignore)
             ;; Wait for process to finish
             (while (process-live-p proc)
               (accept-process-output proc 0.1))
@@ -980,6 +982,8 @@ Returns the full SHA of the new commit."
           (with-current-buffer proc-buf
             (insert "fatal: error message"))
           (let ((proc (start-process "test-sentinel" proc-buf "false")))
+            ;; Prevent default sentinel from inserting status text into buffer
+            (set-process-sentinel proc #'ignore)
             ;; Wait for process to finish
             (while (process-live-p proc)
               (accept-process-output proc 0.1))

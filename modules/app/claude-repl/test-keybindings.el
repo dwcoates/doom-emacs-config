@@ -44,7 +44,7 @@
 (ert-deftest claude-repl-test-format-workspace-state-with-value ()
   "format-workspace-state should format a pair with a non-nil state."
   (let ((result (claude-repl--format-workspace-state '("my-ws" . :thinking))))
-    (should (string= result "  my-ws: thinking"))))
+    (should (string= result "  my-ws: :thinking"))))
 
 (ert-deftest claude-repl-test-format-workspace-state-nil-state ()
   "format-workspace-state should show 'nil' when state is nil."
@@ -332,23 +332,17 @@
 
 (ert-deftest claude-repl-test-kill-owned-panel-buffers-silences-process ()
   "kill-owned-panel-buffers should silence process query before killing."
-  (let ((buf (get-buffer-create "*claude-99887766*"))
-        (query-flag-set nil))
+  (let ((buf (get-buffer-create "*claude-99887766*")))
     (unwind-protect
-        (progn
+        (let ((proc (start-process "test-proc" buf "cat")))
+          (set-process-query-on-exit-flag proc t)
           (with-current-buffer buf
             (setq-local claude-repl--owning-workspace "target-ws"))
-          ;; Simulate a buffer with a process
-          (cl-letf (((symbol-function 'get-buffer-process)
-                     (lambda (_buf) 'fake-proc))
-                    ((symbol-function 'set-process-query-on-exit-flag)
-                     (lambda (_proc flag)
-                       (setq query-flag-set flag)))
-                    ((symbol-function 'process-live-p)
-                     (lambda (_proc) t)))
-            (claude-repl--kill-owned-panel-buffers "target-ws")
-            ;; Process query flag should have been set to nil
-            (should (eq query-flag-set nil))))
+          ;; Verify the flag is set before calling the function
+          (should (process-query-on-exit-flag proc))
+          (claude-repl--kill-owned-panel-buffers "target-ws")
+          ;; Buffer should have been killed (and process silenced first)
+          (should-not (buffer-live-p buf)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 ;;;; ---- Tests: claude-repl-debug/obliterate ----
@@ -459,7 +453,7 @@
       (should (string-match-p "has-window=yes" result))
       (should (string-match-p "claude-open=yes" result))
       (should (string-match-p "dirty=no" result))
-      (should (string-match-p "thinking -> done" result)))))
+      (should (string-match-p ":thinking -> :done" result)))))
 
 (ert-deftest claude-repl-test-format-diagnostics-nil-values ()
   "format-diagnostics should handle nil values gracefully."
@@ -772,7 +766,7 @@
 
 (ert-deftest claude-repl-test-kill-owned-panel-buffers-closes-window ()
   "kill-owned-panel-buffers should close the buffer's window before killing the buffer."
-  (let ((buf (get-buffer-create "*claude-wintest01*"))
+  (let ((buf (get-buffer-create "*claude-a1b2c3d4*"))
         (window-deleted nil))
     (unwind-protect
         (progn

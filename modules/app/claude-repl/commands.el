@@ -112,7 +112,7 @@ Without region: returns file:line."
 Returns a \"file:startline-endline\" string based on the hunk's to-range."
   (let* ((section (magit-current-section))
          (file (magit-file-at-point))
-         (range (oref section to-range))
+         (range (eieio-oref section 'to-range))
          (start (car range))
          (len (cadr range))
          (end (+ start len -1))

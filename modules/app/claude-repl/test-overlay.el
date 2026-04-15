@@ -338,7 +338,7 @@
   "While executing, the advice should set `claude-repl--in-redraw-advice' to t."
   (claude-repl-test--with-clean-state
     (let ((flag-during-update nil))
-      (claude-repl-test--with-temp-buffer "*claude-flagcheck*"
+      (claude-repl-test--with-temp-buffer "*claude-f1a9c4ec*"
         (cl-letf (((symbol-function 'claude-repl--update-hide-overlay)
                    (lambda ()
                      (setq flag-during-update claude-repl--in-redraw-advice))))
