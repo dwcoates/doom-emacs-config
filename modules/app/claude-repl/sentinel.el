@@ -216,19 +216,29 @@ Returns non-nil if a handler was found and called."
   "Handle file-notify EVENT for workspace notification sentinel files.
 Dispatches by filename via `claude-repl--sentinel-dispatch-alist'.
 Skips files that no longer exist (file-notify often fires multiple events
-for a single file creation; the first handler deletes the file)."
+for a single file creation; the first handler deletes the file).
+Ignores events whose file is nil (e.g. `stopped' events fired when a
+watch is removed) and events on the hook debug log, which is pure
+noise — same filter as the poll path."
   (let* ((descriptor (nth 0 event))
          (action     (nth 1 event))
          (file       (nth 2 event))
-         (fname      (file-name-nondirectory file))
-         (exists     (file-exists-p file)))
-    (claude-repl--log nil ">>> SENTINEL EVENT: action=%s file=%s exists=%s descriptor=%S event=%S"
-                      action fname exists descriptor event)
-    (if (and (memq action '(created changed)) exists)
-        (let ((result (claude-repl--dispatch-sentinel-file file)))
-          (claude-repl--log nil ">>> SENTINEL EVENT DONE: file=%s dispatched=%s" fname result))
-      (claude-repl--log nil ">>> SENTINEL EVENT SKIPPED: action=%s file=%s exists=%s (need created/changed + exists)"
-                        action fname exists))))
+         (fname      (and (stringp file) (file-name-nondirectory file))))
+    (cond
+     ((not (stringp file))
+      (claude-repl--log nil ">>> SENTINEL EVENT SKIPPED: action=%s no file in event=%S"
+                        action event))
+     ((string= fname "hook-debug.log")
+      nil)
+     (t
+      (let ((exists (file-exists-p file)))
+        (claude-repl--log nil ">>> SENTINEL EVENT: action=%s file=%s exists=%s descriptor=%S event=%S"
+                          action fname exists descriptor event)
+        (if (and (memq action '(created changed)) exists)
+            (let ((result (claude-repl--dispatch-sentinel-file file)))
+              (claude-repl--log nil ">>> SENTINEL EVENT DONE: file=%s dispatched=%s" fname result))
+          (claude-repl--log nil ">>> SENTINEL EVENT SKIPPED: action=%s file=%s exists=%s (need created/changed + exists)"
+                            action fname exists)))))))
 
 ;;; Polling fallback
 
@@ -265,12 +275,53 @@ by the file-notify watcher and needs processing."
 Stored so we can remove the old watcher before registering a new one
 when sentinel.el is reloaded.")
 
+(defun claude-repl--reap-sentinel-watchers ()
+  "Remove every file-notify watcher on `claude-repl--sentinel-dir'.
+Returns the count removed.  Iterates `file-notify-descriptors' rather
+than relying on `claude-repl--sentinel-watch-descriptor', so it also
+reclaims descriptors leaked across module reloads where that variable
+lost track of the old descriptor."
+  (let ((target (file-truename claude-repl--sentinel-dir))
+        (removed 0))
+    (maphash
+     (lambda (desc watch)
+       (let ((watch-dir (cond
+                         ((and (fboundp 'file-notify--watch-p)
+                               (file-notify--watch-p watch))
+                          (file-notify--watch-directory watch))
+                         ((consp watch) (car watch)))))
+         (when (and watch-dir (string= (file-truename watch-dir) target))
+           (file-notify-rm-watch desc)
+           (cl-incf removed))))
+     file-notify-descriptors)
+    removed))
+
+(defun claude-repl-reset-sentinel-watchers ()
+  "Remove all file-notify watchers on the sentinel dir and re-register one.
+Interactive recovery for the reload-accumulated duplicate-watcher case."
+  (interactive)
+  (let ((removed (claude-repl--reap-sentinel-watchers)))
+    (setq claude-repl--sentinel-watch-descriptor
+          (file-notify-add-watch claude-repl--sentinel-dir '(change)
+                                 #'claude-repl--dispatch-sentinel-event))
+    (message "claude-repl: removed %d stale watcher(s); new descriptor=%S"
+             removed claude-repl--sentinel-watch-descriptor)))
+
+(defun claude-repl-nuke-sentinel-watchers ()
+  "Remove every file-notify watcher on the sentinel dir WITHOUT re-registering.
+Intended for testing: after nuking, re-eval sentinel.el (or just the
+top-level init block) and confirm that exactly one watcher is created.
+Useful to verify the init-time reap logic works without restarting Emacs."
+  (interactive)
+  (let ((removed (claude-repl--reap-sentinel-watchers)))
+    (setq claude-repl--sentinel-watch-descriptor nil)
+    (message "claude-repl: nuked %d sentinel watcher(s) — no replacement registered"
+             removed)))
+
 (make-directory claude-repl--sentinel-dir t)
-(when (and claude-repl--sentinel-watch-descriptor
-           (file-notify-valid-p claude-repl--sentinel-watch-descriptor))
-  (claude-repl--log nil "sentinel-init: removing stale watcher descriptor=%S"
-                    claude-repl--sentinel-watch-descriptor)
-  (file-notify-rm-watch claude-repl--sentinel-watch-descriptor))
+(let ((reaped (claude-repl--reap-sentinel-watchers)))
+  (when (> reaped 0)
+    (claude-repl--log nil "sentinel-init: reaped %d stale watcher(s)" reaped)))
 (setq claude-repl--sentinel-watch-descriptor
       (file-notify-add-watch claude-repl--sentinel-dir '(change)
                              #'claude-repl--dispatch-sentinel-event))

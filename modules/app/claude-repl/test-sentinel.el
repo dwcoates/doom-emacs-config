@@ -44,6 +44,26 @@
         (claude-repl--dispatch-sentinel-event '(nil created "/dir/permission_prompt"))
         (should-not process-called)))))
 
+(ert-deftest claude-repl-test-sentinel-event-ignores-hook-debug-log ()
+  "Events for hook-debug.log should be ignored before dispatch.
+Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
+  (claude-repl-test--with-clean-state
+    (let ((dispatched nil))
+      (cl-letf (((symbol-function 'claude-repl--dispatch-sentinel-file)
+                 (lambda (_f) (setq dispatched t) t)))
+        (claude-repl--dispatch-sentinel-event '(nil changed "/dir/hook-debug.log"))
+        (should-not dispatched)))))
+
+(ert-deftest claude-repl-test-sentinel-event-tolerates-nil-file ()
+  "An event with no file (e.g. `stopped') should be skipped without crashing."
+  (claude-repl-test--with-clean-state
+    (let ((dispatched nil))
+      (cl-letf (((symbol-function 'claude-repl--dispatch-sentinel-file)
+                 (lambda (_f) (setq dispatched t) t)))
+        ;; Must not error even though the file slot is nil.
+        (claude-repl--dispatch-sentinel-event '(nil stopped nil))
+        (should-not dispatched)))))
+
 ;;;; ---- Tests: dispatch-sentinel-file prefix matching ----
 
 (ert-deftest claude-repl-test-sentinel-dispatches-permission ()
@@ -272,8 +292,11 @@
 (ert-deftest claude-repl-test-ws-for-dir-fast-hit ()
   "ws-for-dir-fast should return workspace when git-root -> hash -> buffer -> ws all resolve."
   (claude-repl-test--with-clean-state
-    (let* ((test-root "/home/user/project")
-           (hash (substring (md5 (claude-repl--path-canonical test-root)) 0 8))
+    ;; Use the canonical form throughout so hash calc matches the real
+    ;; --git-root's post-canonicalization behavior regardless of platform
+    ;; (e.g. macOS firmlinks rewrite /home → /System/Volumes/Data/home).
+    (let* ((test-root (claude-repl--path-canonical "/home/user/project"))
+           (hash (substring (md5 test-root) 0 8))
            (buf-name (format "*claude-%s*" hash))
            (buf (get-buffer-create buf-name)))
       (unwind-protect
@@ -281,7 +304,8 @@
                      (lambda (_d) test-root))
                     ((symbol-function 'claude-repl--workspace-for-buffer)
                      (lambda (_b) "my-workspace")))
-            (should (equal (claude-repl--ws-for-dir-fast "/home/user/project/subdir")
+            (should (equal (claude-repl--ws-for-dir-fast
+                            (concat test-root "/subdir"))
                            "my-workspace")))
         (when (buffer-live-p buf)
           (kill-buffer buf))))))
@@ -429,18 +453,28 @@
 (ert-deftest claude-repl-test-poll-dispatches-orphaned-files ()
   "poll-workspace-notifications should dispatch files in the sentinel directory."
   (claude-repl-test--with-clean-state
-    (let ((dispatched-files nil))
-      (cl-letf (((symbol-function 'file-directory-p) (lambda (_d) t))
-                ((symbol-function 'directory-files)
-                 (lambda (_dir _full _match _nosort)
-                   '("/sentinel/stop_abc" "/sentinel/permission_prompt")))
-                ((symbol-function 'file-exists-p) (lambda (_f) t))
-                ((symbol-function 'claude-repl--dispatch-sentinel-file)
-                 (lambda (f) (push f dispatched-files) t)))
-        (claude-repl--poll-workspace-notifications)
-        (should (= (length dispatched-files) 2))
-        (should (member "/sentinel/stop_abc" dispatched-files))
-        (should (member "/sentinel/permission_prompt" dispatched-files))))))
+    ;; Use a real temp directory rather than mocking primitives like
+    ;; `directory-files' / `file-exists-p' / `file-directory-p'.  Redefining
+    ;; those via cl-letf triggers native-comp trampoline installation which
+    ;; can fail on cached native-elisp installs.
+    (let* ((tmp (make-temp-file "claude-repl-sentinel-test-" t))
+           (claude-repl--sentinel-dir tmp)
+           (stop-file (expand-file-name "stop_abc" tmp))
+           (perm-file (expand-file-name "permission_prompt" tmp))
+           (dispatched-files nil))
+      (unwind-protect
+          (progn
+            (write-region "" nil stop-file)
+            (write-region "" nil perm-file)
+            (cl-letf (((symbol-function 'claude-repl--dispatch-sentinel-file)
+                       (lambda (f) (push (file-name-nondirectory f)
+                                         dispatched-files)
+                          t)))
+              (claude-repl--poll-workspace-notifications)
+              (should (= (length dispatched-files) 2))
+              (should (member "stop_abc" dispatched-files))
+              (should (member "permission_prompt" dispatched-files))))
+        (ignore-errors (delete-directory tmp t))))))
 
 (ert-deftest claude-repl-test-poll-skips-nonexistent-dir ()
   "poll-workspace-notifications should do nothing if sentinel dir doesn't exist."
@@ -938,15 +972,9 @@ is still skipped and the file is still deleted."
         (claude-repl--dispatch-sentinel-event '(nil nil "/dir/stop_123"))
         (should-not dispatched)))))
 
-(ert-deftest claude-repl-test-sentinel-event-nil-file-path ()
-  "An event with nil file path should error since file-name-nondirectory requires a string."
-  (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--dispatch-sentinel-file)
-               (lambda (_f) nil))
-              ((symbol-function 'file-exists-p) (lambda (_f) nil)))
-      ;; file-name-nondirectory is called unconditionally in the let* binding,
-      ;; and it requires a string argument, so nil causes an error.
-      (should-error (claude-repl--dispatch-sentinel-event '(nil created nil))))))
+;; Covered by `claude-repl-test-sentinel-event-tolerates-nil-file' above:
+;; `stopped' events fire with nil file when watchers are removed, and the
+;; dispatcher must skip them gracefully rather than crash.
 
 ;;;; ---- Tests: poll-workspace-notifications uncovered edge cases ----
 
@@ -1026,6 +1054,85 @@ is still skipped and the file is still deleted."
     (claude-repl--ws-set "ws1" :thinking)
     (claude-repl--on-permission-event "ws1" "/some/dir")
     (should (eq (claude-repl--ws-state "ws1") :permission))))
+
+;;;; ---- Tests: claude-repl-reset-sentinel-watchers ----
+
+(ert-deftest claude-repl-test-reset-sentinel-watchers-removes-matching ()
+  "Should remove every descriptor whose watched dir is the sentinel dir."
+  (claude-repl-test--with-clean-state
+    (let ((removed '())
+          (target claude-repl--sentinel-dir)
+          (descs (make-hash-table :test 'equal)))
+      (puthash 'desc-a (cons target 'cb) descs)
+      (puthash 'desc-b (cons target 'cb) descs)
+      (cl-letf (((symbol-function 'file-notify-rm-watch)
+                 (lambda (d) (push d removed)))
+                ((symbol-function 'file-notify-add-watch)
+                 (lambda (&rest _) 'new-desc))
+                ((symbol-function 'file-truename) #'identity)
+                (file-notify-descriptors descs))
+        (claude-repl-reset-sentinel-watchers)
+        (should (equal (sort (copy-sequence removed)
+                             (lambda (a b) (string< (symbol-name a) (symbol-name b))))
+                       '(desc-a desc-b)))))))
+
+(ert-deftest claude-repl-test-reset-sentinel-watchers-leaves-others ()
+  "Should NOT remove descriptors watching other directories."
+  (claude-repl-test--with-clean-state
+    (let ((removed '())
+          (descs (make-hash-table :test 'equal)))
+      (puthash 'desc-other (cons "/some/other/dir" 'cb) descs)
+      (cl-letf (((symbol-function 'file-notify-rm-watch)
+                 (lambda (d) (push d removed)))
+                ((symbol-function 'file-notify-add-watch)
+                 (lambda (&rest _) 'new-desc))
+                ((symbol-function 'file-truename) #'identity)
+                (file-notify-descriptors descs))
+        (claude-repl-reset-sentinel-watchers)
+        (should-not removed)))))
+
+(ert-deftest claude-repl-test-reset-sentinel-watchers-registers-fresh ()
+  "Should register a new watcher on the sentinel dir after cleanup."
+  (claude-repl-test--with-clean-state
+    (let ((added-dir nil)
+          (descs (make-hash-table :test 'equal)))
+      (cl-letf (((symbol-function 'file-notify-rm-watch) (lambda (&rest _) nil))
+                ((symbol-function 'file-notify-add-watch)
+                 (lambda (dir &rest _) (setq added-dir dir) 'new-desc))
+                ((symbol-function 'file-truename) #'identity)
+                (file-notify-descriptors descs))
+        (claude-repl-reset-sentinel-watchers)
+        (should (equal added-dir claude-repl--sentinel-dir))
+        (should (eq claude-repl--sentinel-watch-descriptor 'new-desc))))))
+
+(ert-deftest claude-repl-test-reap-sentinel-watchers-returns-count ()
+  "Reap helper should return the number of watchers removed."
+  (claude-repl-test--with-clean-state
+    (let ((target claude-repl--sentinel-dir)
+          (descs (make-hash-table :test 'equal)))
+      (puthash 'desc-a (cons target 'cb) descs)
+      (puthash 'desc-b (cons target 'cb) descs)
+      (puthash 'desc-other (cons "/other" 'cb) descs)
+      (cl-letf (((symbol-function 'file-notify-rm-watch) (lambda (&rest _) nil))
+                ((symbol-function 'file-truename) #'identity)
+                (file-notify-descriptors descs))
+        (should (= (claude-repl--reap-sentinel-watchers) 2))))))
+
+(ert-deftest claude-repl-test-nuke-sentinel-watchers-does-not-re-register ()
+  "`claude-repl-nuke-sentinel-watchers' must NOT create a new watcher."
+  (claude-repl-test--with-clean-state
+    (let ((target claude-repl--sentinel-dir)
+          (add-watch-called nil)
+          (descs (make-hash-table :test 'equal)))
+      (puthash 'desc-a (cons target 'cb) descs)
+      (cl-letf (((symbol-function 'file-notify-rm-watch) (lambda (&rest _) nil))
+                ((symbol-function 'file-notify-add-watch)
+                 (lambda (&rest _) (setq add-watch-called t) 'new-desc))
+                ((symbol-function 'file-truename) #'identity)
+                (file-notify-descriptors descs))
+        (claude-repl-nuke-sentinel-watchers)
+        (should-not add-watch-called)
+        (should-not claude-repl--sentinel-watch-descriptor)))))
 
 (provide 'test-sentinel)
 

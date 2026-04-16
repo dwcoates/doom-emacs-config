@@ -752,7 +752,11 @@ Returns the full SHA of the new commit."
 
 (ert-deftest claude-repl-test-resolve-worktree-paths-inside-worktree ()
   "Inside a worktree (.git is a file), new worktree is a sibling directory."
-  (let ((tmpdir (make-temp-file "resolve-wt-test-" t)))
+  ;; Canonicalize tmpdir up front: the function under test canonicalizes
+  ;; its git-root, so the test's expected paths must also be canonical or
+  ;; they'll mismatch on platforms with firmlinks (macOS /var -> /private/var).
+  (let ((tmpdir (claude-repl--path-canonical
+                 (make-temp-file "resolve-wt-test-" t))))
     (unwind-protect
         (let* ((fake-root (expand-file-name "existing-wt" tmpdir)))
           (make-directory fake-root t)
@@ -774,7 +778,8 @@ Returns the full SHA of the new commit."
 
 (ert-deftest claude-repl-test-resolve-worktree-paths-normal-repo ()
   "Normal repo (.git is a directory) creates a -worktrees sibling directory."
-  (let ((tmpdir (make-temp-file "resolve-wt-test-" t)))
+  (let ((tmpdir (claude-repl--path-canonical
+                 (make-temp-file "resolve-wt-test-" t))))
     (unwind-protect
         (let* ((fake-root (expand-file-name "my-repo" tmpdir)))
           (make-directory fake-root t)
@@ -798,7 +803,8 @@ Returns the full SHA of the new commit."
 
 (ert-deftest claude-repl-test-resolve-worktree-paths-nested-name-extracts-dirname ()
   "Nested branch name like DWC/CV-100/cool-branch extracts only 'cool-branch' as dirname."
-  (let ((tmpdir (make-temp-file "resolve-wt-test-" t)))
+  (let ((tmpdir (claude-repl--path-canonical
+                 (make-temp-file "resolve-wt-test-" t))))
     (unwind-protect
         (let* ((fake-root (expand-file-name "my-repo" tmpdir)))
           (make-directory fake-root t)

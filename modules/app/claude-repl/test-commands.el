@@ -517,6 +517,9 @@
                 ((symbol-function '+workspace-current-name) (lambda () "other"))
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                 ((symbol-function 'force-mode-line-update) #'ignore)
+                ;; Stub `process-live-p' since "true" exits before the test
+                ;; reaches the kill check, racing us to the assertion.
+                ((symbol-function 'process-live-p) (lambda (_p) t))
                 ((symbol-function 'delete-process)
                  (lambda (p) (setq proc-deleted p))))
         (claude-repl-nuke-workspace)

@@ -101,17 +101,66 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                   (if pprompts (length pprompts) "-")
                   (if pshow "t" "-")))))))
 
+(defvar claude-repl--log-format-bug-captured nil
+  "Set to t once a non-string FMT has been captured by `claude-repl--log-format'.
+Prevents repeated backtrace captures from flooding the diagnostic buffer.")
+
+(defun claude-repl--log-format-capture-bug (fmt)
+  "Write a backtrace to *claude-repl-log-bug* the first time FMT isn't a string.
+Lets us find the caller passing a bad FMT without crashing it.  Subsequent
+bad calls are silently coerced so the log stays usable."
+  (unless claude-repl--log-format-bug-captured
+    (setq claude-repl--log-format-bug-captured t)
+    (let ((buf (get-buffer-create "*claude-repl-log-bug*"))
+          (bt (with-output-to-string (ignore-errors (backtrace)))))
+      (with-current-buffer buf
+        (goto-char (point-max))
+        (insert (format "\n=== non-string fmt=%S at %s ===\n"
+                        fmt (format-time-string "%H:%M:%S.%3N")))
+        (insert bt)))))
+
 (defun claude-repl--log-format (ws fmt)
   "Return FMT prefixed with a timestamp, [claude-repl] tag, and workspace context.
 WS is the workspace name (or nil for workspace-free contexts).  When non-nil,
-all workspace metadata from `claude-repl--workspaces' is included."
-  (concat (format-time-string "%H:%M:%S.%3N") " [claude-repl]"
-          (claude-repl--format-ws-metadata ws) " " fmt))
+all workspace metadata from `claude-repl--workspaces' is included.
+
+Hardened against non-string FMT: captures a backtrace to *claude-repl-log-bug*
+the first time it happens, then coerces the value so the caller doesn't crash.
+
+Note: callers using this to build a format string for `apply #'message'
+should be aware that the returned string embeds the workspace metadata
+literally, so any `%' characters in metadata will be interpreted as
+format directives.  `claude-repl--do-log' avoids this by passing
+metadata as an argument rather than splicing it into the format."
+  (let ((safe-fmt (if (stringp fmt)
+                      fmt
+                    (claude-repl--log-format-capture-bug fmt)
+                    (format "[BUG non-string-fmt=%S]" fmt))))
+    (concat (format-time-string "%H:%M:%S.%3N") " [claude-repl]"
+            (claude-repl--format-ws-metadata ws) " " safe-fmt)))
 
 (defun claude-repl--do-log (ws fmt args)
-  "Internal: format FMT with ARGS and emit via `message' with a timestamp prefix.
-WS is the workspace name for context (or nil)."
-  (apply #'message (claude-repl--log-format ws fmt) args))
+  "Internal: emit FMT + ARGS via `message' with a timestamp and WS-metadata prefix.
+Passes the timestamp and workspace metadata as %s arguments rather than
+splicing them into the format string — so any `%' characters in the
+metadata (e.g. from a project path) or in the prefix are treated as data,
+not format directives, and can't cause \"Not enough arguments for format
+string\" arity mismatches.
+
+When FMT isn't a string (a caller bug), captures a backtrace to
+*claude-repl-log-bug* on the first occurrence, then logs a safe
+[BUG non-string-fmt=...] line without interpreting caller ARGS."
+  (if (stringp fmt)
+      (apply #'message
+             (concat "%s [claude-repl]%s " fmt)
+             (format-time-string "%H:%M:%S.%3N")
+             (claude-repl--format-ws-metadata ws)
+             args)
+    (claude-repl--log-format-capture-bug fmt)
+    (message "%s [claude-repl]%s [BUG non-string-fmt=%S]"
+             (format-time-string "%H:%M:%S.%3N")
+             (claude-repl--format-ws-metadata ws)
+             fmt)))
 
 (defun claude-repl--log (ws fmt &rest args)
   "Log a timestamped debug message when `claude-repl-debug' is non-nil.

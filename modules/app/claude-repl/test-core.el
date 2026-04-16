@@ -72,7 +72,13 @@
     (should (claude-repl--claude-buffer-p)))
   (claude-repl-test--with-temp-buffer "*claude-input-abcd1234*"
     (should-not (claude-repl--claude-buffer-p)))
-  (claude-repl-test--with-temp-buffer "*scratch*"
+  ;; Use a unique name — the real `*scratch*' is the current buffer when
+  ;; the aggregate test runner starts, so naming a temp buffer `*scratch*'
+  ;; and then killing it swaps us out of the original buffer and leaves
+  ;; `default-directory' pointing at whatever buffer ert lands in next
+  ;; (Emacs.app/Contents/MacOS on macOS).  That breaks subsequent tests
+  ;; that call git without a -C flag.
+  (claude-repl-test--with-temp-buffer "*claude-repl-test-non-claude-buf*"
     (should-not (claude-repl--claude-buffer-p))))
 
 ;;;; ---- Tests: Logging ----
@@ -1057,6 +1063,48 @@ When t, it should call `message'."
   (should (string-match-p claude-repl--input-buffer-re "*claude-input-abcd1234*"))
   (should-not (string-match-p claude-repl--input-buffer-re "*claude-abcd1234*"))
   (should-not (string-match-p claude-repl--input-buffer-re "*scratch*")))
+
+;;;; ---- Tests: log-format hardening against non-string fmt ----
+
+(ert-deftest claude-repl-test-log-format-tolerates-symbol-fmt ()
+  "`claude-repl--log-format' must not crash when FMT is a symbol.
+Regression guard for callers that pass a file-notify action symbol by mistake."
+  (let ((claude-repl--log-format-bug-captured t)) ; suppress capture side-effect
+    (let ((result (claude-repl--log-format nil 'stopped)))
+      (should (stringp result))
+      (should (string-match-p "BUG non-string-fmt=stopped" result)))))
+
+(ert-deftest claude-repl-test-log-format-captures-backtrace-once ()
+  "Non-string FMT should capture a backtrace into *claude-repl-log-bug* only once."
+  (let ((claude-repl--log-format-bug-captured nil))
+    (unwind-protect
+        (progn
+          (when (get-buffer "*claude-repl-log-bug*")
+            (kill-buffer "*claude-repl-log-bug*"))
+          (claude-repl--log-format nil 'stopped)
+          (should (get-buffer "*claude-repl-log-bug*"))
+          (should claude-repl--log-format-bug-captured)
+          (let ((size (buffer-size (get-buffer "*claude-repl-log-bug*"))))
+            (claude-repl--log-format nil 'changed)
+            ;; Second call should NOT add more content.
+            (should (= size (buffer-size (get-buffer "*claude-repl-log-bug*"))))))
+      (when (get-buffer "*claude-repl-log-bug*")
+        (kill-buffer "*claude-repl-log-bug*")))))
+
+(ert-deftest claude-repl-test-do-log-survives-percent-in-metadata ()
+  "`claude-repl--do-log' must not raise arity errors when workspace metadata
+contains a literal `%' character.  Regression for \"Not enough arguments for
+format string\" seen when running `claude-repl-reset-sentinel-watchers'."
+  (let ((claude-repl-debug t))
+    (cl-letf (((symbol-function 'claude-repl--format-ws-metadata)
+               (lambda (_ws) " {dir=/path/with/%s/literal}"))
+              ((symbol-function 'message) #'ignore))
+      ;; Should complete without signaling a format-string arity error.
+      (claude-repl--log nil "plain message, no specifiers")
+      (claude-repl--log nil "one-specifier=%s" "value")
+      ;; Non-string fmt path should also be safe.
+      (claude-repl--log nil 'stopped)
+      (should t))))
 
 (provide 'test-core)
 

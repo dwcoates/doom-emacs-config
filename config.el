@@ -413,16 +413,48 @@
   ;; Never ask for confirmation when killing a buffer not in the current workspace
   (setq persp-kill-foreign-buffer-behaviour 'kill)
 
-  ;; Show workspace names in tab-bar
-  (defun +dwc/workspace-tabline-formatted ()
-    "Format workspace list for tab-bar display."
-    (+doom-dashboard--center (frame-width) (+workspace--tabline)))
+  ;; --- Tab-bar cache-busting, aka the alternating-space trick ----------
+  ;;
+  ;; The claude-repl status colors (red thinking, green done, etc.) are
+  ;; applied as faces on the tab-bar string produced by
+  ;; `claude-repl--tabline-advice' (status.el).  Emacs's tab-bar maintains
+  ;; a per-segment content cache: if the string returned by a tab-bar-format
+  ;; entry compares `equal' to what it returned last time, the segment is
+  ;; not repainted.  Text-property-only changes — including face changes —
+  ;; *do* compare equal in some paths, so a :thinking -> :done transition
+  ;; can be completely invisible until a `window-configuration-change'
+  ;; (typically a workspace switch) forces a full re-layout.
+  ;;
+  ;; The workaround is to make the segment's raw string content actually
+  ;; change every refresh tick.  `+dwc/tab-bar-refresh-toggle' flips each
+  ;; second (driven by the 1-Hz timer at the bottom of this block), and
+  ;; both the left-aligned tabline and the right-aligned status name
+  ;; append a trailing space or not based on it.  This defeats the cache
+  ;; and lets the current faces actually reach the display.
+  ;;
+  ;; If you remove the toggle, tabs will appear to get stuck on their old
+  ;; colors until you switch workspaces.  Keep it.
 
   (defvar +dwc/tab-bar-refresh-toggle nil
-    "Toggled each call to `+dwc/refresh-tab-bar' to force tab-bar redraw.")
+    "Toggled each call to `+dwc/refresh-tab-bar' to force tab-bar redraw.
+See the block comment above `+dwc/workspace-tabline-formatted' for why
+this trick is necessary.")
+
+  (defun +dwc/workspace-tabline-formatted ()
+    "Format workspace list for tab-bar display.
+Appends a toggled trailing space tied to `+dwc/tab-bar-refresh-toggle'
+so the left-aligned tab-bar segment's string content actually changes
+across refresh ticks (the alternating-space trick — see the block
+comment above).  Without this, face-only status transitions
+(e.g. :thinking -> :done) stay invisible until a workspace switch."
+    (concat (+doom-dashboard--center (frame-width) (+workspace--tabline))
+            (if +dwc/tab-bar-refresh-toggle " " "")))
 
   (defun +dwc/current-workspace-name ()
-    "Return current workspace name (invisible, for triggering updates)."
+    "Return current workspace name as an invisible tab-bar segment.
+Same alternating-space trick as `+dwc/workspace-tabline-formatted': the
+trailing space toggles each second via `+dwc/tab-bar-refresh-toggle' to
+force the right-aligned segment to repaint too."
     (propertize (if +dwc/tab-bar-refresh-toggle
                     (concat (safe-persp-name (get-current-persp)) " ")
                   (safe-persp-name (get-current-persp)))

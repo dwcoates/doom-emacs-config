@@ -177,15 +177,24 @@
      ,@body))
 
 (defmacro claude-repl-test--with-temp-buffer (name &rest body)
-  "Create a temp buffer named NAME, execute BODY, kill buffer after."
+  "Create (or reuse) buffer NAME, execute BODY, kill buffer only if we created it.
+If NAME already refers to a live buffer when the macro runs (e.g. `*scratch*',
+which the test runner itself lives in during aggregate runs), the macro must
+NOT kill it on exit — killing the pre-existing buffer swaps ert out of its
+current buffer and leaves `default-directory' pointing somewhere arbitrary
+(often the Emacs binary's directory on macOS), which breaks any later test
+that shells out to git from the cwd."
   (declare (indent 1))
-  (let ((buf-sym (make-symbol "buf")))
-    `(let ((,buf-sym (get-buffer-create ,name)))
+  (let ((buf-sym (make-symbol "buf"))
+        (pre-sym (make-symbol "pre-existed")))
+    `(let* ((,pre-sym (get-buffer ,name))
+            (,buf-sym (or ,pre-sym (get-buffer-create ,name))))
        (unwind-protect
            (with-current-buffer ,buf-sym
              ,@body)
-         (when (buffer-live-p ,buf-sym)
-           (kill-buffer ,buf-sym))))))
+         (unless ,pre-sym
+           (when (buffer-live-p ,buf-sym)
+             (kill-buffer ,buf-sym)))))))
 
 (provide 'test-helpers)
 
