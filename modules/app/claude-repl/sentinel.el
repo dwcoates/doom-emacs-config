@@ -22,15 +22,20 @@
 (defun claude-repl--ws-for-dir-fast (dir)
   "Try the fast path for DIR: git-root -> hash -> buffer -> workspace.
 Return the workspace name or nil."
+  (claude-repl--log nil "ws-for-dir-fast: ENTER dir=%S" dir)
   (let* ((root (claude-repl--git-root dir))
-         (hash (when root (substring (md5 (claude-repl--path-canonical root)) 0 8)))
+         (_ (claude-repl--log nil "ws-for-dir-fast: git-root returned %S" root))
+         (hash (when root (substring (md5 root) 0 8)))
+         (_ (claude-repl--log nil "ws-for-dir-fast: hash=%s" hash))
          (buf-name (when hash (format "*claude-%s*" hash)))
          (buf (when buf-name (get-buffer buf-name)))
+         (_ (claude-repl--log nil "ws-for-dir-fast: buf-name=%S buf-exists=%s buf-live=%s"
+                              buf-name (if buf "yes" "no")
+                              (if (and buf (buffer-live-p buf)) "yes" "no")))
          (ws (when buf (claude-repl--workspace-for-buffer buf))))
     (if ws
-        (claude-repl--log ws "ws-for-dir fast-path HIT: dir=%S root=%S hash=%s buf=%S ws=%s"
-                          dir root hash buf-name ws)
-      (claude-repl--log nil "ws-for-dir fast-path MISS: dir=%S root=%S hash=%s buf-name=%S buf-exists=%s ws=%s"
+        (claude-repl--log ws "ws-for-dir-fast: HIT dir=%S root=%S hash=%s ws=%s" dir root hash ws)
+      (claude-repl--log nil "ws-for-dir-fast: MISS dir=%S root=%S hash=%s buf-name=%S buf=%s ws=%s"
                         dir root hash buf-name (if buf "yes" "no") ws))
     ws))
 
@@ -40,41 +45,47 @@ Docker sandboxes mount worktrees at /<dirname>, so the sentinel CWD
 won't match any host path.  Extract the first path component after /
 as the container root name and match against workspace project dirs.
 Return the workspace name or nil."
+  (claude-repl--log nil "ws-for-dir-container: ENTER dir=%S persp-mode=%s"
+                    dir (if (bound-and-true-p persp-mode) "yes" "no"))
   (unless (bound-and-true-p persp-mode)
-    (claude-repl--log nil "ws-for-dir-container: persp-mode not bound, skipping container path for dir=%S" dir))
+    (claude-repl--log nil "ws-for-dir-container: persp-mode not bound, aborting"))
   (when (bound-and-true-p persp-mode)
     (let* ((container-root (car (split-string (substring dir 1) "/")))
            (all-ws (+workspace-list-names))
            (ws-dirs (mapcar (lambda (ws)
                               (cons ws (claude-repl--ws-get ws :project-dir)))
-                            all-ws))
-           (match (cl-loop for (ws . proj-dir) in ws-dirs
-                           when (and proj-dir
-                                     (string= container-root
-                                              (file-name-nondirectory
-                                               (directory-file-name proj-dir))))
-                           return ws)))
-      (if match
-          (claude-repl--log match "ws-for-dir container-path match: dir=%S root=%S ws=%s"
-                            dir container-root match)
-        (claude-repl--log nil "ws-for-dir fallback FAILED: dir=%S container-root=%S workspaces=%S"
-                          dir container-root ws-dirs))
-      match)))
+                            all-ws)))
+      (claude-repl--log nil "ws-for-dir-container: container-root=%S all-ws=%S ws-dirs=%S"
+                        container-root all-ws ws-dirs)
+      (let ((match (cl-loop for (ws . proj-dir) in ws-dirs
+                            for canonical = (when proj-dir
+                                              (claude-repl--path-canonical proj-dir))
+                            for basename = (when canonical
+                                             (file-name-nondirectory canonical))
+                            do (claude-repl--log nil "ws-for-dir-container: checking ws=%s proj-dir=%S canonical=%S basename=%S vs container-root=%S match=%s"
+                                                 ws proj-dir canonical basename container-root
+                                                 (if (and basename (string= container-root basename)) "YES" "no"))
+                            when (and basename (string= container-root basename))
+                            return ws)))
+        (if match
+            (claude-repl--log match "ws-for-dir-container: HIT dir=%S container-root=%S ws=%s"
+                              dir container-root match)
+          (claude-repl--log nil "ws-for-dir-container: MISS dir=%S container-root=%S"
+                            dir container-root))
+        match))))
 
 (defun claude-repl--ws-for-dir (dir)
   "Return the workspace name for a Claude session rooted at DIR, or nil.
 First tries the fast path: git-root -> hash -> buffer -> workspace.
 Falls back to container-path matching for Docker sandbox workspaces."
-  (let ((ws (or (let ((fast (claude-repl--ws-for-dir-fast dir)))
-                  (when fast
-                    (claude-repl--log fast "ws-for-dir: fast path succeeded: dir=%S ws=%s" dir fast))
-                  fast)
-                (let ((container (claude-repl--ws-for-dir-container dir)))
-                  (when container
-                    (claude-repl--log container "ws-for-dir: container path succeeded: dir=%S ws=%s" dir container))
-                  container))))
-    (unless ws
-      (claude-repl--log nil "ws-for-dir: both paths failed: dir=%S" dir))
+  (claude-repl--log nil "ws-for-dir: ENTER dir=%S" dir)
+  (let* ((fast (claude-repl--ws-for-dir-fast dir))
+         (_ (claude-repl--log nil "ws-for-dir: fast-path returned %S" fast))
+         (container (unless fast (claude-repl--ws-for-dir-container dir)))
+         (_ (unless fast (claude-repl--log nil "ws-for-dir: container-path returned %S" container)))
+         (ws (or fast container)))
+    (claude-repl--log nil "ws-for-dir: EXIT dir=%S ws=%S (via %s)"
+                      dir ws (cond (fast "fast-path") (container "container-path") (t "NONE")))
     ws))
 
 ;;; Sentinel file reading
@@ -82,19 +93,24 @@ Falls back to container-path matching for Docker sandbox workspaces."
 (defun claude-repl--read-sentinel-file (file)
   "Read and trim the contents of sentinel FILE, or nil on error."
   (let ((fname (file-name-nondirectory file)))
+    (claude-repl--log nil "read-sentinel-file: ENTER file=%s exists=%s readable=%s"
+                      fname (file-exists-p file) (file-readable-p file))
     (condition-case err
-        (let ((content (string-trim (with-temp-buffer
-                                      (insert-file-contents file)
-                                      (buffer-string)))))
-          (claude-repl--log nil "read-sentinel-file: file=%s len=%d" fname (length content))
+        (let* ((raw (with-temp-buffer
+                      (insert-file-contents file)
+                      (buffer-string)))
+               (content (string-trim raw)))
+          (claude-repl--log nil "read-sentinel-file: file=%s raw-len=%d trimmed-len=%d content=%S"
+                            fname (length raw) (length content) content)
+          (when (or (string= content "null") (string= content ""))
+            (claude-repl--log nil "read-sentinel-file: WARNING file=%s has bogus content=%S (hook may not have received cwd)"
+                              fname content))
           content)
       (file-missing
-       ;; Race: file-notify fired but file was deleted between exists-p and read.
-       (claude-repl--log nil "read-sentinel-file race: %s gone" fname)
+       (claude-repl--log nil "read-sentinel-file: RACE file=%s gone between exists-p and read" fname)
        nil)
       (error
-       (message "[claude-repl] WARNING: failed to read sentinel %s: %S"
-                fname err)
+       (claude-repl--log nil "read-sentinel-file: ERROR file=%s err=%S" fname err)
        nil))))
 
 ;;; Event handlers
@@ -112,8 +128,12 @@ standard entry using :name, then calls :callback with two arguments: the
 workspace name and the directory.  Always deletes FILE at the end."
   (let* ((dir (claude-repl--read-sentinel-file file))
          (ws  (when dir (claude-repl--ws-for-dir dir))))
+    (claude-repl--log nil "process-sentinel-file: handler=%s file=%s dir=%S ws=%s"
+                      (plist-get handler :name) (file-name-nondirectory file) dir ws)
     (cond
-     ((null dir)) ; read-sentinel-file already warned
+     ((null dir)
+      (claude-repl--log nil "process-sentinel-file: dir is nil (read failed) for %s"
+                        (file-name-nondirectory file)))
      ((null ws)
       (message (plist-get handler :warning) dir))
      (t
@@ -127,21 +147,32 @@ workspace name and the directory.  Always deletes FILE at the end."
 (defun claude-repl--on-permission-event (ws _dir)
   "Set :permission status on workspace WS.
 Callback for the permission_prompt sentinel handler."
-  (claude-repl--log ws "on-permission-event: ws=%s status=%s" ws (claude-repl--ws-get ws :status))
-  (claude-repl--ws-set ws :permission))
+  (let ((before (claude-repl--ws-get ws :status)))
+    (claude-repl--log ws "on-permission-event: ws=%s status-BEFORE=%s" ws before)
+    (claude-repl--ws-set ws :permission)
+    (claude-repl--log ws "on-permission-event: ws=%s status-AFTER=%s" ws (claude-repl--ws-get ws :status))))
 
 (defun claude-repl--on-stop-event (ws dir)
   "Handle a stop event for workspace WS with directory DIR.
 Logs the resolution, clears :thinking, and runs the finished handler."
-  (message "[claude-repl] stop resolved: dir=%s → ws=%s (was %s)" dir ws
-           (claude-repl--ws-get ws :status))
-  (claude-repl--ws-clear ws :thinking)
-  (claude-repl--handle-claude-finished ws))
+  (let ((before (claude-repl--ws-get ws :status))
+        (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+    (claude-repl--log ws "on-stop-event: ENTER ws=%s dir=%S status-BEFORE=%s vterm-buf=%S vterm-live=%s"
+                      ws dir before
+                      (when vterm-buf (buffer-name vterm-buf))
+                      (if (and vterm-buf (buffer-live-p vterm-buf)) "yes" "no"))
+    (claude-repl--ws-clear ws :thinking)
+    (let ((after-clear (claude-repl--ws-get ws :status)))
+      (claude-repl--log ws "on-stop-event: after ws-clear status=%s (was %s, expected nil)" after-clear before)
+      (claude-repl--handle-claude-finished ws)
+      (claude-repl--log ws "on-stop-event: EXIT ws=%s status-AFTER=%s" ws (claude-repl--ws-get ws :status)))))
 
 (defun claude-repl--on-prompt-submit-event (ws _dir)
   "Mark workspace WS as thinking after a prompt submission."
-  (claude-repl--log ws "on-prompt-submit-event: ws=%s status=%s" ws (claude-repl--ws-get ws :status))
-  (claude-repl--mark-ws-thinking ws))
+  (let ((before (claude-repl--ws-get ws :status)))
+    (claude-repl--log ws "on-prompt-submit-event: ws=%s status-BEFORE=%s" ws before)
+    (claude-repl--mark-ws-thinking ws)
+    (claude-repl--log ws "on-prompt-submit-event: ws=%s status-AFTER=%s" ws (claude-repl--ws-get ws :status))))
 
 ;;; Event dispatch
 
@@ -166,14 +197,19 @@ Each entry is (PREFIX . PLIST) where PLIST has keys:
 Matches the filename against `claude-repl--sentinel-dispatch-alist'.
 Returns non-nil if a handler was found and called."
   (let* ((name (file-name-nondirectory file))
+         (matched-prefix nil)
          (handler (cl-loop for (prefix . plist) in claude-repl--sentinel-dispatch-alist
                            when (string-prefix-p prefix name)
-                           return plist)))
+                           do (setq matched-prefix prefix)
+                           and return plist)))
+    (claude-repl--log nil "dispatch-sentinel-file: file=%s matched-prefix=%S handler=%s"
+                      name matched-prefix (if handler (plist-get handler :name) "NONE"))
     (if handler
         (progn
           (claude-repl--process-sentinel-file file handler)
           t)
-      (claude-repl--log nil "dispatch-sentinel-file: no handler matched: file=%s" name)
+      (claude-repl--log nil "dispatch-sentinel-file: NO HANDLER for file=%s (tried prefixes: %S)"
+                        name (mapcar #'car claude-repl--sentinel-dispatch-alist))
       nil)))
 
 (defun claude-repl--dispatch-sentinel-event (event)
@@ -181,16 +217,18 @@ Returns non-nil if a handler was found and called."
 Dispatches by filename via `claude-repl--sentinel-dispatch-alist'.
 Skips files that no longer exist (file-notify often fires multiple events
 for a single file creation; the first handler deletes the file)."
-  (let* ((action (nth 1 event))
-         (file   (nth 2 event))
-         (fname  (file-name-nondirectory file)))
-    (claude-repl--log nil "notify-event: action=%s file=%s exists=%s"
-                      action fname (file-exists-p file))
-    (if (and (memq action '(created changed))
-             (file-exists-p file))
-        (claude-repl--dispatch-sentinel-file file)
-      (claude-repl--log-verbose nil "notify-event: skipping action=%s file=%s exists=%s"
-                                action fname (file-exists-p file)))))
+  (let* ((descriptor (nth 0 event))
+         (action     (nth 1 event))
+         (file       (nth 2 event))
+         (fname      (file-name-nondirectory file))
+         (exists     (file-exists-p file)))
+    (claude-repl--log nil ">>> SENTINEL EVENT: action=%s file=%s exists=%s descriptor=%S event=%S"
+                      action fname exists descriptor event)
+    (if (and (memq action '(created changed)) exists)
+        (let ((result (claude-repl--dispatch-sentinel-file file)))
+          (claude-repl--log nil ">>> SENTINEL EVENT DONE: file=%s dispatched=%s" fname result))
+      (claude-repl--log nil ">>> SENTINEL EVENT SKIPPED: action=%s file=%s exists=%s (need created/changed + exists)"
+                        action fname exists))))
 
 ;;; Polling fallback
 
@@ -198,29 +236,43 @@ for a single file creation; the first handler deletes the file)."
   "Scan the sentinel directory for files that file-notify may have missed.
 Called periodically as a fallback; any file still present was not picked up
 by the file-notify watcher and needs processing."
-  (let ((files (if (file-directory-p claude-repl--sentinel-dir)
-                   (directory-files claude-repl--sentinel-dir t "\\`[^.]" t)
-                 (progn
-                   (claude-repl--log nil "poll-notifications: sentinel dir does not exist: %s"
-                                     claude-repl--sentinel-dir)
-                   nil))))
-    (if files
-        (progn
-          (claude-repl--log nil "poll-notifications: found %d orphaned file(s): %s"
-                            (length files)
-                            (mapconcat #'file-name-nondirectory files ", "))
-          (dolist (file files)
-            (when (file-exists-p file)
+  (let* ((dir-exists (file-directory-p claude-repl--sentinel-dir))
+         (files (if dir-exists
+                    (directory-files claude-repl--sentinel-dir t "\\`[^.]" t)
+                  nil))
+         ;; Filter out the debug log itself
+         (files (cl-remove-if (lambda (f) (string= (file-name-nondirectory f) "hook-debug.log")) files)))
+    (when files
+      (claude-repl--log nil "poll-notifications: found %d orphaned file(s): %s"
+                        (length files)
+                        (mapconcat #'file-name-nondirectory files ", "))
+      (dolist (file files)
+        (if (file-exists-p file)
+            (progn
+              (claude-repl--log nil "poll-notifications: processing orphan file=%s" (file-name-nondirectory file))
               (unless (claude-repl--dispatch-sentinel-file file)
                 (claude-repl--log nil "poll-notifications: ignoring unknown file %s"
-                                  (file-name-nondirectory file))))))
-      (claude-repl--log-verbose nil "poll-notifications: no files found in %s"
-                                claude-repl--sentinel-dir))))
+                                  (file-name-nondirectory file))))
+          (claude-repl--log nil "poll-notifications: file disappeared before processing: %s"
+                            (file-name-nondirectory file)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; File-notify watcher registration (top-level side effect)
 ;; ---------------------------------------------------------------------------
 
+(defvar claude-repl--sentinel-watch-descriptor nil
+  "File-notify descriptor for the sentinel directory watcher.
+Stored so we can remove the old watcher before registering a new one
+when sentinel.el is reloaded.")
+
 (make-directory claude-repl--sentinel-dir t)
-(file-notify-add-watch claude-repl--sentinel-dir '(change)
-                       #'claude-repl--dispatch-sentinel-event)
+(when (and claude-repl--sentinel-watch-descriptor
+           (file-notify-valid-p claude-repl--sentinel-watch-descriptor))
+  (claude-repl--log nil "sentinel-init: removing stale watcher descriptor=%S"
+                    claude-repl--sentinel-watch-descriptor)
+  (file-notify-rm-watch claude-repl--sentinel-watch-descriptor))
+(setq claude-repl--sentinel-watch-descriptor
+      (file-notify-add-watch claude-repl--sentinel-dir '(change)
+                             #'claude-repl--dispatch-sentinel-event))
+(claude-repl--log nil "sentinel-init: registered watcher descriptor=%S"
+                  claude-repl--sentinel-watch-descriptor)

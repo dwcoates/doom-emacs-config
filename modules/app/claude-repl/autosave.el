@@ -25,8 +25,7 @@ Runs silently every 5 minutes to prevent data loss."
             (dolist (buf (persp-buffers persp))
               (when (claude-repl--save-buffer-if-modified buf)
                 (cl-incf saved)))
-          (message "%s [claude-repl] WARN: autosave encountered non-perspective entry: %S"
-                   (format-time-string "%H:%M:%S.%3N") persp)))
+          (claude-repl--log nil "WARN: autosave encountered non-perspective entry: %S" persp)))
       (if (> saved 0)
           (claude-repl--log nil "autosave: saved %d buffer(s)" saved)
         (claude-repl--log-verbose nil "autosave-workspace-buffers: no buffers needed saving")))))

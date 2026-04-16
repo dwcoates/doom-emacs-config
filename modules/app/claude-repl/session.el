@@ -86,7 +86,6 @@ Returns (:needs-build t :install-script PATH) if the image is not built yet."
                     :image image
                     :install-script (claude-repl--find-install-script git-root))))
         (claude-repl--log nil "resolve-sandbox-config: empty-image from script=%s in git-root=%s" script git-root)
-        (message "[claude-repl] sandbox launcher returned empty image name in %s" git-root)
         nil))))
 
 ;;;; Workspace environment initialization
@@ -233,10 +232,8 @@ SANDBOXED-P means Docker mode with DOCKER-IMAGE; otherwise bare metal."
         (fork-session-id (plist-get start-info :fork-session-id))
         (worktree-str    (if (plist-get start-info :worktree-p) "yes" "no"))
         (active-env      (plist-get start-info :active-env)))
-    (message "[claude-repl] start-claude ws=%s session-id=%s fork-session-id=%s worktree=%s env=%s cmd=%s"
-             ws session-id fork-session-id worktree-str active-env cmd)
-    (claude-repl--log ws "start-claude dir=%s worktree=%s env=%s cmd=%s"
-                      default-directory worktree-str active-env cmd)))
+    (claude-repl--log ws "start-claude ws=%s session-id=%s fork-session-id=%s worktree=%s env=%s cmd=%s dir=%s"
+                      ws session-id fork-session-id worktree-str active-env cmd default-directory)))
 
 (defun claude-repl--start-claude ()
   "Send the claude startup command to the current vterm buffer.
@@ -356,8 +353,9 @@ visible, refreshes output, and notifies the user if the frame is unfocused."
              (cwd (cdr (assq 'cwd json)))
              (session-id (cdr (assq 'sessionId json))))
         (when (and cwd session-id
-                   (or (string= (claude-repl--path-canonical cwd) root)
-                       (string= cwd container-path)))
+                   (let ((canonical-cwd (claude-repl--path-canonical cwd)))
+                     (or (string= canonical-cwd root)
+                         (string= canonical-cwd container-path))))
           session-id))
     (error nil)))
 

@@ -143,7 +143,7 @@ Use this to verify the processor works independently of the file watcher."
                  claude-repl--output-dir)
       (message "Found %d file(s), processing..." (length files))
       (dolist (file files)
-        (message "Processing: %s" file)
+        (claude-repl--log nil "process-pending-commands: processing file=%s" file)
         (claude-repl--process-workspace-commands-file file)))))
 
 (defun claude-repl-debug/workspace-states ()
@@ -238,6 +238,37 @@ window changes, git-diff sentinels, resolve-root, etc.)."
              ws counter claude-repl-prefix-period
              (- claude-repl-prefix-period (mod counter claude-repl-prefix-period)))))
 
+(defun claude-repl-debug/dump-workspace ()
+  "Display the full serialized plist for a selected workspace from the hashmap.
+Prompts to select from workspaces registered in `claude-repl--workspaces'."
+  (interactive)
+  (let* ((known (hash-table-keys claude-repl--workspaces))
+         (_ (unless known (user-error "No claude-repl workspaces registered")))
+         (ws (completing-read "Dump workspace: " known nil t))
+         (plist (gethash ws claude-repl--workspaces)))
+    (with-help-window "*claude-repl-dump*"
+      (with-current-buffer "*claude-repl-dump*"
+        (insert (format "Workspace: %s\n\n" ws))
+        (let ((pl plist))
+          (while pl
+            (let* ((key (pop pl))
+                   (val (pop pl))
+                   (val-str (cond
+                             ((bufferp val)
+                              (format "#<buffer %s %s>"
+                                      (buffer-name val)
+                                      (if (buffer-live-p val) "live" "dead")))
+                             ((processp val)
+                              (format "#<process %s %s>"
+                                      (process-name val)
+                                      (if (process-live-p val) "running" "exited")))
+                             ((timerp val)
+                              (format "#<timer %s>" (if (timer--triggered val) "triggered" "pending")))
+                             ((cl-struct-p val)
+                              (pp-to-string val))
+                             (t (pp-to-string val)))))
+              (insert (format "  %-20s %s\n" key val-str)))))))))
+
 (defun claude-repl-debug/workspace-clean-p (ws-name)
   "Show whether workspace WS-NAME has unstaged changes to tracked files.
 Uses `claude-repl--workspace-clean-p' -- the same function used in production."
@@ -329,7 +360,7 @@ Reports comprehensive diagnostics."
 (map! :leader
       (:prefix "TAB"
        :desc "Create worktree workspace" "n" #'claude-repl-create-worktree-workspace
-       :desc "New workspace"             "N" #'claude-repl--new-workspace
+       :desc "Fork into worktree workspace" "N" #'claude-repl-fork-worktree-workspace
        :desc "Merge workspace into current" "m" #'+dwc/workspace-merge
        :desc "Merge current workspace into master" "M" #'+dwc/workspace-merge-current-into-master
        :desc "Push workspace to second-to-last" "p" #'+dwc/workspace-push-to-back
@@ -341,6 +372,8 @@ Reports comprehensive diagnostics."
       (:prefix ("j" . "claude")
        :desc "Explain line/region/hunk"      "e" #'claude-repl-explain
        :desc "Update GitHub PR description"  "r" #'claude-repl-update-pr
+       :desc "Nuke workspace"           "x" #'claude-repl-nuke-workspace
+       :desc "Dump workspace state"     "p" #'claude-repl-debug/dump-workspace
        :desc "Toggle debug logging"    "D" #'claude-repl-debug/toggle-logging
        (:prefix ("E" . "explain diff")
         :desc "worktree"    "w" #'claude-repl-explain-diff-worktree

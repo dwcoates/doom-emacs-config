@@ -856,42 +856,56 @@ Returns the full SHA of the new commit."
                (lambda (&rest _args) "")))
       (should (null (claude-repl--workspace-branch "ws1"))))))
 
-;;;; ---- Tests: resolve-fork-session-id ----
+;;;; ---- Tests: fork-worktree-workspace ----
 
-(ert-deftest claude-repl-test-resolve-fork-session-id-raw-below-16 ()
-  "When raw prefix is less than 16, returns nil (no fork requested)."
-  (should (null (claude-repl--resolve-fork-session-id 4))))
-
-(ert-deftest claude-repl-test-resolve-fork-session-id-raw-16-with-session-id ()
-  "When raw >= 16 and session-id exists, returns the session-id."
-  (claude-repl-test--with-clean-state
-    (let ((inst (make-claude-repl-instantiation :session-id "sess-abc-123")))
-      (cl-letf (((symbol-function 'claude-repl--active-inst)
-                 (lambda (_ws) inst))
-                ((symbol-function '+workspace-current-name)
-                 (lambda () "test-ws")))
-        (should (equal (claude-repl--resolve-fork-session-id 16) "sess-abc-123"))))))
-
-(ert-deftest claude-repl-test-resolve-fork-session-id-raw-16-no-session-id ()
-  "When raw >= 16 but no session-id, signals user-error."
+(ert-deftest claude-repl-test-fork-worktree-workspace-no-session-id ()
+  "When current workspace has no session ID, fork signals user-error."
   (claude-repl-test--with-clean-state
     (let ((inst (make-claude-repl-instantiation :session-id nil)))
       (cl-letf (((symbol-function 'claude-repl--active-inst)
                  (lambda (_ws) inst))
                 ((symbol-function '+workspace-current-name)
                  (lambda () "test-ws")))
-        (should-error (claude-repl--resolve-fork-session-id 16)
+        (should-error (claude-repl-fork-worktree-workspace nil)
                       :type 'user-error)))))
 
-(ert-deftest claude-repl-test-resolve-fork-session-id-raw-64 ()
-  "When raw is 64 (C-u C-u C-u), fork is still requested."
+(ert-deftest claude-repl-test-fork-worktree-workspace-with-session-id ()
+  "When session ID exists, fork passes it to do-create-worktree-workspace."
   (claude-repl-test--with-clean-state
-    (let ((inst (make-claude-repl-instantiation :session-id "sess-xyz")))
+    (let ((inst (make-claude-repl-instantiation :session-id "sess-abc-123"))
+          (captured-fork-sid nil))
       (cl-letf (((symbol-function 'claude-repl--active-inst)
                  (lambda (_ws) inst))
                 ((symbol-function '+workspace-current-name)
-                 (lambda () "test-ws")))
-        (should (equal (claude-repl--resolve-fork-session-id 64) "sess-xyz"))))))
+                 (lambda () "test-ws"))
+                ((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (if (string-match-p "name" prompt) "my-fork"
+                     "")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare fork-sid &rest _)
+                   (setq captured-fork-sid fork-sid))))
+        (claude-repl-fork-worktree-workspace nil)
+        (should (equal captured-fork-sid "sess-abc-123"))))))
+
+(ert-deftest claude-repl-test-fork-worktree-workspace-bare-metal ()
+  "With prefix arg, fork passes force-bare-metal as t."
+  (claude-repl-test--with-clean-state
+    (let ((inst (make-claude-repl-instantiation :session-id "sess-xyz"))
+          (captured-bare nil))
+      (cl-letf (((symbol-function 'claude-repl--active-inst)
+                 (lambda (_ws) inst))
+                ((symbol-function '+workspace-current-name)
+                 (lambda () "test-ws"))
+                ((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (if (string-match-p "name" prompt) "my-fork"
+                     "")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name bare _fork-sid &rest _)
+                   (setq captured-bare bare))))
+        (claude-repl-fork-worktree-workspace '(4))
+        (should (eq captured-bare t))))))
 
 ;;;; ---- Tests: setup-worktree-session ----
 
@@ -1058,8 +1072,8 @@ Returns the full SHA of the new commit."
   "open-initial-buffers should warn for missing files, not error."
   (let ((warned nil))
     (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_name) 'fake-persp))
-              ((symbol-function 'message)
-               (lambda (fmt &rest _args)
+              ((symbol-function 'claude-repl--log)
+               (lambda (_ws fmt &rest _args)
                  (when (string-match-p "not found" fmt)
                    (setq warned t)))))
       (let ((claude-repl-workspace-initial-buffers

@@ -145,7 +145,7 @@ Checks for both .git directory and .git file (worktrees)."
   (let* ((dir (or dir default-directory))
          (root (locate-dominating-file dir #'claude-repl--dir-has-git-p)))
     (claude-repl--log-verbose nil "git-root: dir=%s root=%s" dir root)
-    root))
+    (when root (claude-repl--path-canonical root))))
 
 (defun claude-repl--git-string (&rest args)
   "Run a synchronous git command and return its trimmed output.
@@ -194,7 +194,7 @@ Tries git root, then buffer-local project root, then `default-directory'."
          (root (or git claude-repl--project-root default-directory))
          (source (cond (git "git") (claude-repl--project-root "buffer-local") (t "default-directory"))))
     (claude-repl--log-verbose nil "resolve-root source=%s root=%s" source root)
-    root))
+    (claude-repl--path-canonical root)))
 
 (defun claude-repl--workspace-id ()
   "Return a short identifier for the current git workspace.

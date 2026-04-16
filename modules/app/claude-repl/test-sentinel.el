@@ -192,7 +192,11 @@
                 ((symbol-function 'claude-repl--handle-claude-finished)
                  (lambda (ws) (setq finished-ws ws)))
                 ((symbol-function 'claude-repl--ws-get)
-                 (lambda (_ws _key) :thinking)))
+                 (lambda (_ws key)
+                   (pcase key
+                     (:status :thinking)
+                     (:vterm-buffer nil)
+                     (_ nil)))))
         (claude-repl--on-stop-event "ws1" "/some/dir")
         (should (equal cleared "ws1"))
         (should (equal finished-ws "ws1"))))))
@@ -545,7 +549,11 @@
                 ((symbol-function 'claude-repl--handle-claude-finished)
                  (lambda (ws) (setq finished ws)))
                 ((symbol-function 'claude-repl--ws-get)
-                 (lambda (_ws _key) :thinking))
+                 (lambda (_ws key)
+                   (pcase key
+                     (:status :thinking)
+                     (:vterm-buffer nil)
+                     (_ nil))))
                 ((symbol-function 'delete-file) #'ignore))
         (claude-repl--dispatch-sentinel-file "/dir/stop_123")
         (should (equal cleared "test-ws"))
@@ -580,14 +588,13 @@
   "ws-for-dir-fast should match when git-root returns a path with trailing slash.
 The hash is computed via path-canonical which strips trailing slashes."
   (claude-repl-test--with-clean-state
-    (let* ((test-root "/home/user/project/")
-           (canonical (claude-repl--path-canonical test-root))
+    (let* ((canonical (claude-repl--path-canonical "/home/user/project/"))
            (hash (substring (md5 canonical) 0 8))
            (buf-name (format "*claude-%s*" hash))
            (buf (get-buffer-create buf-name)))
       (unwind-protect
           (cl-letf (((symbol-function 'claude-repl--git-root)
-                     (lambda (_d) test-root))
+                     (lambda (_d) canonical))
                     ((symbol-function 'claude-repl--workspace-for-buffer)
                      (lambda (_b) "trail-ws")))
             (should (equal (claude-repl--ws-for-dir-fast "/home/user/project/sub")
@@ -608,13 +615,10 @@ path-canonical uses file-truename which resolves symlinks."
            (buf (get-buffer-create buf-name)))
       (unwind-protect
           (cl-letf (((symbol-function 'claude-repl--git-root)
-                     (lambda (_d) "/home/user/symlink-project"))
-                    ;; file-truename resolves symlink to real path
-                    ((symbol-function 'file-truename)
-                     (lambda (_p) real-root))
+                     (lambda (_d) canonical))
                     ((symbol-function 'claude-repl--workspace-for-buffer)
                      (lambda (_b) "sym-ws")))
-            (should (equal (claude-repl--ws-for-dir-fast "/home/user/symlink-project/sub")
+            (should (equal (claude-repl--ws-for-dir-fast "/home/user/real-project/sub")
                            "sym-ws")))
         (when (buffer-live-p buf)
           (kill-buffer buf))))))
@@ -700,10 +704,10 @@ path-canonical uses file-truename which resolves symlinks."
     (let ((warning-msg nil))
       (cl-letf (((symbol-function 'insert-file-contents)
                  (lambda (&rest _) (error "disk I/O error")))
-                ((symbol-function 'message)
-                 (lambda (fmt &rest args) (setq warning-msg (apply #'format fmt args)))))
+                ((symbol-function 'claude-repl--log)
+                 (lambda (_ws fmt &rest args) (setq warning-msg (apply #'format fmt args)))))
         (should-not (claude-repl--read-sentinel-file "/some/sentinel_file"))
-        (should (string-match-p "WARNING.*failed to read" warning-msg))))))
+        (should (string-match-p "read-sentinel-file: ERROR.*disk I/O" warning-msg))))))
 
 (ert-deftest claude-repl-test-read-sentinel-file-very-long-content ()
   "read-sentinel-file should handle files with very long content."
@@ -827,7 +831,11 @@ is still skipped and the file is still deleted."
                 ((symbol-function 'claude-repl--handle-claude-finished)
                  (lambda (ws) (setq finished-ws ws)))
                 ((symbol-function 'claude-repl--ws-get)
-                 (lambda (_ws _key) :permission)))
+                 (lambda (_ws key)
+                   (pcase key
+                     (:status :permission)
+                     (:vterm-buffer nil)
+                     (_ nil)))))
         (claude-repl--on-stop-event "ws1" "/some/dir")
         ;; ws-clear is still called (though clear-if-status won't change anything)
         (should (equal cleared '("ws1" :thinking)))

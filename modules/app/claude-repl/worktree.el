@@ -31,8 +31,7 @@ it to the WS perspective without displaying it."
                 (progn
                   (claude-repl--log ws "open-initial-buffers: opening file=%s" fullpath)
                   (persp-add-buffer (find-file-noselect fullpath) persp t))
-              (claude-repl--log ws "open-initial-buffers: file not found file=%s" fullpath)
-              (message "[claude-repl] initial buffer not found in worktree: %s" fullpath))))))))
+              (claude-repl--log ws "open-initial-buffers: file not found in worktree: %s" fullpath))))))))
 
 
 (defvar claude-repl--workspace-generation-watch nil)
@@ -98,12 +97,12 @@ Tries `+workspace-switch-to' first, then `+workspace/switch-to' on failure."
         (claude-repl--log ws "switch-to-workspace: switched successfully via +workspace-switch-to ws=%s" ws))
     (error
      (claude-repl--log ws "switch-to-workspace: +workspace-switch-to failed, trying fallback ws=%s" ws)
-     (message "[claude-repl] +workspace-switch-to FAILED: %s — trying fallback (+workspace/switch-to)"
-              (error-message-string err))
+     (claude-repl--log ws "+workspace-switch-to FAILED: %s — trying fallback (+workspace/switch-to)"
+                       (error-message-string err))
      (condition-case err2
          (+workspace/switch-to ws)
        (error
-        (message "[claude-repl] fallback also FAILED: %s" (error-message-string err2)))))))
+        (claude-repl--log ws "fallback also FAILED: %s" (error-message-string err2)))))))
 
 (defun claude-repl--assert-clean-worktree (ws project-root)
   "Signal `user-error' if PROJECT-ROOT has uncommitted changes.
@@ -125,7 +124,7 @@ is stored under WS, defaulting to `+workspace-current-name'."
   (let ((ws (or ws (+workspace-current-name))))
     (claude-repl--log ws "register-worktree-ws ws-id=%s ws=%s path=%s" ws-id ws path)
     (claude-repl--ws-put ws :worktree-p t)
-    (claude-repl--ws-put ws :project-dir (file-name-as-directory path))))
+    (claude-repl--ws-put ws :project-dir (claude-repl--path-canonical path))))
 
 (defun claude-repl--setup-worktree-session (ws-id path ws force-bare-metal)
   "Register WS as a worktree at PATH and start its Claude session.
@@ -173,11 +172,12 @@ CALLBACK is called with (SUCCESS-P OUTPUT) when the process exits."
   "Compute worktree paths for branch NAME.
 Returns a plist with keys :git-root, :dirname, :branch-name,
 :worktree-parent, :path, and :in-worktree."
-  (let* ((git-root (claude-repl--git-string "rev-parse" "--show-toplevel"))
-         (_ (when (string-match-p "^fatal" git-root)
+  (let* ((git-root-raw (claude-repl--git-string "rev-parse" "--show-toplevel"))
+         (_ (when (string-match-p "^fatal" git-root-raw)
               (user-error "Not in a git repository")))
+         (git-root (claude-repl--path-canonical git-root-raw))
          (dirname (claude-repl--bare-workspace-name name))
-         (git-root-parent (file-name-directory (directory-file-name git-root)))
+         (git-root-parent (file-name-directory git-root))
          (in-worktree (file-regular-p (expand-file-name ".git" git-root)))
          (worktree-parent (if in-worktree
                               git-root-parent
@@ -185,7 +185,7 @@ Returns a plist with keys :git-root, :dirname, :branch-name,
                                    (wt-dir (expand-file-name (concat repo-name "-worktrees") git-root-parent)))
                               (make-directory wt-dir t)
                               wt-dir)))
-         (path (expand-file-name dirname worktree-parent)))
+         (path (claude-repl--path-canonical (expand-file-name dirname worktree-parent))))
     (claude-repl--log nil "resolve-worktree-paths: git-root=%s dirname=%s branch-name=%s worktree-parent=%s path=%s in-worktree=%s"
                       git-root dirname name worktree-parent path in-worktree)
     (list :git-root git-root
@@ -294,8 +294,7 @@ error messages.  Signals `user-error' on any failure."
   (when (projectile-project-p path)
     (user-error "Worktree '%s' already exists — use SPC p p to switch to it" dirname))
   (when (claude-repl--git-branch-exists-p git-root branch-name)
-    (message "%s [claude-repl] ERROR: branch '%s' already exists — cannot create worktree"
-             (format-time-string "%H:%M:%S.%3N") branch-name)
+    (claude-repl--log nil "ERROR: branch '%s' already exists — cannot create worktree" branch-name)
     (user-error "Branch '%s' already exists — delete it first or choose a different name" branch-name)))
 
 (defun claude-repl--do-create-worktree-workspace (name &optional force-bare-metal fork-session-id preemptive-prompt callback priority)
@@ -327,23 +326,10 @@ When everything is ready, CALLBACK (if non-nil) is called with (PATH DIRNAME)."
 (defun claude-repl--worktree-creation-switch-callback (path dirname)
   "Switch to the newly created worktree workspace and open magit.
 PATH is the worktree directory; DIRNAME is the workspace name."
-  (claude-repl--log nil "worktree-creation-switch-callback: path=%s dirname=%s" path dirname)
-  (message "[claude-repl] pre-switch: fboundp(+workspace-switch-to)=%s current-ws=%s target=%s"
-           (fboundp '+workspace-switch-to) (+workspace-current-name) dirname)
+  (claude-repl--log nil "worktree-creation-switch-callback: path=%s dirname=%s fboundp(+workspace-switch-to)=%s current-ws=%s target=%s"
+                    path dirname (fboundp '+workspace-switch-to) (+workspace-current-name) dirname)
   (claude-repl--switch-to-workspace dirname)
   (magit-status path))
-
-(defun claude-repl--resolve-fork-session-id (raw-prefix)
-  "Return the current workspace's session ID if RAW-PREFIX indicates a fork.
-Forks are requested with C-u C-u (raw >= 16).  Signals `user-error' if
-forking is requested but no session ID is available."
-  (when (>= raw-prefix 16)
-    (let ((sid (claude-repl-instantiation-session-id
-                (claude-repl--active-inst (+workspace-current-name)))))
-      (unless sid
-        (user-error "No session ID for current workspace — cannot fork"))
-      (claude-repl--log nil "resolve-fork-session-id: fork requested, sid=%s" sid)
-      sid)))
 
 (defun claude-repl-create-worktree-workspace (arg)
   "Create a new git worktree and switch to it as a project workspace.
@@ -354,10 +340,7 @@ the branch name.
 If called from a worktree, the new worktree is created as a sibling (../<dirname>).
 If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirname>.
 
-Prefix arguments:
-  \\[universal-argument]       — force bare-metal (skip Docker sandbox)
-  \\[universal-argument] \\[universal-argument]     — fork current Claude session into new worktree
-  \\[universal-argument] \\[universal-argument] \\[universal-argument]   — fork + force bare-metal
+With \\[universal-argument], force bare-metal (skip Docker sandbox).
 
 Optionally prompts for a preemptive prompt.  If provided, the new workspace is
 created in the background (no switch) and the prompt is sent to Claude the moment
@@ -366,13 +349,42 @@ to the new workspace immediately.
 
 Git operations (fetch, worktree add) run asynchronously so Emacs is not blocked."
   (interactive "P")
-  (let* ((raw (prefix-numeric-value arg))
-         (force-bare-metal (memq raw '(4 64)))
-         (fork-session-id (claude-repl--resolve-fork-session-id raw))
+  (let* ((force-bare-metal (and arg t))
          (name (read-string "Worktree name: "))
          (preemptive-prompt (read-string "Preemptive prompt (blank to switch there normally): "))
          (has-preemptive (and preemptive-prompt (not (string-empty-p preemptive-prompt)))))
-    (claude-repl--log nil "create-worktree-workspace: name=%s force-bare-metal=%s fork-session-id=%s has-preemptive=%s"
+    (claude-repl--log nil "create-worktree-workspace: name=%s force-bare-metal=%s has-preemptive=%s"
+                      name force-bare-metal has-preemptive)
+    (claude-repl--do-create-worktree-workspace
+     name force-bare-metal nil preemptive-prompt
+     (unless has-preemptive #'claude-repl--worktree-creation-switch-callback))))
+
+(defun claude-repl-fork-worktree-workspace (arg)
+  "Fork the current Claude session into a new worktree workspace.
+Like `claude-repl-create-worktree-workspace', but branches from HEAD (not
+origin/master) and resumes the current Claude session with --fork-session.
+
+With \\[universal-argument], force bare-metal (skip Docker sandbox).
+
+Optionally prompts for a preemptive prompt.  If provided, the new workspace is
+created in the background (no switch) and the prompt is sent to Claude the moment
+its session becomes ready.  If left blank, behavior is the same as before: switch
+to the new workspace immediately.
+
+Git operations (fetch, worktree add) run asynchronously so Emacs is not blocked."
+  (interactive "P")
+  (let* ((force-bare-metal (and arg t))
+         (fork-session-id
+          (let ((sid (claude-repl-instantiation-session-id
+                      (claude-repl--active-inst (+workspace-current-name)))))
+            (unless sid
+              (user-error "No session ID for current workspace — cannot fork"))
+            (claude-repl--log nil "fork-worktree-workspace: fork requested, sid=%s" sid)
+            sid))
+         (name (read-string "Worktree name: "))
+         (preemptive-prompt (read-string "Preemptive prompt (blank to switch there normally): "))
+         (has-preemptive (and preemptive-prompt (not (string-empty-p preemptive-prompt)))))
+    (claude-repl--log nil "fork-worktree-workspace: name=%s force-bare-metal=%s fork-session-id=%s has-preemptive=%s"
                       name force-bare-metal fork-session-id has-preemptive)
     (claude-repl--do-create-worktree-workspace
      name force-bare-metal fork-session-id preemptive-prompt
@@ -385,7 +397,7 @@ the behavior of `+workspaces-switch-project-function'."
   (let ((root (or (claude-repl--git-root) default-directory)))
     (claude-repl--log nil "new-workspace: root=%s" root)
     (+workspace/new)
-    (claude-repl--ws-put (+workspace-current-name) :project-dir (file-name-as-directory root))
+    (claude-repl--ws-put (+workspace-current-name) :project-dir (claude-repl--path-canonical root))
     (magit-status root)))
 
 ;;; Prompt dispatch

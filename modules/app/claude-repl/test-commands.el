@@ -463,6 +463,96 @@
     (should (stringp (symbol-value var)))
     (should (> (length (symbol-value var)) 0))))
 
+;;;; ---- claude-repl-nuke-workspace ----
+
+(ert-deftest claude-repl-cmd-test-nuke-workspace/no-workspaces ()
+  "nuke-workspace signals user-error when hashmap is empty."
+  (claude-repl-test--with-clean-state
+    (should-error (claude-repl-nuke-workspace) :type 'user-error)))
+
+(ert-deftest claude-repl-cmd-test-nuke-workspace/kills-session-and-removes-hashmap ()
+  "nuke-workspace kills session, deletes persp, and removes hashmap entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
+    (claude-repl--ws-put "doomed" :status :done)
+    (let ((session-killed nil)
+          (persp-deleted nil)
+          (persp-mode t))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "doomed"))
+                ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                ((symbol-function 'claude-repl--kill-session)
+                 (lambda (ws) (setq session-killed ws)))
+                ((symbol-function '+workspace-current-name) (lambda () "other-ws"))
+                ((symbol-function 'persp-get-by-name) (lambda (_n) t))
+                ((symbol-function '+workspace/delete)
+                 (lambda (ws) (setq persp-deleted ws)))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-nuke-workspace)
+        (should (equal session-killed "doomed"))
+        (should (equal persp-deleted "doomed"))
+        (should-not (gethash "doomed" claude-repl--workspaces))))))
+
+(ert-deftest claude-repl-cmd-test-nuke-workspace/aborts-on-deny ()
+  "nuke-workspace does nothing when user answers no."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _coll &rest _) "doomed"))
+              ((symbol-function 'y-or-n-p) (lambda (_prompt) nil)))
+      (should-error (claude-repl-nuke-workspace) :type 'user-error)
+      (should (gethash "doomed" claude-repl--workspaces)))))
+
+(ert-deftest claude-repl-cmd-test-nuke-workspace/kills-git-proc ()
+  "nuke-workspace kills an in-flight git-diff process."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
+    (let ((proc-deleted nil)
+          (fake-proc (start-process "fake" nil "true")))
+      (claude-repl--ws-put "doomed" :git-proc fake-proc)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "doomed"))
+                ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                ((symbol-function 'claude-repl--kill-session) #'ignore)
+                ((symbol-function '+workspace-current-name) (lambda () "other"))
+                ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
+                ((symbol-function 'force-mode-line-update) #'ignore)
+                ((symbol-function 'delete-process)
+                 (lambda (p) (setq proc-deleted p))))
+        (claude-repl-nuke-workspace)
+        (should proc-deleted)))))
+
+(ert-deftest claude-repl-cmd-test-nuke-workspace/switches-away-if-current ()
+  "nuke-workspace switches to another workspace before deleting if target is current."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
+    (let ((switched nil)
+          (persp-mode t))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "doomed"))
+                ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                ((symbol-function 'claude-repl--kill-session) #'ignore)
+                ((symbol-function '+workspace-current-name) (lambda () "doomed"))
+                ((symbol-function '+workspace/other) (lambda () (setq switched t)))
+                ((symbol-function 'persp-get-by-name) (lambda (_n) t))
+                ((symbol-function '+workspace/delete) #'ignore)
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-nuke-workspace)
+        (should switched)))))
+
+(ert-deftest claude-repl-cmd-test-nuke-workspace/no-persp-still-cleans-hashmap ()
+  "nuke-workspace removes hashmap entry even when persp workspace doesn't exist."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ghost" :project-dir "/tmp/ghost")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _coll &rest _) "ghost"))
+              ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+              ((symbol-function 'claude-repl--kill-session) #'ignore)
+              ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
+              ((symbol-function 'force-mode-line-update) #'ignore))
+      (claude-repl-nuke-workspace)
+      (should-not (gethash "ghost" claude-repl--workspaces)))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here

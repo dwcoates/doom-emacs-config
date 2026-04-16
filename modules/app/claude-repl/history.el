@@ -149,7 +149,7 @@ plist to each environment's instantiation struct."
 Sets :project-dir and restores instantiation fields for all environments."
   (let ((saved-dir (plist-get state :project-dir)))
     (when saved-dir
-      (claude-repl--ws-put ws :project-dir saved-dir))
+      (claude-repl--ws-put ws :project-dir (claude-repl--path-canonical saved-dir)))
     (claude-repl--restore-env-state ws state)
     (claude-repl--log ws "state-restore ws=%s project-dir=%s envs=%S"
                       ws saved-dir

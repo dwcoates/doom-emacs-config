@@ -152,12 +152,12 @@ Works from any buffer or from within the vterm buffer itself."
       (claude-repl--fix-vterm-scroll buf)))))
 
 (defun claude-repl--mark-viewed (ws)
-  "If WS is :inactive, re-activate to :done.  Always mark :viewed for :done/:inactive."
+  "If WS is :inactive, re-activate to :done (without :viewed, so it persists).
+If WS is :done, mark :viewed so the next update-ws-state can transition to :inactive."
   (pcase (claude-repl--ws-get ws :status)
     (:inactive
-     (claude-repl--log ws "mark-viewed: ws=%s branch=inactive->done" ws)
-     (claude-repl--ws-set ws :done)
-     (claude-repl--ws-put ws :viewed t))
+     (claude-repl--log ws "mark-viewed: ws=%s branch=inactive->done (no :viewed yet)" ws)
+     (claude-repl--ws-set ws :done))
     (:done
      (claude-repl--log ws "mark-viewed: ws=%s branch=done->viewed" ws)
      (claude-repl--ws-put ws :viewed t))
@@ -422,8 +422,7 @@ is already in vterm-mode."
       (with-current-buffer vterm-buf
         (if (eq major-mode 'vterm-mode)
             (progn
-              (message "[claude-repl] ensure-vterm REUSING existing buffer %s for ws=%s (no --start-claude)" (buffer-name vterm-buf) ws)
-              (claude-repl--log ws "ensure-vterm reusing existing buffer %s" (buffer-name vterm-buf)))
+              (claude-repl--log ws "ensure-vterm REUSING existing buffer %s for ws=%s (no --start-claude)" (buffer-name vterm-buf) ws))
           (claude-repl--initialize-new-vterm ws root))
         (setq-local claude-repl--project-root root)
         (setq-local claude-repl--owning-workspace ws)))))
@@ -559,9 +558,8 @@ If panels hidden: show both panels."
 
 (defun claude-repl--teardown-session-state (ws)
   "Save history, disable overlay, cancel timers, and clear session state for workspace WS."
-  (message "[claude-repl] teardown-session-state ws=%s env=%s (setting had-session t)"
-           ws (claude-repl--ws-get ws :active-env))
-  (claude-repl--log ws "teardown-session-state")
+  (claude-repl--log ws "teardown-session-state ws=%s env=%s (setting had-session t)"
+                    ws (claude-repl--ws-get ws :active-env))
   (ignore-errors (claude-repl--disable-hide-overlay))
   (when claude-repl--sync-timer
     (cancel-timer claude-repl--sync-timer)

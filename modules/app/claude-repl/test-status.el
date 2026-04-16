@@ -700,14 +700,14 @@
       (should (eq (claude-repl--ws-state "ws1") :done)))))
 
 (ert-deftest claude-repl-test-update-ws-state-inactive-dirty ()
-  ":inactive + dirty should transition to :done and clear :viewed."
+  ":inactive + dirty should remain :inactive.
+:inactive is terminal — git status is irrelevant once the user has dismissed it."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :inactive)
     (claude-repl--ws-put "ws1" :viewed t)
     (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) nil)))
       (claude-repl--update-ws-state "ws1")
-      (should (eq (claude-repl--ws-state "ws1") :done))
-      (should-not (claude-repl--ws-get "ws1" :viewed)))))
+      (should (eq (claude-repl--ws-state "ws1") :inactive)))))
 
 (ert-deftest claude-repl-test-update-ws-state-inactive-clean ()
   ":inactive + clean should remain :inactive."
@@ -758,11 +758,11 @@
 (ert-deftest claude-repl-test-update-all-running-vterm ()
   "update-all should call update-ws-state and async-refresh for ws with running vterm."
   (claude-repl-test--with-clean-state
-    (let ((persp-mode t)
-          (updated-ws nil)
+    (let ((updated-ws nil)
           (refreshed-ws nil))
+      ;; Register ws1 in the hashmap so the iterator finds it
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore)
-                ((symbol-function '+workspace-list-names) (lambda () '("ws1")))
                 ((symbol-function 'claude-repl--vterm-running-p) (lambda (_ws) t))
                 ((symbol-function 'claude-repl--update-ws-state)
                  (lambda (ws) (setq updated-ws ws)))
@@ -775,10 +775,10 @@
 (ert-deftest claude-repl-test-update-all-no-vterm ()
   "update-all should call maybe-clear-stale-state for ws without running vterm."
   (claude-repl-test--with-clean-state
-    (let ((persp-mode t)
-          (cleared-ws nil))
+    (let ((cleared-ws nil))
+      ;; Register ws1 in the hashmap so the iterator finds it
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore)
-                ((symbol-function '+workspace-list-names) (lambda () '("ws1")))
                 ((symbol-function 'claude-repl--vterm-running-p) (lambda (_ws) nil))
                 ((symbol-function 'claude-repl--maybe-clear-stale-state)
                  (lambda (ws) (setq cleared-ws ws))))
@@ -869,16 +869,16 @@
       (claude-repl--update-ws-state "ws1")
       (should (eq (claude-repl--ws-state "ws1") :thinking)))))
 
-(ert-deftest claude-repl-test-update-ws-state-done-viewed-dirty-not-visible-to-inactive ()
-  ":done + viewed + dirty + panels not visible should transition to :inactive.
-The dirty flag is irrelevant for done→inactive (pcase uses (:done . ,_) wildcard)."
+(ert-deftest claude-repl-test-update-ws-state-done-viewed-dirty-not-visible-stays-done ()
+  ":done + viewed + dirty + panels not visible should stay :done.
+The dirty guard prevents done→inactive — workspace stays green until clean."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :done)
     (claude-repl--ws-put "ws1" :viewed t)
     (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) nil))
               ((symbol-function 'claude-repl--panels-actively-visible-p) (lambda (_ws) nil)))
       (claude-repl--update-ws-state "ws1")
-      (should (eq (claude-repl--ws-state "ws1") :inactive)))))
+      (should (eq (claude-repl--ws-state "ws1") :done)))))
 
 (ert-deftest claude-repl-test-update-ws-state-done-not-viewed-dirty-stays-done ()
   ":done + NOT viewed + dirty should stay :done.
@@ -943,12 +943,13 @@ The :viewed gate blocks the done→inactive transition even when dirty."
 (ert-deftest claude-repl-test-update-all-multiple-workspaces-dispatch ()
   "update-all should dispatch correctly per workspace: update running, clear dead."
   (claude-repl-test--with-clean-state
-    (let ((persp-mode t)
-          (updated nil)
+    (let ((updated nil)
           (refreshed nil)
           (cleared nil))
+      ;; Register both workspaces in the hashmap
+      (claude-repl--ws-put "running-ws" :project-dir "/tmp/running")
+      (claude-repl--ws-put "dead-ws" :project-dir "/tmp/dead")
       (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore)
-                ((symbol-function '+workspace-list-names) (lambda () '("running-ws" "dead-ws")))
                 ((symbol-function 'claude-repl--vterm-running-p)
                  (lambda (ws) (equal ws "running-ws")))
                 ((symbol-function 'claude-repl--update-ws-state)

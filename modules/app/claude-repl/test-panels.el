@@ -169,12 +169,14 @@
 ;;;; ---- Tests: mark-viewed ----
 
 (ert-deftest claude-repl-test-panels-mark-viewed-inactive-to-done ()
-  "mark-viewed on :inactive workspace transitions to :done and sets :viewed."
+  "mark-viewed on :inactive workspace transitions to :done WITHOUT setting :viewed.
+This prevents the oscillation where update-ws-state immediately sees
+:done+:viewed+panels-closed and transitions back to :inactive."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "test-ws" :inactive)
     (claude-repl--mark-viewed "test-ws")
     (should (eq (claude-repl--ws-get "test-ws" :status) :done))
-    (should (claude-repl--ws-get "test-ws" :viewed))))
+    (should-not (claude-repl--ws-get "test-ws" :viewed))))
 
 (ert-deftest claude-repl-test-panels-mark-viewed-done-sets-viewed ()
   "mark-viewed on :done workspace sets :viewed without changing status."
@@ -1224,7 +1226,9 @@
       (should (eq (claude-repl--ws-get "ws1" :viewed) t)))))
 
 (ert-deftest claude-repl-test-panels-on-workspace-switch-reactivates-inactive ()
-  "on-workspace-switch should transition :inactive→:done and set :viewed=t."
+  "on-workspace-switch should transition :inactive→:done WITHOUT setting :viewed.
+:viewed is deferred to the next switch so update-ws-state doesn't immediately
+cycle the workspace back to :inactive."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :inactive)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
@@ -1234,10 +1238,11 @@
               ((symbol-function 'claude-repl--drain-pending-show-panels) #'ignore))
       (claude-repl--on-workspace-switch)
       (should (eq (claude-repl--ws-state "ws1") :done))
-      (should (eq (claude-repl--ws-get "ws1" :viewed) t)))))
+      (should-not (claude-repl--ws-get "ws1" :viewed)))))
 
 (ert-deftest claude-repl-test-panels-show-hidden-reactivates-inactive ()
-  "show-hidden-panels should transition :inactive→:done and set :viewed=t."
+  "show-hidden-panels should transition :inactive→:done WITHOUT setting :viewed.
+:viewed is deferred so update-ws-state doesn't immediately cycle back to :inactive."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :inactive)
     (claude-repl--ws-put "ws1" :panels-hidden t)
@@ -1245,7 +1250,7 @@
               ((symbol-function 'claude-repl--show-existing-panels) #'ignore))
       (claude-repl--show-hidden-panels)
       (should (eq (claude-repl--ws-state "ws1") :done))
-      (should (eq (claude-repl--ws-get "ws1" :viewed) t))
+      (should-not (claude-repl--ws-get "ws1" :viewed))
       (should-not (claude-repl--ws-get "ws1" :panels-hidden)))))
 
 ;;; test-panels.el ends here

@@ -598,7 +598,7 @@ When t, it should call `message'."
     (setq-local claude-repl--project-root nil)
     (let ((default-directory "/fallback/"))
       (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) nil)))
-        (should (equal (claude-repl--resolve-root) "/fallback/"))))))
+        (should (equal (claude-repl--resolve-root) (claude-repl--path-canonical "/fallback/")))))))
 
 (ert-deftest claude-repl-test-resolve-root-verbose-logging ()
   "resolve-root should call log-verbose with source label."

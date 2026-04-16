@@ -905,6 +905,62 @@
         (should (string-match-p "diag: ws1" msg))
         (should (string-match-p ":done->nil" msg))))))
 
+;;;; ---- Tests: claude-repl-debug/dump-workspace ----
+
+(ert-deftest claude-repl-test-dump-workspace-no-workspaces ()
+  "dump-workspace signals user-error when hashmap is empty."
+  (claude-repl-test--with-clean-state
+    (should-error (claude-repl-debug/dump-workspace) :type 'user-error)))
+
+(ert-deftest claude-repl-test-dump-workspace-shows-status ()
+  "dump-workspace displays the workspace status in the output buffer."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "my-ws" :project-dir "/tmp/my-ws")
+    (claude-repl--ws-put "my-ws" :status :thinking)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _coll &rest _) "my-ws")))
+      (claude-repl-debug/dump-workspace)
+      (with-current-buffer "*claude-repl-dump*"
+        (let ((content (buffer-string)))
+          (should (string-match-p "my-ws" content))
+          (should (string-match-p ":status" content))
+          (should (string-match-p ":thinking" content))
+          (should (string-match-p ":project-dir" content))
+          (should (string-match-p "/tmp/my-ws" content))))
+      (kill-buffer "*claude-repl-dump*"))))
+
+(ert-deftest claude-repl-test-dump-workspace-shows-buffer-summary ()
+  "dump-workspace shows live/dead status for buffer values."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create " *test-dump-buf*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+            (claude-repl--ws-put "ws1" :vterm-buffer buf)
+            (cl-letf (((symbol-function 'completing-read)
+                       (lambda (_prompt _coll &rest _) "ws1")))
+              (claude-repl-debug/dump-workspace)
+              (with-current-buffer "*claude-repl-dump*"
+                (let ((content (buffer-string)))
+                  (should (string-match-p ":vterm-buffer" content))
+                  (should (string-match-p "live" content))))
+              (kill-buffer "*claude-repl-dump*")))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest claude-repl-test-dump-workspace-shows-nil-values ()
+  "dump-workspace handles nil and missing values in the plist."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (claude-repl--ws-put "ws1" :viewed nil)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _coll &rest _) "ws1")))
+      (claude-repl-debug/dump-workspace)
+      (with-current-buffer "*claude-repl-dump*"
+        (let ((content (buffer-string)))
+          (should (string-match-p "ws1" content))
+          (should (string-match-p ":project-dir" content))))
+      (kill-buffer "*claude-repl-dump*"))))
+
 ;;;; ---- Tests: debug/cancel-timers (moved from core.el) ----
 
 (ert-deftest claude-repl-test-debug-cancel-timers-calls-cancel ()

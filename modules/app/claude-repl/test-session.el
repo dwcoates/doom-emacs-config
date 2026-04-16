@@ -1232,9 +1232,8 @@
 (ert-deftest claude-repl-test-log-session-start-all-fields ()
   "log-session-start should format message with all fields present."
   (let ((logged-msg nil))
-    (cl-letf (((symbol-function 'message)
-               (lambda (fmt &rest args) (setq logged-msg (apply #'format fmt args))))
-              ((symbol-function 'claude-repl--log) #'ignore))
+    (cl-letf (((symbol-function 'claude-repl--log)
+               (lambda (_ws fmt &rest args) (setq logged-msg (apply #'format fmt args)))))
       (claude-repl--log-session-start "ws1"
                                       '(:cmd "claude --resume abc"
                                         :session-id "abc"
@@ -1250,9 +1249,8 @@
 (ert-deftest claude-repl-test-log-session-start-nil-optional-fields ()
   "log-session-start should handle nil session-id and fork-session-id."
   (let ((logged-msg nil))
-    (cl-letf (((symbol-function 'message)
-               (lambda (fmt &rest args) (setq logged-msg (apply #'format fmt args))))
-              ((symbol-function 'claude-repl--log) #'ignore))
+    (cl-letf (((symbol-function 'claude-repl--log)
+               (lambda (_ws fmt &rest args) (setq logged-msg (apply #'format fmt args)))))
       (claude-repl--log-session-start "ws1"
                                       '(:cmd "claude"
                                         :session-id nil
@@ -1266,15 +1264,13 @@
   "log-session-start should format worktree-p as yes/no strings."
   (let ((msg-yes nil)
         (msg-no nil))
-    (cl-letf (((symbol-function 'message)
-               (lambda (fmt &rest args) (setq msg-yes (apply #'format fmt args))))
-              ((symbol-function 'claude-repl--log) #'ignore))
+    (cl-letf (((symbol-function 'claude-repl--log)
+               (lambda (_ws fmt &rest args) (setq msg-yes (apply #'format fmt args)))))
       (claude-repl--log-session-start "ws1"
                                       '(:cmd "claude" :worktree-p t :active-env :sandbox
                                         :session-id nil :fork-session-id nil)))
-    (cl-letf (((symbol-function 'message)
-               (lambda (fmt &rest args) (setq msg-no (apply #'format fmt args))))
-              ((symbol-function 'claude-repl--log) #'ignore))
+    (cl-letf (((symbol-function 'claude-repl--log)
+               (lambda (_ws fmt &rest args) (setq msg-no (apply #'format fmt args)))))
       (claude-repl--log-session-start "ws1"
                                       '(:cmd "claude" :worktree-p nil :active-env :bare-metal
                                         :session-id nil :fork-session-id nil)))

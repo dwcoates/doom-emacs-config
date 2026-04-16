@@ -89,7 +89,7 @@ WS defaults to the current workspace name.  No-op if already running."
   (let ((file (buffer-file-name)))
     (unless file
       (user-error "Buffer %s is not visiting a file" (buffer-name)))
-    (let ((rel (file-relative-name file (claude-repl--resolve-root))))
+    (let ((rel (file-relative-name (claude-repl--path-canonical file) (claude-repl--resolve-root))))
       (claude-repl--log nil "buffer-relative-path: path=%s" rel)
       rel)))
 
@@ -117,7 +117,7 @@ Returns a \"file:startline-endline\" string based on the hunk's to-range."
          (len (cadr range))
          (end (+ start len -1))
          (rel (file-relative-name
-               (expand-file-name file (magit-toplevel))
+               (claude-repl--path-canonical (expand-file-name file (magit-toplevel)))
                (claude-repl--resolve-root)))
          (ref (format "%s:%d-%d" rel start end)))
     (claude-repl--log nil "format-magit-hunk-ref: ref=%s" ref)
@@ -297,6 +297,37 @@ sends \"i\" after 0.25s to return to insert mode."
   (interactive)
   (claude-repl--log nil "update-pr: sending update-pr prompt")
   (claude-repl--send-to-claude claude-repl-update-pr-prompt))
+
+(defun claude-repl-nuke-workspace ()
+  "Completely destroy a claude-repl workspace: session, buffers, persp, and hashmap entry.
+Prompts to select from workspaces registered in `claude-repl--workspaces'."
+  (interactive)
+  (let* ((known (hash-table-keys claude-repl--workspaces))
+         (_ (unless known (user-error "No claude-repl workspaces registered")))
+         (ws (completing-read "Nuke workspace: " known nil t)))
+    (unless (y-or-n-p (format "Nuke workspace '%s'? This kills processes, buffers, and removes all state. " ws))
+      (user-error "Aborted"))
+    (claude-repl--log ws "nuke-workspace: ws=%s" ws)
+    ;; Kill git-diff process if running
+    (when-let ((proc (claude-repl--ws-get ws :git-proc)))
+      (when (process-live-p proc)
+        (claude-repl--log ws "nuke-workspace: killing git-proc")
+        (delete-process proc)))
+    ;; Kill session (vterm process, input buffer, timers, overlay)
+    (condition-case err
+        (claude-repl--kill-session ws)
+      (error (claude-repl--log ws "nuke-workspace: kill-session error: %S" err)))
+    ;; Delete persp workspace if it exists (switch away first if current)
+    (when (and (bound-and-true-p persp-mode)
+               (persp-get-by-name ws))
+      (when (string= ws (+workspace-current-name))
+        (+workspace/other))
+      (claude-repl--log ws "nuke-workspace: deleting persp workspace")
+      (+workspace/delete ws))
+    ;; Remove from hashmap
+    (claude-repl--ws-del ws)
+    (force-mode-line-update t)
+    (message "Nuked workspace: %s" ws)))
 
 (defun claude-repl-copy-reference ()
   "Copy the current file and line reference to the clipboard.

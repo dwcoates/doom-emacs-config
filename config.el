@@ -442,6 +442,8 @@
     (interactive)
     (when (and (bound-and-true-p tab-bar-mode) (display-graphic-p))
       (setq +dwc/tab-bar-refresh-toggle (not +dwc/tab-bar-refresh-toggle))
+      (when (fboundp 'claude-repl--log-verbose)
+        (claude-repl--log-verbose nil "refresh-tab-bar: toggle=%s" +dwc/tab-bar-refresh-toggle))
       (tab-bar-tabs-set (tab-bar-tabs))
       (tab-bar--update-tab-bar-lines t)))
 

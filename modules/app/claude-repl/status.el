@@ -257,7 +257,10 @@ tab position."
 (cl-defun claude-repl--tabline-advice (&optional (names nil names-supplied-p))
   "Override for `+workspace--tabline' to color tabs by Claude status."
   (let* ((names (if names-supplied-p names (+workspace-list-names)))
-         (current-name (+workspace-current-name)))
+         (current-name (+workspace-current-name))
+         (states (mapcar (lambda (n) (cons n (claude-repl--ws-state n))) names)))
+    (claude-repl--log-verbose nil "tabline-advice: current=%s states=%S"
+                              current-name states)
     (mapconcat
      #'identity
      (cl-loop for name in names
@@ -324,44 +327,49 @@ and for the current workspace when panels have no visible windows."
   "Update workspace WS state according to claude visibility and git status.
 State table:
   :thinking   → unchanged (never touch)
-  :done       → :inactive (only if :viewed and panels not visible)
   :permission → unchanged
-  :inactive+dirty → :done   |  :inactive+clean → :inactive
-  nil+dirty   → :done       |  nil+clean    → nil"
+  :done+viewed+clean+panels-closed → :inactive
+  :done+viewed+dirty+panels-closed → :done (stay green until clean)
+  :inactive   → unchanged (terminal — git status irrelevant)
+  nil+dirty   → :done       |  nil+clean → nil"
   (let ((state (claude-repl--ws-state ws))
         (dirty (not (claude-repl--workspace-clean-p ws))))
     (pcase (cons state dirty)
-      ;; :done → :inactive when user has viewed and panels are not visible
-      (`(:done . ,_)
+      ;; :done → :inactive only when viewed + panels closed + clean
+      (`(:done . nil)
        (when (and (claude-repl--ws-get ws :viewed)
                   (not (claude-repl--panels-actively-visible-p ws)))
-         (claude-repl--log ws "update-ws-state ws=%s :done->:inactive (viewed, panels closed)" ws)
+         (claude-repl--log ws "update-ws-state ws=%s :done->:inactive (viewed, panels closed, clean)" ws)
          (claude-repl--ws-set ws :inactive)))
-      ;; :inactive or nil + dirty → :done (Claude made new changes)
-      (`(,(or :inactive 'nil) . t)
-       (claude-repl--log ws "update-ws-state ws=%s %s->:done" ws state)
+      ;; :done + dirty → stay :done (no-op, even if viewed)
+      (`(:done . t)
+       (claude-repl--log-verbose ws "update-ws-state ws=%s :done+dirty no-op (stays green)" ws))
+      ;; nil + dirty → :done (initial detection of Claude's changes)
+      (`(nil . t)
+       (claude-repl--log ws "update-ws-state ws=%s nil->:done" ws)
        (claude-repl--ws-put ws :viewed nil)
        (claude-repl--ws-set ws :done))
-      ;; :thinking, :permission, :inactive+clean, nil+clean → no-op
+      ;; :thinking, :permission, :inactive, nil+clean → no-op
       (_ (claude-repl--log-verbose ws "update-ws-state ws=%s state=%s dirty=%s no-op" ws state dirty)))))
 
 (defun claude-repl--update-all-workspace-states ()
-  "Update state for all workspaces based on claude visibility and git status.
+  "Update state for claude-repl workspaces based on visibility and git status.
+Only iterates workspaces registered in `claude-repl--workspaces' (not all
+persp workspaces), since non-claude workspaces have no state to manage.
 Uses cached git status (`:git-clean') and kicks off async refreshes.
 Also polls for orphaned sentinel files that file-notify may have missed.
 State machine runs whenever a live vterm process exists, regardless of
 panel visibility (panels may be hidden via `SPC o c')."
   (claude-repl--poll-workspace-notifications)
-  (when (bound-and-true-p persp-mode)
-    (let ((ws-names (+workspace-list-names)))
-      (claude-repl--log-verbose nil "update-all-workspace-states: count=%d" (length ws-names))
-      (dolist (ws ws-names)
-        (if (claude-repl--vterm-running-p ws)
-            (progn
-              (claude-repl--update-ws-state ws)
-              (claude-repl--async-refresh-git-status ws))
-          ;; No live vterm process → clear non-thinking state
-          (claude-repl--maybe-clear-stale-state ws))))))
+  (let ((ws-names (hash-table-keys claude-repl--workspaces)))
+    (claude-repl--log-verbose nil "update-all-workspace-states: count=%d" (length ws-names))
+    (dolist (ws ws-names)
+      (if (claude-repl--vterm-running-p ws)
+          (progn
+            (claude-repl--update-ws-state ws)
+            (claude-repl--async-refresh-git-status ws))
+        ;; No live vterm process → clear non-thinking state
+        (claude-repl--maybe-clear-stale-state ws)))))
 
 ;; Periodically update all workspace states (catches git changes, etc.)
 (push (run-with-timer 1 1 #'claude-repl--update-all-workspace-states)
