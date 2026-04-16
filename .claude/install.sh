@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # install.sh — register claude-repl hooks in ~/.claude/settings.json
 #
-# Idempotent: safe to run multiple times.  Each hook is only added if its
-# event key is not already present in settings.json.
+# Idempotent: safe to run multiple times.  For each managed hook, the entry
+# is appended only if the exact command path is not already present under
+# that event.  Foreign entries (unrelated hooks from other integrations) are
+# preserved.
 #
 # Usage:
 #   bash .claude/install.sh
@@ -50,31 +52,41 @@ else
 fi
 
 # --- Register hooks in settings.json ---
+# Idempotency rule: a managed hook is identified by the exact command path
+# "~/.claude/hooks/<script>".  We look inside the existing event array for
+# any entry whose .hooks[].command matches; if found, skip.  Otherwise we
+# append a new entry, leaving any foreign entries in place.
 for entry in "${HOOKS[@]}"; do
   IFS='|' read -r event script matcher <<< "$entry"
   script_path="~/.claude/hooks/$script"
 
-  # Check if event key already exists in hooks.
-  existing=$(jq -r ".hooks.\"$event\" // empty" "$SETTINGS")
-  if [ -n "$existing" ]; then
+  # Is our command already registered under this event?
+  already=$(jq -r --arg event "$event" --arg cmd "$script_path" \
+    '.hooks[$event] // [] | [.[].hooks[]?.command] | index($cmd)' \
+    "$SETTINGS")
+  if [ "$already" != "null" ]; then
     echo "[install] Hook already registered: $event -> $script (skipped)"
     continue
   fi
 
-  # Build the hook entry.
+  # Build the single hook entry to append.
   if [ -n "$matcher" ]; then
     # Notification-style hook with matcher.
-    hook_json=$(jq -n --arg cmd "$script_path" --arg match "$matcher" \
-      '[{"matcher": $match, "hooks": [{"type": "command", "command": $cmd}]}]')
+    hook_entry=$(jq -n --arg cmd "$script_path" --arg match "$matcher" \
+      '{"matcher": $match, "hooks": [{"type": "command", "command": $cmd}]}')
   else
     # Standard hook (no matcher).
-    hook_json=$(jq -n --arg cmd "$script_path" \
-      '[{"hooks": [{"type": "command", "command": $cmd}]}]')
+    hook_entry=$(jq -n --arg cmd "$script_path" \
+      '{"hooks": [{"type": "command", "command": $cmd}]}')
   fi
 
-  # Merge into settings.json.
-  jq --arg event "$event" --argjson hook "$hook_json" \
-    '.hooks[$event] = $hook' "$SETTINGS" > "$SETTINGS.tmp" \
+  # Append into settings.json, preserving existing entries under this event.
+  jq --arg event "$event" --argjson entry "$hook_entry" \
+    '
+    .hooks //= {}
+    | .hooks[$event] //= []
+    | .hooks[$event] += [$entry]
+    ' "$SETTINGS" > "$SETTINGS.tmp" \
     && mv "$SETTINGS.tmp" "$SETTINGS"
 
   echo "[install] Registered hook: $event -> $script"
