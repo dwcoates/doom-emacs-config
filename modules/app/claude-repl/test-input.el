@@ -746,8 +746,8 @@
 
 ;;;; ---- Tests: slash mode ----
 
-(ert-deftest claude-repl-test-slash-send-and-push ()
-  "Slash send-and-push should forward char and push to stack."
+(ert-deftest claude-repl-test-slash-try-send-and-push-success ()
+  "On successful vterm forward, pushes onto stack and returns t."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-temp-buffer " *test-slash-push*"
       (setq-local claude-repl--slash-stack nil)
@@ -759,11 +759,29 @@
                     ((symbol-function 'vterm-send-string)
                      (lambda (s &rest _) (push s sent))))
             (with-current-buffer " *test-slash-push*"
-              (claude-repl--slash-send-and-push "a")
+              (should (claude-repl--slash-try-send-and-push "a"))
               (should (equal claude-repl--slash-stack '("a")))
-              (claude-repl--slash-send-and-push "b")
+              (should (claude-repl--slash-try-send-and-push "b"))
               (should (equal claude-repl--slash-stack '("b" "a")))
               (should (equal (reverse sent) '("a" "b"))))))))))
+
+(ert-deftest claude-repl-test-slash-try-send-and-push-no-vterm-refuses-push ()
+  "When no live vterm: returns nil, does NOT push onto stack, surfaces error.
+Regression for the stuck-stack bug: if vterm isn't live, the local stack
+must not accumulate phantom entries that trap the user in slash mode."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-slash-push-fail*"
+      (setq-local claude-repl--slash-stack nil)
+      (let ((msg-called nil))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ;; No :vterm-buffer set → --current-ws-live-vterm returns nil.
+                  ((symbol-function 'message) (lambda (&rest _) (setq msg-called t)))
+                  ((symbol-function 'vterm-send-string)
+                   (lambda (&rest _) (error "MUST NOT be called when vterm missing"))))
+          (with-current-buffer " *test-slash-push-fail*"
+            (should-not (claude-repl--slash-try-send-and-push "a"))
+            (should (null claude-repl--slash-stack))
+            (should msg-called)))))))
 
 (ert-deftest claude-repl-test-slash-backspace-pops-stack ()
   "Slash backspace should pop from stack and send backspace to vterm."
@@ -1499,20 +1517,25 @@ The dead-buffer check happens inside `run-deferred-action' at callback time."
     (should (null claude-repl--slash-stack))
     (should-not claude-slash-input-mode)))
 
-;;; slash-vterm-send: dead vterm is a no-op
+;;; slash-vterm-send: dead vterm fails loudly (never silently)
 
-(ert-deftest claude-repl-test-slash-vterm-send-dead-vterm-noop ()
-  "`claude-repl--slash-vterm-send' is a no-op when vterm buffer is dead."
+(ert-deftest claude-repl-test-slash-vterm-send-dead-vterm-returns-nil-and-errors ()
+  "`claude-repl--slash-vterm-send' must return nil, skip the send, log + message
+when the workspace's recorded vterm buffer is dead.
+Per AGENTS.md \"No Silent Fallbacks\": no silent no-op."
   (claude-repl-test--with-clean-state
     (let ((buf (get-buffer-create "*claude-dead-slash-vterm*"))
-          (sent nil))
+          (sent nil)
+          (msg-called nil))
       (claude-repl--ws-put "test-ws" :vterm-buffer buf)
       (kill-buffer buf)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'message) (lambda (&rest _) (setq msg-called t)))
                 ((symbol-function 'vterm-send-string)
                  (lambda (&rest _) (setq sent t))))
-        (claude-repl--slash-vterm-send "a")
-        (should-not sent)))))
+        (should-not (claude-repl--slash-vterm-send "a"))
+        (should-not sent)
+        (should msg-called)))))
 
 ;;; slash-forward-char: uses last-command-event
 
@@ -1614,6 +1637,104 @@ but `with-current-buffer' on a dead buffer signals an error."
   "`claude-repl--command-prefix' should contain the metaprompt text."
   (should (stringp claude-repl--command-prefix))
   (should (string-match-p "metaprompt" claude-repl--command-prefix)))
+
+;;;; ---- Tests: no-silent-fallback behavior in slash mode (regression suite) ----
+;;
+;; These tests lock in the contract introduced after the stuck-stack bug:
+;; every path that "forwards to vterm" must either succeed and observably
+;; reach vterm, or fail loudly (log + user-visible message) AND avoid
+;; mutating local state that presumes success.  User input must never be
+;; silently dropped.
+
+(ert-deftest claude-repl-test-passthrough-start-no-vterm-inserts-char ()
+  "With empty buffer + no live vterm, passthrough-start must NOT enter slash
+mode and must insert CHAR as a regular self-insert so user input isn't lost."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-pt-no-vterm*"
+      (setq-local claude-repl--slash-stack nil)
+      (let ((msg-called nil))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ;; No :vterm-buffer set → --current-ws-live-vterm returns nil.
+                  ((symbol-function 'message) (lambda (&rest _) (setq msg-called t)))
+                  ((symbol-function 'vterm-send-string)
+                   (lambda (&rest _) (error "MUST NOT forward when vterm missing"))))
+          (with-current-buffer " *test-pt-no-vterm*"
+            (let ((last-command-event ?/))
+              (claude-repl--passthrough-start "/"))
+            (should-not claude-slash-input-mode)
+            (should (null claude-repl--slash-stack))
+            (should (equal (buffer-string) "/"))
+            (should msg-called)))))))
+
+(ert-deftest claude-repl-test-slash-forward-char-no-vterm-exits-and-inserts ()
+  "If vterm goes away mid-slash-session, forward-char must exit slash mode and
+insert the keystroke into the input buffer (never silently dropped)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-fwd-no-vterm*"
+      (setq-local claude-repl--slash-stack '("/"))
+      (claude-slash-input-mode 1)
+      (let ((msg-called nil))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'message) (lambda (&rest _) (setq msg-called t)))
+                  ((symbol-function 'vterm-send-string)
+                   (lambda (&rest _) (error "MUST NOT forward when vterm missing"))))
+          (with-current-buffer " *test-fwd-no-vterm*"
+            (let ((last-command-event ?x))
+              (claude-repl--slash-forward-char))
+            (should-not claude-slash-input-mode)
+            (should (null claude-repl--slash-stack))
+            (should (equal (buffer-string) "x"))
+            (should msg-called)))))))
+
+(ert-deftest claude-repl-test-slash-backspace-no-vterm-exits-loudly ()
+  "Slash backspace with no live vterm must log + message AND exit slash mode,
+not pop a phantom entry from the stack."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-bs-no-vterm*"
+      (setq-local claude-repl--slash-stack '("a" "/"))
+      (claude-slash-input-mode 1)
+      (let ((msg-called nil))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'message) (lambda (&rest _) (setq msg-called t)))
+                  ((symbol-function 'vterm-send-key)
+                   (lambda (&rest _) (error "MUST NOT forward when vterm missing"))))
+          (with-current-buffer " *test-bs-no-vterm*"
+            (claude-repl--slash-backspace)
+            (should-not claude-slash-input-mode)
+            (should (null claude-repl--slash-stack))
+            (should msg-called)))))))
+
+(ert-deftest claude-repl-test-slash-return-no-vterm-still-exits ()
+  "Slash return with no live vterm must still exit slash mode (and surface error)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-ret-no-vterm*"
+      (setq-local claude-repl--slash-stack '("a" "/"))
+      (claude-slash-input-mode 1)
+      (let ((msg-called nil))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'message) (lambda (&rest _) (setq msg-called t)))
+                  ((symbol-function 'vterm-send-return)
+                   (lambda (&rest _) (error "MUST NOT forward when vterm missing"))))
+          (with-current-buffer " *test-ret-no-vterm*"
+            (claude-repl--slash-return)
+            (should-not claude-slash-input-mode)
+            (should (null claude-repl--slash-stack))
+            (should msg-called)))))))
+
+(ert-deftest claude-repl-test-slash-quit-exits-without-sending ()
+  "`claude-repl--slash-quit' (bound to C-g) must exit slash mode without touching vterm."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-slash-quit*"
+      (setq-local claude-repl--slash-stack '("a" "b" "/"))
+      (claude-slash-input-mode 1)
+      (cl-letf (((symbol-function 'vterm-send-string)
+                 (lambda (&rest _) (error "slash-quit must not send")))
+                ((symbol-function 'vterm-send-key)
+                 (lambda (&rest _) (error "slash-quit must not send"))))
+        (with-current-buffer " *test-slash-quit*"
+          (claude-repl--slash-quit)
+          (should-not claude-slash-input-mode)
+          (should (null claude-repl--slash-stack)))))))
 
 (provide 'test-input)
 

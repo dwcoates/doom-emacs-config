@@ -504,63 +504,144 @@ all characters are sent directly to vterm."
   (setq claude-repl--slash-stack nil)
   (claude-slash-input-mode -1))
 
-(defun claude-repl--slash-vterm-send (str)
-  "Send STR to the current workspace's vterm buffer without a trailing return."
-  (claude-repl--log-verbose nil "slash-vterm-send: str=%s" str)
-  (claude-repl--with-vterm-buf
-   (vterm-send-string str)))
+(defun claude-repl--slash-no-vterm-error (what payload)
+  "Log + user-visible error that WHAT couldn't reach vterm (with PAYLOAD).
+Per AGENTS.md \"No Silent Fallbacks\": every vterm-forward failure in slash
+mode must be surfaced to the user and logged with enough state to diagnose."
+  (let* ((ws (+workspace-current-name))
+         (recorded (claude-repl--ws-get ws :vterm-buffer))
+         (live (and (bufferp recorded) (buffer-live-p recorded))))
+    (claude-repl--log ws "slash-%s: FAILED no live vterm — ws=%s recorded-vterm=%S live=%s payload=%S"
+                      what ws recorded live payload)
+    (message "claude-repl: cannot forward to Claude — no live vterm in workspace %s"
+             (or ws "<none>"))))
 
-(defun claude-repl--slash-send-and-push (str)
-  "Send STR to vterm and push it onto the slash stack."
-  (claude-repl--slash-vterm-send str)
-  (push str claude-repl--slash-stack)
-  (claude-repl--log-verbose nil "slash-send-and-push: char=%s stack-depth=%d" str (length claude-repl--slash-stack)))
+(defun claude-repl--slash-vterm-send (str)
+  "Send STR to the current workspace's vterm buffer.
+Return t on success, nil if there is no live vterm.  Must run the send
+inside the vterm buffer via `with-current-buffer' — `vterm-send-string'
+reads `vterm--term' buffer-locally and silently no-ops otherwise.
+On failure, logs + surfaces a user-visible error."
+  (claude-repl--log-verbose nil "slash-vterm-send: str=%S" str)
+  (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
+      (progn
+        (with-current-buffer vterm-buf
+          (vterm-send-string str))
+        t)
+    (claude-repl--slash-no-vterm-error "send" str)
+    nil))
+
+(defun claude-repl--slash-try-send-and-push (str)
+  "Try to send STR to vterm; push onto the slash stack ONLY on success.
+Returns t on success, nil on failure.  Per AGENTS.md: we must not mutate
+local state (the stack) when the operation it reflects (the forward to
+vterm) did not actually happen."
+  (if (claude-repl--slash-vterm-send str)
+      (progn
+        (push str claude-repl--slash-stack)
+        (claude-repl--log-verbose nil "slash-try-send-and-push: char=%S stack-depth=%d"
+                                  str (length claude-repl--slash-stack))
+        t)
+    (claude-repl--log nil "slash-try-send-and-push: REFUSED to push char=%S — send failed"
+                      str)
+    nil))
+
+(defun claude-repl--slash-abort-and-insert (char)
+  "Exit slash mode and insert CHAR as a regular self-insert into the input buffer.
+Used when an in-flight slash-mode forward fails: we exit the mode (so the
+user is no longer trapped), drop the current key into the input buffer (so
+nothing is silently discarded), and leave already-forwarded characters in
+vterm untouched (no rollback — they've already been sent)."
+  (claude-repl--log nil "slash-abort-and-insert: char=%S stack-depth-before-exit=%d"
+                    char (length claude-repl--slash-stack))
+  (claude-repl--exit-slash-mode)
+  (self-insert-command 1 (string-to-char char)))
 
 (defun claude-repl--slash-forward-char ()
-  "Forward the typed character to vterm without inserting it into the buffer."
+  "Forward the typed character to vterm without inserting it into the buffer.
+If the forward fails, exit slash mode and drop the character into the
+input buffer — never silently discard user input."
   (interactive)
-  (claude-repl--log-verbose nil "slash-forward-char: char=%s" (string last-command-event))
-  (claude-repl--slash-send-and-push (string last-command-event)))
+  (let ((char (string last-command-event)))
+    (claude-repl--log-verbose nil "slash-forward-char: char=%S" char)
+    (unless (claude-repl--slash-try-send-and-push char)
+      (claude-repl--slash-abort-and-insert char))))
 
 (defun claude-repl--slash-backspace ()
-  "Pop from the slash stack; send backspace to vterm; exit mode when stack is empty."
+  "Send backspace to vterm; pop the stack; exit mode when stack is empty.
+If the send fails, exit slash mode loudly — do not pop the stack past what
+was actually sent."
   (interactive)
-  (claude-repl--with-vterm-buf
-   (vterm-send-key "<backspace>"))
-  (pop claude-repl--slash-stack)
-  (let ((remaining (length claude-repl--slash-stack)))
-    (claude-repl--log-verbose nil "slash-backspace: remaining-depth=%d exiting=%s" remaining (if (null claude-repl--slash-stack) "t" "nil"))
-    (when (null claude-repl--slash-stack)
-      (claude-repl--exit-slash-mode))))
+  (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
+      (progn
+        (with-current-buffer vterm-buf
+          (vterm-send-key "<backspace>"))
+        (pop claude-repl--slash-stack)
+        (let ((remaining (length claude-repl--slash-stack)))
+          (claude-repl--log-verbose nil "slash-backspace: remaining-depth=%d exiting=%s"
+                                    remaining (if (null claude-repl--slash-stack) "t" "nil"))
+          (when (null claude-repl--slash-stack)
+            (claude-repl--exit-slash-mode))))
+    (claude-repl--slash-no-vterm-error "backspace" nil)
+    (claude-repl--exit-slash-mode)))
 
 (defun claude-repl--slash-return ()
-  "Send return to vterm and exit slash mode."
+  "Send return to vterm and exit slash mode.
+Exits the mode regardless of send outcome — being stuck in slash mode when
+vterm is gone is strictly worse than having one unforwarded RET."
   (interactive)
   (claude-repl--log nil "slash-return: sending return and exiting slash mode")
-  (claude-repl--with-vterm-buf
-   (vterm-send-return))
+  (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
+      (with-current-buffer vterm-buf
+        (vterm-send-return))
+    (claude-repl--slash-no-vterm-error "return" nil))
   (claude-repl--exit-slash-mode))
 
 ;; Use remaps throughout so evil keymap priority is irrelevant -- remaps are
 ;; resolved after key->command lookup and apply across all evil states.
 (defun claude-repl--slash-tab ()
-  "Forward a tab character to vterm in slash mode."
+  "Forward a tab character to vterm in slash mode.
+If the forward fails, exit slash mode and insert TAB — see
+`claude-repl--slash-forward-char'."
   (interactive)
   (claude-repl--log-verbose nil "slash-tab: forwarding tab")
-  (claude-repl--slash-send-and-push "\t"))
+  (unless (claude-repl--slash-try-send-and-push "\t")
+    (claude-repl--slash-abort-and-insert "\t")))
+
+(defun claude-repl--slash-quit ()
+  "Emergency escape: exit slash mode without sending anything to vterm.
+Bound to C-g so the user can always bail out of slash mode regardless of
+vterm state — cheap insurance against any future silent-fallback bugs in
+the slash-mode plumbing."
+  (interactive)
+  (claude-repl--log nil "slash-quit: user-initiated emergency exit stack-depth=%d"
+                    (length claude-repl--slash-stack))
+  (claude-repl--exit-slash-mode))
 
 (defun claude-repl--passthrough-start (char)
-  "Enter pass-through mode and send CHAR to vterm if the buffer is empty.
-Otherwise insert CHAR normally.  Used for /, digits, and any other
-characters that should go directly to Claude when typed first."
-  (if (= (buffer-size) 0)
-      (progn
-        (claude-repl--log nil "passthrough-start: empty-buffer branch, entering slash mode char=%s" char)
-        (claude-slash-input-mode 1)
-        (claude-repl--slash-send-and-push char))
-    (progn
-      (claude-repl--log nil "passthrough-start: non-empty buffer, inserting normally char=%s" char)
-      (self-insert-command 1 (string-to-char char)))))
+  "Enter slash mode and forward CHAR to vterm, or fail loudly without entering.
+Preconditions (empty input buffer AND live vterm for the current workspace)
+are checked up front.  On failure we log, surface a user-visible message,
+and fall through to normal `self-insert-command' so the character lands in
+the input buffer instead of vanishing into a stuck-mode stack.
+Per AGENTS.md: no silent fallback, no dropped user input."
+  (cond
+   ((/= (buffer-size) 0)
+    (claude-repl--log nil "passthrough-start: non-empty buffer, inserting normally char=%S" char)
+    (self-insert-command 1 (string-to-char char)))
+   ((null (claude-repl--current-ws-live-vterm))
+    (claude-repl--slash-no-vterm-error "passthrough-start" char)
+    (self-insert-command 1 (string-to-char char)))
+   (t
+    (claude-repl--log nil "passthrough-start: entering slash mode char=%S" char)
+    (claude-slash-input-mode 1)
+    ;; Race guard: vterm could die between the check above and the send.
+    ;; Undo mode entry + insert the char so we never end up in slash mode
+    ;; with an empty stack and no way to exit via the normal paths.
+    (unless (claude-repl--slash-try-send-and-push char)
+      (claude-repl--log nil "passthrough-start: race — vterm died during entry, aborting")
+      (claude-repl--exit-slash-mode)
+      (self-insert-command 1 (string-to-char char))))))
 
 (defun claude-repl--slash-start ()
   "Enter pass-through mode if the buffer is empty, else insert / normally."
@@ -575,5 +656,7 @@ characters that should go directly to Claude when typed first."
       [remap delete-backward-char]               #'claude-repl--slash-backspace
       [remap backward-delete-char-untabify]      #'claude-repl--slash-backspace
       [remap claude-repl--send]                   #'claude-repl--slash-return
+      [remap keyboard-quit]                       #'claude-repl--slash-quit
+      :ni "C-g"    #'claude-repl--slash-quit
       :ni "<up>"   #'ignore
       :ni "<down>" #'ignore)
