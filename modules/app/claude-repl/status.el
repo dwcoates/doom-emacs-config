@@ -325,13 +325,34 @@ and for the current workspace when panels have no visible windows."
 
 (defun claude-repl--update-ws-state (ws)
   "Update workspace WS state according to claude visibility and git status.
-State table:
-  :thinking   → unchanged (never touch)
-  :permission → unchanged
+
+Scope: THIS function is the timer-driven side of the state machine.  It
+only reads derivable state (git cleanliness, panel visibility, :viewed)
+and therefore NEVER writes :thinking or :permission — those live events
+are the province of the input/sentinel lifecycle, and letting the timer
+race with them produces user-visible lies (a green tab while Claude is
+still working, for example).
+
+State table (this function only; other writers listed below):
+  :thinking   → unchanged here (see WRITERS below)
+  :permission → unchanged here (see WRITERS below)
   :done+viewed+clean+panels-closed → :inactive
   :done+viewed+dirty+panels-closed → :done (stay green until clean)
-  :inactive   → unchanged (terminal — git status irrelevant)
-  nil+dirty   → :done       |  nil+clean → nil"
+  :inactive   → unchanged here (terminal; git status irrelevant)
+  nil+dirty   → :done       |  nil+clean → nil
+
+WRITERS of :thinking (outside this function):
+  mark-ws-thinking (input.el)         — set on prompt submit.
+  on-prompt-submit-event (sentinel.el) — set via prompt_submit_* sentinel.
+  on-stop-event (sentinel.el)         — clears via ws-clear-if-status.
+  maybe-clear-stale-state             — preserves :thinking; never clears.
+
+WRITERS of :permission (outside this function):
+  on-permission-event (sentinel.el)   — set via permission_prompt sentinel.
+  mark-ws-thinking                    — overwritten on next prompt submit.
+  mark-done-if-hidden (session.el)    — overwritten to :done on Stop event
+                                        when panels are hidden.
+  maybe-clear-stale-state             — clears to nil on dead vterm."
   (let ((state (claude-repl--ws-state ws))
         (dirty (not (claude-repl--workspace-clean-p ws))))
     (pcase (cons state dirty)
