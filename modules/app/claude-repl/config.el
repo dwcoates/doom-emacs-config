@@ -25,6 +25,7 @@
       (message "[claude-repl] FAILED to load %s.el: %S" ,file err))))
 
 (claude-repl--load-module "core")
+(claude-repl--load-module "install")
 (claude-repl--load-module "notifications")
 (claude-repl--load-module "history")
 (claude-repl--load-module "overlay")
