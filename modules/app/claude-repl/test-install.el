@@ -225,4 +225,282 @@
   (should (string-match-p "/\\.claude/install\\.sh\\'"
                           claude-repl--install-script)))
 
+;;;; ---- Bash-integration tests --------------------------------------------
+;;
+;; These spawn `bash .claude/install.sh` with HOME redirected to a tmpdir.
+;; They assert end-to-end behavior of the installer, including foreign-entry
+;; preservation, idempotency, uninstall semantics, and sandbox short-circuit.
+;; Skipped when `bash' or `jq' is not on PATH.
+
+(defun test-install-bash--deps-available-p ()
+  "Return non-nil when bash and jq are both on PATH."
+  (and (executable-find "bash") (executable-find "jq")))
+
+(defun test-install-bash--make-tmphome ()
+  "Return an absolute path to a fresh tmpdir usable as HOME."
+  (file-name-as-directory
+   (make-temp-file "claude-repl-install-test-" t)))
+
+(defun test-install-bash--cleanup (tmphome)
+  "Recursively delete TMPHOME."
+  (when (and tmphome (file-directory-p tmphome))
+    (delete-directory tmphome t)))
+
+(defun test-install-bash--write-settings (tmphome content)
+  "Write CONTENT (string) to TMPHOME/.claude/settings.json.
+Creates the .claude directory if needed."
+  (let ((dir (expand-file-name ".claude" tmphome)))
+    (make-directory dir t)
+    (with-temp-file (expand-file-name "settings.json" dir)
+      (insert content))))
+
+(defun test-install-bash--run (tmphome action &optional extra-env)
+  "Invoke the installer with HOME=TMPHOME and ACTION.
+EXTRA-ENV is an alist of additional environment variables.
+Returns a cons (EXIT-CODE . OUTPUT)."
+  (with-temp-buffer
+    ;; Pin default-directory to a known-existing path so call-process does
+    ;; not choke when the test runner's inherited default-directory contains
+    ;; an unexpanded tilde.
+    (let* ((default-directory temporary-file-directory)
+           (process-environment
+            (append (mapcar (lambda (kv) (format "%s=%s" (car kv) (cdr kv)))
+                            (cons (cons "HOME" (directory-file-name tmphome))
+                                  extra-env))
+                    process-environment))
+           (exit (call-process "bash" nil t nil
+                               claude-repl--install-script action)))
+      (cons exit (buffer-string)))))
+
+(defun test-install-bash--read-settings (tmphome)
+  "Return parsed settings.json from TMPHOME, or nil if missing."
+  (let ((path (expand-file-name ".claude/settings.json" tmphome)))
+    (when (file-exists-p path)
+      (json-read-file path))))
+
+(defun test-install-bash--cmd-in-event-p (json event cmd)
+  "Return non-nil if CMD is registered anywhere under EVENT in JSON."
+  (let ((hooks (cdr (assq 'hooks json))))
+    (claude-repl--event-has-command-p hooks event cmd)))
+
+(defun test-install-bash--event-entry-count (json event)
+  "Return the number of top-level entries under EVENT in JSON's .hooks."
+  (let* ((hooks (cdr (assq 'hooks json)))
+         (entries (cdr (assq event hooks))))
+    (cond ((null entries) 0)
+          ((vectorp entries) (length entries))
+          (t (length entries)))))
+
+;; --- Fresh install ------------------------------------------------------
+
+(ert-deftest claude-repl-test-bash-install-fresh ()
+  "Fresh install creates settings.json with all four events registered."
+  (skip-unless (test-install-bash--deps-available-p))
+  (let ((tmphome (test-install-bash--make-tmphome)))
+    (unwind-protect
+        (let* ((result (test-install-bash--run tmphome "install"))
+               (json (test-install-bash--read-settings tmphome)))
+          (should (= 0 (car result)))
+          (should json)
+          (should (test-install-bash--cmd-in-event-p
+                   json 'Stop "~/.claude/hooks/stop-notify.sh"))
+          (should (test-install-bash--cmd-in-event-p
+                   json 'UserPromptSubmit
+                   "~/.claude/hooks/prompt-submit-notify.sh"))
+          (should (test-install-bash--cmd-in-event-p
+                   json 'SessionStart
+                   "~/.claude/hooks/session-start-notify.sh"))
+          (should (test-install-bash--cmd-in-event-p
+                   json 'Notification
+                   "~/.claude/hooks/permission-notify.sh")))
+      (test-install-bash--cleanup tmphome))))
+
+(ert-deftest claude-repl-test-bash-install-no-backup-when-fresh ()
+  "Fresh install (settings.json not pre-existing) does not create a backup."
+  (skip-unless (test-install-bash--deps-available-p))
+  (let ((tmphome (test-install-bash--make-tmphome)))
+    (unwind-protect
+        (progn
+          (test-install-bash--run tmphome "install")
+          (should-not
+           (directory-files (expand-file-name ".claude" tmphome)
+                            nil "settings\\.json\\.bak\\.")))
+      (test-install-bash--cleanup tmphome))))
+
+;; --- Idempotency --------------------------------------------------------
+
+(ert-deftest claude-repl-test-bash-install-idempotent ()
+  "Running install twice does not duplicate managed entries."
+  (skip-unless (test-install-bash--deps-available-p))
+  (let ((tmphome (test-install-bash--make-tmphome)))
+    (unwind-protect
+        (progn
+          (test-install-bash--run tmphome "install")
+          (test-install-bash--run tmphome "install")
+          (let ((json (test-install-bash--read-settings tmphome)))
+            (should (= 1 (test-install-bash--event-entry-count json 'Stop)))
+            (should (= 1 (test-install-bash--event-entry-count
+                          json 'UserPromptSubmit)))
+            (should (= 1 (test-install-bash--event-entry-count
+                          json 'SessionStart)))
+            (should (= 1 (test-install-bash--event-entry-count
+                          json 'Notification)))))
+      (test-install-bash--cleanup tmphome))))
+
+;; --- Foreign entries preserved ------------------------------------------
+
+(ert-deftest claude-repl-test-bash-install-preserves-foreign-stop ()
+  "Install appends our Stop entry alongside a pre-existing foreign one."
+  (skip-unless (test-install-bash--deps-available-p))
+  (let ((tmphome (test-install-bash--make-tmphome)))
+    (unwind-protect
+        (progn
+          (test-install-bash--write-settings
+           tmphome
+           "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"/foreign.sh\"}]}]}}")
+          (test-install-bash--run tmphome "install")
+          (let ((json (test-install-bash--read-settings tmphome)))
+            (should (= 2 (test-install-bash--event-entry-count json 'Stop)))
+            (should (test-install-bash--cmd-in-event-p
+                     json 'Stop "/foreign.sh"))
+            (should (test-install-bash--cmd-in-event-p
+                     json 'Stop "~/.claude/hooks/stop-notify.sh"))))
+      (test-install-bash--cleanup tmphome))))
+
+(ert-deftest claude-repl-test-bash-install-preserves-foreign-top-level ()
+  "Install preserves unrelated top-level keys in settings.json."
+  (skip-unless (test-install-bash--deps-available-p))
+  (let ((tmphome (test-install-bash--make-tmphome)))
+    (unwind-protect
+        (progn
+          (test-install-bash--write-settings
+           tmphome "{\"enabledPlugins\":[\"foo\"],\"statusLine\":\"bar\"}")
+          (test-install-bash--run tmphome "install")
+          (let ((json (test-install-bash--read-settings tmphome)))
+            (should (equal (cdr (assq 'enabledPlugins json)) ["foo"]))
+            (should (equal (cdr (assq 'statusLine json)) "bar"))))
+      (test-install-bash--cleanup tmphome))))
+
+(ert-deftest claude-repl-test-bash-install-creates-backup-when-file-exists ()
+  "Install creates a timestamped backup of a pre-existing settings.json."
+  (skip-unless (test-install-bash--deps-available-p))
+  (let ((tmphome (test-install-bash--make-tmphome)))
+    (unwind-protect
+        (progn
+          (test-install-bash--write-settings tmphome "{\"enabledPlugins\":[]}")
+          (test-install-bash--run tmphome "install")
+          (let ((backups
+                 (directory-files (expand-file-name ".claude" tmphome)
+                                  nil "settings\\.json\\.bak\\.[0-9]+\\'")))
+            (should (= 1 (length backups)))))
+      (test-install-bash--cleanup tmphome))))
+
+;; --- Malformed settings aborts ------------------------------------------
+
+(ert-deftest claude-repl-test-bash-install-malformed-settings-aborts ()
+  "Install aborts with non-zero exit when settings.json is malformed."
+  (skip-unless (test-install-bash--deps-available-p))
+  (let ((tmphome (test-install-bash--make-tmphome)))
+    (unwind-protect
+        (progn
+          (test-install-bash--write-settings tmphome "{ not valid json")
+          (let ((result (test-install-bash--run tmphome "install")))
+            (should (/= 0 (car result)))))
+      (test-install-bash--cleanup tmphome))))
+
+;; --- Sandbox no-op ------------------------------------------------------
+
+(ert-deftest claude-repl-test-bash-install-sandbox-noop ()
+  "DOOM_SANDBOX=1 makes install short-circuit without writing."
+  (skip-unless (test-install-bash--deps-available-p))
+  (let ((tmphome (test-install-bash--make-tmphome)))
+    (unwind-protect
+        (let ((result (test-install-bash--run
+                       tmphome "install" '(("DOOM_SANDBOX" . "1")))))
+          (should (= 0 (car result)))
+          (should (string-match-p "sandbox" (cdr result)))
+          (should-not (file-exists-p
+                       (expand-file-name ".claude/settings.json" tmphome))))
+      (test-install-bash--cleanup tmphome))))
+
+;; --- Uninstall ----------------------------------------------------------
+
+(ert-deftest claude-repl-test-bash-uninstall-preserves-foreign ()
+  "Uninstall removes our Stop entry but preserves the foreign one."
+  (skip-unless (test-install-bash--deps-available-p))
+  (let ((tmphome (test-install-bash--make-tmphome)))
+    (unwind-protect
+        (progn
+          (test-install-bash--write-settings
+           tmphome
+           "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"/foreign.sh\"}]}]}}")
+          (test-install-bash--run tmphome "install")
+          (test-install-bash--run tmphome "uninstall")
+          (let ((json (test-install-bash--read-settings tmphome)))
+            (should (= 1 (test-install-bash--event-entry-count json 'Stop)))
+            (should (test-install-bash--cmd-in-event-p
+                     json 'Stop "/foreign.sh"))
+            (should-not (test-install-bash--cmd-in-event-p
+                         json 'Stop "~/.claude/hooks/stop-notify.sh"))))
+      (test-install-bash--cleanup tmphome))))
+
+(ert-deftest claude-repl-test-bash-uninstall-removes-empty-event-keys ()
+  "Uninstall drops an event key whose array becomes empty."
+  (skip-unless (test-install-bash--deps-available-p))
+  (let ((tmphome (test-install-bash--make-tmphome)))
+    (unwind-protect
+        (progn
+          (test-install-bash--run tmphome "install")
+          (test-install-bash--run tmphome "uninstall")
+          (let* ((json (test-install-bash--read-settings tmphome))
+                 (hooks (cdr (assq 'hooks json))))
+            ;; None of our event keys should survive when no foreign entries
+            ;; co-exist.
+            (should-not (assq 'UserPromptSubmit hooks))
+            (should-not (assq 'SessionStart hooks))
+            (should-not (assq 'Notification hooks))
+            (should-not (assq 'Stop hooks))))
+      (test-install-bash--cleanup tmphome))))
+
+(ert-deftest claude-repl-test-bash-uninstall-deletes-scripts ()
+  "Uninstall removes the managed script files from ~/.claude/hooks/."
+  (skip-unless (test-install-bash--deps-available-p))
+  (let ((tmphome (test-install-bash--make-tmphome)))
+    (unwind-protect
+        (progn
+          (test-install-bash--run tmphome "install")
+          (test-install-bash--run tmphome "uninstall")
+          (let ((hooks-dir (expand-file-name ".claude/hooks" tmphome)))
+            (should-not (file-exists-p
+                         (expand-file-name "stop-notify.sh" hooks-dir)))
+            (should-not (file-exists-p
+                         (expand-file-name "prompt-submit-notify.sh" hooks-dir)))
+            (should-not (file-exists-p
+                         (expand-file-name "session-start-notify.sh" hooks-dir)))
+            (should-not (file-exists-p
+                         (expand-file-name "permission-notify.sh" hooks-dir)))))
+      (test-install-bash--cleanup tmphome))))
+
+;; --- Reinstall ----------------------------------------------------------
+
+(ert-deftest claude-repl-test-bash-reinstall-round-trip ()
+  "Reinstall leaves the foreign+ours layout identical to one install run."
+  (skip-unless (test-install-bash--deps-available-p))
+  (let ((tmphome (test-install-bash--make-tmphome)))
+    (unwind-protect
+        (progn
+          (test-install-bash--write-settings
+           tmphome
+           "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"/foreign.sh\"}]}]}}")
+          (test-install-bash--run tmphome "install")
+          (test-install-bash--run tmphome "reinstall")
+          (let ((json (test-install-bash--read-settings tmphome)))
+            ;; Foreign plus our Stop = length 2 (still).
+            (should (= 2 (test-install-bash--event-entry-count json 'Stop)))
+            (should (test-install-bash--cmd-in-event-p
+                     json 'Stop "/foreign.sh"))
+            (should (test-install-bash--cmd-in-event-p
+                     json 'Stop "~/.claude/hooks/stop-notify.sh"))))
+      (test-install-bash--cleanup tmphome))))
+
 ;;; test-install.el ends here
