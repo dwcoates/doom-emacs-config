@@ -15,7 +15,7 @@
 ;;;; ---- Migrated tests ----
 
 (ert-deftest claude-repl-test-finished-from-hook-hidden-sets-done ()
-  "handle-claude-finished should set :done when vterm buffer is not visible."
+  "handle-claude-finished sets claude-state :done when vterm buffer is not visible."
   (claude-repl-test--with-clean-state
     (let ((done-set nil)
           (fake-buf (generate-new-buffer " *test-hook-hidden*")))
@@ -27,15 +27,17 @@
                       ((symbol-function 'claude-repl--do-refresh) #'ignore)
                       ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
                       ((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
-                      ((symbol-function 'claude-repl--ws-set)
+                      ((symbol-function 'claude-repl--ws-set-claude-state)
                        (lambda (ws state)
                          (when (eq state :done) (setq done-set ws)))))
               (claude-repl--handle-claude-finished "ws1")
               (should (equal done-set "ws1"))))
         (kill-buffer fake-buf)))))
 
-(ert-deftest claude-repl-test-finished-from-hook-visible-no-done ()
-  "handle-claude-finished should NOT set :done when vterm buffer IS visible."
+(ert-deftest claude-repl-test-finished-from-hook-visible-also-sets-done ()
+  "handle-claude-finished sets :done regardless of vterm visibility.
+Visibility is no longer a gate; the renderer decides the display via
+the composed-state rule with :repl-state."
   (claude-repl-test--with-clean-state
     (let ((done-set nil)
           (fake-buf (generate-new-buffer " *test-hook-visible*")))
@@ -48,11 +50,11 @@
                       ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
                       ((symbol-function 'claude-repl--fix-vterm-scroll) #'ignore)
                       ((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
-                      ((symbol-function 'claude-repl--ws-set)
+                      ((symbol-function 'claude-repl--ws-set-claude-state)
                        (lambda (ws state)
                          (when (eq state :done) (setq done-set ws)))))
               (claude-repl--handle-claude-finished "ws1")
-              (should-not done-set)))
+              (should (equal done-set "ws1"))))
         (kill-buffer fake-buf)))))
 
 (ert-deftest claude-repl-test-maybe-notify-debounce ()
@@ -85,8 +87,11 @@
         (claude-repl--maybe-notify-finished "ws1")
         (should (= notify-count 0))))))
 
-(ert-deftest claude-repl-test-finished-from-hook-nil-vterm-no-done ()
-  "handle-claude-finished should NOT set :done when vterm-buf is nil."
+(ert-deftest claude-repl-test-finished-from-hook-nil-vterm-sets-done ()
+  "handle-claude-finished still sets :done when vterm-buf is nil.
+The Stop signal's intent is \"Claude finished\" — unrelated to whether
+the vterm buffer is still around.  Refresh-vterm-after-finish is guarded
+by vterm-buf presence; the :done write is not."
   (claude-repl-test--with-clean-state
     (let ((done-set nil))
       ;; Do NOT register :vterm-buffer for "ws1"
@@ -94,11 +99,11 @@
                 ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
                 ((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
                 ((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                ((symbol-function 'claude-repl--ws-set)
+                ((symbol-function 'claude-repl--ws-set-claude-state)
                  (lambda (ws state)
                    (when (eq state :done) (setq done-set ws)))))
         (claude-repl--handle-claude-finished "ws1")
-        (should-not done-set)))))
+        (should (equal done-set "ws1"))))))
 
 ;;;; ---- Tests: Sandbox configuration ----
 
@@ -293,38 +298,32 @@
 
 ;;;; ---- Tests: Session completion handling ----
 
-(ert-deftest claude-repl-test-mark-done-if-hidden-not-visible ()
-  "mark-done-if-hidden should set :done and clear :viewed when buffer not visible."
+(ert-deftest claude-repl-test-mark-claude-done-sets-done ()
+  "mark-claude-done sets :claude-state :done unconditionally."
   (claude-repl-test--with-clean-state
-    (let ((done-set nil)
-          (fake-buf (generate-new-buffer " *test-mark-done*")))
-      (unwind-protect
-          (progn
-            (claude-repl--ws-put "ws1" :viewed t)
-            (cl-letf (((symbol-function 'get-buffer-window)
-                       (lambda (_buf _all-frames) nil))
-                      ((symbol-function 'claude-repl--ws-set)
-                       (lambda (ws state)
-                         (when (eq state :done) (setq done-set ws)))))
-              (claude-repl--mark-done-if-hidden "ws1" fake-buf)
-              (should (equal done-set "ws1"))
-              (should-not (claude-repl--ws-get "ws1" :viewed))))
-        (kill-buffer fake-buf)))))
+    (let ((done-set nil))
+      (claude-repl--ws-put "ws1" :viewed t)
+      (cl-letf (((symbol-function 'claude-repl--ws-set-claude-state)
+                 (lambda (ws state)
+                   (when (eq state :done) (setq done-set ws)))))
+        (claude-repl--mark-claude-done "ws1")
+        (should (equal done-set "ws1"))
+        (should-not (claude-repl--ws-get "ws1" :viewed))))))
 
-(ert-deftest claude-repl-test-mark-done-if-hidden-visible ()
-  "mark-done-if-hidden should NOT set :done when buffer is visible."
+(ert-deftest claude-repl-test-mark-claude-done-regardless-of-visibility ()
+  "mark-claude-done no longer branches on vterm visibility.
+The previous mark-done-if-hidden used the vterm window as a \"user is
+already looking\" gate. Post-axis-split that gate is the renderer's job."
   (claude-repl-test--with-clean-state
-    (let ((done-set nil)
-          (fake-buf (generate-new-buffer " *test-mark-visible*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'get-buffer-window)
-                     (lambda (_buf _all-frames) 'some-window))
-                    ((symbol-function 'claude-repl--ws-set)
-                     (lambda (ws state)
-                       (when (eq state :done) (setq done-set ws)))))
-            (claude-repl--mark-done-if-hidden "ws1" fake-buf)
-            (should-not done-set))
-        (kill-buffer fake-buf)))))
+    (let ((done-set nil))
+      ;; Any hypothetical visibility — mark-claude-done does not read it.
+      (cl-letf (((symbol-function 'get-buffer-window)
+                 (lambda (&rest _) 'some-window))
+                ((symbol-function 'claude-repl--ws-set-claude-state)
+                 (lambda (ws state)
+                   (when (eq state :done) (setq done-set ws)))))
+        (claude-repl--mark-claude-done "ws1")
+        (should (equal done-set "ws1"))))))
 
 (ert-deftest claude-repl-test-refresh-vterm-after-finish-live ()
   "refresh-vterm-after-finish should call do-refresh and update-hide-overlay for live buffer."
@@ -1111,18 +1110,12 @@
             (when (buffer-live-p vterm-buf)
               (kill-buffer vterm-buf))))))))
 
-(ert-deftest claude-repl-test-mark-done-if-hidden-clears-viewed ()
-  "mark-done-if-hidden should set :viewed to nil when vterm buffer is not visible."
+(ert-deftest claude-repl-test-mark-claude-done-clears-viewed ()
+  "mark-claude-done always sets :viewed to nil and claude-state to :done."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :viewed t)
-    (let ((vterm-buf (generate-new-buffer "*claude-testhidden*")))
-      (unwind-protect
-          (progn
-            ;; No window displaying the buffer → hidden
-            (claude-repl--mark-done-if-hidden "ws1" vterm-buf)
-            (should-not (claude-repl--ws-get "ws1" :viewed))
-            (should (eq (claude-repl--ws-state "ws1") :done)))
-        (when (buffer-live-p vterm-buf)
-          (kill-buffer vterm-buf))))))
+    (claude-repl--mark-claude-done "ws1")
+    (should-not (claude-repl--ws-get "ws1" :viewed))
+    (should (eq (claude-repl--ws-claude-state "ws1") :done))))
 
 ;;; test-session.el ends here

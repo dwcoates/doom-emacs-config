@@ -440,8 +440,9 @@ WRITERS of :thinking (outside this function):
 WRITERS of :permission (outside this function):
   on-permission-event (sentinel.el)   — set via permission_prompt sentinel.
   mark-ws-thinking                    — overwritten on next prompt submit.
-  mark-done-if-hidden (session.el)    — overwritten to :done on Stop event
-                                        when panels are hidden.
+  mark-claude-done (session.el)       — overwritten to :done on every
+                                        Stop event (visibility handled by
+                                        renderer via :repl-state).
   maybe-clear-stale-state             — clears to nil on dead vterm."
   (let ((state (claude-repl--ws-claude-state ws))
         (dirty (not (claude-repl--workspace-clean-p ws))))

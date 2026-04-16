@@ -304,13 +304,18 @@ and title-change paths fire for the same turn completion."
       (when (and last (<= (- now last) 2.0))
         (claude-repl--log ws "maybe-notify-finished: debounce-hit ws=%s elapsed=%.2f" ws (- now last))))))
 
-(defun claude-repl--mark-done-if-hidden (ws vterm-buf)
-  "Mark WS as :done and clear :viewed when VTERM-BUF is not visible."
-  (if (get-buffer-window vterm-buf t)
-      (claude-repl--log ws "mark-done-if-hidden: visible — no-op ws=%s" ws)
-    (claude-repl--log ws "mark-done-if-hidden: hidden — marking done ws=%s" ws)
-    (claude-repl--ws-put ws :viewed nil)
-    (claude-repl--ws-set ws :done)))
+(defun claude-repl--mark-claude-done (ws)
+  "Mark WS's claude-state as :done and clear :viewed.
+Unconditional with respect to panel visibility: the previous
+`mark-done-if-hidden' version used the vterm window as a proxy for
+\"user is already looking; no need to flag unread.\"  After the
+state-axis split (analysis/08), visibility is expressed by
+`:repl-state' and the composed-state resolver handles the rendering
+decision.  Writing `:done' here is always correct — the tab color
+rule is derived, not stored."
+  (claude-repl--log ws "mark-claude-done ws=%s" ws)
+  (claude-repl--ws-put ws :viewed nil)
+  (claude-repl--ws-set-claude-state ws :done))
 
 (defun claude-repl--refresh-vterm-after-finish (vterm-buf)
   "Refresh display and scroll position for VTERM-BUF if it is still live."
@@ -325,13 +330,14 @@ and title-change paths fire for the same turn completion."
 
 (defun claude-repl--handle-claude-finished (ws)
   "Handle Claude finishing in WS.
-Looks up the vterm buffer from the workspace plist, marks it :done if not
-visible, refreshes output, and notifies the user if the frame is unfocused."
+Always marks claude-state as :done (visibility is no longer a gate),
+refreshes the vterm display if the buffer is still live, notifies the
+user if the frame is unfocused, and emits a finished-in-workspace
+message when the current workspace is different."
   (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
-    (claude-repl--log ws "handle-claude-finished ws=%s visible=%s"
-                      ws (if (and vterm-buf (get-buffer-window vterm-buf t)) "yes" "no"))
+    (claude-repl--log ws "handle-claude-finished ws=%s" ws)
+    (claude-repl--mark-claude-done ws)
     (when vterm-buf
-      (claude-repl--mark-done-if-hidden ws vterm-buf)
       (claude-repl--refresh-vterm-after-finish vterm-buf))
     (claude-repl--maybe-notify-finished ws)
     (unless (claude-repl--current-ws-p ws)
