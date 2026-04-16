@@ -160,39 +160,39 @@ directory.  Always deletes FILE at the end."
       (claude-repl--log ws "%s: file=%s dir=%s ws=%s status=%s"
                         (plist-get handler :name)
                         (file-name-nondirectory file) dir ws
-                        (claude-repl--ws-get ws :status))
+                        (claude-repl--ws-get ws :claude-state))
       (funcall (plist-get handler :callback) ws dir)))
     (ignore-errors (delete-file file))))
 
 (defun claude-repl--on-permission-event (ws _dir)
   "Set :permission status on workspace WS.
 Callback for the permission_prompt sentinel handler."
-  (let ((before (claude-repl--ws-get ws :status)))
+  (let ((before (claude-repl--ws-get ws :claude-state)))
     (claude-repl--log-verbose ws "on-permission-event: ws=%s status-BEFORE=%s" ws before)
     (claude-repl--ws-set ws :permission)
-    (claude-repl--log-verbose ws "on-permission-event: ws=%s status-AFTER=%s" ws (claude-repl--ws-get ws :status))))
+    (claude-repl--log-verbose ws "on-permission-event: ws=%s status-AFTER=%s" ws (claude-repl--ws-get ws :claude-state))))
 
 (defun claude-repl--on-stop-event (ws dir)
   "Handle a stop event for workspace WS with directory DIR.
 Logs the resolution, clears :thinking, and runs the finished handler."
-  (let ((before (claude-repl--ws-get ws :status))
+  (let ((before (claude-repl--ws-get ws :claude-state))
         (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (claude-repl--log ws "on-stop-event: ENTER ws=%s dir=%S status-BEFORE=%s vterm-buf=%S vterm-live=%s"
                       ws dir before
                       (when vterm-buf (buffer-name vterm-buf))
                       (if (and vterm-buf (buffer-live-p vterm-buf)) "yes" "no"))
     (claude-repl--ws-clear ws :thinking)
-    (let ((after-clear (claude-repl--ws-get ws :status)))
+    (let ((after-clear (claude-repl--ws-get ws :claude-state)))
       (claude-repl--log ws "on-stop-event: after ws-clear status=%s (was %s, expected nil)" after-clear before)
       (claude-repl--handle-claude-finished ws)
-      (claude-repl--log ws "on-stop-event: EXIT ws=%s status-AFTER=%s" ws (claude-repl--ws-get ws :status)))))
+      (claude-repl--log ws "on-stop-event: EXIT ws=%s status-AFTER=%s" ws (claude-repl--ws-get ws :claude-state)))))
 
 (defun claude-repl--on-prompt-submit-event (ws _dir)
   "Mark workspace WS as thinking after a prompt submission."
-  (let ((before (claude-repl--ws-get ws :status)))
+  (let ((before (claude-repl--ws-get ws :claude-state)))
     (claude-repl--log-verbose ws "on-prompt-submit-event: ws=%s status-BEFORE=%s" ws before)
     (claude-repl--mark-ws-thinking ws)
-    (claude-repl--log-verbose ws "on-prompt-submit-event: ws=%s status-AFTER=%s" ws (claude-repl--ws-get ws :status))))
+    (claude-repl--log-verbose ws "on-prompt-submit-event: ws=%s status-AFTER=%s" ws (claude-repl--ws-get ws :claude-state))))
 
 (defun claude-repl--on-session-start-event (ws _dir)
   "Handle a session_start event for workspace WS.

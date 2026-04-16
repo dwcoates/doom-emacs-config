@@ -153,8 +153,10 @@ Works from any buffer or from within the vterm buffer itself."
 
 (defun claude-repl--mark-viewed (ws)
   "If WS is :inactive, re-activate to :done (without :viewed, so it persists).
-If WS is :done, mark :viewed so the next update-ws-state can transition to :inactive."
-  (pcase (claude-repl--ws-get ws :status)
+If WS is :done, mark :viewed so the next update-ws-state can transition to :inactive.
+Reads :claude-state (the canonical axis); legacy :status is kept in sync
+by the write-both setters."
+  (pcase (claude-repl--ws-claude-state ws)
     (:inactive
      (claude-repl--log-verbose ws "mark-viewed: ws=%s branch=inactive->done (no :viewed yet)" ws)
      (claude-repl--ws-set ws :done))
@@ -162,8 +164,8 @@ If WS is :done, mark :viewed so the next update-ws-state can transition to :inac
      (claude-repl--log-verbose ws "mark-viewed: ws=%s branch=done->viewed" ws)
      (claude-repl--ws-put ws :viewed t))
     (_
-     (claude-repl--log-verbose ws "mark-viewed: ws=%s branch=no-op status=%s"
-                       ws (claude-repl--ws-get ws :status)))))
+     (claude-repl--log-verbose ws "mark-viewed: ws=%s branch=no-op claude-state=%s"
+                       ws (claude-repl--ws-claude-state ws)))))
 
 (defun claude-repl--drain-pending-show-panels (ws)
   "Open panels for WS if a preemptive prompt queued a :pending-show-panels flag.
@@ -248,8 +250,8 @@ WS defaults to the current workspace; when WS is nil the function still
 hides panels but skips the bookkeeping write."
   (let ((ws (or ws (+workspace-current-name))))
     (when ws
-      (claude-repl--log ws "on-close ws=%s state=%s"
-                        ws (claude-repl--ws-state ws))
+      (claude-repl--log ws "on-close ws=%s claude-state=%s"
+                        ws (claude-repl--ws-claude-state ws))
       (claude-repl--ws-put ws :panels-hidden t))
     (claude-repl--hide-panels)))
 
@@ -490,8 +492,8 @@ Demotes indicators, refreshes display, and restores panel layout."
 (defun claude-repl--show-hidden-panels ()
   "Restore hidden panels, re-activate :inactive workspaces, and mark :viewed."
   (let ((ws (+workspace-current-name)))
-    (claude-repl--log ws "showing panels ws=%s state=%s (restoring status)"
-                      ws (claude-repl--ws-state ws))
+    (claude-repl--log ws "showing panels ws=%s claude-state=%s (restoring status)"
+                      ws (claude-repl--ws-claude-state ws))
     (claude-repl--ws-put ws :panels-hidden nil)
     (claude-repl--mark-viewed ws))
   (claude-repl--show-existing-panels))

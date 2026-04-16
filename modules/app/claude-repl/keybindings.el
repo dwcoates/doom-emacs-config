@@ -6,8 +6,8 @@
   "Directory for workspace command files and other IPC output.")
 
 (defun claude-repl--cons-name-state (name)
-  "Return (NAME . state) for workspace NAME."
-  (cons name (claude-repl--ws-state name)))
+  "Return (NAME . claude-state) for workspace NAME."
+  (cons name (claude-repl--ws-claude-state name)))
 
 (defun claude-repl--format-workspace-state (pair)
   "Format a (NAME . STATE) PAIR as an indented diagnostic string."
@@ -302,7 +302,7 @@ Returns a plist with keys :vterm-buf :proc-alive :owning-ws :has-window
 Mirrors the logic in `claude-repl--update-all-workspace-states'."
   (if claude-open
       (claude-repl--update-ws-state ws-name)
-    (let ((state (claude-repl--ws-state ws-name)))
+    (let ((state (claude-repl--ws-claude-state ws-name)))
       (when (and state (not (eq state :thinking)))
         (claude-repl--ws-clear ws-name state)))))
 
@@ -331,10 +331,10 @@ Runs the same logic as the periodic `update-all-workspace-states' timer:
 checks claude visibility, git dirty status, and applies the state table.
 Reports comprehensive diagnostics."
   (interactive (list (claude-repl--read-workspace-with-default "Workspace: ")))
-  (let* ((before (claude-repl--ws-state ws-name))
+  (let* ((before (claude-repl--ws-claude-state ws-name))
          (diag (claude-repl-debug/--gather-ws-diagnostics ws-name)))
     (claude-repl-debug/--apply-state-refresh ws-name (plist-get diag :claude-open))
-    (let ((after (claude-repl--ws-state ws-name)))
+    (let ((after (claude-repl--ws-claude-state ws-name)))
       (force-mode-line-update t)
       (message "%s" (claude-repl-debug/--format-diagnostics ws-name diag before after)))))
 

@@ -63,7 +63,8 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
           (format " {ws=%s}" ws)
         (let* ((id       (claude-repl--ws-id-cached ws))
                (dir      (plist-get plist :project-dir))
-               (status   (plist-get plist :status))
+               (cstate   (plist-get plist :claude-state))
+               (rstate   (plist-get plist :repl-state))
                (env      (plist-get plist :active-env))
                (vbuf     (plist-get plist :vterm-buffer))
                (ibuf     (plist-get plist :input-buffer))
@@ -78,14 +79,15 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                (viewed   (plist-get plist :viewed))
                (pprompts (plist-get plist :pending-prompts))
                (pshow    (plist-get plist :pending-show-panels)))
-          (format (concat " {ws=%s id=%s dir=%s st=%s env=%s"
+          (format (concat " {ws=%s id=%s dir=%s cst=%s rst=%s env=%s"
                           " vt=%s in=%s cnt=%s hid=%s"
                           " git=%s gproc=%s wt=%s fork=%s"
                           " rtmr=%s pri=%s viewed=%s pend=%s pshow=%s}")
                   ws
                   (or id "-")
                   (or dir "-")
-                  (or status "-")
+                  (or cstate "-")
+                  (or rstate "-")
                   (or env "-")
                   (if vbuf (if (buffer-live-p vbuf) "live" "dead") "-")
                   (if ibuf (if (buffer-live-p ibuf) "live" "dead") "-")
@@ -275,11 +277,14 @@ Each workspace has one instantiation for :sandbox and one for :bare-metal."
 (defvar claude-repl--workspaces (make-hash-table :test 'equal)
   "Hash table mapping workspace name → state plist.
 Keys: :vterm-buffer :input-buffer
-      :prefix-counter :status :panels-hidden
+      :prefix-counter :claude-state :repl-state :panels-hidden
       :git-clean :git-proc :worktree-p :project-dir
       :active-env :sandbox :bare-metal :fork-session-id
       :ready-timer :thinking :done :priority :viewed
       :pending-prompts :pending-show-panels
+Legacy `:status' is written alongside `:claude-state' by `ws-set' /
+`ws-clear-if-status' during the migration and is removed in a later
+commit.
 :active-env is :sandbox or :bare-metal; :sandbox and :bare-metal are
 `claude-repl-instantiation' structs holding per-environment session state.")
 

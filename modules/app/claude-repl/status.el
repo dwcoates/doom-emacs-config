@@ -443,7 +443,7 @@ WRITERS of :permission (outside this function):
   mark-done-if-hidden (session.el)    — overwritten to :done on Stop event
                                         when panels are hidden.
   maybe-clear-stale-state             — clears to nil on dead vterm."
-  (let ((state (claude-repl--ws-state ws))
+  (let ((state (claude-repl--ws-claude-state ws))
         (dirty (not (claude-repl--workspace-clean-p ws))))
     (pcase (cons state dirty)
       ;; :done → :inactive only when viewed + panels closed + clean
@@ -491,7 +491,7 @@ panel visibility (panels may be hidden via `SPC o c')."
 Preserves :thinking (which is managed by the input/sentinel lifecycle).
 Clears both the legacy `:status' and the new `:claude-state' fields for
 write-both consistency during the state-axis migration."
-  (let ((state (claude-repl--ws-state ws)))
+  (let ((state (claude-repl--ws-claude-state ws)))
     (if (and state (not (eq state :thinking)))
         (progn
           (claude-repl--log ws "maybe-clear-stale-state: ws=%s clearing %s (no vterm)" ws state)
