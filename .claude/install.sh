@@ -12,6 +12,16 @@
 # Requires: jq, bash 4+
 set -euo pipefail
 
+# --- Sandbox detection ---
+# When we're executing inside the agent sandbox, the host's ~/.claude/ is
+# not visible and any writes happen to the container's filesystem, which
+# is surprising and useless. No-op here; the user installs from the host.
+if [ -f /.dockerenv ] || [ "${DOOM_SANDBOX:-}" = "1" ]; then
+  echo "[install] Detected sandbox environment; skipping install."
+  echo "[install] Run this script from the host to install hooks."
+  exit 0
+fi
+
 SETTINGS="$HOME/.claude/settings.json"
 HOOKS_DIR="$HOME/.claude/hooks"
 
