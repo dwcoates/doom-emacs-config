@@ -79,6 +79,68 @@
   "ws-claude-state-clear-if signals error on nil workspace."
   (should-error (claude-repl--ws-claude-state-clear-if nil :thinking) :type 'error))
 
+;;;; ---- Tests: composed-state 8-cell product space ----
+
+(ert-deftest claude-repl-test-composed-nil-nil ()
+  "Composed (nil, nil) → nil (default face)."
+  (should-not (claude-repl--composed-state nil nil)))
+
+(ert-deftest claude-repl-test-composed-thinking-init ()
+  "Composed (:thinking, :init) → :thinking."
+  (should (eq :thinking (claude-repl--composed-state :thinking :init))))
+
+(ert-deftest claude-repl-test-composed-thinking-inactive ()
+  ":thinking dominates even when repl-state is :inactive (work-in-progress visibility)."
+  (should (eq :thinking (claude-repl--composed-state :thinking :inactive))))
+
+(ert-deftest claude-repl-test-composed-permission-init ()
+  "Composed (:permission, :init) → :permission."
+  (should (eq :permission (claude-repl--composed-state :permission :init))))
+
+(ert-deftest claude-repl-test-composed-permission-inactive ()
+  ":permission dominates even with repl-state :inactive (❓ label, not orange)."
+  (should (eq :permission (claude-repl--composed-state :permission :inactive))))
+
+(ert-deftest claude-repl-test-composed-done-init ()
+  "Composed (:done, :init) → :done (green)."
+  (should (eq :done (claude-repl--composed-state :done :init))))
+
+(ert-deftest claude-repl-test-composed-done-inactive ()
+  "Composed (:done, :inactive) → :inactive (orange — closed with unread done)."
+  (should (eq :inactive (claude-repl--composed-state :done :inactive))))
+
+(ert-deftest claude-repl-test-composed-nil-inactive ()
+  "Composed (nil, :inactive) → nil (no done to elevate to orange)."
+  (should-not (claude-repl--composed-state nil :inactive)))
+
+(ert-deftest claude-repl-test-composed-legacy-inactive-claude-axis ()
+  "Legacy :inactive on the claude axis still renders orange during migration."
+  (should (eq :inactive (claude-repl--composed-state :inactive nil)))
+  (should (eq :inactive (claude-repl--composed-state :inactive :init))))
+
+;;;; ---- Tests: ws-display-state reads both axes ----
+
+(ert-deftest claude-repl-test-display-state-reads-both-axes ()
+  "ws-display-state reads :claude-state and :repl-state together."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :done)
+    (claude-repl--ws-set-repl-state "ws1" :inactive)
+    (should (eq :inactive (claude-repl--ws-display-state "ws1")))))
+
+(ert-deftest claude-repl-test-display-state-thinking-overrides-closed-panels ()
+  "Panels closed during a :thinking turn still renders red."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :thinking)
+    (claude-repl--ws-set-repl-state "ws1" :inactive)
+    (should (eq :thinking (claude-repl--ws-display-state "ws1")))))
+
+(ert-deftest claude-repl-test-display-state-permission-closed-panels ()
+  "Panels closed during :permission still shows ❓ green (user must decide)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :permission)
+    (claude-repl--ws-set-repl-state "ws1" :inactive)
+    (should (eq :permission (claude-repl--ws-display-state "ws1")))))
+
 ;;;; ---- Tests: Legacy wrappers still populate both axes ----
 
 (ert-deftest claude-repl-test-legacy-ws-set-writes-claude-state ()

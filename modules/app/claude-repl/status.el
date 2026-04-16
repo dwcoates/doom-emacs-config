@@ -302,12 +302,39 @@ normal.  For unselected tabs, returns the status face from
     (when-let ((img (claude-repl--priority-image priority)))
       (propertize " " 'display img))))
 
+(defun claude-repl--composed-state (claude repl)
+  "Project the (CLAUDE, REPL) state pair onto the palette's display key.
+Priority rule (see analysis/08-decoupled-state):
+  :thinking claude  → :thinking                                (red; dominates)
+  :permission claude → :permission                             (green + ❓)
+  :inactive claude OR (:inactive repl + :done claude) → :inactive (orange)
+  :done claude       → :done                                   (green)
+  otherwise          → nil                                     (default face)
+Accepts the legacy `:inactive' value on the claude axis so write-both
+callers that have not migrated yet still render correctly; the
+repl-axis branch handles the post-migration case."
+  (cond
+   ((eq claude :thinking)   :thinking)
+   ((eq claude :permission) :permission)
+   ((or (eq claude :inactive)
+        (and (eq repl :inactive)
+             (eq claude :done)))
+    :inactive)
+   ((eq claude :done)       :done)
+   (t                       nil)))
+
+(defun claude-repl--ws-display-state (ws)
+  "Return the palette display key for WS, combining claude and repl axes."
+  (claude-repl--composed-state (claude-repl--ws-claude-state ws)
+                               (claude-repl--ws-repl-state ws)))
+
 (defun claude-repl--render-tab-entry (name current-name index)
   "Render a single tab entry for workspace NAME.
 CURRENT-NAME is the active workspace name.  INDEX is the 1-based
-tab position."
+tab position.  The display state is composed from the two per-axis
+keys via `claude-repl--ws-display-state'."
   (let* ((selected (equal current-name name))
-         (state (claude-repl--ws-state name))
+         (state (claude-repl--ws-display-state name))
          (label (claude-repl--tab-label state index))
          (face (claude-repl--tab-face state selected))
          (img-str (claude-repl--tab-priority-image-str name)))
@@ -319,7 +346,9 @@ tab position."
   "Override for `+workspace--tabline' to color tabs by Claude status."
   (let* ((names (if names-supplied-p names (+workspace-list-names)))
          (current-name (+workspace-current-name))
-         (states (mapcar (lambda (n) (cons n (claude-repl--ws-state n))) names)))
+         (states (mapcar (lambda (n)
+                           (cons n (claude-repl--ws-display-state n)))
+                         names)))
     (claude-repl--log-verbose nil "tabline-advice: current=%s states=%S"
                               current-name states)
     (mapconcat
