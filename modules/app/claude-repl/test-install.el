@@ -225,6 +225,212 @@
   (should (string-match-p "/\\.claude/install\\.sh\\'"
                           claude-repl--install-script)))
 
+;;;; ---- doctor-issues ----
+
+(defun test-install--doctor-level-count (issues level)
+  "Return the number of entries in ISSUES whose level is LEVEL."
+  (cl-count-if (lambda (i) (eq (car i) level)) issues))
+
+(defun test-install--doctor-find (issues substring)
+  "Return the first issue whose message contains SUBSTRING, else nil."
+  (cl-find-if (lambda (i) (string-match-p substring (cdr i))) issues))
+
+(ert-deftest claude-repl-test-doctor-sandbox-returns-nil ()
+  "In sandbox, doctor-issues is a no-op."
+  (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () t)))
+    (should-not (claude-repl--doctor-issues))))
+
+(ert-deftest claude-repl-test-doctor-missing-settings ()
+  "Settings missing or unreadable produces a single top-level error."
+  (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+            ((symbol-function 'claude-repl--settings-json) (lambda () nil)))
+    (let ((issues (claude-repl--doctor-issues)))
+      (should (= 1 (length issues)))
+      (should (eq 'error (car (car issues))))
+      (should (string-match-p "missing or unreadable"
+                              (cdr (car issues)))))))
+
+(ert-deftest claude-repl-test-doctor-all-present ()
+  "With all hooks registered and scripts on disk matching source, no issues."
+  (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+            ((symbol-function 'claude-repl--settings-json)
+             #'test-install--json-with-all-hooks)
+            ((symbol-function 'claude-repl--check-script-files)
+             (lambda (_issues) nil)))
+    (should-not (claude-repl--doctor-issues))))
+
+(ert-deftest claude-repl-test-doctor-missing-stop-errors ()
+  "Missing Stop registration is error-level (workspaces stuck in :thinking)."
+  (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+            ((symbol-function 'claude-repl--settings-json)
+             (lambda () (test-install--json-missing-one 'Stop)))
+            ((symbol-function 'claude-repl--check-script-files)
+             (lambda (_issues) nil)))
+    (let ((issues (claude-repl--doctor-issues)))
+      (should (test-install--doctor-find issues "Stop hook not registered"))
+      (should (eq 'error
+                  (car (test-install--doctor-find
+                        issues "Stop hook not registered")))))))
+
+(ert-deftest claude-repl-test-doctor-missing-session-start-errors ()
+  "Missing SessionStart is error-level (readiness never fires, placeholder stuck)."
+  (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+            ((symbol-function 'claude-repl--settings-json)
+             (lambda () (test-install--json-missing-one 'SessionStart)))
+            ((symbol-function 'claude-repl--check-script-files)
+             (lambda (_issues) nil)))
+    (let ((issues (claude-repl--doctor-issues)))
+      (should (test-install--doctor-find issues "SessionStart"))
+      (should (eq 'error
+                  (car (test-install--doctor-find issues "SessionStart")))))))
+
+(ert-deftest claude-repl-test-doctor-missing-user-prompt-submit-warns ()
+  "Missing UserPromptSubmit is warn-level (Emacs do-send still sets :thinking)."
+  (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+            ((symbol-function 'claude-repl--settings-json)
+             (lambda () (test-install--json-missing-one 'UserPromptSubmit)))
+            ((symbol-function 'claude-repl--check-script-files)
+             (lambda (_issues) nil)))
+    (let ((issues (claude-repl--doctor-issues)))
+      (should (test-install--doctor-find issues "UserPromptSubmit"))
+      (should (eq 'warn
+                  (car (test-install--doctor-find issues "UserPromptSubmit")))))))
+
+(ert-deftest claude-repl-test-doctor-missing-notification-warns ()
+  "Missing Notification is warn-level (❓ badge absent but module works)."
+  (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+            ((symbol-function 'claude-repl--settings-json)
+             (lambda () (test-install--json-missing-one 'Notification)))
+            ((symbol-function 'claude-repl--check-script-files)
+             (lambda (_issues) nil)))
+    (let ((issues (claude-repl--doctor-issues)))
+      (should (test-install--doctor-find issues "Notification"))
+      (should (eq 'warn
+                  (car (test-install--doctor-find issues "Notification")))))))
+
+(ert-deftest claude-repl-test-doctor-settings-skip-short-circuits-script-checks ()
+  "When settings.json is missing, script-file checks are not performed."
+  (let ((script-checks-called nil))
+    (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+              ((symbol-function 'claude-repl--settings-json) (lambda () nil))
+              ((symbol-function 'claude-repl--check-script-files)
+               (lambda (_) (setq script-checks-called t))))
+      (claude-repl--doctor-issues)
+      (should-not script-checks-called))))
+
+;; Script-file checks — use tmpfile fixtures so the real file predicates work.
+
+(defun test-install--with-fake-hooks-dir (contents body-fn)
+  "Run BODY-FN with claude-repl--hooks-dest-dir rebound to a tmpdir.
+CONTENTS is an alist ((SCRIPT-NAME . (MODE . TEXT)) ...): writes each
+script with the given unix MODE permissions and TEXT content.  A
+SCRIPT-NAME with `:missing' means leave that script absent."
+  (let ((tmpdir (file-name-as-directory
+                 (make-temp-file "claude-repl-doctor-" t))))
+    (unwind-protect
+        (progn
+          (dolist (entry contents)
+            (let ((name (car entry))
+                  (mode-content (cdr entry)))
+              (unless (eq mode-content :missing)
+                (let ((path (expand-file-name name tmpdir)))
+                  (with-temp-file path
+                    (insert (cdr mode-content)))
+                  (set-file-modes path (car mode-content))))))
+          (cl-letf (((symbol-function 'claude-repl--installed-script-path)
+                     (lambda (cmd)
+                       (expand-file-name
+                        (file-name-nondirectory cmd) tmpdir))))
+            (funcall body-fn tmpdir)))
+      (delete-directory tmpdir t))))
+
+(ert-deftest claude-repl-test-doctor-script-missing-errors ()
+  "A missing installed script emits an error-level issue."
+  (test-install--with-fake-hooks-dir
+   `(("stop-notify.sh" . :missing)
+     ("prompt-submit-notify.sh" . (#o755 . "x"))
+     ("session-start-notify.sh" . (#o755 . "x"))
+     ("permission-notify.sh" . (#o755 . "x")))
+   (lambda (_tmp)
+     (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+               ((symbol-function 'claude-repl--settings-json)
+                #'test-install--json-with-all-hooks)
+               ((symbol-function 'claude-repl--script-drift-p)
+                (lambda (_) nil)))
+       (let* ((issues (claude-repl--doctor-issues))
+              (found (test-install--doctor-find
+                      issues "missing:.*stop-notify\\.sh")))
+         (should found)
+         (should (eq 'error (car found))))))))
+
+(ert-deftest claude-repl-test-doctor-script-not-executable-errors ()
+  "A non-executable installed script emits an error-level issue."
+  (test-install--with-fake-hooks-dir
+   `(("stop-notify.sh" . (#o644 . "x"))
+     ("prompt-submit-notify.sh" . (#o755 . "x"))
+     ("session-start-notify.sh" . (#o755 . "x"))
+     ("permission-notify.sh" . (#o755 . "x")))
+   (lambda (_tmp)
+     (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+               ((symbol-function 'claude-repl--settings-json)
+                #'test-install--json-with-all-hooks)
+               ((symbol-function 'claude-repl--script-drift-p)
+                (lambda (_) nil)))
+       (let* ((issues (claude-repl--doctor-issues))
+              (found (test-install--doctor-find issues "not executable")))
+         (should found)
+         (should (eq 'error (car found))))))))
+
+(ert-deftest claude-repl-test-doctor-script-drift-warns ()
+  "A drifted installed script emits a warn-level issue."
+  (test-install--with-fake-hooks-dir
+   `(("stop-notify.sh" . (#o755 . "x"))
+     ("prompt-submit-notify.sh" . (#o755 . "x"))
+     ("session-start-notify.sh" . (#o755 . "x"))
+     ("permission-notify.sh" . (#o755 . "x")))
+   (lambda (_tmp)
+     (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+               ((symbol-function 'claude-repl--settings-json)
+                #'test-install--json-with-all-hooks)
+               ((symbol-function 'claude-repl--script-drift-p)
+                (lambda (cmd)
+                  (equal (file-name-nondirectory cmd)
+                         "stop-notify.sh"))))
+       (let* ((issues (claude-repl--doctor-issues))
+              (found (test-install--doctor-find issues "drift")))
+         (should found)
+         (should (eq 'warn (car found))))))))
+
+(ert-deftest claude-repl-test-script-drift-p-match ()
+  "script-drift-p is nil when installed bytes match source."
+  (let* ((src (make-temp-file "crd-src-")) (dest (make-temp-file "crd-dst-")))
+    (unwind-protect
+        (progn
+          (with-temp-file src (insert "identical"))
+          (with-temp-file dest (insert "identical"))
+          (cl-letf (((symbol-function 'claude-repl--installed-script-path)
+                     (lambda (_) dest))
+                    ((symbol-function 'claude-repl--source-script-path)
+                     (lambda (_) src)))
+            (should-not
+             (claude-repl--script-drift-p "~/.claude/hooks/anything.sh"))))
+      (delete-file src) (delete-file dest))))
+
+(ert-deftest claude-repl-test-script-drift-p-mismatch ()
+  "script-drift-p is non-nil when installed bytes differ from source."
+  (let* ((src (make-temp-file "crd-src-")) (dest (make-temp-file "crd-dst-")))
+    (unwind-protect
+        (progn
+          (with-temp-file src (insert "source-content"))
+          (with-temp-file dest (insert "tampered-content"))
+          (cl-letf (((symbol-function 'claude-repl--installed-script-path)
+                     (lambda (_) dest))
+                    ((symbol-function 'claude-repl--source-script-path)
+                     (lambda (_) src)))
+            (should (claude-repl--script-drift-p
+                     "~/.claude/hooks/anything.sh"))))
+      (delete-file src) (delete-file dest))))
+
 ;;;; ---- Bash-integration tests --------------------------------------------
 ;;
 ;; These spawn `bash .claude/install.sh` with HOME redirected to a tmpdir.

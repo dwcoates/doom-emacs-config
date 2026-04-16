@@ -38,11 +38,20 @@ because Claude Code expands it at dispatch time.")
 Resolved relative to this file so the wrapper keeps working regardless
 of where the Doom config tree is mounted.")
 
+(defconst claude-repl--hooks-source-dir
+  (let ((module-dir (file-name-directory (or load-file-name
+                                              (buffer-file-name)))))
+    (file-name-as-directory (expand-file-name "hooks" module-dir)))
+  "Absolute path to the checked-in managed hook scripts.")
+
 (defconst claude-repl--install-output-buffer "*claude-repl-install*"
   "Buffer name used to surface install-script output to the user.")
 
 (defconst claude-repl--settings-file "~/.claude/settings.json"
   "Path to the Claude Code settings file we read for installed-state checks.")
+
+(defconst claude-repl--hooks-dest-dir "~/.claude/hooks/"
+  "Destination directory where managed hook scripts are installed.")
 
 ;;;; ---- Sandbox detection ------------------------------------------------
 
@@ -151,6 +160,106 @@ foreign entries untouched) and deletes the managed scripts from
   "Reinstall managed Claude Code hooks: uninstall then install."
   (interactive)
   (claude-repl--run-install-action "reinstall"))
+
+;;;; ---- Doctor support ---------------------------------------------------
+
+(defconst claude-repl--hook-severity
+  '((Stop             . error)
+    (SessionStart     . error)
+    (UserPromptSubmit . warn)
+    (Notification     . warn))
+  "Severity of a missing managed hook.
+`error' means the module is non-functional without it; `warn' means a
+degraded UX but still usable.  Script-file problems for any hook are
+treated as `error' (a registered hook pointing at a missing script will
+fail noisily at dispatch time).")
+
+(defun claude-repl--managed-script-name (cmd)
+  "Return the bare filename for a managed command path CMD.
+CMD is of the form \"~/.claude/hooks/<name>.sh\"."
+  (file-name-nondirectory cmd))
+
+(defun claude-repl--installed-script-path (cmd)
+  "Absolute path where CMD's managed script should live after install."
+  (expand-file-name (claude-repl--managed-script-name cmd)
+                    (expand-file-name claude-repl--hooks-dest-dir)))
+
+(defun claude-repl--source-script-path (cmd)
+  "Absolute path of the checked-in source for CMD's managed script."
+  (expand-file-name (claude-repl--managed-script-name cmd)
+                    claude-repl--hooks-source-dir))
+
+(defun claude-repl--file-contents (path)
+  "Return PATH's contents as a string, or nil if unreadable."
+  (when (file-readable-p path)
+    (with-temp-buffer
+      (insert-file-contents-literally path)
+      (buffer-string))))
+
+(defun claude-repl--script-drift-p (cmd)
+  "Return non-nil when the installed managed script for CMD differs from source."
+  (let ((installed (claude-repl--file-contents
+                    (claude-repl--installed-script-path cmd)))
+        (source (claude-repl--file-contents
+                 (claude-repl--source-script-path cmd))))
+    (and installed source (not (equal installed source)))))
+
+(defun claude-repl--push-issue (issues-cell level msg)
+  "Prepend (LEVEL . MSG) to the list held in ISSUES-CELL (a single-cons list)."
+  (setcar issues-cell (cons (cons level msg) (car issues-cell))))
+
+(defun claude-repl--check-registration (hooks issues-cell)
+  "Populate ISSUES-CELL with any missing registrations per `claude-repl--managed-hooks'."
+  (dolist (pair claude-repl--managed-hooks)
+    (let* ((event (car pair))
+           (cmd (cdr pair)))
+      (unless (claude-repl--event-has-command-p hooks event cmd)
+        (claude-repl--push-issue
+         issues-cell
+         (or (cdr (assq event claude-repl--hook-severity)) 'warn)
+         (format "%s hook not registered in %s — run M-x claude-repl-install-hooks"
+                 event claude-repl--settings-file))))))
+
+(defun claude-repl--check-script-files (issues-cell)
+  "Populate ISSUES-CELL with problems at each managed script's install location."
+  (dolist (pair claude-repl--managed-hooks)
+    (let* ((cmd (cdr pair))
+           (path (claude-repl--installed-script-path cmd)))
+      (cond
+       ((not (file-exists-p path))
+        (claude-repl--push-issue
+         issues-cell 'error
+         (format "Managed script missing: %s — run M-x claude-repl-install-hooks"
+                 path)))
+       ((not (file-executable-p path))
+        (claude-repl--push-issue
+         issues-cell 'error
+         (format "Managed script not executable: %s" path)))
+       ((claude-repl--script-drift-p cmd)
+        (claude-repl--push-issue
+         issues-cell 'warn
+         (format "Managed script drift: %s differs from checked-in source — run M-x claude-repl-reinstall-hooks"
+                 path)))))))
+
+(defun claude-repl--doctor-issues ()
+  "Return a list of (LEVEL . MESSAGE) describing hook-install problems.
+LEVEL is `error' or `warn'.  Empty list means all managed hooks are
+registered and on-disk.  No-ops (returns nil) when running inside the
+sandbox — the host is where installation happens, not the container.
+When settings.json is missing or unreadable, a single top-level error is
+returned and the per-hook checks are skipped."
+  (if (claude-repl--in-sandbox-p)
+      nil
+    (let* ((issues (list nil))
+           (json (claude-repl--settings-json)))
+      (if (not json)
+          (claude-repl--push-issue
+           issues 'error
+           (format "%s is missing or unreadable — run M-x claude-repl-install-hooks"
+                   (expand-file-name claude-repl--settings-file)))
+        (claude-repl--check-registration (cdr (assq 'hooks json)) issues)
+        (claude-repl--check-script-files issues))
+      (nreverse (car issues)))))
 
 (provide 'claude-repl-install)
 
