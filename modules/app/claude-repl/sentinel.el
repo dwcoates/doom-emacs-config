@@ -169,7 +169,7 @@ directory.  Always deletes FILE at the end."
 Callback for the permission_prompt sentinel handler."
   (let ((before (claude-repl--ws-get ws :claude-state)))
     (claude-repl--log-verbose ws "on-permission-event: ws=%s status-BEFORE=%s" ws before)
-    (claude-repl--ws-set ws :permission)
+    (claude-repl--ws-set-claude-state ws :permission)
     (claude-repl--log-verbose ws "on-permission-event: ws=%s status-AFTER=%s" ws (claude-repl--ws-get ws :claude-state))))
 
 (defun claude-repl--on-stop-event (ws dir)
@@ -181,7 +181,7 @@ Logs the resolution, clears :thinking, and runs the finished handler."
                       ws dir before
                       (when vterm-buf (buffer-name vterm-buf))
                       (if (and vterm-buf (buffer-live-p vterm-buf)) "yes" "no"))
-    (claude-repl--ws-clear ws :thinking)
+    (claude-repl--ws-claude-state-clear-if ws :thinking)
     (let ((after-clear (claude-repl--ws-get ws :claude-state)))
       (claude-repl--log ws "on-stop-event: after ws-clear status=%s (was %s, expected nil)" after-clear before)
       (claude-repl--handle-claude-finished ws)

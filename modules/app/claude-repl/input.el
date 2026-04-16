@@ -389,9 +389,9 @@ Uses paste mode for large inputs to avoid truncation."
       (claude-repl--send-input-direct vterm-buf input))))
 
 (defun claude-repl--mark-ws-thinking (ws)
-  "Mark workspace WS as thinking: set state."
+  "Mark workspace WS as thinking: set claude-state."
   (claude-repl--log ws "mark-ws-thinking ws=%s" ws)
-  (claude-repl--ws-set ws :thinking))
+  (claude-repl--ws-set-claude-state ws :thinking))
 
 (defun claude-repl--increment-prefix-counter (ws)
   "Increment the metaprompt prefix counter for workspace WS."

@@ -204,7 +204,7 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
   (claude-repl-test--with-clean-state
     (let ((cleared nil) (finished-ws nil))
       (claude-repl--ws-set "ws1" :thinking)
-      (cl-letf (((symbol-function 'claude-repl--ws-clear)
+      (cl-letf (((symbol-function 'claude-repl--ws-claude-state-clear-if)
                  (lambda (ws state)
                    (when (eq state :thinking)
                      (setq cleared ws))))
@@ -213,6 +213,7 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
                 ((symbol-function 'claude-repl--ws-get)
                  (lambda (_ws key)
                    (pcase key
+                     (:claude-state :thinking)
                      (:status :thinking)
                      (:vterm-buffer nil)
                      (_ nil)))))
@@ -250,10 +251,10 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
 ;;;; ---- Tests: on-permission-event handler ----
 
 (ert-deftest claude-repl-test-on-permission-event-sets-permission ()
-  "on-permission-event should call ws-set with :permission."
+  "on-permission-event should call ws-set-claude-state with :permission."
   (claude-repl-test--with-clean-state
     (let ((set-args nil))
-      (cl-letf (((symbol-function 'claude-repl--ws-set)
+      (cl-letf (((symbol-function 'claude-repl--ws-set-claude-state)
                  (lambda (ws state) (setq set-args (list ws state)))))
         (claude-repl--on-permission-event "ws1" "/some/dir")
         (should (equal set-args '("ws1" :permission)))))))
@@ -568,7 +569,7 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
 ;;;; ---- Tests: end-to-end dispatch through process-sentinel-file ----
 
 (ert-deftest claude-repl-test-end-to-end-permission-dispatch ()
-  "Full dispatch: permission_prompt file -> on-permission-event -> ws-set :permission."
+  "Full dispatch: permission_prompt file -> on-permission-event -> ws-set-claude-state :permission."
   (claude-repl-test--with-clean-state
     (let ((set-args nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
@@ -577,7 +578,7 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
                  (lambda (_d) "test-ws"))
                 ((symbol-function 'claude-repl--update-session-id-from-sentinel)
                  #'ignore)
-                ((symbol-function 'claude-repl--ws-set)
+                ((symbol-function 'claude-repl--ws-set-claude-state)
                  (lambda (ws state) (setq set-args (list ws state))))
                 ((symbol-function 'claude-repl--ws-get)
                  (lambda (_ws _key) nil))
@@ -586,14 +587,14 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
         (should (equal set-args '("test-ws" :permission)))))))
 
 (ert-deftest claude-repl-test-end-to-end-stop-dispatch ()
-  "Full dispatch: stop_* file -> on-stop-event -> ws-clear :thinking + handle-finished."
+  "Full dispatch: stop_* file -> on-stop-event -> ws-claude-state-clear-if :thinking + handle-finished."
   (claude-repl-test--with-clean-state
     (let ((cleared nil) (finished nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
                  (lambda (_f) '(:dir "/project/dir" :session-id "test-sid")))
                 ((symbol-function 'claude-repl--ws-for-dir)
                  (lambda (_d) "test-ws"))
-                ((symbol-function 'claude-repl--ws-clear)
+                ((symbol-function 'claude-repl--ws-claude-state-clear-if)
                  (lambda (ws state)
                    (when (eq state :thinking) (setq cleared ws))))
                 ((symbol-function 'claude-repl--update-session-id-from-sentinel)
@@ -603,6 +604,7 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
                 ((symbol-function 'claude-repl--ws-get)
                  (lambda (_ws key)
                    (pcase key
+                     (:claude-state :thinking)
                      (:status :thinking)
                      (:vterm-buffer nil)
                      (_ nil))))
@@ -873,11 +875,11 @@ is still skipped and the file is still deleted."
     (should-error (claude-repl--on-permission-event nil "/some/dir"))))
 
 (ert-deftest claude-repl-test-on-permission-event-already-permission ()
-  "on-permission-event should still call ws-set even if ws already has :permission status."
+  "on-permission-event should still call ws-set-claude-state even if ws already has :permission."
   (claude-repl-test--with-clean-state
     (let ((set-args nil))
       (claude-repl--ws-set "ws1" :permission)
-      (cl-letf (((symbol-function 'claude-repl--ws-set)
+      (cl-letf (((symbol-function 'claude-repl--ws-set-claude-state)
                  (lambda (ws state) (setq set-args (list ws state)))))
         (claude-repl--on-permission-event "ws1" "/some/dir")
         (should (equal set-args '("ws1" :permission)))))))
@@ -885,11 +887,11 @@ is still skipped and the file is still deleted."
 ;;;; ---- Tests: on-stop-event uncovered edge cases ----
 
 (ert-deftest claude-repl-test-on-stop-event-status-not-thinking ()
-  "on-stop-event should call ws-clear even when status is not :thinking (clear-if-status is a no-op)."
+  "on-stop-event should call ws-claude-state-clear-if even when state is not :thinking."
   (claude-repl-test--with-clean-state
     (let ((cleared nil) (finished-ws nil))
       (claude-repl--ws-set "ws1" :permission)
-      (cl-letf (((symbol-function 'claude-repl--ws-clear)
+      (cl-letf (((symbol-function 'claude-repl--ws-claude-state-clear-if)
                  (lambda (ws state)
                    (when (eq state :thinking)
                      (setq cleared (list ws state)))))
@@ -898,19 +900,20 @@ is still skipped and the file is still deleted."
                 ((symbol-function 'claude-repl--ws-get)
                  (lambda (_ws key)
                    (pcase key
+                     (:claude-state :permission)
                      (:status :permission)
                      (:vterm-buffer nil)
                      (_ nil)))))
         (claude-repl--on-stop-event "ws1" "/some/dir")
-        ;; ws-clear is still called (though clear-if-status won't change anything)
+        ;; ws-claude-state-clear-if is still called (though clear-if is a no-op)
         (should (equal cleared '("ws1" :thinking)))
         (should (equal finished-ws "ws1"))))))
 
 (ert-deftest claude-repl-test-on-stop-event-nil-status ()
-  "on-stop-event should still call ws-clear and handle-finished when status is nil."
+  "on-stop-event should still call ws-claude-state-clear-if and handle-finished when claude-state is nil."
   (claude-repl-test--with-clean-state
     (let ((cleared nil) (finished-ws nil))
-      (cl-letf (((symbol-function 'claude-repl--ws-clear)
+      (cl-letf (((symbol-function 'claude-repl--ws-claude-state-clear-if)
                  (lambda (ws state)
                    (when (eq state :thinking)
                      (setq cleared (list ws state)))))
