@@ -236,6 +236,23 @@ Redirects away from Claude buffers and saves frame state."
     (claude-repl--log ws "hide-panels")
     (claude-repl--close-buffer-windows input-buf vterm-buf)))
 
+(defun claude-repl--on-close (&optional ws)
+  "Single audit point for user-initiated panel close.
+Hides the panel windows without tearing down the session.  All
+user-initiated close paths route through here: `hide-and-preserve-status'
+(SPC o c), `claude-repl-send-and-hide', and the pre-magit hide hook.
+Marks `:panels-hidden' so future readers can distinguish this from an
+orphan cleanup.  Future commits will additionally write a `:repl-state'
+value here once the state axis is split (see analysis/08-decoupled-state).
+WS defaults to the current workspace; when WS is nil the function still
+hides panels but skips the bookkeeping write."
+  (let ((ws (or ws (+workspace-current-name))))
+    (when ws
+      (claude-repl--log ws "on-close ws=%s state=%s"
+                        ws (claude-repl--ws-state ws))
+      (claude-repl--ws-put ws :panels-hidden t))
+    (claude-repl--hide-panels)))
+
 ;;;; Window synchronization
 
 ;; Auto-close orphaned panels: if one is closed, close the other.
@@ -481,14 +498,12 @@ Demotes indicators, refreshes display, and restores panel layout."
 
 (defun claude-repl--hide-and-preserve-status ()
   "Hide Claude panels while preserving the current workspace status.
-Marks :panels-hidden so the panels can be restored later without losing
-the :thinking/:done/:permission state."
+Thin wrapper around `claude-repl--on-close' that enforces the invariant
+that a workspace is active (the `SPC o c' toggle path should never fire
+without one)."
   (let ((ws (+workspace-current-name)))
     (unless ws (error "claude-repl--hide-and-preserve-status: no active workspace"))
-    (claude-repl--log ws "hiding panels ws=%s state=%s (preserving status)"
-                      ws (claude-repl--ws-state ws))
-    (claude-repl--ws-put ws :panels-hidden t))
-  (claude-repl--hide-panels))
+    (claude-repl--on-close ws)))
 
 ;;;; Entry point
 

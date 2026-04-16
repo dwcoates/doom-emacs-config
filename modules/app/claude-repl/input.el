@@ -469,7 +469,7 @@ Handles input preparation, sending, history, and persistence."
   (interactive)
   (claude-repl--log nil "send-and-hide")
   (claude-repl--send)
-  (claude-repl--hide-panels))
+  (claude-repl--on-close))
 
 (defun claude-repl-send-with-metaprompt ()
   "Send input with the metaprompt prefix, bypassing the counter."

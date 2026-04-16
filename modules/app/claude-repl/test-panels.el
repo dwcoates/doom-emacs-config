@@ -320,10 +320,49 @@ This prevents the oscillation where update-ws-state immediately sees
     ;; The selected window should be showing *scratch* or similar
     (should (claude-repl--non-claude-panel-window-p win))))
 
+;;;; ---- Tests: on-close (single close audit point) ----
+
+(ert-deftest claude-repl-test-panels-on-close-marks-hidden ()
+  "on-close sets :panels-hidden on the current workspace."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
+      (claude-repl--on-close)
+      (should (claude-repl--ws-get "test-ws" :panels-hidden)))))
+
+(ert-deftest claude-repl-test-panels-on-close-calls-hide-panels ()
+  "on-close invokes hide-panels."
+  (claude-repl-test--with-clean-state
+    (let ((hide-called nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--hide-panels)
+                 (lambda () (setq hide-called t))))
+        (claude-repl--on-close)
+        (should hide-called)))))
+
+(ert-deftest claude-repl-test-panels-on-close-with-explicit-ws ()
+  "on-close accepts an explicit WS argument."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ignored"))
+              ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
+      (claude-repl--on-close "specific-ws")
+      (should (claude-repl--ws-get "specific-ws" :panels-hidden))
+      (should-not (claude-repl--ws-get "ignored" :panels-hidden)))))
+
+(ert-deftest claude-repl-test-panels-on-close-nil-ws-still-hides ()
+  "on-close with nil workspace hides panels but skips bookkeeping."
+  (claude-repl-test--with-clean-state
+    (let ((hide-called nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
+                ((symbol-function 'claude-repl--hide-panels)
+                 (lambda () (setq hide-called t))))
+        (claude-repl--on-close)
+        (should hide-called)))))
+
 ;;;; ---- Tests: hide-and-preserve-status ----
 
 (ert-deftest claude-repl-test-panels-hide-and-preserve-marks-hidden ()
-  "hide-and-preserve-status sets :panels-hidden flag."
+  "hide-and-preserve-status sets :panels-hidden flag via on-close."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
@@ -335,6 +374,16 @@ This prevents the oscillation where update-ws-state immediately sees
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
       (should-error (claude-repl--hide-and-preserve-status)))))
+
+(ert-deftest claude-repl-test-panels-hide-and-preserve-routes-through-on-close ()
+  "hide-and-preserve-status delegates to on-close."
+  (claude-repl-test--with-clean-state
+    (let ((on-close-ws nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--on-close)
+                 (lambda (&optional ws) (setq on-close-ws ws))))
+        (claude-repl--hide-and-preserve-status)
+        (should (equal on-close-ws "test-ws"))))))
 
 ;;;; ---- Tests: show-hidden-panels ----
 

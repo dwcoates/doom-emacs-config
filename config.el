@@ -397,7 +397,7 @@
   "Hide claude-repl panels before opening magit, giving magit full window control."
   (when (and (fboundp 'claude-repl--panels-visible-p)
              (claude-repl--panels-visible-p))
-    (claude-repl--hide-panels)))
+    (claude-repl--on-close)))
 
 ;; Section map bindings must be done after magit-diff loads
 (after! magit-diff
