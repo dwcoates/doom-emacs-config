@@ -99,15 +99,35 @@ Runs as a buffer-local `pre-command-hook'."
   (erase-buffer)
   (evil-insert-state))
 
-(defun claude-repl-discard-or-send-interrupt ()
-  "If input buffer is empty, send C-c to Claude; otherwise discard input."
-  (interactive)
-  (if (string-blank-p (buffer-string))
+(defun claude-repl--vterm-send-raw-ctrl-c ()
+  "Write a raw ETX byte (0x03, Ctrl-C) to the current workspace's vterm process.
+Returns t on success, nil if no live vterm.
+
+Bypasses `vterm-send-key' (which routes through libvterm's key-translation
+layer and can dispatch a SIGINT instead of the literal keystroke).  A raw
+ETX byte matches what a native terminal sends when the user types Ctrl-C
+at a Claude prompt in raw-input mode — which is what actually clears the
+input line.  On failure, logs and surfaces an error (no silent fallback)."
+  (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
       (progn
-        (claude-repl--log nil "discard-or-send-interrupt: empty buffer, sending C-c to vterm")
-        (claude-repl--with-vterm-buf
-         (vterm-send-key "c" nil nil t)))
-    (claude-repl-discard-input)))
+        (with-current-buffer vterm-buf
+          (process-send-string vterm--process "\C-c"))
+        t)
+    (claude-repl--slash-no-vterm-error "send-raw-ctrl-c" "\\C-c")
+    nil))
+
+(defun claude-repl-discard-or-send-interrupt ()
+  "Clear Claude's prompt AND the local input buffer.
+Always sends a raw Ctrl-C to Claude (clearing its current input line) and,
+if the local input buffer isn't already empty, also discards its contents.
+Previously this only sent Ctrl-C when the local buffer was empty, which
+left users with a half-cleared state."
+  (interactive)
+  (claude-repl--log nil "discard-or-send-interrupt: clearing Claude prompt + local buffer (local-empty=%s)"
+                    (string-blank-p (buffer-string)))
+  (unless (string-blank-p (buffer-string))
+    (claude-repl-discard-input))
+  (claude-repl--vterm-send-raw-ctrl-c))
 
 ;;; Arrow key forwarding (insert-mode terminal navigation)
 
@@ -494,9 +514,29 @@ Popped on backspace; when empty the mode exits.")
 (define-minor-mode claude-slash-input-mode
   "Minor mode that transparently forwards keystrokes to Claude vterm.
 Active when the user begins input with /. The input buffer stays empty;
-all characters are sent directly to vterm."
+all characters are sent directly to vterm.
+
+Inhibits `evil-escape' while active — Doom configures evil-escape with
+the `jk' key sequence and a 150ms delay, which otherwise causes every
+`j' keystroke in slash mode to flutter (held 150ms waiting for a `k'
+before being forwarded to vterm)."
   :lighter " /…"
-  :keymap (make-sparse-keymap))
+  :keymap (make-sparse-keymap)
+  (if claude-slash-input-mode
+      (setq-local evil-escape-inhibit t)
+    (kill-local-variable 'evil-escape-inhibit)))
+
+(defun claude-repl--slash-on-insert-state-exit ()
+  "Exit slash mode when evil leaves insert state (e.g. on ESC).
+Installed on `evil-insert-state-exit-hook'.  Runs in every buffer that
+leaves insert state, but only acts when the buffer-local
+`claude-slash-input-mode' is active — so it's effectively scoped to the
+Claude input buffer."
+  (when claude-slash-input-mode
+    (claude-repl--log nil "slash-on-insert-state-exit: exiting slash mode (evil left insert state)")
+    (claude-repl--slash-quit)))
+
+(add-hook 'evil-insert-state-exit-hook #'claude-repl--slash-on-insert-state-exit)
 
 (defun claude-repl--exit-slash-mode ()
   "Clear the slash stack and disable `claude-slash-input-mode'."

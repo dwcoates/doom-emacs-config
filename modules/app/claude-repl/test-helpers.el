@@ -100,10 +100,16 @@
   (defun vterm--set-title (&rest _args) "Stub." nil))
 (unless (boundp 'vterm--term)
   (defvar vterm--term nil "Stub."))
+(unless (boundp 'vterm--process)
+  (defvar vterm--process nil "Stub."))
 
 ;; evil stubs
 (unless (fboundp 'evil-insert-state)
   (defun evil-insert-state () "Stub." nil))
+(unless (boundp 'evil-insert-state-exit-hook)
+  (defvar evil-insert-state-exit-hook nil "Stub hook."))
+(unless (boundp 'evil-escape-inhibit)
+  (defvar-local evil-escape-inhibit nil "Stub."))
 (unless (fboundp 'evil-window-left)
   (defun evil-window-left (&rest _args) "Stub." nil))
 (unless (fboundp 'evil-define-key)

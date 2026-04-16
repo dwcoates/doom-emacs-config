@@ -573,35 +573,48 @@
 
 ;;;; ---- Tests: discard-or-send-interrupt ----
 
-(ert-deftest claude-repl-test-discard-or-send-interrupt-empty-sends-ctrl-c ()
-  "When input buffer is empty, send C-c to vterm."
+(ert-deftest claude-repl-test-discard-or-send-interrupt-empty-sends-raw-etx ()
+  "When input buffer is empty, send raw ETX (Ctrl-C) byte directly to vterm process.
+Uses `process-send-string' rather than `vterm-send-key' because the latter
+routes through libvterm's key translation and can dispatch SIGINT instead
+of the literal ETX keystroke Claude needs to clear its input line."
   (claude-repl-test--with-clean-state
-    (let ((sent-key nil))
+    (let ((sent-bytes nil))
       (claude-repl-test--with-temp-buffer "*claude-discard-test*"
+        (setq-local vterm--process 'fake-proc)
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (claude-repl-test--with-temp-buffer " *test-input-discard*"
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                    ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
-                    ((symbol-function 'vterm-send-key)
-                     (lambda (key &rest args) (setq sent-key (cons key args)))))
+                    ((symbol-function 'process-send-string)
+                     (lambda (proc bytes) (push (cons proc bytes) sent-bytes))))
             (claude-repl-discard-or-send-interrupt)
-            (should (equal (car sent-key) "c"))))))))
+            (should (equal sent-bytes '((fake-proc . "\C-c"))))))))))
 
-(ert-deftest claude-repl-test-discard-or-send-interrupt-nonempty-discards ()
-  "When input buffer has text, discard the input."
-  (claude-repl-test--with-temp-buffer " *test-input-nonempty*"
-    (setq-local claude-repl--input-history nil)
-    (setq-local claude-repl--history-index 0)
-    (setq-local claude-repl--history-navigating nil)
-    (insert "some text")
-    (let ((evil-called nil))
-      (cl-letf (((symbol-function 'evil-insert-state)
-                 (lambda () (setq evil-called t)))
-                ((symbol-function 'claude-repl--history-save) #'ignore))
-        (claude-repl-discard-or-send-interrupt)
-        ;; Should have discarded (cleared buffer)
-        (should (equal (buffer-string) ""))
-        (should evil-called)))))
+(ert-deftest claude-repl-test-discard-or-send-interrupt-nonempty-discards-and-clears-vterm ()
+  "When input buffer has text, BOTH discard the input locally AND clear Claude's prompt.
+Previously only cleared the local buffer; this regressed real-world usage
+where the user pressed C-c C-c expecting a full reset."
+  (claude-repl-test--with-clean-state
+    (let ((sent-bytes nil)
+          (evil-called nil))
+      (claude-repl-test--with-temp-buffer "*claude-discard-vterm*"
+        (setq-local vterm--process 'fake-proc)
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (claude-repl-test--with-temp-buffer " *test-input-nonempty*"
+          (setq-local claude-repl--input-history nil)
+          (setq-local claude-repl--history-index 0)
+          (setq-local claude-repl--history-navigating nil)
+          (insert "some text")
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'evil-insert-state)
+                     (lambda () (setq evil-called t)))
+                    ((symbol-function 'claude-repl--history-save) #'ignore)
+                    ((symbol-function 'process-send-string)
+                     (lambda (proc bytes) (push (cons proc bytes) sent-bytes))))
+            (claude-repl-discard-or-send-interrupt)
+            (should (equal (buffer-string) ""))
+            (should evil-called)
+            (should (equal sent-bytes '((fake-proc . "\C-c"))))))))))
 
 ;;;; ---- Tests: send-vterm-key ----
 
@@ -1046,21 +1059,20 @@ must not accumulate phantom entries that trap the user in slash mode."
 
 ;;; discard-or-send-interrupt with whitespace-only buffer
 
-(ert-deftest claude-repl-test-discard-or-send-interrupt-whitespace-sends-ctrl-c ()
-  "Whitespace-only buffer is blank-p, so should send C-c to vterm."
+(ert-deftest claude-repl-test-discard-or-send-interrupt-whitespace-sends-raw-etx ()
+  "Whitespace-only buffer is blank-p, so raw ETX is sent and local discard skipped."
   (claude-repl-test--with-clean-state
-    (let ((sent-key nil))
+    (let ((sent-bytes nil))
       (claude-repl-test--with-temp-buffer "*claude-discard-ws-vterm*"
+        (setq-local vterm--process 'fake-proc)
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (claude-repl-test--with-temp-buffer " *test-discard-ws-input*"
           (insert "   \n\t  ")
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                    ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
-                    ((symbol-function 'vterm-send-key)
-                     (lambda (key &rest args) (setq sent-key (cons key args)))))
+                    ((symbol-function 'process-send-string)
+                     (lambda (proc bytes) (push (cons proc bytes) sent-bytes))))
             (claude-repl-discard-or-send-interrupt)
-            ;; string-blank-p returns t for whitespace, so C-c is sent
-            (should (equal (car sent-key) "c"))))))))
+            (should (equal sent-bytes '((fake-proc . "\C-c"))))))))))
 
 ;;; send-vterm-key with dead vterm buffer
 
@@ -1735,6 +1747,62 @@ not pop a phantom entry from the stack."
           (claude-repl--slash-quit)
           (should-not claude-slash-input-mode)
           (should (null claude-repl--slash-stack)))))))
+
+;;;; ---- Tests: evil-escape inhibit + insert-state-exit hook (jk flutter fix) ----
+
+(ert-deftest claude-repl-test-slash-mode-enables-evil-escape-inhibit ()
+  "Activating slash mode must set `evil-escape-inhibit' buffer-locally.
+Without this, Doom's default `jk' escape sequence (150ms delay) causes
+every `j' keystroke in slash mode to flutter before reaching vterm."
+  (claude-repl-test--with-temp-buffer " *test-slash-inhibit*"
+    (setq-local evil-escape-inhibit nil)
+    (claude-slash-input-mode 1)
+    (should (eq evil-escape-inhibit t))
+    (should (local-variable-p 'evil-escape-inhibit))))
+
+(ert-deftest claude-repl-test-slash-mode-disable-clears-evil-escape-inhibit ()
+  "Deactivating slash mode must clear the buffer-local `evil-escape-inhibit'."
+  (claude-repl-test--with-temp-buffer " *test-slash-uninhibit*"
+    (claude-slash-input-mode 1)
+    (should (local-variable-p 'evil-escape-inhibit))
+    (claude-slash-input-mode -1)
+    (should-not (local-variable-p 'evil-escape-inhibit))))
+
+(ert-deftest claude-repl-test-slash-on-insert-state-exit-exits-slash ()
+  "Leaving evil insert state (e.g. ESC) must exit slash mode."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-slash-esc*"
+      (setq-local claude-repl--slash-stack '("a" "/"))
+      (claude-slash-input-mode 1)
+      (with-current-buffer " *test-slash-esc*"
+        (claude-repl--slash-on-insert-state-exit)
+        (should-not claude-slash-input-mode)
+        (should (null claude-repl--slash-stack))))))
+
+(ert-deftest claude-repl-test-slash-on-insert-state-exit-noop-when-not-in-slash ()
+  "The insert-state-exit hook must be a no-op when slash mode is NOT active."
+  (claude-repl-test--with-temp-buffer " *test-slash-esc-noop*"
+    ;; Do not enable slash mode.
+    (should-not claude-slash-input-mode)
+    ;; Should not error or do anything.
+    (claude-repl--slash-on-insert-state-exit)
+    (should-not claude-slash-input-mode)))
+
+;;;; ---- Tests: raw-ETX helper (no-silent-fallback on no vterm) ----
+
+(ert-deftest claude-repl-test-vterm-send-raw-ctrl-c-no-vterm-errors-loudly ()
+  "With no live vterm, `--vterm-send-raw-ctrl-c' returns nil, skips process-send,
+and surfaces a user-visible error."
+  (claude-repl-test--with-clean-state
+    (let ((sent nil)
+          (msg-called nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'message) (lambda (&rest _) (setq msg-called t)))
+                ((symbol-function 'process-send-string)
+                 (lambda (&rest _) (setq sent t))))
+        (should-not (claude-repl--vterm-send-raw-ctrl-c))
+        (should-not sent)
+        (should msg-called)))))
 
 (provide 'test-input)
 
