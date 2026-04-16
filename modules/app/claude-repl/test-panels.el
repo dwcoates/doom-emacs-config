@@ -420,6 +420,28 @@ This prevents the oscillation where update-ws-state immediately sees
         ;; :inactive should have been re-activated to :done via mark-viewed
         (should (eq (claude-repl--ws-get "test-ws" :status) :done))))))
 
+(ert-deftest claude-repl-test-panels-show-hidden-clears-repl-state ()
+  "show-hidden-panels clears :repl-state so the workspace is no longer :inactive."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-repl-state "test-ws" :inactive)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'claude-repl--show-existing-panels) #'ignore))
+      (claude-repl--show-hidden-panels)
+      (should-not (claude-repl--ws-get "test-ws" :repl-state)))))
+
+(ert-deftest claude-repl-test-panels-show-existing-clears-repl-state ()
+  "show-existing-panels clears :repl-state."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-repl-state "test-ws" :inactive)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+              ((symbol-function 'delete-other-windows) #'ignore)
+              ((symbol-function 'claude-repl--ensure-input-buffer) #'ignore)
+              ((symbol-function 'claude-repl--show-panels-and-focus) #'ignore)
+              ((symbol-function 'claude-repl--update-hide-overlay) #'ignore))
+      (claude-repl--show-existing-panels)
+      (should-not (claude-repl--ws-get "test-ws" :repl-state)))))
+
 ;;;; ---- Tests: deferred macro ----
 
 (ert-deftest claude-repl-test-panels-deferred-debounces ()

@@ -486,10 +486,12 @@ The placeholder is swapped for the real vterm buffer once Claude is ready."
 
 (defun claude-repl--show-existing-panels ()
   "Show panels for an already-running Claude session.
-Demotes indicators, refreshes display, and restores panel layout."
+Demotes indicators, refreshes display, and restores panel layout.
+Clears `:repl-state' so the workspace is no longer flagged as inactive."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "show-existing-panels")
     (unless ws (error "claude-repl--show-existing-panels: no active workspace"))
+    (claude-repl--ws-set-repl-state ws nil)
     (claude-repl--refresh-vterm)
     (delete-other-windows)
     (claude-repl--ensure-input-buffer ws)
@@ -501,6 +503,7 @@ Demotes indicators, refreshes display, and restores panel layout."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "showing panels ws=%s claude-state=%s (restoring status)"
                       ws (claude-repl--ws-claude-state ws))
+    (claude-repl--ws-set-repl-state ws nil)
     (claude-repl--ws-put ws :panels-hidden nil)
     (claude-repl--mark-viewed ws))
   (claude-repl--show-existing-panels))
