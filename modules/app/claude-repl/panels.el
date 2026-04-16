@@ -615,7 +615,10 @@ Captures the current buffer references before teardown clears them."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "kill")
     (unless ws (error "claude-repl-kill: no active workspace"))
+    ;; Lifecycle-reset exception to the sentinel-only-writes invariant
+    ;; (analysis/12): kill destroys both axes explicitly.
     (claude-repl--ws-put ws :status nil)
+    (claude-repl--ws-put ws :claude-state nil)
     (claude-repl--ws-put ws :panels-hidden nil)
     (force-mode-line-update t)
     (claude-repl--kill-session ws)))

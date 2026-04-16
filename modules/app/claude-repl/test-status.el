@@ -13,6 +13,98 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
+;;;; ---- Tests: Typed state setters (ws-set-claude-state, ws-set-repl-state) ----
+
+(ert-deftest claude-repl-test-ws-set-claude-state-writes-both ()
+  "ws-set-claude-state writes :claude-state AND legacy :status (write-both)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :thinking)
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :thinking))
+    (should (eq (claude-repl--ws-get "ws1" :status) :thinking))))
+
+(ert-deftest claude-repl-test-ws-set-claude-state-nil-writes-both ()
+  "ws-set-claude-state nil clears both axes."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :done)
+    (claude-repl--ws-set-claude-state "ws1" nil)
+    (should-not (claude-repl--ws-get "ws1" :claude-state))
+    (should-not (claude-repl--ws-get "ws1" :status))))
+
+(ert-deftest claude-repl-test-ws-set-claude-state-nil-ws-errors ()
+  "ws-set-claude-state signals error on nil workspace."
+  (should-error (claude-repl--ws-set-claude-state nil :thinking) :type 'error))
+
+(ert-deftest claude-repl-test-ws-claude-state-getter ()
+  "ws-claude-state reads :claude-state, not :status."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :claude-state :permission)
+    (should (eq (claude-repl--ws-claude-state "ws1") :permission))))
+
+(ert-deftest claude-repl-test-ws-set-repl-state-isolated ()
+  "ws-set-repl-state writes :repl-state, leaves :claude-state/:status alone."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :thinking)
+    (claude-repl--ws-set-repl-state "ws1" :inactive)
+    (should (eq (claude-repl--ws-get "ws1" :repl-state) :inactive))
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :thinking))
+    (should (eq (claude-repl--ws-get "ws1" :status) :thinking))))
+
+(ert-deftest claude-repl-test-ws-set-repl-state-nil-ws-errors ()
+  "ws-set-repl-state signals error on nil workspace."
+  (should-error (claude-repl--ws-set-repl-state nil :inactive) :type 'error))
+
+(ert-deftest claude-repl-test-ws-repl-state-getter ()
+  "ws-repl-state reads :repl-state, not :status."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :repl-state :init)
+    (should (eq (claude-repl--ws-repl-state "ws1") :init))))
+
+(ert-deftest claude-repl-test-ws-claude-state-clear-if-match-clears-both ()
+  "ws-claude-state-clear-if with a matching state clears both fields."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :thinking)
+    (claude-repl--ws-claude-state-clear-if "ws1" :thinking)
+    (should-not (claude-repl--ws-get "ws1" :claude-state))
+    (should-not (claude-repl--ws-get "ws1" :status))))
+
+(ert-deftest claude-repl-test-ws-claude-state-clear-if-mismatch-noop ()
+  "ws-claude-state-clear-if with a non-matching state is a no-op on both fields."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :done)
+    (claude-repl--ws-claude-state-clear-if "ws1" :thinking)
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :done))
+    (should (eq (claude-repl--ws-get "ws1" :status) :done))))
+
+(ert-deftest claude-repl-test-ws-claude-state-clear-if-nil-ws-errors ()
+  "ws-claude-state-clear-if signals error on nil workspace."
+  (should-error (claude-repl--ws-claude-state-clear-if nil :thinking) :type 'error))
+
+;;;; ---- Tests: Legacy wrappers still populate both axes ----
+
+(ert-deftest claude-repl-test-legacy-ws-set-writes-claude-state ()
+  "Legacy ws-set (wrapper) still writes :claude-state during migration."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set "ws1" :permission)
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :permission))
+    (should (eq (claude-repl--ws-get "ws1" :status) :permission))))
+
+(ert-deftest claude-repl-test-legacy-ws-clear-clears-both-axes ()
+  "Legacy ws-clear-if-status (wrapper) clears :claude-state too."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set "ws1" :thinking)
+    (claude-repl--ws-clear-if-status "ws1" :thinking)
+    (should-not (claude-repl--ws-get "ws1" :claude-state))
+    (should-not (claude-repl--ws-get "ws1" :status))))
+
+(ert-deftest claude-repl-test-maybe-clear-stale-clears-claude-state ()
+  "maybe-clear-stale-state clears :claude-state (write-both)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set "ws1" :done)
+    (cl-letf (((symbol-function 'claude-repl--vterm-running-p) (lambda (_) nil)))
+      (claude-repl--maybe-clear-stale-state "ws1")
+      (should-not (claude-repl--ws-get "ws1" :claude-state))
+      (should-not (claude-repl--ws-get "ws1" :status)))))
+
 ;;;; ---- Tests: Workspace state accessors (ws-set, ws-clear, ws-state) ----
 
 (ert-deftest claude-repl-test-ws-set-and-state ()
