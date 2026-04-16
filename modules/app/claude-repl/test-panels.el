@@ -1180,6 +1180,28 @@ This prevents the oscillation where update-ws-state immediately sees
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
       (should-error (claude-repl--start-fresh)))))
 
+(ert-deftest claude-repl-test-panels-start-fresh-sets-init ()
+  "start-fresh writes :claude-state :init after ensure-session launches vterm."
+  (claude-repl-test--with-clean-state
+    (let ((init-set nil)
+          (ensure-called nil)
+          (fake-inst (make-claude-repl-instantiation :start-cmd "claude")))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'delete-other-windows) #'ignore)
+                ((symbol-function 'claude-repl--ensure-session)
+                 (lambda () (setq ensure-called t)))
+                ((symbol-function 'claude-repl--show-loading-panels) #'ignore)
+                ((symbol-function 'claude-repl--active-inst)
+                 (lambda (_) fake-inst))
+                ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
+                ((symbol-function 'claude-repl--resolve-root) (lambda () "/"))
+                ((symbol-function 'claude-repl--ws-set-claude-state)
+                 (lambda (ws state)
+                   (when (eq state :init) (setq init-set ws)))))
+        (claude-repl--start-fresh)
+        (should ensure-called)
+        (should (equal init-set "test-ws"))))))
+
 ;;;; ---- Tests: schedule-sigkill ----
 
 (ert-deftest claude-repl-test-panels-schedule-sigkill-schedules-timer ()

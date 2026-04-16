@@ -1297,6 +1297,21 @@ is still skipped and the file is still deleted."
               (should (eq swapped-buf fake-buf))))
         (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
 
+(ert-deftest claude-repl-test-on-session-start-event-sets-idle ()
+  "on-session-start-event writes :claude-state :idle (transition from :init)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :init)
+    (let ((fake-buf (generate-new-buffer " *test-session-start-idle*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
+            (cl-letf (((symbol-function 'claude-repl--cancel-ready-timer) #'ignore)
+                      ((symbol-function 'claude-repl--swap-placeholder) #'ignore)
+                      ((symbol-function 'claude-repl--open-panels-after-ready) #'ignore))
+              (claude-repl--on-session-start-event "ws1" "/some/dir")
+              (should (eq (claude-repl--ws-claude-state "ws1") :idle))))
+        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
+
 (provide 'test-sentinel)
 
 ;;; test-sentinel.el ends here

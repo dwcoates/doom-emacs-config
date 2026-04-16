@@ -196,15 +196,18 @@ Logs the resolution, clears :thinking, and runs the finished handler."
 
 (defun claude-repl--on-session-start-event (ws _dir)
   "Handle a session_start event for workspace WS.
-This is the sole readiness signal: sets `claude-repl--ready' on the vterm
-buffer, cancels the ready timer, swaps the loading placeholder, drains
-pending prompts, and opens panels.  Session ID is already set by
+This is the sole readiness signal: transitions `:claude-state' from
+`:init' to `:idle', sets `claude-repl--ready' on the vterm buffer,
+cancels the ready timer, swaps the loading placeholder, drains pending
+prompts, and opens panels.  Session ID is already set by
 `claude-repl--update-session-id-from-sentinel' before this callback runs.
-Idempotent — no-op if already ready."
+Idempotent — no-op on the readiness side if already ready, but the
+claude-state write still fires (idempotent at the plist level)."
   (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (claude-repl--log ws "on-session-start-event: ENTER ws=%s vterm-buf=%S vterm-live=%s"
                       ws (when vterm-buf (buffer-name vterm-buf))
                       (if (and vterm-buf (buffer-live-p vterm-buf)) "yes" "no"))
+    (claude-repl--ws-set-claude-state ws :idle)
     (cond
      ((or (null vterm-buf) (not (buffer-live-p vterm-buf)))
       (claude-repl--log ws "on-session-start-event: ERROR no live vterm buffer for ws=%s" ws)
