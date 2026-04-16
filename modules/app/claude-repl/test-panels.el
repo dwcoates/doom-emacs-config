@@ -1220,6 +1220,21 @@ This prevents the oscillation where update-ws-state immediately sees
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
       (should-error (claude-repl-kill)))))
 
+(ert-deftest claude-repl-test-panels-kill-clears-all-state-fields ()
+  "claude-repl-kill resets :status, :claude-state, :repl-state, and :panels-hidden."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set "ws1" :thinking)               ;; writes :status + :claude-state
+    (claude-repl--ws-set-repl-state "ws1" :inactive)
+    (claude-repl--ws-put "ws1" :panels-hidden t)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'claude-repl--kill-session) #'ignore)
+              ((symbol-function 'force-mode-line-update) #'ignore))
+      (claude-repl-kill)
+      (should-not (claude-repl--ws-get "ws1" :status))
+      (should-not (claude-repl--ws-get "ws1" :claude-state))
+      (should-not (claude-repl--ws-get "ws1" :repl-state))
+      (should-not (claude-repl--ws-get "ws1" :panels-hidden)))))
+
 ;;;; ---- Tests: redirect-from-claude-before-save with Claude window ----
 
 (ert-deftest claude-repl-test-panels-redirect-claude-to-other-window ()
