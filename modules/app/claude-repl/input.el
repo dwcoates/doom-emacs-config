@@ -410,13 +410,18 @@ buffer drifts between perspectives."
 
 (defun claude-repl--do-send (ws input raw)
   "Core send: dispatch INPUT to WS's vterm.
-Increments the prefix counter, pins the owning workspace, marks the workspace
-as thinking, sends INPUT, and runs posthooks with RAW (the undecorated text)."
+Increments the prefix counter, pins the owning workspace, sends INPUT,
+and runs posthooks with RAW (the undecorated text).
+
+Does NOT write `:claude-state :thinking' — that transition is the
+exclusive province of the `prompt_submit' Claude Code hook (routed
+through `on-prompt-submit-event').  The brief gap between RET and the
+red tab reflects that the hook is the source of truth for Claude's
+state."
   (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (claude-repl--log ws "do-send ws=%s len=%d" ws (length input))
     (claude-repl--increment-prefix-counter ws)
     (claude-repl--pin-owning-workspace vterm-buf ws)
-    (claude-repl--mark-ws-thinking ws)
     (claude-repl--send-input-to-vterm vterm-buf input)
     (claude-repl--run-send-posthooks ws raw)))
 

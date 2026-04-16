@@ -539,15 +539,18 @@
         (claude-repl--do-send "ws1" "input" "raw"))
       (should (= (claude-repl--ws-get "ws1" :prefix-counter) 6)))))
 
-(ert-deftest claude-repl-test-do-send-sets-thinking-state ()
-  "`claude-repl--do-send' marks workspace as thinking."
+(ert-deftest claude-repl-test-do-send-does-not-touch-claude-state ()
+  "`claude-repl--do-send' must not write :claude-state.
+The :thinking transition belongs to the prompt_submit Claude Code hook
+(via `on-prompt-submit-event').  Emacs-side do-send only sends bytes."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-temp-buffer "*claude-do-send-think*"
       (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (cl-letf (((symbol-function 'claude-repl--send-input-to-vterm) #'ignore)
                 ((symbol-function 'claude-repl--run-send-posthooks) #'ignore))
         (claude-repl--do-send "ws1" "input" "raw"))
-      (should (eq (claude-repl--ws-state "ws1") :thinking)))))
+      (should-not (claude-repl--ws-claude-state "ws1"))
+      (should-not (claude-repl--ws-get "ws1" :status)))))
 
 (ert-deftest claude-repl-test-do-send-pins-owning-workspace ()
   "`claude-repl--do-send' pins the owning workspace on the vterm buffer."
