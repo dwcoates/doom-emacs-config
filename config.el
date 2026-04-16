@@ -900,6 +900,14 @@ If found, the class name is returned, otherwise STR is returned"
        :desc "Switch to project with file" "P" #'+dwc/switch-to-project-with-file
        :desc "Switch to project buffer" "b" #'+dwc/switch-to-project-buffer))
 
+(defun +dwc/switch-to-messages-buffer ()
+  "Switch to the *Messages* buffer in the current window."
+  (interactive)
+  (switch-to-buffer (messages-buffer)))
+
+(map! :leader
+      :desc "Switch to *Messages*" "C-," #'+dwc/switch-to-messages-buffer)
+
 ;; Custom named vterm function
 (defun +dwc/vterm-named ()
   "Create a new vterm with a custom name in current window, cd'd to current file's directory."
