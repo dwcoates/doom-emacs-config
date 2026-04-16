@@ -10,13 +10,15 @@
 #   uninstall  Remove managed registrations (preserving foreign entries)
 #              and delete the managed hook scripts from ~/.claude/hooks/.
 #              Drops an event key when its array becomes empty.
+#   reinstall  uninstall then install.  Useful after editing a checked-in
+#              managed script.
 #   help       Show usage.
 #
 # Backs up ~/.claude/settings.json to settings.json.bak.<unix-ts> before
 # any mutation.  No-ops when running inside the agent sandbox.
 #
 # Usage:
-#   bash .claude/install.sh [install|uninstall|help]
+#   bash .claude/install.sh [install|uninstall|reinstall|help]
 #
 # Requires: jq, bash 4+.
 set -euo pipefail
@@ -49,12 +51,13 @@ HOOKS=(
 
 show_help() {
   cat <<USAGE
-Usage: bash $0 [install|uninstall|help]
+Usage: bash $0 [install|uninstall|reinstall|help]
 
   install    (default) Copy managed hook scripts and register them in
              ~/.claude/settings.json.  Idempotent.
   uninstall  Remove managed registrations (preserving foreign entries)
              and delete the managed hook scripts.
+  reinstall  uninstall then install.
   help       Show this message.
 USAGE
 }
@@ -176,6 +179,7 @@ ACTION="${1:-install}"
 case "$ACTION" in
   install)        do_install ;;
   uninstall)      do_uninstall ;;
+  reinstall)      do_uninstall; do_install ;;
   -h|--help|help) show_help; exit 0 ;;
   *)              echo "[install.sh] Unknown action: $ACTION" >&2
                   show_help
