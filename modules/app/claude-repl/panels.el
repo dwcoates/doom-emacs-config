@@ -243,15 +243,22 @@ Redirects away from Claude buffers and saves frame state."
 Hides the panel windows without tearing down the session.  All
 user-initiated close paths route through here: `hide-and-preserve-status'
 (SPC o c), `claude-repl-send-and-hide', and the pre-magit hide hook.
-Marks `:panels-hidden' so future readers can distinguish this from an
-orphan cleanup.  Future commits will additionally write a `:repl-state'
-value here once the state axis is split (see analysis/08-decoupled-state).
+
+Invariably sets `:repl-state' to :inactive — this is the completion of
+the \"close always transitions to :inactive\" requirement (analysis/01,
+item #1).  `:claude-state' is intentionally left untouched so that
+closing during a :thinking or :permission turn preserves the in-flight
+signal (the renderer shows red/❓ through the closed-panel state).
+`:panels-hidden' continues to be written for the duration of the
+migration; it becomes redundant once the legacy field is removed.
+
 WS defaults to the current workspace; when WS is nil the function still
 hides panels but skips the bookkeeping write."
   (let ((ws (or ws (+workspace-current-name))))
     (when ws
-      (claude-repl--log ws "on-close ws=%s claude-state=%s"
+      (claude-repl--log ws "on-close ws=%s claude-state=%s -> repl-state=:inactive"
                         ws (claude-repl--ws-claude-state ws))
+      (claude-repl--ws-set-repl-state ws :inactive)
       (claude-repl--ws-put ws :panels-hidden t))
     (claude-repl--hide-panels)))
 

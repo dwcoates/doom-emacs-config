@@ -359,6 +359,24 @@ This prevents the oscillation where update-ws-state immediately sees
         (claude-repl--on-close)
         (should hide-called)))))
 
+(ert-deftest claude-repl-test-panels-on-close-sets-repl-state-inactive ()
+  "on-close invariably writes :repl-state :inactive (item #1)."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
+      (claude-repl--on-close)
+      (should (eq (claude-repl--ws-get "test-ws" :repl-state) :inactive)))))
+
+(ert-deftest claude-repl-test-panels-on-close-preserves-claude-state ()
+  "on-close does not touch :claude-state — mid-task :thinking survives close."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "test-ws" :thinking)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
+      (claude-repl--on-close)
+      (should (eq (claude-repl--ws-claude-state "test-ws") :thinking))
+      (should (eq (claude-repl--ws-get "test-ws" :repl-state) :inactive)))))
+
 ;;;; ---- Tests: hide-and-preserve-status ----
 
 (ert-deftest claude-repl-test-panels-hide-and-preserve-marks-hidden ()
