@@ -106,11 +106,11 @@
   (should (eq :done (claude-repl--composed-state :done :init))))
 
 (ert-deftest claude-repl-test-composed-done-inactive ()
-  "Composed (:done, :inactive) → :inactive (orange — closed with unread done)."
-  (should (eq :inactive (claude-repl--composed-state :done :inactive))))
+  "Composed (:done, :inactive) → :done — :repl-state contributes no color."
+  (should (eq :done (claude-repl--composed-state :done :inactive))))
 
 (ert-deftest claude-repl-test-composed-nil-inactive ()
-  "Composed (nil, :inactive) → nil (no done to elevate to orange)."
+  "Composed (nil, :inactive) → nil — :repl-state alone is colorless."
   (should-not (claude-repl--composed-state nil :inactive)))
 
 (ert-deftest claude-repl-test-composed-legacy-inactive-claude-axis ()
@@ -118,14 +118,24 @@
   (should (eq :inactive (claude-repl--composed-state :inactive nil)))
   (should (eq :inactive (claude-repl--composed-state :inactive :init))))
 
+(ert-deftest claude-repl-test-composed-init ()
+  "Composed (:init, any) → :init (blue — Claude initializing)."
+  (should (eq :init (claude-repl--composed-state :init nil)))
+  (should (eq :init (claude-repl--composed-state :init :inactive))))
+
+(ert-deftest claude-repl-test-composed-idle ()
+  "Composed (:idle, any) → nil — idle Claude renders as default face."
+  (should-not (claude-repl--composed-state :idle nil))
+  (should-not (claude-repl--composed-state :idle :inactive)))
+
 ;;;; ---- Tests: ws-display-state reads both axes ----
 
-(ert-deftest claude-repl-test-display-state-reads-both-axes ()
-  "ws-display-state reads :claude-state and :repl-state together."
+(ert-deftest claude-repl-test-display-state-repl-inactive-does-not-change-color ()
+  "A :done workspace with :repl-state :inactive still renders :done (green)."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :done)
     (claude-repl--ws-set-repl-state "ws1" :inactive)
-    (should (eq :inactive (claude-repl--ws-display-state "ws1")))))
+    (should (eq :done (claude-repl--ws-display-state "ws1")))))
 
 (ert-deftest claude-repl-test-display-state-thinking-overrides-closed-panels ()
   "Panels closed during a :thinking turn still renders red."

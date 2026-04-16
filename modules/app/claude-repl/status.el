@@ -201,7 +201,9 @@ A no-op if a check is already in progress for WS."
 ;; :face is the defface symbol for unselected tabs.
 ;; :label, when present, overrides the numeric tab index.
 (defconst claude-repl--status-colors
-  '((:thinking   :bg "#cc3333" :fg "white" :selected-fg "#cc3333"
+  '((:init       :bg "#3366cc" :fg "white" :selected-fg "#3366cc"
+                 :face claude-repl-tab-init)
+    (:thinking   :bg "#cc3333" :fg "white" :selected-fg "#cc3333"
                  :face claude-repl-tab-thinking)
     (:done       :bg "#1a7a1a" :fg "black" :selected-fg "#2a8c2a"
                  :face claude-repl-tab-done)
@@ -209,7 +211,10 @@ A no-op if a check is already in progress for WS."
                  :face claude-repl-tab-permission :label "❓")
     (:inactive   :bg "#cc8800" :fg "black" :selected-fg "#cc8800"
                  :face claude-repl-tab-inactive))
-  "Alist mapping status keywords to color and display properties.")
+  "Alist mapping claude-state keywords to color and display properties.
+`:idle' intentionally has no entry — an idle workspace renders with the
+default tab face.  `:inactive' remains for the duration of the state-axis
+migration and is removed once no writer produces it.")
 
 (defun claude-repl--status-color (state prop)
   "Return property PROP for STATE from `claude-repl--status-colors'.
@@ -227,6 +232,9 @@ STATUS is an unquoted symbol (e.g. thinking, done).  DOC is the docstring."
             :foreground ,(claude-repl--status-color ,kw :fg)
             :weight bold))
        ,doc)))
+
+(claude-repl--define-status-face init
+  "Face for workspace tabs where Claude is initializing (blue).")
 
 (claude-repl--define-status-face thinking
   "Face for workspace tabs where Claude is thinking (red).")
@@ -302,29 +310,32 @@ normal.  For unselected tabs, returns the status face from
     (when-let ((img (claude-repl--priority-image priority)))
       (propertize " " 'display img))))
 
-(defun claude-repl--composed-state (claude repl)
-  "Project the (CLAUDE, REPL) state pair onto the palette's display key.
-Priority rule (see analysis/08-decoupled-state):
-  :thinking claude  → :thinking                                (red; dominates)
-  :permission claude → :permission                             (green + ❓)
-  :inactive claude OR (:inactive repl + :done claude) → :inactive (orange)
-  :done claude       → :done                                   (green)
-  otherwise          → nil                                     (default face)
-Accepts the legacy `:inactive' value on the claude axis so write-both
-callers that have not migrated yet still render correctly; the
-repl-axis branch handles the post-migration case."
+(defun claude-repl--composed-state (claude _repl)
+  "Project CLAUDE (and optionally _REPL) onto the palette's display key.
+Per user direction, `:repl-state' contributes no color — tab color is a
+pure function of `:claude-state'.  The second argument is retained so
+that callers can keep the pair-based call convention while we migrate,
+and so a future feature can hook back into rendering without a signature
+change.
+Rule:
+  :thinking   → :thinking                (red)
+  :permission → :permission               (green + ❓)
+  :inactive   → :inactive                 (legacy orange — kept until no
+                                          writer produces it; see N20+)
+  :init       → :init                     (blue — Claude starting)
+  :done       → :done                     (green — unacknowledged work)
+  :idle / nil / other → nil               (default face)"
   (cond
    ((eq claude :thinking)   :thinking)
    ((eq claude :permission) :permission)
-   ((or (eq claude :inactive)
-        (and (eq repl :inactive)
-             (eq claude :done)))
-    :inactive)
+   ((eq claude :inactive)   :inactive)
+   ((eq claude :init)       :init)
    ((eq claude :done)       :done)
    (t                       nil)))
 
 (defun claude-repl--ws-display-state (ws)
-  "Return the palette display key for WS, combining claude and repl axes."
+  "Return the palette display key for WS.
+Reads `:claude-state' (the source of truth for tab color)."
   (claude-repl--composed-state (claude-repl--ws-claude-state ws)
                                (claude-repl--ws-repl-state ws)))
 
