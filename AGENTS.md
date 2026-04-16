@@ -14,6 +14,23 @@ Functions defined in `modules/app/claude-repl/config.el` must use the `claude-re
 
 New code added to the claude-repl module must include instrumentation via `claude-repl--log`. Every dynamic aspect of the call site must be included in the log message — variable values, resolved paths, computed flags, branch outcomes, etc. The goal is that a log trace alone should be sufficient to diagnose any behavioral issue without needing to add instrumentation after the fact.
 
+## No Silent Fallbacks
+
+**Never silently fall back, skip, or no-op when a precondition fails.** Always fail loudly: a `claude-repl--log` entry AND user-visible feedback (a `user-error`, `error`, or at minimum a `message` that reaches the echo area).
+
+Silent fallbacks create mysterious "stuck" states (the slash-passthrough bug was one — vterm lookup failed silently, keystrokes piled onto a hidden stack, the user saw no effect and had no signal that anything was wrong). A loud failure surfaces itself and can be diagnosed; a silent fallback just leaves the user guessing.
+
+Anti-patterns to reject:
+- `(when-let ((x (lookup))) BODY)` where BODY is user-expected behavior. If `lookup` returns nil, the caller needs to know.
+- State mutations that run regardless of whether the upstream operation succeeded (e.g., pushing onto a local stack after a failed forward).
+- `(ignore-errors ...)` without a companion log of what was swallowed.
+- `or`-chained defaults that mask missing data: `(or (ws-get :vterm) (default-vterm))`.
+- Early returns that hide a failed precondition instead of signaling it.
+
+The only acceptable silent no-op is one whose contract **explicitly requests** it: a best-effort cleanup where failure is known to be recoverable, or a `lookup-or-nil`-style query function. In those cases, document the contract in the docstring so callers know what they're getting.
+
+When in doubt: fail loudly.
+
 ## Testing
 
 After any changes to `modules/app/claude-repl/`, always run the claude-repl test suite:
