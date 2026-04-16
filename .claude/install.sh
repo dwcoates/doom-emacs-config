@@ -15,9 +15,14 @@ set -euo pipefail
 SETTINGS="$HOME/.claude/settings.json"
 HOOKS_DIR="$HOME/.claude/hooks"
 
-# Ensure settings.json exists with at least an empty object.
+# Ensure settings.json exists with at least an empty object.  We back up
+# pre-existing content before any mutation so a bad merge can be restored.
 mkdir -p "$(dirname "$SETTINGS")"
-if [ ! -f "$SETTINGS" ]; then
+if [ -f "$SETTINGS" ]; then
+  backup="$SETTINGS.bak.$(date +%s)"
+  cp "$SETTINGS" "$backup"
+  echo "[install] Backed up $SETTINGS -> $backup"
+else
   echo '{}' > "$SETTINGS"
 fi
 
