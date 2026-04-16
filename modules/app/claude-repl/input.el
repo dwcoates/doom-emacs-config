@@ -280,7 +280,7 @@ ignoring trailing whitespace."
   (let* ((trimmed (string-trim-right raw))
          (result (or (member trimmed claude-repl-metaprompt-exempt-strings)
                      (string-match-p "^[0-9]+$" trimmed))))
-    (claude-repl--log nil "skip-metaprompt-p: result=%s" result)
+    (claude-repl--log-verbose nil "skip-metaprompt-p: result=%s" result)
     result))
 
 (defvar claude-repl-send-posthooks
@@ -310,7 +310,7 @@ COUNTER is the current prefix counter.  FORCE bypasses the counter check."
                      claude-repl-command-prefix
                      (not (claude-repl--skip-metaprompt-p raw))
                      (or force (zerop (mod counter claude-repl-prefix-period))))))
-    (claude-repl--log nil "should-prepend-metaprompt-p: result=%s counter=%d force=%s" result counter force)
+    (claude-repl--log-verbose nil "should-prepend-metaprompt-p: result=%s counter=%d force=%s" result counter force)
     result))
 
 (defun claude-repl--prepare-input (ws raw &optional force-metaprompt)
@@ -326,7 +326,7 @@ When FORCE-METAPROMPT is non-nil, always prepend (ignoring the counter)."
 
 (defun claude-repl--send-input-direct (vterm-buf input)
   "Send small INPUT string directly to VTERM-BUF and refresh."
-  (claude-repl--log nil "send-input-direct: len=%d" (length input))
+  (claude-repl--log-verbose nil "send-input-direct: len=%d" (length input))
   (with-current-buffer vterm-buf
     (vterm-send-string input)
     (vterm-send-return)
@@ -350,14 +350,14 @@ ACTION is called with `inhibit-quit' bound to t."
 (defun claude-repl--bracketed-finalize ()
   "Send a final Return and refresh vterm after bracketed paste.
 Used as the second deferred action in the bracketed paste pipeline."
-  (claude-repl--log nil "bracketed-finalize: sending final return")
+  (claude-repl--log-verbose nil "bracketed-finalize: sending final return")
   (vterm-send-return)
   (claude-repl--refresh-vterm))
 
 (defun claude-repl--bracketed-send-return (vterm-buf)
   "Send Return to VTERM-BUF and schedule a finalize step.
 Used as the first deferred action in the bracketed paste pipeline."
-  (claude-repl--log nil "bracketed-send-return: sending return, scheduling finalize")
+  (claude-repl--log-verbose nil "bracketed-send-return: sending return, scheduling finalize")
   (vterm-send-return)
   (claude-repl--vterm-deferred-action
    vterm-buf 0.05
@@ -366,7 +366,7 @@ Used as the first deferred action in the bracketed paste pipeline."
 (defun claude-repl--send-input-bracketed (vterm-buf input)
   "Send large INPUT string to VTERM-BUF using bracketed paste mode.
 Uses `claude-repl-paste-delay' to wait before sending Return."
-  (claude-repl--log nil "send-input-bracketed: len=%d" (length input))
+  (claude-repl--log-verbose nil "send-input-bracketed: len=%d" (length input))
   (with-current-buffer vterm-buf
     (vterm-send-string input t)
     (claude-repl--vterm-deferred-action
@@ -382,7 +382,7 @@ to avoid terminal truncation.")
   "Send INPUT string to VTERM-BUF.
 Uses paste mode for large inputs to avoid truncation."
   (let ((use-paste (> (length input) claude-repl--bracketed-paste-threshold)))
-    (claude-repl--log nil "send-input-to-vterm len=%d mode=%s"
+    (claude-repl--log-verbose nil "send-input-to-vterm len=%d mode=%s"
                       (length input) (if use-paste "paste" "direct"))
     (if use-paste
         (claude-repl--send-input-bracketed vterm-buf input)
@@ -396,7 +396,7 @@ Uses paste mode for large inputs to avoid truncation."
 (defun claude-repl--increment-prefix-counter (ws)
   "Increment the metaprompt prefix counter for workspace WS."
   (let ((new-val (1+ (or (claude-repl--ws-get ws :prefix-counter) 0))))
-    (claude-repl--log ws "increment-prefix-counter: ws=%s new-counter=%d" ws new-val)
+    (claude-repl--log-verbose ws "increment-prefix-counter: ws=%s new-counter=%d" ws new-val)
     (claude-repl--ws-put ws :prefix-counter new-val)))
 
 (defun claude-repl--pin-owning-workspace (vterm-buf ws)
@@ -404,7 +404,7 @@ Uses paste mode for large inputs to avoid truncation."
 Ensures title-change clears the correct workspace even if the
 buffer drifts between perspectives."
   (when vterm-buf
-    (claude-repl--log ws "pin-owning-workspace: ws=%s" ws)
+    (claude-repl--log-verbose ws "pin-owning-workspace: ws=%s" ws)
     (with-current-buffer vterm-buf
       (setq-local claude-repl--owning-workspace ws))))
 
@@ -434,7 +434,7 @@ When CLEAR-P is non-nil, erase the input buffer after saving history."
 
 (defun claude-repl--read-input-buffer (ws)
   "Return the text contents of the input buffer for workspace WS, or nil."
-  (claude-repl--log ws "read-input-buffer: ws=%s" ws)
+  (claude-repl--log-verbose ws "read-input-buffer: ws=%s" ws)
   (when-let ((buf (claude-repl--ws-get ws :input-buffer)))
     (when (buffer-live-p buf)
       (with-current-buffer buf (buffer-string)))))
@@ -625,12 +625,37 @@ was actually sent."
     (claude-repl--slash-no-vterm-error "backspace" nil)
     (claude-repl--exit-slash-mode)))
 
+(defun claude-repl--slash-command-string ()
+  "Reconstruct the slash command from the slash stack.
+The stack is in reverse order (most recent push first), so we reverse
+and concatenate.  Tab characters are included as-is."
+  (apply #'concat (reverse claude-repl--slash-stack)))
+
+(defun claude-repl--slash-workspace-command-p ()
+  "Return non-nil if the current slash stack represents a /wor command.
+Used to detect workspace-generation and workspace-update skills so
+the source workspace identity can be injected."
+  (string-prefix-p "/wor" (claude-repl--slash-command-string)))
+
+(defun claude-repl--slash-maybe-inject-source-ws ()
+  "If the slash command starts with /wor, send the source workspace tag to vterm.
+Appends \" [source-ws:<ws-name>]\" so the skill can identify which workspace
+initiated the generation.  Does not push to the slash stack (this is
+injected text, not user keystrokes)."
+  (when (claude-repl--slash-workspace-command-p)
+    (let ((ws (+workspace-current-name)))
+      (claude-repl--log nil "slash-maybe-inject-source-ws: injecting source-ws=%s" ws)
+      (claude-repl--slash-vterm-send (format " [source-ws:%s]" ws)))))
+
 (defun claude-repl--slash-return ()
   "Send return to vterm and exit slash mode.
+For /wor commands, injects a [source-ws:NAME] tag before return so
+workspace-generation and workspace-update skills know the originating workspace.
 Exits the mode regardless of send outcome — being stuck in slash mode when
 vterm is gone is strictly worse than having one unforwarded RET."
   (interactive)
   (claude-repl--log nil "slash-return: sending return and exiting slash mode")
+  (claude-repl--slash-maybe-inject-source-ws)
   (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
       (with-current-buffer vterm-buf
         (vterm-send-return))

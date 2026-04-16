@@ -94,7 +94,7 @@ Returns (:needs-build t :install-script PATH) if the image is not built yet."
   "Initialize environment state for workspace WS if not already set.
 Sets up bare-metal as the default :active-env, creates instantiation
 structs for both :sandbox and :bare-metal, then restores any persisted
-state from disk and verifies the session-id against live sessions."
+state from disk.  Session IDs are delivered by hooks, not scanned here."
   (claude-repl--log ws "ensure-ws-env: ws=%s" ws)
   (if (claude-repl--ws-get ws :active-env)
       (claude-repl--log ws "ensure-ws-env: restoring existing env for ws=%s" ws)
@@ -102,8 +102,7 @@ state from disk and verifies the session-id against live sessions."
     (claude-repl--ws-put ws :active-env :bare-metal)
     (claude-repl--ws-put ws :sandbox (make-claude-repl-instantiation))
     (claude-repl--ws-put ws :bare-metal (make-claude-repl-instantiation)))
-  (claude-repl--state-restore ws)
-  (claude-repl--capture-session-id ws))
+  (claude-repl--state-restore ws))
 
 (defun claude-repl--prompt-sandbox-build (sandbox-config)
   "Prompt the user to build a missing sandbox image from SANDBOX-CONFIG.
@@ -277,12 +276,11 @@ un-dedicated, switched to BUF, and re-dedicated."
         (set-window-dedicated-p win t))
       (kill-buffer placeholder))))
 
-(defun claude-repl--swap-placeholder ()
-  "Replace the loading placeholder window with the real vterm buffer.
-Called once when Claude sets its first terminal title (meaning it's ready)."
-  (claude-repl--log nil "swap-placeholder buf=%s" (buffer-name))
-  (let ((buf (current-buffer))
-        (placeholder (get-buffer " *claude-loading*")))
+(defun claude-repl--swap-placeholder (buf)
+  "Replace the loading placeholder window with the real vterm buffer BUF.
+Called once when Claude becomes ready (via session_start hook)."
+  (claude-repl--log nil "swap-placeholder buf=%s" (if buf (buffer-name buf) "nil"))
+  (let ((placeholder (get-buffer " *claude-loading*")))
     (when placeholder
       (run-at-time 0 nil
                    #'claude-repl--swap-placeholder-into-windows
@@ -346,52 +344,11 @@ visible, refreshes output, and notifies the user if the frame is unfocused."
   (claude-repl--log ws "set-session-id: ws=%s id=%s" ws id)
   (setf (claude-repl-instantiation-session-id (claude-repl--active-inst ws)) id))
 
-(defun claude-repl--session-file-matches-p (file root container-path)
-  "Return the session ID from JSON FILE if it matches ROOT or CONTAINER-PATH, or nil."
-  (condition-case nil
-      (let* ((json (json-read-file file))
-             (cwd (cdr (assq 'cwd json)))
-             (session-id (cdr (assq 'sessionId json))))
-        (when (and cwd session-id
-                   (let ((canonical-cwd (claude-repl--path-canonical cwd)))
-                     (or (string= canonical-cwd root)
-                         (string= canonical-cwd container-path))))
-          session-id))
-    (error nil)))
-
-(defun claude-repl--find-session-id-in-dir (root container-path)
-  "Search ~/.claude/sessions/ for a session matching ROOT or CONTAINER-PATH.
-ROOT is the canonical host path and CONTAINER-PATH is the Docker mount
-path (e.g. \"/<dirname>\").  Returns the session ID string or nil."
-  (claude-repl--log nil "find-session-id-in-dir: root=%s container-path=%s" root container-path)
-  (let ((sessions-dir (expand-file-name "~/.claude/sessions/")))
-    (let ((result (when (file-directory-p sessions-dir)
-                    (cl-loop for file in (directory-files sessions-dir t "\\.json\\'")
-                             thereis (claude-repl--session-file-matches-p file root container-path)))))
-      (claude-repl--log nil "find-session-id-in-dir: result=%s" result)
-      result)))
-
-(defun claude-repl--capture-session-id (ws)
-  "Scan ~/.claude/sessions/ for a running session matching WS's project root.
-Stores the session ID on the active instantiation, or clears a stale one."
-  (let ((project-dir (claude-repl--ws-get ws :project-dir)))
-    (if (null project-dir)
-        (claude-repl--log ws "capture-session-id: no :project-dir for ws=%s, skipping" ws)
-      (let* ((root (claude-repl--path-canonical project-dir))
-             ;; Docker sandbox mounts the worktree at /<dirname>, so session files
-             ;; record a container path rather than the full host path.
-             (container-path (concat "/" (file-name-nondirectory root)))
-             (found-id (claude-repl--find-session-id-in-dir root container-path))
-             (env (claude-repl--ws-get ws :active-env)))
-        (claude-repl--set-session-id ws found-id)
-        (if found-id
-            (progn
-              (claude-repl--log ws "capture-session-id ws=%s env=%s id=%s" ws env found-id)
-              (claude-repl--state-save ws))
-          ;; Clear stale session-id so a restored-from-disk value doesn't
-          ;; cause --resume with a dead session.
-          (claude-repl--log ws "capture-session-id ws=%s env=%s: no matching session found (cleared)"
-                            ws env))))))
+;; Session ID capture is handled exclusively by Claude Code hooks.
+;; Every hook event (session_start, stop, prompt_submit, permission_prompt)
+;; delivers session_id in the sentinel file, and
+;; claude-repl--update-session-id-from-sentinel (in sentinel.el) sets it
+;; on the workspace's active instantiation.  No file scanning needed.
 
 ;;;; Readiness and pending prompt handling
 
@@ -438,12 +395,6 @@ trigger `--show-existing-panels' with the wrong selected window."
     (claude-repl--log ws "show-panels-or-defer: other ws=%s — deferring" ws)
     (claude-repl--ws-put ws :pending-show-panels t)))
 
-(defun claude-repl--finalize-ready-state (ws)
-  "Finalize readiness for workspace WS: cancel timer and capture session ID."
-  (claude-repl--log ws "finalize-ready-state: ws=%s" ws)
-  (claude-repl--cancel-ready-timer ws)
-  (claude-repl--capture-session-id ws))
-
 (defun claude-repl--open-panels-after-ready (ws)
   "Open panels for WS after Claude becomes ready.
 If there were pending prompts, always show panels (or defer).
@@ -460,29 +411,11 @@ Otherwise, only show panels if WS is the current workspace."
           (claude-repl))
       (claude-repl--log ws "open-panels-after-ready: no pending + other ws=%s — no-op" ws))))
 
-(defun claude-repl--handle-first-ready ()
-  "Handle the first terminal title set — Claude is now ready.
-Cancels the ready-timer, swaps the loading placeholder, drains any pending
-prompts (with a 0.3s delay), and auto-opens panels if appropriate."
-  (unless claude-repl--ready
-    (claude-repl--log claude-repl--owning-workspace "first-ready buf=%s ws=%s" (buffer-name) claude-repl--owning-workspace)
-    (setq claude-repl--ready t)
-    (when claude-repl--owning-workspace
-      (claude-repl--finalize-ready-state claude-repl--owning-workspace))
-    (claude-repl--swap-placeholder)
-    (when claude-repl--owning-workspace
-      (claude-repl--open-panels-after-ready claude-repl--owning-workspace))))
-
-(defun claude-repl--on-vterm-title-set (_title)
-  "Detect first terminal title set to trigger ready handshake.
-Ignores TITLE -- only uses the event as a signal that Claude is ready."
-  (if (claude-repl--claude-buffer-p)
-      (claude-repl--handle-first-ready)
-    (claude-repl--log nil "on-vterm-title-set: not a claude buffer — skipping buf=%s" (buffer-name))))
-
-
-(after! vterm
-  (advice-add 'vterm--set-title :before #'claude-repl--on-vterm-title-set))
+;; Readiness is handled by the session_start hook via sentinel.el.
+;; The hook fires when Claude Code initializes, delivering session-id and
+;; triggering claude-repl--on-session-start-event which sets ready state,
+;; drains pending prompts, and opens panels.  No vterm title-change advice
+;; is needed.
 
 ;;;; Process state predicates
 

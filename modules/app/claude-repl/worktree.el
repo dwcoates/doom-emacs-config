@@ -464,26 +464,63 @@ it is normalized to the dirname before lookup."
 
 ;;; Workspace commands file processing
 
-(defun claude-repl--create-worktree-from-command (name prompt priority)
+(defun claude-repl--resolve-fork-session-id (fork-from)
+  "Resolve FORK-FROM workspace name to a Claude session ID.
+FORK-FROM is a workspace name (possibly a full branch like \"DWC/foo\");
+it is normalized to the bare name (\"foo\") before lookup.
+Returns the session ID string.  Signals `error' if FORK-FROM is non-nil
+but the workspace is unknown or has no active session — callers must not
+silently degrade to origin/master when forking was explicitly requested."
+  (when fork-from
+    (let* ((ws (claude-repl--bare-workspace-name fork-from))
+           (inst (ignore-errors (claude-repl--active-inst ws)))
+           (sid (and inst (claude-repl-instantiation-session-id inst))))
+      (claude-repl--log ws "resolve-fork-session-id: fork-from=%s ws=%s sid=%s" fork-from ws sid)
+      (unless sid
+        (claude-repl--log ws "resolve-fork-session-id: FAILED fork-from=%s ws=%s — no session ID found" fork-from ws)
+        (error "Cannot fork from workspace '%s': no active session ID (workspace unknown or session not started)" fork-from))
+      sid)))
+
+(defun claude-repl--create-worktree-from-command (name prompt priority &optional fork-session-id)
   "Timer callback: create a worktree workspace for NAME with PROMPT and PRIORITY.
+When FORK-SESSION-ID is non-nil, the new worktree branches from HEAD and
+resumes the fork source's Claude session.
 Binds `default-directory' to the main git root before creating."
-  (claude-repl--log nil "create-worktree-from-command: name=%s priority=%s" name priority)
+  (claude-repl--log nil "create-worktree-from-command: name=%s priority=%s fork-session-id=%s" name priority fork-session-id)
   (let ((default-directory claude-repl--main-git-root))
-    (claude-repl--do-create-worktree-workspace name nil nil prompt nil priority)))
+    (claude-repl--do-create-worktree-workspace name nil fork-session-id prompt nil priority)))
 
 (defconst claude-repl--worktree-stagger-seconds 5
   "Seconds between staggered worktree creation timers.
 Prevents concurrent Claude startups from corrupting ~/.claude.json.")
 
 (defun claude-repl--handle-create-command (cmd delay)
-  "Handle a \"create\" workspace command CMD, scheduling it after DELAY seconds."
-  (let ((name (alist-get 'name cmd))
-        (prompt (alist-get 'prompt cmd nil))
-        (priority (alist-get 'priority cmd nil)))
-    (claude-repl--log nil "workspace-commands-file create: %s (delay %.1fs) priority=%s" name delay priority)
-    (run-with-timer delay nil
-                    #'claude-repl--create-worktree-from-command
-                    name prompt priority)))
+  "Handle a \"create\" workspace command CMD, scheduling it after DELAY seconds.
+When CMD contains a \"fork_from\" field, resolves it to a session ID so the
+new workspace forks from the source workspace's Claude session and HEAD.
+If fork_from is present but resolution fails, the workspace is NOT created
+and an error message is shown to the user."
+  (let* ((name (alist-get 'name cmd))
+         (prompt (alist-get 'prompt cmd nil))
+         (priority (alist-get 'priority cmd nil))
+         (fork-from (alist-get 'fork_from cmd nil))
+         (fork-session-id
+          (condition-case err
+              (claude-repl--resolve-fork-session-id fork-from)
+            (error
+             (claude-repl--log nil "handle-create-command: ABORTING workspace '%s' — fork resolution failed: %s"
+                              name (error-message-string err))
+             (message "[claude-repl] ERROR: cannot create workspace '%s' — %s" name (error-message-string err))
+             nil))))
+    ;; If fork_from was requested but resolution failed, refuse to create.
+    (if (and fork-from (null fork-session-id))
+        (claude-repl--log nil "handle-create-command: SKIPPED workspace '%s' (fork_from=%s failed, refusing silent fallback)"
+                          name fork-from)
+      (claude-repl--log nil "workspace-commands-file create: %s (delay %.1fs) priority=%s fork-session-id=%s"
+                        name delay priority fork-session-id)
+      (run-with-timer delay nil
+                      #'claude-repl--create-worktree-from-command
+                      name prompt priority fork-session-id))))
 
 (defun claude-repl--handle-prompt-command (cmd)
   "Handle a \"prompt\" workspace command CMD."

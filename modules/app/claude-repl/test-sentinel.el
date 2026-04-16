@@ -119,9 +119,11 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
     (let ((callback-args nil)
           (deleted-file nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
-                 (lambda (_f) "/some/dir"))
+                 (lambda (_f) '(:dir "/some/dir" :session-id "sid-123")))
                 ((symbol-function 'claude-repl--ws-for-dir)
                  (lambda (_d) "ws1"))
+                ((symbol-function 'claude-repl--update-session-id-from-sentinel)
+                 #'ignore)
                 ((symbol-function 'delete-file)
                  (lambda (f) (setq deleted-file f))))
         (claude-repl--process-sentinel-file
@@ -132,7 +134,7 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
         (should (equal callback-args '("ws1" "/some/dir")))
         (should (equal deleted-file "/tmp/stop_123"))))))
 
-(ert-deftest claude-repl-test-process-sentinel-file-nil-dir-skips-all ()
+(ert-deftest claude-repl-test-process-sentinel-file-nil-read-skips-all ()
   "When read-sentinel-file returns nil, callback should not be called."
   (claude-repl-test--with-clean-state
     (let ((callback-called nil)
@@ -159,7 +161,7 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
           (warning-msg nil)
           (deleted-file nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
-                 (lambda (_f) "/unknown/dir"))
+                 (lambda (_f) '(:dir "/unknown/dir" :session-id nil)))
                 ((symbol-function 'claude-repl--ws-for-dir)
                  (lambda (_d) nil))
                 ((symbol-function 'message)
@@ -181,16 +183,13 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
   (claude-repl-test--with-clean-state
     (let ((deleted-file nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
-                 (lambda (_f) "/some/dir"))
+                 (lambda (_f) '(:dir "/some/dir" :session-id nil)))
                 ((symbol-function 'claude-repl--ws-for-dir)
                  (lambda (_d) "ws1"))
+                ((symbol-function 'claude-repl--update-session-id-from-sentinel)
+                 #'ignore)
                 ((symbol-function 'delete-file)
                  (lambda (f) (setq deleted-file f))))
-        ;; The callback errors, but delete-file is in unwind-protect-like
-        ;; position (it's after the cond, not inside it) so it still runs.
-        ;; Actually, looking at the code, it's NOT in unwind-protect.
-        ;; If callback errors, delete-file won't run.  But the test still
-        ;; verifies the normal case.
         (claude-repl--process-sentinel-file
          "/tmp/perm_123"
          '(:callback (lambda (_ws _dir) nil)
@@ -226,7 +225,7 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
   (claude-repl-test--with-clean-state
     (let ((finished-called nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
-                 (lambda (_f) "/unknown/dir"))
+                 (lambda (_f) '(:dir "/unknown/dir" :session-id nil)))
                 ((symbol-function 'claude-repl--ws-for-dir)
                  (lambda (_d) nil))
                 ((symbol-function 'claude-repl--handle-claude-finished)
@@ -261,15 +260,28 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
 
 ;;;; ---- Tests: read-sentinel-file ----
 
-(ert-deftest claude-repl-test-read-sentinel-file-returns-trimmed-content ()
-  "read-sentinel-file should return trimmed file contents."
+(ert-deftest claude-repl-test-read-sentinel-file-returns-dir-only ()
+  "read-sentinel-file with single-line file returns plist with :dir and nil :session-id."
   (claude-repl-test--with-clean-state
     (let ((tmp (make-temp-file "sentinel-test-")))
       (unwind-protect
           (progn
             (write-region "  /some/project/dir  \n" nil tmp)
-            (should (equal (claude-repl--read-sentinel-file tmp)
-                           "/some/project/dir")))
+            (let ((result (claude-repl--read-sentinel-file tmp)))
+              (should (equal (plist-get result :dir) "/some/project/dir"))
+              (should-not (plist-get result :session-id))))
+        (ignore-errors (delete-file tmp))))))
+
+(ert-deftest claude-repl-test-read-sentinel-file-returns-dir-and-session-id ()
+  "read-sentinel-file with two-line file returns both :dir and :session-id."
+  (claude-repl-test--with-clean-state
+    (let ((tmp (make-temp-file "sentinel-test-")))
+      (unwind-protect
+          (progn
+            (write-region "/some/project/dir\nabc-123-def\n" nil tmp)
+            (let ((result (claude-repl--read-sentinel-file tmp)))
+              (should (equal (plist-get result :dir) "/some/project/dir"))
+              (should (equal (plist-get result :session-id) "abc-123-def"))))
         (ignore-errors (delete-file tmp))))))
 
 (ert-deftest claude-repl-test-read-sentinel-file-returns-nil-on-missing ()
@@ -278,13 +290,15 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
     (should-not (claude-repl--read-sentinel-file "/nonexistent/path/sentinel_file"))))
 
 (ert-deftest claude-repl-test-read-sentinel-file-empty-file ()
-  "read-sentinel-file should return empty string for empty file."
+  "read-sentinel-file should return plist with empty :dir for empty file."
   (claude-repl-test--with-clean-state
     (let ((tmp (make-temp-file "sentinel-test-")))
       (unwind-protect
           (progn
             (write-region "" nil tmp)
-            (should (equal (claude-repl--read-sentinel-file tmp) "")))
+            (let ((result (claude-repl--read-sentinel-file tmp)))
+              (should (equal (plist-get result :dir) ""))
+              (should-not (plist-get result :session-id))))
         (ignore-errors (delete-file tmp))))))
 
 ;;;; ---- Tests: ws-for-dir-fast ----
@@ -558,9 +572,11 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
   (claude-repl-test--with-clean-state
     (let ((set-args nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
-                 (lambda (_f) "/project/dir"))
+                 (lambda (_f) '(:dir "/project/dir" :session-id "test-sid")))
                 ((symbol-function 'claude-repl--ws-for-dir)
                  (lambda (_d) "test-ws"))
+                ((symbol-function 'claude-repl--update-session-id-from-sentinel)
+                 #'ignore)
                 ((symbol-function 'claude-repl--ws-set)
                  (lambda (ws state) (setq set-args (list ws state))))
                 ((symbol-function 'claude-repl--ws-get)
@@ -574,12 +590,14 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
   (claude-repl-test--with-clean-state
     (let ((cleared nil) (finished nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
-                 (lambda (_f) "/project/dir"))
+                 (lambda (_f) '(:dir "/project/dir" :session-id "test-sid")))
                 ((symbol-function 'claude-repl--ws-for-dir)
                  (lambda (_d) "test-ws"))
                 ((symbol-function 'claude-repl--ws-clear)
                  (lambda (ws state)
                    (when (eq state :thinking) (setq cleared ws))))
+                ((symbol-function 'claude-repl--update-session-id-from-sentinel)
+                 #'ignore)
                 ((symbol-function 'claude-repl--handle-claude-finished)
                  (lambda (ws) (setq finished ws)))
                 ((symbol-function 'claude-repl--ws-get)
@@ -598,9 +616,11 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
   (claude-repl-test--with-clean-state
     (let ((thinking-ws nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
-                 (lambda (_f) "/project/dir"))
+                 (lambda (_f) '(:dir "/project/dir" :session-id "test-sid")))
                 ((symbol-function 'claude-repl--ws-for-dir)
                  (lambda (_d) "test-ws"))
+                ((symbol-function 'claude-repl--update-session-id-from-sentinel)
+                 #'ignore)
                 ((symbol-function 'claude-repl--mark-ws-thinking)
                  (lambda (ws) (setq thinking-ws ws)))
                 ((symbol-function 'claude-repl--ws-get)
@@ -712,24 +732,27 @@ path-canonical uses file-truename which resolves symlinks."
 ;;;; ---- Tests: read-sentinel-file uncovered edge cases ----
 
 (ert-deftest claude-repl-test-read-sentinel-file-whitespace-only ()
-  "read-sentinel-file should return empty string for a file with only whitespace."
+  "read-sentinel-file should return plist with empty :dir for whitespace-only file."
   (claude-repl-test--with-clean-state
     (let ((tmp (make-temp-file "sentinel-test-")))
       (unwind-protect
           (progn
             (write-region "   \n\t\n  " nil tmp)
-            (should (equal (claude-repl--read-sentinel-file tmp) "")))
+            (let ((result (claude-repl--read-sentinel-file tmp)))
+              (should (equal (plist-get result :dir) ""))
+              (should-not (plist-get result :session-id))))
         (ignore-errors (delete-file tmp))))))
 
 (ert-deftest claude-repl-test-read-sentinel-file-multiline-content ()
-  "read-sentinel-file should return trimmed multi-line content."
+  "read-sentinel-file with two lines returns :dir and :session-id."
   (claude-repl-test--with-clean-state
     (let ((tmp (make-temp-file "sentinel-test-")))
       (unwind-protect
           (progn
             (write-region "/first/line\n/second/line\n" nil tmp)
-            (should (equal (claude-repl--read-sentinel-file tmp)
-                           "/first/line\n/second/line")))
+            (let ((result (claude-repl--read-sentinel-file tmp)))
+              (should (equal (plist-get result :dir) "/first/line"))
+              (should (equal (plist-get result :session-id) "/second/line"))))
         (ignore-errors (delete-file tmp))))))
 
 (ert-deftest claude-repl-test-read-sentinel-file-generic-error ()
@@ -744,14 +767,16 @@ path-canonical uses file-truename which resolves symlinks."
         (should (string-match-p "read-sentinel-file: ERROR.*disk I/O" warning-msg))))))
 
 (ert-deftest claude-repl-test-read-sentinel-file-very-long-content ()
-  "read-sentinel-file should handle files with very long content."
+  "read-sentinel-file should handle files with very long dir path."
   (claude-repl-test--with-clean-state
     (let ((tmp (make-temp-file "sentinel-test-"))
           (long-path (concat "/" (make-string 1000 ?a))))
       (unwind-protect
           (progn
             (write-region long-path nil tmp)
-            (should (equal (claude-repl--read-sentinel-file tmp) long-path)))
+            (let ((result (claude-repl--read-sentinel-file tmp)))
+              (should (equal (plist-get result :dir) long-path))
+              (should-not (plist-get result :session-id))))
         (ignore-errors (delete-file tmp))))))
 
 ;;;; ---- Tests: process-sentinel-file uncovered edge cases ----
@@ -761,9 +786,11 @@ path-canonical uses file-truename which resolves symlinks."
   (claude-repl-test--with-clean-state
     (let ((deleted-file nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
-                 (lambda (_f) "/some/dir"))
+                 (lambda (_f) '(:dir "/some/dir" :session-id nil)))
                 ((symbol-function 'claude-repl--ws-for-dir)
                  (lambda (_d) "ws1"))
+                ((symbol-function 'claude-repl--update-session-id-from-sentinel)
+                 #'ignore)
                 ((symbol-function 'delete-file)
                  (lambda (f) (setq deleted-file f))))
         ;; The callback errors; since there's no unwind-protect, delete-file won't run.
@@ -782,9 +809,11 @@ path-canonical uses file-truename which resolves symlinks."
   (claude-repl-test--with-clean-state
     (let ((callback-called nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
-                 (lambda (_f) "/some/dir"))
+                 (lambda (_f) '(:dir "/some/dir" :session-id nil)))
                 ((symbol-function 'claude-repl--ws-for-dir)
                  (lambda (_d) "ws1"))
+                ((symbol-function 'claude-repl--update-session-id-from-sentinel)
+                 #'ignore)
                 ((symbol-function 'delete-file)
                  (lambda (_f) (error "permission denied"))))
         ;; Should not propagate the delete-file error
@@ -800,9 +829,11 @@ path-canonical uses file-truename which resolves symlinks."
   (claude-repl-test--with-clean-state
     (let ((deleted-file nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
-                 (lambda (_f) "/some/dir"))
+                 (lambda (_f) '(:dir "/some/dir" :session-id nil)))
                 ((symbol-function 'claude-repl--ws-for-dir)
                  (lambda (_d) "ws1"))
+                ((symbol-function 'claude-repl--update-session-id-from-sentinel)
+                 #'ignore)
                 ((symbol-function 'delete-file)
                  (lambda (f) (setq deleted-file f))))
         ;; Missing :callback means (plist-get handler :callback) => nil
@@ -820,7 +851,7 @@ is still skipped and the file is still deleted."
     (let ((callback-called nil)
           (deleted-file nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
-                 (lambda (_f) "/some/dir"))
+                 (lambda (_f) '(:dir "/some/dir" :session-id nil)))
                 ((symbol-function 'claude-repl--ws-for-dir)
                  (lambda (_d) nil))
                 ((symbol-function 'delete-file)
@@ -1133,6 +1164,135 @@ is still skipped and the file is still deleted."
         (claude-repl-nuke-sentinel-watchers)
         (should-not add-watch-called)
         (should-not claude-repl--sentinel-watch-descriptor)))))
+
+;;;; ---- Tests: update-session-id-from-sentinel ----
+
+(ert-deftest claude-repl-test-update-session-id-from-sentinel-sets-id ()
+  "update-session-id-from-sentinel should set the session ID on the active inst."
+  (claude-repl-test--with-clean-state
+    (let ((inst (make-claude-repl-instantiation)))
+      (claude-repl--ws-put "ws1" :active-env :bare-metal)
+      (claude-repl--ws-put "ws1" :bare-metal inst)
+      (claude-repl--update-session-id-from-sentinel "ws1" "new-sid-abc")
+      (should (equal (claude-repl-instantiation-session-id inst) "new-sid-abc")))))
+
+(ert-deftest claude-repl-test-update-session-id-from-sentinel-skips-nil ()
+  "update-session-id-from-sentinel should be a no-op when session-id is nil."
+  (claude-repl-test--with-clean-state
+    (let ((inst (make-claude-repl-instantiation :session-id "old-sid")))
+      (claude-repl--ws-put "ws1" :active-env :bare-metal)
+      (claude-repl--ws-put "ws1" :bare-metal inst)
+      (claude-repl--update-session-id-from-sentinel "ws1" nil)
+      (should (equal (claude-repl-instantiation-session-id inst) "old-sid")))))
+
+(ert-deftest claude-repl-test-update-session-id-from-sentinel-skips-empty ()
+  "update-session-id-from-sentinel should be a no-op when session-id is empty string."
+  (claude-repl-test--with-clean-state
+    (let ((inst (make-claude-repl-instantiation :session-id "old-sid")))
+      (claude-repl--ws-put "ws1" :active-env :bare-metal)
+      (claude-repl--ws-put "ws1" :bare-metal inst)
+      (claude-repl--update-session-id-from-sentinel "ws1" "")
+      (should (equal (claude-repl-instantiation-session-id inst) "old-sid")))))
+
+(ert-deftest claude-repl-test-update-session-id-from-sentinel-skips-same ()
+  "update-session-id-from-sentinel should be a no-op when session-id is unchanged."
+  (claude-repl-test--with-clean-state
+    (let ((inst (make-claude-repl-instantiation :session-id "same-sid"))
+          (set-called nil))
+      (claude-repl--ws-put "ws1" :active-env :bare-metal)
+      (claude-repl--ws-put "ws1" :bare-metal inst)
+      (cl-letf (((symbol-function 'claude-repl--set-session-id)
+                 (lambda (_ws _id) (setq set-called t))))
+        (claude-repl--update-session-id-from-sentinel "ws1" "same-sid")
+        (should-not set-called)))))
+
+(ert-deftest claude-repl-test-update-session-id-from-sentinel-updates-changed ()
+  "update-session-id-from-sentinel should update when session-id differs."
+  (claude-repl-test--with-clean-state
+    (let ((inst (make-claude-repl-instantiation :session-id "old-sid")))
+      (claude-repl--ws-put "ws1" :active-env :bare-metal)
+      (claude-repl--ws-put "ws1" :bare-metal inst)
+      (claude-repl--update-session-id-from-sentinel "ws1" "new-sid")
+      (should (equal (claude-repl-instantiation-session-id inst) "new-sid")))))
+
+;;;; ---- Tests: on-session-start-event ----
+
+(ert-deftest claude-repl-test-on-session-start-event-sets-ready ()
+  "on-session-start-event should set claude-repl--ready on the vterm buffer."
+  (claude-repl-test--with-clean-state
+    (let ((fake-buf (generate-new-buffer " *test-session-start-vterm*"))
+          (timer-cancelled nil)
+          (panels-opened nil))
+      (unwind-protect
+          (progn
+            (with-current-buffer fake-buf
+              (setq-local claude-repl--ready nil))
+            (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
+            (cl-letf (((symbol-function 'claude-repl--cancel-ready-timer)
+                       (lambda (_ws) (setq timer-cancelled t)))
+                      ((symbol-function 'claude-repl--swap-placeholder) #'ignore)
+                      ((symbol-function 'claude-repl--open-panels-after-ready)
+                       (lambda (_ws) (setq panels-opened t))))
+              (claude-repl--on-session-start-event "ws1" "/some/dir")
+              (should (buffer-local-value 'claude-repl--ready fake-buf))
+              (should timer-cancelled)
+              (should panels-opened)))
+        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
+
+(ert-deftest claude-repl-test-on-session-start-event-idempotent ()
+  "on-session-start-event should be a no-op when already ready."
+  (claude-repl-test--with-clean-state
+    (let ((fake-buf (generate-new-buffer " *test-session-start-idem*"))
+          (panels-opened nil))
+      (unwind-protect
+          (progn
+            (with-current-buffer fake-buf
+              (setq-local claude-repl--ready t))
+            (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
+            (cl-letf (((symbol-function 'claude-repl--open-panels-after-ready)
+                       (lambda (_ws) (setq panels-opened t))))
+              (claude-repl--on-session-start-event "ws1" "/some/dir")
+              (should-not panels-opened)))
+        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
+
+(ert-deftest claude-repl-test-on-session-start-event-no-vterm-errors ()
+  "on-session-start-event should error loudly when no vterm buffer exists."
+  (claude-repl-test--with-clean-state
+    (let ((msg-called nil))
+      (cl-letf (((symbol-function 'message)
+                 (lambda (&rest _) (setq msg-called t))))
+        (claude-repl--on-session-start-event "ws1" "/some/dir")
+        (should msg-called)))))
+
+(ert-deftest claude-repl-test-on-session-start-event-dead-vterm-errors ()
+  "on-session-start-event should error loudly when vterm buffer is dead."
+  (claude-repl-test--with-clean-state
+    (let ((fake-buf (generate-new-buffer " *test-session-start-dead*"))
+          (msg-called nil))
+      (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
+      (kill-buffer fake-buf)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (&rest _) (setq msg-called t))))
+        (claude-repl--on-session-start-event "ws1" "/some/dir")
+        (should msg-called)))))
+
+(ert-deftest claude-repl-test-on-session-start-event-swaps-placeholder ()
+  "on-session-start-event should call swap-placeholder with the vterm buffer."
+  (claude-repl-test--with-clean-state
+    (let ((fake-buf (generate-new-buffer " *test-session-start-swap*"))
+          (swapped-buf nil))
+      (unwind-protect
+          (progn
+            (with-current-buffer fake-buf
+              (setq-local claude-repl--ready nil))
+            (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
+            (cl-letf (((symbol-function 'claude-repl--cancel-ready-timer) #'ignore)
+                      ((symbol-function 'claude-repl--swap-placeholder)
+                       (lambda (buf) (setq swapped-buf buf)))
+                      ((symbol-function 'claude-repl--open-panels-after-ready) #'ignore))
+              (claude-repl--on-session-start-event "ws1" "/some/dir")
+              (should (eq swapped-buf fake-buf))))
+        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
 
 (provide 'test-sentinel)
 

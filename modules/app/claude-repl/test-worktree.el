@@ -1138,4 +1138,100 @@ Returns the full SHA of the new commit."
         (claude-repl--open-initial-buffers "ws1" "/tmp/")
         (should-not add-called)))))
 
+;;;; ---- Tests: resolve-fork-session-id ----
+
+(ert-deftest claude-repl-test-resolve-fork-session-id-nil ()
+  "resolve-fork-session-id returns nil when fork-from is nil."
+  (should-not (claude-repl--resolve-fork-session-id nil)))
+
+(ert-deftest claude-repl-test-resolve-fork-session-id-known-ws ()
+  "resolve-fork-session-id returns session ID for a known workspace."
+  (claude-repl-test--with-clean-state
+    (let ((inst (make-claude-repl-instantiation :session-id "abc-123")))
+      (claude-repl--ws-put "my-ws" :active-env :bare-metal)
+      (claude-repl--ws-put "my-ws" :bare-metal inst)
+      (should (equal (claude-repl--resolve-fork-session-id "my-ws") "abc-123")))))
+
+(ert-deftest claude-repl-test-resolve-fork-session-id-normalizes-branch ()
+  "resolve-fork-session-id normalizes DWC/my-ws to my-ws."
+  (claude-repl-test--with-clean-state
+    (let ((inst (make-claude-repl-instantiation :session-id "def-456")))
+      (claude-repl--ws-put "my-ws" :active-env :bare-metal)
+      (claude-repl--ws-put "my-ws" :bare-metal inst)
+      (should (equal (claude-repl--resolve-fork-session-id "DWC/my-ws") "def-456")))))
+
+(ert-deftest claude-repl-test-resolve-fork-session-id-no-session-errors ()
+  "resolve-fork-session-id signals error when workspace has no session ID."
+  (claude-repl-test--with-clean-state
+    (let ((inst (make-claude-repl-instantiation)))
+      (claude-repl--ws-put "my-ws" :active-env :bare-metal)
+      (claude-repl--ws-put "my-ws" :bare-metal inst)
+      (should-error (claude-repl--resolve-fork-session-id "my-ws") :type 'error))))
+
+(ert-deftest claude-repl-test-resolve-fork-session-id-unknown-ws-errors ()
+  "resolve-fork-session-id signals error for an unknown workspace."
+  (claude-repl-test--with-clean-state
+    (should-error (claude-repl--resolve-fork-session-id "nonexistent") :type 'error)))
+
+;;;; ---- Tests: handle-create-command with fork_from ----
+
+(ert-deftest claude-repl-test-handle-create-command-with-fork-from ()
+  "handle-create-command should resolve fork_from and pass fork-session-id."
+  (claude-repl-test--with-clean-state
+    (let ((inst (make-claude-repl-instantiation :session-id "fork-sid-789")))
+      (claude-repl--ws-put "source-ws" :active-env :bare-metal)
+      (claude-repl--ws-put "source-ws" :bare-metal inst)
+      (let ((captured-args nil))
+        (cl-letf (((symbol-function 'run-with-timer)
+                   (lambda (_delay _repeat fn &rest args)
+                     (setq captured-args args))))
+          (claude-repl--handle-create-command
+           '((type . "create") (name . "DWC/new-ws") (fork_from . "source-ws"))
+           0)
+          ;; captured-args = (name prompt priority fork-session-id)
+          (should (equal (nth 0 captured-args) "DWC/new-ws"))
+          (should (equal (nth 3 captured-args) "fork-sid-789")))))))
+
+(ert-deftest claude-repl-test-handle-create-command-without-fork-from ()
+  "handle-create-command without fork_from should pass nil fork-session-id."
+  (claude-repl-test--with-clean-state
+    (let ((captured-args nil))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat fn &rest args)
+                   (setq captured-args args))))
+        (claude-repl--handle-create-command
+         '((type . "create") (name . "DWC/new-ws"))
+         0)
+        ;; fork-session-id (4th arg) should be nil
+        (should (equal (nth 0 captured-args) "DWC/new-ws"))
+        (should-not (nth 3 captured-args))))))
+
+(ert-deftest claude-repl-test-handle-create-command-fork-from-no-session-aborts ()
+  "handle-create-command with fork_from but no session should refuse to create workspace."
+  (claude-repl-test--with-clean-state
+    (let ((inst (make-claude-repl-instantiation)))
+      (claude-repl--ws-put "source-ws" :active-env :bare-metal)
+      (claude-repl--ws-put "source-ws" :bare-metal inst)
+      (let ((timer-scheduled nil))
+        (cl-letf (((symbol-function 'run-with-timer)
+                   (lambda (_delay _repeat fn &rest args)
+                     (setq timer-scheduled t))))
+          (claude-repl--handle-create-command
+           '((type . "create") (name . "DWC/new-ws") (fork_from . "source-ws"))
+           0)
+          ;; Timer must NOT be scheduled -- workspace creation was refused.
+          (should-not timer-scheduled))))))
+
+(ert-deftest claude-repl-test-handle-create-command-fork-from-unknown-ws-aborts ()
+  "handle-create-command with fork_from referencing unknown workspace should refuse to create."
+  (claude-repl-test--with-clean-state
+    (let ((timer-scheduled nil))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat fn &rest args)
+                   (setq timer-scheduled t))))
+        (claude-repl--handle-create-command
+         '((type . "create") (name . "DWC/new-ws") (fork_from . "nonexistent"))
+         0)
+        (should-not timer-scheduled)))))
+
 ;;; test-worktree.el ends here

@@ -14,20 +14,6 @@
 
 ;;;; ---- Migrated tests ----
 
-(ert-deftest claude-repl-test-handle-first-ready-idempotent ()
-  "First call sets `claude-repl--ready' to t and calls `swap-placeholder'. Second call is a no-op."
-  (claude-repl-test--with-temp-buffer " *test-first-ready*"
-    (setq-local claude-repl--ready nil)
-    (let ((swap-count 0))
-      (cl-letf (((symbol-function 'claude-repl--swap-placeholder)
-                 (lambda () (cl-incf swap-count))))
-        (claude-repl--handle-first-ready)
-        (should claude-repl--ready)
-        (should (= swap-count 1))
-        ;; Second call should be no-op
-        (claude-repl--handle-first-ready)
-        (should (= swap-count 1))))))
-
 (ert-deftest claude-repl-test-finished-from-hook-hidden-sets-done ()
   "handle-claude-finished should set :done when vterm buffer is not visible."
   (claude-repl-test--with-clean-state
@@ -417,136 +403,6 @@
       (claude-repl--maybe-notify-finished "ws1")
       (should (numberp (claude-repl--ws-get "ws1" :last-notify-time))))))
 
-;;;; ---- Tests: Session ID management ----
-
-(ert-deftest claude-repl-test-session-file-matches-host-path ()
-  "session-file-matches-p should match on canonical host path."
-  (cl-letf (((symbol-function 'json-read-file)
-             (lambda (_f)
-               '((cwd . "/home/user/project")
-                 (sessionId . "sess-abc"))))
-            ((symbol-function 'claude-repl--path-canonical)
-             (lambda (p) p)))
-    (should (equal (claude-repl--session-file-matches-p
-                    "/tmp/session.json" "/home/user/project" "/project")
-                   "sess-abc"))))
-
-(ert-deftest claude-repl-test-session-file-matches-container-path ()
-  "session-file-matches-p should match on container path."
-  (cl-letf (((symbol-function 'json-read-file)
-             (lambda (_f)
-               '((cwd . "/project")
-                 (sessionId . "sess-xyz"))))
-            ((symbol-function 'claude-repl--path-canonical)
-             (lambda (p) p)))
-    (should (equal (claude-repl--session-file-matches-p
-                    "/tmp/session.json" "/home/user/project" "/project")
-                   "sess-xyz"))))
-
-(ert-deftest claude-repl-test-session-file-no-match ()
-  "session-file-matches-p should return nil when cwd matches neither path."
-  (cl-letf (((symbol-function 'json-read-file)
-             (lambda (_f)
-               '((cwd . "/other/dir")
-                 (sessionId . "sess-nope"))))
-            ((symbol-function 'claude-repl--path-canonical)
-             (lambda (p) p)))
-    (should-not (claude-repl--session-file-matches-p
-                 "/tmp/session.json" "/home/user/project" "/project"))))
-
-(ert-deftest claude-repl-test-session-file-missing-cwd ()
-  "session-file-matches-p should return nil when cwd is missing from JSON."
-  (cl-letf (((symbol-function 'json-read-file)
-             (lambda (_f) '((sessionId . "sess-abc"))))
-            ((symbol-function 'claude-repl--path-canonical)
-             (lambda (p) p)))
-    (should-not (claude-repl--session-file-matches-p
-                 "/tmp/session.json" "/root" "/root"))))
-
-(ert-deftest claude-repl-test-session-file-missing-session-id ()
-  "session-file-matches-p should return nil when sessionId is missing."
-  (cl-letf (((symbol-function 'json-read-file)
-             (lambda (_f) '((cwd . "/root"))))
-            ((symbol-function 'claude-repl--path-canonical)
-             (lambda (p) p)))
-    (should-not (claude-repl--session-file-matches-p
-                 "/tmp/session.json" "/root" "/root"))))
-
-(ert-deftest claude-repl-test-session-file-json-error ()
-  "session-file-matches-p should return nil on JSON parse error."
-  (cl-letf (((symbol-function 'json-read-file)
-             (lambda (_f) (error "JSON parse error"))))
-    (should-not (claude-repl--session-file-matches-p
-                 "/nonexistent.json" "/root" "/root"))))
-
-(ert-deftest claude-repl-test-find-session-id-in-dir-no-sessions-dir ()
-  "find-session-id-in-dir should return nil when sessions dir does not exist."
-  (cl-letf (((symbol-function 'file-directory-p) (lambda (_d) nil)))
-    (should-not (claude-repl--find-session-id-in-dir "/root" "/root"))))
-
-(ert-deftest claude-repl-test-find-session-id-in-dir-matches ()
-  "find-session-id-in-dir should return session ID from matching file."
-  (cl-letf (((symbol-function 'file-directory-p) (lambda (_d) t))
-            ((symbol-function 'directory-files)
-             (lambda (_dir _full _match)
-               '("/home/.claude/sessions/a.json")))
-            ((symbol-function 'claude-repl--session-file-matches-p)
-             (lambda (_f _r _c) "found-id")))
-    (should (equal (claude-repl--find-session-id-in-dir "/root" "/root")
-                   "found-id"))))
-
-(ert-deftest claude-repl-test-find-session-id-in-dir-no-match ()
-  "find-session-id-in-dir should return nil when no file matches."
-  (cl-letf (((symbol-function 'file-directory-p) (lambda (_d) t))
-            ((symbol-function 'directory-files)
-             (lambda (_dir _full _match)
-               '("/home/.claude/sessions/a.json")))
-            ((symbol-function 'claude-repl--session-file-matches-p)
-             (lambda (_f _r _c) nil)))
-    (should-not (claude-repl--find-session-id-in-dir "/root" "/root"))))
-
-;;;; ---- Tests: capture-session-id ----
-
-(ert-deftest claude-repl-test-capture-session-id-no-project-dir ()
-  "capture-session-id should skip when :project-dir is nil."
-  (claude-repl-test--with-clean-state
-    (let ((find-called nil))
-      (cl-letf (((symbol-function 'claude-repl--find-session-id-in-dir)
-                 (lambda (&rest _) (setq find-called t) nil)))
-        (claude-repl--capture-session-id "ws1")
-        (should-not find-called)))))
-
-(ert-deftest claude-repl-test-capture-session-id-found ()
-  "capture-session-id should store found session ID and save state."
-  (claude-repl-test--with-clean-state
-    (let ((saved nil))
-      (claude-repl--ws-put "ws1" :project-dir "/my/project")
-      (claude-repl--ws-put "ws1" :active-env :bare-metal)
-      (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
-      (cl-letf (((symbol-function 'claude-repl--path-canonical) (lambda (p) p))
-                ((symbol-function 'claude-repl--find-session-id-in-dir)
-                 (lambda (_r _c) "found-session"))
-                ((symbol-function 'claude-repl--state-save)
-                 (lambda (_ws) (setq saved t))))
-        (claude-repl--capture-session-id "ws1")
-        (should saved)
-        (should (equal (claude-repl-instantiation-session-id
-                        (claude-repl--ws-get "ws1" :bare-metal))
-                       "found-session"))))))
-
-(ert-deftest claude-repl-test-capture-session-id-not-found-clears ()
-  "capture-session-id should clear session ID when no match is found."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws1" :project-dir "/my/project")
-    (claude-repl--ws-put "ws1" :active-env :bare-metal)
-    (let ((inst (make-claude-repl-instantiation :session-id "stale-id")))
-      (claude-repl--ws-put "ws1" :bare-metal inst)
-      (cl-letf (((symbol-function 'claude-repl--path-canonical) (lambda (p) p))
-                ((symbol-function 'claude-repl--find-session-id-in-dir)
-                 (lambda (_r _c) nil)))
-        (claude-repl--capture-session-id "ws1")
-        (should-not (claude-repl-instantiation-session-id inst))))))
-
 ;;;; ---- Tests: Readiness handling ----
 
 (ert-deftest claude-repl-test-drain-pending-prompts-empty ()
@@ -609,19 +465,6 @@
       (claude-repl--show-panels-or-defer "ws1")
       (should (claude-repl--ws-get "ws1" :pending-show-panels)))))
 
-(ert-deftest claude-repl-test-finalize-ready-state ()
-  "finalize-ready-state should cancel timer and capture session ID."
-  (claude-repl-test--with-clean-state
-    (let ((timer-cancelled nil)
-          (session-captured nil))
-      (cl-letf (((symbol-function 'claude-repl--cancel-ready-timer)
-                 (lambda (_ws) (setq timer-cancelled t)))
-                ((symbol-function 'claude-repl--capture-session-id)
-                 (lambda (_ws) (setq session-captured t))))
-        (claude-repl--finalize-ready-state "ws1")
-        (should timer-cancelled)
-        (should session-captured)))))
-
 (ert-deftest claude-repl-test-open-panels-after-ready-with-pending ()
   "open-panels-after-ready should show panels when there are pending prompts."
   (claude-repl-test--with-clean-state
@@ -655,40 +498,6 @@
                 ((symbol-function 'claude-repl)
                  (lambda () (setq panels-opened t))))
         (claude-repl--open-panels-after-ready "ws1")
-        (should-not panels-opened)))))
-
-(ert-deftest claude-repl-test-handle-first-ready-with-owning-workspace ()
-  "handle-first-ready should finalize state and open panels when owning-workspace set."
-  (claude-repl-test--with-temp-buffer " *test-first-ready-ws*"
-    (setq-local claude-repl--ready nil)
-    (setq-local claude-repl--owning-workspace "ws1")
-    (let ((finalized nil)
-          (panels-opened nil))
-      (cl-letf (((symbol-function 'claude-repl--finalize-ready-state)
-                 (lambda (_ws) (setq finalized t)))
-                ((symbol-function 'claude-repl--swap-placeholder) #'ignore)
-                ((symbol-function 'claude-repl--open-panels-after-ready)
-                 (lambda (_ws) (setq panels-opened t))))
-        (claude-repl--handle-first-ready)
-        (should claude-repl--ready)
-        (should finalized)
-        (should panels-opened)))))
-
-(ert-deftest claude-repl-test-handle-first-ready-no-owning-workspace ()
-  "handle-first-ready should skip finalize/panels when no owning workspace."
-  (claude-repl-test--with-temp-buffer " *test-first-ready-no-ws*"
-    (setq-local claude-repl--ready nil)
-    (setq-local claude-repl--owning-workspace nil)
-    (let ((finalized nil)
-          (panels-opened nil))
-      (cl-letf (((symbol-function 'claude-repl--finalize-ready-state)
-                 (lambda (_ws) (setq finalized t)))
-                ((symbol-function 'claude-repl--swap-placeholder) #'ignore)
-                ((symbol-function 'claude-repl--open-panels-after-ready)
-                 (lambda (_ws) (setq panels-opened t))))
-        (claude-repl--handle-first-ready)
-        (should claude-repl--ready)
-        (should-not finalized)
         (should-not panels-opened)))))
 
 ;;;; ---- Tests: Loading placeholder ----
@@ -857,55 +666,28 @@
         (should (= cancel-count 1))
         (should (eq (claude-repl--ws-get "ws1" :ready-timer) 'fake-timer))))))
 
-;;;; ---- Tests: on-vterm-title-set ----
-
-(ert-deftest claude-repl-test-on-vterm-title-set-non-claude-buffer ()
-  "on-vterm-title-set should not call handle-first-ready in non-claude buffers."
-  (claude-repl-test--with-temp-buffer " *test-title-non-claude*"
-    (let ((handled nil))
-      (cl-letf (((symbol-function 'claude-repl--claude-buffer-p) (lambda () nil))
-                ((symbol-function 'claude-repl--handle-first-ready)
-                 (lambda () (setq handled t))))
-        (claude-repl--on-vterm-title-set "some title")
-        (should-not handled)))))
-
-(ert-deftest claude-repl-test-on-vterm-title-set-claude-buffer ()
-  "on-vterm-title-set should call handle-first-ready in claude buffers."
-  (claude-repl-test--with-temp-buffer " *test-title-claude*"
-    (let ((handled nil))
-      (cl-letf (((symbol-function 'claude-repl--claude-buffer-p) (lambda () t))
-                ((symbol-function 'claude-repl--handle-first-ready)
-                 (lambda () (setq handled t))))
-        (claude-repl--on-vterm-title-set "some title")
-        (should handled)))))
-
 ;;;; ---- Tests: Workspace environment initialization ----
 
 (ert-deftest claude-repl-test-ensure-ws-env-initializes-once ()
   "ensure-ws-env should initialize environment only when :active-env is not set."
   (claude-repl-test--with-clean-state
-    (let ((restore-count 0)
-          (capture-count 0))
+    (let ((restore-count 0))
       (cl-letf (((symbol-function 'claude-repl--state-restore)
-                 (lambda (_ws) (cl-incf restore-count)))
-                ((symbol-function 'claude-repl--capture-session-id)
-                 (lambda (_ws) (cl-incf capture-count))))
+                 (lambda (_ws) (cl-incf restore-count))))
         ;; First call: should initialize
         (claude-repl--ensure-ws-env "ws1")
         (should (eq (claude-repl--ws-get "ws1" :active-env) :bare-metal))
         (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :sandbox)))
         (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :bare-metal)))
-        ;; Second call: should not re-initialize but still restore+capture
+        ;; Second call: should not re-initialize but still restore
         (claude-repl--ensure-ws-env "ws1")
-        (should (= restore-count 2))
-        (should (= capture-count 2))))))
+        (should (= restore-count 2))))))
 
 (ert-deftest claude-repl-test-ensure-ws-env-preserves-existing ()
   "ensure-ws-env should not overwrite existing :active-env."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :active-env :sandbox)
-    (cl-letf (((symbol-function 'claude-repl--state-restore) #'ignore)
-              ((symbol-function 'claude-repl--capture-session-id) #'ignore))
+    (cl-letf (((symbol-function 'claude-repl--state-restore) #'ignore))
       (claude-repl--ensure-ws-env "ws1")
       (should (eq (claude-repl--ws-get "ws1" :active-env) :sandbox)))))
 

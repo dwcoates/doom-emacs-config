@@ -1804,6 +1804,92 @@ and surfaces a user-visible error."
         (should-not sent)
         (should msg-called)))))
 
+;;;; ---- Tests: slash workspace injection ----
+
+(ert-deftest claude-repl-test-slash-command-string-reconstructs ()
+  "slash-command-string should reconstruct the command from the reversed stack."
+  (claude-repl-test--with-temp-buffer " *test-cmd-str*"
+    (setq-local claude-repl--slash-stack '("r" "k" "s" "a" "/"))
+    (should (equal (claude-repl--slash-command-string) "/askr"))))
+
+(ert-deftest claude-repl-test-slash-command-string-empty ()
+  "slash-command-string returns empty string for an empty stack."
+  (claude-repl-test--with-temp-buffer " *test-cmd-str-empty*"
+    (setq-local claude-repl--slash-stack nil)
+    (should (equal (claude-repl--slash-command-string) ""))))
+
+(ert-deftest claude-repl-test-slash-command-string-with-tab ()
+  "slash-command-string includes tab characters from the stack."
+  (claude-repl-test--with-temp-buffer " *test-cmd-str-tab*"
+    (setq-local claude-repl--slash-stack '("\t" "r" "o" "w" "/"))
+    (should (equal (claude-repl--slash-command-string) "/wor\t"))))
+
+(ert-deftest claude-repl-test-slash-workspace-command-p-true ()
+  "slash-workspace-command-p returns non-nil for /wor prefix."
+  (claude-repl-test--with-temp-buffer " *test-ws-cmd-t*"
+    (setq-local claude-repl--slash-stack
+                (nreverse (mapcar #'string (string-to-list "/workspace-generation"))))
+    (should (claude-repl--slash-workspace-command-p))))
+
+(ert-deftest claude-repl-test-slash-workspace-command-p-with-tab ()
+  "slash-workspace-command-p returns non-nil for /wor followed by tab."
+  (claude-repl-test--with-temp-buffer " *test-ws-cmd-tab*"
+    (setq-local claude-repl--slash-stack '("\t" "r" "o" "w" "/"))
+    (should (claude-repl--slash-workspace-command-p))))
+
+(ert-deftest claude-repl-test-slash-workspace-command-p-false ()
+  "slash-workspace-command-p returns nil for non-/wor commands."
+  (claude-repl-test--with-temp-buffer " *test-ws-cmd-f*"
+    (setq-local claude-repl--slash-stack '("r" "a" "e" "l" "c" "/"))
+    (should-not (claude-repl--slash-workspace-command-p))))
+
+(ert-deftest claude-repl-test-slash-return-injects-source-ws ()
+  "Slash return should inject [source-ws:NAME] for /wor commands."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-slash-inject*"
+      (setq-local claude-repl--slash-stack
+                  (nreverse (mapcar #'string (string-to-list "/workspace-generation"))))
+      (claude-slash-input-mode 1)
+      (let ((sent-strings nil)
+            (return-called nil))
+        (claude-repl-test--with-temp-buffer "*claude-slash-inject-vterm*"
+          (claude-repl--ws-put "my-ws" :vterm-buffer (current-buffer))
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                    ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                    ((symbol-function 'vterm-send-string)
+                     (lambda (str &rest _) (push str sent-strings)))
+                    ((symbol-function 'vterm-send-return)
+                     (lambda () (setq return-called t))))
+            (with-current-buffer " *test-slash-inject*"
+              (claude-repl--slash-return)
+              (should return-called)
+              ;; The injected string should contain the source workspace tag.
+              (should (cl-some (lambda (s) (string-match-p "\\[source-ws:my-ws\\]" s))
+                               sent-strings)))))))))
+
+(ert-deftest claude-repl-test-slash-return-no-inject-for-non-wor ()
+  "Slash return should NOT inject [source-ws:] for non-/wor commands."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-slash-no-inject*"
+      (setq-local claude-repl--slash-stack '("r" "a" "e" "l" "c" "/"))
+      (claude-slash-input-mode 1)
+      (let ((sent-strings nil)
+            (return-called nil))
+        (claude-repl-test--with-temp-buffer "*claude-slash-no-inject-vterm*"
+          (claude-repl--ws-put "my-ws" :vterm-buffer (current-buffer))
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                    ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                    ((symbol-function 'vterm-send-string)
+                     (lambda (str &rest _) (push str sent-strings)))
+                    ((symbol-function 'vterm-send-return)
+                     (lambda () (setq return-called t))))
+            (with-current-buffer " *test-slash-no-inject*"
+              (claude-repl--slash-return)
+              (should return-called)
+              ;; No source-ws tag should have been sent.
+              (should-not (cl-some (lambda (s) (string-match-p "source-ws" s))
+                                   sent-strings)))))))))
+
 (provide 'test-input)
 
 ;;; test-input.el ends here

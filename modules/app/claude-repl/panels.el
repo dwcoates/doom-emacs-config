@@ -156,13 +156,13 @@ Works from any buffer or from within the vterm buffer itself."
 If WS is :done, mark :viewed so the next update-ws-state can transition to :inactive."
   (pcase (claude-repl--ws-get ws :status)
     (:inactive
-     (claude-repl--log ws "mark-viewed: ws=%s branch=inactive->done (no :viewed yet)" ws)
+     (claude-repl--log-verbose ws "mark-viewed: ws=%s branch=inactive->done (no :viewed yet)" ws)
      (claude-repl--ws-set ws :done))
     (:done
-     (claude-repl--log ws "mark-viewed: ws=%s branch=done->viewed" ws)
+     (claude-repl--log-verbose ws "mark-viewed: ws=%s branch=done->viewed" ws)
      (claude-repl--ws-put ws :viewed t))
     (_
-     (claude-repl--log ws "mark-viewed: ws=%s branch=no-op status=%s"
+     (claude-repl--log-verbose ws "mark-viewed: ws=%s branch=no-op status=%s"
                        ws (claude-repl--ws-get ws :status)))))
 
 (defun claude-repl--drain-pending-show-panels (ws)
@@ -173,7 +173,7 @@ Clears the flag and calls `claude-repl' to display the panels."
         (claude-repl--log ws "drain-pending-show-panels: ws=%s branch=had-pending draining" ws)
         (claude-repl--ws-put ws :pending-show-panels nil)
         (claude-repl))
-    (claude-repl--log ws "drain-pending-show-panels: ws=%s branch=no-pending no-op" ws)))
+    (claude-repl--log-verbose ws "drain-pending-show-panels: ws=%s branch=no-pending no-op" ws)))
 
 ;; Refresh vterm on workspace switch
 (defun claude-repl--on-workspace-switch ()
@@ -182,7 +182,7 @@ Also opens panels for workspaces that were created with a preemptive prompt.
 Marks the switched-to workspace as :viewed so :done→:inactive can proceed.
 If switching to an :inactive workspace, re-activates it to :done."
   (let ((ws (+workspace-current-name)))
-    (claude-repl--log ws "workspace-switch ws=%s" ws)
+    (claude-repl--log-verbose ws "workspace-switch ws=%s" ws)
     (when ws
       (claude-repl--mark-viewed ws))
     (claude-repl--update-all-workspace-states)

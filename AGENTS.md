@@ -14,11 +14,13 @@ Functions defined in `modules/app/claude-repl/config.el` must use the `claude-re
 
 New code added to the claude-repl module must include instrumentation via `claude-repl--log`. Every dynamic aspect of the call site must be included in the log message — variable values, resolved paths, computed flags, branch outcomes, etc. The goal is that a log trace alone should be sufficient to diagnose any behavioral issue without needing to add instrumentation after the fact.
 
-## No Silent Fallbacks
+## No Silent Fallbacks — Fail Hard on Invariant Violations
 
-**Never silently fall back, skip, or no-op when a precondition fails.** Always fail loudly: a `claude-repl--log` entry AND user-visible feedback (a `user-error`, `error`, or at minimum a `message` that reaches the echo area).
+**Never silently fall back, skip, or no-op when a precondition fails.** If an invariant is violated, **immediately fail loudly** with a `claude-repl--log` entry AND user-visible feedback (`user-error`, `error`, or at minimum a `message` that reaches the echo area). **Never fall back to an alternative code path** — the operation must abort entirely.
 
-Silent fallbacks create mysterious "stuck" states (the slash-passthrough bug was one — vterm lookup failed silently, keystrokes piled onto a hidden stack, the user saw no effect and had no signal that anything was wrong). A loud failure surfaces itself and can be diagnosed; a silent fallback just leaves the user guessing.
+**Do not commit state changes before the failure point.** If an operation involves multiple steps (e.g., resolve session ID, then create worktree), validate all preconditions before mutating any state. If validation fails partway through, no workspace should be created, no timers scheduled, no hash table entries written. The system state must remain unchanged on failure.
+
+Silent fallbacks create mysterious "stuck" states (the slash-passthrough bug was one — vterm lookup failed silently, keystrokes piled onto a hidden stack, the user saw no effect and had no signal that anything was wrong). A loud failure surfaces itself and can be diagnosed; a silent fallback just leaves the user guessing. A "degraded but working" fallback is even worse — the user sees *something* happen, assumes it worked, and only discovers the problem much later (e.g., a workspace branched from origin/master instead of the requested fork source).
 
 Anti-patterns to reject:
 - `(when-let ((x (lookup))) BODY)` where BODY is user-expected behavior. If `lookup` returns nil, the caller needs to know.
@@ -26,10 +28,11 @@ Anti-patterns to reject:
 - `(ignore-errors ...)` without a companion log of what was swallowed.
 - `or`-chained defaults that mask missing data: `(or (ws-get :vterm) (default-vterm))`.
 - Early returns that hide a failed precondition instead of signaling it.
+- Returning nil from a resolution function and letting the caller silently degrade to a default (e.g., resolving a fork source to nil and falling back to origin/master).
 
 The only acceptable silent no-op is one whose contract **explicitly requests** it: a best-effort cleanup where failure is known to be recoverable, or a `lookup-or-nil`-style query function. In those cases, document the contract in the docstring so callers know what they're getting.
 
-When in doubt: fail loudly.
+When in doubt: fail loudly. When a precondition fails: abort entirely.
 
 ## Testing
 
@@ -48,6 +51,12 @@ To verify parenthesis balance in an `.el` file (skipping strings and comments):
 ```bash
 python3 .claude/check-parens.py <file.el>
 ```
+
+## No Redundant Mechanisms
+
+Never maintain two mechanisms for the same thing. Redundancy adds complexity, obscures which path is authoritative, and creates subtle divergence bugs. If a new approach replaces an old one, **delete the old one** — do not keep it "as a fallback." If the new approach isn't trusted enough to stand alone, it's not ready to ship.
+
+Example: Claude Code hooks (`session_start`, `stop`, `prompt_submit`) are the sole source of session IDs and lifecycle events. Do not also scan `~/.claude/sessions/` files, watch terminal titles for readiness, or poll for state that hooks already deliver. One mechanism, one source of truth.
 
 ## AGENTS.md Updates
 
