@@ -192,7 +192,7 @@ A no-op if a check is already in progress for WS."
 ;; :face is the defface symbol for unselected tabs.
 ;; :label, when present, overrides the numeric tab index.
 (defconst claude-repl--status-colors
-  '((:init       :bg "#3366cc" :fg "white" :selected-fg "#3366cc"
+  '((:init       :bg "#c0c0c0" :fg "white" :selected-fg "#3366cc"
                  :face claude-repl-tab-init)
     (:thinking   :bg "#cc3333" :fg "white" :selected-fg "#cc3333"
                  :face claude-repl-tab-thinking)
@@ -251,7 +251,7 @@ LABEL is the bracket content (number or emoji), STATE is the
 status keyword (or nil), FACE is the resolved face for the tab
 name, and IMG-STR is an optional priority image string."
   (let* ((bracket-fg (or (claude-repl--status-color state :selected-fg) "black"))
-         (bg "#c0c0c0")
+         (bg "#3366cc")
          (text-fg "black"))
     (claude-repl--render-tab
      name
