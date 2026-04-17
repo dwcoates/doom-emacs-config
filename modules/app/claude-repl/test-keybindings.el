@@ -951,7 +951,6 @@
   "dump-workspace handles nil and missing values in the plist."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-    (claude-repl--ws-put "ws1" :viewed nil)
     (cl-letf (((symbol-function 'completing-read)
                (lambda (_prompt _coll &rest _) "ws1")))
       (claude-repl-debug/dump-workspace)

@@ -305,16 +305,11 @@ and title-change paths fire for the same turn completion."
         (claude-repl--log ws "maybe-notify-finished: debounce-hit ws=%s elapsed=%.2f" ws (- now last))))))
 
 (defun claude-repl--mark-claude-done (ws)
-  "Mark WS's claude-state as :done and clear :viewed.
-Unconditional with respect to panel visibility: the previous
-`mark-done-if-hidden' version used the vterm window as a proxy for
-\"user is already looking; no need to flag unread.\"  After the
-state-axis split (analysis/08), visibility is expressed by
-`:repl-state' and the composed-state resolver handles the rendering
-decision.  Writing `:done' here is always correct — the tab color
-rule is derived, not stored."
+  "Mark WS's claude-state as :done.
+Unconditional: called on every Stop hook.  Whether the tab eventually
+decays to :idle is a pure function of git-clean observed by the 1 Hz
+update-ws-state timer."
   (claude-repl--log ws "mark-claude-done ws=%s" ws)
-  (claude-repl--ws-put ws :viewed nil)
   (claude-repl--ws-set-claude-state ws :done))
 
 (defun claude-repl--refresh-vterm-after-finish (vterm-buf)

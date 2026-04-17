@@ -151,22 +151,6 @@ Works from any buffer or from within the vterm buffer itself."
                                     (buffer-name buf) major-mode)))
       (claude-repl--fix-vterm-scroll buf)))))
 
-(defun claude-repl--mark-viewed (ws)
-  "If WS is :inactive, re-activate to :done (without :viewed, so it persists).
-If WS is :done, mark :viewed so the next update-ws-state can transition to :inactive.
-Reads :claude-state (the canonical axis); legacy :status is kept in sync
-by the write-both setters."
-  (pcase (claude-repl--ws-claude-state ws)
-    (:inactive
-     (claude-repl--log-verbose ws "mark-viewed: ws=%s branch=inactive->done (no :viewed yet)" ws)
-     (claude-repl--ws-set ws :done))
-    (:done
-     (claude-repl--log-verbose ws "mark-viewed: ws=%s branch=done->viewed" ws)
-     (claude-repl--ws-put ws :viewed t))
-    (_
-     (claude-repl--log-verbose ws "mark-viewed: ws=%s branch=no-op claude-state=%s"
-                       ws (claude-repl--ws-claude-state ws)))))
-
 (defun claude-repl--drain-pending-show-panels (ws)
   "Open panels for WS if a preemptive prompt queued a :pending-show-panels flag.
 Clears the flag and calls `claude-repl' to display the panels."
@@ -180,13 +164,9 @@ Clears the flag and calls `claude-repl' to display the panels."
 ;; Refresh vterm on workspace switch
 (defun claude-repl--on-workspace-switch ()
   "Handle workspace switch: update all workspace states, refresh vterm, reset cursors.
-Also opens panels for workspaces that were created with a preemptive prompt.
-Marks the switched-to workspace as :viewed so :done→:inactive can proceed.
-If switching to an :inactive workspace, re-activates it to :done."
+Also opens panels for workspaces that were created with a preemptive prompt."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log-verbose ws "workspace-switch ws=%s" ws)
-    (when ws
-      (claude-repl--mark-viewed ws))
     (claude-repl--update-all-workspace-states)
     (claude-repl--refresh-vterm)
     (claude-repl--reset-vterm-cursors)
@@ -501,12 +481,13 @@ Clears `:repl-state' so the workspace is no longer flagged as inactive."
     (claude-repl--update-hide-overlay)))
 
 (defun claude-repl--show-hidden-panels ()
-  "Restore hidden panels, re-activate :inactive workspaces, and mark :viewed."
+  "Restore hidden panels and clear :repl-state.
+`:claude-state' is untouched; rendering follows the same rule whether
+panels are visible or hidden."
   (let ((ws (+workspace-current-name)))
-    (claude-repl--log ws "showing panels ws=%s claude-state=%s (restoring status)"
+    (claude-repl--log ws "showing panels ws=%s claude-state=%s"
                       ws (claude-repl--ws-claude-state ws))
-    (claude-repl--ws-set-repl-state ws nil)
-    (claude-repl--mark-viewed ws))
+    (claude-repl--ws-set-repl-state ws nil))
   (claude-repl--show-existing-panels))
 
 (defun claude-repl--hide-and-preserve-status ()

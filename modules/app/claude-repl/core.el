@@ -75,13 +75,12 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                (fork     (plist-get plist :fork-session-id))
                (rtimer   (plist-get plist :ready-timer))
                (pri      (plist-get plist :priority))
-               (viewed   (plist-get plist :viewed))
                (pprompts (plist-get plist :pending-prompts))
                (pshow    (plist-get plist :pending-show-panels)))
           (format (concat " {ws=%s id=%s dir=%s cst=%s rst=%s env=%s"
                           " vt=%s in=%s cnt=%s"
                           " git=%s gproc=%s wt=%s fork=%s"
-                          " rtmr=%s pri=%s viewed=%s pend=%s pshow=%s}")
+                          " rtmr=%s pri=%s pend=%s pshow=%s}")
                   ws
                   (or id "-")
                   (or dir "-")
@@ -97,7 +96,6 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                   (or fork "-")
                   (if rtimer "t" "-")
                   (or pri "-")
-                  (if viewed "t" "-")
                   (if pprompts (length pprompts) "-")
                   (if pshow "t" "-")))))))
 
@@ -278,7 +276,7 @@ Keys: :vterm-buffer :input-buffer
       :prefix-counter :claude-state :repl-state
       :git-clean :git-proc :worktree-p :project-dir
       :active-env :sandbox :bare-metal :fork-session-id
-      :ready-timer :priority :viewed
+      :ready-timer :priority
       :pending-prompts :pending-show-panels
 :active-env is :sandbox or :bare-metal; :sandbox and :bare-metal are
 `claude-repl-instantiation' structs holding per-environment session state.")

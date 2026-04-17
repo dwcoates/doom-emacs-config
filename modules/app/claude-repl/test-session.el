@@ -302,13 +302,11 @@ by vterm-buf presence; the :done write is not."
   "mark-claude-done sets :claude-state :done unconditionally."
   (claude-repl-test--with-clean-state
     (let ((done-set nil))
-      (claude-repl--ws-put "ws1" :viewed t)
       (cl-letf (((symbol-function 'claude-repl--ws-set-claude-state)
                  (lambda (ws state)
                    (when (eq state :done) (setq done-set ws)))))
         (claude-repl--mark-claude-done "ws1")
-        (should (equal done-set "ws1"))
-        (should-not (claude-repl--ws-get "ws1" :viewed))))))
+        (should (equal done-set "ws1"))))))
 
 (ert-deftest claude-repl-test-mark-claude-done-regardless-of-visibility ()
   "mark-claude-done no longer branches on vterm visibility.
@@ -1109,13 +1107,5 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
                 (should (= notify-count 1)))
             (when (buffer-live-p vterm-buf)
               (kill-buffer vterm-buf))))))))
-
-(ert-deftest claude-repl-test-mark-claude-done-clears-viewed ()
-  "mark-claude-done always sets :viewed to nil and claude-state to :done."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws1" :viewed t)
-    (claude-repl--mark-claude-done "ws1")
-    (should-not (claude-repl--ws-get "ws1" :viewed))
-    (should (eq (claude-repl--ws-claude-state "ws1") :done))))
 
 ;;; test-session.el ends here

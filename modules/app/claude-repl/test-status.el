@@ -854,7 +854,6 @@
 :inactive is terminal — git status is irrelevant once the user has dismissed it."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :inactive)
-    (claude-repl--ws-put "ws1" :viewed t)
     (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) nil)))
       (claude-repl--update-ws-state "ws1")
       (should (eq (claude-repl--ws-state "ws1") :inactive)))))
@@ -1019,27 +1018,13 @@ trees; under the revised model only the Stop hook writes :done."
       (claude-repl--update-ws-state "ws1")
       (should (eq (claude-repl--ws-state "ws1") :thinking)))))
 
-(ert-deftest claude-repl-test-update-ws-state-done-viewed-dirty-not-visible-stays-done ()
-  ":done + viewed + dirty + panels not visible should stay :done.
-The dirty guard prevents done→inactive — workspace stays green until clean."
+(ert-deftest claude-repl-test-update-ws-state-done-dirty-stays-done-explicit ()
+  ":done + dirty stays :done — dirty worktree blocks the :done→:idle decay."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-set "ws1" :done)
-    (claude-repl--ws-put "ws1" :viewed t)
-    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) nil))
-              ((symbol-function 'claude-repl--panels-actively-visible-p) (lambda (_ws) nil)))
+    (claude-repl--ws-set-claude-state "ws1" :done)
+    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) nil)))
       (claude-repl--update-ws-state "ws1")
-      (should (eq (claude-repl--ws-state "ws1") :done)))))
-
-(ert-deftest claude-repl-test-update-ws-state-done-not-viewed-dirty-stays-done ()
-  ":done + NOT viewed + dirty should stay :done.
-The :viewed gate blocks the done→inactive transition even when dirty."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-set "ws1" :done)
-    ;; :viewed is not set (nil)
-    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) nil))
-              ((symbol-function 'claude-repl--panels-actively-visible-p) (lambda (_ws) nil)))
-      (claude-repl--update-ws-state "ws1")
-      (should (eq (claude-repl--ws-state "ws1") :done)))))
+      (should (eq (claude-repl--ws-claude-state "ws1") :done)))))
 
 (ert-deftest claude-repl-test-update-ws-state-permission-clean-unchanged ()
   ":permission + clean should remain unchanged.
