@@ -556,6 +556,27 @@
       (claude-repl-nuke-workspace)
       (should-not (gethash "ghost" claude-repl--workspaces)))))
 
+(ert-deftest claude-repl-cmd-test-nuke-workspace/purges-state-file ()
+  "nuke-workspace unlinks the .claude-repl-state file at the project root.
+Without this, a subsequent workspace registered at the same root would
+inherit the stale session-id via `state-restore' and launch Claude
+with `--resume <stale-sid>' — the exact failure the purge closes."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "claude-nuke-" t)))
+      (unwind-protect
+          (let ((state-file (expand-file-name ".claude-repl-state" tmpdir)))
+            (with-temp-file state-file (insert "(:session-id \"stale-abc\")"))
+            (claude-repl--ws-put "doomed" :project-dir tmpdir)
+            (cl-letf (((symbol-function 'completing-read)
+                       (lambda (_prompt _coll &rest _) "doomed"))
+                      ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                      ((symbol-function 'claude-repl--kill-session) #'ignore)
+                      ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
+                      ((symbol-function 'force-mode-line-update) #'ignore))
+              (claude-repl-nuke-workspace)
+              (should-not (file-exists-p state-file))))
+        (delete-directory tmpdir t)))))
+
 ;;;; ---- claude-repl-nuke-all-workspaces ----
 
 (ert-deftest claude-repl-cmd-test-nuke-all/no-workspaces ()

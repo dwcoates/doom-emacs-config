@@ -968,6 +968,51 @@
     (claude-repl--history-on-change 1 5 0)
     (should (= claude-repl--history-index -1))))
 
+;;;; ---- Tests: state-purge ----
+
+(ert-deftest claude-repl-test-state-purge-removes-both-files ()
+  "state-purge deletes .claude-repl-state and .claude-repl-history under ROOT."
+  (let ((tmpdir (make-temp-file "claude-purge-" t)))
+    (unwind-protect
+        (let ((state-file   (expand-file-name ".claude-repl-state"   tmpdir))
+              (history-file (expand-file-name ".claude-repl-history" tmpdir)))
+          (with-temp-file state-file   (insert "(:session-id \"abc\")"))
+          (with-temp-file history-file (insert "(:history (\"x\"))"))
+          (should (file-exists-p state-file))
+          (should (file-exists-p history-file))
+          (claude-repl--state-purge tmpdir)
+          (should-not (file-exists-p state-file))
+          (should-not (file-exists-p history-file)))
+      (delete-directory tmpdir t))))
+
+(ert-deftest claude-repl-test-state-purge-nil-root-noop ()
+  "state-purge is a no-op when ROOT is nil."
+  ;; Should not error; there's nothing else to assert — the function just returns.
+  (claude-repl--state-purge nil))
+
+(ert-deftest claude-repl-test-state-purge-idempotent ()
+  "state-purge on a root with no state files is a silent no-op."
+  (let ((tmpdir (make-temp-file "claude-purge-empty-" t)))
+    (unwind-protect
+        (progn
+          (claude-repl--state-purge tmpdir)
+          ;; Running again should still be fine.
+          (claude-repl--state-purge tmpdir))
+      (delete-directory tmpdir t))))
+
+(ert-deftest claude-repl-test-state-purge-leaves-unrelated-files ()
+  "state-purge only removes the managed per-project files."
+  (let ((tmpdir (make-temp-file "claude-purge-unrelated-" t)))
+    (unwind-protect
+        (let ((state-file   (expand-file-name ".claude-repl-state" tmpdir))
+              (unrelated    (expand-file-name "README.md"          tmpdir)))
+          (with-temp-file state-file (insert "(:session-id \"abc\")"))
+          (with-temp-file unrelated  (insert "# project"))
+          (claude-repl--state-purge tmpdir)
+          (should-not (file-exists-p state-file))
+          (should (file-exists-p unrelated)))
+      (delete-directory tmpdir t))))
+
 (provide 'test-history)
 
 ;;; test-history.el ends here

@@ -73,6 +73,26 @@ Returns nil when INST is nil."
   (when root
     (expand-file-name ".claude-repl-state" root)))
 
+(defconst claude-repl--per-project-files
+  '(".claude-repl-state" ".claude-repl-history")
+  "Filenames this module persists at each workspace's project root.
+Listed so `claude-repl--state-purge' can unlink them without having to
+hunt them down individually.")
+
+(defun claude-repl--state-purge (root)
+  "Delete every per-project persistence file under ROOT.
+Iterates `claude-repl--per-project-files' and unlinks each when
+present.  No-op when ROOT is nil or a file is missing.  Called by the
+nuke paths so a freshly-destroyed workspace cannot resurrect its
+stale session-id via `state-restore' on the next
+`claude-repl--register-worktree-ws' at the same project root."
+  (when root
+    (dolist (filename claude-repl--per-project-files)
+      (let ((path (expand-file-name filename root)))
+        (when (file-exists-p path)
+          (claude-repl--log nil "state-purge: deleting %s" path)
+          (ignore-errors (delete-file path)))))))
+
 ;;;; History persistence
 
 (defun claude-repl--ws-live-input-buffer (ws)
