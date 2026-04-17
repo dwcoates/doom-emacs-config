@@ -469,11 +469,12 @@ Emacs is the only observer of \"Claude process exists, not ready yet\")."
 (defun claude-repl--show-existing-panels ()
   "Show panels for an already-running Claude session.
 Demotes indicators, refreshes display, and restores panel layout.
-Clears `:repl-state' so the workspace is no longer flagged as inactive."
+Sets `:repl-state :active' now that panels are visible and the
+session is in use."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "show-existing-panels")
     (unless ws (error "claude-repl--show-existing-panels: no active workspace"))
-    (claude-repl--ws-set-repl-state ws nil)
+    (claude-repl--ws-set-repl-state ws :active)
     (claude-repl--refresh-vterm)
     (delete-other-windows)
     (claude-repl--ensure-input-buffer ws)
@@ -481,13 +482,12 @@ Clears `:repl-state' so the workspace is no longer flagged as inactive."
     (claude-repl--update-hide-overlay)))
 
 (defun claude-repl--show-hidden-panels ()
-  "Restore hidden panels and clear :repl-state.
+  "Restore hidden panels.  `show-existing-panels' writes :repl-state :active.
 `:claude-state' is untouched; rendering follows the same rule whether
 panels are visible or hidden."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "showing panels ws=%s claude-state=%s"
-                      ws (claude-repl--ws-claude-state ws))
-    (claude-repl--ws-set-repl-state ws nil))
+                      ws (claude-repl--ws-claude-state ws)))
   (claude-repl--show-existing-panels))
 
 (defun claude-repl--hide-and-preserve-status ()

@@ -43,8 +43,13 @@ Populates `claude-repl--priority-images' with display-ready image specs."
 ;;                   Written primarily by hook sentinels; narrow
 ;;                   Emacs-side exceptions at lifecycle boundaries
 ;;                   (start-fresh writes :init; kill clears).
-;;   :repl-state   — Emacs-owned panel-visibility flag.  Values: nil |
-;;                   :inactive.  Does not contribute to tab color.
+;;   :repl-state   — Emacs-owned session-lifecycle flag.  Values:
+;;                     nil       — workspace registered, no Claude
+;;                                 session has ever been attached.
+;;                     :active   — panels open, session running.
+;;                     :inactive — panels closed, session preserved.
+;;                     :dead     — vterm process has died.
+;;                   Does not contribute to tab color.
 
 (defun claude-repl--ws-state (ws)
   "Return the current :claude-state keyword for workspace WS, or nil.
@@ -70,7 +75,8 @@ STATE is one of: nil, :init, :idle, :thinking, :done, :permission."
 
 (defun claude-repl--ws-set-repl-state (ws state)
   "Set workspace WS's :repl-state to STATE.
-STATE is one of: nil, :inactive.  Independent of the Claude-state axis."
+STATE is one of: nil, :active, :inactive, :dead.  Independent of the
+Claude-state axis."
   (unless ws (error "claude-repl--ws-set-repl-state: ws is nil"))
   (claude-repl--log ws "repl-state %s -> %s" ws state)
   (claude-repl--ws-put ws :repl-state state)

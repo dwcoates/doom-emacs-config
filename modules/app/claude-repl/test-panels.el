@@ -364,17 +364,21 @@
         (claude-repl--show-hidden-panels)
         (should show-called)))))
 
-(ert-deftest claude-repl-test-panels-show-hidden-clears-repl-state ()
-  "show-hidden-panels clears :repl-state so the workspace is no longer :inactive."
+(ert-deftest claude-repl-test-panels-show-hidden-sets-active ()
+  "show-hidden-panels (via show-existing-panels) sets :repl-state :active."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-repl-state "test-ws" :inactive)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'claude-repl--show-existing-panels) #'ignore))
+              ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+              ((symbol-function 'delete-other-windows) #'ignore)
+              ((symbol-function 'claude-repl--ensure-input-buffer) #'ignore)
+              ((symbol-function 'claude-repl--show-panels-and-focus) #'ignore)
+              ((symbol-function 'claude-repl--update-hide-overlay) #'ignore))
       (claude-repl--show-hidden-panels)
-      (should-not (claude-repl--ws-get "test-ws" :repl-state)))))
+      (should (eq (claude-repl--ws-get "test-ws" :repl-state) :active)))))
 
-(ert-deftest claude-repl-test-panels-show-existing-clears-repl-state ()
-  "show-existing-panels clears :repl-state."
+(ert-deftest claude-repl-test-panels-show-existing-sets-active ()
+  "show-existing-panels sets :repl-state :active."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-repl-state "test-ws" :inactive)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
@@ -384,7 +388,7 @@
               ((symbol-function 'claude-repl--show-panels-and-focus) #'ignore)
               ((symbol-function 'claude-repl--update-hide-overlay) #'ignore))
       (claude-repl--show-existing-panels)
-      (should-not (claude-repl--ws-get "test-ws" :repl-state)))))
+      (should (eq (claude-repl--ws-get "test-ws" :repl-state) :active)))))
 
 ;;;; ---- Tests: deferred macro ----
 
