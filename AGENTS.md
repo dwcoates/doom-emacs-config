@@ -64,6 +64,10 @@ Never maintain two mechanisms for the same thing. Redundancy adds complexity, ob
 
 Example: Claude Code hooks (`session_start`, `stop`, `prompt_submit`) are the sole source of session IDs and lifecycle events. Do not also scan `~/.claude/sessions/` files, watch terminal titles for readiness, or poll for state that hooks already deliver. One mechanism, one source of truth.
 
+## Git
+
+When asked to make changes, commit your work when done. Commit freely and often. **Never** rebase, pull, merge, push, or run any other mutating git commands without explicit instruction from the user.
+
 ## AGENTS.md Updates
 
 Keep entries minimal — one short sentence or a brief code block per rule.

@@ -363,6 +363,7 @@ Reports comprehensive diagnostics."
 (map! :nvi "C-S-m" #'claude-repl-cycle)
 (map! :i "C-S-f" #'claude-repl-toggle-fullscreen)
 (map! :leader :prefix "w" :n "c" #'claude-repl-toggle-fullscreen)
+(map! :leader :prefix "w" :n "f" #'claude-repl-fullscreen-and-focus)
 
 ;; SPC o -- Claude session control (open, focus, kill, interrupt, utilities)
 (map! :leader

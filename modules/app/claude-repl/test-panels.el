@@ -1396,4 +1396,59 @@ we at least surface the stuck state so the user knows to click out."
         (switch-to-buffer "*scratch*")
         (when (buffer-live-p claude-buf) (kill-buffer claude-buf))))))
 
+;;;; ---- Tests: fullscreen-and-focus ----
+
+(ert-deftest claude-repl-test-panels-fullscreen-and-focus-calls-toggle ()
+  "fullscreen-and-focus delegates to toggle-fullscreen."
+  (claude-repl-test--with-clean-state
+    (let ((toggle-called nil))
+      (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen)
+                 (lambda () (setq toggle-called t)))
+                ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+        (claude-repl-fullscreen-and-focus)
+        (should toggle-called)))))
+
+(ert-deftest claude-repl-test-panels-fullscreen-and-focus-selects-input ()
+  "fullscreen-and-focus selects the input window after toggling."
+  (claude-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*test-fs-input*"))
+          (new-win nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (setq new-win (split-window))
+            (set-window-buffer new-win input-buf)
+            (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen) #'ignore)
+                      ((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                      ((symbol-function 'evil-insert-state) #'ignore))
+              (claude-repl-fullscreen-and-focus)
+              (should (eq (window-buffer (selected-window)) input-buf))))
+        (when (and new-win (window-live-p new-win))
+          (ignore-errors (delete-window new-win)))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
+(ert-deftest claude-repl-test-panels-fullscreen-and-focus-no-input-window ()
+  "fullscreen-and-focus does not error when input buffer has no window."
+  (claude-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*test-fs-no-win*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (switch-to-buffer (get-buffer-create "*other*"))
+            (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen) #'ignore)
+                      ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+              ;; Input buffer exists but is not displayed — should not error
+              (claude-repl-fullscreen-and-focus)
+              (should-not (eq (window-buffer (selected-window)) input-buf))))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))
+        (when (get-buffer "*other*") (kill-buffer "*other*"))))))
+
+(ert-deftest claude-repl-test-panels-fullscreen-and-focus-no-input-buffer ()
+  "fullscreen-and-focus does not error when no input buffer is set."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen) #'ignore)
+              ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+      ;; No input buffer at all — should not error
+      (claude-repl-fullscreen-and-focus))))
+
 ;;; test-panels.el ends here
