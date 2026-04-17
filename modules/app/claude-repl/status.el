@@ -182,44 +182,86 @@ A no-op if a check is already in progress for WS."
              return (safe-persp-name persp))))
 
 ;;; Tab-bar rendering ---------------------------------------------------------
+;;
+;; Two defconsts fully describe tab appearance:
+;;
+;;   `claude-repl--tab-default' — appearance for states with no palette
+;;       entry (idle, nil, unknown).  Carries separate `:unselected' and
+;;       `:selected' specs.
+;;
+;;   `claude-repl--tab-palette' — per-state overrides.  Each row has:
+;;       :face       — defface name for unselected tabs (Doom theming hook).
+;;       :label      — optional bracket content override (e.g. "❓").
+;;       :unselected — plist describing unselected appearance.
+;;       :selected   — plist describing selected appearance.  May include
+;;                     :face-override to replace the NAME face in selected
+;;                     form (used by :permission to keep its green badge
+;;                     visible on the selected tab).
+;;
+;;   Spec plist keys:
+;;       :bg          — bracket (and separator) background.
+;;       :fg          — separator foreground.
+;;       :bracket-fg  — [LABEL] foreground.
+;;       :weight      — font weight (default `bold').
+;;
+;;   Use `unspecified' (the symbol) for "inherit from frame default".
+;;
+;; Invariants: anything the tab bar needs to know about a state's look
+;; lives here.  Renderers are thin; they take a spec and propertize.
 
-;; Canonical color palette and display properties for status states.
-;; :bg is used for unselected-tab face backgrounds.
-;; :fg is the contrasting text color on that background.
-;; :selected-fg is the foreground color used on the selected tab's bracket
-;; (rendered against a light grey #c0c0c0 background, so brighter variants
-;; are used where needed for readability).
-;; :face is the defface symbol for unselected tabs.
-;; :label, when present, overrides the numeric tab index.
-(defconst claude-repl--status-colors
-  '((:init       :bg "#3366cc" :fg "white" :selected-fg "#3366cc"
-                 :face claude-repl-tab-init)
-    (:thinking   :bg "#cc3333" :fg "white" :selected-fg "#cc3333"
-                 :face claude-repl-tab-thinking)
-    (:done       :bg "#1a7a1a" :fg "black" :selected-fg "#2a8c2a"
-                 :face claude-repl-tab-done)
-    (:permission :bg "#1a7a1a" :fg "black" :selected-fg "#2a8c2a"
-                 :face claude-repl-tab-permission :label "❓"))
-  "Alist mapping claude-state keywords to color and display properties.
-`:idle' intentionally has no entry — an idle workspace renders with
-the default tab face.  `:repl-state :inactive' does not contribute to
-color either (it is bookkeeping only).")
+(defconst claude-repl--tab-default
+  '(:unselected (:bg unspecified :fg unspecified :bracket-fg "#4477cc" :weight bold)
+    :selected   (:bg "#c0c0c0"   :fg "black"    :bracket-fg "black"   :weight bold))
+  "Default tab-appearance spec for states absent from `claude-repl--tab-palette'.")
 
-(defun claude-repl--status-color (state prop)
-  "Return property PROP for STATE from `claude-repl--status-colors'.
-PROP is one of :bg, :fg, :selected-fg, :face, or :label.
-Returns nil if STATE has no entry or PROP is not defined for it."
-  (plist-get (alist-get state claude-repl--status-colors) prop))
+(defconst claude-repl--tab-palette
+  '((:init
+     :face       claude-repl-tab-init
+     :unselected (:bg "#3366cc" :fg "white" :bracket-fg "#4477cc" :weight bold)
+     :selected   (:bg "#c0c0c0" :fg "black" :bracket-fg "#3366cc" :weight bold))
+    (:thinking
+     :face       claude-repl-tab-thinking
+     :unselected (:bg "#cc3333" :fg "white" :bracket-fg "#4477cc" :weight bold)
+     :selected   (:bg "#c0c0c0" :fg "black" :bracket-fg "#cc3333" :weight bold))
+    (:done
+     :face       claude-repl-tab-done
+     :unselected (:bg "#1a7a1a" :fg "black" :bracket-fg "#4477cc" :weight bold)
+     :selected   (:bg "#c0c0c0" :fg "black" :bracket-fg "#2a8c2a" :weight bold))
+    (:permission
+     :face       claude-repl-tab-permission
+     :label      "❓"
+     :unselected (:bg "#1a7a1a" :fg "black" :bracket-fg "#4477cc" :weight bold)
+     :selected   (:bg "#c0c0c0" :fg "black" :bracket-fg "#2a8c2a" :weight bold
+                  :face-override claude-repl-tab-permission)))
+  "Per-state tab-appearance palette.
+Each entry fully describes both selected and unselected looks for a
+claude-state keyword.  Absent states fall back to `claude-repl--tab-default'.
+`:idle' intentionally has no entry — an idle workspace renders with the
+default tab face.  `:repl-state :inactive' does not contribute to color
+either (it is bookkeeping only).")
+
+(defun claude-repl--tab-spec (state selected)
+  "Return the appearance spec (plist) for STATE with SELECTED flag.
+Falls back to `claude-repl--tab-default' when STATE has no palette entry.
+Keys in the returned plist: :bg :fg :bracket-fg :weight and optionally
+:face-override."
+  (let* ((row (alist-get state claude-repl--tab-palette))
+         (key (if selected :selected :unselected)))
+    (or (plist-get row key)
+        (plist-get claude-repl--tab-default key))))
 
 (defmacro claude-repl--define-status-face (status doc)
-  "Define a face `claude-repl-tab-STATUS' using colors from the status palette.
-STATUS is an unquoted symbol (e.g. thinking, done).  DOC is the docstring."
+  "Define a face `claude-repl-tab-STATUS' using colors from the palette.
+STATUS is an unquoted symbol (e.g. thinking, done).  DOC is the docstring.
+Reads the `:unselected :bg' / `:fg' fields of the palette row at
+macroexpand time."
   (let* ((face-name (intern (format "claude-repl-tab-%s" status)))
-         (kw        (intern (format ":%s" status))))
+         (kw        (intern (format ":%s" status)))
+         (spec      (plist-get (alist-get kw claude-repl--tab-palette) :unselected))
+         (bg        (plist-get spec :bg))
+         (fg        (plist-get spec :fg)))
     `(defface ,face-name
-       `((t :background ,(claude-repl--status-color ,kw :bg)
-            :foreground ,(claude-repl--status-color ,kw :fg)
-            :weight bold))
+       (list (list t :background ,bg :foreground ,fg :weight 'bold))
        ,doc)))
 
 (claude-repl--define-status-face init
@@ -234,61 +276,42 @@ STATUS is an unquoted symbol (e.g. thinking, done).  DOC is the docstring."
 (claude-repl--define-status-face permission
   "Face for workspace tabs where Claude needs permission (green + emoji).")
 
-(defun claude-repl--render-tab (name separator-face bracket-face name-face label img-str)
-  "Render a tab string for workspace NAME.
-SEPARATOR-FACE is applied to the leading space.
-BRACKET-FACE is applied to the [LABEL] portion.
-NAME-FACE is applied to the workspace name text.
-IMG-STR, when non-nil, is inserted between bracket and name."
-  (concat (propertize " " 'face separator-face)
-          (propertize (format "[%s]" label) 'face bracket-face)
-          (when img-str (concat " " img-str))
-          (propertize (format " %s " name) 'face name-face)))
-
-(defun claude-repl--render-selected-tab (name label state face img-str)
-  "Render a selected tab for workspace NAME.
-LABEL is the bracket content (number or emoji), STATE is the
-status keyword (or nil), FACE is the resolved face for the tab
-name, and IMG-STR is an optional priority image string."
-  (let* ((bracket-fg (or (claude-repl--status-color state :selected-fg) "black"))
-         (bg "#c0c0c0")
-         (text-fg "black"))
-    (claude-repl--render-tab
-     name
-     `(:background unspecified :foreground ,text-fg :weight bold)
-     `(:foreground ,bracket-fg :weight bold :background ,bg)
-     face
-     label img-str)))
-
-(defun claude-repl--render-unselected-tab (name label face img-str)
-  "Render an unselected tab for workspace NAME.
-LABEL is the bracket content (number or emoji), FACE is the
-resolved face for the tab name, and IMG-STR is an optional
-priority image string."
-  (claude-repl--render-tab
-   name
-   '(:background unspecified)
-   '(:foreground "#4477cc" :background unspecified :weight bold)
-   face label img-str))
+(defun claude-repl--render-tab (name spec label name-face img-str)
+  "Render a tab string for workspace NAME from SPEC.
+SPEC is a plist with keys :bg :fg :bracket-fg :weight (see
+`claude-repl--tab-palette' docstring).  NAME-FACE is applied to the
+workspace-name portion.  LABEL is the bracket content (number or
+emoji).  IMG-STR, when non-nil, is inserted between bracket and name."
+  (let* ((bg         (or (plist-get spec :bg)         'unspecified))
+         (fg         (or (plist-get spec :fg)         'unspecified))
+         (bracket-fg (or (plist-get spec :bracket-fg) 'unspecified))
+         (weight     (or (plist-get spec :weight)     'normal))
+         (separator-face `(:background unspecified :foreground ,fg :weight ,weight))
+         (bracket-face   `(:background ,bg          :foreground ,bracket-fg :weight ,weight)))
+    (concat (propertize " " 'face separator-face)
+            (propertize (format "[%s]" label) 'face bracket-face)
+            (when img-str (concat " " img-str))
+            (propertize (format " %s " name) 'face name-face))))
 
 (defun claude-repl--tab-label (state index)
   "Return the tab label for STATE and numeric INDEX.
-Uses a status-specific label when defined, otherwise the index as a string."
-  (or (claude-repl--status-color state :label)
+Uses a palette-defined `:label' when present (e.g. \"❓\"), otherwise
+the index as a string."
+  (or (plist-get (alist-get state claude-repl--tab-palette) :label)
       (number-to-string index)))
 
 (defun claude-repl--tab-face (state selected)
-  "Return the face for a tab with STATE and SELECTED flag.
-For selected tabs, only :permission overrides the default selected face;
-other statuses (e.g. :thinking) are suppressed so the selected tab looks
-normal.  For unselected tabs, returns the status face from
-`claude-repl--status-colors', falling back to `+workspace-tab-face'."
-  (if selected
-      (if (eq state :permission)
-          (claude-repl--status-color state :face)
-        '+workspace-tab-selected-face)
-    (or (claude-repl--status-color state :face)
-        '+workspace-tab-face)))
+  "Return the face symbol for the NAME portion of a tab.
+For unselected tabs, uses the palette row's `:face' or falls back to
+`+workspace-tab-face'.  For selected tabs, uses the state's
+`:selected :face-override' when present (e.g. `:permission' keeps its
+green badge visible), or falls back to `+workspace-tab-selected-face'."
+  (let ((row (alist-get state claude-repl--tab-palette)))
+    (if selected
+        (or (plist-get (plist-get row :selected) :face-override)
+            '+workspace-tab-selected-face)
+      (or (plist-get row :face)
+          '+workspace-tab-face))))
 
 (defun claude-repl--tab-priority-image-str (name)
   "Return a propertized image string for workspace NAME's priority, or nil."
@@ -325,15 +348,15 @@ Reads `:claude-state' (the source of truth for tab color)."
   "Render a single tab entry for workspace NAME.
 CURRENT-NAME is the active workspace name.  INDEX is the 1-based
 tab position.  The display state is composed from the two per-axis
-keys via `claude-repl--ws-display-state'."
+keys via `claude-repl--ws-display-state'; the appearance spec is
+resolved via `claude-repl--tab-spec'."
   (let* ((selected (equal current-name name))
-         (state (claude-repl--ws-display-state name))
-         (label (claude-repl--tab-label state index))
-         (face (claude-repl--tab-face state selected))
-         (img-str (claude-repl--tab-priority-image-str name)))
-    (if selected
-        (claude-repl--render-selected-tab name label state face img-str)
-      (claude-repl--render-unselected-tab name label face img-str))))
+         (state    (claude-repl--ws-display-state name))
+         (spec     (claude-repl--tab-spec state selected))
+         (label    (claude-repl--tab-label state index))
+         (face     (claude-repl--tab-face state selected))
+         (img-str  (claude-repl--tab-priority-image-str name)))
+    (claude-repl--render-tab name spec label face img-str)))
 
 (cl-defun claude-repl--tabline-advice (&optional (names nil names-supplied-p))
   "Override for `+workspace--tabline' to color tabs by Claude status."

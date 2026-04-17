@@ -535,63 +535,59 @@
                  (lambda (_buf _persp) nil)))
         (should-not (claude-repl--workspace-for-buffer (current-buffer)))))))
 
-;;;; ---- Tests: status-color ----
+;;;; ---- Tests: tab-spec ----
 
-(ert-deftest claude-repl-test-status-color-bg-for-thinking ()
-  "status-color should return the :bg value for :thinking."
-  (should (equal (claude-repl--status-color :thinking :bg) "#cc3333")))
+(ert-deftest claude-repl-test-tab-spec-unselected-known-state ()
+  "tab-spec returns the :unselected plist from the palette for a known state."
+  (let ((spec (claude-repl--tab-spec :thinking nil)))
+    (should (equal (plist-get spec :bg) "#cc3333"))
+    (should (equal (plist-get spec :fg) "white"))))
 
-(ert-deftest claude-repl-test-status-color-nil-for-unknown-state ()
-  "status-color should return nil for an unknown state."
-  (should-not (claude-repl--status-color :bogus :bg)))
+(ert-deftest claude-repl-test-tab-spec-selected-known-state ()
+  "tab-spec returns the :selected plist from the palette for a known state."
+  (let ((spec (claude-repl--tab-spec :done t)))
+    (should (equal (plist-get spec :bracket-fg) "#2a8c2a"))))
 
-(ert-deftest claude-repl-test-status-color-nil-for-unknown-prop ()
-  "status-color should return nil for an unknown prop on a valid state."
-  (should-not (claude-repl--status-color :thinking :nonexistent)))
+(ert-deftest claude-repl-test-tab-spec-unknown-state-falls-back-to-default ()
+  "tab-spec returns the default spec for states absent from the palette."
+  (let ((unsel (claude-repl--tab-spec :bogus nil))
+        (sel   (claude-repl--tab-spec :bogus t)))
+    (should (equal (plist-get unsel :bracket-fg) "#4477cc"))
+    (should (equal (plist-get sel :bg) "#c0c0c0"))))
 
-(ert-deftest claude-repl-test-status-color-nil-state ()
-  "status-color should return nil when state is nil."
-  (should-not (claude-repl--status-color nil :bg)))
+(ert-deftest claude-repl-test-tab-spec-nil-state-uses-default ()
+  "tab-spec with nil state returns the default spec."
+  (should (equal (plist-get (claude-repl--tab-spec nil nil) :bracket-fg)
+                 "#4477cc")))
 
-;;;; ---- Tests: render-tab with img-str ----
+(ert-deftest claude-repl-test-tab-spec-permission-has-face-override ()
+  "The :permission :selected spec carries :face-override = the permission face."
+  (let ((spec (claude-repl--tab-spec :permission t)))
+    (should (eq (plist-get spec :face-override) 'claude-repl-tab-permission))))
+
+;;;; ---- Tests: render-tab (spec-driven) ----
 
 (ert-deftest claude-repl-test-render-tab-with-img-str ()
   "render-tab should include img-str when non-nil."
-  (let ((result (claude-repl--render-tab
-                 "ws1"
-                 '(:background unspecified)
-                 '(:foreground "blue")
-                 '(:foreground "black")
-                 "1"
-                 "IMG")))
+  (let* ((spec '(:bg unspecified :fg "black" :bracket-fg "blue" :weight bold))
+         (result (claude-repl--render-tab "ws1" spec "1" '+workspace-tab-face "IMG")))
     (should (string-match-p "IMG" result))
     (should (string-match-p "ws1" result))))
 
 (ert-deftest claude-repl-test-render-tab-empty-name ()
   "render-tab should handle an empty name string."
-  (let ((result (claude-repl--render-tab
-                 ""
-                 '(:background unspecified)
-                 '(:foreground "blue")
-                 '(:foreground "black")
-                 "1"
-                 nil)))
-    ;; Should still produce a string with bracket portion
+  (let* ((spec '(:bg unspecified :fg "black" :bracket-fg "blue" :weight bold))
+         (result (claude-repl--render-tab "" spec "1" '+workspace-tab-face nil)))
     (should (string-match-p "\\[1\\]" result))))
 
-;;;; ---- Tests: render-selected-tab with img-str ----
-
-(ert-deftest claude-repl-test-render-selected-tab-with-img-str ()
-  "render-selected-tab should include img-str in the output when non-nil."
-  (let ((result (claude-repl--render-selected-tab "ws1" "1" nil '+workspace-tab-selected-face "IMG")))
-    (should (string-match-p "IMG" result))))
-
-;;;; ---- Tests: render-unselected-tab with img-str ----
-
-(ert-deftest claude-repl-test-render-unselected-tab-with-img-str ()
-  "render-unselected-tab should include img-str in the output when non-nil."
-  (let ((result (claude-repl--render-unselected-tab "ws1" "1" '(:foreground "black") "IMG")))
-    (should (string-match-p "IMG" result))))
+(ert-deftest claude-repl-test-render-tab-selected-spec-bg ()
+  "render-tab applies the spec :bg to the bracket face's background."
+  (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "#2a8c2a" :weight bold))
+         (result (claude-repl--render-tab "ws1" spec "1" '+workspace-tab-face nil))
+         (pos (string-match "\\[1\\]" result))
+         (face (get-text-property pos 'face result)))
+    (should (equal (plist-get face :background) "#c0c0c0"))
+    (should (equal (plist-get face :foreground) "#2a8c2a"))))
 
 ;;;; ---- Tests: tab-label edge cases ----
 
