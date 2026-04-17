@@ -801,35 +801,13 @@
       (should (claude-repl--ws-claude-open-p "bg-ws"))
       (should (equal wconf-called "bg-ws")))))
 
-;;;; ---- Tests: panels-actively-visible-p ----
-
-(ert-deftest claude-repl-test-panels-actively-visible-background ()
-  "panels-actively-visible-p should return nil for a background workspace."
-  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))
-    (should-not (claude-repl--panels-actively-visible-p "bg-ws"))))
-
-(ert-deftest claude-repl-test-panels-actively-visible-current-with-panels ()
-  "panels-actively-visible-p should return non-nil when current ws has visible panels."
-  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-            ((symbol-function 'claude-repl--claude-visible-in-current-ws-p)
-             (lambda () t)))
-    (should (claude-repl--panels-actively-visible-p "ws1"))))
-
-(ert-deftest claude-repl-test-panels-actively-visible-current-no-panels ()
-  "panels-actively-visible-p should return nil when current ws has no visible panels."
-  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-            ((symbol-function 'claude-repl--claude-visible-in-current-ws-p)
-             (lambda () nil)))
-    (should-not (claude-repl--panels-actively-visible-p "ws1"))))
-
 ;;;; ---- Tests: update-ws-state (state machine) ----
 
 (ert-deftest claude-repl-test-update-ws-state-thinking-unchanged ()
   ":thinking state should remain unchanged regardless of dirty value."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :thinking)
-    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) nil))
-              ((symbol-function 'claude-repl--panels-actively-visible-p) (lambda (_ws) nil)))
+    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) nil)))
       (claude-repl--update-ws-state "ws1")
       (should (eq (claude-repl--ws-state "ws1") :thinking)))))
 
@@ -886,8 +864,7 @@ trees; under the revised model only the Stop hook writes :done."
   ":permission state should remain unchanged regardless of dirty value."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :permission)
-    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) nil))
-              ((symbol-function 'claude-repl--panels-actively-visible-p) (lambda (_ws) nil)))
+    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) nil)))
       (claude-repl--update-ws-state "ws1")
       (should (eq (claude-repl--ws-state "ws1") :permission)))))
 
@@ -1013,8 +990,7 @@ trees; under the revised model only the Stop hook writes :done."
   ":thinking + clean should remain unchanged (pcase wildcard catches both dirty values)."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :thinking)
-    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) t))
-              ((symbol-function 'claude-repl--panels-actively-visible-p) (lambda (_ws) nil)))
+    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) t)))
       (claude-repl--update-ws-state "ws1")
       (should (eq (claude-repl--ws-state "ws1") :thinking)))))
 
@@ -1031,8 +1007,7 @@ trees; under the revised model only the Stop hook writes :done."
 :permission is never auto-cleared by the state machine regardless of dirty value."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :permission)
-    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) t))
-              ((symbol-function 'claude-repl--panels-actively-visible-p) (lambda (_ws) nil)))
+    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) t)))
       (claude-repl--update-ws-state "ws1")
       (should (eq (claude-repl--ws-state "ws1") :permission)))))
 

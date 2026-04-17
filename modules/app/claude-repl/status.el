@@ -400,13 +400,6 @@ For background workspaces, inspects the saved persp window configuration."
       (claude-repl--claude-visible-in-current-ws-p)
     (claude-repl--claude-in-saved-wconf-p ws-name)))
 
-(defun claude-repl--panels-actively-visible-p (ws)
-  "Return non-nil if the user is currently looking at claude panels for WS.
-Returns nil for background workspaces (user is on a different workspace)
-and for the current workspace when panels have no visible windows."
-  (and (string= ws (+workspace-current-name))
-       (claude-repl--claude-visible-in-current-ws-p)))
-
 ;;; State machine ------------------------------------------------------------
 
 (defun claude-repl--update-ws-state (ws)
