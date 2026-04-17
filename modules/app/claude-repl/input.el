@@ -182,6 +182,11 @@ left users with a half-cleared state."
 
 ;;; Vterm output scrolling
 
+(defcustom claude-repl-scroll-lines 15
+  "Number of lines to scroll per `C-S-n' / `C-S-p' keypress."
+  :type 'integer
+  :group 'claude-repl)
+
 (defun claude-repl--scroll-vterm-output (scroll-fn)
   "Scroll the Claude vterm output window using SCROLL-FN.
 SCROLL-FN is called with a line count (e.g. `scroll-up' or `scroll-down')."
@@ -190,7 +195,7 @@ SCROLL-FN is called with a line count (e.g. `scroll-up' or `scroll-down')."
    (let ((vterm-win (get-buffer-window vterm-buf)))
      (when vterm-win
        (with-selected-window vterm-win
-         (funcall scroll-fn 3))))))
+         (funcall scroll-fn claude-repl-scroll-lines))))))
 
 (defun claude-repl-scroll-output-up ()
   "Scroll the Claude vterm output window up (toward older output)."

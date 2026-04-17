@@ -1122,12 +1122,13 @@ must not accumulate phantom entries that trap the user in slash mode."
         (claude-repl-scroll-up)
         (should-not called)))))
 
-;;; scroll-vterm-output: scrolls by 3 lines with visible window
+;;; scroll-vterm-output: scrolls by claude-repl-scroll-lines with visible window
 
-(ert-deftest claude-repl-test-scroll-vterm-output-scrolls-3-lines ()
-  "`claude-repl--scroll-vterm-output' calls SCROLL-FN with 3 in the vterm window."
+(ert-deftest claude-repl-test-scroll-vterm-output-uses-scroll-lines ()
+  "`claude-repl--scroll-vterm-output' calls SCROLL-FN with `claude-repl-scroll-lines'."
   (claude-repl-test--with-clean-state
-    (let ((scroll-arg nil))
+    (let ((scroll-arg nil)
+          (claude-repl-scroll-lines 20))
       (claude-repl-test--with-temp-buffer "*claude-panel-scroll-output*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
@@ -1141,7 +1142,7 @@ must not accumulate phantom entries that trap the user in slash mode."
                      (lambda (&rest _) (selected-window))))
             (claude-repl--scroll-vterm-output
              (lambda (n) (setq scroll-arg n)))
-            (should (= scroll-arg 3))))))))
+            (should (= scroll-arg 20))))))))
 
 ;;; scroll-vterm-output: no vterm window is a no-op
 
@@ -1176,7 +1177,7 @@ must not accumulate phantom entries that trap the user in slash mode."
                   ((symbol-function 'scroll-up)
                    (lambda (_n) (setq fn-called 'wrong))))
           (claude-repl-scroll-output-up)
-          (should (equal fn-called '(scroll-down 3))))))))
+          (should (equal fn-called (list 'scroll-down claude-repl-scroll-lines))))))))
 
 ;;; scroll-output-down calls scroll-up
 
@@ -1195,7 +1196,7 @@ must not accumulate phantom entries that trap the user in slash mode."
                   ((symbol-function 'scroll-down)
                    (lambda (_n) (setq fn-called 'wrong))))
           (claude-repl-scroll-output-down)
-          (should (equal fn-called '(scroll-up 3))))))))
+          (should (equal fn-called (list 'scroll-up claude-repl-scroll-lines))))))))
 
 ;;; send-char with dead vterm buffer
 
@@ -1647,6 +1648,10 @@ but `with-current-buffer' on a dead buffer signals an error."
 (ert-deftest claude-repl-test-prefix-period-default ()
   "`claude-repl-prefix-period' should default to 7."
   (should (= (default-value 'claude-repl-prefix-period) 7)))
+
+(ert-deftest claude-repl-test-scroll-lines-default ()
+  "`claude-repl-scroll-lines' should default to 15."
+  (should (= (default-value 'claude-repl-scroll-lines) 15)))
 
 (ert-deftest claude-repl-test-command-prefix-contains-text ()
   "`claude-repl--command-prefix' should contain the metaprompt text."
