@@ -447,18 +447,20 @@ The placeholder is swapped for the real vterm buffer once Claude is ready."
     (claude-repl--ws-put ws :vterm-buffer real-vterm)))
 
 (defun claude-repl--start-fresh ()
-  "Start a new Claude session with placeholder panels.
+  "Start a new Claude session without showing panels yet.
 Writes `:claude-state :init' immediately after launching the vterm
 process (documented lifecycle exception to the sentinel-only-writes
 rule — no hook fires between process launch and session-start, so
-Emacs is the only observer of \"Claude process exists, not ready yet\")."
+Emacs is the only observer of \"Claude process exists, not ready yet\").
+Panels are deliberately NOT opened here — `on-session-start-event'
+opens them once `:claude-state' transitions from `:init' to `:idle'.
+During that window the user sees the blue `:init' tab and the
+echo-area message below."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "start-fresh")
     (unless ws (error "claude-repl--start-fresh: no active workspace"))
-    (delete-other-windows)
     (claude-repl--ensure-session)
     (claude-repl--ws-set-claude-state ws :init)
-    (claude-repl--show-loading-panels)
     (let ((start-cmd (claude-repl-instantiation-start-cmd (claude-repl--active-inst ws))))
       (message "Starting Claude... ws=%s ws-id=%s dir=%s cmd=%s"
                ws
