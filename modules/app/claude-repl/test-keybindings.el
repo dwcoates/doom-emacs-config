@@ -122,6 +122,40 @@
         (should (equal captured-default "current-ws"))
         (should (equal result "current-ws"))))))
 
+;;;; ---- Tests: claude-repl--read-known-workspace ----
+
+(ert-deftest claude-repl-test-read-known-workspace-no-workspaces ()
+  "read-known-workspace signals user-error when no workspaces are registered."
+  (claude-repl-test--with-clean-state
+    (should-error (claude-repl--read-known-workspace "Pick: ") :type 'user-error)))
+
+(ert-deftest claude-repl-test-read-known-workspace-defaults-to-current ()
+  "read-known-workspace defaults to the current workspace when registered."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+    (let ((captured-default nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws2"))
+                ((symbol-function 'completing-read)
+                 (lambda (_p _c _pr _r _h _hv default)
+                   (setq captured-default default)
+                   default)))
+        (claude-repl--read-known-workspace "Pick: ")
+        (should (equal captured-default "ws2"))))))
+
+(ert-deftest claude-repl-test-read-known-workspace-no-default-when-current-not-registered ()
+  "read-known-workspace passes nil default when current workspace is not registered."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (let ((captured-default 'sentinel))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "stranger"))
+                ((symbol-function 'completing-read)
+                 (lambda (_p _c _pr _r _h _hv default)
+                   (setq captured-default default)
+                   "ws1")))
+        (claude-repl--read-known-workspace "Pick: ")
+        (should-not captured-default)))))
+
 ;;;; ---- Tests: claude-repl--write-output-json ----
 
 (ert-deftest claude-repl-test-write-output-json-creates-file ()

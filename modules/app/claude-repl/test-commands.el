@@ -556,6 +556,52 @@
       (claude-repl-nuke-workspace)
       (should-not (gethash "ghost" claude-repl--workspaces)))))
 
+;;;; ---- claude-repl-nuke-all-workspaces ----
+
+(ert-deftest claude-repl-cmd-test-nuke-all/no-workspaces ()
+  "nuke-all-workspaces signals user-error when hashmap is empty."
+  (claude-repl-test--with-clean-state
+    (should-error (claude-repl-nuke-all-workspaces) :type 'user-error)))
+
+(ert-deftest claude-repl-cmd-test-nuke-all/aborts-on-deny ()
+  "nuke-all-workspaces does nothing when user answers no."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) nil)))
+      (should-error (claude-repl-nuke-all-workspaces) :type 'user-error)
+      (should (gethash "ws1" claude-repl--workspaces))
+      (should (gethash "ws2" claude-repl--workspaces)))))
+
+(ert-deftest claude-repl-cmd-test-nuke-all/iterates-every-workspace ()
+  "nuke-all-workspaces tears down every registered workspace."
+  (claude-repl-test--with-clean-state
+    (dolist (n '("ws1" "ws2" "ws3"))
+      (claude-repl--ws-put n :project-dir (format "/tmp/%s" n)))
+    (let ((torn-down nil)
+          (persp-mode nil))
+      (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                ((symbol-function 'claude-repl--kill-session)
+                 (lambda (ws) (push ws torn-down)))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-nuke-all-workspaces)
+        (should (= 3 (length torn-down)))
+        (should (member "ws1" torn-down))
+        (should (member "ws2" torn-down))
+        (should (member "ws3" torn-down))
+        (should (zerop (hash-table-count claude-repl--workspaces)))))))
+
+(ert-deftest claude-repl-cmd-test-nuke-all/prompt-includes-count ()
+  "nuke-all-workspaces' confirmation prompt includes the workspace count."
+  (claude-repl-test--with-clean-state
+    (dolist (n '("a" "b"))
+      (claude-repl--ws-put n :project-dir (format "/tmp/%s" n)))
+    (let ((seen-prompt nil))
+      (cl-letf (((symbol-function 'y-or-n-p)
+                 (lambda (prompt) (setq seen-prompt prompt) nil)))
+        (ignore-errors (claude-repl-nuke-all-workspaces))
+        (should (string-match-p "ALL 2" seen-prompt))))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here

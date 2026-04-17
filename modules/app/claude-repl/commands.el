@@ -298,36 +298,59 @@ sends \"i\" after 0.25s to return to insert mode."
   (claude-repl--log nil "update-pr: sending update-pr prompt")
   (claude-repl--send-to-claude claude-repl-update-pr-prompt))
 
+(defun claude-repl--nuke-one-workspace (ws)
+  "Tear down a single claude-repl workspace WS without prompting.
+Kills any in-flight git-diff process, tears down the vterm session
+and buffers, deletes the persp workspace (switching away first if WS
+is current), and removes WS from `claude-repl--workspaces'.  Designed
+to be reusable from both `claude-repl-nuke-workspace' (one-shot) and
+`claude-repl-nuke-all-workspaces' (loop)."
+  (claude-repl--log ws "nuke-one-workspace: ws=%s" ws)
+  (when-let ((proc (claude-repl--ws-get ws :git-proc)))
+    (when (process-live-p proc)
+      (claude-repl--log ws "nuke-one-workspace: killing git-proc")
+      (delete-process proc)))
+  (condition-case err
+      (claude-repl--kill-session ws)
+    (error (claude-repl--log ws "nuke-one-workspace: kill-session error: %S" err)))
+  (when (and (bound-and-true-p persp-mode)
+             (persp-get-by-name ws))
+    (when (string= ws (+workspace-current-name))
+      (+workspace/other))
+    (claude-repl--log ws "nuke-one-workspace: deleting persp workspace")
+    (+workspace/delete ws))
+  (claude-repl--ws-del ws))
+
 (defun claude-repl-nuke-workspace ()
   "Completely destroy a claude-repl workspace: session, buffers, persp, and hashmap entry.
-Prompts to select from workspaces registered in `claude-repl--workspaces'."
+Prompts to select from workspaces registered in `claude-repl--workspaces',
+defaulting to the current workspace when registered."
   (interactive)
-  (let* ((known (hash-table-keys claude-repl--workspaces))
-         (_ (unless known (user-error "No claude-repl workspaces registered")))
-         (ws (completing-read "Nuke workspace: " known nil t)))
+  (let ((ws (claude-repl--read-known-workspace "Nuke workspace: ")))
     (unless (y-or-n-p (format "Nuke workspace '%s'? This kills processes, buffers, and removes all state. " ws))
       (user-error "Aborted"))
-    (claude-repl--log ws "nuke-workspace: ws=%s" ws)
-    ;; Kill git-diff process if running
-    (when-let ((proc (claude-repl--ws-get ws :git-proc)))
-      (when (process-live-p proc)
-        (claude-repl--log ws "nuke-workspace: killing git-proc")
-        (delete-process proc)))
-    ;; Kill session (vterm process, input buffer, timers, overlay)
-    (condition-case err
-        (claude-repl--kill-session ws)
-      (error (claude-repl--log ws "nuke-workspace: kill-session error: %S" err)))
-    ;; Delete persp workspace if it exists (switch away first if current)
-    (when (and (bound-and-true-p persp-mode)
-               (persp-get-by-name ws))
-      (when (string= ws (+workspace-current-name))
-        (+workspace/other))
-      (claude-repl--log ws "nuke-workspace: deleting persp workspace")
-      (+workspace/delete ws))
-    ;; Remove from hashmap
-    (claude-repl--ws-del ws)
+    (claude-repl--nuke-one-workspace ws)
     (force-mode-line-update t)
     (message "Nuked workspace: %s" ws)))
+
+(defun claude-repl-nuke-all-workspaces ()
+  "Completely destroy ALL claude-repl workspaces.
+Iterates every workspace registered in `claude-repl--workspaces' and
+applies the same teardown as `claude-repl-nuke-workspace' to each.
+Prompts once with the count before proceeding."
+  (interactive)
+  (let* ((known (hash-table-keys claude-repl--workspaces))
+         (count (length known)))
+    (unless known (user-error "No claude-repl workspaces registered"))
+    (unless (y-or-n-p (format "Nuke ALL %d claude-repl workspace(s)? This kills processes, buffers, and removes all state. "
+                              count))
+      (user-error "Aborted"))
+    (claude-repl--log nil "nuke-all-workspaces: count=%d" count)
+    ;; Snapshot keys before iterating; each call mutates the hash.
+    (dolist (ws known)
+      (claude-repl--nuke-one-workspace ws))
+    (force-mode-line-update t)
+    (message "Nuked %d workspace(s)" count)))
 
 (defun claude-repl-copy-reference ()
   "Copy the current file and line reference to the clipboard.

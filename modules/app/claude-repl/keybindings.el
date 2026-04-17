@@ -40,6 +40,17 @@ is still current."
   (completing-read prompt (+workspace-list-names) nil t
                    nil nil (+workspace-current-name)))
 
+(defun claude-repl--read-known-workspace (prompt)
+  "Prompt for a workspace registered in `claude-repl--workspaces'.
+Defaults to the current workspace when it is registered (so RET picks
+the obvious target).  Signals `user-error' when no workspaces exist."
+  (let* ((known (hash-table-keys claude-repl--workspaces))
+         (current (and (fboundp '+workspace-current-name)
+                       (+workspace-current-name)))
+         (default (and current (member current known) current)))
+    (unless known (user-error "No claude-repl workspaces registered"))
+    (completing-read prompt known nil t nil nil default)))
+
 (defun claude-repl--write-output-json (filename content)
   "Write CONTENT as JSON to FILENAME inside `claude-repl--output-dir'.
 Ensures the output directory exists.  Returns the full path of the written file."
@@ -240,11 +251,10 @@ window changes, git-diff sentinels, resolve-root, etc.)."
 
 (defun claude-repl-debug/dump-workspace ()
   "Display the full serialized plist for a selected workspace from the hashmap.
-Prompts to select from workspaces registered in `claude-repl--workspaces'."
+Prompts to select from workspaces registered in `claude-repl--workspaces',
+defaulting to the current workspace when registered."
   (interactive)
-  (let* ((known (hash-table-keys claude-repl--workspaces))
-         (_ (unless known (user-error "No claude-repl workspaces registered")))
-         (ws (completing-read "Dump workspace: " known nil t))
+  (let* ((ws (claude-repl--read-known-workspace "Dump workspace: "))
          (plist (gethash ws claude-repl--workspaces)))
     (with-help-window "*claude-repl-dump*"
       (with-current-buffer "*claude-repl-dump*"
@@ -371,6 +381,7 @@ Reports comprehensive diagnostics."
        :desc "Explain line/region/hunk"      "e" #'claude-repl-explain
        :desc "Update GitHub PR description"  "r" #'claude-repl-update-pr
        :desc "Nuke workspace"           "x" #'claude-repl-nuke-workspace
+       :desc "Nuke ALL workspaces"      "X" #'claude-repl-nuke-all-workspaces
        :desc "Dump workspace state"     "p" #'claude-repl-debug/dump-workspace
        :desc "Toggle debug logging"    "D" #'claude-repl-debug/toggle-logging
        (:prefix ("E" . "explain diff")
