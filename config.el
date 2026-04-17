@@ -683,7 +683,7 @@ Otherwise, copy to the kill ring."
 (defun +dwc/magit-status-workspace ()
   "Open magit-status for the current workspace's project root."
   (interactive)
-  (magit-status (claude-repl--project-dir (+workspace-current-name))))
+  (magit-status (claude-repl--ws-dir (+workspace-current-name))))
 
 (map! :leader
       :desc "Magit status for workspace"
