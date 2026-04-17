@@ -69,7 +69,6 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                (vbuf     (plist-get plist :vterm-buffer))
                (ibuf     (plist-get plist :input-buffer))
                (pcnt     (plist-get plist :prefix-counter))
-               (hidden   (plist-get plist :panels-hidden))
                (gclean   (plist-get plist :git-clean))
                (gproc    (plist-get plist :git-proc))
                (wt       (plist-get plist :worktree-p))
@@ -80,7 +79,7 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                (pprompts (plist-get plist :pending-prompts))
                (pshow    (plist-get plist :pending-show-panels)))
           (format (concat " {ws=%s id=%s dir=%s cst=%s rst=%s env=%s"
-                          " vt=%s in=%s cnt=%s hid=%s"
+                          " vt=%s in=%s cnt=%s"
                           " git=%s gproc=%s wt=%s fork=%s"
                           " rtmr=%s pri=%s viewed=%s pend=%s pshow=%s}")
                   ws
@@ -92,7 +91,6 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                   (if vbuf (if (buffer-live-p vbuf) "live" "dead") "-")
                   (if ibuf (if (buffer-live-p ibuf) "live" "dead") "-")
                   (or pcnt "-")
-                  (if hidden "t" "-")
                   (or gclean "-")
                   (if gproc (if (process-live-p gproc) "run" "done") "-")
                   (if wt "t" "-")
@@ -277,14 +275,11 @@ Each workspace has one instantiation for :sandbox and one for :bare-metal."
 (defvar claude-repl--workspaces (make-hash-table :test 'equal)
   "Hash table mapping workspace name → state plist.
 Keys: :vterm-buffer :input-buffer
-      :prefix-counter :claude-state :repl-state :panels-hidden
+      :prefix-counter :claude-state :repl-state
       :git-clean :git-proc :worktree-p :project-dir
       :active-env :sandbox :bare-metal :fork-session-id
-      :ready-timer :thinking :done :priority :viewed
+      :ready-timer :priority :viewed
       :pending-prompts :pending-show-panels
-Legacy `:status' is written alongside `:claude-state' by `ws-set' /
-`ws-clear-if-status' during the migration and is removed in a later
-commit.
 :active-env is :sandbox or :bare-metal; :sandbox and :bare-metal are
 `claude-repl-instantiation' structs holding per-environment session state.")
 

@@ -20,7 +20,7 @@
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :thinking)
     (should (eq (claude-repl--ws-get "ws1" :claude-state) :thinking))
-    (should (eq (claude-repl--ws-get "ws1" :status) :thinking))))
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :thinking))))
 
 (ert-deftest claude-repl-test-ws-set-claude-state-nil-writes-both ()
   "ws-set-claude-state nil clears both axes."
@@ -28,7 +28,7 @@
     (claude-repl--ws-set-claude-state "ws1" :done)
     (claude-repl--ws-set-claude-state "ws1" nil)
     (should-not (claude-repl--ws-get "ws1" :claude-state))
-    (should-not (claude-repl--ws-get "ws1" :status))))
+    (should-not (claude-repl--ws-get "ws1" :claude-state))))
 
 (ert-deftest claude-repl-test-ws-set-claude-state-nil-ws-errors ()
   "ws-set-claude-state signals error on nil workspace."
@@ -47,7 +47,7 @@
     (claude-repl--ws-set-repl-state "ws1" :inactive)
     (should (eq (claude-repl--ws-get "ws1" :repl-state) :inactive))
     (should (eq (claude-repl--ws-get "ws1" :claude-state) :thinking))
-    (should (eq (claude-repl--ws-get "ws1" :status) :thinking))))
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :thinking))))
 
 (ert-deftest claude-repl-test-ws-set-repl-state-nil-ws-errors ()
   "ws-set-repl-state signals error on nil workspace."
@@ -65,7 +65,7 @@
     (claude-repl--ws-set-claude-state "ws1" :thinking)
     (claude-repl--ws-claude-state-clear-if "ws1" :thinking)
     (should-not (claude-repl--ws-get "ws1" :claude-state))
-    (should-not (claude-repl--ws-get "ws1" :status))))
+    (should-not (claude-repl--ws-get "ws1" :claude-state))))
 
 (ert-deftest claude-repl-test-ws-claude-state-clear-if-mismatch-noop ()
   "ws-claude-state-clear-if with a non-matching state is a no-op on both fields."
@@ -73,7 +73,7 @@
     (claude-repl--ws-set-claude-state "ws1" :done)
     (claude-repl--ws-claude-state-clear-if "ws1" :thinking)
     (should (eq (claude-repl--ws-get "ws1" :claude-state) :done))
-    (should (eq (claude-repl--ws-get "ws1" :status) :done))))
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :done))))
 
 (ert-deftest claude-repl-test-ws-claude-state-clear-if-nil-ws-errors ()
   "ws-claude-state-clear-if signals error on nil workspace."
@@ -158,7 +158,7 @@
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :permission)
     (should (eq (claude-repl--ws-get "ws1" :claude-state) :permission))
-    (should (eq (claude-repl--ws-get "ws1" :status) :permission))))
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :permission))))
 
 (ert-deftest claude-repl-test-legacy-ws-clear-clears-both-axes ()
   "Legacy ws-clear-if-status (wrapper) clears :claude-state too."
@@ -166,7 +166,7 @@
     (claude-repl--ws-set "ws1" :thinking)
     (claude-repl--ws-clear-if-status "ws1" :thinking)
     (should-not (claude-repl--ws-get "ws1" :claude-state))
-    (should-not (claude-repl--ws-get "ws1" :status))))
+    (should-not (claude-repl--ws-get "ws1" :claude-state))))
 
 (ert-deftest claude-repl-test-maybe-clear-stale-clears-claude-state ()
   "maybe-clear-stale-state clears :claude-state (write-both)."
@@ -175,7 +175,7 @@
     (cl-letf (((symbol-function 'claude-repl--vterm-running-p) (lambda (_) nil)))
       (claude-repl--maybe-clear-stale-state "ws1")
       (should-not (claude-repl--ws-get "ws1" :claude-state))
-      (should-not (claude-repl--ws-get "ws1" :status)))))
+      (should-not (claude-repl--ws-get "ws1" :claude-state)))))
 
 ;;;; ---- Tests: Workspace state accessors (ws-set, ws-clear, ws-state) ----
 
@@ -187,7 +187,7 @@
     (claude-repl--ws-set "ws1" :done)
     (should (eq (claude-repl--ws-state "ws1") :done))
     ;; Thinking should be cleared — the plist status should now be :done
-    (should (eq (claude-repl--ws-get "ws1" :status) :done))))
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :done))))
 
 (ert-deftest claude-repl-test-ws-clear ()
   "ws-clear should clear only the specified state."
@@ -233,14 +233,14 @@
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :thinking)
     (claude-repl--ws-clear "ws1" :done)
-    (should (eq (claude-repl--ws-get "ws1" :status) :thinking))))
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :thinking))))
 
 (ert-deftest claude-repl-test-ws-clear-permission ()
   "`ws-clear' with :permission should not clear status when it is :done."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :done)
     (claude-repl--ws-clear "ws1" :permission)
-    (should (eq (claude-repl--ws-get "ws1" :status) :done))))
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :done))))
 
 (ert-deftest claude-repl-test-ws-clear-nil-error ()
   "`ws-clear' with nil ws should signal error."
@@ -1072,35 +1072,35 @@ The :viewed gate blocks the done→inactive transition even when dirty."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :permission)
     (claude-repl--ws-clear-if-status "ws1" :thinking)
-    (should (eq (claude-repl--ws-get "ws1" :status) :permission))))
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :permission))))
 
 (ert-deftest claude-repl-test-ws-clear-inactive-when-thinking-noop ()
   "Clearing :inactive when actual status is :thinking should be a no-op."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :thinking)
     (claude-repl--ws-clear-if-status "ws1" :inactive)
-    (should (eq (claude-repl--ws-get "ws1" :status) :thinking))))
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :thinking))))
 
 (ert-deftest claude-repl-test-ws-clear-done-when-inactive-noop ()
   "Clearing :done when actual status is :inactive should be a no-op."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :inactive)
     (claude-repl--ws-clear-if-status "ws1" :done)
-    (should (eq (claude-repl--ws-get "ws1" :status) :inactive))))
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :inactive))))
 
 (ert-deftest claude-repl-test-ws-clear-inactive-when-done-noop ()
   "Clearing :inactive when actual status is :done should be a no-op."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :done)
     (claude-repl--ws-clear-if-status "ws1" :inactive)
-    (should (eq (claude-repl--ws-get "ws1" :status) :done))))
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :done))))
 
 (ert-deftest claude-repl-test-ws-clear-thinking-when-done-noop ()
   "Clearing :thinking when actual status is :done should be a no-op."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :done)
     (claude-repl--ws-clear-if-status "ws1" :thinking)
-    (should (eq (claude-repl--ws-get "ws1" :status) :done))))
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :done))))
 
 ;;;; ---- Tests: update-all-workspace-states multi-workspace dispatch ----
 

@@ -249,8 +249,6 @@ the \"close always transitions to :inactive\" requirement (analysis/01,
 item #1).  `:claude-state' is intentionally left untouched so that
 closing during a :thinking or :permission turn preserves the in-flight
 signal (the renderer shows red/❓ through the closed-panel state).
-`:panels-hidden' continues to be written for the duration of the
-migration; it becomes redundant once the legacy field is removed.
 
 WS defaults to the current workspace; when WS is nil the function still
 hides panels but skips the bookkeeping write."
@@ -258,8 +256,7 @@ hides panels but skips the bookkeeping write."
     (when ws
       (claude-repl--log ws "on-close ws=%s claude-state=%s -> repl-state=:inactive"
                         ws (claude-repl--ws-claude-state ws))
-      (claude-repl--ws-set-repl-state ws :inactive)
-      (claude-repl--ws-put ws :panels-hidden t))
+      (claude-repl--ws-set-repl-state ws :inactive))
     (claude-repl--hide-panels)))
 
 ;;;; Window synchronization
@@ -509,7 +506,6 @@ Clears `:repl-state' so the workspace is no longer flagged as inactive."
     (claude-repl--log ws "showing panels ws=%s claude-state=%s (restoring status)"
                       ws (claude-repl--ws-claude-state ws))
     (claude-repl--ws-set-repl-state ws nil)
-    (claude-repl--ws-put ws :panels-hidden nil)
     (claude-repl--mark-viewed ws))
   (claude-repl--show-existing-panels))
 
@@ -637,10 +633,8 @@ Captures the current buffer references before teardown clears them."
     ;; claude-state" — see analysis/12.)  :repl-state nil means "no panels
     ;; and no particular inactive/dead designation"; the workspace returns
     ;; to a pristine no-Claude state awaiting the next start-fresh.
-    (claude-repl--ws-put ws :status nil)
     (claude-repl--ws-put ws :claude-state nil)
     (claude-repl--ws-put ws :repl-state nil)
-    (claude-repl--ws-put ws :panels-hidden nil)
     (force-mode-line-update t)
     (claude-repl--kill-session ws)))
 

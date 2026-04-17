@@ -175,7 +175,7 @@ This prevents the oscillation where update-ws-state immediately sees
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "test-ws" :inactive)
     (claude-repl--mark-viewed "test-ws")
-    (should (eq (claude-repl--ws-get "test-ws" :status) :done))
+    (should (eq (claude-repl--ws-get "test-ws" :claude-state) :done))
     (should-not (claude-repl--ws-get "test-ws" :viewed))))
 
 (ert-deftest claude-repl-test-panels-mark-viewed-done-sets-viewed ()
@@ -183,7 +183,7 @@ This prevents the oscillation where update-ws-state immediately sees
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "test-ws" :done)
     (claude-repl--mark-viewed "test-ws")
-    (should (eq (claude-repl--ws-get "test-ws" :status) :done))
+    (should (eq (claude-repl--ws-get "test-ws" :claude-state) :done))
     (should (claude-repl--ws-get "test-ws" :viewed))))
 
 (ert-deftest claude-repl-test-panels-mark-viewed-thinking-noop ()
@@ -191,14 +191,14 @@ This prevents the oscillation where update-ws-state immediately sees
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "test-ws" :thinking)
     (claude-repl--mark-viewed "test-ws")
-    (should (eq (claude-repl--ws-get "test-ws" :status) :thinking))
+    (should (eq (claude-repl--ws-get "test-ws" :claude-state) :thinking))
     (should-not (claude-repl--ws-get "test-ws" :viewed))))
 
 (ert-deftest claude-repl-test-panels-mark-viewed-nil-status-noop ()
   "mark-viewed on a workspace with nil status does nothing."
   (claude-repl-test--with-clean-state
     (claude-repl--mark-viewed "test-ws")
-    (should-not (claude-repl--ws-get "test-ws" :status))
+    (should-not (claude-repl--ws-get "test-ws" :claude-state))
     (should-not (claude-repl--ws-get "test-ws" :viewed))))
 
 (ert-deftest claude-repl-test-panels-mark-viewed-permission-noop ()
@@ -206,7 +206,7 @@ This prevents the oscillation where update-ws-state immediately sees
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "test-ws" :permission)
     (claude-repl--mark-viewed "test-ws")
-    (should (eq (claude-repl--ws-get "test-ws" :status) :permission))
+    (should (eq (claude-repl--ws-get "test-ws" :claude-state) :permission))
     (should-not (claude-repl--ws-get "test-ws" :viewed))))
 
 ;;;; ---- Tests: drain-pending-show-panels ----
@@ -322,14 +322,6 @@ This prevents the oscillation where update-ws-state immediately sees
 
 ;;;; ---- Tests: on-close (single close audit point) ----
 
-(ert-deftest claude-repl-test-panels-on-close-marks-hidden ()
-  "on-close sets :panels-hidden on the current workspace."
-  (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
-      (claude-repl--on-close)
-      (should (claude-repl--ws-get "test-ws" :panels-hidden)))))
-
 (ert-deftest claude-repl-test-panels-on-close-calls-hide-panels ()
   "on-close invokes hide-panels."
   (claude-repl-test--with-clean-state
@@ -346,8 +338,8 @@ This prevents the oscillation where update-ws-state immediately sees
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ignored"))
               ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
       (claude-repl--on-close "specific-ws")
-      (should (claude-repl--ws-get "specific-ws" :panels-hidden))
-      (should-not (claude-repl--ws-get "ignored" :panels-hidden)))))
+      (should (eq (claude-repl--ws-get "specific-ws" :repl-state) :inactive))
+      (should-not (claude-repl--ws-get "ignored" :repl-state)))))
 
 (ert-deftest claude-repl-test-panels-on-close-nil-ws-still-hides ()
   "on-close with nil workspace hides panels but skips bookkeeping."
@@ -379,13 +371,13 @@ This prevents the oscillation where update-ws-state immediately sees
 
 ;;;; ---- Tests: hide-and-preserve-status ----
 
-(ert-deftest claude-repl-test-panels-hide-and-preserve-marks-hidden ()
-  "hide-and-preserve-status sets :panels-hidden flag via on-close."
+(ert-deftest claude-repl-test-panels-hide-and-preserve-marks-inactive ()
+  "hide-and-preserve-status routes through on-close and sets :repl-state :inactive."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
       (claude-repl--hide-and-preserve-status)
-      (should (claude-repl--ws-get "test-ws" :panels-hidden)))))
+      (should (eq (claude-repl--ws-get "test-ws" :repl-state) :inactive)))))
 
 (ert-deftest claude-repl-test-panels-hide-and-preserve-no-workspace-errors ()
   "hide-and-preserve-status errors when no workspace is active."
@@ -405,10 +397,9 @@ This prevents the oscillation where update-ws-state immediately sees
 
 ;;;; ---- Tests: show-hidden-panels ----
 
-(ert-deftest claude-repl-test-panels-show-hidden-clears-flag ()
-  "show-hidden-panels clears :panels-hidden and calls show-existing-panels."
+(ert-deftest claude-repl-test-panels-show-hidden-calls-show-existing ()
+  "show-hidden-panels calls show-existing-panels and re-activates :inactive → :done."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "test-ws" :panels-hidden t)
     (claude-repl--ws-set "test-ws" :inactive)
     (let ((show-called nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
@@ -416,9 +407,8 @@ This prevents the oscillation where update-ws-state immediately sees
                  (lambda () (setq show-called t))))
         (claude-repl--show-hidden-panels)
         (should show-called)
-        (should-not (claude-repl--ws-get "test-ws" :panels-hidden))
         ;; :inactive should have been re-activated to :done via mark-viewed
-        (should (eq (claude-repl--ws-get "test-ws" :status) :done))))))
+        (should (eq (claude-repl--ws-get "test-ws" :claude-state) :done))))))
 
 (ert-deftest claude-repl-test-panels-show-hidden-clears-repl-state ()
   "show-hidden-panels clears :repl-state so the workspace is no longer :inactive."
@@ -1282,20 +1272,17 @@ This prevents the oscillation where update-ws-state immediately sees
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
       (should-error (claude-repl-kill)))))
 
-(ert-deftest claude-repl-test-panels-kill-clears-all-state-fields ()
-  "claude-repl-kill resets :status, :claude-state, :repl-state, and :panels-hidden."
+(ert-deftest claude-repl-test-panels-kill-clears-state-axes ()
+  "claude-repl-kill resets :claude-state and :repl-state."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-set "ws1" :thinking)               ;; writes :status + :claude-state
+    (claude-repl--ws-set "ws1" :thinking)
     (claude-repl--ws-set-repl-state "ws1" :inactive)
-    (claude-repl--ws-put "ws1" :panels-hidden t)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'claude-repl--kill-session) #'ignore)
               ((symbol-function 'force-mode-line-update) #'ignore))
       (claude-repl-kill)
-      (should-not (claude-repl--ws-get "ws1" :status))
       (should-not (claude-repl--ws-get "ws1" :claude-state))
-      (should-not (claude-repl--ws-get "ws1" :repl-state))
-      (should-not (claude-repl--ws-get "ws1" :panels-hidden)))))
+      (should-not (claude-repl--ws-get "ws1" :repl-state)))))
 
 ;;;; ---- Tests: redirect-from-claude-before-save with Claude window ----
 
@@ -1371,12 +1358,10 @@ cycle the workspace back to :inactive."
 :viewed is deferred so update-ws-state doesn't immediately cycle back to :inactive."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :inactive)
-    (claude-repl--ws-put "ws1" :panels-hidden t)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'claude-repl--show-existing-panels) #'ignore))
       (claude-repl--show-hidden-panels)
       (should (eq (claude-repl--ws-state "ws1") :done))
-      (should-not (claude-repl--ws-get "ws1" :viewed))
-      (should-not (claude-repl--ws-get "ws1" :panels-hidden)))))
+      (should-not (claude-repl--ws-get "ws1" :viewed)))))
 
 ;;; test-panels.el ends here

@@ -35,29 +35,22 @@ Populates `claude-repl--priority-images' with display-ready image specs."
 
 ;;; Workspace state accessors ------------------------------------------------
 
-;; --- State axis migration (analysis #8) ---
+;; --- Two-axis state model (analysis #8) ---
 ;;
-;; The legacy single `:status' plist key is being split into two
-;; orthogonal axes:
-;;   :claude-state — Claude-owned (`:thinking', `:done', `:permission').
-;;                   Driven by hook sentinels; tests also set directly.
-;;   :repl-state   — Emacs-owned (`:init', `:inactive').  Driven by
-;;                   panel-visibility and lifecycle events.
-;;
-;; This commit adds the new keys, typed setters, and getters alongside
-;; the legacy `:status'.  The legacy `ws-set' / `ws-clear-if-status' are
-;; retained as thin wrappers that also populate the legacy field so
-;; readers that have not yet been migrated continue to work.  All writes
-;; of `:claude-state' also write `:status' for the duration of the
-;; migration ("write-both").  A later commit migrates readers, then
-;; deletes the legacy field.
+;; Workspace state is split into two orthogonal plist keys:
+;;   :claude-state — Claude-owned lifecycle.  Values: nil | :init |
+;;                   :idle | :thinking | :done | :permission.
+;;                   Written primarily by hook sentinels; narrow
+;;                   Emacs-side exceptions at lifecycle boundaries
+;;                   (start-fresh writes :init; kill clears).
+;;   :repl-state   — Emacs-owned panel-visibility flag.  Values: nil |
+;;                   :inactive.  Does not contribute to tab color.
 
 (defun claude-repl--ws-state (ws)
-  "Return the legacy combined status keyword for workspace WS.
-Reads `:status'.  Returns one of: :thinking, :done, :permission,
-:inactive, or nil.  During the state-axis migration, this stays in sync
-with `:claude-state' via write-both in `ws-set-claude-state'."
-  (claude-repl--ws-get ws :status))
+  "Return the current :claude-state keyword for workspace WS, or nil.
+Compat shim: equivalent to `claude-repl--ws-claude-state', retained for
+test callers that have not yet migrated."
+  (claude-repl--ws-get ws :claude-state))
 
 (defun claude-repl--ws-claude-state (ws)
   "Return the current :claude-state keyword for workspace WS, or nil."
@@ -69,20 +62,15 @@ with `:claude-state' via write-both in `ws-set-claude-state'."
 
 (defun claude-repl--ws-set-claude-state (ws state)
   "Set workspace WS's :claude-state to STATE.
-STATE is one of: :thinking, :done, :permission, :inactive, or nil.
-Write-both: also updates the legacy `:status' field so readers that
-have not yet migrated to `ws-claude-state' continue to observe the
-correct value.  Removed in a later commit once readers are migrated."
+STATE is one of: nil, :init, :idle, :thinking, :done, :permission."
   (unless ws (error "claude-repl--ws-set-claude-state: ws is nil"))
   (claude-repl--log ws "claude-state %s -> %s" ws state)
   (claude-repl--ws-put ws :claude-state state)
-  (claude-repl--ws-put ws :status state)
   (force-mode-line-update t))
 
 (defun claude-repl--ws-set-repl-state (ws state)
   "Set workspace WS's :repl-state to STATE.
-STATE is one of: :init, :inactive, or nil.  Independent of the Claude
-state axis — writing this does not touch `:claude-state' or `:status'."
+STATE is one of: nil, :inactive.  Independent of the Claude-state axis."
   (unless ws (error "claude-repl--ws-set-repl-state: ws is nil"))
   (claude-repl--log ws "repl-state %s -> %s" ws state)
   (claude-repl--ws-put ws :repl-state state)
@@ -90,15 +78,12 @@ state axis — writing this does not touch `:claude-state' or `:status'."
 
 (defun claude-repl--ws-claude-state-clear-if (ws state)
   "Clear WS's :claude-state when it currently equals STATE.
-Compare-and-clear: no-op if the current value is not STATE.  Write-both
-semantics mirror `ws-set-claude-state': the legacy `:status' field is
-also cleared on match."
+Compare-and-clear: no-op if the current value is not STATE."
   (unless ws (error "claude-repl--ws-claude-state-clear-if: ws is nil"))
   (if (eq (claude-repl--ws-get ws :claude-state) state)
       (progn
         (claude-repl--log ws "claude-state-clear-if %s %s -> nil" ws state)
         (claude-repl--ws-put ws :claude-state nil)
-        (claude-repl--ws-put ws :status nil)
         (force-mode-line-update t))
     (claude-repl--log-verbose ws
                               "claude-state-clear-if ws=%s state=%s no-op (current=%s)"
@@ -499,15 +484,14 @@ panel visibility (panels may be hidden via `SPC o c')."
       claude-repl--timers)
 
 (defun claude-repl--maybe-clear-stale-state (ws)
-  "Clear WS state when no vterm process is running.
+  "Clear WS's claude-state when no vterm process is running.
 Preserves :thinking (which is managed by the input/sentinel lifecycle).
-Clears both the legacy `:status' and the new `:claude-state' fields for
-write-both consistency during the state-axis migration."
+Scheduled for replacement with a :repl-state :dead transition — see
+follow-up commit."
   (let ((state (claude-repl--ws-claude-state ws)))
     (if (and state (not (eq state :thinking)))
         (progn
           (claude-repl--log ws "maybe-clear-stale-state: ws=%s clearing %s (no vterm)" ws state)
-          (claude-repl--ws-put ws :status nil)
           (claude-repl--ws-put ws :claude-state nil)
           (force-mode-line-update t))
       (claude-repl--log-verbose ws "maybe-clear-stale-state: ws=%s no-op (state=%s)" ws state))))
