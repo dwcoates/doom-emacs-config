@@ -1258,44 +1258,37 @@ is still skipped and the file is still deleted."
               (should-not panels-opened)))
         (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
 
-(ert-deftest claude-repl-test-on-session-start-event-no-vterm-errors ()
-  "on-session-start-event should error loudly when no vterm buffer exists."
+(ert-deftest claude-repl-test-on-session-start-event-no-vterm-silent-noop ()
+  "on-session-start-event silently no-ops when no vterm buffer exists.
+This covers session_start hooks fired by Claude sessions that this
+module does not own (common when the hook's cwd routes to a default
+persp with no managed vterm)."
   (claude-repl-test--with-clean-state
-    (let ((msg-called nil))
+    (let ((msg-called nil)
+          (claude-state-written nil))
       (cl-letf (((symbol-function 'message)
-                 (lambda (&rest _) (setq msg-called t))))
+                 (lambda (&rest _) (setq msg-called t)))
+                ((symbol-function 'claude-repl--ws-set-claude-state)
+                 (lambda (&rest _) (setq claude-state-written t))))
         (claude-repl--on-session-start-event "ws1" "/some/dir")
-        (should msg-called)))))
+        (should-not msg-called)
+        (should-not claude-state-written)))))
 
-(ert-deftest claude-repl-test-on-session-start-event-dead-vterm-errors ()
-  "on-session-start-event should error loudly when vterm buffer is dead."
+(ert-deftest claude-repl-test-on-session-start-event-dead-vterm-silent-noop ()
+  "on-session-start-event silently no-ops when the vterm buffer is dead."
   (claude-repl-test--with-clean-state
     (let ((fake-buf (generate-new-buffer " *test-session-start-dead*"))
-          (msg-called nil))
+          (msg-called nil)
+          (claude-state-written nil))
       (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
       (kill-buffer fake-buf)
       (cl-letf (((symbol-function 'message)
-                 (lambda (&rest _) (setq msg-called t))))
+                 (lambda (&rest _) (setq msg-called t)))
+                ((symbol-function 'claude-repl--ws-set-claude-state)
+                 (lambda (&rest _) (setq claude-state-written t))))
         (claude-repl--on-session-start-event "ws1" "/some/dir")
-        (should msg-called)))))
-
-(ert-deftest claude-repl-test-on-session-start-event-swaps-placeholder ()
-  "on-session-start-event should call swap-placeholder with the vterm buffer."
-  (claude-repl-test--with-clean-state
-    (let ((fake-buf (generate-new-buffer " *test-session-start-swap*"))
-          (swapped-buf nil))
-      (unwind-protect
-          (progn
-            (with-current-buffer fake-buf
-              (setq-local claude-repl--ready nil))
-            (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
-            (cl-letf (((symbol-function 'claude-repl--cancel-ready-timer) #'ignore)
-                      ((symbol-function 'claude-repl--swap-placeholder)
-                       (lambda (buf) (setq swapped-buf buf)))
-                      ((symbol-function 'claude-repl--open-panels-after-ready) #'ignore))
-              (claude-repl--on-session-start-event "ws1" "/some/dir")
-              (should (eq swapped-buf fake-buf))))
-        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
+        (should-not msg-called)
+        (should-not claude-state-written)))))
 
 (ert-deftest claude-repl-test-on-session-start-event-sets-idle ()
   "on-session-start-event writes :claude-state :idle (transition from :init)."

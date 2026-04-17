@@ -196,30 +196,38 @@ Logs the resolution, clears :thinking, and runs the finished handler."
 
 (defun claude-repl--on-session-start-event (ws _dir)
   "Handle a session_start event for workspace WS.
-This is the sole readiness signal: transitions `:claude-state' from
-`:init' to `:idle', sets `claude-repl--ready' on the vterm buffer,
-cancels the ready timer, swaps the loading placeholder, drains pending
-prompts, and opens panels.  Session ID is already set by
+When WS has a live vterm buffer, this is Claude becoming ready:
+transitions `:claude-state' from `:init' to `:idle', sets
+`claude-repl--ready' on the vterm buffer, cancels the ready timer,
+and opens panels (via `open-panels-after-ready').
+
+When WS has no live vterm buffer, the hook was not fired by a session
+this module is managing (commonly: `workspace-for-buffer' routed the
+cwd to the default persp because the managed vterm is in a different
+persp, or the hook came from a Claude session the user started by
+hand outside `SPC o c').  In that case we silently no-op — no
+`:claude-state' write, no user-facing error.  Session ID is still
+persisted for whatever workspace matched, via
 `claude-repl--update-session-id-from-sentinel' before this callback runs.
-Idempotent — no-op on the readiness side if already ready, but the
-claude-state write still fires (idempotent at the plist level)."
+
+Idempotent on repeated fires for the same workspace."
   (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (claude-repl--log ws "on-session-start-event: ENTER ws=%s vterm-buf=%S vterm-live=%s"
                       ws (when vterm-buf (buffer-name vterm-buf))
                       (if (and vterm-buf (buffer-live-p vterm-buf)) "yes" "no"))
-    (claude-repl--ws-set-claude-state ws :idle)
     (cond
      ((or (null vterm-buf) (not (buffer-live-p vterm-buf)))
-      (claude-repl--log ws "on-session-start-event: ERROR no live vterm buffer for ws=%s" ws)
-      (message "[claude-repl] ERROR: session_start for workspace '%s' but no live vterm buffer" ws))
+      (claude-repl--log ws
+                        "on-session-start-event: ws=%s has no managed vterm — session_start not for us, skipping"
+                        ws))
      ((buffer-local-value 'claude-repl--ready vterm-buf)
       (claude-repl--log ws "on-session-start-event: already ready ws=%s — no-op" ws))
      (t
       (claude-repl--log ws "on-session-start-event: marking ready ws=%s" ws)
+      (claude-repl--ws-set-claude-state ws :idle)
       (with-current-buffer vterm-buf
         (setq claude-repl--ready t))
       (claude-repl--cancel-ready-timer ws)
-      (claude-repl--swap-placeholder vterm-buf)
       (claude-repl--open-panels-after-ready ws)))))
 
 ;;; Event dispatch
