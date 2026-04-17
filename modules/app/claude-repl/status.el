@@ -446,9 +446,16 @@ panel visibility (panels may be hidden via `SPC o c')."
 Sets `:repl-state :dead' and clears `:claude-state'.  This is a
 documented lifecycle-cleanup exception to the sentinel-only writer
 rule: no hook will ever fire again for a dead process, so Emacs is
-the only observer that can reset state.  No-op if `:repl-state' is
-already `:dead' (idempotent on the poll path)."
-  (unless (eq (claude-repl--ws-repl-state ws) :dead)
+the only observer that can reset state.
+
+No-op in two cases:
+- `:repl-state' is already `:dead' (idempotent on the poll path).
+- `:claude-state' is `:init' — Claude is starting, the vterm process
+  may not have reached running state yet, and observing no process
+  does not mean dead.  The session-start hook will transition away
+  from `:init' shortly; until then the timer leaves things alone."
+  (unless (or (eq (claude-repl--ws-repl-state ws) :dead)
+              (eq (claude-repl--ws-claude-state ws) :init))
     (claude-repl--log ws "mark-dead-vterm: ws=%s claude-state=%s -> :dead"
                       ws (claude-repl--ws-claude-state ws))
     (claude-repl--ws-put ws :repl-state :dead)

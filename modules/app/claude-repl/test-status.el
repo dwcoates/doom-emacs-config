@@ -931,6 +931,17 @@ trees; under the revised model only the Stop hook writes :done."
     ;; Second call must not re-run the clear — claude-state stays as-is.
     (should (eq (claude-repl--ws-claude-state "ws1") :done))))
 
+(ert-deftest claude-repl-test-mark-dead-vterm-preserves-init ()
+  "mark-dead-vterm is a no-op when :claude-state is :init.
+During start-fresh, the timer may tick before vterm-running-p returns t
+even though the session is legitimately coming up; under the old code
+this clobbered :init with :dead.  The :init guard prevents that."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :init)
+    (claude-repl--mark-dead-vterm "ws1")
+    (should (eq (claude-repl--ws-claude-state "ws1") :init))
+    (should-not (claude-repl--ws-repl-state "ws1"))))
+
 ;;;; ---- Tests: on-frame-focus ----
 
 (ert-deftest claude-repl-test-on-frame-focus-with-focus ()
