@@ -20,24 +20,44 @@
 ;; stop_*, prompt_submit_*.
 
 (defun claude-repl--ws-for-dir-fast (dir)
-  "Try the fast path for DIR: git-root -> hash -> buffer -> workspace.
-Return the workspace name or nil."
+  "Fast path for DIR: iterate `claude-repl--workspaces' and match :project-dir.
+Returns the workspace name whose canonicalized :project-dir equals the
+canonicalized git-root of DIR, or nil.
+
+Unlike the previous dir -> git-root -> md5 -> buffer -> persp-lookup chain,
+this function does not touch persp-mode or buffer names.  Bypassing the
+persp lookup closes the last known leak path that fed \"none\" into
+`claude-repl--workspaces' when persp-mode routed a Claude buffer to the
+wrong perspective."
   (claude-repl--log-verbose nil "ws-for-dir-fast: ENTER dir=%S" dir)
-  (let* ((root (claude-repl--git-root dir))
-         (_ (claude-repl--log-verbose nil "ws-for-dir-fast: git-root returned %S" root))
-         (hash (when root (substring (md5 root) 0 8)))
-         (_ (claude-repl--log-verbose nil "ws-for-dir-fast: hash=%s" hash))
-         (buf-name (when hash (format "*claude-%s*" hash)))
-         (buf (when buf-name (get-buffer buf-name)))
-         (_ (claude-repl--log-verbose nil "ws-for-dir-fast: buf-name=%S buf-exists=%s buf-live=%s"
-                              buf-name (if buf "yes" "no")
-                              (if (and buf (buffer-live-p buf)) "yes" "no")))
-         (ws (when buf (claude-repl--workspace-for-buffer buf))))
-    (if ws
-        (claude-repl--log-verbose ws "ws-for-dir-fast: HIT dir=%S root=%S hash=%s ws=%s" dir root hash ws)
-      (claude-repl--log-verbose nil "ws-for-dir-fast: MISS dir=%S root=%S hash=%s buf-name=%S buf=%s ws=%s"
-                        dir root hash buf-name (if buf "yes" "no") ws))
-    ws))
+  (let* ((target-root (and dir (claude-repl--git-root dir)))
+         (canonical-target (when target-root
+                             (claude-repl--path-canonical target-root)))
+         (match nil))
+    (claude-repl--log-verbose nil "ws-for-dir-fast: git-root=%S canonical=%S"
+                              target-root canonical-target)
+    (when canonical-target
+      (maphash
+       (lambda (ws _plist)
+         (unless match
+           (let* ((proj (claude-repl--ws-get ws :project-dir))
+                  (canonical-proj (when proj
+                                    (claude-repl--path-canonical proj))))
+             (claude-repl--log-verbose nil "ws-for-dir-fast: check ws=%s proj=%S canonical=%S match=%s"
+                                       ws proj canonical-proj
+                                       (if (and canonical-proj
+                                                (string= canonical-target canonical-proj))
+                                           "YES" "no"))
+             (when (and canonical-proj
+                        (string= canonical-target canonical-proj))
+               (setq match ws)))))
+       claude-repl--workspaces))
+    (if match
+        (claude-repl--log-verbose match "ws-for-dir-fast: HIT dir=%S root=%S ws=%s"
+                                  dir canonical-target match)
+      (claude-repl--log-verbose nil "ws-for-dir-fast: MISS dir=%S root=%S"
+                                dir canonical-target))
+    match))
 
 (defun claude-repl--ws-for-dir-container (dir)
   "Try container-path matching for DIR.

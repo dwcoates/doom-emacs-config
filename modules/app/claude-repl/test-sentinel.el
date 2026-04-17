@@ -305,56 +305,77 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
 ;;;; ---- Tests: ws-for-dir-fast ----
 
 (ert-deftest claude-repl-test-ws-for-dir-fast-hit ()
-  "ws-for-dir-fast should return workspace when git-root -> hash -> buffer -> ws all resolve."
+  "ws-for-dir-fast returns the workspace whose :project-dir matches git-root of DIR."
   (claude-repl-test--with-clean-state
-    ;; Use the canonical form throughout so hash calc matches the real
-    ;; --git-root's post-canonicalization behavior regardless of platform
-    ;; (e.g. macOS firmlinks rewrite /home → /System/Volumes/Data/home).
-    (let* ((test-root (claude-repl--path-canonical "/home/user/project"))
-           (hash (substring (md5 test-root) 0 8))
-           (buf-name (format "*claude-%s*" hash))
-           (buf (get-buffer-create buf-name)))
-      (unwind-protect
-          (cl-letf (((symbol-function 'claude-repl--git-root)
-                     (lambda (_d) test-root))
-                    ((symbol-function 'claude-repl--workspace-for-buffer)
-                     (lambda (_b) "my-workspace")))
-            (should (equal (claude-repl--ws-for-dir-fast
-                            (concat test-root "/subdir"))
-                           "my-workspace")))
-        (when (buffer-live-p buf)
-          (kill-buffer buf))))))
+    ;; Use canonical paths throughout so string= comparisons survive
+    ;; macOS firmlinks (/home -> /System/Volumes/Data/home, etc.).
+    (let* ((test-root (claude-repl--path-canonical "/home/user/project")))
+      (claude-repl--ws-put "my-workspace" :project-dir test-root)
+      (cl-letf (((symbol-function 'claude-repl--git-root)
+                 (lambda (_d) test-root)))
+        (should (equal (claude-repl--ws-for-dir-fast
+                        (concat test-root "/subdir"))
+                       "my-workspace"))))))
 
 (ert-deftest claude-repl-test-ws-for-dir-fast-no-git-root ()
-  "ws-for-dir-fast should return nil when git-root returns nil."
+  "ws-for-dir-fast returns nil when git-root returns nil."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function 'claude-repl--git-root)
                (lambda (_d) nil)))
       (should-not (claude-repl--ws-for-dir-fast "/some/dir")))))
 
-(ert-deftest claude-repl-test-ws-for-dir-fast-no-buffer ()
-  "ws-for-dir-fast should return nil when the expected buffer does not exist."
+(ert-deftest claude-repl-test-ws-for-dir-fast-no-match ()
+  "ws-for-dir-fast returns nil when no workspace's :project-dir matches."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "other-ws" :project-dir
+                         (claude-repl--path-canonical "/home/user/other"))
+    (cl-letf (((symbol-function 'claude-repl--git-root)
+               (lambda (_d) (claude-repl--path-canonical "/home/user/project"))))
+      (should-not (claude-repl--ws-for-dir-fast "/home/user/project/subdir")))))
+
+(ert-deftest claude-repl-test-ws-for-dir-fast-empty-workspaces ()
+  "ws-for-dir-fast returns nil when the workspaces hash is empty."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function 'claude-repl--git-root)
-               (lambda (_d) "/some/root")))
-      ;; No buffer named *claude-HASH* exists
-      (should-not (claude-repl--ws-for-dir-fast "/some/root/subdir")))))
+               (lambda (_d) "/home/user/project")))
+      (should-not (claude-repl--ws-for-dir-fast "/home/user/project/subdir")))))
 
-(ert-deftest claude-repl-test-ws-for-dir-fast-buffer-no-workspace ()
-  "ws-for-dir-fast should return nil when buffer exists but workspace-for-buffer returns nil."
+(ert-deftest claude-repl-test-ws-for-dir-fast-picks-correct-among-multiple ()
+  "ws-for-dir-fast returns the workspace matching the target git-root among several."
   (claude-repl-test--with-clean-state
-    (let* ((test-root "/home/user/project")
-           (hash (substring (md5 (claude-repl--path-canonical test-root)) 0 8))
-           (buf-name (format "*claude-%s*" hash))
-           (buf (get-buffer-create buf-name)))
-      (unwind-protect
-          (cl-letf (((symbol-function 'claude-repl--git-root)
-                     (lambda (_d) test-root))
-                    ((symbol-function 'claude-repl--workspace-for-buffer)
-                     (lambda (_b) nil)))
-            (should-not (claude-repl--ws-for-dir-fast "/home/user/project/subdir")))
-        (when (buffer-live-p buf)
-          (kill-buffer buf))))))
+    (let ((root-a (claude-repl--path-canonical "/home/user/proj-a"))
+          (root-b (claude-repl--path-canonical "/home/user/proj-b"))
+          (root-c (claude-repl--path-canonical "/home/user/proj-c")))
+      (claude-repl--ws-put "ws-a" :project-dir root-a)
+      (claude-repl--ws-put "ws-b" :project-dir root-b)
+      (claude-repl--ws-put "ws-c" :project-dir root-c)
+      (cl-letf (((symbol-function 'claude-repl--git-root)
+                 (lambda (_d) root-b)))
+        (should (equal (claude-repl--ws-for-dir-fast (concat root-b "/sub"))
+                       "ws-b"))))))
+
+(ert-deftest claude-repl-test-ws-for-dir-fast-skips-ws-without-project-dir ()
+  "ws-for-dir-fast skips workspaces whose :project-dir is nil."
+  (claude-repl-test--with-clean-state
+    (let ((target (claude-repl--path-canonical "/home/user/project")))
+      (claude-repl--ws-put "no-dir-ws" :vterm-buffer nil) ; registered, :project-dir nil
+      (claude-repl--ws-put "real-ws" :project-dir target)
+      (cl-letf (((symbol-function 'claude-repl--git-root)
+                 (lambda (_d) target)))
+        (should (equal (claude-repl--ws-for-dir-fast (concat target "/sub"))
+                       "real-ws"))))))
+
+(ert-deftest claude-repl-test-ws-for-dir-fast-canonicalizes-project-dir ()
+  "ws-for-dir-fast canonicalizes :project-dir so trailing-slash variants still match."
+  (claude-repl-test--with-clean-state
+    (let* ((canonical (claude-repl--path-canonical "/home/user/project"))
+           ;; Store :project-dir with a trailing slash; canonicalization strips it.
+           (stored (concat canonical "/")))
+      (claude-repl--ws-put "trail-ws" :project-dir stored)
+      (cl-letf (((symbol-function 'claude-repl--git-root)
+                 (lambda (_d) canonical)))
+        (should (equal (claude-repl--ws-for-dir-fast (concat canonical "/sub"))
+                       "trail-ws"))))))
 
 ;;;; ---- Tests: ws-for-dir-container ----
 
@@ -634,50 +655,32 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
 ;;;; ---- Tests: ws-for-dir-fast uncovered edge cases ----
 
 (ert-deftest claude-repl-test-ws-for-dir-fast-nil-dir ()
-  "ws-for-dir-fast should return nil when DIR is nil."
+  "ws-for-dir-fast returns nil when DIR is nil (no git-root call attempted)."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--git-root)
-               (lambda (d) d)))
-      (should-not (claude-repl--ws-for-dir-fast nil)))))
+    (should-not (claude-repl--ws-for-dir-fast nil))))
 
-(ert-deftest claude-repl-test-ws-for-dir-fast-trailing-slash ()
-  "ws-for-dir-fast should match when git-root returns a path with trailing slash.
-The hash is computed via path-canonical which strips trailing slashes."
+(ert-deftest claude-repl-test-ws-for-dir-fast-canonicalizes-git-root-trailing-slash ()
+  "ws-for-dir-fast matches when git-root returns a path with a trailing slash.
+Both the stored :project-dir and git-root output are canonicalized, which
+strips trailing slashes."
   (claude-repl-test--with-clean-state
-    (let* ((canonical (claude-repl--path-canonical "/home/user/project/"))
-           (hash (substring (md5 canonical) 0 8))
-           (buf-name (format "*claude-%s*" hash))
-           (buf (get-buffer-create buf-name)))
-      (unwind-protect
-          (cl-letf (((symbol-function 'claude-repl--git-root)
-                     (lambda (_d) canonical))
-                    ((symbol-function 'claude-repl--workspace-for-buffer)
-                     (lambda (_b) "trail-ws")))
-            (should (equal (claude-repl--ws-for-dir-fast "/home/user/project/sub")
-                           "trail-ws")))
-        (when (buffer-live-p buf)
-          (kill-buffer buf))))))
+    (let* ((canonical (claude-repl--path-canonical "/home/user/project")))
+      (claude-repl--ws-put "trail-ws" :project-dir canonical)
+      (cl-letf (((symbol-function 'claude-repl--git-root)
+                 ;; git-root returns with a trailing slash
+                 (lambda (_d) (concat canonical "/"))))
+        (should (equal (claude-repl--ws-for-dir-fast "/home/user/project/sub")
+                       "trail-ws"))))))
 
 (ert-deftest claude-repl-test-ws-for-dir-fast-symlink-canonical ()
-  "ws-for-dir-fast should produce a stable hash regardless of symlink paths.
-path-canonical uses file-truename which resolves symlinks."
+  "ws-for-dir-fast matches symlinked paths because path-canonical resolves symlinks."
   (claude-repl-test--with-clean-state
-    ;; Simulate: git-root returns a symlink path, but path-canonical resolves it
-    ;; to a real path.  The buffer was created using the real path's hash.
-    (let* ((real-root "/home/user/real-project")
-           (canonical (claude-repl--path-canonical real-root))
-           (hash (substring (md5 canonical) 0 8))
-           (buf-name (format "*claude-%s*" hash))
-           (buf (get-buffer-create buf-name)))
-      (unwind-protect
-          (cl-letf (((symbol-function 'claude-repl--git-root)
-                     (lambda (_d) canonical))
-                    ((symbol-function 'claude-repl--workspace-for-buffer)
-                     (lambda (_b) "sym-ws")))
-            (should (equal (claude-repl--ws-for-dir-fast "/home/user/real-project/sub")
-                           "sym-ws")))
-        (when (buffer-live-p buf)
-          (kill-buffer buf))))))
+    (let* ((canonical (claude-repl--path-canonical "/home/user/real-project")))
+      (claude-repl--ws-put "sym-ws" :project-dir canonical)
+      (cl-letf (((symbol-function 'claude-repl--git-root)
+                 (lambda (_d) canonical)))
+        (should (equal (claude-repl--ws-for-dir-fast "/home/user/real-project/sub")
+                       "sym-ws"))))))
 
 ;;;; ---- Tests: ws-for-dir-container uncovered edge cases ----
 
