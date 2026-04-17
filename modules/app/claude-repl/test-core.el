@@ -751,6 +751,130 @@ When t, it should call `message'."
     (should-not (claude-repl--ws-get "ws1" :status))
     (should-not (claude-repl--ws-get "ws1" :priority))))
 
+;;;; ---- Tests: record-project-dir ----
+
+(ert-deftest claude-repl-test-record-project-dir-sets-when-unset ()
+  "record-project-dir writes :project-dir when workspace has none."
+  (claude-repl-test--with-clean-state
+    (claude-repl--record-project-dir "ws1" "/path/to/ws1")
+    (should (equal (claude-repl--ws-get "ws1" :project-dir) "/path/to/ws1"))))
+
+(ert-deftest claude-repl-test-record-project-dir-preserves-existing ()
+  "record-project-dir never overwrites an already-set :project-dir.
+Load-bearing: worktree workspaces store their canonical path via
+`register-worktree-ws' before ensure-vterm-buffer runs, and a drifted
+`default-directory' from elsewhere must not clobber it."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/canonical/worktree")
+    (claude-repl--record-project-dir "ws1" "/drifted/default-dir")
+    (should (equal (claude-repl--ws-get "ws1" :project-dir) "/canonical/worktree"))))
+
+(ert-deftest claude-repl-test-record-project-dir-creates-ws-entry ()
+  "record-project-dir works even when the workspace has no hash entry yet.
+`ws-put' via `plist-put' on nil produces a fresh plist, so a workspace
+that was never registered still gets :project-dir — this is the exact
+path that closes the SPC-j-x-restart warning."
+  (claude-repl-test--with-clean-state
+    (should-not (gethash "fresh-ws" claude-repl--workspaces))
+    (claude-repl--record-project-dir "fresh-ws" "/path")
+    (should (equal (claude-repl--ws-get "fresh-ws" :project-dir) "/path"))))
+
+;;;; ---- Tests: create-buffer ----
+
+(ert-deftest claude-repl-test-create-buffer-vterm-name ()
+  "create-buffer with no suffix produces the vterm buffer name."
+  (let ((buf nil))
+    (unwind-protect
+        (progn
+          (setq buf (claude-repl--create-buffer "ws1"))
+          (should (buffer-live-p buf))
+          (should (equal (buffer-name buf) "*claude-ws1*")))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-create-buffer-input-suffix ()
+  "create-buffer with \"-input\" suffix produces the input buffer name."
+  (let ((buf nil))
+    (unwind-protect
+        (progn
+          (setq buf (claude-repl--create-buffer "ws1" "-input"))
+          (should (equal (buffer-name buf) "*claude-input-ws1*")))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-create-buffer-sets-owning-workspace ()
+  "create-buffer sets `claude-repl--owning-workspace' buffer-locally."
+  (let ((buf nil))
+    (unwind-protect
+        (progn
+          (setq buf (claude-repl--create-buffer "ws1"))
+          (should (equal (buffer-local-value 'claude-repl--owning-workspace buf)
+                         "ws1")))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-create-buffer-owning-workspace-survives-mode ()
+  "`claude-repl--owning-workspace' survives `kill-all-local-variables'.
+Major-mode activation (vterm-mode, claude-input-mode) wipes buffer-local
+bindings; the permanent-local property on this variable is what keeps
+ownership intact across that transition."
+  (let ((buf nil))
+    (unwind-protect
+        (progn
+          (setq buf (claude-repl--create-buffer "ws1"))
+          (with-current-buffer buf
+            (kill-all-local-variables))
+          (should (equal (buffer-local-value 'claude-repl--owning-workspace buf)
+                         "ws1")))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-create-buffer-attaches-to-persp ()
+  "create-buffer adds the buffer to WS's perspective when it exists."
+  (let ((buf nil)
+        (added nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'persp-get-by-name)
+                   (lambda (_name) 'fake-persp))
+                  ((symbol-function 'persp-add-buffer)
+                   (lambda (b persp &rest _)
+                     (setq added (list b persp)))))
+          (setq buf (claude-repl--create-buffer "ws1"))
+          (should (equal added (list buf 'fake-persp))))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-create-buffer-skips-persp-when-not-found ()
+  "create-buffer does not error when no perspective named WS exists."
+  (let ((buf nil)
+        (add-called nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_name) nil))
+                  ((symbol-function 'persp-add-buffer)
+                   (lambda (&rest _) (setq add-called t))))
+          (setq buf (claude-repl--create-buffer "ws1"))
+          (should-not add-called))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-create-buffer-skips-persp-when-ws-nil ()
+  "create-buffer does not attempt persp attachment when WS is nil.
+Falls back to the \"default\" buffer name via `claude-repl--buffer-name'
+so the buffer still has a sensible name."
+  (let ((buf nil)
+        (get-called nil))
+    (unwind-protect
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
+                  ((symbol-function 'persp-get-by-name)
+                   (lambda (_name) (setq get-called t) nil)))
+          (setq buf (claude-repl--create-buffer nil))
+          (should-not get-called)
+          (should (equal (buffer-name buf) "*claude-default*")))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-create-buffer-idempotent ()
+  "Calling create-buffer twice with the same args reuses the buffer."
+  (let ((first nil))
+    (unwind-protect
+        (let* ((_ (setq first (claude-repl--create-buffer "ws1")))
+               (second (claude-repl--create-buffer "ws1")))
+          (should (eq first second)))
+      (when (buffer-live-p first) (kill-buffer first)))))
+
 ;;;; ---- Tests: active-inst ----
 
 (ert-deftest claude-repl-test-active-inst-default-bare-metal ()

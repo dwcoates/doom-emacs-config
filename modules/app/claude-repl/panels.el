@@ -386,7 +386,7 @@ Allows mouse-initiated selection through."
   "Create input buffer for workspace WS if needed, put in claude-input-mode."
   (claude-repl--log ws "ensure-input-buffer")
   (let* ((root (claude-repl--resolve-root))
-         (input-buf (get-buffer-create (claude-repl--buffer-name "-input" ws))))
+         (input-buf (claude-repl--create-buffer ws "-input")))
     (claude-repl--ws-put ws :input-buffer input-buf)
     (with-current-buffer input-buf
       (setq-local claude-repl--project-root root)
@@ -415,7 +415,6 @@ entered vterm-mode."
   (setq-local word-wrap t)
   (claude-repl--set-buffer-background claude-repl--vterm-background-grey)
   (claude-repl--log ws "ensure-vterm created %s root=%s" (buffer-name) root)
-  (setq-local claude-repl--owning-workspace ws)
   (claude-repl--start-claude ws))
 
 (defun claude-repl--ensure-vterm-buffer (ws)
@@ -425,16 +424,16 @@ is already in vterm-mode."
   (let* ((root (claude-repl--resolve-root))
          (default-directory root))
     (claude-repl--log ws "ensure-vterm-buffer ws=%s root=%s default-directory=%s" ws root default-directory)
+    (claude-repl--record-project-dir ws root)
     (claude-repl--kill-stale-vterm ws)
-    (let ((vterm-buf (get-buffer-create (claude-repl--buffer-name nil ws))))
+    (let ((vterm-buf (claude-repl--create-buffer ws)))
       (claude-repl--ws-put ws :vterm-buffer vterm-buf)
       (with-current-buffer vterm-buf
         (if (eq major-mode 'vterm-mode)
             (progn
               (claude-repl--log ws "ensure-vterm REUSING existing buffer %s for ws=%s (no --start-claude)" (buffer-name vterm-buf) ws))
           (claude-repl--initialize-new-vterm ws root))
-        (setq-local claude-repl--project-root root)
-        (setq-local claude-repl--owning-workspace ws)))))
+        (setq-local claude-repl--project-root root)))))
 
 ;;;; Panel show/hide strategies
 

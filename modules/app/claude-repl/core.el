@@ -180,6 +180,11 @@ Used for high-frequency, low-signal events."
 (defvar-local claude-repl--project-root nil
   "Buffer-local git root for Claude REPL buffers.
 Set when vterm/input buffers are created so workspace-id works from them.")
+;; Survive `kill-all-local-variables' from major-mode activation.  Callers
+;; would otherwise have to re-set this after every `vterm-mode' /
+;; `claude-input-mode' call, which is easy to forget and was in fact
+;; missing from `claude-repl--ensure-input-buffer'.
+(put 'claude-repl--project-root 'permanent-local t)
 
 (defun claude-repl--dir-has-git-p (d)
   "Return non-nil if directory D contains a .git directory or file."
@@ -295,6 +300,17 @@ Internally uses plist-put (which returns a new list) threaded into puthash."
   "Remove all state for workspace WS."
   (remhash ws claude-repl--workspaces))
 
+(defun claude-repl--record-project-dir (ws root)
+  "Record ROOT as WS's `:project-dir' if not already set.
+`claude-repl--ws-for-dir-fast' resolves session_start/stop sentinel
+directories back to workspaces by matching this key; an unset
+`:project-dir' is why restarting Claude after `SPC j x' produced
+\"session-start dir=… matched no workspace\" warnings.  No-ops when
+`:project-dir' is already set so worktree registration (which stores
+the canonical worktree path) wins over a drifted `default-directory'."
+  (unless (claude-repl--ws-get ws :project-dir)
+    (claude-repl--ws-put ws :project-dir root)))
+
 (defun claude-repl--active-inst (ws)
   "Return the active `claude-repl-instantiation' for workspace WS.
 Creates the struct if not yet initialized for the current environment."
@@ -309,6 +325,7 @@ Creates the struct if not yet initialized for the current environment."
   "Workspace name that owns this claude session.
 Set when the user sends a message; used to correctly target workspace
 state changes regardless of which persp the buffer drifts into.")
+(put 'claude-repl--owning-workspace 'permanent-local t)
 
 ;;; Buffer naming and predicates
 
@@ -349,6 +366,32 @@ Falls back to \"default\" when no workspace name is available."
          (name (format "*claude%s-%s*" (or suffix "") (or safe "default"))))
     (claude-repl--log-verbose nil "buffer-name: suffix=%s ws=%s name=%s" suffix ws-name name)
     name))
+
+(defun claude-repl--create-buffer (ws &optional suffix)
+  "Create a workspace-owned buffer for WS and return it.
+SUFFIX is passed to `claude-repl--buffer-name' to select the buffer's
+role: nil for the vterm buffer (*claude-WS*), \"-input\" for the input
+buffer (*claude-input-WS*).
+
+Single entry point for every workspace-owned buffer.  Derives the
+canonical name, sets `claude-repl--owning-workspace' buffer-locally
+(permanent-local so it survives subsequent major-mode activation), and
+registers the buffer with WS's perspective so it appears in
+`+workspace-buffer-list' and related listings.
+
+Idempotent — `get-buffer-create' returns an existing buffer of the
+same name, and `persp-add-buffer' internally no-ops when the buffer is
+already in the perspective.  Skips persp attachment when WS is nil or
+no perspective named WS exists (e.g. early in session startup)."
+  (let ((buf (get-buffer-create (claude-repl--buffer-name suffix ws))))
+    (with-current-buffer buf
+      (setq-local claude-repl--owning-workspace ws))
+    (when (and ws
+               (fboundp 'persp-get-by-name)
+               (fboundp 'persp-add-buffer))
+      (when-let ((persp (persp-get-by-name ws)))
+        (persp-add-buffer buf persp nil)))
+    buf))
 
 (defun claude-repl--claude-buffer-p (&optional buf)
   "Return non-nil if BUF (default: current buffer) is a Claude vterm buffer.
