@@ -410,55 +410,29 @@ and for the current workspace when panels have no visible windows."
 ;;; State machine ------------------------------------------------------------
 
 (defun claude-repl--update-ws-state (ws)
-  "Update workspace WS state according to claude visibility and git status.
+  "Decay WS's claude-state from :done to :idle when the worktree is clean.
 
-Scope: THIS function is the timer-driven side of the state machine.  It
-only reads derivable state (git cleanliness, panel visibility, :viewed)
-and therefore NEVER writes :thinking or :permission — those live events
-are the province of the input/sentinel lifecycle, and letting the timer
-race with them produces user-visible lies (a green tab while Claude is
-still working, for example).
+This is the sole transition the timer drives on the claude-state axis.
+Every other transition is sentinel-owned (see the hook handlers in
+`sentinel.el').  When Claude finishes a turn the Stop hook writes
+`:done'; if the worktree is clean (nothing was changed, or the user
+has staged/committed), there is nothing outstanding and the tab decays
+to `:idle' (default face, no attention needed).  If the worktree is
+dirty, the tab stays green until the user stages or commits.
 
-State table (this function only; other writers listed below):
-  :thinking   → unchanged here (see WRITERS below)
-  :permission → unchanged here (see WRITERS below)
-  :done+viewed+clean+panels-closed → :inactive
-  :done+viewed+dirty+panels-closed → :done (stay green until clean)
-  :inactive   → unchanged here (terminal; git status irrelevant)
-  nil+dirty   → :done       |  nil+clean → nil
-
-WRITERS of :thinking (outside this function):
-  mark-ws-thinking (input.el)         — set on prompt submit.
-  on-prompt-submit-event (sentinel.el) — set via prompt_submit_* sentinel.
-  on-stop-event (sentinel.el)         — clears via ws-clear-if-status.
-  maybe-clear-stale-state             — preserves :thinking; never clears.
-
-WRITERS of :permission (outside this function):
-  on-permission-event (sentinel.el)   — set via permission_prompt sentinel.
-  mark-ws-thinking                    — overwritten on next prompt submit.
-  mark-claude-done (session.el)       — overwritten to :done on every
-                                        Stop event (visibility handled by
-                                        renderer via :repl-state).
-  maybe-clear-stale-state             — clears to nil on dead vterm."
+State table:
+  :done + clean → :idle         (this function)
+  :done + dirty → unchanged     (wait for user to stage/commit)
+  anything else → unchanged     (sentinel-owned or already terminal)"
   (let ((state (claude-repl--ws-claude-state ws))
         (dirty (not (claude-repl--workspace-clean-p ws))))
-    (pcase (cons state dirty)
-      ;; :done → :inactive only when viewed + panels closed + clean
-      (`(:done . nil)
-       (when (and (claude-repl--ws-get ws :viewed)
-                  (not (claude-repl--panels-actively-visible-p ws)))
-         (claude-repl--log ws "update-ws-state ws=%s :done->:inactive (viewed, panels closed, clean)" ws)
-         (claude-repl--ws-set ws :inactive)))
-      ;; :done + dirty → stay :done (no-op, even if viewed)
-      (`(:done . t)
-       (claude-repl--log-verbose ws "update-ws-state ws=%s :done+dirty no-op (stays green)" ws))
-      ;; nil + dirty → :done (initial detection of Claude's changes)
-      (`(nil . t)
-       (claude-repl--log ws "update-ws-state ws=%s nil->:done" ws)
-       (claude-repl--ws-put ws :viewed nil)
-       (claude-repl--ws-set ws :done))
-      ;; :thinking, :permission, :inactive, nil+clean → no-op
-      (_ (claude-repl--log-verbose ws "update-ws-state ws=%s state=%s dirty=%s no-op" ws state dirty)))))
+    (cond
+     ((and (eq state :done) (not dirty))
+      (claude-repl--log ws "update-ws-state ws=%s :done->:idle (clean)" ws)
+      (claude-repl--ws-set-claude-state ws :idle))
+     (t
+      (claude-repl--log-verbose ws "update-ws-state ws=%s state=%s dirty=%s no-op"
+                                ws state dirty)))))
 
 (defun claude-repl--update-all-workspace-states ()
   "Update state for claude-repl workspaces based on visibility and git status.

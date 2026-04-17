@@ -833,35 +833,21 @@
       (claude-repl--update-ws-state "ws1")
       (should (eq (claude-repl--ws-state "ws1") :thinking)))))
 
-(ert-deftest claude-repl-test-update-ws-state-done-viewed-not-visible ()
-  ":done + viewed + panels not visible should transition to :inactive."
+(ert-deftest claude-repl-test-update-ws-state-done-clean-to-idle ()
+  ":done + clean → :idle (user staged/committed; nothing outstanding)."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-set "ws1" :done)
-    (claude-repl--ws-put "ws1" :viewed t)
-    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) t))
-              ((symbol-function 'claude-repl--panels-actively-visible-p) (lambda (_ws) nil)))
+    (claude-repl--ws-set-claude-state "ws1" :done)
+    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) t)))
       (claude-repl--update-ws-state "ws1")
-      (should (eq (claude-repl--ws-state "ws1") :inactive)))))
+      (should (eq (claude-repl--ws-claude-state "ws1") :idle)))))
 
-(ert-deftest claude-repl-test-update-ws-state-done-not-viewed ()
-  ":done + not viewed should remain :done."
+(ert-deftest claude-repl-test-update-ws-state-done-dirty-stays-done ()
+  ":done + dirty stays :done — waiting on user to stage/commit."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-set "ws1" :done)
-    ;; :viewed is not set
-    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) t))
-              ((symbol-function 'claude-repl--panels-actively-visible-p) (lambda (_ws) nil)))
+    (claude-repl--ws-set-claude-state "ws1" :done)
+    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) nil)))
       (claude-repl--update-ws-state "ws1")
-      (should (eq (claude-repl--ws-state "ws1") :done)))))
-
-(ert-deftest claude-repl-test-update-ws-state-done-viewed-panels-visible ()
-  ":done + viewed + panels visible should remain :done."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-set "ws1" :done)
-    (claude-repl--ws-put "ws1" :viewed t)
-    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) t))
-              ((symbol-function 'claude-repl--panels-actively-visible-p) (lambda (_ws) t)))
-      (claude-repl--update-ws-state "ws1")
-      (should (eq (claude-repl--ws-state "ws1") :done)))))
+      (should (eq (claude-repl--ws-claude-state "ws1") :done)))))
 
 (ert-deftest claude-repl-test-update-ws-state-inactive-dirty ()
   ":inactive + dirty should remain :inactive.
@@ -881,14 +867,14 @@
       (claude-repl--update-ws-state "ws1")
       (should (eq (claude-repl--ws-state "ws1") :inactive)))))
 
-(ert-deftest claude-repl-test-update-ws-state-nil-dirty ()
-  "nil + dirty should transition to :done and clear :viewed."
+(ert-deftest claude-repl-test-update-ws-state-nil-dirty-stays-nil ()
+  "nil + dirty no longer transitions (dirty ≠ signal from Claude anymore).
+The old (nil . t) → :done inference was a footgun on pre-existing dirty
+trees; under the revised model only the Stop hook writes :done."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws1" :viewed t)
     (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) nil)))
       (claude-repl--update-ws-state "ws1")
-      (should (eq (claude-repl--ws-state "ws1") :done))
-      (should-not (claude-repl--ws-get "ws1" :viewed)))))
+      (should-not (claude-repl--ws-claude-state "ws1")))))
 
 (ert-deftest claude-repl-test-update-ws-state-nil-clean ()
   "nil + clean should remain nil."
