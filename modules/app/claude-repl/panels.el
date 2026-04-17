@@ -415,7 +415,8 @@ entered vterm-mode."
   (setq-local word-wrap t)
   (claude-repl--set-buffer-background claude-repl--vterm-background-grey)
   (claude-repl--log ws "ensure-vterm created %s root=%s" (buffer-name) root)
-  (claude-repl--start-claude))
+  (setq-local claude-repl--owning-workspace ws)
+  (claude-repl--start-claude ws))
 
 (defun claude-repl--ensure-vterm-buffer (ws)
   "Create vterm buffer for workspace WS running claude if needed.

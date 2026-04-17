@@ -900,7 +900,7 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
                   ((symbol-function 'claude-repl--log-session-start) #'ignore)
                   ((symbol-function 'claude-repl--sandbox-mode-line)
                    (lambda (_s _d) '("test"))))
-          (claude-repl--start-claude)
+          (claude-repl--start-claude "ws1")
           (should (string-match-p "clear && claude" sent-string))
           (should return-sent)
           (should timer-scheduled))))))
@@ -927,7 +927,7 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
                 ((symbol-function 'claude-repl--log-session-start) #'ignore)
                 ((symbol-function 'claude-repl--sandbox-mode-line)
                  (lambda (_s _d) '("test"))))
-        (claude-repl--start-claude)
+        (claude-repl--start-claude "ws1")
         (should-not (claude-repl--ws-get "ws1" :fork-session-id))))))
 
 (ert-deftest claude-repl-test-start-claude-sets-mode-line-sandboxed ()
@@ -949,7 +949,7 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
                 ((symbol-function 'vterm-send-return) #'ignore)
                 ((symbol-function 'claude-repl--schedule-ready-timer) #'ignore)
                 ((symbol-function 'claude-repl--log-session-start) #'ignore))
-        (claude-repl--start-claude)
+        (claude-repl--start-claude "ws1")
         (should (string-match-p "DOCKER SANDBOX" (car mode-line-format)))))))
 
 (ert-deftest claude-repl-test-start-claude-sets-ready-nil ()
@@ -976,16 +976,20 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
                   ((symbol-function 'claude-repl--log-session-start) #'ignore)
                   ((symbol-function 'claude-repl--sandbox-mode-line)
                    (lambda (_s _d) '("test"))))
-          (claude-repl--start-claude)
+          (claude-repl--start-claude "ws1")
           (should-not ready-at-send))))))
 
-(ert-deftest claude-repl-test-start-claude-no-owning-workspace ()
-  "start-claude should use +workspace-current-name when no owning workspace."
-  (claude-repl-test--with-temp-buffer " *test-start-no-owner*"
-    (setq-local claude-repl--owning-workspace nil)
+(ert-deftest claude-repl-test-start-claude-uses-explicit-ws-arg ()
+  "start-claude should use its WS argument verbatim, ignoring buffer-local
+`claude-repl--owning-workspace' and `+workspace-current-name'.  This is
+load-bearing: when a worktree is created from another persp, the
+creating persp's current-name is wrong, and the owning-workspace
+buffer-local may not be pinned yet."
+  (claude-repl-test--with-temp-buffer " *test-start-explicit-ws*"
+    (setq-local claude-repl--owning-workspace "buffer-local-ws")
     (claude-repl-test--with-clean-state
       (let ((ws-used nil))
-        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "fallback-ws"))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "persp-current-ws"))
                   ((symbol-function 'claude-repl--ensure-ws-env)
                    (lambda (ws) (setq ws-used ws)))
                   ((symbol-function 'claude-repl--build-start-cmd)
@@ -1003,8 +1007,8 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
                   ((symbol-function 'claude-repl--log-session-start) #'ignore)
                   ((symbol-function 'claude-repl--sandbox-mode-line)
                    (lambda (_s _d) '("test"))))
-          (claude-repl--start-claude)
-          (should (equal ws-used "fallback-ws")))))))
+          (claude-repl--start-claude "explicit-arg-ws")
+          (should (equal ws-used "explicit-arg-ws")))))))
 
 ;;;; ---- Tests: log-session-start ----
 

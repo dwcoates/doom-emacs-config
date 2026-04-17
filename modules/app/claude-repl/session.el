@@ -234,13 +234,17 @@ SANDBOXED-P means Docker mode with DOCKER-IMAGE; otherwise bare metal."
     (claude-repl--log ws "start-claude ws=%s session-id=%s fork-session-id=%s worktree=%s env=%s cmd=%s dir=%s"
                       ws session-id fork-session-id worktree-str active-env cmd default-directory)))
 
-(defun claude-repl--start-claude ()
-  "Send the claude startup command to the current vterm buffer.
+(defun claude-repl--start-claude (ws)
+  "Send the claude startup command to the current vterm buffer for WS.
+WS is the workspace whose instantiation drives the command; passing it
+explicitly avoids a `(+workspace-current-name)' fallback that would
+otherwise resolve to the caller's persp (and read that workspace's
+session-id), producing a stray `--resume' when a fresh worktree is
+being created from another persp.
 For worktree workspaces with :active-env :sandbox, delegates to
 .claude/sandbox/claude-sandbox if a sandbox image is configured.
 Falls back to bare-metal Claude otherwise."
-  (let* ((ws (or claude-repl--owning-workspace (+workspace-current-name)))
-         (start-info (progn
+  (let* ((start-info (progn
                        (claude-repl--ensure-ws-env ws)
                        (claude-repl--build-start-cmd ws)))
          (cmd         (plist-get start-info :cmd))
