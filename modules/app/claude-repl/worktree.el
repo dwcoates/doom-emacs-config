@@ -4,6 +4,10 @@
 
 (require 'filenotify)
 
+(defvar +dwc/workspace-history nil
+  "Workspace names ordered by most-recently-visited first.
+Defined in config.el; declared here to suppress byte-compiler warnings.")
+
 ;;; Worktree initial buffers
 
 (defcustom claude-repl-workspace-initial-buffers nil
@@ -719,7 +723,17 @@ Prompts for which workspace to merge in."
     ;; Guard: uncommitted changes would interfere with cherry-pick.
     (claude-repl--assert-clean-worktree
      current-ws (claude-repl--ws-dir current-ws))
-    (let ((target-ws (completing-read "Merge workspace into current: " other-ws nil t)))
+    (let* ((default-ws (cl-find-if
+                        (lambda (ws)
+                          (and (member ws other-ws)
+                               (gethash ws claude-repl--workspaces)))
+                        +dwc/workspace-history))
+           (target-ws (completing-read
+                       (if default-ws
+                           (format "Merge workspace into current (default %s): "
+                                   default-ws)
+                         "Merge workspace into current: ")
+                       other-ws nil t nil nil default-ws)))
       (claude-repl--workspace-merge-do target-ws))))
 
 (defalias '+dwc/workspace-merge #'claude-repl-workspace-merge)

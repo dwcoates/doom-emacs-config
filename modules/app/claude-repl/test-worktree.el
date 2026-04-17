@@ -1388,4 +1388,85 @@ Covers the full call the interactive `SPC TAB n' path builds up."
       (should (equal captured-args
                      '("worktree" "add" "-b" "my-branch" "/path" "HEAD"))))))
 
+;;;; ---- Tests: workspace-merge default selection ----
+
+(ert-deftest claude-repl-test-workspace-merge-defaults-to-last-visited-claude-ws ()
+  "workspace-merge pre-selects the most recently visited claude workspace."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "current" :project-dir "/tmp/cur")
+    (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
+    (claude-repl--ws-put "ws-b" :project-dir "/tmp/b")
+    (let ((+dwc/workspace-history '("ws-b" "ws-a" "current"))
+          (captured-default nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current"))
+                ((symbol-function '+workspace-list-names)
+                 (lambda () '("current" "ws-a" "ws-b")))
+                ((symbol-function 'claude-repl--assert-clean-worktree) #'ignore)
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &optional _pred _req _init _hist default &rest _)
+                   (setq captured-default default)
+                   "ws-a"))
+                ((symbol-function 'claude-repl--workspace-merge-do) #'ignore))
+        (claude-repl-workspace-merge)
+        (should (equal captured-default "ws-b"))))))
+
+(ert-deftest claude-repl-test-workspace-merge-skips-non-claude-ws ()
+  "workspace-merge skips workspaces not registered in claude-repl--workspaces."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "current" :project-dir "/tmp/cur")
+    ;; Only ws-b is a claude workspace; ws-a is a plain workspace.
+    (claude-repl--ws-put "ws-b" :project-dir "/tmp/b")
+    (let ((+dwc/workspace-history '("ws-a" "ws-b" "current"))
+          (captured-default nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current"))
+                ((symbol-function '+workspace-list-names)
+                 (lambda () '("current" "ws-a" "ws-b")))
+                ((symbol-function 'claude-repl--assert-clean-worktree) #'ignore)
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &optional _pred _req _init _hist default &rest _)
+                   (setq captured-default default)
+                   "ws-b"))
+                ((symbol-function 'claude-repl--workspace-merge-do) #'ignore))
+        (claude-repl-workspace-merge)
+        (should (equal captured-default "ws-b"))))))
+
+(ert-deftest claude-repl-test-workspace-merge-no-default-when-history-empty ()
+  "workspace-merge passes nil default when no history matches."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "current" :project-dir "/tmp/cur")
+    (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
+    (let ((+dwc/workspace-history nil)
+          (captured-default nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current"))
+                ((symbol-function '+workspace-list-names)
+                 (lambda () '("current" "ws-a")))
+                ((symbol-function 'claude-repl--assert-clean-worktree) #'ignore)
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &optional _pred _req _init _hist default &rest _)
+                   (setq captured-default default)
+                   "ws-a"))
+                ((symbol-function 'claude-repl--workspace-merge-do) #'ignore))
+        (claude-repl-workspace-merge)
+        (should (null captured-default))))))
+
+(ert-deftest claude-repl-test-workspace-merge-skips-current-ws-in-history ()
+  "workspace-merge does not default to the current workspace even if most recent."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "current" :project-dir "/tmp/cur")
+    (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
+    (let ((+dwc/workspace-history '("current" "ws-a"))
+          (captured-default nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current"))
+                ((symbol-function '+workspace-list-names)
+                 (lambda () '("current" "ws-a")))
+                ((symbol-function 'claude-repl--assert-clean-worktree) #'ignore)
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &optional _pred _req _init _hist default &rest _)
+                   (setq captured-default default)
+                   "ws-a"))
+                ((symbol-function 'claude-repl--workspace-merge-do) #'ignore))
+        (claude-repl-workspace-merge)
+        ;; current is removed from other-ws, so ws-a should be the default
+        (should (equal captured-default "ws-a"))))))
+
 ;;; test-worktree.el ends here
