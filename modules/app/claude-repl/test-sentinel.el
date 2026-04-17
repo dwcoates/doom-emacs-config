@@ -931,7 +931,7 @@ is still skipped and the file is still deleted."
 (ert-deftest claude-repl-test-on-stop-event-handle-finished-error ()
   "on-stop-event should propagate error from handle-claude-finished."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--ws-clear) #'ignore)
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-state-clear-if) #'ignore)
               ((symbol-function 'claude-repl--handle-claude-finished)
                (lambda (_ws) (error "finished handler boom")))
               ((symbol-function 'claude-repl--ws-get)

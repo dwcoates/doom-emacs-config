@@ -932,7 +932,7 @@ value and writes :repl-state :dead."
                 ((symbol-function 'claude-repl-debug/--apply-state-refresh)
                  (lambda (ws _open)
                    ;; Simulate clearing state (mirroring non-open + :done behavior)
-                   (claude-repl--ws-clear ws :done)))
+                   (claude-repl--ws-claude-state-clear-if ws :done)))
                 ((symbol-function 'claude-repl-debug/--format-diagnostics)
                  (lambda (ws _diag before after)
                    (format "diag: %s %s->%s" ws before after)))

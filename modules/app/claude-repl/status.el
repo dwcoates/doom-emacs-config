@@ -106,14 +106,6 @@ callers that have not yet migrated to the typed setter.
 STATE is one of: :thinking, :done, :permission, :inactive."
   (claude-repl--ws-set-claude-state ws state))
 
-(defun claude-repl--ws-clear-if-status (ws state)
-  "Clear status for workspace WS only if it currently equals STATE.
-Thin wrapper around `claude-repl--ws-claude-state-clear-if'."
-  (claude-repl--ws-claude-state-clear-if ws state))
-
-(defalias 'claude-repl--ws-clear #'claude-repl--ws-clear-if-status
-  "Backward-compatible alias for `claude-repl--ws-clear-if-status'.")
-
 (defun claude-repl--ws-dir (ws)
   "Return the project root directory for workspace WS.
 Reads :project-dir from the workspace plist.  Errors if not set."

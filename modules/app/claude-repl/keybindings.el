@@ -176,7 +176,7 @@ Use this to verify the processor works independently of the file watcher."
   "Clear all states for workspace WS without killing buffers."
   (interactive (list (claude-repl--read-workspace "Workspace: ")))
   (dolist (state '(:thinking :done :permission :inactive))
-    (claude-repl--ws-clear ws state))
+    (claude-repl--ws-claude-state-clear-if ws state))
   (message "Cleared all states for %s" ws))
 
 (defun claude-repl--kill-owned-panel-buffers (ws)

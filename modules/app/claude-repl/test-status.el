@@ -159,7 +159,7 @@
   "Legacy ws-clear-if-status (wrapper) clears :claude-state too."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :thinking)
-    (claude-repl--ws-clear-if-status "ws1" :thinking)
+    (claude-repl--ws-claude-state-clear-if "ws1" :thinking)
     (should-not (claude-repl--ws-get "ws1" :claude-state))
     (should-not (claude-repl--ws-get "ws1" :claude-state))))
 
@@ -187,7 +187,7 @@
   "ws-clear should clear only the specified state."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :thinking)
-    (claude-repl--ws-clear "ws1" :thinking)
+    (claude-repl--ws-claude-state-clear-if "ws1" :thinking)
     (should-not (claude-repl--ws-state "ws1"))))
 
 (ert-deftest claude-repl-test-ws-state-inactive ()
@@ -226,20 +226,20 @@
   "`ws-clear' with :done should not clear status when it is :thinking."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :thinking)
-    (claude-repl--ws-clear "ws1" :done)
+    (claude-repl--ws-claude-state-clear-if "ws1" :done)
     (should (eq (claude-repl--ws-get "ws1" :claude-state) :thinking))))
 
 (ert-deftest claude-repl-test-ws-clear-permission ()
   "`ws-clear' with :permission should not clear status when it is :done."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :done)
-    (claude-repl--ws-clear "ws1" :permission)
+    (claude-repl--ws-claude-state-clear-if "ws1" :permission)
     (should (eq (claude-repl--ws-get "ws1" :claude-state) :done))))
 
 (ert-deftest claude-repl-test-ws-clear-nil-error ()
   "`ws-clear' with nil ws should signal error."
   (claude-repl-test--with-clean-state
-    (should-error (claude-repl--ws-clear nil :done) :type 'error)))
+    (should-error (claude-repl--ws-claude-state-clear-if nil :done) :type 'error)))
 
 ;;;; ---- Tests: Tabline rendering ----
 
@@ -326,28 +326,28 @@
 (ert-deftest claude-repl-test-ws-clear-when-already-nil ()
   "Clearing when status is already nil should be a no-op."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-clear-if-status "ws1" :thinking)
+    (claude-repl--ws-claude-state-clear-if "ws1" :thinking)
     (should-not (claude-repl--ws-state "ws1"))))
 
 (ert-deftest claude-repl-test-ws-clear-matching-done ()
   "Clearing :done when status IS :done should clear to nil."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :done)
-    (claude-repl--ws-clear-if-status "ws1" :done)
+    (claude-repl--ws-claude-state-clear-if "ws1" :done)
     (should-not (claude-repl--ws-state "ws1"))))
 
 (ert-deftest claude-repl-test-ws-clear-matching-permission ()
   "Clearing :permission when status IS :permission should clear to nil."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :permission)
-    (claude-repl--ws-clear-if-status "ws1" :permission)
+    (claude-repl--ws-claude-state-clear-if "ws1" :permission)
     (should-not (claude-repl--ws-state "ws1"))))
 
 (ert-deftest claude-repl-test-ws-clear-matching-inactive ()
   "Clearing :inactive when status IS :inactive should clear to nil."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :inactive)
-    (claude-repl--ws-clear-if-status "ws1" :inactive)
+    (claude-repl--ws-claude-state-clear-if "ws1" :inactive)
     (should-not (claude-repl--ws-state "ws1"))))
 
 (ert-deftest claude-repl-test-ws-clear-calls-mode-line-update-on-match ()
@@ -358,10 +358,10 @@
       (cl-letf (((symbol-function 'force-mode-line-update)
                  (lambda (&rest _) (cl-incf call-count))))
         ;; Mismatch: should NOT call force-mode-line-update
-        (claude-repl--ws-clear-if-status "ws1" :thinking)
+        (claude-repl--ws-claude-state-clear-if "ws1" :thinking)
         (should (= call-count 0))
         ;; Match: should call force-mode-line-update
-        (claude-repl--ws-clear-if-status "ws1" :done)
+        (claude-repl--ws-claude-state-clear-if "ws1" :done)
         (should (= call-count 1))))))
 
 ;;;; ---- Tests: ws-dir ----
@@ -998,35 +998,35 @@ this clobbered :init with :dead.  The :init guard prevents that."
   "Clearing :thinking when actual status is :permission should be a no-op."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :permission)
-    (claude-repl--ws-clear-if-status "ws1" :thinking)
+    (claude-repl--ws-claude-state-clear-if "ws1" :thinking)
     (should (eq (claude-repl--ws-get "ws1" :claude-state) :permission))))
 
 (ert-deftest claude-repl-test-ws-clear-inactive-when-thinking-noop ()
   "Clearing :inactive when actual status is :thinking should be a no-op."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :thinking)
-    (claude-repl--ws-clear-if-status "ws1" :inactive)
+    (claude-repl--ws-claude-state-clear-if "ws1" :inactive)
     (should (eq (claude-repl--ws-get "ws1" :claude-state) :thinking))))
 
 (ert-deftest claude-repl-test-ws-clear-done-when-inactive-noop ()
   "Clearing :done when actual status is :inactive should be a no-op."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :inactive)
-    (claude-repl--ws-clear-if-status "ws1" :done)
+    (claude-repl--ws-claude-state-clear-if "ws1" :done)
     (should (eq (claude-repl--ws-get "ws1" :claude-state) :inactive))))
 
 (ert-deftest claude-repl-test-ws-clear-inactive-when-done-noop ()
   "Clearing :inactive when actual status is :done should be a no-op."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :done)
-    (claude-repl--ws-clear-if-status "ws1" :inactive)
+    (claude-repl--ws-claude-state-clear-if "ws1" :inactive)
     (should (eq (claude-repl--ws-get "ws1" :claude-state) :done))))
 
 (ert-deftest claude-repl-test-ws-clear-thinking-when-done-noop ()
   "Clearing :thinking when actual status is :done should be a no-op."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :done)
-    (claude-repl--ws-clear-if-status "ws1" :thinking)
+    (claude-repl--ws-claude-state-clear-if "ws1" :thinking)
     (should (eq (claude-repl--ws-get "ws1" :claude-state) :done))))
 
 ;;;; ---- Tests: update-all-workspace-states multi-workspace dispatch ----
