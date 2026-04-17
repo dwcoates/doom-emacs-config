@@ -193,13 +193,11 @@ A no-op if a check is already in progress for WS."
     (:done       :bg "#1a7a1a" :fg "black" :selected-fg "#2a8c2a"
                  :face claude-repl-tab-done)
     (:permission :bg "#1a7a1a" :fg "black" :selected-fg "#2a8c2a"
-                 :face claude-repl-tab-permission :label "❓")
-    (:inactive   :bg "#cc8800" :fg "black" :selected-fg "#cc8800"
-                 :face claude-repl-tab-inactive))
+                 :face claude-repl-tab-permission :label "❓"))
   "Alist mapping claude-state keywords to color and display properties.
-`:idle' intentionally has no entry — an idle workspace renders with the
-default tab face.  `:inactive' remains for the duration of the state-axis
-migration and is removed once no writer produces it.")
+`:idle' intentionally has no entry — an idle workspace renders with
+the default tab face.  `:repl-state :inactive' does not contribute to
+color either (it is bookkeeping only).")
 
 (defun claude-repl--status-color (state prop)
   "Return property PROP for STATE from `claude-repl--status-colors'.
@@ -229,9 +227,6 @@ STATUS is an unquoted symbol (e.g. thinking, done).  DOC is the docstring."
 
 (claude-repl--define-status-face permission
   "Face for workspace tabs where Claude needs permission (green + emoji).")
-
-(claude-repl--define-status-face inactive
-  "Face for workspace tabs you've viewed but whose panels are closed (orange).")
 
 (defun claude-repl--render-tab (name separator-face bracket-face name-face label img-str)
   "Render a tab string for workspace NAME.
@@ -297,23 +292,19 @@ normal.  For unselected tabs, returns the status face from
 
 (defun claude-repl--composed-state (claude _repl)
   "Project CLAUDE (and optionally _REPL) onto the palette's display key.
-Per user direction, `:repl-state' contributes no color — tab color is a
-pure function of `:claude-state'.  The second argument is retained so
-that callers can keep the pair-based call convention while we migrate,
-and so a future feature can hook back into rendering without a signature
-change.
+`:repl-state' contributes no color — tab color is a pure function of
+`:claude-state'.  The second argument is retained so callers keep the
+pair-based convention and a future feature can hook in without a
+signature change.
 Rule:
   :thinking   → :thinking                (red)
   :permission → :permission               (green + ❓)
-  :inactive   → :inactive                 (legacy orange — kept until no
-                                          writer produces it; see N20+)
   :init       → :init                     (blue — Claude starting)
   :done       → :done                     (green — unacknowledged work)
   :idle / nil / other → nil               (default face)"
   (cond
    ((eq claude :thinking)   :thinking)
    ((eq claude :permission) :permission)
-   ((eq claude :inactive)   :inactive)
    ((eq claude :init)       :init)
    ((eq claude :done)       :done)
    (t                       nil)))

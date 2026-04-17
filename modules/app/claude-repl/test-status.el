@@ -113,11 +113,6 @@
   "Composed (nil, :inactive) → nil — :repl-state alone is colorless."
   (should-not (claude-repl--composed-state nil :inactive)))
 
-(ert-deftest claude-repl-test-composed-legacy-inactive-claude-axis ()
-  "Legacy :inactive on the claude axis still renders orange during migration."
-  (should (eq :inactive (claude-repl--composed-state :inactive nil)))
-  (should (eq :inactive (claude-repl--composed-state :inactive :init))))
-
 (ert-deftest claude-repl-test-composed-init ()
   "Composed (:init, any) → :init (blue — Claude initializing)."
   (should (eq :init (claude-repl--composed-state :init nil)))
@@ -301,17 +296,6 @@
           (should pos)
           (should (eq (get-text-property pos 'face result)
                       'claude-repl-tab-permission)))))))
-
-(ert-deftest claude-repl-test-tabline-inactive-face ()
-  "A background tab with :inactive should use inactive face."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-set "bg-ws" :inactive)
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))
-      (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
-        (let ((pos (string-match "bg-ws" result)))
-          (should pos)
-          (should (eq (get-text-property pos 'face result)
-                      'claude-repl-tab-inactive)))))))
 
 ;;;; ---- Tests: ws-state edge cases ----
 
