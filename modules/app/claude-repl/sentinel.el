@@ -207,14 +207,12 @@ transitions `:claude-state' from `:init' to `:idle', sets
 `claude-repl--ready' on the vterm buffer, cancels the ready timer,
 and opens panels (via `open-panels-after-ready').
 
-When WS has no live vterm buffer, the hook was not fired by a session
-this module is managing (commonly: `workspace-for-buffer' routed the
-cwd to the default persp because the managed vterm is in a different
-persp, or the hook came from a Claude session the user started by
-hand outside `SPC o c').  In that case we silently no-op — no
-`:claude-state' write, no user-facing error.  Session ID is still
-persisted for whatever workspace matched, via
-`claude-repl--update-session-id-from-sentinel' before this callback runs.
+When WS is registered but its vterm buffer is null or dead, that is a
+structural inconsistency — by the time this callback runs, the caller
+chain has confirmed WS is non-nil and registered in
+`claude-repl--workspaces'.  We emit a loud `message' (but do not
+`error', since we run from a file-notify callback and a hard error
+would kill the watcher) so the condition is visible.
 
 Idempotent on repeated fires for the same workspace."
   (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
@@ -223,8 +221,9 @@ Idempotent on repeated fires for the same workspace."
                       (if (and vterm-buf (buffer-live-p vterm-buf)) "yes" "no"))
     (cond
      ((or (null vterm-buf) (not (buffer-live-p vterm-buf)))
+      (message "[claude-repl] ERROR: session_start for ws=%s but vterm buffer is null/dead" ws)
       (claude-repl--log ws
-                        "on-session-start-event: ws=%s has no managed vterm — session_start not for us, skipping"
+                        "on-session-start-event: ERROR ws=%s vterm buffer is null/dead — structural inconsistency"
                         ws))
      ((buffer-local-value 'claude-repl--ready vterm-buf)
       (claude-repl--log ws "on-session-start-event: already ready ws=%s — no-op" ws))

@@ -1271,37 +1271,47 @@ the module does not manage."
               (should-not panels-opened)))
         (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
 
-(ert-deftest claude-repl-test-on-session-start-event-no-vterm-silent-noop ()
-  "on-session-start-event silently no-ops when no vterm buffer exists.
-This covers session_start hooks fired by Claude sessions that this
-module does not own (common when the hook's cwd routes to a default
-persp with no managed vterm)."
+(ert-deftest claude-repl-test-on-session-start-event-no-vterm-warns ()
+  "on-session-start-event emits a loud ERROR message when no vterm buffer exists.
+Reaching this branch means ws is registered (caller chain checks that)
+but its :vterm-buffer slot is nil — a structural inconsistency that
+must surface, not be silently swallowed."
   (claude-repl-test--with-clean-state
-    (let ((msg-called nil)
+    (let ((messages '())
           (claude-state-written nil))
       (cl-letf (((symbol-function 'message)
-                 (lambda (&rest _) (setq msg-called t)))
+                 (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
                 ((symbol-function 'claude-repl--ws-set-claude-state)
                  (lambda (&rest _) (setq claude-state-written t))))
         (claude-repl--on-session-start-event "ws1" "/some/dir")
-        (should-not msg-called)
-        (should-not claude-state-written)))))
+        (should-not claude-state-written)
+        (should (cl-some (lambda (m)
+                           (and (string-match-p "\\[claude-repl\\] ERROR" m)
+                                (string-match-p "session_start" m)
+                                (string-match-p "ws1" m)
+                                (string-match-p "null/dead" m)))
+                         messages))))))
 
-(ert-deftest claude-repl-test-on-session-start-event-dead-vterm-silent-noop ()
-  "on-session-start-event silently no-ops when the vterm buffer is dead."
+(ert-deftest claude-repl-test-on-session-start-event-dead-vterm-warns ()
+  "on-session-start-event emits a loud ERROR message when the vterm buffer is dead."
   (claude-repl-test--with-clean-state
     (let ((fake-buf (generate-new-buffer " *test-session-start-dead*"))
-          (msg-called nil)
+          (messages '())
           (claude-state-written nil))
       (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
       (kill-buffer fake-buf)
       (cl-letf (((symbol-function 'message)
-                 (lambda (&rest _) (setq msg-called t)))
+                 (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
                 ((symbol-function 'claude-repl--ws-set-claude-state)
                  (lambda (&rest _) (setq claude-state-written t))))
         (claude-repl--on-session-start-event "ws1" "/some/dir")
-        (should-not msg-called)
-        (should-not claude-state-written)))))
+        (should-not claude-state-written)
+        (should (cl-some (lambda (m)
+                           (and (string-match-p "\\[claude-repl\\] ERROR" m)
+                                (string-match-p "session_start" m)
+                                (string-match-p "ws1" m)
+                                (string-match-p "null/dead" m)))
+                         messages))))))
 
 (ert-deftest claude-repl-test-on-session-start-event-sets-idle ()
   "on-session-start-event writes :claude-state :idle (transition from :init)."
