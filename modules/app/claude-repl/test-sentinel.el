@@ -1209,6 +1209,19 @@ is still skipped and the file is still deleted."
         (claude-repl--update-session-id-from-sentinel "ws1" "same-sid")
         (should-not set-called)))))
 
+(ert-deftest claude-repl-test-update-session-id-from-sentinel-skips-unregistered-ws ()
+  "update-session-id-from-sentinel does not auto-vivify unregistered workspaces.
+Without the gate, `active-inst' would create a fresh instantiation and
+puthash it into `claude-repl--workspaces', leaking entries for sessions
+the module does not manage."
+  (claude-repl-test--with-clean-state
+    (let ((set-called nil))
+      (cl-letf (((symbol-function 'claude-repl--set-session-id)
+                 (lambda (_ws _id) (setq set-called t))))
+        (claude-repl--update-session-id-from-sentinel "unmanaged-ws" "some-sid")
+        (should-not set-called)
+        (should-not (gethash "unmanaged-ws" claude-repl--workspaces))))))
+
 (ert-deftest claude-repl-test-update-session-id-from-sentinel-updates-changed ()
   "update-session-id-from-sentinel should update when session-id differs."
   (claude-repl-test--with-clean-state

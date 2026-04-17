@@ -121,10 +121,16 @@ For backward compatibility, a single-line file (CWD only) returns :session-id ni
 
 (defun claude-repl--update-session-id-from-sentinel (ws session-id)
   "Update the session ID for workspace WS from sentinel data if non-nil.
-Only updates when SESSION-ID is a non-empty string and differs from
-the currently stored value.  Logs the update at standard level since
-this is a meaningful state change."
-  (when (and session-id (not (string-empty-p session-id)))
+Only updates when WS is already registered in `claude-repl--workspaces'
+and SESSION-ID is a non-empty string that differs from the stored value.
+Skipping unregistered workspaces is load-bearing: `claude-repl--active-inst'
+auto-creates an instantiation in the hash, which would otherwise cause
+sentinel fires for workspaces this module doesn't manage (e.g. the
+default persp matched via `workspace-for-buffer') to leak entries into
+`claude-repl--workspaces'."
+  (when (and session-id
+             (not (string-empty-p session-id))
+             (gethash ws claude-repl--workspaces))
     (let* ((inst (claude-repl--active-inst ws))
            (current (claude-repl-instantiation-session-id inst)))
       (unless (equal current session-id)
