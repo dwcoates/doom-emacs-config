@@ -183,59 +183,129 @@ A no-op if a check is already in progress for WS."
 
 ;;; Tab-bar rendering ---------------------------------------------------------
 ;;
-;; Two defconsts fully describe tab appearance:
+;; Appearance is described by a small pyramid:
 ;;
-;;   `claude-repl--tab-default' — appearance for states with no palette
-;;       entry (idle, nil, unknown).  Carries separate `:unselected' and
-;;       `:selected' specs.
+;;   1. Named constants — every color / label / font-weight literal lives
+;;      in a `claude-repl--color-*' / `--label-*' / `--tab-weight' defconst.
+;;   2. `claude-repl--tab-default' and `claude-repl--tab-palette' — the
+;;      two defconsts that compose those named values into per-state
+;;      appearance specs.  No palette row contains a string literal.
+;;   3. Faces — four `defface' forms that reference the same named
+;;      constants (Doom theming hook).
+;;   4. Renderers — take a spec, emit a propertized string.
 ;;
-;;   `claude-repl--tab-palette' — per-state overrides.  Each row has:
-;;       :face       — defface name for unselected tabs (Doom theming hook).
-;;       :label      — optional bracket content override (e.g. "❓").
-;;       :unselected — plist describing unselected appearance.
-;;       :selected   — plist describing selected appearance.  May include
-;;                     :face-override to replace the NAME face in selected
-;;                     form (used by :permission to keep its green badge
-;;                     visible on the selected tab).
+;; Palette shape (per-state):
+;;   :face       — defface name for unselected tabs.
+;;   :label      — optional bracket content override (e.g. the permission
+;;                 glyph).
+;;   :unselected — plist describing unselected appearance.
+;;   :selected   — plist describing selected appearance.  May include
+;;                 :face-override to replace the NAME face in selected
+;;                 form (used by :permission to keep its green badge
+;;                 visible on the selected tab).
 ;;
-;;   Spec plist keys:
-;;       :bg          — bracket (and separator) background.
-;;       :fg          — separator foreground.
-;;       :bracket-fg  — [LABEL] foreground.
-;;       :weight      — font weight (default `bold').
+;; Spec plist keys:
+;;   :bg          — bracket (and separator) background.
+;;   :fg          — separator foreground.
+;;   :bracket-fg  — [LABEL] foreground.
+;;   :weight      — font weight (default `bold').
 ;;
-;;   Use `unspecified' (the symbol) for "inherit from frame default".
-;;
-;; Invariants: anything the tab bar needs to know about a state's look
-;; lives here.  Renderers are thin; they take a spec and propertize.
+;; Use `unspecified' (the symbol) for "inherit from frame default".
+
+;; --- Named color / style constants --- ;;
+
+(defconst claude-repl--color-init-blue        "#3366cc"
+  "Blue used for the :init claude-state tab background.")
+
+(defconst claude-repl--color-thinking-red     "#cc3333"
+  "Red used for the :thinking claude-state tab background.")
+
+(defconst claude-repl--color-done-green       "#1a7a1a"
+  "Dark green used for :done and :permission tab backgrounds.")
+
+(defconst claude-repl--color-done-green-bright "#2a8c2a"
+  "Brighter green used for :done / :permission bracket-fg on selected
+tabs; readable against `claude-repl--color-selected-bg'.")
+
+(defconst claude-repl--color-default-bracket  "#4477cc"
+  "Blue used for bracket numerals on unselected tabs of any state.")
+
+(defconst claude-repl--color-selected-bg      "#c0c0c0"
+  "Grey used for the background of selected tabs.")
+
+(defconst claude-repl--color-light            "white"
+  "Light foreground for dark state backgrounds.")
+
+(defconst claude-repl--color-dark             "black"
+  "Dark foreground for light state backgrounds.")
+
+(defconst claude-repl--label-permission       "❓"
+  "Bracket label shown in place of the numeric index when Claude is
+asking for a permission decision.")
+
+(defconst claude-repl--tab-weight             'bold
+  "Font weight applied to every tab face.")
+
+;; --- Appearance palette --- ;;
 
 (defconst claude-repl--tab-default
-  '(:unselected (:bg unspecified :fg unspecified :bracket-fg "#4477cc" :weight bold)
-    :selected   (:bg "#c0c0c0"   :fg "black"    :bracket-fg "black"   :weight bold))
+  `(:unselected (:bg unspecified
+                 :fg unspecified
+                 :bracket-fg ,claude-repl--color-default-bracket
+                 :weight ,claude-repl--tab-weight)
+    :selected   (:bg ,claude-repl--color-selected-bg
+                 :fg ,claude-repl--color-dark
+                 :bracket-fg ,claude-repl--color-dark
+                 :weight ,claude-repl--tab-weight))
   "Default tab-appearance spec for states absent from `claude-repl--tab-palette'.")
 
 (defconst claude-repl--tab-palette
-  '((:init
+  `((:init
      :face       claude-repl-tab-init
-     :unselected (:bg "#3366cc" :fg "white" :bracket-fg "#4477cc" :weight bold)
-     :selected   (:bg "#c0c0c0" :fg "black" :bracket-fg "#3366cc" :weight bold))
+     :unselected (:bg ,claude-repl--color-init-blue
+                  :fg ,claude-repl--color-light
+                  :bracket-fg ,claude-repl--color-default-bracket
+                  :weight ,claude-repl--tab-weight)
+     :selected   (:bg ,claude-repl--color-selected-bg
+                  :fg ,claude-repl--color-dark
+                  :bracket-fg ,claude-repl--color-init-blue
+                  :weight ,claude-repl--tab-weight))
     (:thinking
      :face       claude-repl-tab-thinking
-     :unselected (:bg "#cc3333" :fg "white" :bracket-fg "#4477cc" :weight bold)
-     :selected   (:bg "#c0c0c0" :fg "black" :bracket-fg "#cc3333" :weight bold))
+     :unselected (:bg ,claude-repl--color-thinking-red
+                  :fg ,claude-repl--color-light
+                  :bracket-fg ,claude-repl--color-default-bracket
+                  :weight ,claude-repl--tab-weight)
+     :selected   (:bg ,claude-repl--color-selected-bg
+                  :fg ,claude-repl--color-dark
+                  :bracket-fg ,claude-repl--color-thinking-red
+                  :weight ,claude-repl--tab-weight))
     (:done
      :face       claude-repl-tab-done
-     :unselected (:bg "#1a7a1a" :fg "black" :bracket-fg "#4477cc" :weight bold)
-     :selected   (:bg "#c0c0c0" :fg "black" :bracket-fg "#2a8c2a" :weight bold))
+     :unselected (:bg ,claude-repl--color-done-green
+                  :fg ,claude-repl--color-dark
+                  :bracket-fg ,claude-repl--color-default-bracket
+                  :weight ,claude-repl--tab-weight)
+     :selected   (:bg ,claude-repl--color-selected-bg
+                  :fg ,claude-repl--color-dark
+                  :bracket-fg ,claude-repl--color-done-green-bright
+                  :weight ,claude-repl--tab-weight))
     (:permission
      :face       claude-repl-tab-permission
-     :label      "❓"
-     :unselected (:bg "#1a7a1a" :fg "black" :bracket-fg "#4477cc" :weight bold)
-     :selected   (:bg "#c0c0c0" :fg "black" :bracket-fg "#2a8c2a" :weight bold
+     :label      ,claude-repl--label-permission
+     :unselected (:bg ,claude-repl--color-done-green
+                  :fg ,claude-repl--color-dark
+                  :bracket-fg ,claude-repl--color-default-bracket
+                  :weight ,claude-repl--tab-weight)
+     :selected   (:bg ,claude-repl--color-selected-bg
+                  :fg ,claude-repl--color-dark
+                  :bracket-fg ,claude-repl--color-done-green-bright
+                  :weight ,claude-repl--tab-weight
                   :face-override claude-repl-tab-permission)))
   "Per-state tab-appearance palette.
 Each entry fully describes both selected and unselected looks for a
-claude-state keyword.  Absent states fall back to `claude-repl--tab-default'.
+claude-state keyword via nested `:unselected' and `:selected' plists.
+Absent states fall back to `claude-repl--tab-default'.
 `:idle' intentionally has no entry — an idle workspace renders with the
 default tab face.  `:repl-state :inactive' does not contribute to color
 either (it is bookkeeping only).")
@@ -250,30 +320,33 @@ Keys in the returned plist: :bg :fg :bracket-fg :weight and optionally
     (or (plist-get row key)
         (plist-get claude-repl--tab-default key))))
 
-(defmacro claude-repl--define-status-face (status doc)
-  "Define a face `claude-repl-tab-STATUS' using colors from the palette.
-STATUS is an unquoted symbol (e.g. thinking, done).  DOC is the docstring.
-Reads the `:unselected :bg' / `:fg' fields of the palette row at
-macroexpand time."
-  (let* ((face-name (intern (format "claude-repl-tab-%s" status)))
-         (kw        (intern (format ":%s" status)))
-         (spec      (plist-get (alist-get kw claude-repl--tab-palette) :unselected))
-         (bg        (plist-get spec :bg))
-         (fg        (plist-get spec :fg)))
-    `(defface ,face-name
-       (list (list t :background ,bg :foreground ,fg :weight 'bold))
-       ,doc)))
+;; --- defface forms referencing the named constants --- ;;
+;; Each `:unselected' palette row has the same colors these forms read,
+;; by construction.  Kept as explicit defface calls so Doom users can
+;; customize via `customize-face' (the Doom theming hook).
 
-(claude-repl--define-status-face init
+(defface claude-repl-tab-init
+  `((t :background ,claude-repl--color-init-blue
+       :foreground ,claude-repl--color-light
+       :weight ,claude-repl--tab-weight))
   "Face for workspace tabs where Claude is initializing (blue).")
 
-(claude-repl--define-status-face thinking
+(defface claude-repl-tab-thinking
+  `((t :background ,claude-repl--color-thinking-red
+       :foreground ,claude-repl--color-light
+       :weight ,claude-repl--tab-weight))
   "Face for workspace tabs where Claude is thinking (red).")
 
-(claude-repl--define-status-face done
+(defface claude-repl-tab-done
+  `((t :background ,claude-repl--color-done-green
+       :foreground ,claude-repl--color-dark
+       :weight ,claude-repl--tab-weight))
   "Face for workspace tabs where Claude is done (green).")
 
-(claude-repl--define-status-face permission
+(defface claude-repl-tab-permission
+  `((t :background ,claude-repl--color-done-green
+       :foreground ,claude-repl--color-dark
+       :weight ,claude-repl--tab-weight))
   "Face for workspace tabs where Claude needs permission (green + emoji).")
 
 (defun claude-repl--render-tab (name spec label name-face img-str)
