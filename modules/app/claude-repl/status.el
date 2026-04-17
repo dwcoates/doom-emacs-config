@@ -435,24 +435,25 @@ panel visibility (panels may be hidden via `SPC o c')."
             (claude-repl--update-ws-state ws)
             (claude-repl--async-refresh-git-status ws))
         ;; No live vterm process → clear non-thinking state
-        (claude-repl--maybe-clear-stale-state ws)))))
+        (claude-repl--mark-dead-vterm ws)))))
 
 ;; Periodically update all workspace states (catches git changes, etc.)
 (push (run-with-timer 1 1 #'claude-repl--update-all-workspace-states)
       claude-repl--timers)
 
-(defun claude-repl--maybe-clear-stale-state (ws)
-  "Clear WS's claude-state when no vterm process is running.
-Preserves :thinking (which is managed by the input/sentinel lifecycle).
-Scheduled for replacement with a :repl-state :dead transition — see
-follow-up commit."
-  (let ((state (claude-repl--ws-claude-state ws)))
-    (if (and state (not (eq state :thinking)))
-        (progn
-          (claude-repl--log ws "maybe-clear-stale-state: ws=%s clearing %s (no vterm)" ws state)
-          (claude-repl--ws-put ws :claude-state nil)
-          (force-mode-line-update t))
-      (claude-repl--log-verbose ws "maybe-clear-stale-state: ws=%s no-op (state=%s)" ws state))))
+(defun claude-repl--mark-dead-vterm (ws)
+  "Record that WS's vterm process is no longer running.
+Sets `:repl-state :dead' and clears `:claude-state'.  This is a
+documented lifecycle-cleanup exception to the sentinel-only writer
+rule: no hook will ever fire again for a dead process, so Emacs is
+the only observer that can reset state.  No-op if `:repl-state' is
+already `:dead' (idempotent on the poll path)."
+  (unless (eq (claude-repl--ws-repl-state ws) :dead)
+    (claude-repl--log ws "mark-dead-vterm: ws=%s claude-state=%s -> :dead"
+                      ws (claude-repl--ws-claude-state ws))
+    (claude-repl--ws-put ws :repl-state :dead)
+    (claude-repl--ws-put ws :claude-state nil)
+    (force-mode-line-update t)))
 
 ;;; Frame focus handler -------------------------------------------------------
 

@@ -495,13 +495,16 @@
     (claude-repl-debug/--apply-state-refresh "ws1" nil)
     (should-not (claude-repl--ws-state "ws1"))))
 
-(ert-deftest claude-repl-test-apply-state-refresh-not-open-preserves-thinking ()
-  "apply-state-refresh with claude not open should NOT clear :thinking state."
+(ert-deftest claude-repl-test-apply-state-refresh-not-open-clears-thinking ()
+  "apply-state-refresh with claude not open clears :thinking.
+The underlying vterm is gone, so no hook will ever fire to clear it
+naturally.  mark-dead-vterm clears :claude-state regardless of prior
+value and writes :repl-state :dead."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-set "ws1" :thinking)
+    (claude-repl--ws-set-claude-state "ws1" :thinking)
     (claude-repl-debug/--apply-state-refresh "ws1" nil)
-    ;; :thinking should be preserved because the guard `(not (eq state :thinking))` is false
-    (should (eq (claude-repl--ws-state "ws1") :thinking))))
+    (should-not (claude-repl--ws-claude-state "ws1"))
+    (should (eq (claude-repl--ws-repl-state "ws1") :dead))))
 
 (ert-deftest claude-repl-test-apply-state-refresh-not-open-no-state ()
   "apply-state-refresh with claude not open and no state should be a no-op."

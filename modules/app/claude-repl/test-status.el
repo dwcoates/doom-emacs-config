@@ -163,14 +163,13 @@
     (should-not (claude-repl--ws-get "ws1" :claude-state))
     (should-not (claude-repl--ws-get "ws1" :claude-state))))
 
-(ert-deftest claude-repl-test-maybe-clear-stale-clears-claude-state ()
-  "maybe-clear-stale-state clears :claude-state (write-both)."
+(ert-deftest claude-repl-test-mark-dead-vterm-clears-claude-state ()
+  "mark-dead-vterm clears :claude-state and sets :repl-state :dead."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-set "ws1" :done)
-    (cl-letf (((symbol-function 'claude-repl--vterm-running-p) (lambda (_) nil)))
-      (claude-repl--maybe-clear-stale-state "ws1")
-      (should-not (claude-repl--ws-get "ws1" :claude-state))
-      (should-not (claude-repl--ws-get "ws1" :claude-state)))))
+    (claude-repl--ws-set-claude-state "ws1" :done)
+    (claude-repl--mark-dead-vterm "ws1")
+    (should-not (claude-repl--ws-get "ws1" :claude-state))
+    (should (eq (claude-repl--ws-get "ws1" :repl-state) :dead))))
 
 ;;;; ---- Tests: Workspace state accessors (ws-set, ws-clear, ws-state) ----
 
@@ -883,17 +882,17 @@ trees; under the revised model only the Stop hook writes :done."
         (should (equal refreshed-ws "ws1"))))))
 
 (ert-deftest claude-repl-test-update-all-no-vterm ()
-  "update-all should call maybe-clear-stale-state for ws without running vterm."
+  "update-all should call mark-dead-vterm for ws without running vterm."
   (claude-repl-test--with-clean-state
-    (let ((cleared-ws nil))
+    (let ((dead-ws nil))
       ;; Register ws1 in the hashmap so the iterator finds it
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore)
                 ((symbol-function 'claude-repl--vterm-running-p) (lambda (_ws) nil))
-                ((symbol-function 'claude-repl--maybe-clear-stale-state)
-                 (lambda (ws) (setq cleared-ws ws))))
+                ((symbol-function 'claude-repl--mark-dead-vterm)
+                 (lambda (ws) (setq dead-ws ws))))
         (claude-repl--update-all-workspace-states)
-        (should (equal cleared-ws "ws1"))))))
+        (should (equal dead-ws "ws1"))))))
 
 (ert-deftest claude-repl-test-update-all-calls-poll ()
   "update-all-workspace-states should call poll-workspace-notifications."
@@ -905,41 +904,32 @@ trees; under the revised model only the Stop hook writes :done."
         (claude-repl--update-all-workspace-states)
         (should poll-called)))))
 
-;;;; ---- Tests: maybe-clear-stale-state ----
+;;;; ---- Tests: mark-dead-vterm ----
 
-(ert-deftest claude-repl-test-maybe-clear-stale-nil-noop ()
-  "maybe-clear-stale-state should be a no-op when state is nil."
+(ert-deftest claude-repl-test-mark-dead-vterm-sets-dead-and-clears-claude-state ()
+  "mark-dead-vterm writes :repl-state :dead and clears :claude-state."
   (claude-repl-test--with-clean-state
-    (claude-repl--maybe-clear-stale-state "ws1")
-    (should-not (claude-repl--ws-state "ws1"))))
+    (claude-repl--ws-set-claude-state "ws1" :done)
+    (claude-repl--mark-dead-vterm "ws1")
+    (should (eq (claude-repl--ws-repl-state "ws1") :dead))
+    (should-not (claude-repl--ws-claude-state "ws1"))))
 
-(ert-deftest claude-repl-test-maybe-clear-stale-thinking-preserved ()
-  "maybe-clear-stale-state should preserve :thinking state."
+(ert-deftest claude-repl-test-mark-dead-vterm-from-thinking ()
+  "mark-dead-vterm clears :thinking (vterm is gone; sentinel won't fire)."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-set "ws1" :thinking)
-    (claude-repl--maybe-clear-stale-state "ws1")
-    (should (eq (claude-repl--ws-state "ws1") :thinking))))
+    (claude-repl--ws-set-claude-state "ws1" :thinking)
+    (claude-repl--mark-dead-vterm "ws1")
+    (should (eq (claude-repl--ws-repl-state "ws1") :dead))
+    (should-not (claude-repl--ws-claude-state "ws1"))))
 
-(ert-deftest claude-repl-test-maybe-clear-stale-done-cleared ()
-  "maybe-clear-stale-state should clear :done state."
+(ert-deftest claude-repl-test-mark-dead-vterm-idempotent ()
+  "mark-dead-vterm is a no-op when :repl-state is already :dead."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-set "ws1" :done)
-    (claude-repl--maybe-clear-stale-state "ws1")
-    (should-not (claude-repl--ws-state "ws1"))))
-
-(ert-deftest claude-repl-test-maybe-clear-stale-permission-cleared ()
-  "maybe-clear-stale-state should clear :permission state."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-set "ws1" :permission)
-    (claude-repl--maybe-clear-stale-state "ws1")
-    (should-not (claude-repl--ws-state "ws1"))))
-
-(ert-deftest claude-repl-test-maybe-clear-stale-inactive-cleared ()
-  "maybe-clear-stale-state should clear :inactive state."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-set "ws1" :inactive)
-    (claude-repl--maybe-clear-stale-state "ws1")
-    (should-not (claude-repl--ws-state "ws1"))))
+    (claude-repl--ws-put "ws1" :repl-state :dead)
+    (claude-repl--ws-put "ws1" :claude-state :done)  ; simulate stale residue
+    (claude-repl--mark-dead-vterm "ws1")
+    ;; Second call must not re-run the clear — claude-state stays as-is.
+    (should (eq (claude-repl--ws-claude-state "ws1") :done))))
 
 ;;;; ---- Tests: on-frame-focus ----
 
@@ -1050,7 +1040,7 @@ trees; under the revised model only the Stop hook writes :done."
                  (lambda (ws) (push ws updated)))
                 ((symbol-function 'claude-repl--async-refresh-git-status)
                  (lambda (ws) (push ws refreshed)))
-                ((symbol-function 'claude-repl--maybe-clear-stale-state)
+                ((symbol-function 'claude-repl--mark-dead-vterm)
                  (lambda (ws) (push ws cleared))))
         (claude-repl--update-all-workspace-states)
         ;; running-ws should get update + refresh

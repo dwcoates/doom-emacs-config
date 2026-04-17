@@ -302,9 +302,7 @@ Returns a plist with keys :vterm-buf :proc-alive :owning-ws :has-window
 Mirrors the logic in `claude-repl--update-all-workspace-states'."
   (if claude-open
       (claude-repl--update-ws-state ws-name)
-    (let ((state (claude-repl--ws-claude-state ws-name)))
-      (when (and state (not (eq state :thinking)))
-        (claude-repl--ws-clear ws-name state)))))
+    (claude-repl--mark-dead-vterm ws-name)))
 
 (defun claude-repl-debug/--format-diagnostics (ws-name diag before after)
   "Format a diagnostic summary string for WS-NAME.
