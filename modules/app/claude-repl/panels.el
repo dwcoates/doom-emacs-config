@@ -61,7 +61,11 @@ input panel (or a warning if the input isn't displayed)."
 ;; Manual window layout: vterm on the right (full height), input below vterm.
 (defun claude-repl--show-panels ()
   "Display vterm and input panels to the right of the current window.
-Splits right for vterm (60% width to work window), then splits vterm bottom for input (15%)."
+Splits right for vterm (60% width to work window), then splits vterm bottom for input (15%).
+If a window exists above the current one, selects it first so panels
+are not split from a bottom popup (e.g. a regular vterm)."
+  (when-let ((above (window-in-direction 'above)))
+    (select-window above))
   (let* ((ws (+workspace-current-name))
          (vterm-buf (claude-repl--ws-get ws :vterm-buffer))
          (input-buf (claude-repl--ws-get ws :input-buffer)))

@@ -749,6 +749,57 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
         (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
 
+(ert-deftest claude-repl-test-panels-show-panels-moves-up-from-bottom-window ()
+  "show-panels selects the window above before splitting, so panels
+are not created from a bottom popup like a regular vterm."
+  (claude-repl-test--with-clean-state
+    (let ((vterm-buf (get-buffer-create "*show-up-vterm*"))
+          (input-buf (get-buffer-create "*show-up-input*"))
+          (bottom-win nil))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
+                    ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil)))
+            (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (delete-other-windows)
+            (let ((top-win (selected-window)))
+              ;; Create a bottom popup window and select it
+              (setq bottom-win (split-window top-win nil 'below))
+              (select-window bottom-win)
+              (should (eq (selected-window) bottom-win))
+              (claude-repl--show-panels)
+              ;; The vterm split should have come from top-win, not bottom-win.
+              ;; Verify top-win is no longer selected (it was split into work + vterm)
+              ;; and that both panel buffers are visible.
+              (should (get-buffer-window vterm-buf))
+              (should (get-buffer-window input-buf))))
+        ;; Clean up
+        (delete-other-windows)
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
+(ert-deftest claude-repl-test-panels-show-panels-noop-when-no-window-above ()
+  "show-panels does not error when there is no window above (single window)."
+  (claude-repl-test--with-clean-state
+    (let ((vterm-buf (get-buffer-create "*show-noop-vterm*"))
+          (input-buf (get-buffer-create "*show-noop-input*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
+                    ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil)))
+            (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (delete-other-windows)
+            ;; Single window, no window above -- should work normally
+            (claude-repl--show-panels)
+            (should (get-buffer-window vterm-buf))
+            (should (get-buffer-window input-buf)))
+        ;; Clean up
+        (delete-other-windows)
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
 ;;;; ---- Tests: focus-input-panel edge cases ----
 
 (ert-deftest claude-repl-test-panels-focus-input-panel-nil-buffer ()
