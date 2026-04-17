@@ -134,6 +134,30 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
         (should (equal callback-args '("ws1" "/some/dir")))
         (should (equal deleted-file "/tmp/stop_123"))))))
 
+(ert-deftest claude-repl-test-process-sentinel-file-deletes-before-callback ()
+  "File must be deleted before the callback runs so a slow callback cannot be
+re-dispatched by the poll fallback observing a still-present file."
+  (claude-repl-test--with-clean-state
+    (let ((delete-time nil)
+          (callback-time nil)
+          (counter 0))
+      (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
+                 (lambda (_f) '(:dir "/some/dir" :session-id nil)))
+                ((symbol-function 'claude-repl--ws-for-dir)
+                 (lambda (_d) "ws1"))
+                ((symbol-function 'claude-repl--update-session-id-from-sentinel)
+                 #'ignore)
+                ((symbol-function 'delete-file)
+                 (lambda (_f) (setq delete-time (cl-incf counter)))))
+        (claude-repl--process-sentinel-file
+         "/tmp/stop_789"
+         (list :callback (lambda (_ws _dir) (setq callback-time (cl-incf counter)))
+               :warning "warn %s"
+               :name "test"))
+        (should delete-time)
+        (should callback-time)
+        (should (< delete-time callback-time))))))
+
 (ert-deftest claude-repl-test-process-sentinel-file-nil-read-skips-all ()
   "When read-sentinel-file returns nil, callback should not be called."
   (claude-repl-test--with-clean-state
@@ -786,8 +810,8 @@ strips trailing slashes."
 
 ;;;; ---- Tests: process-sentinel-file uncovered edge cases ----
 
-(ert-deftest claude-repl-test-process-sentinel-file-callback-error-skips-delete ()
-  "When callback raises an error, delete-file is not called (no unwind-protect)."
+(ert-deftest claude-repl-test-process-sentinel-file-callback-error-still-deletes ()
+  "File is deleted before callback runs, so callback errors don't leave orphans for the poll to re-dispatch."
   (claude-repl-test--with-clean-state
     (let ((deleted-file nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
@@ -798,7 +822,6 @@ strips trailing slashes."
                  #'ignore)
                 ((symbol-function 'delete-file)
                  (lambda (f) (setq deleted-file f))))
-        ;; The callback errors; since there's no unwind-protect, delete-file won't run.
         (condition-case _err
             (claude-repl--process-sentinel-file
              "/tmp/stop_err"
@@ -806,8 +829,7 @@ strips trailing slashes."
                :warning "warn %s"
                :name "test"))
           (error nil))
-        ;; delete-file should NOT have run because the error interrupted execution
-        (should-not deleted-file)))))
+        (should (equal deleted-file "/tmp/stop_err"))))))
 
 (ert-deftest claude-repl-test-process-sentinel-file-delete-file-error-suppressed ()
   "When delete-file errors, the error should be suppressed by ignore-errors."

@@ -158,21 +158,25 @@ default persp matched via `workspace-for-buffer') to leak entries into
         (claude-repl--set-session-id ws session-id)))))
 
 (defun claude-repl--process-sentinel-file (file handler)
-  "Read sentinel FILE, resolve its workspace, invoke HANDLER's callback, then delete.
+  "Read sentinel FILE, delete it, resolve its workspace, then invoke HANDLER's callback.
 HANDLER is an entry from `claude-repl--sentinel-dispatch-alist' with keys
 :warning, :callback, and :name.
 
 Reads the directory and session-id from FILE via `claude-repl--read-sentinel-file',
-resolves the workspace via `claude-repl--ws-for-dir'.  If the read failed
-\(nil return), does nothing.  If the workspace is nil, logs the :warning
-message with the directory interpolated via %s.  Otherwise updates the
-workspace's session ID (if provided), logs a standard entry using :name,
-then calls :callback with two arguments: the workspace name and the
-directory.  Always deletes FILE at the end."
+then deletes FILE immediately so the poll fallback cannot race a slow handler
+and re-dispatch the same file.  Resolves the workspace via `claude-repl--ws-for-dir'.
+If the read failed \(nil return), does nothing further.  If the workspace is
+nil, logs the :warning message with the directory interpolated via %s.
+Otherwise updates the workspace's session ID (if provided), logs a standard
+entry using :name, then calls :callback with two arguments: the workspace
+name and the directory."
   (let* ((sentinel-data (claude-repl--read-sentinel-file file))
          (dir (plist-get sentinel-data :dir))
          (session-id (plist-get sentinel-data :session-id))
          (ws  (when dir (claude-repl--ws-for-dir dir))))
+    ;; Delete the file immediately after reading so the poll fallback can't
+    ;; re-dispatch it while a slow handler (e.g. panel setup) is still running.
+    (ignore-errors (delete-file file))
     (claude-repl--log nil "process-sentinel-file: handler=%s file=%s dir=%S session-id=%S ws=%s"
                       (plist-get handler :name) (file-name-nondirectory file) dir session-id ws)
     (cond
@@ -187,8 +191,7 @@ directory.  Always deletes FILE at the end."
                         (plist-get handler :name)
                         (file-name-nondirectory file) dir ws
                         (claude-repl--ws-get ws :claude-state))
-      (funcall (plist-get handler :callback) ws dir)))
-    (ignore-errors (delete-file file))))
+      (funcall (plist-get handler :callback) ws dir)))))
 
 (defun claude-repl--on-permission-event (ws _dir)
   "Set :permission status on workspace WS.
