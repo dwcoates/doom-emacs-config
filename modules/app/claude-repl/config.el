@@ -11,6 +11,8 @@
 
 ;;; Code:
 
+(message "[claude-repl] Loading Claude-Repl package...")
+
 (defvar claude-repl--load-errors nil
   "List of (FILE . ERROR) pairs for sub-files that failed to load.")
 
@@ -38,6 +40,7 @@
 (claude-repl--load-module "panels")
 (claude-repl--load-module "worktree")
 (claude-repl--load-module "keybindings")
+(claude-repl--load-module "magit")
 
 (if claude-repl--load-errors
     (progn

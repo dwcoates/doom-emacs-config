@@ -241,6 +241,8 @@ signal (the renderer shows red/❓ through the closed-panel state).
 WS defaults to the current workspace; when WS is nil the function still
 hides panels but skips the bookkeeping write."
   (let ((ws (or ws (+workspace-current-name))))
+    (claude-repl--log ws "on-close: CALLED this-command=%s last-command=%s"
+                      this-command last-command)
     (when ws
       (claude-repl--log ws "on-close ws=%s claude-state=%s -> repl-state=:inactive"
                         ws (claude-repl--ws-claude-state ws))

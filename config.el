@@ -382,29 +382,8 @@
         (unless (doom-real-buffer-list)
           (magit-status dir))))
 
-(after! magit
-  (setq magit-no-confirm (append magit-no-confirm '(abort-revert abort-rebase abort-merge))
-        magit-diff-visit-previous-blob nil)
-
-  (advice-add 'magit-display-buffer :before #'+dwc/hide-claude-repl-for-magit)
-
-  (map! :map (magit-unstaged-section-map magit-staged-section-map magit-untracked-section-map magit-mode-map)
-        :desc "Jump to recent commits"
-        "g r"
-        #'magit-jump-to-unpushed-to-upstream))
-
-(defun +dwc/hide-claude-repl-for-magit (&rest _)
-  "Hide claude-repl panels before opening magit, giving magit full window control."
-  (when (and (fboundp 'claude-repl--panels-visible-p)
-             (claude-repl--panels-visible-p))
-    (claude-repl--on-close)))
-
-;; Section map bindings must be done after magit-diff loads
-(after! magit-diff
-  (define-key magit-file-section-map [return] #'magit-diff-visit-worktree-file)
-  (define-key magit-file-section-map [C-return] #'magit-diff-visit-file)
-  (define-key magit-hunk-section-map [return] #'magit-diff-visit-worktree-file)
-  (define-key magit-hunk-section-map [C-return] #'magit-diff-visit-file))
+;; All magit integration and user magit commands live in the claude-repl
+;; module's magit.el (see AGENTS.md — no claude-repl code in this file).
 
 ;; Workspace configuration
 (after! persp-mode
@@ -625,36 +604,6 @@ If OPEN-IN-BROWSER is non-nil, open the link in the default browser."
       (kill-new github-url)
       (message "GitHub link copied to clipboard: %s" github-url))))
 
-(defun +dwc/magit-open-commit-in-github ()
-  "Open the current commit in GitHub browser."
-  (interactive)
-  (let* ((commit-sha (string-trim (shell-command-to-string "git rev-parse HEAD")))
-         (remote-url (string-trim (shell-command-to-string "git config --get remote.origin.url")))
-         (cleaned-url (replace-regexp-in-string "^git@github.com:" "https://github.com"
-                                                (replace-regexp-in-string "\\.git$" "" remote-url)))
-         (repo-name (progn
-                      (if (string-match "github.com[:/]ChessCom/\\(.*\\)" cleaned-url)
-                          (match-string 1 cleaned-url)
-                        (error (format "Remote URL '%s' does not match expected pattern" cleaned-url)))))
-         (github-url (format "https://github.com/ChessCom/%s/commit/%s" repo-name commit-sha)))
-    (browse-url github-url)))
-
-(defun +dwc/magit-copy-commit-link ()
-  "Copy GitHub link for commit at point in magit buffer."
-  (interactive)
-  (let* ((commit-sha (magit-commit-at-point))
-         (default-directory (magit-toplevel))
-         (remote-url (string-trim (shell-command-to-string "git config --get remote.origin.url")))
-         (cleaned-url (replace-regexp-in-string "^git@github.com:" "https://github.com"
-                                                (replace-regexp-in-string "\\.git$" "" remote-url)))
-         (repo-name (progn
-                      (if (string-match "github.com[:/]ChessCom/\\(.*\\)" cleaned-url)
-                          (match-string 1 cleaned-url)
-                        (error (format "Remote URL '%s' does not match expected pattern" cleaned-url)))))
-         (github-url (format "https://github.com/ChessCom/%s/commit/%s" repo-name commit-sha)))
-    (kill-new github-url)
-    (message "GitHub commit link copied to clipboard: %s" github-url)))
-
 (defun +dwc/pr-url-for-branch (&optional open-in-browser)
   "Get the GitHub pull request URL for the current branch.
 If OPEN-IN-BROWSER is non-nil, open it in the browser.
@@ -680,33 +629,17 @@ Otherwise, copy to the kill ring."
     (kill-new branch)
     (message "Branch copied: %s" branch)))
 
-(defun +dwc/magit-status-workspace ()
-  "Open magit-status for the current workspace's project root."
-  (interactive)
-  (magit-status (claude-repl--ws-dir (+workspace-current-name))))
-
 (map! :leader
-      :desc "Magit status for workspace"
-      "g g" #'+dwc/magit-status-workspace
-      :desc "Magit status"
-      "g G" #'magit-status
       :desc "Generate GitHub link for current line"
       "g h" #'+dwc/generate-github-link
       :desc "Generate and open GitHub link in browser"
       "g H" (lambda () (interactive) (+dwc/generate-github-link t))
-      :desc "Open commit in GitHub"
-      "g O" #'+dwc/magit-open-commit-in-github
       :desc "Copy branch name"
       "g b" #'+dwc/copy-branch-name
       :desc "Copy PR link for current branch"
       "g p" #'+dwc/pr-url-for-branch
       :desc "Open PR for current branch in browser"
       "g P" (lambda () (interactive) (+dwc/pr-url-for-branch t)))
-
-;; Add magit-specific keybinding
-(map! :map magit-status-mode-map
-      "g c" #'+dwc/magit-copy-commit-link
-      "g C" #'+dwc/magit-open-commit-in-github)
 
 ;; Whenever you reconfigure a package, make sure to wrap your config in an
 ;; `after!' block, otherwise Doom's defaults may override your settings. E.g.
@@ -1053,9 +986,6 @@ If found, the class name is returned, otherwise STR is returned"
 
 (map! :leader
       :desc "Search files from current dir" "s d" #'+dwc/counsel-rg-here)
-
-(map! :map (magit-status-mode-map magit-diff-section-base-map magit-diff-section-map)
-      "C-<return>" #'magit-diff-visit-file-other-window)
 
 ;; just-mode configuration
 (use-package! just-mode

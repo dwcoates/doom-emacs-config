@@ -6,9 +6,15 @@ Begin the persistence message with ✅ if the changes are not persistent after r
 
 ## Claude REPL
 
-All Claude REPL functionality (commands, keybindings, functions) must be added to `modules/app/claude-repl/config.el`. Never add Claude REPL features to `config.el` or any other file without first asking the user.
+**Never put claude-repl code in the top-level doomdir `config.el`.** All claude-repl code — defuns, advice, hooks, keybindings, magit integration — lives under `modules/app/claude-repl/*.el`. The top-level `config.el` is not reloaded by `M-x doom/reload-lisp-config` the same way the module is, and instrumentation added there routinely fails to take effect, wasting debugging cycles.
 
-Functions defined in `modules/app/claude-repl/config.el` must use the `claude-repl-` prefix (public) or `claude-repl--` prefix (private). Never use `+dwc/` prefixed functions in that file — `+dwc/` functions belong in `config.el`.
+When adding a new concern:
+
+1. Pick the right sub-file (`core.el`, `panels.el`, `status.el`, `session.el`, `sentinel.el`, `worktree.el`, `input.el`, `keybindings.el`, `magit.el`, etc.) or create a new one.
+2. If creating a new file, register it in `modules/app/claude-repl/config.el` via `(claude-repl--load-module "NAME")`.
+3. If the feature bridges claude-repl with another package (e.g. magit), put it in a dedicated integration file like `magit.el` rather than in the doomdir `config.el` under `(after! PACKAGE ...)`.
+
+Naming: internals use `claude-repl--` prefix, public entry points use `claude-repl-` prefix. User-facing commands triggered by leader keybindings may keep the `+dwc/` prefix when they were moved out of the doomdir `config.el` and remain user-scope entry points.
 
 ## Claude REPL instrumentation
 
