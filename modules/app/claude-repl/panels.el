@@ -243,33 +243,37 @@ hides panels but skips the bookkeeping write."
 
 ;; Auto-close orphaned panels: if one is closed, close the other.
 ;; Also refresh the hide overlay in case a window change invalidated it.
-(defun claude-repl--extract-panel-hex (name)
-  "Extract the hex identifier from a Claude panel buffer NAME.
-Returns the hex string, or nil if NAME is not a Claude panel buffer."
+(defun claude-repl--extract-panel-id (name)
+  "Extract the workspace identifier from a Claude panel buffer NAME.
+Returns the identifier string, or nil if NAME is not a Claude panel buffer.
+Input-buffer check comes first since `claude-repl--vterm-buffer-re' is a
+superset that also matches input-buffer names."
   (cond
-   ((string-match-p claude-repl--vterm-buffer-re name)
-    (substring name (length "*claude-") (- (length name) (length "*"))))
    ((string-match-p claude-repl--input-buffer-re name)
-    (substring name (length "*claude-input-") (- (length name) (length "*"))))))
+    (substring name (length "*claude-input-") (- (length name) (length "*"))))
+   ((string-match-p claude-repl--vterm-buffer-re name)
+    (substring name (length "*claude-") (- (length name) (length "*"))))))
 
-(defun claude-repl--partner-buffer-name (name hex)
-  "Return the partner buffer name for Claude panel NAME with identifier HEX.
-For a vterm buffer, the partner is the input buffer, and vice versa."
-  (if (string-match-p claude-repl--vterm-buffer-re name)
-      (format "*claude-input-%s*" hex)
-    (format "*claude-%s*" hex)))
+(defun claude-repl--partner-buffer-name (name id)
+  "Return the partner buffer name for Claude panel NAME with identifier ID.
+For a vterm buffer, the partner is the input buffer, and vice versa.
+Checks input-re first since vterm-re is a superset that also matches inputs."
+  (if (string-match-p claude-repl--input-buffer-re name)
+      (format "*claude-%s*" id)
+    (format "*claude-input-%s*" id)))
 
 (defun claude-repl--orphaned-panel-p (name)
   "Return non-nil if NAME is a Claude panel buffer whose partner is not visible.
 Ignores single-window frames.  Input buffers are not orphaned while the
 loading placeholder exists (the vterm has not been swapped in yet)."
-  (when-let ((hex (claude-repl--extract-panel-hex name)))
-    (let ((partner (claude-repl--partner-buffer-name name hex))
-          (result (and (not (one-window-p))
-                       (not (get-buffer-window (claude-repl--partner-buffer-name name hex)))
-                       ;; Input panels are not orphaned while loading placeholder is live
-                       (or (string-match-p claude-repl--vterm-buffer-re name)
-                           (not (get-buffer " *claude-loading*"))))))
+  (when-let ((id (claude-repl--extract-panel-id name)))
+    (let* ((is-input (string-match-p claude-repl--input-buffer-re name))
+           (partner (claude-repl--partner-buffer-name name id))
+           (result (and (not (one-window-p))
+                        (not (get-buffer-window partner))
+                        ;; Input panels are not orphaned while loading placeholder is live
+                        (or (not is-input)
+                            (not (get-buffer " *claude-loading*"))))))
       (when result
         (claude-repl--log-verbose nil "orphaned-panel-p: name=%s partner=%s is-orphaned" name partner))
       result)))
@@ -382,7 +386,7 @@ Allows mouse-initiated selection through."
   "Create input buffer for workspace WS if needed, put in claude-input-mode."
   (claude-repl--log ws "ensure-input-buffer")
   (let* ((root (claude-repl--resolve-root))
-         (input-buf (get-buffer-create (claude-repl--buffer-name "-input"))))
+         (input-buf (get-buffer-create (claude-repl--buffer-name "-input" ws))))
     (claude-repl--ws-put ws :input-buffer input-buf)
     (with-current-buffer input-buf
       (setq-local claude-repl--project-root root)
@@ -390,9 +394,10 @@ Allows mouse-initiated selection through."
         (claude-input-mode)
         (claude-repl--history-restore)))))
 
-(defun claude-repl--kill-stale-vterm ()
-  "Kill the Claude vterm buffer if it exists but has no live process."
-  (let ((existing (get-buffer (claude-repl--buffer-name))))
+(defun claude-repl--kill-stale-vterm (&optional ws)
+  "Kill the Claude vterm buffer for WS if it exists but has no live process.
+WS defaults to the current workspace."
+  (let ((existing (get-buffer (claude-repl--buffer-name nil ws))))
     (if (not existing)
         (claude-repl--log nil "kill-stale-vterm: no existing buffer")
       (if (get-buffer-process existing)
@@ -419,8 +424,8 @@ is already in vterm-mode."
   (let* ((root (claude-repl--resolve-root))
          (default-directory root))
     (claude-repl--log ws "ensure-vterm-buffer ws=%s root=%s default-directory=%s" ws root default-directory)
-    (claude-repl--kill-stale-vterm)
-    (let ((vterm-buf (get-buffer-create (claude-repl--buffer-name))))
+    (claude-repl--kill-stale-vterm ws)
+    (let ((vterm-buf (get-buffer-create (claude-repl--buffer-name nil ws))))
       (claude-repl--ws-put ws :vterm-buffer vterm-buf)
       (with-current-buffer vterm-buf
         (if (eq major-mode 'vterm-mode)

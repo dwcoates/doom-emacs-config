@@ -459,11 +459,14 @@ resolved via `claude-repl--tab-spec'."
 
 ;; Walk saved window-configuration tree to find claude buffers.
 (defun claude-repl--wconf-has-claude-p (wconf)
-  "Return non-nil if WCONF (a `window-state-get' tree) contains a claude buffer."
+  "Return non-nil if WCONF (a `window-state-get' tree) contains a claude vterm buffer.
+Excludes input buffers: presence of only the input panel in a saved
+config (e.g. from a placeholder layout) should not count as claude open."
   (when (and wconf (proper-list-p wconf))
     (let ((buf-entry (alist-get 'buffer wconf)))
       (if (and buf-entry (stringp (car-safe buf-entry))
-               (string-match-p claude-repl--vterm-buffer-re (car buf-entry)))
+               (string-match-p claude-repl--vterm-buffer-re (car buf-entry))
+               (not (string-match-p claude-repl--input-buffer-re (car buf-entry))))
           t
         (cl-some #'claude-repl--wconf-has-claude-p
                  (cl-remove-if-not #'proper-list-p wconf))))))

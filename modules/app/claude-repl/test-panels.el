@@ -67,21 +67,25 @@
 
 ;;;; ---- Tests: Extract panel hex ----
 
-(ert-deftest claude-repl-test-panels-extract-hex-from-vterm ()
-  "extract-panel-hex returns hex from a vterm buffer name."
-  (should (equal (claude-repl--extract-panel-hex "*claude-abcd1234*")
-                 "abcd1234")))
+(ert-deftest claude-repl-test-panels-extract-id-from-vterm ()
+  "extract-panel-id returns workspace identifier from a vterm buffer name."
+  (should (equal (claude-repl--extract-panel-id "*claude-abcd1234*")
+                 "abcd1234"))
+  (should (equal (claude-repl--extract-panel-id "*claude-my-workspace*")
+                 "my-workspace")))
 
-(ert-deftest claude-repl-test-panels-extract-hex-from-input ()
-  "extract-panel-hex returns hex from an input buffer name."
-  (should (equal (claude-repl--extract-panel-hex "*claude-input-abcd1234*")
-                 "abcd1234")))
+(ert-deftest claude-repl-test-panels-extract-id-from-input ()
+  "extract-panel-id returns workspace identifier from an input buffer name."
+  (should (equal (claude-repl--extract-panel-id "*claude-input-abcd1234*")
+                 "abcd1234"))
+  (should (equal (claude-repl--extract-panel-id "*claude-input-my-workspace*")
+                 "my-workspace")))
 
-(ert-deftest claude-repl-test-panels-extract-hex-non-claude ()
-  "extract-panel-hex returns nil for non-Claude buffer names."
-  (should-not (claude-repl--extract-panel-hex "*scratch*"))
-  (should-not (claude-repl--extract-panel-hex "*Messages*"))
-  (should-not (claude-repl--extract-panel-hex "config.el")))
+(ert-deftest claude-repl-test-panels-extract-id-non-claude ()
+  "extract-panel-id returns nil for non-Claude buffer names."
+  (should-not (claude-repl--extract-panel-id "*scratch*"))
+  (should-not (claude-repl--extract-panel-id "*Messages*"))
+  (should-not (claude-repl--extract-panel-id "config.el")))
 
 ;;;; ---- Tests: Partner buffer name ----
 
@@ -1017,7 +1021,8 @@
 (ert-deftest claude-repl-test-panels-kill-stale-vterm-no-buffer ()
   "kill-stale-vterm is a no-op when no buffer with the expected name exists."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--buffer-name) (lambda () "*nonexistent-stale*")))
+    (cl-letf (((symbol-function 'claude-repl--buffer-name)
+               (lambda (&rest _) "*nonexistent-stale*")))
       ;; Should not error
       (claude-repl--kill-stale-vterm))))
 
@@ -1025,7 +1030,8 @@
   "kill-stale-vterm kills a buffer that exists without a live process."
   (claude-repl-test--with-clean-state
     (let ((buf (get-buffer-create "*stale-vterm-test*")))
-      (cl-letf (((symbol-function 'claude-repl--buffer-name) (lambda () "*stale-vterm-test*")))
+      (cl-letf (((symbol-function 'claude-repl--buffer-name)
+                 (lambda (&rest _) "*stale-vterm-test*")))
         (should (get-buffer "*stale-vterm-test*"))
         (claude-repl--kill-stale-vterm)
         (should-not (get-buffer "*stale-vterm-test*"))))))
@@ -1035,7 +1041,8 @@
   (claude-repl-test--with-clean-state
     (let ((buf (get-buffer-create "*process-vterm-test*")))
       (unwind-protect
-          (cl-letf (((symbol-function 'claude-repl--buffer-name) (lambda () "*process-vterm-test*"))
+          (cl-letf (((symbol-function 'claude-repl--buffer-name)
+                     (lambda (&rest _) "*process-vterm-test*"))
                     ((symbol-function 'get-buffer-process) (lambda (_buf) 'fake-process)))
             (claude-repl--kill-stale-vterm)
             ;; Buffer should still exist

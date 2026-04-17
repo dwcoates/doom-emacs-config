@@ -51,34 +51,54 @@
 ;;;; ---- Tests: Buffer naming ----
 
 (ert-deftest claude-repl-test-buffer-name-format ()
-  "Buffer names should follow *claude-HASH* and *claude-input-HASH* pattern."
-  (claude-repl-test--with-temp-buffer " *test-buf-name*"
-    (setq-local claude-repl--project-root "/test/proj")
-    (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) nil)))
-      (let ((id (claude-repl--workspace-id)))
-        (should (equal (claude-repl--buffer-name) (format "*claude-%s*" id)))
-        (should (equal (claude-repl--buffer-name "-input") (format "*claude-input-%s*" id)))))))
+  "Buffer names should follow *claude-WS* and *claude-input-WS* pattern."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws")))
+    (should (equal (claude-repl--buffer-name) "*claude-my-ws*"))
+    (should (equal (claude-repl--buffer-name "-input") "*claude-input-my-ws*"))))
 
 (ert-deftest claude-repl-test-buffer-name-default ()
-  "Buffer name uses 'default' when workspace-id returns nil."
-  (cl-letf (((symbol-function 'claude-repl--workspace-id) (lambda () nil)))
+  "Buffer name uses 'default' when no workspace name is available."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
     (should (equal (claude-repl--buffer-name) "*claude-default*"))))
+
+(ert-deftest claude-repl-test-buffer-name-uses-explicit-ws ()
+  "Buffer name should prefer the explicit WS argument over the current workspace."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))
+    (should (equal (claude-repl--buffer-name nil "other-ws")
+                   "*claude-other-ws*"))))
+
+(ert-deftest claude-repl-test-buffer-name-sanitizes-unsafe-chars ()
+  "Workspace names with unsafe characters should be sanitized to underscores."
+  (should (equal (claude-repl--buffer-name nil "feat/login")
+                 "*claude-feat_login*"))
+  (should (equal (claude-repl--buffer-name nil "ws with space")
+                 "*claude-ws_with_space*"))
+  (should (equal (claude-repl--buffer-name "-input" "a*b")
+                 "*claude-input-a_b*")))
+
+(ert-deftest claude-repl-test-sanitize-ws-name ()
+  "sanitize-ws-name keeps alphanumerics, hyphens, and underscores."
+  (should (equal (claude-repl--sanitize-ws-name "abc-123_xyz") "abc-123_xyz"))
+  (should (equal (claude-repl--sanitize-ws-name "feat/login") "feat_login"))
+  (should (equal (claude-repl--sanitize-ws-name "a b*c") "a_b_c"))
+  (should-not (claude-repl--sanitize-ws-name nil)))
 
 ;;;; ---- Tests: Buffer predicates ----
 
 (ert-deftest claude-repl-test-claude-buffer-p ()
-  "claude-buffer-p should match *claude-HASH* pattern only."
+  "claude-buffer-p should match *claude-WS* pattern only (excluding input)."
   (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
     (should (claude-repl--claude-buffer-p)))
   (claude-repl-test--with-temp-buffer "*claude-input-abcd1234*"
     (should-not (claude-repl--claude-buffer-p)))
-  ;; Use a unique name — the real `*scratch*' is the current buffer when
-  ;; the aggregate test runner starts, so naming a temp buffer `*scratch*'
-  ;; and then killing it swaps us out of the original buffer and leaves
+  ;; Use a name that does NOT begin with `*claude-' so the vterm regex
+  ;; can't match.  The real `*scratch*' is the current buffer when the
+  ;; aggregate test runner starts, so naming a temp buffer `*scratch*' and
+  ;; then killing it swaps us out of the original buffer and leaves
   ;; `default-directory' pointing at whatever buffer ert lands in next
   ;; (Emacs.app/Contents/MacOS on macOS).  That breaks subsequent tests
   ;; that call git without a -C flag.
-  (claude-repl-test--with-temp-buffer "*claude-repl-test-non-claude-buf*"
+  (claude-repl-test--with-temp-buffer "*repl-test-non-claude-buf*"
     (should-not (claude-repl--claude-buffer-p))))
 
 ;;;; ---- Tests: Logging ----
@@ -774,25 +794,35 @@ When t, it should call `message'."
 
 (ert-deftest claude-repl-test-buffer-name-empty-suffix ()
   "Buffer name with empty string suffix should work like no suffix."
-  (cl-letf (((symbol-function 'claude-repl--workspace-id) (lambda () "abcd1234")))
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "abcd1234")))
     (should (equal (claude-repl--buffer-name "") "*claude-abcd1234*"))))
 
 (ert-deftest claude-repl-test-buffer-name-various-suffixes ()
   "Buffer name with various suffix values should include them."
-  (cl-letf (((symbol-function 'claude-repl--workspace-id) (lambda () "abcd1234")))
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "abcd1234")))
     (should (equal (claude-repl--buffer-name "-debug") "*claude-debug-abcd1234*"))
     (should (equal (claude-repl--buffer-name "-log") "*claude-log-abcd1234*"))))
 
 (ert-deftest claude-repl-test-buffer-name-matches-regexps ()
-  "Buffer names should match their respective regexp patterns."
-  (cl-letf (((symbol-function 'claude-repl--workspace-id) (lambda () "abcd1234")))
+  "Buffer names should match their respective regexp patterns.
+Use `claude-repl--claude-buffer-p' for the vterm-vs-input distinction —
+`claude-repl--vterm-buffer-re' is a superset that also matches input names."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "abcd1234")))
     (let ((vterm-name (claude-repl--buffer-name))
           (input-name (claude-repl--buffer-name "-input")))
       (should (string-match-p claude-repl--vterm-buffer-re vterm-name))
       (should (string-match-p claude-repl--input-buffer-re input-name))
-      ;; Cross-check: vterm name should NOT match input re and vice versa
+      ;; Vterm name does NOT match input-re; predicate on vterm name is true.
       (should-not (string-match-p claude-repl--input-buffer-re vterm-name))
-      (should-not (string-match-p claude-repl--vterm-buffer-re input-name)))))
+      (with-temp-buffer
+        (rename-buffer vterm-name t)
+        (should (claude-repl--claude-buffer-p)))
+      ;; Input name matches vterm-re (superset), but the predicate correctly
+      ;; excludes it.
+      (should (string-match-p claude-repl--vterm-buffer-re input-name))
+      (with-temp-buffer
+        (rename-buffer input-name t)
+        (should-not (claude-repl--claude-buffer-p))))))
 
 ;;;; ---- Tests: claude-buffer-p edge cases ----
 
@@ -1053,14 +1083,19 @@ When t, it should call `message'."
   (should-not (default-value 'claude-repl-debug)))
 
 (ert-deftest claude-repl-test-vterm-buffer-re-matches ()
-  "`claude-repl--vterm-buffer-re' should match expected vterm buffer patterns."
+  "`claude-repl--vterm-buffer-re' matches vterm and input names (superset by design).
+Callers that need a vterm-only check must use `claude-repl--claude-buffer-p'."
   (should (string-match-p claude-repl--vterm-buffer-re "*claude-abcd1234*"))
-  (should-not (string-match-p claude-repl--vterm-buffer-re "*claude-input-abcd1234*"))
+  (should (string-match-p claude-repl--vterm-buffer-re "*claude-my-workspace*"))
+  ;; Vterm-re intentionally also matches input buffers (workspace names can
+  ;; contain hyphens, so the regex can't cheaply exclude "input-*").
+  (should (string-match-p claude-repl--vterm-buffer-re "*claude-input-abcd1234*"))
   (should-not (string-match-p claude-repl--vterm-buffer-re "*scratch*")))
 
 (ert-deftest claude-repl-test-input-buffer-re-matches ()
   "`claude-repl--input-buffer-re' should match expected input buffer patterns."
   (should (string-match-p claude-repl--input-buffer-re "*claude-input-abcd1234*"))
+  (should (string-match-p claude-repl--input-buffer-re "*claude-input-my-workspace*"))
   (should-not (string-match-p claude-repl--input-buffer-re "*claude-abcd1234*"))
   (should-not (string-match-p claude-repl--input-buffer-re "*scratch*")))
 
