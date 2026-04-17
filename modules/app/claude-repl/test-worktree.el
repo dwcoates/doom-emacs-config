@@ -212,7 +212,7 @@ Returns the full SHA of the new commit."
 (ert-deftest claude-repl-test-dispatch-prompt-enqueues-when-not-ready ()
   "When vterm buffer exists but is not ready, prompt is enqueued."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*claude-test-vterm*"
+    (claude-repl-test--with-temp-buffer "*claude-panel-test-vterm*"
       (setq-local claude-repl--ready nil)
       (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (claude-repl--dispatch-prompt-command "ws1" "hello")
@@ -721,14 +721,14 @@ Returns the full SHA of the new commit."
   "Vterm buffer process is killed when present."
   (claude-repl-test--with-clean-state
     (let ((killed-buf nil))
-      (claude-repl-test--with-temp-buffer "*claude-test-vterm*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-test-vterm*"
         (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function 'claude-repl--kill-vterm-process)
                    (lambda (b) (setq killed-buf b)))
                   ((symbol-function '+workspace-list-names) (lambda () nil))
                   ((symbol-function 'persp-kill) (lambda (_ws) nil)))
           (claude-repl--finish-workspace "ws1")
-          (should (equal killed-buf (get-buffer "*claude-test-vterm*"))))))))
+          (should (equal killed-buf (get-buffer "*claude-panel-test-vterm*"))))))))
 
 (ert-deftest claude-repl-test-finish-workspace-no-persp-kill-if-not-listed ()
   "If workspace is not in +workspace-list-names, persp-kill is not called."

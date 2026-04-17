@@ -147,7 +147,7 @@
 (ert-deftest claude-repl-test-resolve-target-in-claude-buffer ()
   "In a claude buffer, `resolve-overlay-target-buffer' returns current buffer."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+    (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
       (should (eq (claude-repl--resolve-overlay-target-buffer) (current-buffer))))))
 
 (ert-deftest claude-repl-test-resolve-target-non-claude-with-ws ()
@@ -302,7 +302,7 @@
   "Reentrancy guard prevents recursive calls to `after-vterm-redraw'."
   (claude-repl-test--with-clean-state
     (let ((update-count 0))
-      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
         (cl-letf (((symbol-function 'claude-repl--update-hide-overlay)
                    (lambda () (cl-incf update-count))))
           ;; With reentrancy guard active, update-hide-overlay should NOT be called
@@ -328,7 +328,7 @@
 (ert-deftest claude-repl-test-redraw-advice-accepts-args ()
   "The redraw advice function should accept and ignore any arguments."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*claude-test9999*"
+    (claude-repl-test--with-temp-buffer "*claude-panel-test9999*"
       (cl-letf (((symbol-function 'claude-repl--update-hide-overlay)
                  (lambda () nil)))
         ;; Should not error when called with extra arguments
@@ -338,7 +338,7 @@
   "While executing, the advice should set `claude-repl--in-redraw-advice' to t."
   (claude-repl-test--with-clean-state
     (let ((flag-during-update nil))
-      (claude-repl-test--with-temp-buffer "*claude-f1a9c4ec*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-f1a9c4ec*"
         (cl-letf (((symbol-function 'claude-repl--update-hide-overlay)
                    (lambda ()
                      (setq flag-during-update claude-repl--in-redraw-advice))))
@@ -570,7 +570,7 @@
 
 (ert-deftest claude-repl-test-vterm-color-advice-claude-default-bg ()
   "vterm-color-advice in a claude buffer with default bg request should return dark hex."
-  (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+  (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
     (let ((result (claude-repl--vterm-color-advice
                    (lambda (_idx &rest _args) "#ffffff")
                    -1)))
@@ -578,7 +578,7 @@
 
 (ert-deftest claude-repl-test-vterm-color-advice-claude-non-default ()
   "vterm-color-advice in a claude buffer with non-default request should pass through."
-  (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+  (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
     (let ((result (claude-repl--vterm-color-advice
                    (lambda (_idx &rest _args) "#ff0000")
                    0)))

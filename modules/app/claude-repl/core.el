@@ -329,25 +329,18 @@ state changes regardless of which persp the buffer drifts into.")
 
 ;;; Buffer naming and predicates
 
-;; Workspace names may contain hyphens, so a naive regex like
-;; `^\\*claude-[[:alnum:]_-]+\\*$' would match `*claude-input-ws*' as well
-;; as `*claude-ws*'.  The vterm regex excludes names that begin with the
-;; "input-" prefix by requiring the first character after "claude-" to be
-;; non-hyphen and then allowing hyphen-containing tails -- but that still
-;; matches "input-..." since `input' does not start with a hyphen.  The
-;; cleanest fix is to anchor around the prefix: "claude-" followed by a
-;; workspace component that is NOT "input" plus optional "-tail".  We
-;; approximate this by requiring the char after "claude-" to not be `i',
-;; or if it is `i', the next char to not be `n', and so on.  That is
-;; unwieldy, so instead the VTERM predicate below explicitly excludes
-;; input-buffer matches.
-(defconst claude-repl--vterm-buffer-re "^\\*claude-[[:alnum:]_-]+\\*$"
-  "Regexp matching Claude vterm buffer names (e.g. *claude-my-workspace*).
+;; Panel buffers use the "claude-panel-" prefix to distinguish them from
+;; other claude-repl utility buffers (e.g. *claude-repl-dump*,
+;; *claude-repl-log-bug*).  The vterm regex is still a superset that
+;; matches input buffers too; `claude-repl--claude-buffer-p' explicitly
+;; excludes them.
+(defconst claude-repl--vterm-buffer-re "^\\*claude-panel-[[:alnum:]_-]+\\*$"
+  "Regexp matching Claude panel buffer names (e.g. *claude-panel-my-workspace*).
 Caveat: also matches input buffer names.  Use `claude-repl--claude-buffer-p'
 for the combined check.")
 
-(defconst claude-repl--input-buffer-re "^\\*claude-input-[[:alnum:]_-]+\\*$"
-  "Regexp matching Claude input buffer names (e.g. *claude-input-my-workspace*).")
+(defconst claude-repl--input-buffer-re "^\\*claude-panel-input-[[:alnum:]_-]+\\*$"
+  "Regexp matching Claude input buffer names (e.g. *claude-panel-input-my-workspace*).")
 
 (defun claude-repl--sanitize-ws-name (name)
   "Return NAME with unsafe characters replaced by underscores.
@@ -356,22 +349,22 @@ Keeps alphanumerics, hyphens, and underscores.  Returns nil for nil NAME."
     (replace-regexp-in-string "[^[:alnum:]_-]" "_" name)))
 
 (defun claude-repl--buffer-name (&optional suffix ws)
-  "Return a workspace-specific buffer name like *claude-WS* or *claude-input-WS*.
+  "Return a workspace-specific buffer name like *claude-panel-WS* or *claude-panel-input-WS*.
 SUFFIX, if provided, is inserted before the workspace name (e.g. \"-input\").
 WS, if provided, is the workspace name; otherwise uses the current workspace.
 Falls back to \"default\" when no workspace name is available."
   (let* ((ws-name (or ws (and (fboundp '+workspace-current-name)
                               (+workspace-current-name))))
          (safe (claude-repl--sanitize-ws-name ws-name))
-         (name (format "*claude%s-%s*" (or suffix "") (or safe "default"))))
+         (name (format "*claude-panel%s-%s*" (or suffix "") (or safe "default"))))
     (claude-repl--log-verbose nil "buffer-name: suffix=%s ws=%s name=%s" suffix ws-name name)
     name))
 
 (defun claude-repl--create-buffer (ws &optional suffix)
   "Create a workspace-owned buffer for WS and return it.
 SUFFIX is passed to `claude-repl--buffer-name' to select the buffer's
-role: nil for the vterm buffer (*claude-WS*), \"-input\" for the input
-buffer (*claude-input-WS*).
+role: nil for the vterm buffer (*claude-panel-WS*), \"-input\" for the input
+buffer (*claude-panel-input-WS*).
 
 Single entry point for every workspace-owned buffer.  Derives the
 canonical name, sets `claude-repl--owning-workspace' buffer-locally

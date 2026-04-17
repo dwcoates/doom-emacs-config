@@ -63,7 +63,7 @@
   "`claude-repl-send-char' should call `vterm-send-string' with the char, then `vterm-send-return'."
   (claude-repl-test--with-clean-state
     (let ((calls nil))
-      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -79,7 +79,7 @@
   "`claude-repl-scroll-down' calls `vterm-send-down' in the vterm buffer."
   (claude-repl-test--with-clean-state
     (let ((down-called nil))
-      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -92,7 +92,7 @@
   "`claude-repl-scroll-up' calls `vterm-send-up'."
   (claude-repl-test--with-clean-state
     (let ((up-called nil))
-      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -105,7 +105,7 @@
   "`claude-repl-interrupt' calls `vterm-send-key' with \"<escape>\" twice."
   (claude-repl-test--with-clean-state
     (let ((escape-count 0))
-      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -120,7 +120,7 @@
   "`claude-repl-cycle' calls `vterm-send-key' with \"<backtab>\"."
   (claude-repl-test--with-clean-state
     (let ((backtab-called nil))
-      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -136,7 +136,7 @@
   (claude-repl-test--with-clean-state
     (let ((send-string-args nil)
           (return-called nil))
-      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
@@ -154,7 +154,7 @@
     (let ((send-string-args nil)
           (return-called nil)
           (timer-args nil))
-      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
@@ -217,7 +217,7 @@
   "claude-repl-paste-to-vterm should call vterm-send-key with C-v args."
   (claude-repl-test--with-clean-state
     (let ((send-key-args nil))
-      (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -367,7 +367,7 @@
 (ert-deftest claude-repl-test-pin-owning-workspace-sets-local ()
   "Pin should set `claude-repl--owning-workspace' as a buffer-local."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*claude-pin-test*"
+    (claude-repl-test--with-temp-buffer "*claude-panel-pin-test*"
       (claude-repl--pin-owning-workspace (current-buffer) "my-ws")
       (should (equal claude-repl--owning-workspace "my-ws")))))
 
@@ -425,7 +425,7 @@
   (claude-repl-test--with-clean-state
     (let ((send-string-args nil)
           (return-called nil))
-      (claude-repl-test--with-temp-buffer "*claude-threshold*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-threshold*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
@@ -442,7 +442,7 @@
   (claude-repl-test--with-clean-state
     (let ((send-string-args nil)
           (return-called nil))
-      (claude-repl-test--with-temp-buffer "*claude-empty*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-empty*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
@@ -531,7 +531,7 @@
 (ert-deftest claude-repl-test-do-send-increments-counter ()
   "`claude-repl--do-send' increments the prefix counter."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*claude-do-send*"
+    (claude-repl-test--with-temp-buffer "*claude-panel-do-send*"
       (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (claude-repl--ws-put "ws1" :prefix-counter 5)
       (cl-letf (((symbol-function 'claude-repl--send-input-to-vterm) #'ignore)
@@ -544,7 +544,7 @@
 The :thinking transition belongs to the prompt_submit Claude Code hook
 (via `on-prompt-submit-event').  Emacs-side do-send only sends bytes."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*claude-do-send-think*"
+    (claude-repl-test--with-temp-buffer "*claude-panel-do-send-think*"
       (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (cl-letf (((symbol-function 'claude-repl--send-input-to-vterm) #'ignore)
                 ((symbol-function 'claude-repl--run-send-posthooks) #'ignore))
@@ -555,7 +555,7 @@ The :thinking transition belongs to the prompt_submit Claude Code hook
 (ert-deftest claude-repl-test-do-send-pins-owning-workspace ()
   "`claude-repl--do-send' pins the owning workspace on the vterm buffer."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*claude-do-send-pin*"
+    (claude-repl-test--with-temp-buffer "*claude-panel-do-send-pin*"
       (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (cl-letf (((symbol-function 'claude-repl--send-input-to-vterm) #'ignore)
                 ((symbol-function 'claude-repl--run-send-posthooks) #'ignore))
@@ -566,7 +566,7 @@ The :thinking transition belongs to the prompt_submit Claude Code hook
   "`claude-repl--do-send' passes raw input to posthooks."
   (claude-repl-test--with-clean-state
     (let ((posthook-args nil))
-      (claude-repl-test--with-temp-buffer "*claude-do-send-hook*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-do-send-hook*"
         (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function 'claude-repl--send-input-to-vterm) #'ignore)
                   ((symbol-function 'claude-repl--run-send-posthooks)
@@ -583,7 +583,7 @@ routes through libvterm's key translation and can dispatch SIGINT instead
 of the literal ETX keystroke Claude needs to clear its input line."
   (claude-repl-test--with-clean-state
     (let ((sent-bytes nil))
-      (claude-repl-test--with-temp-buffer "*claude-discard-test*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-discard-test*"
         (setq-local vterm--process 'fake-proc)
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (claude-repl-test--with-temp-buffer " *test-input-discard*"
@@ -600,7 +600,7 @@ where the user pressed C-c C-c expecting a full reset."
   (claude-repl-test--with-clean-state
     (let ((sent-bytes nil)
           (evil-called nil))
-      (claude-repl-test--with-temp-buffer "*claude-discard-vterm*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-discard-vterm*"
         (setq-local vterm--process 'fake-proc)
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (claude-repl-test--with-temp-buffer " *test-input-nonempty*"
@@ -625,7 +625,7 @@ where the user pressed C-c C-c expecting a full reset."
   "`claude-repl--send-vterm-key' forwards the given key to vterm."
   (claude-repl-test--with-clean-state
     (let ((sent-key nil))
-      (claude-repl-test--with-temp-buffer "*claude-key-test*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-key-test*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -638,7 +638,7 @@ where the user pressed C-c C-c expecting a full reset."
   "`claude-repl--send-up-arrow' sends <up> to vterm."
   (claude-repl-test--with-clean-state
     (let ((sent-key nil))
-      (claude-repl-test--with-temp-buffer "*claude-up-test*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-up-test*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -651,7 +651,7 @@ where the user pressed C-c C-c expecting a full reset."
   "`claude-repl--send-down-arrow' sends <down> to vterm."
   (claude-repl-test--with-clean-state
     (let ((sent-key nil))
-      (claude-repl-test--with-temp-buffer "*claude-down-test*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-down-test*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -677,7 +677,7 @@ where the user pressed C-c C-c expecting a full reset."
         (setq-local claude-repl--history-navigating nil)
         (insert "from buffer")
         (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
-        (claude-repl-test--with-temp-buffer "*claude-send-vterm*"
+        (claude-repl-test--with-temp-buffer "*claude-panel-send-vterm*"
           (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'claude-repl--send-input-to-vterm)
@@ -700,7 +700,7 @@ where the user pressed C-c C-c expecting a full reset."
         (setq-local claude-repl--history-navigating nil)
         (insert "original content")
         (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
-        (claude-repl-test--with-temp-buffer "*claude-send-prompt-vterm*"
+        (claude-repl-test--with-temp-buffer "*claude-panel-send-prompt-vterm*"
           (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'claude-repl--send-input-to-vterm)
@@ -717,7 +717,7 @@ where the user pressed C-c C-c expecting a full reset."
   "`claude-repl--send' is a no-op when both prompt and input buffer are nil/empty."
   (claude-repl-test--with-clean-state
     (let ((do-send-called nil))
-      (claude-repl-test--with-temp-buffer "*claude-noop-vterm*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-noop-vterm*"
         (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
         ;; No input buffer registered
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
@@ -736,7 +736,7 @@ where the user pressed C-c C-c expecting a full reset."
   "`claude-repl--send-input-direct' sends string then return then refreshes."
   (claude-repl-test--with-clean-state
     (let ((calls nil))
-      (claude-repl-test--with-temp-buffer "*claude-direct-test*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-direct-test*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest _) (push (list 'string s) calls)))
                   ((symbol-function 'vterm-send-return)
@@ -751,7 +751,7 @@ where the user pressed C-c C-c expecting a full reset."
   "`claude-repl--send-input-bracketed' calls vterm-send-string with t paste flag."
   (claude-repl-test--with-clean-state
     (let ((send-args nil))
-      (claude-repl-test--with-temp-buffer "*claude-bracketed-test*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-bracketed-test*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-args (cons s args))))
                   ((symbol-function 'run-at-time)
@@ -768,7 +768,7 @@ where the user pressed C-c C-c expecting a full reset."
     (claude-repl-test--with-temp-buffer " *test-slash-push*"
       (setq-local claude-repl--slash-stack nil)
       (let ((sent nil))
-        (claude-repl-test--with-temp-buffer "*claude-slash-vterm*"
+        (claude-repl-test--with-temp-buffer "*claude-panel-slash-vterm*"
           (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -805,7 +805,7 @@ must not accumulate phantom entries that trap the user in slash mode."
     (claude-repl-test--with-temp-buffer " *test-slash-bs*"
       (setq-local claude-repl--slash-stack '("b" "a" "/"))
       (let ((backspace-count 0))
-        (claude-repl-test--with-temp-buffer "*claude-slash-bs-vterm*"
+        (claude-repl-test--with-temp-buffer "*claude-panel-slash-bs-vterm*"
           (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -824,7 +824,7 @@ must not accumulate phantom entries that trap the user in slash mode."
     (claude-repl-test--with-temp-buffer " *test-slash-exit*"
       (setq-local claude-repl--slash-stack '("/"))
       (claude-slash-input-mode 1)
-      (claude-repl-test--with-temp-buffer "*claude-slash-exit-vterm*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-slash-exit-vterm*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -841,7 +841,7 @@ must not accumulate phantom entries that trap the user in slash mode."
       (setq-local claude-repl--slash-stack '("r" "a" "e" "l" "c" "/"))
       (claude-slash-input-mode 1)
       (let ((return-called nil))
-        (claude-repl-test--with-temp-buffer "*claude-slash-return-vterm*"
+        (claude-repl-test--with-temp-buffer "*claude-panel-slash-return-vterm*"
           (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -868,7 +868,7 @@ must not accumulate phantom entries that trap the user in slash mode."
     (claude-repl-test--with-temp-buffer " *test-slash-tab*"
       (setq-local claude-repl--slash-stack '("/"))
       (let ((sent nil))
-        (claude-repl-test--with-temp-buffer "*claude-slash-tab-vterm*"
+        (claude-repl-test--with-temp-buffer "*claude-panel-slash-tab-vterm*"
           (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -887,7 +887,7 @@ must not accumulate phantom entries that trap the user in slash mode."
     (claude-repl-test--with-temp-buffer " *test-passthrough-empty*"
       (setq-local claude-repl--slash-stack nil)
       (let ((sent nil))
-        (claude-repl-test--with-temp-buffer "*claude-pt-vterm*"
+        (claude-repl-test--with-temp-buffer "*claude-panel-pt-vterm*"
           (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -953,7 +953,7 @@ must not accumulate phantom entries that trap the user in slash mode."
       (setq-local claude-slash-input-mode nil)
       (let ((this-command 'delete-backward-char)
             (sent-key nil))
-        (claude-repl-test--with-temp-buffer "*claude-intercept-vterm*"
+        (claude-repl-test--with-temp-buffer "*claude-panel-intercept-vterm*"
           (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -994,7 +994,7 @@ must not accumulate phantom entries that trap the user in slash mode."
       (insert "   ")
       (let ((this-command 'delete-backward-char)
             (sent-key nil))
-        (claude-repl-test--with-temp-buffer "*claude-intercept-ws-vterm*"
+        (claude-repl-test--with-temp-buffer "*claude-panel-intercept-ws-vterm*"
           (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -1066,7 +1066,7 @@ must not accumulate phantom entries that trap the user in slash mode."
   "Whitespace-only buffer is blank-p, so raw ETX is sent and local discard skipped."
   (claude-repl-test--with-clean-state
     (let ((sent-bytes nil))
-      (claude-repl-test--with-temp-buffer "*claude-discard-ws-vterm*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-discard-ws-vterm*"
         (setq-local vterm--process 'fake-proc)
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (claude-repl-test--with-temp-buffer " *test-discard-ws-input*"
@@ -1082,7 +1082,7 @@ must not accumulate phantom entries that trap the user in slash mode."
 (ert-deftest claude-repl-test-send-vterm-key-dead-vterm-noop ()
   "`claude-repl--send-vterm-key' should be a no-op when vterm buffer is dead."
   (claude-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*claude-dead-key*"))
+    (let ((buf (get-buffer-create "*claude-panel-dead-key*"))
           (sent nil))
       (claude-repl--ws-put "test-ws" :vterm-buffer buf)
       (kill-buffer buf)
@@ -1097,7 +1097,7 @@ must not accumulate phantom entries that trap the user in slash mode."
 (ert-deftest claude-repl-test-scroll-down-dead-vterm-noop ()
   "`claude-repl-scroll-down' should be a no-op when vterm buffer is dead."
   (claude-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*claude-dead-scroll-down*"))
+    (let ((buf (get-buffer-create "*claude-panel-dead-scroll-down*"))
           (called nil))
       (claude-repl--ws-put "test-ws" :vterm-buffer buf)
       (kill-buffer buf)
@@ -1112,7 +1112,7 @@ must not accumulate phantom entries that trap the user in slash mode."
 (ert-deftest claude-repl-test-scroll-up-dead-vterm-noop ()
   "`claude-repl-scroll-up' should be a no-op when vterm buffer is dead."
   (claude-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*claude-dead-scroll-up*"))
+    (let ((buf (get-buffer-create "*claude-panel-dead-scroll-up*"))
           (called nil))
       (claude-repl--ws-put "test-ws" :vterm-buffer buf)
       (kill-buffer buf)
@@ -1128,7 +1128,7 @@ must not accumulate phantom entries that trap the user in slash mode."
   "`claude-repl--scroll-vterm-output' calls SCROLL-FN with 3 in the vterm window."
   (claude-repl-test--with-clean-state
     (let ((scroll-arg nil))
-      (claude-repl-test--with-temp-buffer "*claude-scroll-output*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-scroll-output*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -1149,7 +1149,7 @@ must not accumulate phantom entries that trap the user in slash mode."
   "`claude-repl--scroll-vterm-output' is a no-op when vterm has no visible window."
   (claude-repl-test--with-clean-state
     (let ((scroll-called nil))
-      (claude-repl-test--with-temp-buffer "*claude-scroll-nowin*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-scroll-nowin*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -1165,7 +1165,7 @@ must not accumulate phantom entries that trap the user in slash mode."
   "`claude-repl-scroll-output-up' calls `scroll-down' (not `scroll-up')."
   (claude-repl-test--with-clean-state
     (let ((fn-called nil))
-      (claude-repl-test--with-temp-buffer "*claude-scroll-up-test*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-scroll-up-test*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -1184,7 +1184,7 @@ must not accumulate phantom entries that trap the user in slash mode."
   "`claude-repl-scroll-output-down' calls `scroll-up' (not `scroll-down')."
   (claude-repl-test--with-clean-state
     (let ((fn-called nil))
-      (claude-repl-test--with-temp-buffer "*claude-scroll-down-test*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-scroll-down-test*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -1202,7 +1202,7 @@ must not accumulate phantom entries that trap the user in slash mode."
 (ert-deftest claude-repl-test-send-char-dead-vterm-noop ()
   "`claude-repl-send-char' should be a no-op when vterm buffer is dead."
   (claude-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*claude-dead-sendchar*"))
+    (let ((buf (get-buffer-create "*claude-panel-dead-sendchar*"))
           (sent nil))
       (claude-repl--ws-put "test-ws" :vterm-buffer buf)
       (kill-buffer buf)
@@ -1265,7 +1265,7 @@ must not accumulate phantom entries that trap the user in slash mode."
     (claude-repl-test--with-temp-buffer " *test-digit-empty*"
       (setq-local claude-repl--slash-stack nil)
       (let ((sent nil))
-        (claude-repl-test--with-temp-buffer "*claude-digit-vterm*"
+        (claude-repl-test--with-temp-buffer "*claude-panel-digit-vterm*"
           (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -1377,7 +1377,7 @@ must not accumulate phantom entries that trap the user in slash mode."
 (ert-deftest claude-repl-test-do-send-dead-vterm ()
   "`claude-repl--do-send' should still increment counter etc. even with a dead vterm buffer."
   (claude-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*claude-dead-do-send*")))
+    (let ((buf (get-buffer-create "*claude-panel-dead-do-send*")))
       (claude-repl--ws-put "ws1" :vterm-buffer buf)
       (claude-repl--ws-put "ws1" :prefix-counter 5)
       (kill-buffer buf)
@@ -1400,7 +1400,7 @@ must not accumulate phantom entries that trap the user in slash mode."
         (setq-local claude-repl--history-navigating nil)
         (insert "hello")
         (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
-        (claude-repl-test--with-temp-buffer "*claude-send-force-vterm*"
+        (claude-repl-test--with-temp-buffer "*claude-panel-send-force-vterm*"
           (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'claude-repl--prepare-input)
@@ -1418,7 +1418,7 @@ must not accumulate phantom entries that trap the user in slash mode."
   "`claude-repl--send' does not call do-send when vterm buffer is dead."
   (claude-repl-test--with-clean-state
     (let ((do-send-called nil)
-          (buf (get-buffer-create "*claude-send-dead-vterm*")))
+          (buf (get-buffer-create "*claude-panel-send-dead-vterm*")))
       (claude-repl--ws-put "ws1" :vterm-buffer buf)
       (claude-repl-test--with-temp-buffer " *test-send-dead-input*"
         (insert "hello")
@@ -1539,7 +1539,7 @@ The dead-buffer check happens inside `run-deferred-action' at callback time."
 when the workspace's recorded vterm buffer is dead.
 Per AGENTS.md \"No Silent Fallbacks\": no silent no-op."
   (claude-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*claude-dead-slash-vterm*"))
+    (let ((buf (get-buffer-create "*claude-panel-dead-slash-vterm*"))
           (sent nil)
           (msg-called nil))
       (claude-repl--ws-put "test-ws" :vterm-buffer buf)
@@ -1560,7 +1560,7 @@ Per AGENTS.md \"No Silent Fallbacks\": no silent no-op."
     (claude-repl-test--with-temp-buffer " *test-slash-fwd-char*"
       (setq-local claude-repl--slash-stack '("/"))
       (let ((sent nil))
-        (claude-repl-test--with-temp-buffer "*claude-fwd-char-vterm*"
+        (claude-repl-test--with-temp-buffer "*claude-panel-fwd-char-vterm*"
           (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -1580,7 +1580,7 @@ Per AGENTS.md \"No Silent Fallbacks\": no silent no-op."
     (claude-repl-test--with-temp-buffer " *test-slash-bs-empty*"
       (setq-local claude-repl--slash-stack nil)
       (claude-slash-input-mode 1)
-      (claude-repl-test--with-temp-buffer "*claude-slash-bs-empty-vterm*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-slash-bs-empty-vterm*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -1855,7 +1855,7 @@ and surfaces a user-visible error."
       (claude-slash-input-mode 1)
       (let ((sent-strings nil)
             (return-called nil))
-        (claude-repl-test--with-temp-buffer "*claude-slash-inject-vterm*"
+        (claude-repl-test--with-temp-buffer "*claude-panel-slash-inject-vterm*"
           (claude-repl--ws-put "my-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
@@ -1878,7 +1878,7 @@ and surfaces a user-visible error."
       (claude-slash-input-mode 1)
       (let ((sent-strings nil)
             (return-called nil))
-        (claude-repl-test--with-temp-buffer "*claude-slash-no-inject-vterm*"
+        (claude-repl-test--with-temp-buffer "*claude-panel-slash-no-inject-vterm*"
           (claude-repl--ws-put "my-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))

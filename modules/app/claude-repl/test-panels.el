@@ -69,16 +69,16 @@
 
 (ert-deftest claude-repl-test-panels-extract-id-from-vterm ()
   "extract-panel-id returns workspace identifier from a vterm buffer name."
-  (should (equal (claude-repl--extract-panel-id "*claude-abcd1234*")
+  (should (equal (claude-repl--extract-panel-id "*claude-panel-abcd1234*")
                  "abcd1234"))
-  (should (equal (claude-repl--extract-panel-id "*claude-my-workspace*")
+  (should (equal (claude-repl--extract-panel-id "*claude-panel-my-workspace*")
                  "my-workspace")))
 
 (ert-deftest claude-repl-test-panels-extract-id-from-input ()
   "extract-panel-id returns workspace identifier from an input buffer name."
-  (should (equal (claude-repl--extract-panel-id "*claude-input-abcd1234*")
+  (should (equal (claude-repl--extract-panel-id "*claude-panel-input-abcd1234*")
                  "abcd1234"))
-  (should (equal (claude-repl--extract-panel-id "*claude-input-my-workspace*")
+  (should (equal (claude-repl--extract-panel-id "*claude-panel-input-my-workspace*")
                  "my-workspace")))
 
 (ert-deftest claude-repl-test-panels-extract-id-non-claude ()
@@ -91,13 +91,13 @@
 
 (ert-deftest claude-repl-test-panels-partner-of-vterm ()
   "partner-buffer-name of a vterm buffer is the input buffer."
-  (should (equal (claude-repl--partner-buffer-name "*claude-abcd1234*" "abcd1234")
-                 "*claude-input-abcd1234*")))
+  (should (equal (claude-repl--partner-buffer-name "*claude-panel-abcd1234*" "abcd1234")
+                 "*claude-panel-input-abcd1234*")))
 
 (ert-deftest claude-repl-test-panels-partner-of-input ()
   "partner-buffer-name of an input buffer is the vterm buffer."
-  (should (equal (claude-repl--partner-buffer-name "*claude-input-abcd1234*" "abcd1234")
-                 "*claude-abcd1234*")))
+  (should (equal (claude-repl--partner-buffer-name "*claude-panel-input-abcd1234*" "abcd1234")
+                 "*claude-panel-abcd1234*")))
 
 ;;;; ---- Tests: Orphaned panel detection (migrated) ----
 
@@ -109,7 +109,7 @@
               ((symbol-function 'get-buffer-window) (lambda (_buf) nil))
               ((symbol-function 'get-buffer) (lambda (_name) nil)))
       ;; Vterm with no visible input partner is orphaned
-      (should (claude-repl--orphaned-panel-p "*claude-abcd1234*"))
+      (should (claude-repl--orphaned-panel-p "*claude-panel-abcd1234*"))
       ;; Non-Claude buffers are never orphaned
       (should-not (claude-repl--orphaned-panel-p "*some-other*")))))
 
@@ -120,7 +120,7 @@
               ((symbol-function 'get-buffer-window) (lambda (_buf) nil))
               ((symbol-function 'get-buffer) (lambda (_name) nil)))
       ;; Input with no visible vterm partner and no loading placeholder is orphaned
-      (should (claude-repl--orphaned-panel-p "*claude-input-abcd1234*"))
+      (should (claude-repl--orphaned-panel-p "*claude-panel-input-abcd1234*"))
       ;; Non-Claude buffers are never orphaned
       (should-not (claude-repl--orphaned-panel-p "*scratch*")))))
 
@@ -128,7 +128,7 @@
   "When one-window-p returns t, no panel is considered orphaned."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function 'one-window-p) (lambda () t)))
-      (should-not (claude-repl--orphaned-panel-p "*claude-abcd1234*")))))
+      (should-not (claude-repl--orphaned-panel-p "*claude-panel-abcd1234*")))))
 
 (ert-deftest claude-repl-test-panels-orphaned-input-with-loading ()
   "When loading placeholder buffer exists, input panel is not orphaned."
@@ -138,7 +138,7 @@
               ((symbol-function 'get-buffer) (lambda (name)
                                                (when (equal name " *claude-loading*")
                                                  'fake-buffer))))
-      (should-not (claude-repl--orphaned-panel-p "*claude-input-abcd1234*")))))
+      (should-not (claude-repl--orphaned-panel-p "*claude-panel-input-abcd1234*")))))
 
 (ert-deftest claude-repl-test-panels-orphaned-vterm-partner-visible ()
   "A vterm buffer whose input partner IS visible is not orphaned."
@@ -147,9 +147,9 @@
               ((symbol-function 'get-buffer-window)
                (lambda (buf)
                  ;; The input partner window is visible
-                 (when (equal buf "*claude-input-abcd1234*")
+                 (when (equal buf "*claude-panel-input-abcd1234*")
                    'fake-window))))
-      (should-not (claude-repl--orphaned-panel-p "*claude-abcd1234*")))))
+      (should-not (claude-repl--orphaned-panel-p "*claude-panel-abcd1234*")))))
 
 (ert-deftest claude-repl-test-panels-orphaned-input-partner-visible ()
   "An input buffer whose vterm partner IS visible is not orphaned."
@@ -158,9 +158,9 @@
               ((symbol-function 'get-buffer-window)
                (lambda (buf)
                  ;; The vterm partner window is visible
-                 (when (equal buf "*claude-abcd1234*")
+                 (when (equal buf "*claude-panel-abcd1234*")
                    'fake-window))))
-      (should-not (claude-repl--orphaned-panel-p "*claude-input-abcd1234*")))))
+      (should-not (claude-repl--orphaned-panel-p "*claude-panel-input-abcd1234*")))))
 
 ;;;; ---- Tests: Docstring accuracy (migrated) ----
 
@@ -945,7 +945,7 @@ are not created from a bottom popup like a regular vterm."
 
 (ert-deftest claude-repl-test-panels-non-claude-panel-window-p-vterm-buffer ()
   "non-claude-panel-window-p returns nil for a window showing a Claude vterm buffer."
-  (let ((buf (get-buffer-create "*claude-abcd1234*")))
+  (let ((buf (get-buffer-create "*claude-panel-abcd1234*")))
     (unwind-protect
         (progn
           (switch-to-buffer buf)
@@ -955,7 +955,7 @@ are not created from a bottom popup like a regular vterm."
 
 (ert-deftest claude-repl-test-panels-non-claude-panel-window-p-input-buffer ()
   "non-claude-panel-window-p returns nil for a window showing a Claude input buffer."
-  (let ((buf (get-buffer-create "*claude-input-abcd1234*")))
+  (let ((buf (get-buffer-create "*claude-panel-input-abcd1234*")))
     (unwind-protect
         (progn
           (switch-to-buffer buf)
@@ -1049,7 +1049,7 @@ are not created from a bottom popup like a regular vterm."
 Load-bearing: after the bounce redirects vterm→input, the input selection
 must not itself trigger another bounce."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*claude-input-test-ws*"
+    (claude-repl-test--with-temp-buffer "*claude-panel-input-test-ws*"
       (let ((orig-win (selected-window)))
         (set-window-buffer orig-win (current-buffer))
         (let ((last-input-event ?a))
@@ -1059,8 +1059,8 @@ must not itself trigger another bounce."
 (ert-deftest claude-repl-test-panels-bounce-from-vterm-keyboard-redirects ()
   "bounce-from-vterm redirects to the input window when selection is keyboard-driven."
   (claude-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*claude-test-ws*"))
-          (input-buf (get-buffer-create "*claude-input-test-ws*"))
+    (let ((vterm-buf (get-buffer-create "*claude-panel-test-ws*"))
+          (input-buf (get-buffer-create "*claude-panel-input-test-ws*"))
           (new-win nil))
       (unwind-protect
           (progn
@@ -1080,8 +1080,8 @@ must not itself trigger another bounce."
 (ert-deftest claude-repl-test-panels-bounce-from-vterm-mouse-does-not-redirect ()
   "Mouse-driven selection of a vterm window stays put — user wants to scroll/copy."
   (claude-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*claude-test-ws*"))
-          (input-buf (get-buffer-create "*claude-input-test-ws*"))
+    (let ((vterm-buf (get-buffer-create "*claude-panel-test-ws*"))
+          (input-buf (get-buffer-create "*claude-panel-input-test-ws*"))
           (new-win nil))
       (unwind-protect
           (progn
@@ -1105,13 +1105,13 @@ must not itself trigger another bounce."
 Previously this path logged verbosely and stranded point in vterm; now
 we at least surface the stuck state so the user knows to click out."
   (claude-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*claude-test-ws*"))
+    (let ((vterm-buf (get-buffer-create "*claude-panel-test-ws*"))
           (messages nil))
       (unwind-protect
           (progn
             ;; Input buffer is stored but NOT displayed in any window.
             (claude-repl--ws-put "test-ws" :input-buffer
-                                 (get-buffer-create "*claude-input-test-ws*"))
+                                 (get-buffer-create "*claude-panel-input-test-ws*"))
             (set-window-buffer (selected-window) vterm-buf)
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                       ((symbol-function 'message)
@@ -1121,7 +1121,7 @@ we at least surface the stuck state so the user knows to click out."
             (should (cl-some (lambda (m) (string-match-p "input panel isn't visible" m))
                              messages)))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
-        (when-let ((b (get-buffer "*claude-input-test-ws*"))) (kill-buffer b))))))
+        (when-let ((b (get-buffer "*claude-panel-input-test-ws*"))) (kill-buffer b))))))
 
 ;;;; ---- Tests: kill-stale-vterm ----
 
@@ -1361,7 +1361,7 @@ we at least surface the stuck state so the user knows to click out."
 (ert-deftest claude-repl-test-panels-redirect-claude-to-other-window ()
   "redirect-from-claude-before-save selects a non-Claude window when current is Claude."
   (claude-repl-test--with-clean-state
-    (let ((claude-buf (get-buffer-create "*claude-abcd1234*"))
+    (let ((claude-buf (get-buffer-create "*claude-panel-abcd1234*"))
           (regular-buf (get-buffer-create "*regular-buf*"))
           (new-win nil))
       (unwind-protect
@@ -1383,7 +1383,7 @@ we at least surface the stuck state so the user knows to click out."
 (ert-deftest claude-repl-test-panels-redirect-claude-only-window ()
   "redirect-from-claude-before-save skips redirect when Claude is the only window."
   (claude-repl-test--with-clean-state
-    (let ((claude-buf (get-buffer-create "*claude-abcd1234*")))
+    (let ((claude-buf (get-buffer-create "*claude-panel-abcd1234*")))
       (unwind-protect
           (progn
             (delete-other-windows)

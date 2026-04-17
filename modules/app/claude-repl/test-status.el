@@ -670,12 +670,12 @@
 
 (ert-deftest claude-repl-test-wconf-has-claude-flat-match ()
   "wconf-has-claude-p should return t for a flat wconf with a matching buffer."
-  (let ((wconf '((buffer "*claude-ab12cd34*"))))
+  (let ((wconf '((buffer "*claude-panel-ab12cd34*"))))
     (should (claude-repl--wconf-has-claude-p wconf))))
 
 (ert-deftest claude-repl-test-wconf-has-claude-nested-match ()
   "wconf-has-claude-p should return t for a nested wconf with matching buffer."
-  (let ((wconf '((child ((buffer "*claude-ab12cd34*"))))))
+  (let ((wconf '((child ((buffer "*claude-panel-ab12cd34*"))))))
     (should (claude-repl--wconf-has-claude-p wconf))))
 
 (ert-deftest claude-repl-test-wconf-has-claude-no-buffer ()
@@ -692,7 +692,7 @@
 
 (ert-deftest claude-repl-test-visible-claude-buffer-dead-buffer ()
   "visible-claude-buffer-p should return nil for a dead buffer."
-  (let ((buf (generate-new-buffer "*claude-deadbeef*")))
+  (let ((buf (generate-new-buffer "*claude-panel-deadbeef*")))
     (kill-buffer buf)
     (should-not (claude-repl--visible-claude-buffer-p buf))))
 
@@ -703,13 +703,13 @@
 
 (ert-deftest claude-repl-test-visible-claude-buffer-no-window ()
   "visible-claude-buffer-p should return nil for a live claude buffer with no window."
-  (claude-repl-test--with-temp-buffer "*claude-00112233*"
+  (claude-repl-test--with-temp-buffer "*claude-panel-00112233*"
     ;; Buffer is live and claude but has no window
     (should-not (claude-repl--visible-claude-buffer-p (current-buffer)))))
 
 (ert-deftest claude-repl-test-visible-claude-buffer-with-window ()
   "visible-claude-buffer-p should return non-nil for a live claude buffer with a window."
-  (claude-repl-test--with-temp-buffer "*claude-00112233*"
+  (claude-repl-test--with-temp-buffer "*claude-panel-00112233*"
     (cl-letf (((symbol-function 'get-buffer-window)
                (lambda (_buf) 'fake-window)))
       (should (claude-repl--visible-claude-buffer-p (current-buffer))))))
@@ -724,7 +724,7 @@
 
 (ert-deftest claude-repl-test-claude-visible-in-current-ws-found ()
   "claude-visible-in-current-ws-p should return non-nil when a visible claude buffer exists."
-  (claude-repl-test--with-temp-buffer "*claude-aabbccdd*"
+  (claude-repl-test--with-temp-buffer "*claude-panel-aabbccdd*"
     (let ((test-buf (current-buffer)))
       (cl-letf (((symbol-function 'buffer-list)
                  (lambda () (list test-buf)))
@@ -747,7 +747,7 @@
 (ert-deftest claude-repl-test-claude-in-saved-wconf-with-claude ()
   "claude-in-saved-wconf-p should return t when saved wconf contains claude buffer."
   (let ((fake-persp (list 'fake-persp-struct))
-        (fake-wconf '((buffer "*claude-ab12cd34*"))))
+        (fake-wconf '((buffer "*claude-panel-ab12cd34*"))))
     (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_name) fake-persp))
               ((symbol-function 'persp-window-conf) (lambda (_persp) fake-wconf)))
       (should (claude-repl--claude-in-saved-wconf-p "ws1")))))

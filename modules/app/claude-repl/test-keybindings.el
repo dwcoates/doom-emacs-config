@@ -55,12 +55,12 @@
 
 (ert-deftest claude-repl-test-format-buffer-info-with-values ()
   "format-buffer-info should show buffer name, owning workspace, and persp workspace."
-  (claude-repl-test--with-temp-buffer "*claude-abcd1234*"
+  (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
     (setq-local claude-repl--owning-workspace "my-ws")
     (cl-letf (((symbol-function 'claude-repl--workspace-for-buffer)
                (lambda (_buf) "persp-ws")))
       (let ((result (claude-repl--format-buffer-info (current-buffer))))
-        (should (string-match-p "\\*claude-abcd1234\\*" result))
+        (should (string-match-p "\\*claude-panel-abcd1234\\*" result))
         (should (string-match-p "owning=my-ws" result))
         (should (string-match-p "persp=persp-ws" result))))))
 
@@ -199,9 +199,9 @@
 
 (ert-deftest claude-repl-test-list-claude-vterm-buffers-filters ()
   "list-claude-vterm-buffers should return only buffers matching the vterm pattern."
-  (let ((buf1 (get-buffer-create "*claude-abcd1234*"))
+  (let ((buf1 (get-buffer-create "*claude-panel-abcd1234*"))
         (buf2 (get-buffer-create "*not-claude*"))
-        (buf3 (get-buffer-create "*claude-11223344*")))
+        (buf3 (get-buffer-create "*claude-panel-11223344*")))
     (unwind-protect
         (let ((result (claude-repl--list-claude-vterm-buffers)))
           (should (memq buf1 result))
@@ -257,7 +257,7 @@
   "paste-to-vterm should forward Ctrl-V to the vterm buffer when live."
   (let ((sent-args nil))
     (claude-repl-test--with-clean-state
-      (claude-repl-test--with-temp-buffer "*claude-aabbccdd*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-aabbccdd*"
         (cl-letf (((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                   ((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--ws-get)
@@ -325,9 +325,9 @@
 
 (ert-deftest claude-repl-test-kill-owned-panel-buffers-kills-matching ()
   "kill-owned-panel-buffers should kill panel buffers owned by the specified workspace."
-  (let ((buf1 (get-buffer-create "*claude-aabb0011*"))
-        (buf2 (get-buffer-create "*claude-input-aabb0011*"))
-        (buf3 (get-buffer-create "*claude-ccdd2233*")))
+  (let ((buf1 (get-buffer-create "*claude-panel-aabb0011*"))
+        (buf2 (get-buffer-create "*claude-panel-input-aabb0011*"))
+        (buf3 (get-buffer-create "*claude-panel-ccdd2233*")))
     (unwind-protect
         (progn
           (with-current-buffer buf1
@@ -366,7 +366,7 @@
 
 (ert-deftest claude-repl-test-kill-owned-panel-buffers-silences-process ()
   "kill-owned-panel-buffers should silence process query before killing."
-  (let ((buf (get-buffer-create "*claude-99887766*")))
+  (let ((buf (get-buffer-create "*claude-panel-99887766*")))
     (unwind-protect
         (let ((proc (start-process "test-proc" buf "cat")))
           (set-process-query-on-exit-flag proc t)
@@ -472,7 +472,7 @@
 
 (ert-deftest claude-repl-test-format-diagnostics-full ()
   "format-diagnostics should include all diagnostic fields."
-  (claude-repl-test--with-temp-buffer "*claude-aabb0011*"
+  (claude-repl-test--with-temp-buffer "*claude-panel-aabb0011*"
     (let* ((diag (list :vterm-buf (current-buffer)
                        :proc-alive t
                        :owning-ws "my-ws"
@@ -481,7 +481,7 @@
                        :dirty nil))
            (result (claude-repl-debug/--format-diagnostics "ws1" diag :thinking :done)))
       (should (string-match-p "ws1" result))
-      (should (string-match-p "\\*claude-aabb0011\\*" result))
+      (should (string-match-p "\\*claude-panel-aabb0011\\*" result))
       (should (string-match-p "process=alive" result))
       (should (string-match-p "owning-ws=my-ws" result))
       (should (string-match-p "has-window=yes" result))
@@ -629,7 +629,7 @@ value and writes :repl-state :dead."
 
 (ert-deftest claude-repl-test-debug-buffer-info-with-buffers ()
   "buffer-info should display info for all claude vterm buffers."
-  (let ((buf (get-buffer-create "*claude-aabb0011*")))
+  (let ((buf (get-buffer-create "*claude-panel-aabb0011*")))
     (unwind-protect
         (progn
           (with-current-buffer buf
@@ -641,7 +641,7 @@ value and writes :repl-state :dead."
                        (lambda (fmt &rest args)
                          (setq msg (apply #'format fmt args)))))
               (claude-repl-debug/buffer-info)
-              (should (string-match-p "\\*claude-aabb0011\\*" msg))
+              (should (string-match-p "\\*claude-panel-aabb0011\\*" msg))
               (should (string-match-p "owning=ws1" msg)))))
       (kill-buffer buf))))
 
@@ -689,7 +689,7 @@ value and writes :repl-state :dead."
 
 (ert-deftest claude-repl-test-format-buffer-info-owning-set-persp-nil ()
   "format-buffer-info should show owning workspace value and persp=nil when persp is nil."
-  (claude-repl-test--with-temp-buffer "*claude-ff001122*"
+  (claude-repl-test--with-temp-buffer "*claude-panel-ff001122*"
     (setq-local claude-repl--owning-workspace "my-ws")
     (cl-letf (((symbol-function 'claude-repl--workspace-for-buffer)
                (lambda (_buf) nil)))
@@ -701,8 +701,8 @@ value and writes :repl-state :dead."
 
 (ert-deftest claude-repl-test-list-claude-vterm-buffers-excludes-input ()
   "list-claude-vterm-buffers should not include input buffers (only vterm pattern)."
-  (let ((vterm-buf (get-buffer-create "*claude-aabb1122*"))
-        (input-buf (get-buffer-create "*claude-input-aabb1122*")))
+  (let ((vterm-buf (get-buffer-create "*claude-panel-aabb1122*"))
+        (input-buf (get-buffer-create "*claude-panel-input-aabb1122*")))
     (unwind-protect
         (let ((result (claude-repl--list-claude-vterm-buffers)))
           (should (memq vterm-buf result))
@@ -714,7 +714,7 @@ value and writes :repl-state :dead."
 
 (ert-deftest claude-repl-test-list-claude-vterm-buffers-excludes-killed ()
   "list-claude-vterm-buffers should not include killed/dead buffers."
-  (let ((buf (get-buffer-create "*claude-dead0001*")))
+  (let ((buf (get-buffer-create "*claude-panel-dead0001*")))
     (kill-buffer buf)
     ;; After killing, buffer-list should not contain buf, so result should not either
     (let ((result (claude-repl--list-claude-vterm-buffers)))
@@ -803,7 +803,7 @@ value and writes :repl-state :dead."
 
 (ert-deftest claude-repl-test-kill-owned-panel-buffers-closes-window ()
   "kill-owned-panel-buffers should close the buffer's window before killing the buffer."
-  (let ((buf (get-buffer-create "*claude-a1b2c3d4*"))
+  (let ((buf (get-buffer-create "*claude-panel-a1b2c3d4*"))
         (window-deleted nil))
     (unwind-protect
         (progn
@@ -824,7 +824,7 @@ value and writes :repl-state :dead."
 
 (ert-deftest claude-repl-test-debug-set-owning-workspace ()
   "set-owning-workspace should set the owning workspace on the selected buffer."
-  (let ((buf (get-buffer-create "*claude-owntest01*")))
+  (let ((buf (get-buffer-create "*claude-panel-owntest01*")))
     (unwind-protect
         (let ((call-count 0))
           (cl-letf (((symbol-function 'completing-read)
@@ -849,7 +849,7 @@ value and writes :repl-state :dead."
 (ert-deftest claude-repl-test-gather-ws-diagnostics-all-populated ()
   "gather-ws-diagnostics should return all fields populated when persp has a vterm buffer."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*claude-diagfull*"
+    (claude-repl-test--with-temp-buffer "*claude-panel-diagfull*"
       (setq-local claude-repl--owning-workspace "ws1")
       (let ((test-buf (current-buffer)))
         (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_) t))

@@ -1099,7 +1099,7 @@ buffer-local may not be pinned yet."
                 ((symbol-function '+workspace-current-name) (lambda () "other-ws"))
                 ((symbol-function 'claude-repl--current-ws-p) (lambda (_ws) nil)))
         ;; Create a hidden vterm buffer for ws1
-        (let ((vterm-buf (generate-new-buffer "*claude-testfinish*")))
+        (let ((vterm-buf (generate-new-buffer "*claude-panel-testfinish*")))
           (unwind-protect
               (progn
                 (claude-repl--ws-put "ws1" :vterm-buffer vterm-buf)

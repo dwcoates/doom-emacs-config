@@ -260,17 +260,17 @@ Input-buffer check comes first since `claude-repl--vterm-buffer-re' is a
 superset that also matches input-buffer names."
   (cond
    ((string-match-p claude-repl--input-buffer-re name)
-    (substring name (length "*claude-input-") (- (length name) (length "*"))))
+    (substring name (length "*claude-panel-input-") (- (length name) (length "*"))))
    ((string-match-p claude-repl--vterm-buffer-re name)
-    (substring name (length "*claude-") (- (length name) (length "*"))))))
+    (substring name (length "*claude-panel-") (- (length name) (length "*"))))))
 
 (defun claude-repl--partner-buffer-name (name id)
   "Return the partner buffer name for Claude panel NAME with identifier ID.
 For a vterm buffer, the partner is the input buffer, and vice versa.
 Checks input-re first since vterm-re is a superset that also matches inputs."
   (if (string-match-p claude-repl--input-buffer-re name)
-      (format "*claude-%s*" id)
-    (format "*claude-input-%s*" id)))
+      (format "*claude-panel-%s*" id)
+    (format "*claude-panel-input-%s*" id)))
 
 (defun claude-repl--orphaned-panel-p (name)
   "Return non-nil if NAME is a Claude panel buffer whose partner is not visible.
