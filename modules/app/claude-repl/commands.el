@@ -265,7 +265,7 @@ Without region: sends file path and current line."
 (defun claude-repl--send-interrupt-escape (ws vterm-buf)
   "Send two Escape key presses to VTERM-BUF to interrupt Claude.
 WS is the current workspace name for logging."
-  (claude-repl--log ws "send-interrupt-escape: sending escape to buf=%s" (buffer-name vterm-buf))
+  (claude-repl--log ws "send-interrupt-escape: sending 2x <escape> to vterm=%s" (buffer-name vterm-buf))
   (with-current-buffer vterm-buf
     (vterm-send-key "<escape>")
     (vterm-send-key "<escape>")))
@@ -274,10 +274,10 @@ WS is the current workspace name for logging."
   "Send \"i\" to VTERM-BUF to re-enter insert mode."
   (if (buffer-live-p vterm-buf)
       (progn
-        (claude-repl--log nil "enter-insert-mode: sending i to buf=%s" (buffer-name vterm-buf))
+        (claude-repl--log nil "enter-insert-mode: sending \"i\" to vterm=%s" (buffer-name vterm-buf))
         (with-current-buffer vterm-buf
           (vterm-send-string "i")))
-    (claude-repl--log nil "enter-insert-mode: buffer is dead, skipping")))
+    (claude-repl--log nil "enter-insert-mode: vterm is dead, skipping")))
 
 (defun claude-repl-interrupt ()
   "Interrupt Claude and re-enter insert mode after a short delay.

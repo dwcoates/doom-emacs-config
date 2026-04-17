@@ -70,10 +70,13 @@ Runs as a buffer-local `pre-command-hook'."
           (claude-repl--log-verbose nil "slash-intercept-backspace: slash-mode branch this-command=%s" this-command)
           (setq this-command #'claude-repl--slash-backspace))
       (if (= (buffer-size) 0)
-          (progn
-            (claude-repl--log-verbose nil "slash-intercept-backspace: empty-buffer-forward branch this-command=%s" this-command)
-            (claude-repl--with-vterm-buf
-             (vterm-send-key "<backspace>")))
+          (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
+              (progn
+                (claude-repl--log-verbose nil "slash-intercept-backspace: empty-buffer-forward sending <backspace> to vterm=%s this-command=%s"
+                                          (buffer-name vterm-buf) this-command)
+                (with-current-buffer vterm-buf
+                  (vterm-send-key "<backspace>")))
+            (claude-repl--log-verbose nil "slash-intercept-backspace: empty-buffer-forward no live vterm, skipping this-command=%s" this-command))
         (claude-repl--log-verbose nil "slash-intercept-backspace: normal branch this-command=%s" this-command)))))
 
 ;; Input mode
@@ -110,6 +113,7 @@ at a Claude prompt in raw-input mode — which is what actually clears the
 input line.  On failure, logs and surfaces an error (no silent fallback)."
   (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
       (progn
+        (claude-repl--log nil "send-raw-ctrl-c: sending ETX (0x03) to vterm=%s" (buffer-name vterm-buf))
         (with-current-buffer vterm-buf
           (process-send-string vterm--process "\C-c"))
         t)
@@ -133,9 +137,12 @@ left users with a half-cleared state."
 
 (defun claude-repl--send-vterm-key (key-name)
   "Send KEY-NAME to the Claude vterm buffer."
-  (claude-repl--log nil "send-vterm-key: %s" key-name)
-  (claude-repl--with-vterm-buf
-   (vterm-send-key key-name)))
+  (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
+      (progn
+        (claude-repl--log nil "send-vterm-key: sending %s to vterm=%s" key-name (buffer-name vterm-buf))
+        (with-current-buffer vterm-buf
+          (vterm-send-key key-name)))
+    (claude-repl--log nil "send-vterm-key: no live vterm, skipping key=%s" key-name)))
 
 (defun claude-repl--send-up-arrow ()
   "Forward up-arrow to vterm for terminal line navigation (insert mode)."
@@ -152,16 +159,22 @@ left users with a half-cleared state."
 (defun claude-repl--send-vterm-down ()
   "Scroll vterm history forward (next item)."
   (interactive)
-  (claude-repl--log nil "send-vterm-down")
-  (claude-repl--with-vterm-buf
-   (vterm-send-down)))
+  (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
+      (progn
+        (claude-repl--log nil "send-vterm-down: sending <down> to vterm=%s" (buffer-name vterm-buf))
+        (with-current-buffer vterm-buf
+          (vterm-send-down)))
+    (claude-repl--log nil "send-vterm-down: no live vterm, skipping")))
 
 (defun claude-repl--send-vterm-up ()
   "Scroll vterm history backward (previous item)."
   (interactive)
-  (claude-repl--log nil "send-vterm-up")
-  (claude-repl--with-vterm-buf
-   (vterm-send-up)))
+  (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
+      (progn
+        (claude-repl--log nil "send-vterm-up: sending <up> to vterm=%s" (buffer-name vterm-buf))
+        (with-current-buffer vterm-buf
+          (vterm-send-up)))
+    (claude-repl--log nil "send-vterm-up: no live vterm, skipping")))
 
 ;; Public aliases -- used in keybindings and tests.
 (defalias 'claude-repl-scroll-down #'claude-repl--send-vterm-down)
@@ -500,10 +513,14 @@ Handles input preparation, sending, history, and persistence."
 
 (defun claude-repl-send-char (char)
   "Send a single character to Claude."
-  (claude-repl--log nil "send-char %s" char)
-  (claude-repl--with-vterm-buf
-   (vterm-send-string char)
-   (vterm-send-return)))
+  (claude-repl--log nil "send-char: char=%s" char)
+  (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
+      (progn
+        (claude-repl--log nil "send-char: sending %s + <return> to vterm=%s" char (buffer-name vterm-buf))
+        (with-current-buffer vterm-buf
+          (vterm-send-string char)
+          (vterm-send-return)))
+    (claude-repl--log nil "send-char: no live vterm, skipping char=%s" char)))
 
 ;;; Slash-command pass-through mode
 ;;
@@ -620,6 +637,7 @@ was actually sent."
   (interactive)
   (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
       (progn
+        (claude-repl--log-verbose nil "slash-backspace: sending <backspace> to vterm=%s" (buffer-name vterm-buf))
         (with-current-buffer vterm-buf
           (vterm-send-key "<backspace>"))
         (pop claude-repl--slash-stack)
@@ -660,11 +678,13 @@ workspace-generation and workspace-update skills know the originating workspace.
 Exits the mode regardless of send outcome — being stuck in slash mode when
 vterm is gone is strictly worse than having one unforwarded RET."
   (interactive)
-  (claude-repl--log nil "slash-return: sending return and exiting slash mode")
+  (claude-repl--log nil "slash-return: exiting slash mode")
   (claude-repl--slash-maybe-inject-source-ws)
   (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
-      (with-current-buffer vterm-buf
-        (vterm-send-return))
+      (progn
+        (claude-repl--log nil "slash-return: sending <return> to vterm=%s" (buffer-name vterm-buf))
+        (with-current-buffer vterm-buf
+          (vterm-send-return)))
     (claude-repl--slash-no-vterm-error "return" nil))
   (claude-repl--exit-slash-mode))
 

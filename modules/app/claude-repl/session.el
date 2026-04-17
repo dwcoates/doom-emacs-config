@@ -260,6 +260,7 @@ Falls back to bare-metal Claude otherwise."
     (claude-repl--log-session-start ws start-info)
     (claude-repl--log ws "start-claude: setting ready=nil for ws=%s" ws)
     (setq-local claude-repl--ready nil)
+    (claude-repl--log ws "start-claude: sending startup cmd + <return> to vterm len=%d" (length cmd))
     (vterm-send-string (concat "clear && " cmd))
     (vterm-send-return)
     (claude-repl--schedule-ready-timer ws)))
