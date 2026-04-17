@@ -1234,4 +1234,158 @@ Returns the full SHA of the new commit."
          0)
         (should-not timer-scheduled)))))
 
+;;;; ---- Tests: create-worktree-workspace (interactive) ----
+
+(ert-deftest claude-repl-test-create-worktree-workspace-default-base-is-head ()
+  "`SPC TAB n' with no prefix arg branches off HEAD (the current worktree)."
+  (claude-repl-test--with-clean-state
+    (let ((captured-base nil))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (if (string-match-p "name" prompt) "my-ws" "")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork _prompt _cb _priority base)
+                   (setq captured-base base))))
+        (claude-repl-create-worktree-workspace nil)
+        (should (equal captured-base "HEAD"))))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-c-u-base-is-origin-master ()
+  "`C-u SPC TAB n' branches off origin/master."
+  (claude-repl-test--with-clean-state
+    (let ((captured-base nil))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (if (string-match-p "name" prompt) "my-ws" "")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork _prompt _cb _priority base)
+                   (setq captured-base base))))
+        (claude-repl-create-worktree-workspace '(4))
+        (should (equal captured-base "origin/master"))))))
+
+;;;; ---- Tests: do-create-worktree-workspace base-commit + fetch ----
+
+(ert-deftest claude-repl-test-do-create-base-commit-default-no-fork-is-origin-master ()
+  "When BASE-COMMIT is nil and no FORK-SESSION-ID, the default is origin/master.
+Preserves the programmatic worktree-creation path used by
+`create-worktree-from-command' (Slack/command-file workspace creation)."
+  (let ((add-args nil))
+    (cl-letf (((symbol-function 'claude-repl--resolve-worktree-paths)
+               (lambda (_name) (list :git-root "/g" :dirname "d" :branch-name "b"
+                                     :in-worktree nil :path "/g/d")))
+              ((symbol-function 'claude-repl--validate-worktree-creation)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
+              ((symbol-function '+workspace-current-name) (lambda () "ws"))
+              ((symbol-function 'claude-repl--async-git)
+               (lambda (_label _root args _cb) (setq add-args args)))
+              ((symbol-function 'claude-repl--async-worktree-add)
+               (lambda (&rest _) nil)))
+      (claude-repl--do-create-worktree-workspace "name" nil nil nil nil nil nil)
+      ;; Fetch is scheduled for origin/master
+      (should (equal add-args '("fetch" "origin" "master"))))))
+
+(ert-deftest claude-repl-test-do-create-base-commit-default-with-fork-is-head ()
+  "When BASE-COMMIT is nil and FORK-SESSION-ID is set, the default is HEAD.
+Fork workflows need the session's tip; fetching origin/master would
+reset that context."
+  (let ((add-base nil))
+    (cl-letf (((symbol-function 'claude-repl--resolve-worktree-paths)
+               (lambda (_name) (list :git-root "/g" :dirname "d" :branch-name "b"
+                                     :in-worktree nil :path "/g/d")))
+              ((symbol-function 'claude-repl--validate-worktree-creation)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
+              ((symbol-function '+workspace-current-name) (lambda () "ws"))
+              ((symbol-function 'claude-repl--async-worktree-add)
+               (lambda (_root _branch _path base &rest _) (setq add-base base))))
+      (claude-repl--do-create-worktree-workspace "name" nil "sid-1" nil nil nil nil)
+      (should (equal add-base "HEAD")))))
+
+(ert-deftest claude-repl-test-do-create-base-commit-explicit-wins ()
+  "Explicit BASE-COMMIT overrides the fork-derived default.
+This is the path `claude-repl-create-worktree-workspace' uses to
+force HEAD even without a fork-session-id."
+  (let ((add-base nil))
+    (cl-letf (((symbol-function 'claude-repl--resolve-worktree-paths)
+               (lambda (_name) (list :git-root "/g" :dirname "d" :branch-name "b"
+                                     :in-worktree nil :path "/g/d")))
+              ((symbol-function 'claude-repl--validate-worktree-creation)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
+              ((symbol-function '+workspace-current-name) (lambda () "ws"))
+              ((symbol-function 'claude-repl--async-worktree-add)
+               (lambda (_root _branch _path base &rest _) (setq add-base base))))
+      (claude-repl--do-create-worktree-workspace "name" nil nil nil nil nil "HEAD")
+      (should (equal add-base "HEAD")))))
+
+(ert-deftest claude-repl-test-do-create-skips-fetch-when-base-is-head ()
+  "No fetch runs when BASE-COMMIT is HEAD — nothing to pull from origin."
+  (let ((fetch-called nil)
+        (add-called nil))
+    (cl-letf (((symbol-function 'claude-repl--resolve-worktree-paths)
+               (lambda (_name) (list :git-root "/g" :dirname "d" :branch-name "b"
+                                     :in-worktree nil :path "/g/d")))
+              ((symbol-function 'claude-repl--validate-worktree-creation)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
+              ((symbol-function '+workspace-current-name) (lambda () "ws"))
+              ((symbol-function 'claude-repl--async-git)
+               (lambda (&rest _) (setq fetch-called t)))
+              ((symbol-function 'claude-repl--async-worktree-add)
+               (lambda (&rest _) (setq add-called t))))
+      (claude-repl--do-create-worktree-workspace "name" nil nil nil nil nil "HEAD")
+      (should-not fetch-called)
+      (should add-called))))
+
+(ert-deftest claude-repl-test-do-create-fetch-ref-parsed-from-base ()
+  "Fetch uses the ref name parsed from BASE-COMMIT after the origin/ prefix.
+Supports bases other than origin/master without hard-coding the ref."
+  (let ((fetch-args nil))
+    (cl-letf (((symbol-function 'claude-repl--resolve-worktree-paths)
+               (lambda (_name) (list :git-root "/g" :dirname "d" :branch-name "b"
+                                     :in-worktree nil :path "/g/d")))
+              ((symbol-function 'claude-repl--validate-worktree-creation)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
+              ((symbol-function '+workspace-current-name) (lambda () "ws"))
+              ((symbol-function 'claude-repl--async-git)
+               (lambda (_label _root args _cb) (setq fetch-args args))))
+      (claude-repl--do-create-worktree-workspace
+       "name" nil nil nil nil nil "origin/develop")
+      (should (equal fetch-args '("fetch" "origin" "develop"))))))
+
+(ert-deftest claude-repl-test-do-create-fork-skips-fetch-regardless-of-base ()
+  "FORK-SESSION-ID always skips fetch (Claude session-restore flow).
+Even if someone passed an origin/ base-commit by mistake, the fork
+path short-circuits to avoid disturbing the fork source's refs."
+  (let ((fetch-called nil))
+    (cl-letf (((symbol-function 'claude-repl--resolve-worktree-paths)
+               (lambda (_name) (list :git-root "/g" :dirname "d" :branch-name "b"
+                                     :in-worktree nil :path "/g/d")))
+              ((symbol-function 'claude-repl--validate-worktree-creation)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
+              ((symbol-function '+workspace-current-name) (lambda () "ws"))
+              ((symbol-function 'claude-repl--async-git)
+               (lambda (&rest _) (setq fetch-called t)))
+              ((symbol-function 'claude-repl--async-worktree-add)
+               (lambda (&rest _) nil)))
+      (claude-repl--do-create-worktree-workspace
+       "name" nil "sid-1" nil nil nil "origin/master")
+      (should-not fetch-called))))
+
+;;;; ---- Tests: async-worktree-add base-commit ----
+
+(ert-deftest claude-repl-test-async-worktree-add-uses-base-commit ()
+  "async-worktree-add passes BASE-COMMIT as the final `git worktree add' arg.
+Covers the full call the interactive `SPC TAB n' path builds up."
+  (let ((captured-args nil))
+    (cl-letf (((symbol-function 'claude-repl--async-git)
+               (lambda (_label _root args _cb) (setq captured-args args))))
+      (claude-repl--async-worktree-add
+       "/git-root" "my-branch" "/path" "HEAD"
+       nil "dirname" nil nil nil nil)
+      (should (equal captured-args
+                     '("worktree" "add" "-b" "my-branch" "/path" "HEAD"))))))
+
 ;;; test-worktree.el ends here
