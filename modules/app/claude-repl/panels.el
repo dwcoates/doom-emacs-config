@@ -45,13 +45,17 @@
       (claude-repl--close-buffer-window buf))))
 
 (defun claude-repl--configure-vterm-window (win)
-  "Configure WIN as a dedicated, navigation-skipped, width-locked vterm window.
-Marks the window as dedicated, hides it from `other-window'/windmove so
-keyboard navigation (C-l etc.) skips it, and locks its width to prevent
-resize-triggered reflow in vterm."
+  "Configure WIN as a dedicated, width-locked vterm window.
+Marks the window as dedicated (so `display-buffer' can't repurpose it)
+and locks its width to prevent resize-triggered reflow in vterm.
+
+Keyboard-navigation isolation is handled dynamically by
+`claude-repl--bounce-from-vterm' rather than by a static
+`no-other-window' parameter — that way windmove/`other-window' can see
+vterm, but any non-mouse selection gets auto-corrected back to the
+input panel (or a warning if the input isn't displayed)."
   (claude-repl--log nil "configure-vterm-window: win=%s" win)
   (set-window-dedicated-p win t)
-  (set-window-parameter win 'no-other-window t)
   (set-window-parameter win 'window-size-fixed 'width))
 
 ;; Manual window layout: vterm on the right (full height), input below vterm.
@@ -361,10 +365,17 @@ Cancels any pending timer and schedules `claude-repl--reset-vterm-cursors'.")
 ;; Mouse clicks (checked via last-input-event) are allowed through so the
 ;; user can still click into the output when needed.
 (defun claude-repl--bounce-from-vterm (_frame)
-  "If the selected window is a no-other-window vterm, redirect to the input window.
-Allows mouse-initiated selection through."
+  "If the selected window shows a Claude vterm buffer, redirect to the input window.
+Allows mouse-initiated selection through so clicking into the output to
+scroll or copy works.  When no input window is currently displayed
+\(e.g. panels are hidden), emits a warning via `message' rather than
+leaving point stranded silently.
+
+Predicate is buffer-identity (`claude-repl--claude-buffer-p' — vterm-only,
+excludes input buffers) rather than the `no-other-window' parameter, so
+this bounce alone is sufficient to keep keyboard nav out of vterm."
   (let ((win (selected-window)))
-    (if (and (window-parameter win 'no-other-window)
+    (if (and (claude-repl--claude-buffer-p (window-buffer win))
              (not (mouse-event-p last-input-event)))
         (let* ((ws (+workspace-current-name))
                (input-buf (and ws (claude-repl--ws-get ws :input-buffer)))
@@ -373,9 +384,10 @@ Allows mouse-initiated selection through."
               (progn
                 (claude-repl--log-verbose nil "bounce-from-vterm: bouncing to input-win=%s" input-win)
                 (select-window input-win))
-            (claude-repl--log-verbose nil "bounce-from-vterm: no input-win to bounce to")))
-      (claude-repl--log-verbose nil "bounce-from-vterm: skipped no-other-window=%s mouse=%s"
-                                (window-parameter win 'no-other-window)
+            (message "[claude-repl] keyboard navigation landed in Claude vterm but input panel isn't visible — stuck here until you click out or reopen panels")
+            (claude-repl--log nil "bounce-from-vterm: no input-win to bounce to (warned)")))
+      (claude-repl--log-verbose nil "bounce-from-vterm: skipped vterm-buffer=%s mouse=%s"
+                                (if (claude-repl--claude-buffer-p (window-buffer win)) "yes" "no")
                                 (if (mouse-event-p last-input-event) "yes" "no")))))
 
 (add-hook 'window-selection-change-functions #'claude-repl--bounce-from-vterm)

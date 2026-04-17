@@ -218,17 +218,19 @@
 ;;;; ---- Tests: configure-vterm-window ----
 
 (ert-deftest claude-repl-test-panels-configure-vterm-window ()
-  "configure-vterm-window sets dedicated, no-other-window, and size-fixed."
+  "configure-vterm-window sets dedicated + width-fixed.
+Does NOT set `no-other-window' — keyboard isolation now comes from
+`claude-repl--bounce-from-vterm', so vterm stays visible to
+`other-window'/`windmove' but any non-mouse landing is auto-corrected."
   (let ((win (selected-window)))
     (unwind-protect
         (progn
           (claude-repl--configure-vterm-window win)
           (should (window-dedicated-p win))
-          (should (window-parameter win 'no-other-window))
+          (should-not (window-parameter win 'no-other-window))
           (should (eq (window-parameter win 'window-size-fixed) 'width)))
       ;; Clean up window parameters
       (set-window-dedicated-p win nil)
-      (set-window-parameter win 'no-other-window nil)
       (set-window-parameter win 'window-size-fixed nil))))
 
 ;;;; ---- Tests: resolve-vterm-buffer ----
@@ -982,39 +984,93 @@
 
 ;;;; ---- Tests: bounce-from-vterm ----
 
-(ert-deftest claude-repl-test-panels-bounce-from-vterm-normal-window ()
-  "bounce-from-vterm is a no-op when selected window lacks no-other-window param."
+(ert-deftest claude-repl-test-panels-bounce-from-vterm-non-vterm-buffer ()
+  "bounce-from-vterm is a no-op when the selected window shows a non-claude buffer."
   (claude-repl-test--with-clean-state
-    (let ((orig-win (selected-window)))
-      ;; Ensure the window does not have no-other-window
-      (set-window-parameter orig-win 'no-other-window nil)
-      (claude-repl--bounce-from-vterm nil)
-      ;; Should remain on the same window
-      (should (eq (selected-window) orig-win)))))
+    (claude-repl-test--with-temp-buffer "*bounce-noop-regular*"
+      (let ((orig-win (selected-window)))
+        (set-window-buffer orig-win (current-buffer))
+        (claude-repl--bounce-from-vterm nil)
+        (should (eq (selected-window) orig-win))))))
+
+(ert-deftest claude-repl-test-panels-bounce-from-vterm-input-buffer-no-recursion ()
+  "bounce-from-vterm does NOT fire when the selected window shows an input buffer.
+Load-bearing: after the bounce redirects vterm→input, the input selection
+must not itself trigger another bounce."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-input-test-ws*"
+      (let ((orig-win (selected-window)))
+        (set-window-buffer orig-win (current-buffer))
+        (let ((last-input-event ?a))
+          (claude-repl--bounce-from-vterm nil))
+        (should (eq (selected-window) orig-win))))))
 
 (ert-deftest claude-repl-test-panels-bounce-from-vterm-keyboard-redirects ()
-  "bounce-from-vterm redirects to input window on keyboard event."
+  "bounce-from-vterm redirects to the input window when selection is keyboard-driven."
   (claude-repl-test--with-clean-state
-    (let ((input-buf (get-buffer-create "*bounce-input*"))
+    (let ((vterm-buf (get-buffer-create "*claude-test-ws*"))
+          (input-buf (get-buffer-create "*claude-input-test-ws*"))
           (new-win nil))
       (unwind-protect
           (progn
             (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (set-window-buffer (selected-window) vterm-buf)
             (setq new-win (split-window))
             (set-window-buffer new-win input-buf)
-            ;; Set no-other-window on selected window to simulate vterm window
-            (set-window-parameter (selected-window) 'no-other-window t)
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-              ;; Simulate keyboard event (not mouse)
               (let ((last-input-event ?a))
                 (claude-repl--bounce-from-vterm nil)
-                ;; Should have redirected to the input window
                 (should (eq (window-buffer (selected-window)) input-buf)))))
-        ;; Clean up
-        (set-window-parameter (selected-window) 'no-other-window nil)
         (when (and new-win (window-live-p new-win))
           (ignore-errors (delete-window new-win)))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
         (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
+(ert-deftest claude-repl-test-panels-bounce-from-vterm-mouse-does-not-redirect ()
+  "Mouse-driven selection of a vterm window stays put — user wants to scroll/copy."
+  (claude-repl-test--with-clean-state
+    (let ((vterm-buf (get-buffer-create "*claude-test-ws*"))
+          (input-buf (get-buffer-create "*claude-input-test-ws*"))
+          (new-win nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (let ((vterm-win (selected-window)))
+              (set-window-buffer vterm-win vterm-buf)
+              (setq new-win (split-window))
+              (set-window-buffer new-win input-buf)
+              (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+                ;; Simulate a mouse event as last-input-event
+                (let ((last-input-event '(mouse-1 (nil 0 . 0))))
+                  (claude-repl--bounce-from-vterm nil)
+                  (should (eq (selected-window) vterm-win))))))
+        (when (and new-win (window-live-p new-win))
+          (ignore-errors (delete-window new-win)))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
+(ert-deftest claude-repl-test-panels-bounce-from-vterm-warns-when-no-input-win ()
+  "When panels are hidden (no visible input window), bounce emits a user-facing warning.
+Previously this path logged verbosely and stranded point in vterm; now
+we at least surface the stuck state so the user knows to click out."
+  (claude-repl-test--with-clean-state
+    (let ((vterm-buf (get-buffer-create "*claude-test-ws*"))
+          (messages nil))
+      (unwind-protect
+          (progn
+            ;; Input buffer is stored but NOT displayed in any window.
+            (claude-repl--ws-put "test-ws" :input-buffer
+                                 (get-buffer-create "*claude-input-test-ws*"))
+            (set-window-buffer (selected-window) vterm-buf)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                      ((symbol-function 'message)
+                       (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+              (let ((last-input-event ?a))
+                (claude-repl--bounce-from-vterm nil)))
+            (should (cl-some (lambda (m) (string-match-p "input panel isn't visible" m))
+                             messages)))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
+        (when-let ((b (get-buffer "*claude-input-test-ws*"))) (kill-buffer b))))))
 
 ;;;; ---- Tests: kill-stale-vterm ----
 
