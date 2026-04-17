@@ -128,9 +128,9 @@ bad calls are silently coerced so the log stays usable."
         (insert bt)))))
 
 (defun claude-repl--log-format (ws fmt)
-  "Return FMT prefixed with a timestamp, [claude-repl] tag, and workspace context.
+  "Return FMT with a timestamp, [claude-repl] tag, and trailing workspace context.
 WS is the workspace name (or nil for workspace-free contexts).  When non-nil,
-all workspace metadata from `claude-repl--workspaces' is included.
+all workspace metadata from `claude-repl--workspaces' is appended after FMT.
 
 Hardened against non-string FMT: captures a backtrace to *claude-repl-log-bug*
 the first time it happens, then coerces the value so the caller doesn't crash.
@@ -144,8 +144,8 @@ metadata as an argument rather than splicing it into the format."
                       fmt
                     (claude-repl--log-format-capture-bug fmt)
                     (format "[BUG non-string-fmt=%S]" fmt))))
-    (concat (format-time-string "%H:%M:%S.%3N") " [claude-repl]"
-            (claude-repl--format-ws-metadata ws) " " safe-fmt)))
+    (concat (format-time-string "%H:%M:%S.%3N") " [claude-repl] "
+            safe-fmt (claude-repl--format-ws-metadata ws))))
 
 (defun claude-repl--logfile-path ()
   "Return the path to `.claude-repl.log' in the git root, or nil.
@@ -169,27 +169,25 @@ break the caller."
         (write-region (concat text "\n") nil path t 'silent)))))
 
 (defun claude-repl--do-log (ws fmt args)
-  "Internal: emit FMT + ARGS via `message' with a timestamp and WS-metadata prefix.
-Passes the timestamp and workspace metadata as %s arguments rather than
-splicing them into the format string — so any `%' characters in the
-metadata (e.g. from a project path) or in the prefix are treated as data,
-not format directives, and can't cause \"Not enough arguments for format
-string\" arity mismatches.
+  "Internal: emit FMT + ARGS via `message' with a timestamp prefix and trailing WS metadata.
+The message body comes immediately after the [claude-repl] tag, with workspace
+metadata appended at the end for readability.  Workspace metadata is concatenated
+after formatting, so any `%' characters in metadata are treated as data, not
+format directives.
 
 When FMT isn't a string (a caller bug), captures a backtrace to
 *claude-repl-log-bug* on the first occurrence, then logs a safe
 [BUG non-string-fmt=...] line without interpreting caller ARGS."
   (let ((text (if (stringp fmt)
-                  (apply #'format
-                         (concat "%s [claude-repl]%s " fmt)
-                         (format-time-string "%H:%M:%S.%3N")
-                         (claude-repl--format-ws-metadata ws)
-                         args)
+                  (let ((msg (apply #'format fmt args))
+                        (ts  (format-time-string "%H:%M:%S.%3N"))
+                        (meta (claude-repl--format-ws-metadata ws)))
+                    (format "%s [claude-repl] %s%s" ts msg meta))
                 (claude-repl--log-format-capture-bug fmt)
-                (format "%s [claude-repl]%s [BUG non-string-fmt=%S]"
+                (format "%s [claude-repl] [BUG non-string-fmt=%S]%s"
                         (format-time-string "%H:%M:%S.%3N")
-                        (claude-repl--format-ws-metadata ws)
-                        fmt))))
+                        fmt
+                        (claude-repl--format-ws-metadata ws)))))
     (message "%s" text)
     (claude-repl--do-log-to-file text)))
 
