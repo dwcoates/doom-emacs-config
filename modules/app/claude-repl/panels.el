@@ -230,7 +230,7 @@ Redirects away from Claude buffers and saves frame state."
   "Single audit point for user-initiated panel close.
 Hides the panel windows without tearing down the session.  All
 user-initiated close paths route through here: `hide-and-preserve-status'
-(SPC o c), `claude-repl-send-and-hide', and the pre-magit hide hook.
+(SPC o c) and `claude-repl-send-and-hide'.
 
 Invariably sets `:repl-state' to :inactive — this is the completion of
 the \"close always transitions to :inactive\" requirement (analysis/01,

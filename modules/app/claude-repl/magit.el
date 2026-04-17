@@ -8,13 +8,11 @@
 
 ;;; Code:
 
-;;;; --- magit settings, panel-hide advice registration, keybindings --------
+;;;; --- magit settings and keybindings ---------------------------------------
 
 (after! magit
   (setq magit-no-confirm (append magit-no-confirm '(abort-revert abort-rebase abort-merge))
         magit-diff-visit-previous-blob nil)
-
-  (advice-add 'magit-display-buffer :before #'+dwc/hide-claude-repl-for-magit)
 
   (map! :map (magit-unstaged-section-map magit-staged-section-map magit-untracked-section-map magit-mode-map)
         :desc "Jump to recent commits"
@@ -27,21 +25,6 @@
   (define-key magit-file-section-map [C-return] #'magit-diff-visit-file)
   (define-key magit-hunk-section-map [return] #'magit-diff-visit-worktree-file)
   (define-key magit-hunk-section-map [C-return] #'magit-diff-visit-file))
-
-;;;; --- Panel hide advice --------------------------------------------------
-
-(defun +dwc/hide-claude-repl-for-magit (&rest _)
-  "Hide claude-repl panels before opening magit, giving magit full window control."
-  (when (fboundp 'claude-repl--log)
-    (claude-repl--log nil
-                      "hide-claude-repl-for-magit: FIRED this-command=%s last-command=%s panels-visible=%s"
-                      this-command last-command
-                      (if (and (fboundp 'claude-repl--panels-visible-p)
-                               (claude-repl--panels-visible-p))
-                          "yes" "no")))
-  (when (and (fboundp 'claude-repl--panels-visible-p)
-             (claude-repl--panels-visible-p))
-    (claude-repl--on-close)))
 
 ;;;; --- GitHub URL helpers for magit commits -------------------------------
 
@@ -80,8 +63,7 @@
 (defun +dwc/magit-status-workspace ()
   "Open magit-status for the current workspace's project root.
 If a magit-status buffer is already visible, switch to that window and
-revert the buffer in place — does not go through `magit-display-buffer',
-so the claude-repl hide advice does not fire and panels stay open."
+revert the buffer in place instead of opening a fresh one."
   (interactive)
   (let ((magit-win (cl-loop for win in (window-list)
                             when (with-current-buffer (window-buffer win)

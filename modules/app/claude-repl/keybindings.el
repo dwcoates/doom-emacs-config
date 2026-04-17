@@ -447,8 +447,6 @@ Reports comprehensive diagnostics."
   (define-key doom-leader-map (kbd (format "o %s" i))
     #'claude-repl--send-digit-char))
 
-;; FIXME: fix magit handling
-
 (map! :leader "b R" #'claude-repl-revert-and-eval-buffer)
 (map! :leader "m e B" #'claude-repl-revert-and-eval-buffer)
 
