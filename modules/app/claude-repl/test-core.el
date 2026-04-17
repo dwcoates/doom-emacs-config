@@ -396,6 +396,71 @@ When t, it should call `message'."
         (claude-repl--log-verbose nil "ts check")
         (should (string-match-p "^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\\." captured-msg))))))
 
+;;;; ---- Tests: log-to-file ----
+
+(ert-deftest claude-repl-test-logfile-path-returns-path-in-git-root ()
+  "`claude-repl--logfile-path' should return .claude-repl.log under the main git root."
+  (let ((claude-repl--main-git-root "/fake/repo/"))
+    (should (equal (claude-repl--logfile-path) "/fake/repo/.claude-repl.log"))))
+
+(ert-deftest claude-repl-test-logfile-path-nil-when-no-root ()
+  "`claude-repl--logfile-path' should return nil when no git root is available."
+  (let ((claude-repl--main-git-root ""))
+    (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) nil)))
+      (should-not (claude-repl--logfile-path)))))
+
+(ert-deftest claude-repl-test-do-log-to-file-writes-when-enabled ()
+  "`claude-repl--do-log-to-file' should append text to the logfile."
+  (let* ((tmpdir (make-temp-file "test-log-" t))
+         (logpath (expand-file-name ".claude-repl.log" tmpdir))
+         (claude-repl-log-to-file t))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--logfile-path) (lambda () logpath)))
+          (claude-repl--do-log-to-file "first line")
+          (claude-repl--do-log-to-file "second line")
+          (let ((contents (with-temp-buffer
+                            (insert-file-contents logpath)
+                            (buffer-string))))
+            (should (string-match-p "first line" contents))
+            (should (string-match-p "second line" contents))))
+      (delete-directory tmpdir t))))
+
+(ert-deftest claude-repl-test-do-log-to-file-skips-when-disabled ()
+  "`claude-repl--do-log-to-file' should not write when `claude-repl-log-to-file' is nil."
+  (let* ((tmpdir (make-temp-file "test-log-" t))
+         (logpath (expand-file-name ".claude-repl.log" tmpdir))
+         (claude-repl-log-to-file nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--logfile-path) (lambda () logpath)))
+          (claude-repl--do-log-to-file "should not appear")
+          (should-not (file-exists-p logpath)))
+      (delete-directory tmpdir t))))
+
+(ert-deftest claude-repl-test-do-log-writes-to-file ()
+  "`claude-repl--do-log' should write to the logfile when log-to-file is enabled."
+  (let* ((tmpdir (make-temp-file "test-log-" t))
+         (logpath (expand-file-name ".claude-repl.log" tmpdir))
+         (claude-repl-log-to-file t)
+         (claude-repl-debug t))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--logfile-path) (lambda () logpath))
+                  ((symbol-function 'message) (lambda (&rest _args) nil)))
+          (claude-repl--log nil "hello %s" "world")
+          (let ((contents (with-temp-buffer
+                            (insert-file-contents logpath)
+                            (buffer-string))))
+            (should (string-match-p "hello world" contents))
+            (should (string-match-p "\\[claude-repl\\]" contents))))
+      (delete-directory tmpdir t))))
+
+(ert-deftest claude-repl-test-do-log-to-file-survives-write-error ()
+  "`claude-repl--do-log-to-file' should not signal on write errors."
+  (let ((claude-repl-log-to-file t))
+    (cl-letf (((symbol-function 'claude-repl--logfile-path)
+               (lambda () "/nonexistent/dir/impossible.log")))
+      ;; Should not error
+      (claude-repl--do-log-to-file "test"))))
+
 ;;;; ---- Tests: dir-has-git-p ----
 
 (ert-deftest claude-repl-test-dir-has-git-p-with-git-dir ()

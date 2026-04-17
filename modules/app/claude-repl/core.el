@@ -35,6 +35,16 @@ high-frequency events (window changes, resolve-root)."
                  (const :tag "Verbose" verbose))
   :group 'claude-repl)
 
+(defcustom claude-repl-log-to-file t
+  "When non-nil, append all log output to a hidden file in the repository root.
+The file is `.claude-repl.log' at the git root of the current project.
+Logging to file occurs independently of `claude-repl-debug' — messages are
+written to the file whenever they pass through `claude-repl--do-log',
+regardless of the current debug level.  Use
+`claude-repl-debug/toggle-log-to-file' to toggle at runtime."
+  :type 'boolean
+  :group 'claude-repl)
+
 ;;; Logging
 
 (defun claude-repl--ws-id-cached (ws)
@@ -137,6 +147,27 @@ metadata as an argument rather than splicing it into the format."
     (concat (format-time-string "%H:%M:%S.%3N") " [claude-repl]"
             (claude-repl--format-ws-metadata ws) " " safe-fmt)))
 
+(defun claude-repl--logfile-path ()
+  "Return the path to `.claude-repl.log' in the git root, or nil.
+Uses `claude-repl--main-git-root' when available (set at module load time),
+falling back to `claude-repl--git-root' for pre-init calls.  Returns nil
+if no git root can be determined."
+  (when-let ((root (if (and (boundp 'claude-repl--main-git-root)
+                            (not (string-empty-p claude-repl--main-git-root)))
+                       claude-repl--main-git-root
+                     (claude-repl--git-root))))
+    (expand-file-name ".claude-repl.log" root)))
+
+(defun claude-repl--do-log-to-file (text)
+  "Append TEXT as a line to the logfile when `claude-repl-log-to-file' is non-nil.
+Silently no-ops when the logfile path cannot be determined or if a write error
+occurs (e.g. read-only filesystem).  Never signals an error — logging must not
+break the caller."
+  (when claude-repl-log-to-file
+    (when-let ((path (claude-repl--logfile-path)))
+      (ignore-errors
+        (write-region (concat text "\n") nil path t 'silent)))))
+
 (defun claude-repl--do-log (ws fmt args)
   "Internal: emit FMT + ARGS via `message' with a timestamp and WS-metadata prefix.
 Passes the timestamp and workspace metadata as %s arguments rather than
@@ -148,17 +179,19 @@ string\" arity mismatches.
 When FMT isn't a string (a caller bug), captures a backtrace to
 *claude-repl-log-bug* on the first occurrence, then logs a safe
 [BUG non-string-fmt=...] line without interpreting caller ARGS."
-  (if (stringp fmt)
-      (apply #'message
-             (concat "%s [claude-repl]%s " fmt)
-             (format-time-string "%H:%M:%S.%3N")
-             (claude-repl--format-ws-metadata ws)
-             args)
-    (claude-repl--log-format-capture-bug fmt)
-    (message "%s [claude-repl]%s [BUG non-string-fmt=%S]"
-             (format-time-string "%H:%M:%S.%3N")
-             (claude-repl--format-ws-metadata ws)
-             fmt)))
+  (let ((text (if (stringp fmt)
+                  (apply #'format
+                         (concat "%s [claude-repl]%s " fmt)
+                         (format-time-string "%H:%M:%S.%3N")
+                         (claude-repl--format-ws-metadata ws)
+                         args)
+                (claude-repl--log-format-capture-bug fmt)
+                (format "%s [claude-repl]%s [BUG non-string-fmt=%S]"
+                        (format-time-string "%H:%M:%S.%3N")
+                        (claude-repl--format-ws-metadata ws)
+                        fmt))))
+    (message "%s" text)
+    (claude-repl--do-log-to-file text)))
 
 (defun claude-repl--log (ws fmt &rest args)
   "Log a timestamped debug message when `claude-repl-debug' is non-nil.

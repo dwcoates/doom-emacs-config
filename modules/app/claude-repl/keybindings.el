@@ -234,6 +234,18 @@ window changes, git-diff sentinels, resolve-root, etc.)."
     (when claude-repl-debug
       (claude-repl--log nil "debug logging toggled: %s" label))))
 
+(defun claude-repl-debug/toggle-log-to-file ()
+  "Toggle writing debug log output to `.claude-repl.log' in the repository root.
+When enabled, all messages that pass through `claude-repl--do-log' are
+appended to the file regardless of the `claude-repl-debug' level."
+  (interactive)
+  (setq claude-repl-log-to-file (not claude-repl-log-to-file))
+  (let ((label (if claude-repl-log-to-file "ON" "OFF"))
+        (path (claude-repl--logfile-path)))
+    (message "[claude-repl] log-to-file: %s%s"
+             label
+             (if path (format " (%s)" path) ""))))
+
 (defun claude-repl-debug/toggle-metaprompt ()
   "Toggle the metaprompt prefix injection."
   (interactive)

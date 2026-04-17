@@ -104,5 +104,8 @@ When facing a bug that resists immediate root-cause identification, **do not spe
 6. **Toggling logging at runtime.**
    Use `M-x claude-repl-debug/toggle-logging` to cycle standard logging on/off. With a prefix argument (`C-u M-x claude-repl-debug/toggle-logging`), it toggles verbose mode instead. Verbose mode includes high-frequency events (1-second timer ticks, git-diff sentinels, window changes, resolve-root). Standard mode logs only meaningful state transitions and user-initiated actions.
 
-7. **Choosing standard vs verbose.**
+7. **Persistent logfile (`.claude-repl.log`).**
+   By default, all log output is also appended to `.claude-repl.log` at the git repository root. This file persists across Emacs sessions and is the primary artifact for debugging and coordinating with the user. When investigating a bug or answering a user question about recent behavior, **read `.claude-repl.log` first** — it contains the full timestamped trace of claude-repl activity. Use `M-x claude-repl-debug/toggle-log-to-file` to disable or re-enable file logging at runtime.
+
+8. **Choosing standard vs verbose.**
    Events that fire on every timer tick, every window change, or every keystroke MUST use `claude-repl--log-verbose`. Events that fire on discrete user actions or state transitions use `claude-repl--log`. Rule of thumb: if it fires more than once per second across all workspaces, it's verbose.
