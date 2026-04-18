@@ -2,6 +2,31 @@
 
 ;;; Code:
 
+(defcustom claude-repl-vterm-width-fraction 0.6
+  "Fraction of the work window's width allocated to the vterm panel."
+  :type 'number
+  :group 'claude-repl)
+
+(defcustom claude-repl-input-height-fraction 0.15
+  "Fraction of the vterm window's height allocated to the input panel."
+  :type 'number
+  :group 'claude-repl)
+
+(defcustom claude-repl-loading-placeholder-name " *claude-loading*"
+  "Buffer name for the loading placeholder shown while Claude starts."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-sigkill-delay 0.5
+  "Seconds to wait before sending SIGKILL to a lingering Claude process."
+  :type 'number
+  :group 'claude-repl)
+
+(defcustom claude-repl-session-id-display-length 8
+  "Number of characters of session ID to display in messages."
+  :type 'integer
+  :group 'claude-repl)
+
 ;;;; Panel visibility predicates
 
 (defun claude-repl--ws-buffer-visible-p (key)
@@ -73,8 +98,8 @@ are not split from a bottom popup (e.g. a regular vterm)."
                       (claude-repl--safe-buffer-name vterm-buf)
                       (claude-repl--safe-buffer-name input-buf))
     (let* ((work-win (selected-window))
-           (vterm-win (split-window work-win (round (* 0.6 (window-total-width work-win))) 'right))
-           (input-win (split-window vterm-win (round (* -0.15 (window-total-height vterm-win))) 'below)))
+           (vterm-win (split-window work-win (round (* claude-repl-vterm-width-fraction (window-total-width work-win))) 'right))
+           (input-win (split-window vterm-win (round (* (- claude-repl-input-height-fraction) (window-total-height vterm-win))) 'below)))
       (claude-repl--log ws "show-panels: work-win=%s vterm-win=%s input-win=%s" work-win vterm-win input-win)
       (claude-repl--refresh-vterm)
       (set-window-buffer vterm-win vterm-buf)
@@ -283,7 +308,7 @@ loading placeholder exists (the vterm has not been swapped in yet)."
                         (not (get-buffer-window partner))
                         ;; Input panels are not orphaned while loading placeholder is live
                         (or (not is-input)
-                            (not (get-buffer " *claude-loading*"))))))
+                            (not (get-buffer claude-repl-loading-placeholder-name))))))
       (when result
         (claude-repl--log-verbose nil "orphaned-panel-p: name=%s partner=%s is-orphaned" name partner))
       result)))
@@ -460,7 +485,7 @@ is already in vterm-mode."
 The placeholder is swapped for the real vterm buffer once Claude is ready."
   (let* ((ws (+workspace-current-name))
          (real-vterm (claude-repl--ws-get ws :vterm-buffer))
-         (placeholder (get-buffer-create " *claude-loading*")))
+         (placeholder (get-buffer-create claude-repl-loading-placeholder-name)))
     (claude-repl--log ws "show-loading-panels")
     (with-current-buffer placeholder
       (setq-local mode-line-format nil)
@@ -563,8 +588,8 @@ If panels hidden: show both panels."
 
 (defun claude-repl--kill-placeholder ()
   "Close and kill the loading placeholder buffer if it exists."
-  (claude-repl--log nil "kill-placeholder exists=%s" (if (get-buffer " *claude-loading*") "yes" "no"))
-  (when-let ((placeholder (get-buffer " *claude-loading*")))
+  (claude-repl--log nil "kill-placeholder exists=%s" (if (get-buffer claude-repl-loading-placeholder-name) "yes" "no"))
+  (when-let ((placeholder (get-buffer claude-repl-loading-placeholder-name)))
     (claude-repl--close-buffer-window placeholder)
     (kill-buffer placeholder)))
 
@@ -577,7 +602,7 @@ If panels hidden: show both panels."
 (defun claude-repl--schedule-sigkill (proc)
   "Schedule a SIGKILL for PROC after 0.5s if it's still alive."
   (claude-repl--log nil "schedule-sigkill: scheduling for proc=%s" proc)
-  (run-at-time 0.5 nil #'claude-repl--sigkill-if-alive proc))
+  (run-at-time claude-repl-sigkill-delay nil #'claude-repl--sigkill-if-alive proc))
 
 (defun claude-repl--kill-vterm-process (buf)
   "Kill the vterm buffer BUF and its process."
@@ -784,6 +809,6 @@ Requires a worktree workspace with a captured session ID."
     (claude-repl--ws-put ws :active-env new-env)
     (message "Switching to %s (resuming session %s...)"
              (if (eq new-env :sandbox) "Docker sandbox" "bare-metal")
-             (substring session-id 0 8))
+             (substring session-id 0 claude-repl-session-id-display-length))
     (claude-repl--ensure-session ws)
     (claude-repl--show-panels-and-focus)))

@@ -20,6 +20,31 @@ do not abort workspace creation."
   :type '(alist :key-type regexp :value-type (repeat string))
   :group 'claude-repl)
 
+(defcustom claude-repl-workspace-commands-file-prefix "workspace_commands_"
+  "Filename prefix for workspace command files in the output directory."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-workspace-commands-output-dir "~/.claude/output/"
+  "Directory watched for workspace command files."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-worktree-dir-suffix "-worktrees"
+  "Suffix appended to repo name to form the sibling worktrees directory."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-worktree-default-base "origin/master"
+  "Default git ref for new worktree branches when no fork source is active."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-master-workspace-name "master"
+  "Name of the master workspace used as merge target."
+  :type 'string
+  :group 'claude-repl)
+
 (defun claude-repl--open-initial-buffers (ws path)
   "Open configured initial buffers for workspace WS rooted at PATH.
 Checks `claude-repl-workspace-initial-buffers' for entries whose PATTERN
@@ -52,7 +77,7 @@ workspace_commands_*.json file is created, changed, or renamed."
                  (nth 2 event))))
     (claude-repl--log nil "workspace-commands-watch-handler: action=%s file=%s" action file)
     (if (and (memq action '(changed created renamed))
-             (string-prefix-p "workspace_commands_"
+             (string-prefix-p claude-repl-workspace-commands-file-prefix
                               (file-name-nondirectory file)))
         (claude-repl--process-workspace-commands-file file)
       (claude-repl--log nil "workspace-commands-watch-handler: skipped (wrong action or wrong prefix)"))))
@@ -60,7 +85,7 @@ workspace_commands_*.json file is created, changed, or renamed."
 (defun claude-repl--register-workspace-commands-watch ()
   "Register a file-notify watch on ~/.claude/output/ for workspace command files.
 Tears down any existing watch first to avoid duplicates on re-eval."
-  (let ((output-dir (expand-file-name "~/.claude/output/")))
+  (let ((output-dir (expand-file-name claude-repl-workspace-commands-output-dir)))
     (make-directory output-dir t)
     (when (and claude-repl--workspace-generation-watch
                (file-notify-valid-p claude-repl--workspace-generation-watch))
@@ -186,7 +211,7 @@ Returns a plist with keys :git-root, :dirname, :branch-name,
          (worktree-parent (if in-worktree
                               git-root-parent
                             (let* ((repo-name (file-name-nondirectory (directory-file-name git-root)))
-                                   (wt-dir (expand-file-name (concat repo-name "-worktrees") git-root-parent)))
+                                   (wt-dir (expand-file-name (concat repo-name claude-repl-worktree-dir-suffix) git-root-parent)))
                               (make-directory wt-dir t)
                               wt-dir)))
          (path (claude-repl--path-canonical (expand-file-name dirname worktree-parent))))
@@ -240,7 +265,7 @@ and invokes CALLBACK with (PATH DIRNAME) when done."
                     path dirname priority fork-session-id force-bare-metal)
   (claude-repl--register-projectile-project path dirname)
   (let* ((canonical (claude-repl--path-canonical path))
-         (ws-id (substring (md5 canonical) 0 8))
+         (ws-id (substring (md5 canonical) 0 claude-repl-workspace-id-length))
          (ws dirname))
     (claude-repl--log ws "worktree creating workspace %s" ws)
     (+workspace-new ws)
@@ -320,7 +345,7 @@ current worktree; `C-u SPC TAB n' passes \"origin/master\".
 
 The fetch step runs only when BASE-COMMIT has an \"origin/\" prefix
 \(i.e. the new branch needs an up-to-date remote ref)."
-  (let* ((base-commit (or base-commit (if fork-session-id "HEAD" "origin/master")))
+  (let* ((base-commit (or base-commit (if fork-session-id "HEAD" claude-repl-worktree-default-base)))
          (paths (claude-repl--resolve-worktree-paths name))
          (git-root (plist-get paths :git-root))
          (dirname (plist-get paths :dirname))
@@ -524,9 +549,11 @@ Binds `default-directory' to the main git root before creating."
   (let ((default-directory claude-repl--main-git-root))
     (claude-repl--do-create-worktree-workspace name nil fork-session-id prompt nil priority)))
 
-(defconst claude-repl--worktree-stagger-seconds 5
+(defcustom claude-repl-worktree-stagger-seconds 5
   "Seconds between staggered worktree creation timers.
-Prevents concurrent Claude startups from corrupting ~/.claude.json.")
+Prevents concurrent Claude startups from corrupting ~/.claude.json."
+  :type 'integer
+  :group 'claude-repl)
 
 (defun claude-repl--handle-create-command (cmd delay)
   "Handle a \"create\" workspace command CMD, scheduling it after DELAY seconds.
@@ -576,7 +603,7 @@ unchanged otherwise)."
     (cond
      ((string= type "create")
       (claude-repl--handle-create-command cmd create-delay)
-      (+ create-delay claude-repl--worktree-stagger-seconds))
+      (+ create-delay claude-repl-worktree-stagger-seconds))
      ((string= type "prompt")
       (claude-repl--handle-prompt-command cmd)
       create-delay)
@@ -589,7 +616,7 @@ unchanged otherwise)."
 
 (defun claude-repl--process-workspace-commands-file (file)
   "Process a workspace commands file FILE, dispatching each typed command.
-Create commands are staggered by `claude-repl--worktree-stagger-seconds' to
+Create commands are staggered by `claude-repl-worktree-stagger-seconds' to
 avoid concurrent Claude startup writes corrupting ~/.claude.json."
   (if (not (file-exists-p file))
       (claude-repl--log nil "workspace-commands-file not found: %s" file)
@@ -752,7 +779,7 @@ Prompts for which workspace to merge in."
 Switches to master, then cherry-picks commits from the current workspace."
   (interactive)
   (let* ((source-ws (+workspace-current-name))
-         (master-ws "master"))
+         (master-ws claude-repl-master-workspace-name))
     (claude-repl--log source-ws "workspace-merge-current-into-master: source-ws=%s master-ws=%s" source-ws master-ws)
     (unless (member master-ws (+workspace-list-names))
       (user-error "No workspace named 'master' found"))

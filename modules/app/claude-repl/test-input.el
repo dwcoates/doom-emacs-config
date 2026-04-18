@@ -730,7 +730,7 @@ where the user pressed C-c C-c expecting a full reset."
 
 (ert-deftest claude-repl-test-bracketed-paste-threshold-constant ()
   "The bracketed paste threshold should be 200."
-  (should (= claude-repl--bracketed-paste-threshold 200)))
+  (should (= claude-repl-bracketed-paste-threshold 200)))
 
 (ert-deftest claude-repl-test-send-input-direct-calls-send-return ()
   "`claude-repl--send-input-direct' sends string then return then refreshes."

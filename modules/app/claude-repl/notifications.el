@@ -2,24 +2,44 @@
 
 ;;; Code:
 
+(defcustom claude-repl-terminal-notifier-executable "terminal-notifier"
+  "Name or path of the terminal-notifier binary."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-osascript-executable "osascript"
+  "Name or path of the osascript binary."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-notification-sound "default"
+  "System sound name used for desktop notifications via osascript."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-notify-process-name "claude-notify"
+  "Process name used when spawning notification commands."
+  :type 'string
+  :group 'claude-repl)
+
 ;; Notifications
 (defun claude-repl--notify-backend-terminal-notifier (title message)
   "Send a desktop notification via terminal-notifier."
-  (call-process "terminal-notifier" nil 0 nil
+  (call-process claude-repl-terminal-notifier-executable nil 0 nil
                 "-title" title
                 "-message" message))
 
 (defun claude-repl--notify-backend-osascript (title message)
   "Send a desktop notification via osascript."
-  (start-process "claude-notify" nil
-                 "osascript" "-e"
-                 (format "display notification %S with title %S sound name \"default\""
-                         message title)))
+  (start-process claude-repl-notify-process-name nil
+                 claude-repl-osascript-executable "-e"
+                 (format "display notification %S with title %S sound name %S"
+                         message title claude-repl-notification-sound)))
 
 (defun claude-repl--select-notification-backend ()
   "Select the best available desktop notification backend."
   (cond
-   ((executable-find "terminal-notifier")
+   ((executable-find claude-repl-terminal-notifier-executable)
     (claude-repl--log nil "select-notification-backend: backend=terminal-notifier")
     #'claude-repl--notify-backend-terminal-notifier)
    (t

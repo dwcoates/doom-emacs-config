@@ -30,5 +30,15 @@ Runs silently every 5 minutes to prevent data loss."
           (claude-repl--log nil "autosave: saved %d buffer(s)" saved)
         (claude-repl--log-verbose nil "autosave-workspace-buffers: no buffers needed saving")))))
 
-(push (run-with-timer 300 300 #'claude-repl--autosave-workspace-buffers)
+(defcustom claude-repl-autosave-initial-delay 300
+  "Seconds before the first autosave sweep fires after load."
+  :type 'integer
+  :group 'claude-repl)
+
+(defcustom claude-repl-autosave-interval 300
+  "Seconds between autosave sweeps."
+  :type 'integer
+  :group 'claude-repl)
+
+(push (run-with-timer claude-repl-autosave-initial-delay claude-repl-autosave-interval #'claude-repl--autosave-workspace-buffers)
       claude-repl--timers)

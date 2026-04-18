@@ -58,6 +58,28 @@
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-diff-analysis-message-template "for the %s, %s"
+  "Format string for diff analysis messages sent to Claude.
+First %s is the change-spec, second %s is the prompt."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-explain-prompt-template "please explain %s"
+  "Format string for the explain command prompt.
+%s is replaced with the context reference (file:line or file:range)."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-interrupt-escape-count 2
+  "Number of Escape key presses sent to interrupt Claude."
+  :type 'integer
+  :group 'claude-repl)
+
+(defcustom claude-repl-interrupt-reinsert-delay 0.25
+  "Seconds to wait after interrupting before re-entering insert mode."
+  :type 'number
+  :group 'claude-repl)
+
 ;;;; Session helpers
 
 (defun claude-repl--ensure-session (&optional ws)
@@ -143,7 +165,7 @@ both active region and point-at-line cases)."
   "Send a diff analysis request to Claude.
 CHANGE-SPEC describes which changes (e.g. \"unstaged changes (git diff)\").
 PROMPT is the analysis instruction."
-  (let ((msg (format "for the %s, %s" change-spec prompt)))
+  (let ((msg (format claude-repl-diff-analysis-message-template change-spec prompt)))
     (claude-repl--log nil "diff-analysis: %s" change-spec)
     (claude-repl--send-to-claude msg)))
 
@@ -258,17 +280,17 @@ With active region: sends file path and line range.
 Without region: sends file path and current line."
   (interactive)
   (let* ((ref (claude-repl--context-reference))
-         (msg (format "please explain %s" ref)))
+         (msg (format claude-repl-explain-prompt-template ref)))
     (claude-repl--log nil "explain %s" msg)
     (claude-repl--send-to-claude msg)))
 
 (defun claude-repl--send-interrupt-escape (ws vterm-buf)
   "Send two Escape key presses to VTERM-BUF to interrupt Claude.
 WS is the current workspace name for logging."
-  (claude-repl--log ws "send-interrupt-escape: sending 2x <escape> to vterm=%s" (buffer-name vterm-buf))
+  (claude-repl--log ws "send-interrupt-escape: sending %dx <escape> to vterm=%s" claude-repl-interrupt-escape-count (buffer-name vterm-buf))
   (with-current-buffer vterm-buf
-    (vterm-send-key "<escape>")
-    (vterm-send-key "<escape>")))
+    (dotimes (_ claude-repl-interrupt-escape-count)
+      (vterm-send-key "<escape>"))))
 
 (defun claude-repl--enter-insert-mode (vterm-buf)
   "Send \"i\" to VTERM-BUF to re-enter insert mode."
@@ -289,7 +311,7 @@ sends \"i\" after 0.25s to return to insert mode."
     (if (claude-repl--vterm-live-p)
         (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
           (claude-repl--send-interrupt-escape ws vterm-buf)
-          (run-at-time 0.25 nil #'claude-repl--enter-insert-mode vterm-buf))
+          (run-at-time claude-repl-interrupt-reinsert-delay nil #'claude-repl--enter-insert-mode vterm-buf))
       (claude-repl--log ws "interrupt: vterm not live, skipping"))))
 
 (defun claude-repl-update-pr ()

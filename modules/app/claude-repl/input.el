@@ -22,14 +22,21 @@ and periodically prepended to user input (see `claude-repl-prefix-period')."
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-command-prefix-template
+  (concat "<<*this is a metaprompt. "
+          "I will periodically prefix my prompts with this "
+          "to remind you of our restrictions for freely making changes. "
+          "Do not be alarmed, this is merely a periodic reminder*: "
+          "%s "
+          "*metaprompt over* "
+          "(rest is actual user request that you should respond to directly)>>\n\n")
+  "Template wrapping the metaprompt prefix.
+Must contain a single %s placeholder for `claude-repl-command-prefix'."
+  :type 'string
+  :group 'claude-repl)
+
 (defvar claude-repl--command-prefix
-  (format (concat "<<*this is a metaprompt. "
-                  "I will periodically prefix my prompts with this "
-                  "to remind you of our restrictions for freely making changes. "
-                  "Do not be alarmed, this is merely a periodic reminder*: "
-                  "%s "
-                  "*metaprompt over* "
-                  "(rest is actual user request that you should respond to directly)>>\n\n")
+  (format claude-repl-command-prefix-template
           claude-repl-command-prefix)
   "Formatted metaprompt string prepended before every input.
 Active when `claude-repl-skip-permissions' is non-nil, subject to
@@ -41,9 +48,11 @@ Active when `claude-repl-skip-permissions' is non-nil, subject to
   :type 'string
   :group 'claude-repl)
 
-(defvar claude-repl-paste-delay 0.25
+(defcustom claude-repl-paste-delay 0.25
   "Seconds to wait after pasting before sending Return.
-Used by `claude-repl--send-input-to-vterm' for large inputs.")
+Used by `claude-repl--send-input-to-vterm' for large inputs."
+  :type 'number
+  :group 'claude-repl)
 
 ;; Instructions bar face
 (defface claude-repl-header-line
@@ -79,13 +88,18 @@ Runs as a buffer-local `pre-command-hook'."
             (claude-repl--log-verbose nil "slash-intercept-backspace: empty-buffer-forward no live vterm, skipping this-command=%s" this-command))
         (claude-repl--log-verbose nil "slash-intercept-backspace: normal branch this-command=%s" this-command)))))
 
+(defcustom claude-repl-input-background-shade 37
+  "Greyscale level (0-255) for the input buffer background."
+  :type 'integer
+  :group 'claude-repl)
+
 ;; Input mode
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
   (setq-local header-line-format
               "RET: send | C-RET: send+postfix | C-c C-c: clear+save (empty→C-c) | C-c C-k: interrupt | <up>/<down>: history")
   (face-remap-add-relative 'header-line 'claude-repl-header-line)
-  (claude-repl--set-buffer-background 37)
+  (claude-repl--set-buffer-background claude-repl-input-background-shade)
   (visual-line-mode 1)
   (add-hook 'after-change-functions #'claude-repl--history-on-change nil t)
   (add-hook 'pre-command-hook #'claude-repl--slash-intercept-backspace nil t))
@@ -287,10 +301,12 @@ Otherwise insert the digit normally.  The digit is determined from
 
 ;;; Input preparation and metaprompt
 
-(defvar claude-repl-metaprompt-exempt-strings
+(defcustom claude-repl-metaprompt-exempt-strings
   '("/clear" "/usage" "/login" "/logout")
   "Inputs that should never have the metaprompt prepended.
-Compared exactly against the trimmed input.")
+Compared exactly against the trimmed input."
+  :type '(repeat string)
+  :group 'claude-repl)
 
 (defun claude-repl--skip-metaprompt-p (raw)
   "Return non-nil if RAW input should never have the metaprompt prepended.
@@ -373,13 +389,18 @@ Used as the second deferred action in the bracketed paste pipeline."
   (vterm-send-return)
   (claude-repl--refresh-vterm))
 
+(defcustom claude-repl-bracketed-finalize-delay 0.05
+  "Seconds between sending Return and the finalize step in bracketed paste."
+  :type 'number
+  :group 'claude-repl)
+
 (defun claude-repl--bracketed-send-return (vterm-buf)
   "Send Return to VTERM-BUF and schedule a finalize step.
 Used as the first deferred action in the bracketed paste pipeline."
   (claude-repl--log-verbose nil "bracketed-send-return: sending return, scheduling finalize")
   (vterm-send-return)
   (claude-repl--vterm-deferred-action
-   vterm-buf 0.05
+   vterm-buf claude-repl-bracketed-finalize-delay
    #'claude-repl--bracketed-finalize))
 
 (defun claude-repl--send-input-bracketed (vterm-buf input)
@@ -392,15 +413,17 @@ Uses `claude-repl-paste-delay' to wait before sending Return."
      vterm-buf claude-repl-paste-delay
      (apply-partially #'claude-repl--bracketed-send-return vterm-buf))))
 
-(defconst claude-repl--bracketed-paste-threshold 200
+(defcustom claude-repl-bracketed-paste-threshold 200
   "Input length above which bracketed paste mode is used.
 Inputs longer than this are sent via `claude-repl--send-input-bracketed'
-to avoid terminal truncation.")
+to avoid terminal truncation."
+  :type 'integer
+  :group 'claude-repl)
 
 (defun claude-repl--send-input-to-vterm (vterm-buf input)
   "Send INPUT string to VTERM-BUF.
 Uses paste mode for large inputs to avoid truncation."
-  (let ((use-paste (> (length input) claude-repl--bracketed-paste-threshold)))
+  (let ((use-paste (> (length input) claude-repl-bracketed-paste-threshold)))
     (claude-repl--log-verbose nil "send-input-to-vterm len=%d mode=%s"
                       (length input) (if use-paste "paste" "direct"))
     (if use-paste
@@ -660,11 +683,17 @@ The stack is in reverse order (most recent push first), so we reverse
 and concatenate.  Tab characters are included as-is."
   (apply #'concat (reverse claude-repl--slash-stack)))
 
+(defcustom claude-repl-workspace-command-prefix "/wor"
+  "String prefix that identifies workspace-related slash commands.
+Used to detect workspace-generation and workspace-update skills."
+  :type 'string
+  :group 'claude-repl)
+
 (defun claude-repl--slash-workspace-command-p ()
   "Return non-nil if the current slash stack represents a /wor command.
 Used to detect workspace-generation and workspace-update skills so
 the source workspace identity can be injected."
-  (string-prefix-p "/wor" (claude-repl--slash-command-string)))
+  (string-prefix-p claude-repl-workspace-command-prefix (claude-repl--slash-command-string)))
 
 (defun claude-repl--slash-maybe-inject-source-ws ()
   "If the slash command starts with /wor, send the source workspace tag to vterm.

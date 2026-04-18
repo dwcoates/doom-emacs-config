@@ -16,6 +16,53 @@ If empty (the default), worktrees without a .claude/sandbox/image run Claude dir
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-managed-project-pattern "ChessCom"
+  "Pattern matched against the project directory to determine permission mode.
+Projects whose expanded path contains this pattern use `claude-repl-managed-permission-flag';
+all others use `claude-repl-personal-permission-flag'."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-managed-permission-flag "--permission-mode auto"
+  "Permission flag for managed projects matching `claude-repl-managed-project-pattern'."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-personal-permission-flag "--dangerously-skip-permissions"
+  "Permission flag for personal projects not matching `claude-repl-managed-project-pattern'."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-startup-prefix "clear && "
+  "Shell command prefix prepended before the Claude command at startup."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-notify-debounce-seconds 2.0
+  "Minimum seconds between desktop notifications for the same workspace."
+  :type 'number
+  :group 'claude-repl)
+
+(defcustom claude-repl-notify-delay 0.1
+  "Seconds to delay before sending a desktop notification."
+  :type 'number
+  :group 'claude-repl)
+
+(defcustom claude-repl-pending-prompt-deliver-delay 0.3
+  "Seconds to wait before delivering pending prompts after Claude becomes ready."
+  :type 'number
+  :group 'claude-repl)
+
+(defcustom claude-repl-ready-timeout-seconds 30.0
+  "Maximum seconds to wait for Claude to signal readiness before giving up."
+  :type 'number
+  :group 'claude-repl)
+
+(defcustom claude-repl-ready-poll-interval 0.5
+  "Seconds between readiness-poll timer ticks."
+  :type 'number
+  :group 'claude-repl)
+
 (defun claude-repl--docker-image-exists-p (image)
   "Return non-nil if IMAGE exists in the local Docker image store."
   (let ((result (= 0 (call-process "docker" nil nil nil "image" "inspect" "--format" "." image))))
@@ -165,12 +212,12 @@ personal repos use --dangerously-skip-permissions."
       (progn
         (claude-repl--log nil "compute-perm-flag: sandboxed — no perm flag")
         nil)
-    (let ((flag (if (string-match-p "ChessCom" (expand-file-name (or project-dir default-directory)))
-                    "--permission-mode auto"
-                  "--dangerously-skip-permissions")))
+    (let ((flag (if (string-match-p claude-repl-managed-project-pattern (expand-file-name (or project-dir default-directory)))
+                    claude-repl-managed-permission-flag
+                  claude-repl-personal-permission-flag)))
       (claude-repl--log nil "compute-perm-flag: branch=%s flag=%s"
-                        (if (string-match-p "ChessCom" (expand-file-name (or project-dir default-directory)))
-                            "ChessCom" "personal")
+                        (if (string-match-p claude-repl-managed-project-pattern (expand-file-name (or project-dir default-directory)))
+                            "managed" "personal")
                         flag)
       flag)))
 
@@ -261,7 +308,7 @@ Falls back to bare-metal Claude otherwise."
     (claude-repl--log ws "start-claude: setting ready=nil for ws=%s" ws)
     (setq-local claude-repl--ready nil)
     (claude-repl--log ws "start-claude: sending startup cmd + <return> to vterm len=%d" (length cmd))
-    (vterm-send-string (concat "clear && " cmd))
+    (vterm-send-string (concat claude-repl-startup-prefix cmd))
     (vterm-send-return)
     (claude-repl--schedule-ready-timer ws)))
 
@@ -301,12 +348,12 @@ and title-change paths fire for the same turn completion."
   (let ((last (claude-repl--ws-get ws :last-notify-time))
         (now  (float-time)))
     (if (and (not (frame-focus-state))
-             (or (null last) (> (- now last) 2.0)))
+             (or (null last) (> (- now last) claude-repl-notify-debounce-seconds)))
         (progn
           (claude-repl--ws-put ws :last-notify-time now)
-          (run-at-time 0.1 nil #'claude-repl--notify ws "Claude REPL"
+          (run-at-time claude-repl-notify-delay nil #'claude-repl--notify ws "Claude REPL"
                        (format "%s: Claude ready" ws)))
-      (when (and last (<= (- now last) 2.0))
+      (when (and last (<= (- now last) claude-repl-notify-debounce-seconds))
         (claude-repl--log ws "maybe-notify-finished: debounce-hit ws=%s elapsed=%.2f" ws (- now last))))))
 
 (defun claude-repl--mark-claude-done (ws)
@@ -376,7 +423,7 @@ so the terminal has time to settle."
       (claude-repl--log ws "first-ready draining %d pending prompt(s) for ws=%s" (length pending) ws)
       (claude-repl--ws-put ws :pending-prompts nil)
       (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
-        (run-at-time 0.3 nil
+        (run-at-time claude-repl-pending-prompt-deliver-delay nil
                      #'claude-repl--deliver-pending-prompts
                      vterm-buf pending ws)))
     pending))
@@ -466,7 +513,7 @@ gives up after 30 seconds, or cancels and opens panels once Claude is ready."
   (let ((elapsed (- (float-time) start-time)))
     (claude-repl--log-verbose ws "ready-timer-tick: ws=%s elapsed=%.1fs" ws elapsed)
     (cond
-     ((> elapsed 30.0)
+     ((> elapsed claude-repl-ready-timeout-seconds)
       (claude-repl--cancel-ready-timer ws)
       (claude-repl--log ws "ready-timer: timed out for ws=%s" ws))
      ((claude-repl--session-starting-p ws) nil)
@@ -482,6 +529,6 @@ Gives up after 30s. This is a fallback — the title-change path is the happy pa
   (let ((start-time (float-time)))
     (claude-repl--ws-put ws :ready-timer
       (run-at-time
-       0.5 0.5
+       claude-repl-ready-poll-interval claude-repl-ready-poll-interval
        #'claude-repl--ready-timer-tick
        ws start-time))))

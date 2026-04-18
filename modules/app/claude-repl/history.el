@@ -8,6 +8,16 @@
   "List of per-workspace environment keys.
 Each workspace has one `claude-repl-instantiation' struct per environment.")
 
+(defcustom claude-repl-history-filename ".claude-repl-history"
+  "Name of the per-project input history file."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-state-filename ".claude-repl-state"
+  "Name of the per-project session state file."
+  :type 'string
+  :group 'claude-repl)
+
 ;;;; Error handling
 
 (defmacro claude-repl--with-error-logging (label &rest body)
@@ -66,15 +76,15 @@ Returns nil when INST is nil."
 
 (defun claude-repl--history-file ()
   "Return the path to the history file for the current project."
-  (expand-file-name ".claude-repl-history" (claude-repl--resolve-root)))
+  (expand-file-name claude-repl-history-filename (claude-repl--resolve-root)))
 
 (defun claude-repl--state-file (root)
   "Return the path to the state file under ROOT, or nil if ROOT is nil."
   (when root
-    (expand-file-name ".claude-repl-state" root)))
+    (expand-file-name claude-repl-state-filename root)))
 
-(defconst claude-repl--per-project-files
-  '(".claude-repl-state" ".claude-repl-history")
+(defvar claude-repl--per-project-files
+  (list claude-repl-state-filename claude-repl-history-filename)
   "Filenames this module persists at each workspace's project root.
 Listed so `claude-repl--state-purge' can unlink them without having to
 hunt them down individually.")

@@ -7,6 +7,27 @@
 ;; Each image is a small PNG loaded from the module's images/ directory and
 ;; scaled to fit the tab-bar line height.
 
+(defcustom claude-repl-priority-levels '("p05" "p1" "p2" "p3")
+  "List of recognized priority level strings for workspace badges."
+  :type '(repeat string)
+  :group 'claude-repl)
+
+(defcustom claude-repl-tab-bracket-format "[%s]"
+  "Format string for tab bracket labels.
+%s is replaced with the tab index number or emoji."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-tab-name-padding " %s "
+  "Format string for tab workspace name padding."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-state-poll-interval 1
+  "Seconds between workspace state update polls."
+  :type 'integer
+  :group 'claude-repl)
+
 (defvar claude-repl--priority-images nil
   "Alist mapping priority strings (\"p05\" \"p1\" \"p2\" \"p3\") to Emacs image specs.")
 
@@ -15,7 +36,7 @@
 Populates `claude-repl--priority-images' with display-ready image specs."
   (let* ((dir (file-name-directory (or load-file-name buffer-file-name)))
          (img-dir (expand-file-name "images/" dir))
-         (names '("p05" "p1" "p2" "p3"))
+         (names claude-repl-priority-levels)
          (height (frame-char-height)))
     (setq claude-repl--priority-images
           (cl-loop for name in names
@@ -354,9 +375,9 @@ emoji).  IMG-STR, when non-nil, is inserted between bracket and name."
          (separator-face `(:background unspecified :foreground ,fg :weight ,weight))
          (bracket-face   `(:background ,bg          :foreground ,bracket-fg :weight ,weight)))
     (concat (propertize " " 'face separator-face)
-            (propertize (format "[%s]" label) 'face bracket-face)
+            (propertize (format claude-repl-tab-bracket-format label) 'face bracket-face)
             (when img-str (concat " " img-str))
-            (propertize (format " %s " name) 'face name-face))))
+            (propertize (format claude-repl-tab-name-padding name) 'face name-face))))
 
 (defun claude-repl--tab-label (state index)
   "Return the tab label for STATE and numeric INDEX.
@@ -535,7 +556,7 @@ panel visibility (panels may be hidden via `SPC o c')."
         (claude-repl--mark-dead-vterm ws)))))
 
 ;; Periodically update all workspace states (catches git changes, etc.)
-(push (run-with-timer 1 1 #'claude-repl--update-all-workspace-states)
+(push (run-with-timer claude-repl-state-poll-interval claude-repl-state-poll-interval #'claude-repl--update-all-workspace-states)
       claude-repl--timers)
 
 (defun claude-repl--mark-dead-vterm (ws)

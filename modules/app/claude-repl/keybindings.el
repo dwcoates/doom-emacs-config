@@ -5,6 +5,26 @@
 (defconst claude-repl--output-dir (expand-file-name "~/.claude/output/")
   "Directory for workspace command files and other IPC output.")
 
+(defcustom claude-repl-debug-mock-workspace-default-name "DWC/mock-test"
+  "Default branch name used in mock workspace generation."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-debug-mock-priority-branch-default "DWC/mock-priority-test"
+  "Default branch name used in mock workspace priority generation."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-workspace-commands-file-regexp "^workspace_commands_.*\\.json$"
+  "Regexp matching workspace command files in the output directory."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-dump-buffer-name "*claude-repl-dump*"
+  "Buffer name for workspace state dump output."
+  :type 'string
+  :group 'claude-repl)
+
 (defun claude-repl--cons-name-state (name)
   "Return (NAME . claude-state) for workspace NAME."
   (cons name (claude-repl--ws-claude-state name)))
@@ -97,7 +117,7 @@ This lets Claude CLI handle paste natively, including images."
   "Set the priority badge for the current workspace.
 PRIORITY is one of \"p05\", \"p1\", \"p2\", \"p3\", or \"\" to clear."
   (interactive
-   (list (completing-read "Priority: " '("p05" "p1" "p2" "p3" "") nil t)))
+   (list (completing-read "Priority: " (append claude-repl-priority-levels '("")) nil t)))
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "set-priority: ws=%s priority=%s" ws (if (string-empty-p priority) "(cleared)" priority))
     (claude-repl--ws-put ws :priority (if (string-empty-p priority) nil priority))
@@ -125,7 +145,7 @@ PRIORITY is one of \"p05\", \"p1\", \"p2\", \"p3\", or \"\" to clear."
   "Write a mock workspace_generation.json to trigger the file watcher.
 NAMES is an optional list of branch name strings; defaults to a single test entry."
   (interactive)
-  (let* ((names (or names '("DWC/mock-test")))
+  (let* ((names (or names (list claude-repl-debug-mock-workspace-default-name)))
          (file (claude-repl--write-output-json "workspace_generation.json" names)))
     (claude-repl--log nil "mock workspace-generation file written: %s names=%s" file names)
     (message "Wrote mock workspace_generation.json: %s" names)))
@@ -133,8 +153,8 @@ NAMES is an optional list of branch name strings; defaults to a single test entr
 (defun claude-repl-debug/mock-workspace-commands-with-priority ()
   "Write a mock workspace_commands file with a priority field to test image badges."
   (interactive)
-  (let* ((priority (completing-read "Priority: " '("p05" "p1" "p2" "p3") nil t))
-         (name (read-string "Branch name: " "DWC/mock-priority-test"))
+  (let* ((priority (completing-read "Priority: " claude-repl-priority-levels nil t))
+         (name (read-string "Branch name: " claude-repl-debug-mock-priority-branch-default))
          (filename (format "workspace_commands_%s.json" (format-time-string "%s")))
          (commands (vector `((type . "create")
                              (name . ,name)
@@ -148,7 +168,7 @@ Use this to verify the processor works independently of the file watcher."
   (interactive)
   (let ((files (when (file-directory-p claude-repl--output-dir)
                  (directory-files claude-repl--output-dir t
-                                  "^workspace_commands_.*\\.json$"))))
+                                  claude-repl-workspace-commands-file-regexp))))
     (if (not files)
         (message "No workspace_commands_*.json files found in %s"
                  claude-repl--output-dir)
@@ -268,8 +288,8 @@ defaulting to the current workspace when registered."
   (interactive)
   (let* ((ws (claude-repl--read-known-workspace "Dump workspace: "))
          (plist (gethash ws claude-repl--workspaces)))
-    (with-help-window "*claude-repl-dump*"
-      (with-current-buffer "*claude-repl-dump*"
+    (with-help-window claude-repl-dump-buffer-name
+      (with-current-buffer claude-repl-dump-buffer-name
         (insert (format "Workspace: %s\n\n" ws))
         (let ((pl plist))
           (while pl

@@ -12,6 +12,27 @@
   (expand-file-name "~/.claude/workspace-notifications")
   "Directory where Claude Code hooks write sentinel files.")
 
+(defcustom claude-repl-sentinel-debug-log-filename "hook-debug.log"
+  "Filename of the hook debug log to ignore in sentinel file processing."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-sentinel-dispatch-actions '(created changed)
+  "File-notify actions that trigger sentinel dispatch."
+  :type '(repeat symbol)
+  :group 'claude-repl)
+
+(defcustom claude-repl-sentinel-poll-file-regexp "\\`[^.]"
+  "Regexp for filtering sentinel directory files during polling.
+Only files matching this pattern are enumerated."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-sentinel-watch-events '(change)
+  "File-notify event types to watch on the sentinel directory."
+  :type '(repeat symbol)
+  :group 'claude-repl)
+
 ;;; Workspace resolution
 
 ;; Workspace event detection via file-notify watcher.
@@ -315,13 +336,13 @@ noise — same filter as the poll path."
      ((not (stringp file))
       (claude-repl--log-verbose nil ">>> SENTINEL EVENT SKIPPED: action=%s no file in event=%S"
                         action event))
-     ((string= fname "hook-debug.log")
+     ((string= fname claude-repl-sentinel-debug-log-filename)
       nil)
      (t
       (let ((exists (file-exists-p file)))
         (claude-repl--log nil ">>> SENTINEL EVENT: action=%s file=%s exists=%s descriptor=%S event=%S"
                           action fname exists descriptor event)
-        (if (and (memq action '(created changed)) exists)
+        (if (and (memq action claude-repl-sentinel-dispatch-actions) exists)
             (let ((result (claude-repl--dispatch-sentinel-file file)))
               (claude-repl--log nil ">>> SENTINEL EVENT DONE: file=%s dispatched=%s" fname result))
           (claude-repl--log-verbose nil ">>> SENTINEL EVENT SKIPPED: action=%s file=%s exists=%s (need created/changed + exists)"
@@ -335,10 +356,10 @@ Called periodically as a fallback; any file still present was not picked up
 by the file-notify watcher and needs processing."
   (let* ((dir-exists (file-directory-p claude-repl--sentinel-dir))
          (files (if dir-exists
-                    (directory-files claude-repl--sentinel-dir t "\\`[^.]" t)
+                    (directory-files claude-repl--sentinel-dir t claude-repl-sentinel-poll-file-regexp t)
                   nil))
          ;; Filter out the debug log itself
-         (files (cl-remove-if (lambda (f) (string= (file-name-nondirectory f) "hook-debug.log")) files)))
+         (files (cl-remove-if (lambda (f) (string= (file-name-nondirectory f) claude-repl-sentinel-debug-log-filename)) files)))
     (when files
       (claude-repl--log nil "poll-notifications: found %d orphaned file(s): %s"
                         (length files)
@@ -389,7 +410,7 @@ Interactive recovery for the reload-accumulated duplicate-watcher case."
   (interactive)
   (let ((removed (claude-repl--reap-sentinel-watchers)))
     (setq claude-repl--sentinel-watch-descriptor
-          (file-notify-add-watch claude-repl--sentinel-dir '(change)
+          (file-notify-add-watch claude-repl--sentinel-dir claude-repl-sentinel-watch-events
                                  #'claude-repl--dispatch-sentinel-event))
     (message "claude-repl: removed %d stale watcher(s); new descriptor=%S"
              removed claude-repl--sentinel-watch-descriptor)))
@@ -410,7 +431,7 @@ Useful to verify the init-time reap logic works without restarting Emacs."
   (when (> reaped 0)
     (claude-repl--log nil "sentinel-init: reaped %d stale watcher(s)" reaped)))
 (setq claude-repl--sentinel-watch-descriptor
-      (file-notify-add-watch claude-repl--sentinel-dir '(change)
+      (file-notify-add-watch claude-repl--sentinel-dir claude-repl-sentinel-watch-events
                              #'claude-repl--dispatch-sentinel-event))
 (claude-repl--log nil "sentinel-init: registered watcher descriptor=%S"
                   claude-repl--sentinel-watch-descriptor)

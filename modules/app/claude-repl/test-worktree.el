@@ -287,7 +287,7 @@ Returns the full SHA of the new commit."
                (lambda (cmd delay) (push (list cmd delay) handled))))
       (let ((cmd '((type . "create") (name . "test"))))
         (let ((new-delay (claude-repl--dispatch-workspace-command cmd 0)))
-          (should (= new-delay claude-repl--worktree-stagger-seconds))
+          (should (= new-delay claude-repl-worktree-stagger-seconds))
           (should (= (length handled) 1)))))))
 
 (ert-deftest claude-repl-test-dispatch-workspace-command-prompt ()
@@ -335,7 +335,7 @@ Returns the full SHA of the new commit."
                      (lambda (_cmd delay) (push delay delays))))
             (claude-repl--process-workspace-commands-file tmpfile))
           ;; Delays should be 0 and stagger-seconds
-          (should (equal (reverse delays) (list 0 claude-repl--worktree-stagger-seconds)))
+          (should (equal (reverse delays) (list 0 claude-repl-worktree-stagger-seconds)))
           ;; File should be deleted
           (should-not (file-exists-p tmpfile)))
       (when (file-exists-p tmpfile) (delete-file tmpfile)))))

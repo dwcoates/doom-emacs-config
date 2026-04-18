@@ -45,6 +45,34 @@ regardless of the current debug level.  Use
   :type 'boolean
   :group 'claude-repl)
 
+(defcustom claude-repl-workspace-id-length 8
+  "Number of hex characters from MD5 hash used for workspace IDs.
+Longer values reduce collision risk in setups with many workspaces."
+  :type 'integer
+  :group 'claude-repl)
+
+(defcustom claude-repl-log-file-name ".claude-repl.log"
+  "Name of the log file written to the git root directory."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-default-workspace-name "default"
+  "Fallback workspace name used when no workspace is active."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-ws-name-allowed-chars-re "[^[:alnum:]_-]"
+  "Regexp matching characters to replace in workspace names.
+Characters matching this pattern are replaced with underscores."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-panel-buffer-name-format "*claude-panel%s-%s*"
+  "Format string for Claude panel buffer names.
+First %s is the suffix (e.g. \"-input\" or empty), second %s is the workspace name."
+  :type 'string
+  :group 'claude-repl)
+
 ;;; Logging
 
 (defun claude-repl--ws-id-cached (ws)
@@ -55,7 +83,7 @@ Returns nil if WS is nil or no :project-dir is set."
   (when ws
     (or (plist-get (gethash ws claude-repl--workspaces) :ws-id)
         (when-let ((dir (plist-get (gethash ws claude-repl--workspaces) :project-dir)))
-          (let ((id (substring (md5 (directory-file-name (file-truename dir))) 0 8)))
+          (let ((id (substring (md5 (directory-file-name (file-truename dir))) 0 claude-repl-workspace-id-length)))
             (puthash ws (plist-put (gethash ws claude-repl--workspaces) :ws-id id)
                      claude-repl--workspaces)
             id)))))
@@ -156,7 +184,7 @@ if no git root can be determined."
                             (not (string-empty-p claude-repl--main-git-root)))
                        claude-repl--main-git-root
                      (claude-repl--git-root))))
-    (expand-file-name ".claude-repl.log" root)))
+    (expand-file-name claude-repl-log-file-name root)))
 
 (defun claude-repl--do-log-to-file (text)
   "Append TEXT as a line to the logfile when `claude-repl-log-to-file' is non-nil.
@@ -285,7 +313,7 @@ Uses an MD5 hash of the canonical git root path.  Falls back to the buffer-local
 `claude-repl--project-root' and then `default-directory'."
   (let* ((root (claude-repl--resolve-root))
          (id (when root
-               (substring (md5 (claude-repl--path-canonical root)) 0 8))))
+               (substring (md5 (claude-repl--path-canonical root)) 0 claude-repl-workspace-id-length))))
     (claude-repl--log-verbose nil "workspace-id: root=%s id=%s" root id)
     id))
 
@@ -377,7 +405,7 @@ for the combined check.")
   "Return NAME with unsafe characters replaced by underscores.
 Keeps alphanumerics, hyphens, and underscores.  Returns nil for nil NAME."
   (when name
-    (replace-regexp-in-string "[^[:alnum:]_-]" "_" name)))
+    (replace-regexp-in-string claude-repl-ws-name-allowed-chars-re "_" name)))
 
 (defun claude-repl--buffer-name (&optional suffix ws)
   "Return a workspace-specific buffer name like *claude-panel-WS* or *claude-panel-input-WS*.
@@ -387,7 +415,7 @@ Falls back to \"default\" when no workspace name is available."
   (let* ((ws-name (or ws (and (fboundp '+workspace-current-name)
                               (+workspace-current-name))))
          (safe (claude-repl--sanitize-ws-name ws-name))
-         (name (format "*claude-panel%s-%s*" (or suffix "") (or safe "default"))))
+         (name (format claude-repl-panel-buffer-name-format (or suffix "") (or safe claude-repl-default-workspace-name))))
     (claude-repl--log-verbose nil "buffer-name: suffix=%s ws=%s name=%s" suffix ws-name name)
     name))
 

@@ -18,6 +18,26 @@
 (require 'json)
 (require 'seq)
 
+(defcustom claude-repl-sandbox-dockerenv-path "/.dockerenv"
+  "Path to the Docker environment sentinel file for sandbox detection."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-sandbox-env-var "DOOM_SANDBOX"
+  "Environment variable name that signals sandbox mode."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-sandbox-env-value "1"
+  "Expected value of `claude-repl-sandbox-env-var' to indicate sandbox mode."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-install-shell "bash"
+  "Shell interpreter used to invoke the install script."
+  :type 'string
+  :group 'claude-repl)
+
 ;;;; ---- Constants --------------------------------------------------------
 
 (defconst claude-repl--managed-hooks
@@ -60,8 +80,8 @@ of where the Doom config tree is mounted.")
 Mirrors the detection rule in `install.sh' so the Emacs wrappers no-op
 under the same conditions: a `/.dockerenv' file exists or the
 `DOOM_SANDBOX' environment variable is set to `1'."
-  (or (file-exists-p "/.dockerenv")
-      (equal (getenv "DOOM_SANDBOX") "1")))
+  (or (file-exists-p claude-repl-sandbox-dockerenv-path)
+      (equal (getenv claude-repl-sandbox-env-var) claude-repl-sandbox-env-value)))
 
 ;;;; ---- Installed-state predicate ----------------------------------------
 
@@ -106,7 +126,7 @@ script cannot be located."
     (error "claude-repl install script not found: %s"
            claude-repl--install-script))
   (with-temp-buffer
-    (let ((exit-code (call-process "bash" nil t nil
+    (let ((exit-code (call-process claude-repl-install-shell nil t nil
                                    claude-repl--install-script action)))
       (list exit-code (buffer-string)))))
 

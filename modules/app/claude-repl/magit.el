@@ -8,10 +8,37 @@
 
 ;;; Code:
 
+(defcustom claude-repl-magit-no-confirm-extras '(abort-revert abort-rebase abort-merge)
+  "Extra actions to add to `magit-no-confirm'."
+  :type '(repeat symbol)
+  :group 'claude-repl)
+
+(defcustom claude-repl-magit-github-ssh-prefix-regexp "^git@github.com:"
+  "Regexp matching the SSH prefix in git remote URLs."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-magit-github-base-url "https://github.com"
+  "Base URL for GitHub, used when converting SSH remote URLs to HTTPS."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-magit-github-org-regexp "github.com[:/]ChessCom/\\(.*\\)"
+  "Regexp to extract the repo name from a GitHub remote URL.
+Must contain one capture group for the repository name."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-magit-github-commit-url-format "https://github.com/ChessCom/%s/commit/%s"
+  "Format string for GitHub commit URLs.
+First %s is the repo name, second %s is the commit SHA."
+  :type 'string
+  :group 'claude-repl)
+
 ;;;; --- magit settings and keybindings ---------------------------------------
 
 (after! magit
-  (setq magit-no-confirm (append magit-no-confirm '(abort-revert abort-rebase abort-merge))
+  (setq magit-no-confirm (append magit-no-confirm claude-repl-magit-no-confirm-extras)
         magit-diff-visit-previous-blob nil)
 
   (map! :map (magit-unstaged-section-map magit-staged-section-map magit-untracked-section-map magit-mode-map)
@@ -33,13 +60,13 @@
   (interactive)
   (let* ((commit-sha (string-trim (shell-command-to-string "git rev-parse HEAD")))
          (remote-url (string-trim (shell-command-to-string "git config --get remote.origin.url")))
-         (cleaned-url (replace-regexp-in-string "^git@github.com:" "https://github.com"
+         (cleaned-url (replace-regexp-in-string claude-repl-magit-github-ssh-prefix-regexp claude-repl-magit-github-base-url
                                                 (replace-regexp-in-string "\\.git$" "" remote-url)))
          (repo-name (progn
-                      (if (string-match "github.com[:/]ChessCom/\\(.*\\)" cleaned-url)
+                      (if (string-match claude-repl-magit-github-org-regexp cleaned-url)
                           (match-string 1 cleaned-url)
                         (error (format "Remote URL '%s' does not match expected pattern" cleaned-url)))))
-         (github-url (format "https://github.com/ChessCom/%s/commit/%s" repo-name commit-sha)))
+         (github-url (format claude-repl-magit-github-commit-url-format repo-name commit-sha)))
     (browse-url github-url)))
 
 (defun +dwc/magit-copy-commit-link ()
@@ -48,13 +75,13 @@
   (let* ((commit-sha (magit-commit-at-point))
          (default-directory (magit-toplevel))
          (remote-url (string-trim (shell-command-to-string "git config --get remote.origin.url")))
-         (cleaned-url (replace-regexp-in-string "^git@github.com:" "https://github.com"
+         (cleaned-url (replace-regexp-in-string claude-repl-magit-github-ssh-prefix-regexp claude-repl-magit-github-base-url
                                                 (replace-regexp-in-string "\\.git$" "" remote-url)))
          (repo-name (progn
-                      (if (string-match "github.com[:/]ChessCom/\\(.*\\)" cleaned-url)
+                      (if (string-match claude-repl-magit-github-org-regexp cleaned-url)
                           (match-string 1 cleaned-url)
                         (error (format "Remote URL '%s' does not match expected pattern" cleaned-url)))))
-         (github-url (format "https://github.com/ChessCom/%s/commit/%s" repo-name commit-sha)))
+         (github-url (format claude-repl-magit-github-commit-url-format repo-name commit-sha)))
     (kill-new github-url)
     (message "GitHub commit link copied to clipboard: %s" github-url)))
 
