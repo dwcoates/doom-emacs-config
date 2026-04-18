@@ -1262,6 +1262,72 @@ Returns the full SHA of the new commit."
         (claude-repl-create-worktree-workspace '(4))
         (should (equal captured-base "origin/master"))))))
 
+(ert-deftest claude-repl-test-create-worktree-workspace-prefixes-preemptive-prompt ()
+  "When a preemptive prompt is given, it is prefixed with the autonomous instruction."
+  (claude-repl-test--with-clean-state
+    (let ((captured-prompt nil))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (if (string-match-p "name" prompt) "my-ws"
+                     "do the thing")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork prompt &rest _)
+                   (setq captured-prompt prompt))))
+        (claude-repl-create-worktree-workspace nil)
+        (should (string-prefix-p claude-repl--autonomous-prompt-prefix captured-prompt))
+        (should (string-suffix-p "do the thing" captured-prompt))))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-blank-prompt-passes-nil ()
+  "When preemptive prompt is blank, nil is passed (no prefix prepended)."
+  (claude-repl-test--with-clean-state
+    (let ((captured-prompt :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (if (string-match-p "name" prompt) "my-ws" "")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork prompt &rest _)
+                   (setq captured-prompt prompt))))
+        (claude-repl-create-worktree-workspace nil)
+        (should (null captured-prompt))))))
+
+(ert-deftest claude-repl-test-fork-worktree-workspace-prefixes-preemptive-prompt ()
+  "When a preemptive prompt is given to fork, it is prefixed with the autonomous instruction."
+  (claude-repl-test--with-clean-state
+    (let ((inst (make-claude-repl-instantiation :session-id "sess-abc"))
+          (captured-prompt nil))
+      (cl-letf (((symbol-function 'claude-repl--active-inst)
+                 (lambda (_ws) inst))
+                ((symbol-function '+workspace-current-name)
+                 (lambda () "test-ws"))
+                ((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (if (string-match-p "name" prompt) "my-fork"
+                     "do the thing")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork prompt &rest _)
+                   (setq captured-prompt prompt))))
+        (claude-repl-fork-worktree-workspace nil)
+        (should (string-prefix-p claude-repl--autonomous-prompt-prefix captured-prompt))
+        (should (string-suffix-p "do the thing" captured-prompt))))))
+
+(ert-deftest claude-repl-test-fork-worktree-workspace-blank-prompt-passes-nil ()
+  "When fork preemptive prompt is blank, nil is passed (no prefix prepended)."
+  (claude-repl-test--with-clean-state
+    (let ((inst (make-claude-repl-instantiation :session-id "sess-abc"))
+          (captured-prompt :unset))
+      (cl-letf (((symbol-function 'claude-repl--active-inst)
+                 (lambda (_ws) inst))
+                ((symbol-function '+workspace-current-name)
+                 (lambda () "test-ws"))
+                ((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (if (string-match-p "name" prompt) "my-fork" "")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork prompt &rest _)
+                   (setq captured-prompt prompt))))
+        (claude-repl-fork-worktree-workspace nil)
+        (should (null captured-prompt))))))
+
 ;;;; ---- Tests: do-create-worktree-workspace base-commit + fetch ----
 
 (ert-deftest claude-repl-test-do-create-base-commit-default-no-fork-is-origin-master ()

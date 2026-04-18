@@ -213,6 +213,11 @@ value is stored via `claude-repl--ws-put'."
   (claude-repl--log nil "worktree wrote .projectile, adding to projectile known projects")
   (projectile-add-known-project (file-name-as-directory path)))
 
+(defconst claude-repl--autonomous-prompt-prefix
+  "Do not wait for further instructions. Come up with a plan and then immediately execute on it. When finished, commit the result. Here is the task:\n\n"
+  "Prefix prepended to preemptive prompts to instruct Claude to plan,
+execute, and commit autonomously without waiting for confirmation.")
+
 (defun claude-repl--enqueue-preemptive-prompt (ws prompt)
   "Enqueue PROMPT on workspace WS for delivery once Claude is ready.
 Sets :pending-show-panels so panels open after switching to WS."
@@ -375,8 +380,10 @@ Git operations (fetch, worktree add) run asynchronously so Emacs is not blocked.
   (interactive "P")
   (let* ((base-commit (if arg "origin/master" "HEAD"))
          (name (read-string "Worktree name: "))
-         (preemptive-prompt (read-string "Preemptive prompt (blank to switch there normally): "))
-         (has-preemptive (and preemptive-prompt (not (string-empty-p preemptive-prompt)))))
+         (raw-prompt (read-string "Preemptive prompt (blank to switch there normally): "))
+         (has-preemptive (and raw-prompt (not (string-empty-p raw-prompt))))
+         (preemptive-prompt (when has-preemptive
+                              (concat claude-repl--autonomous-prompt-prefix raw-prompt))))
     (claude-repl--log nil "create-worktree-workspace: name=%s base-commit=%s has-preemptive=%s"
                       name base-commit has-preemptive)
     (claude-repl--do-create-worktree-workspace
@@ -407,8 +414,10 @@ Git operations (fetch, worktree add) run asynchronously so Emacs is not blocked.
             (claude-repl--log nil "fork-worktree-workspace: fork requested, sid=%s" sid)
             sid))
          (name (read-string "Worktree name: "))
-         (preemptive-prompt (read-string "Preemptive prompt (blank to switch there normally): "))
-         (has-preemptive (and preemptive-prompt (not (string-empty-p preemptive-prompt)))))
+         (raw-prompt (read-string "Preemptive prompt (blank to switch there normally): "))
+         (has-preemptive (and raw-prompt (not (string-empty-p raw-prompt))))
+         (preemptive-prompt (when has-preemptive
+                              (concat claude-repl--autonomous-prompt-prefix raw-prompt))))
     (claude-repl--log nil "fork-worktree-workspace: name=%s force-bare-metal=%s fork-session-id=%s has-preemptive=%s"
                       name force-bare-metal fork-session-id has-preemptive)
     (claude-repl--do-create-worktree-workspace
