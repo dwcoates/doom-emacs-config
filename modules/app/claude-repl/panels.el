@@ -22,6 +22,13 @@
   :type 'number
   :group 'claude-repl)
 
+(defcustom claude-repl-autoselect-input-on-workspace-switch t
+  "When non-nil, auto-select the Claude input window on workspace switch.
+If the input panel is visible after switching to a workspace, the input
+window is selected so the user can start typing immediately."
+  :type 'boolean
+  :group 'claude-repl)
+
 (defcustom claude-repl-session-id-display-length 8
   "Number of characters of session ID to display in messages."
   :type 'integer
@@ -195,15 +202,26 @@ Clears the flag and calls `claude-repl' to display the panels."
     (claude-repl--log-verbose ws "drain-pending-show-panels: ws=%s branch=no-pending no-op" ws)))
 
 ;; Refresh vterm on workspace switch
+(defun claude-repl--maybe-autoselect-input (ws)
+  "Select the Claude input window for WS if visible and autoselect is enabled.
+Respects `claude-repl-autoselect-input-on-workspace-switch'."
+  (when claude-repl-autoselect-input-on-workspace-switch
+    (when-let ((buf (claude-repl--ws-get ws :input-buffer))
+               (win (and (buffer-live-p buf) (get-buffer-window buf))))
+      (claude-repl--log ws "maybe-autoselect-input: selecting input-win=%s" win)
+      (select-window win))))
+
 (defun claude-repl--on-workspace-switch ()
   "Handle workspace switch: update all workspace states, refresh vterm, reset cursors.
-Also opens panels for workspaces that were created with a preemptive prompt."
+Also opens panels for workspaces that were created with a preemptive prompt,
+and auto-selects the input window if visible."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log-verbose ws "workspace-switch ws=%s" ws)
     (claude-repl--update-all-workspace-states)
     (claude-repl--refresh-vterm)
     (claude-repl--reset-vterm-cursors)
-    (claude-repl--drain-pending-show-panels ws)))
+    (claude-repl--drain-pending-show-panels ws)
+    (claude-repl--maybe-autoselect-input ws)))
 
 ;; Save window state for current workspace before switching away,
 ;; so update-all-workspace-states can inspect the saved config.

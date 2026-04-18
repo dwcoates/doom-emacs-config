@@ -937,9 +937,86 @@ are not created from a bottom popup like a regular vterm."
               ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil))
               ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
               ((symbol-function 'claude-repl--reset-vterm-cursors) (lambda () nil))
-              ((symbol-function 'claude-repl--drain-pending-show-panels) (lambda (_ws) nil)))
+              ((symbol-function 'claude-repl--drain-pending-show-panels) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--maybe-autoselect-input) (lambda (_ws) nil)))
       ;; Should not error -- the when guard skips mark-viewed
       (claude-repl--on-workspace-switch))))
+
+;;;; ---- Tests: maybe-autoselect-input ----
+
+(ert-deftest claude-repl-test-panels-maybe-autoselect-input-selects-visible-input ()
+  "maybe-autoselect-input selects the input window when it is visible."
+  (claude-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*autoselect-input*"))
+          (new-win nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (setq new-win (split-window))
+            (set-window-buffer new-win input-buf)
+            ;; Ensure we start on the other window
+            (select-window (car (window-list)))
+            (should-not (eq (window-buffer (selected-window)) input-buf))
+            (let ((claude-repl-autoselect-input-on-workspace-switch t))
+              (claude-repl--maybe-autoselect-input "test-ws")
+              (should (eq (window-buffer (selected-window)) input-buf))))
+        (when (and new-win (window-live-p new-win))
+          (ignore-errors (delete-window new-win)))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
+(ert-deftest claude-repl-test-panels-maybe-autoselect-input-noop-when-disabled ()
+  "maybe-autoselect-input does nothing when the defcustom is nil."
+  (claude-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*autoselect-disabled*"))
+          (new-win nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (setq new-win (split-window))
+            (set-window-buffer new-win input-buf)
+            (let ((orig-win (selected-window))
+                  (claude-repl-autoselect-input-on-workspace-switch nil))
+              (claude-repl--maybe-autoselect-input "test-ws")
+              ;; Window should not have changed
+              (should (eq (selected-window) orig-win))))
+        (when (and new-win (window-live-p new-win))
+          (ignore-errors (delete-window new-win)))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
+(ert-deftest claude-repl-test-panels-maybe-autoselect-input-noop-no-buffer ()
+  "maybe-autoselect-input does nothing when no input buffer exists."
+  (claude-repl-test--with-clean-state
+    (let ((orig-win (selected-window))
+          (claude-repl-autoselect-input-on-workspace-switch t))
+      (claude-repl--maybe-autoselect-input "test-ws")
+      (should (eq (selected-window) orig-win)))))
+
+(ert-deftest claude-repl-test-panels-maybe-autoselect-input-noop-not-visible ()
+  "maybe-autoselect-input does nothing when input buffer is not in any window."
+  (claude-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*autoselect-hidden*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            ;; Display a different buffer so input-buf has no window
+            (switch-to-buffer (get-buffer-create "*other-auto*"))
+            (let ((orig-win (selected-window))
+                  (claude-repl-autoselect-input-on-workspace-switch t))
+              (claude-repl--maybe-autoselect-input "test-ws")
+              (should (eq (selected-window) orig-win))))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))
+        (when (get-buffer "*other-auto*") (kill-buffer "*other-auto*"))))))
+
+(ert-deftest claude-repl-test-panels-maybe-autoselect-input-noop-dead-buffer ()
+  "maybe-autoselect-input does nothing when input buffer has been killed."
+  (claude-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*autoselect-dead*")))
+      (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+      (kill-buffer input-buf)
+      (let ((orig-win (selected-window))
+            (claude-repl-autoselect-input-on-workspace-switch t))
+        (claude-repl--maybe-autoselect-input "test-ws")
+        (should (eq (selected-window) orig-win))))))
 
 ;;;; ---- Tests: non-claude-panel-window-p with Claude buffers ----
 
