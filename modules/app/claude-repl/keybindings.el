@@ -361,6 +361,8 @@ Reports comprehensive diagnostics."
 ;;; Section 4: Keybinding definitions
 
 (map! :nvi "C-S-m" #'claude-repl-cycle)
+(map! :nvi "C-S-n" #'claude-repl-scroll-output-down)
+(map! :nvi "C-S-p" #'claude-repl-scroll-output-up)
 (map! :i "C-S-f" #'claude-repl-toggle-fullscreen)
 (map! :leader :prefix "w" :n "c" #'claude-repl-toggle-fullscreen)
 (map! :leader :prefix "w" :n "f" #'claude-repl-fullscreen-and-focus)
