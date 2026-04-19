@@ -157,6 +157,7 @@ For backward compatibility, a single-line file (CWD only) returns :session-id ni
        (claude-repl--log nil "read-sentinel-file: RACE file=%s gone between exists-p and read" fname)
        nil)
       (error
+       (message "[claude-repl] WARNING: sentinel file read error for %s: %S" fname err)
        (claude-repl--log nil "read-sentinel-file: ERROR file=%s err=%S" fname err)
        nil))))
 
@@ -199,7 +200,11 @@ name and the directory."
          (ws  (when dir (claude-repl--ws-for-dir dir))))
     ;; Delete the file immediately after reading so the poll fallback can't
     ;; re-dispatch it while a slow handler (e.g. panel setup) is still running.
-    (ignore-errors (delete-file file))
+    (condition-case err
+        (delete-file file)
+      (error
+       (message "[claude-repl] WARNING: could not delete sentinel file %s: %S"
+                (file-name-nondirectory file) err)))
     (claude-repl--log nil "process-sentinel-file: handler=%s file=%s dir=%S session-id=%S ws=%s"
                       (plist-get handler :name) (file-name-nondirectory file) dir session-id ws)
     (cond
@@ -318,6 +323,7 @@ Returns non-nil if a handler was found and called."
         (progn
           (claude-repl--process-sentinel-file file handler)
           t)
+      (message "[claude-repl] WARNING: no handler for sentinel file %s" name)
       (claude-repl--log nil "dispatch-sentinel-file: NO HANDLER for file=%s (tried prefixes: %S)"
                         name (mapcar #'car claude-repl--sentinel-dispatch-alist))
       nil)))

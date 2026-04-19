@@ -270,13 +270,9 @@
           (should (equal sent-args '("v" nil nil t))))))))
 
 (ert-deftest claude-repl-test-paste-to-vterm-when-not-live ()
-  "paste-to-vterm should do nothing when vterm is not live."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'claude-repl--vterm-live-p) (lambda () nil))
-              ((symbol-function 'vterm-send-key)
-               (lambda (&rest _) (setq sent t))))
-      (claude-repl-paste-to-vterm)
-      (should-not sent))))
+  "paste-to-vterm should signal user-error when vterm is not live."
+  (cl-letf (((symbol-function 'claude-repl--vterm-live-p) (lambda () nil)))
+    (should-error (claude-repl-paste-to-vterm) :type 'user-error)))
 
 ;;;; ---- Tests: claude-repl-set-priority ----
 

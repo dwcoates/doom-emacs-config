@@ -108,7 +108,7 @@ This lets Claude CLI handle paste natively, including images."
         (claude-repl--log nil "paste-to-vterm: vterm live, forwarding C-v")
         (with-current-buffer (claude-repl--ws-get (+workspace-current-name) :vterm-buffer)
           (vterm-send-key "v" nil nil t)))
-    (claude-repl--log nil "paste-to-vterm: vterm not live, skipping")))
+    (user-error "No live Claude session — paste not forwarded")))
 
 ;; TODO: claude-repl-set-priority has no keybinding anywhere; it belongs in
 ;; commands.el rather than keybindings.el.  Do not move yet -- other agents are
@@ -209,7 +209,9 @@ Closes their windows and silences process exit queries before killing."
                (equal ws (buffer-local-value 'claude-repl--owning-workspace buf)))
       (claude-repl--log ws "kill-owned-panel-buffers: killing buffer=%s" (buffer-name buf))
       (when-let ((win (get-buffer-window buf)))
-        (ignore-errors (delete-window win)))
+        (condition-case err
+            (delete-window win)
+          (error (message "[claude-repl] could not close window for %s: %S" (buffer-name buf) err))))
       (let ((proc (get-buffer-process buf)))
         (when proc (set-process-query-on-exit-flag proc nil)))
       (kill-buffer buf))))
@@ -247,7 +249,8 @@ window changes, git-diff sentinels, resolve-root, etc.)."
   (let ((label (pcase claude-repl-debug
                  ('nil "OFF")
                  ('t   "ON")
-                 ('verbose "ON (verbose)"))))
+                 ('verbose "ON (verbose)")
+                 (_ (error "claude-repl-debug has unexpected value: %S" claude-repl-debug)))))
     ;; Always emit via message so it's visible even when logging is off.
     (message "[claude-repl] debug logging: %s" label)
     ;; Also emit via the log system so it appears in the log stream.

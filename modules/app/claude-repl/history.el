@@ -22,11 +22,14 @@ Each workspace has one `claude-repl-instantiation' struct per environment.")
 
 (defmacro claude-repl--with-error-logging (label &rest body)
   "Execute BODY, logging any error with LABEL prefix.
-Catches errors and logs them via `claude-repl--log' rather than propagating."
+Catches errors and displays a user-visible warning via `message',
+then logs the full error via `claude-repl--log'."
   (declare (indent 1) (debug (stringp body)))
   `(condition-case err
        (progn ,@body)
-     (error (claude-repl--log nil (concat ,label " error: %S") err))))
+     (error
+      (message "[claude-repl] %s error: %S" ,label err)
+      (claude-repl--log nil (concat ,label " error: %S") err))))
 
 ;;;; File I/O helpers
 
@@ -104,7 +107,10 @@ stale session-id via `state-restore' on the next
       (let ((path (expand-file-name filename root)))
         (when (file-exists-p path)
           (claude-repl--log nil "state-purge: deleting %s" path)
-          (ignore-errors (delete-file path)))))))
+          (condition-case err
+              (delete-file path)
+            (error
+             (message "[claude-repl] WARNING: could not delete %s: %S" path err))))))))
 
 ;;;; History persistence
 

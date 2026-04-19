@@ -89,7 +89,11 @@ under the same conditions: a `/.dockerenv' file exists or the
   "Return parsed `~/.claude/settings.json' or nil if absent/unreadable."
   (let ((path (expand-file-name claude-repl--settings-file)))
     (when (file-exists-p path)
-      (ignore-errors (json-read-file path)))))
+      (condition-case err
+          (json-read-file path)
+        (error
+         (message "[claude-repl] WARNING: failed to parse %s: %S" path err)
+         nil)))))
 
 (defun claude-repl--event-has-command-p (hooks event cmd)
   "Return non-nil when HOOKS alist has a CMD registered under EVENT.
@@ -236,7 +240,10 @@ CMD is of the form \"~/.claude/hooks/<name>.sh\"."
       (unless (claude-repl--event-has-command-p hooks event cmd)
         (claude-repl--push-issue
          issues-cell
-         (or (cdr (assq event claude-repl--hook-severity)) 'warn)
+         (let ((sev (cdr (assq event claude-repl--hook-severity))))
+           (unless sev
+             (message "[claude-repl] WARNING: no severity defined for hook event %S — defaulting to warn" event))
+           (or sev 'warn))
          (format "%s hook not registered in %s — run M-x claude-repl-install-hooks"
                  event claude-repl--settings-file))))))
 
