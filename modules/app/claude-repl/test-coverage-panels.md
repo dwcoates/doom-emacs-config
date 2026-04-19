@@ -91,6 +91,7 @@ Complex function: splits windows, sets buffers, configures windows.
 | Workspace has no vterm buffer | No | |
 | Workspace has no input buffer | No | |
 | Docstring mentions correct percentages | Yes | `show-panels-docstring` |
+| Sets no-delete-other-windows on both panels | Yes | `show-panels-sets-no-delete-other-windows` |
 
 ### `claude-repl--focus-input-panel ()`
 

@@ -77,9 +77,11 @@ window is selected so the user can start typing immediately."
       (claude-repl--close-buffer-window buf))))
 
 (defun claude-repl--configure-vterm-window (win)
-  "Configure WIN as a dedicated, width-locked vterm window.
-Marks the window as dedicated (so `display-buffer' can't repurpose it)
-and locks its width to prevent resize-triggered reflow in vterm.
+  "Configure WIN as a dedicated, width-locked, protected vterm window.
+Marks the window as dedicated (so `display-buffer' can't repurpose it),
+locks its width to prevent resize-triggered reflow in vterm, and sets
+`no-delete-other-windows' so commands like `magit-status' that call
+`delete-other-windows' cannot kill the panel.
 
 Keyboard-navigation isolation is handled dynamically by
 `claude-repl--bounce-from-vterm' rather than by a static
@@ -88,7 +90,8 @@ vterm, but any non-mouse selection gets auto-corrected back to the
 input panel (or a warning if the input isn't displayed)."
   (claude-repl--log nil "configure-vterm-window: win=%s" win)
   (set-window-dedicated-p win t)
-  (set-window-parameter win 'window-size-fixed 'width))
+  (set-window-parameter win 'window-size-fixed 'width)
+  (set-window-parameter win 'no-delete-other-windows t))
 
 ;; Manual window layout: vterm on the right (full height), input below vterm.
 (defun claude-repl--show-panels ()
@@ -112,7 +115,8 @@ are not split from a bottom popup (e.g. a regular vterm)."
       (set-window-buffer vterm-win vterm-buf)
       (set-window-buffer input-win input-buf)
       (claude-repl--configure-vterm-window vterm-win)
-      (set-window-dedicated-p input-win t)))
+      (set-window-dedicated-p input-win t)
+      (set-window-parameter input-win 'no-delete-other-windows t)))
   (claude-repl--update-all-workspace-states))
 
 (defun claude-repl--focus-input-panel ()

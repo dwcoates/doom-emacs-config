@@ -218,7 +218,7 @@
 ;;;; ---- Tests: configure-vterm-window ----
 
 (ert-deftest claude-repl-test-panels-configure-vterm-window ()
-  "configure-vterm-window sets dedicated + width-fixed.
+  "configure-vterm-window sets dedicated + width-fixed + no-delete-other-windows.
 Does NOT set `no-other-window' — keyboard isolation now comes from
 `claude-repl--bounce-from-vterm', so vterm stays visible to
 `other-window'/`windmove' but any non-mouse landing is auto-corrected."
@@ -228,10 +228,12 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
           (claude-repl--configure-vterm-window win)
           (should (window-dedicated-p win))
           (should-not (window-parameter win 'no-other-window))
-          (should (eq (window-parameter win 'window-size-fixed) 'width)))
+          (should (eq (window-parameter win 'window-size-fixed) 'width))
+          (should (window-parameter win 'no-delete-other-windows)))
       ;; Clean up window parameters
       (set-window-dedicated-p win nil)
-      (set-window-parameter win 'window-size-fixed nil))))
+      (set-window-parameter win 'window-size-fixed nil)
+      (set-window-parameter win 'no-delete-other-windows nil))))
 
 ;;;; ---- Tests: resolve-vterm-buffer ----
 
@@ -795,6 +797,29 @@ are not created from a bottom popup like a regular vterm."
             (claude-repl--show-panels)
             (should (get-buffer-window vterm-buf))
             (should (get-buffer-window input-buf)))
+        ;; Clean up
+        (delete-other-windows)
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
+(ert-deftest claude-repl-test-panels-show-panels-sets-no-delete-other-windows ()
+  "show-panels sets `no-delete-other-windows' on both vterm and input windows
+so that commands like magit-status cannot destroy panel layout."
+  (claude-repl-test--with-clean-state
+    (let ((vterm-buf (get-buffer-create "*show-ndow-vterm*"))
+          (input-buf (get-buffer-create "*show-ndow-input*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
+                    ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil)))
+            (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (delete-other-windows)
+            (claude-repl--show-panels)
+            (let ((vterm-win (get-buffer-window vterm-buf))
+                  (input-win (get-buffer-window input-buf)))
+              (should (window-parameter vterm-win 'no-delete-other-windows))
+              (should (window-parameter input-win 'no-delete-other-windows))))
         ;; Clean up
         (delete-other-windows)
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
