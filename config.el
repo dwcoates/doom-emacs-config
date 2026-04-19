@@ -387,6 +387,8 @@
 
 ;; Workspace configuration
 (after! persp-mode
+  ;; Auto-save workspaces when Emacs is killed (e.g. SPC q Q)
+  (setq persp-auto-save-opt 1)
   ;; Auto-restore workspaces from last session on startup
   (setq persp-auto-resume-time 0.1)
   ;; Never ask for confirmation when killing a buffer not in the current workspace
