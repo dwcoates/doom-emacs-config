@@ -21,11 +21,15 @@ Runs silently every 5 minutes to prevent data loss."
     (claude-repl--log-verbose nil "autosave-workspace-buffers: scanning all workspace buffers")
     (let ((saved 0))
       (dolist (persp (persp-persps))
-        (if (and persp (not (symbolp persp)))
-            (dolist (buf (persp-buffers persp))
-              (when (claude-repl--save-buffer-if-modified buf)
-                (cl-incf saved)))
-          (claude-repl--log nil "WARN: autosave encountered non-perspective entry: %S" persp)))
+        (cond
+         ;; nil is persp-mode's "no perspective" container — expected, skip silently.
+         ((null persp) nil)
+         ((not (symbolp persp))
+          (dolist (buf (persp-buffers persp))
+            (when (claude-repl--save-buffer-if-modified buf)
+              (cl-incf saved))))
+         (t
+          (claude-repl--log nil "WARN: autosave encountered non-perspective entry: %S" persp))))
       (if (> saved 0)
           (claude-repl--log nil "autosave: saved %d buffer(s)" saved)
         (claude-repl--log-verbose nil "autosave-workspace-buffers: no buffers needed saving")))))

@@ -107,8 +107,8 @@
       ;; No buffers saved, so no log message
       (should (null log-messages)))))
 
-(ert-deftest claude-repl-test-autosave-workspace-symbol-persp-warns ()
-  "autosave-workspace-buffers warns when a perspective entry is a symbol."
+(ert-deftest claude-repl-test-autosave-workspace-nil-persp-silent ()
+  "autosave-workspace-buffers skips nil entries silently (persp-mode no-persp container)."
   (let ((persp-mode t)
         (warnings nil))
     (cl-letf (((symbol-function 'persp-persps) (lambda () '(nil)))
@@ -116,9 +116,8 @@
                (lambda (_ws fmt &rest args)
                  (push (apply #'format fmt args) warnings))))
       (claude-repl--autosave-workspace-buffers)
-      ;; Should have emitted a warning about non-perspective entry
-      (should (cl-some (lambda (w) (string-match-p "non-perspective entry" w))
-                       warnings)))))
+      (should-not (cl-some (lambda (w) (string-match-p "non-perspective entry" w))
+                           warnings)))))
 
 (ert-deftest claude-repl-test-autosave-workspace-symbol-persp-non-nil ()
   "autosave-workspace-buffers warns for non-nil symbol perspective entries."
