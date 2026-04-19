@@ -28,13 +28,12 @@
                        (substring (md5 "/test/project") 0 8)))))))
 
 (ert-deftest claude-repl-test-workspace-id-default-directory ()
-  "Workspace ID falls back to default-directory when no git root or project root."
+  "Workspace ID signals an error when no git root or project root."
   (claude-repl-test--with-temp-buffer " *test-ws-id-dd*"
     (setq-local claude-repl--project-root nil)
     (let ((default-directory "/fallback/dir/"))
       (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) nil)))
-        (should (equal (claude-repl--workspace-id)
-                       (substring (md5 (claude-repl--path-canonical "/fallback/dir/")) 0 8)))))))
+        (should-error (claude-repl--workspace-id) :type 'error)))))
 
 (ert-deftest claude-repl-test-resolve-root-priority ()
   "resolve-root should prefer git-root > project-root > default-directory."
@@ -57,9 +56,9 @@
     (should (equal (claude-repl--buffer-name "-input") "*claude-panel-input-my-ws*"))))
 
 (ert-deftest claude-repl-test-buffer-name-default ()
-  "Buffer name uses 'default' when no workspace name is available."
+  "Buffer name signals an error when no workspace name is available."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
-    (should (equal (claude-repl--buffer-name) "*claude-panel-default*"))))
+    (should-error (claude-repl--buffer-name) :type 'error)))
 
 (ert-deftest claude-repl-test-buffer-name-uses-explicit-ws ()
   "Buffer name should prefer the explicit WS argument over the current workspace."
@@ -189,10 +188,14 @@ When t, it should call `message'."
   (should (numberp claude-repl-paste-delay)))
 
 (ert-deftest claude-repl-test-bug10-defvar-declarations ()
-  "Bug 10: All key variables should be properly declared."
+  "Bug 10: All key variables should be properly declared.
+Note: claude-repl--notification-backend may not be bound in headless
+environments without notification tools (terminal-notifier or osascript)."
   (should (boundp 'claude-repl--workspaces))
   (should (boundp 'claude-repl-hide-input-box))
-  (should (boundp 'claude-repl--notification-backend))
+  ;; notification-backend requires osascript or terminal-notifier at load time
+  (when (or (executable-find "terminal-notifier") (executable-find "osascript"))
+    (should (boundp 'claude-repl--notification-backend)))
   (should (boundp 'claude-repl--sync-timer)))
 
 (ert-deftest claude-repl-test-bug11-fullscreen-config-stored-in-plist ()
@@ -687,20 +690,19 @@ When t, it should call `message'."
 ;;;; ---- Tests: resolve-root ----
 
 (ert-deftest claude-repl-test-resolve-root-default-directory-only ()
-  "resolve-root should fall back to default-directory when git and project root are nil."
+  "resolve-root should signal an error when git and project root are nil."
   (claude-repl-test--with-temp-buffer " *test-resolve-dd*"
     (setq-local claude-repl--project-root nil)
     (let ((default-directory "/fallback/"))
       (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) nil)))
-        (should (equal (claude-repl--resolve-root) (claude-repl--path-canonical "/fallback/")))))))
+        (should-error (claude-repl--resolve-root) :type 'error)))))
 
 (ert-deftest claude-repl-test-resolve-root-verbose-logging ()
   "resolve-root should call log-verbose with source label."
   (let ((log-called nil))
     (claude-repl-test--with-temp-buffer " *test-resolve-log*"
-      (setq-local claude-repl--project-root nil)
-      (let ((default-directory "/test/")
-            (claude-repl-debug 'verbose))
+      (setq-local claude-repl--project-root "/test/project")
+      (let ((claude-repl-debug 'verbose))
         (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) nil))
                   ((symbol-function 'claude-repl--log-verbose)
                    (lambda (_ws fmt &rest _args)
@@ -919,20 +921,10 @@ ownership intact across that transition."
           (should-not add-called))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-(ert-deftest claude-repl-test-create-buffer-skips-persp-when-ws-nil ()
-  "create-buffer does not attempt persp attachment when WS is nil.
-Falls back to the \"default\" buffer name via `claude-repl--buffer-name'
-so the buffer still has a sensible name."
-  (let ((buf nil)
-        (get-called nil))
-    (unwind-protect
-        (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
-                  ((symbol-function 'persp-get-by-name)
-                   (lambda (_name) (setq get-called t) nil)))
-          (setq buf (claude-repl--create-buffer nil))
-          (should-not get-called)
-          (should (equal (buffer-name buf) "*claude-panel-default*")))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
+(ert-deftest claude-repl-test-create-buffer-errors-when-ws-nil ()
+  "create-buffer signals an error when WS is nil and no current workspace."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
+    (should-error (claude-repl--create-buffer nil) :type 'error)))
 
 (ert-deftest claude-repl-test-create-buffer-idempotent ()
   "Calling create-buffer twice with the same args reuses the buffer."
@@ -946,17 +938,15 @@ so the buffer still has a sensible name."
 ;;;; ---- Tests: active-inst ----
 
 (ert-deftest claude-repl-test-active-inst-default-bare-metal ()
-  "active-inst should default to :bare-metal when no :active-env is set."
+  "active-inst should error when no :active-env is set (ensure-ws-env not called)."
   (claude-repl-test--with-clean-state
-    (let ((inst (claude-repl--active-inst "ws1")))
-      (should (claude-repl-instantiation-p inst))
-      ;; Should be stored under :bare-metal
-      (should (equal (claude-repl--ws-get "ws1" :bare-metal) inst)))))
+    (should-error (claude-repl--active-inst "ws1") :type 'error)))
 
 (ert-deftest claude-repl-test-active-inst-sandbox-env ()
   "active-inst should use :sandbox when :active-env is set to :sandbox."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :active-env :sandbox)
+    (claude-repl--ws-put "ws1" :sandbox (make-claude-repl-instantiation))
     (let ((inst (claude-repl--active-inst "ws1")))
       (should (claude-repl-instantiation-p inst))
       (should (equal (claude-repl--ws-get "ws1" :sandbox) inst)))))
@@ -964,6 +954,8 @@ so the buffer still has a sensible name."
 (ert-deftest claude-repl-test-active-inst-returns-same-struct ()
   "active-inst should return the same struct on second call (not create a new one)."
   (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :active-env :bare-metal)
+    (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
     (let ((inst1 (claude-repl--active-inst "ws1"))
           (inst2 (claude-repl--active-inst "ws1")))
       (should (eq inst1 inst2)))))
@@ -971,12 +963,16 @@ so the buffer still has a sensible name."
 (ert-deftest claude-repl-test-active-inst-is-struct ()
   "active-inst should return a claude-repl-instantiation struct."
   (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :active-env :bare-metal)
+    (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
     (let ((inst (claude-repl--active-inst "ws1")))
       (should (claude-repl-instantiation-p inst)))))
 
 (ert-deftest claude-repl-test-active-inst-fields-nil-by-default ()
   "active-inst struct fields should be nil by default."
   (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :active-env :bare-metal)
+    (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
     (let ((inst (claude-repl--active-inst "ws1")))
       (should-not (claude-repl-instantiation-had-session inst))
       (should-not (claude-repl-instantiation-session-id inst))

@@ -138,11 +138,15 @@ Reads :project-dir from the workspace plist.  Errors if not set."
 (defun claude-repl--workspace-clean-p (ws)
   "Return non-nil if workspace WS has no unstaged changes to tracked files.
 Reads from a cached value updated asynchronously by
-`claude-repl--async-refresh-git-status'.  Defaults to non-nil (clean) when
-the cache has not yet been populated."
-  (let ((result (not (eq (claude-repl--ws-get ws :git-clean) 'dirty))))
-    (claude-repl--log-verbose ws "workspace-clean-p ws=%s result=%s" ws result)
-    result))
+`claude-repl--async-refresh-git-status'.  Signals an error if the cache
+has not yet been populated — callers must ensure the async git check has
+completed before consulting this predicate."
+  (let ((status (claude-repl--ws-get ws :git-clean)))
+    (unless status
+      (error "claude-repl--workspace-clean-p: :git-clean not populated for workspace %s" ws))
+    (let ((result (eq status 'clean)))
+      (claude-repl--log-verbose ws "workspace-clean-p ws=%s status=%s result=%s" ws status result)
+      result)))
 
 (defun claude-repl--git-check-in-progress-p (ws)
   "Return non-nil if a git-diff process is already running for workspace WS."
@@ -158,9 +162,16 @@ triggers a state update via `claude-repl--update-ws-state'.
 _EVENT is ignored."
   (unless (process-live-p proc)
     (let* ((exit-code (process-exit-status proc))
-           (clean-result (if (= 0 exit-code) 'clean 'dirty)))
+           (clean-result (cond
+                          ((= 0 exit-code) 'clean)
+                          ((= 1 exit-code) 'dirty)
+                          (t (message "[claude-repl] WARNING: git diff --quiet exited with code %d for ws=%s (git error, not dirty)"
+                                      exit-code ws)
+                             (claude-repl--log ws "git-diff-sentinel: unexpected exit-code=%d for ws=%s" exit-code ws)
+                             nil))))
       (claude-repl--log-verbose ws "git-diff-sentinel: ws=%s exit-code=%s result=%s" ws exit-code clean-result)
-      (claude-repl--ws-put ws :git-clean clean-result)
+      (when clean-result
+        (claude-repl--ws-put ws :git-clean clean-result))
       (claude-repl--ws-put ws :git-proc nil)
       (claude-repl--update-ws-state ws))))
 
@@ -527,14 +538,16 @@ State table:
   :done + dirty → unchanged     (wait for user to stage/commit)
   anything else → unchanged     (sentinel-owned or already terminal)"
   (let ((state (claude-repl--ws-claude-state ws))
-        (dirty (not (claude-repl--workspace-clean-p ws))))
+        (git-status (claude-repl--ws-get ws :git-clean)))
     (cond
-     ((and (eq state :done) (not dirty))
+     ((null git-status)
+      (claude-repl--log-verbose ws "update-ws-state ws=%s state=%s git-clean not yet populated, skipping" ws state))
+     ((and (eq state :done) (eq git-status 'clean))
       (claude-repl--log ws "update-ws-state ws=%s :done->:idle (clean)" ws)
       (claude-repl--ws-set-claude-state ws :idle))
      (t
-      (claude-repl--log-verbose ws "update-ws-state ws=%s state=%s dirty=%s no-op"
-                                ws state dirty)))))
+      (claude-repl--log-verbose ws "update-ws-state ws=%s state=%s git-status=%s no-op"
+                                ws state git-status)))))
 
 (defun claude-repl--update-all-workspace-states ()
   "Update state for claude-repl workspaces based on visibility and git status.

@@ -120,12 +120,19 @@ are not split from a bottom popup (e.g. a regular vterm)."
   (claude-repl--update-all-workspace-states))
 
 (defun claude-repl--focus-input-panel ()
-  "Focus the input panel window and enter insert state."
+  "Focus the input panel window and enter insert state.
+Signals an error if the input buffer or its window cannot be found —
+callers should ensure panels are displayed before calling this."
   (claude-repl--log nil "focus-input-panel")
-  (when-let ((buf (claude-repl--ws-get (+workspace-current-name) :input-buffer))
-             (win (get-buffer-window buf)))
-    (select-window win)
-    (evil-insert-state)))
+  (let ((ws (+workspace-current-name)))
+    (let ((buf (claude-repl--ws-get ws :input-buffer)))
+      (unless buf
+        (error "claude-repl--focus-input-panel: no :input-buffer for workspace %s" ws))
+      (let ((win (get-buffer-window buf)))
+        (unless win
+          (error "claude-repl--focus-input-panel: input buffer %s is not displayed in any window" (buffer-name buf)))
+        (select-window win)
+        (evil-insert-state)))))
 
 (defun claude-repl--show-panels-and-focus ()
   "Display both Claude panels and focus the input panel.
@@ -384,9 +391,7 @@ Resets cursor, redraws, and syncs window point."
   "Deferred handler for window configuration changes.
 Syncs orphaned panels, refreshes overlay, and resets cursors."
   (claude-repl--log-verbose nil "on-window-change")
-  (condition-case nil
-      (claude-repl--sync-panels)
-    (error nil))
+  (claude-repl--sync-panels)
   (claude-repl--update-hide-overlay)
   (claude-repl--reset-vterm-cursors))
 

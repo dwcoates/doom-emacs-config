@@ -828,24 +828,21 @@ so that commands like magit-status cannot destroy panel layout."
 ;;;; ---- Tests: focus-input-panel edge cases ----
 
 (ert-deftest claude-repl-test-panels-focus-input-panel-nil-buffer ()
-  "focus-input-panel is a no-op when input buffer is nil."
+  "focus-input-panel signals an error when input buffer is nil."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-      ;; No input buffer set -- when-let guards, should return nil
-      (should-not (claude-repl--focus-input-panel)))))
+      (should-error (claude-repl--focus-input-panel) :type 'error))))
 
 (ert-deftest claude-repl-test-panels-focus-input-panel-no-window ()
-  "focus-input-panel is a no-op when input buffer exists but has no window."
+  "focus-input-panel signals an error when input buffer exists but has no window."
   (claude-repl-test--with-clean-state
     (let ((buf (get-buffer-create "*focus-no-win*")))
       (unwind-protect
           (progn
             (claude-repl--ws-put "test-ws" :input-buffer buf)
-            ;; Display a different buffer in the selected window
             (switch-to-buffer (get-buffer-create "*other*"))
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-              ;; Input buffer exists but is not in any window
-              (should-not (claude-repl--focus-input-panel))))
+              (should-error (claude-repl--focus-input-panel) :type 'error)))
         (when (buffer-live-p buf) (kill-buffer buf))
         (when (get-buffer "*other*") (kill-buffer "*other*"))))))
 
@@ -1119,21 +1116,13 @@ so that commands like magit-status cannot destroy panel layout."
 ;;;; ---- Tests: on-window-change sync-panels error ----
 
 (ert-deftest claude-repl-test-panels-on-window-change-sync-error ()
-  "on-window-change catches errors from sync-panels via condition-case."
+  "on-window-change propagates errors from sync-panels (no error swallowing)."
   (claude-repl-test--with-clean-state
-    (let ((overlay-called nil)
-          (cursors-called nil))
-      (cl-letf (((symbol-function 'claude-repl--sync-panels)
-                 (lambda () (error "sync failed")))
-                ((symbol-function 'claude-repl--update-hide-overlay)
-                 (lambda () (setq overlay-called t)))
-                ((symbol-function 'claude-repl--reset-vterm-cursors)
-                 (lambda () (setq cursors-called t))))
-        ;; Should not error despite sync-panels throwing
-        (claude-repl--on-window-change)
-        ;; Subsequent steps should still execute
-        (should overlay-called)
-        (should cursors-called)))))
+    (cl-letf (((symbol-function 'claude-repl--sync-panels)
+               (lambda () (error "sync failed")))
+              ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
+              ((symbol-function 'claude-repl--reset-vterm-cursors) #'ignore))
+      (should-error (claude-repl--on-window-change) :type 'error))))
 
 ;;;; ---- Tests: bounce-from-vterm ----
 

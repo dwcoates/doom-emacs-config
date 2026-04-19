@@ -392,9 +392,9 @@
     (should-not (claude-repl--workspace-clean-p "ws1"))))
 
 (ert-deftest claude-repl-test-workspace-clean-p-default-nil ()
-  "workspace-clean-p should return non-nil (clean) when :git-clean is unset."
+  "workspace-clean-p should signal an error when :git-clean is unset."
   (claude-repl-test--with-clean-state
-    (should (claude-repl--workspace-clean-p "ws1"))))
+    (should-error (claude-repl--workspace-clean-p "ws1") :type 'error)))
 
 ;;;; ---- Tests: git-check-in-progress-p ----
 

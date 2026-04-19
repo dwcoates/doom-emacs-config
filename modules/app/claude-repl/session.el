@@ -215,11 +215,13 @@ personal repos use --dangerously-skip-permissions."
       (progn
         (claude-repl--log nil "compute-perm-flag: sandboxed — no perm flag")
         nil)
-    (let ((flag (if (string-match-p claude-repl-managed-project-pattern (expand-file-name (or project-dir default-directory)))
+    (unless project-dir
+      (error "claude-repl--compute-perm-flag: project-dir is nil — cannot determine permission mode"))
+    (let ((flag (if (string-match-p claude-repl-managed-project-pattern (expand-file-name project-dir))
                     claude-repl-managed-permission-flag
                   claude-repl-personal-permission-flag)))
       (claude-repl--log nil "compute-perm-flag: branch=%s flag=%s"
-                        (if (string-match-p claude-repl-managed-project-pattern (expand-file-name (or project-dir default-directory)))
+                        (if (string-match-p claude-repl-managed-project-pattern (expand-file-name project-dir))
                             "managed" "personal")
                         flag)
       flag)))
@@ -412,10 +414,11 @@ message when the current workspace is different."
   "Deliver PENDING prompts to WS if VTERM-BUF is still live.
 Each prompt in PENDING is sent via `claude-repl--send'."
   (claude-repl--log ws "deliver-pending-prompts: ws=%s count=%d" ws (length pending))
-  (if (buffer-live-p vterm-buf)
-      (dolist (p pending)
-        (claude-repl--send p ws))
-    (claude-repl--log ws "deliver-pending-prompts: buffer is dead ws=%s" ws)))
+  (unless (buffer-live-p vterm-buf)
+    (error "claude-repl--deliver-pending-prompts: vterm buffer is dead for ws=%s — %d prompt(s) lost"
+           ws (length pending)))
+  (dolist (p pending)
+    (claude-repl--send p ws)))
 
 (defun claude-repl--drain-pending-prompts (ws)
   "Drain queued prompts for workspace WS after Claude becomes ready.
@@ -484,18 +487,23 @@ Otherwise, only show panels if WS is the current workspace."
 
 (defun claude-repl--vterm-running-p (&optional ws)
   "Return t if Claude vterm buffer for WS exists with a live process.
-WS defaults to the current workspace name."
-  (claude-repl--vterm-process-alive-p (or ws (+workspace-current-name))))
+WS defaults to the current workspace name.  Signals an error if no
+workspace can be determined."
+  (let ((ws (or ws (+workspace-current-name))))
+    (unless ws (error "claude-repl--vterm-running-p: no workspace specified and no current workspace"))
+    (claude-repl--vterm-process-alive-p ws)))
 
 (defun claude-repl--session-starting-p (&optional ws)
   "Return t if vterm exists with a live process but Claude is not yet ready.
-WS defaults to the current workspace name."
-  (let* ((ws (or ws (+workspace-current-name)))
-         (result (and (claude-repl--vterm-process-alive-p ws)
-                      (not (buffer-local-value 'claude-repl--ready
-                                               (claude-repl--ws-get ws :vterm-buffer))))))
-    (claude-repl--log-verbose ws "session-starting-p: ws=%s starting=%s" ws (if result "yes" "no"))
-    result))
+WS defaults to the current workspace name.  Signals an error if no
+workspace can be determined."
+  (let ((ws (or ws (+workspace-current-name))))
+    (unless ws (error "claude-repl--session-starting-p: no workspace specified and no current workspace"))
+    (let ((result (and (claude-repl--vterm-process-alive-p ws)
+                       (not (buffer-local-value 'claude-repl--ready
+                                                (claude-repl--ws-get ws :vterm-buffer))))))
+      (claude-repl--log-verbose ws "session-starting-p: ws=%s starting=%s" ws (if result "yes" "no"))
+      result)))
 
 ;;;; Readiness timer (fallback polling)
 

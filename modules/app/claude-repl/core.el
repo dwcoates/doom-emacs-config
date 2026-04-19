@@ -57,10 +57,10 @@ is created on demand by `claude-repl--logfile-path'."
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-default-workspace-name "default"
-  "Fallback workspace name used when no workspace is active."
-  :type 'string
-  :group 'claude-repl)
+;; NOTE: claude-repl-default-workspace-name was removed as part of the
+;; no-defaults-no-fallbacks refactor.  Buffer naming now errors when no
+;; workspace name can be determined, rather than silently using "default"
+;; (which caused unrelated contexts to collide on the same buffer).
 
 (defcustom claude-repl-ws-name-allowed-chars-re "[^[:alnum:]_-]"
   "Regexp matching characters to replace in workspace names.
@@ -281,7 +281,10 @@ Suitable for init-time calls that may run outside a git repository."
   "The git branch active when claude-repl config was loaded.")
 
 (defvar claude-repl--main-git-root
-  (file-name-as-directory (claude-repl--git-string-quiet "rev-parse" "--show-toplevel"))
+  (let ((raw (claude-repl--git-string-quiet "rev-parse" "--show-toplevel")))
+    (if (string-empty-p raw)
+        (error "claude-repl: loaded outside a git repository — cannot determine main git root")
+      (file-name-as-directory raw)))
   "The main git root captured at module load time.
 Used by the workspace-generation file watcher so new sessions are always
 created from the main repo, not the currently selected worktree.")
@@ -299,12 +302,17 @@ via `directory-file-name' so that the same directory always produces the same ha
 
 (defun claude-repl--resolve-root ()
   "Return the project root directory.
-Tries git root, then buffer-local project root, then `default-directory'."
+Tries git root, then buffer-local project root.  Signals an error if
+neither is available — falling back to `default-directory' is too
+dangerous (wrong workspace identity, wrong logfile, wrong project)."
   (let* ((git (claude-repl--git-root))
-         (root (or git claude-repl--project-root default-directory))
-         (source (cond (git "git") (claude-repl--project-root "buffer-local") (t "default-directory"))))
-    (claude-repl--log-verbose nil "resolve-root source=%s root=%s" source root)
-    (claude-repl--path-canonical root)))
+         (root (or git claude-repl--project-root)))
+    (unless root
+      (error "claude-repl--resolve-root: no git root and no buffer-local project root (default-directory=%s)"
+             default-directory))
+    (let ((source (if git "git" "buffer-local")))
+      (claude-repl--log-verbose nil "resolve-root source=%s root=%s" source root)
+      (claude-repl--path-canonical root))))
 
 (defun claude-repl--workspace-id ()
   "Return a short identifier for the current git workspace.
@@ -371,13 +379,15 @@ the canonical worktree path) wins over a drifted `default-directory'."
 
 (defun claude-repl--active-inst (ws)
   "Return the active `claude-repl-instantiation' for workspace WS.
-Creates the struct if not yet initialized for the current environment."
-  (let ((env (or (claude-repl--ws-get ws :active-env) :bare-metal)))
-    (or (claude-repl--ws-get ws env)
-        (let ((inst (make-claude-repl-instantiation)))
-          (claude-repl--log ws "active-inst: creating new instantiation env=%s" env)
-          (claude-repl--ws-put ws env inst)
-          inst))))
+Signals an error if the environment or instantiation struct is missing —
+both must be initialized by `claude-repl--ensure-ws-env' before this is called."
+  (let ((env (claude-repl--ws-get ws :active-env)))
+    (unless env
+      (error "claude-repl--active-inst: workspace %s has no :active-env (ensure-ws-env not called?)" ws))
+    (let ((inst (claude-repl--ws-get ws env)))
+      (unless inst
+        (error "claude-repl--active-inst: no instantiation struct for ws=%s env=%s (ensure-ws-env not called?)" ws env))
+      inst)))
 
 (defvar-local claude-repl--owning-workspace nil
   "Workspace name that owns this claude session.
@@ -410,13 +420,16 @@ Keeps alphanumerics, hyphens, and underscores.  Returns nil for nil NAME."
   "Return a workspace-specific buffer name like *claude-panel-WS* or *claude-panel-input-WS*.
 SUFFIX, if provided, is inserted before the workspace name (e.g. \"-input\").
 WS, if provided, is the workspace name; otherwise uses the current workspace.
-Falls back to \"default\" when no workspace name is available."
+Signals an error when no workspace name can be determined."
   (let* ((ws-name (or ws (and (fboundp '+workspace-current-name)
                               (+workspace-current-name))))
-         (safe (claude-repl--sanitize-ws-name ws-name))
-         (name (format claude-repl-panel-buffer-name-format (or suffix "") (or safe claude-repl-default-workspace-name))))
-    (claude-repl--log-verbose nil "buffer-name: suffix=%s ws=%s name=%s" suffix ws-name name)
-    name))
+         (safe (claude-repl--sanitize-ws-name ws-name)))
+    (unless safe
+      (error "claude-repl--buffer-name: no workspace name available (ws=%s, +workspace-current-name=%s)"
+             ws (and (fboundp '+workspace-current-name) (+workspace-current-name))))
+    (let ((name (format claude-repl-panel-buffer-name-format (or suffix "") safe)))
+      (claude-repl--log-verbose nil "buffer-name: suffix=%s ws=%s name=%s" suffix ws-name name)
+      name)))
 
 (defun claude-repl--create-buffer (ws &optional suffix)
   "Create a workspace-owned buffer for WS and return it.

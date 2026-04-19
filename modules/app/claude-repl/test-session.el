@@ -261,10 +261,8 @@ by vterm-buf presence; the :done write is not."
                  "--dangerously-skip-permissions")))
 
 (ert-deftest claude-repl-test-compute-perm-flag-nil-dir ()
-  "compute-perm-flag with nil project-dir should use default-directory."
-  (let ((default-directory "/tmp/ChessCom/test"))
-    (should (equal (claude-repl--compute-perm-flag nil nil)
-                   "--permission-mode auto"))))
+  "compute-perm-flag with nil project-dir should signal an error."
+  (should-error (claude-repl--compute-perm-flag nil nil) :type 'error))
 
 (ert-deftest claude-repl-test-assemble-cmd-sandboxed ()
   "assemble-cmd should use sandbox script when sandboxed."
@@ -436,14 +434,11 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
       (kill-buffer fake-buf))))
 
 (ert-deftest claude-repl-test-deliver-pending-prompts-dead-buf ()
-  "deliver-pending-prompts should not call send when buffer is dead."
-  (let ((sent nil)
-        (fake-buf (generate-new-buffer " *test-deliver-dead*")))
+  "deliver-pending-prompts should signal an error when buffer is dead."
+  (let ((fake-buf (generate-new-buffer " *test-deliver-dead*")))
     (kill-buffer fake-buf)
-    (cl-letf (((symbol-function 'claude-repl--send)
-               (lambda (p _ws) (push p sent))))
-      (claude-repl--deliver-pending-prompts fake-buf '("a") "ws1")
-      (should-not sent))))
+    (should-error (claude-repl--deliver-pending-prompts fake-buf '("a") "ws1")
+                  :type 'error)))
 
 (ert-deftest claude-repl-test-show-panels-or-defer-current-ws ()
   "show-panels-or-defer should call claude-repl when WS is current."
@@ -850,7 +845,7 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
         (should-not (plist-get result :sandboxed-p))))))
 
 (ert-deftest claude-repl-test-build-start-cmd-nil-project-dir ()
-  "build-start-cmd with nil :project-dir should still produce a command."
+  "build-start-cmd with nil :project-dir should signal an error."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :active-env :bare-metal)
     (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
@@ -858,10 +853,7 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
     (claude-repl--ws-put "ws1" :project-dir nil)
     (cl-letf (((symbol-function 'claude-repl--ensure-sandbox-image)
                (lambda (_ws) nil)))
-      (let* ((default-directory "/tmp/personal/project")
-             (result (claude-repl--build-start-cmd "ws1")))
-        (should (stringp (plist-get result :cmd)))
-        (should (string-match-p "claude" (plist-get result :cmd)))))))
+      (should-error (claude-repl--build-start-cmd "ws1") :type 'error))))
 
 (ert-deftest claude-repl-test-build-start-cmd-empty-session-id ()
   "build-start-cmd with nil session-id should not include --resume."

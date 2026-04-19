@@ -21,10 +21,16 @@
                 #'claude-repl--notify-backend-terminal-notifier))))
 
 (ert-deftest claude-repl-test-select-backend-falls-back-to-osascript ()
-  "When terminal-notifier is NOT available, fall back to osascript."
-  (cl-letf (((symbol-function 'executable-find) (lambda (_cmd) nil)))
+  "When terminal-notifier is NOT available but osascript is, use osascript."
+  (cl-letf (((symbol-function 'executable-find)
+             (lambda (cmd) (when (equal cmd "osascript") "/usr/bin/osascript"))))
     (should (eq (claude-repl--select-notification-backend)
                 #'claude-repl--notify-backend-osascript))))
+
+(ert-deftest claude-repl-test-select-backend-errors-when-none-available ()
+  "When neither terminal-notifier nor osascript is available, signal an error."
+  (cl-letf (((symbol-function 'executable-find) (lambda (_cmd) nil)))
+    (should-error (claude-repl--select-notification-backend) :type 'error)))
 
 ;;;; ---- Tests: notification backend variable ----
 

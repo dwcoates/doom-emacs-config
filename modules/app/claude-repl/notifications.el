@@ -37,14 +37,17 @@
                          message title claude-repl-notification-sound)))
 
 (defun claude-repl--select-notification-backend ()
-  "Select the best available desktop notification backend."
+  "Select the best available desktop notification backend.
+Signals an error if no supported notification tool is found."
   (cond
    ((executable-find claude-repl-terminal-notifier-executable)
     (claude-repl--log nil "select-notification-backend: backend=terminal-notifier")
     #'claude-repl--notify-backend-terminal-notifier)
-   (t
+   ((executable-find "osascript")
     (claude-repl--log nil "select-notification-backend: backend=osascript")
-    #'claude-repl--notify-backend-osascript)))
+    #'claude-repl--notify-backend-osascript)
+   (t
+    (error "claude-repl: no notification backend available (neither terminal-notifier nor osascript found)"))))
 
 (defvar claude-repl--notification-backend (claude-repl--select-notification-backend)
   "Desktop notification backend function, selected at load time based on available platform tools.")
