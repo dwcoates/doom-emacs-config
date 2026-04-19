@@ -530,6 +530,8 @@ gives up after 30 seconds, or cancels and opens panels once Claude is ready."
      ((claude-repl--session-starting-p ws) nil)
      (t
       (claude-repl--cancel-ready-timer ws)
+      (message "[claude-repl] ready-timer catch-all for ws=%s (session no longer starting)" ws)
+      (claude-repl--log ws "ready-timer: catch-all branch hit for ws=%s — not starting but not timed out" ws)
       (when (claude-repl--current-ws-p ws)
         (claude-repl))))))
 

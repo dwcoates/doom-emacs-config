@@ -187,13 +187,14 @@ The parent directory is created if it does not exist."
 
 (defun claude-repl--do-log-to-file (text)
   "Append TEXT as a line to the logfile when `claude-repl-log-to-file' is non-nil.
-Silently no-ops when the logfile path cannot be determined or if a write error
-occurs (e.g. read-only filesystem).  Never signals an error — logging must not
-break the caller."
+No-ops when the logfile path cannot be determined.  Displays a warning
+if a write error occurs (e.g. read-only filesystem) but does not signal
+an error — logging must not break the caller."
   (when claude-repl-log-to-file
     (when-let ((path (claude-repl--logfile-path)))
-      (ignore-errors
-        (write-region (concat text "\n") nil path t 'silent)))))
+      (condition-case err
+          (write-region (concat text "\n") nil path t 'silent)
+        (error (message "[claude-repl] WARNING: log write failed to %s: %S" path err))))))
 
 (defun claude-repl--do-log (ws fmt args)
   "Internal: emit FMT + ARGS via `message' with a timestamp prefix and trailing WS metadata.

@@ -50,7 +50,12 @@
     (progn
       (message "[claude-repl] Loaded with %d ERROR(S):" (length claude-repl--load-errors))
       (dolist (pair (nreverse claude-repl--load-errors))
-        (message "[claude-repl]   %s.el: %S" (car pair) (cdr pair))))
+        (message "[claude-repl]   %s.el: %S" (car pair) (cdr pair)))
+      ;; core.el is required for the module to function at all.
+      ;; Other modules can fail (degraded mode), but without core
+      ;; the entire package is non-functional.
+      (when (assoc "core" claude-repl--load-errors)
+        (error "[claude-repl] FATAL: core.el failed to load — module is non-functional")))
   (message "[claude-repl] Loaded Claude-Repl package."))
 
 (provide 'claude-repl)

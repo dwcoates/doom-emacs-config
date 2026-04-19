@@ -65,9 +65,12 @@ window is selected so the user can start typing immediately."
   (and b (buffer-name b)))
 
 (defun claude-repl--close-buffer-window (buf)
-  "Close the window displaying BUF, ignoring errors."
+  "Close the window displaying BUF.  Warns if the window cannot be closed."
   (when-let ((win (get-buffer-window buf)))
-    (ignore-errors (delete-window win))))
+    (condition-case err
+        (delete-window win)
+      (error (message "[claude-repl] could not close window for %s: %S"
+                      (claude-repl--safe-buffer-name buf) err)))))
 
 (defun claude-repl--close-buffer-windows (&rest bufs)
   "Close windows displaying any of BUFS."
@@ -259,7 +262,10 @@ Skips redirect if claude is the only window (fullscreen case)."
 Redirects away from Claude buffers and saves frame state."
   (claude-repl--log nil "before-persp-deactivate: entry")
   (claude-repl--redirect-from-claude-before-save)
-  (ignore-errors (persp-frame-save-state)))
+  (condition-case err
+      (persp-frame-save-state)
+    (error (message "[claude-repl] WARNING: persp-frame-save-state failed: %S" err)
+           (claude-repl--log nil "before-persp-deactivate: persp-frame-save-state error: %S" err))))
 
 (defun claude-repl--after-persp-activated (&rest _)
   "Handle perspective activation by scheduling a workspace switch."
@@ -646,7 +652,9 @@ If panels hidden: show both panels."
   "Save history, disable overlay, cancel timers, and clear session state for workspace WS."
   (claude-repl--log ws "teardown-session-state ws=%s env=%s (setting had-session t)"
                     ws (claude-repl--ws-get ws :active-env))
-  (ignore-errors (claude-repl--disable-hide-overlay))
+  (condition-case err
+      (claude-repl--disable-hide-overlay)
+    (error (message "[claude-repl] WARNING: disable-hide-overlay failed during teardown: %S" err)))
   (when claude-repl--sync-timer
     (cancel-timer claude-repl--sync-timer)
     (setq claude-repl--sync-timer nil))
@@ -737,7 +745,9 @@ If Claude isn't running, start it (same as `claude-repl')."
   (claude-repl--log nil "delete-non-panel-windows: window-count=%d" (length (window-list)))
   (dolist (win (window-list))
     (unless (memq (window-buffer win) (list vterm-buf input-buf))
-      (ignore-errors (delete-window win)))))
+      (condition-case err
+          (delete-window win)
+        (error (message "[claude-repl] could not close non-panel window: %S" err))))))
 
 (defun claude-repl-toggle-fullscreen ()
   "Toggle fullscreen for the Claude REPL vterm and input windows.
