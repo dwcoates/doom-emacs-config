@@ -147,10 +147,12 @@ For backward compatibility, a single-line file (CWD only) returns :session-id ni
                (session-id (when (nth 1 lines) (string-trim (nth 1 lines)))))
           (claude-repl--log-verbose nil "read-sentinel-file: file=%s dir=%S session-id=%S"
                             fname dir session-id)
-          (when (or (string= dir "null") (string= dir ""))
-            (claude-repl--log nil "read-sentinel-file: WARNING file=%s has bogus dir=%S (hook may not have received cwd)"
-                              fname dir))
-          (list :dir dir :session-id session-id))
+          (if (or (string= dir "null") (string= dir ""))
+              (progn
+                (claude-repl--log nil "read-sentinel-file: REJECTING file=%s with bogus dir=%S (hook may not have received cwd)"
+                                  fname dir)
+                nil)
+            (list :dir dir :session-id session-id)))
       (file-missing
        (claude-repl--log nil "read-sentinel-file: RACE file=%s gone between exists-p and read" fname)
        nil)

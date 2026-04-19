@@ -85,6 +85,7 @@ Runs as a buffer-local `pre-command-hook'."
                                           (buffer-name vterm-buf) this-command)
                 (with-current-buffer vterm-buf
                   (vterm-send-key "<backspace>")))
+            (message "[claude-repl] no live Claude session — backspace not forwarded")
             (claude-repl--log-verbose nil "slash-intercept-backspace: empty-buffer-forward no live vterm, skipping this-command=%s" this-command))
         (claude-repl--log-verbose nil "slash-intercept-backspace: normal branch this-command=%s" this-command)))))
 
@@ -156,6 +157,7 @@ left users with a half-cleared state."
         (claude-repl--log nil "send-vterm-key: sending %s to vterm=%s" key-name (buffer-name vterm-buf))
         (with-current-buffer vterm-buf
           (vterm-send-key key-name)))
+    (message "[claude-repl] no live Claude session — %s not forwarded" key-name)
     (claude-repl--log nil "send-vterm-key: no live vterm, skipping key=%s" key-name)))
 
 (defun claude-repl--send-up-arrow ()
@@ -178,6 +180,7 @@ left users with a half-cleared state."
         (claude-repl--log nil "send-vterm-down: sending <down> to vterm=%s" (buffer-name vterm-buf))
         (with-current-buffer vterm-buf
           (vterm-send-down)))
+    (message "[claude-repl] no live Claude session — down not forwarded")
     (claude-repl--log nil "send-vterm-down: no live vterm, skipping")))
 
 (defun claude-repl--send-vterm-up ()
@@ -188,6 +191,7 @@ left users with a half-cleared state."
         (claude-repl--log nil "send-vterm-up: sending <up> to vterm=%s" (buffer-name vterm-buf))
         (with-current-buffer vterm-buf
           (vterm-send-up)))
+    (message "[claude-repl] no live Claude session — up not forwarded")
     (claude-repl--log nil "send-vterm-up: no live vterm, skipping")))
 
 ;; Public aliases -- used in keybindings and tests.
@@ -527,10 +531,13 @@ Handles input preparation, sending, history, and persistence."
 (defun claude-repl--append-to-input-buffer (text)
   "Append TEXT to the end of the current workspace's input buffer."
   (claude-repl--log nil "append-to-input-buffer: len=%d" (length text))
-  (when-let ((buf (claude-repl--ws-get (+workspace-current-name) :input-buffer)))
-    (with-current-buffer buf
-      (goto-char (point-max))
-      (insert text))))
+  (let ((buf (claude-repl--ws-get (+workspace-current-name) :input-buffer)))
+    (if buf
+        (with-current-buffer buf
+          (goto-char (point-max))
+          (insert text))
+      (message "[claude-repl] WARNING: no input buffer for current workspace — text not appended")
+      (claude-repl--log nil "append-to-input-buffer: no input buffer, text discarded"))))
 
 (defun claude-repl-send-with-postfix ()
   "Append `claude-repl-send-postfix' to the input buffer, then send."
@@ -548,6 +555,7 @@ Handles input preparation, sending, history, and persistence."
         (with-current-buffer vterm-buf
           (vterm-send-string char)
           (vterm-send-return)))
+    (message "[claude-repl] no live Claude session — '%s' not sent" char)
     (claude-repl--log nil "send-char: no live vterm, skipping char=%s" char)))
 
 ;;; Slash-command pass-through mode

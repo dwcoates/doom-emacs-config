@@ -117,21 +117,23 @@ Tears down any existing watch first to avoid duplicates on re-eval."
   (file-name-nondirectory (directory-file-name ws)))
 
 (defun claude-repl--switch-to-workspace (ws)
-  "Switch to workspace WS with fallback.
-Tries `+workspace-switch-to' first, then `+workspace/switch-to' on failure."
+  "Switch to workspace WS.
+Tries `+workspace-switch-to' first, then `+workspace/switch-to' on failure.
+Signals an error if both methods fail — downstream code assumes the switch
+succeeded, so silent failure would operate on the wrong workspace."
   (claude-repl--log ws "switch-to-workspace: ws=%s" ws)
   (condition-case err
       (progn
         (+workspace-switch-to ws)
         (claude-repl--log ws "switch-to-workspace: switched successfully via +workspace-switch-to ws=%s" ws))
     (error
-     (claude-repl--log ws "switch-to-workspace: +workspace-switch-to failed, trying fallback ws=%s" ws)
-     (claude-repl--log ws "+workspace-switch-to FAILED: %s — trying fallback (+workspace/switch-to)"
-                       (error-message-string err))
+     (claude-repl--log ws "switch-to-workspace: +workspace-switch-to failed, trying fallback ws=%s: %s"
+                       ws (error-message-string err))
      (condition-case err2
          (+workspace/switch-to ws)
        (error
-        (claude-repl--log ws "fallback also FAILED: %s" (error-message-string err2)))))))
+        (error "claude-repl--switch-to-workspace: both switch methods failed for ws=%s — primary: %S, fallback: %S"
+               ws err err2))))))
 
 (defun claude-repl--assert-clean-worktree (ws project-root)
   "Signal `user-error' if PROJECT-ROOT has uncommitted changes.
@@ -149,8 +151,11 @@ WS is used only for the error message."
 (defun claude-repl--register-worktree-ws (ws-id path &optional ws)
   "Mark workspace WS as a worktree workspace rooted at PATH.
 WS-ID is the hash identifier (used for logging/buffer naming); the state
-is stored under WS, defaulting to `+workspace-current-name'."
+is stored under WS, defaulting to `+workspace-current-name'.
+Signals an error if no workspace name can be determined."
   (let ((ws (or ws (+workspace-current-name))))
+    (unless ws
+      (error "claude-repl--register-worktree-ws: no workspace name provided and no current workspace"))
     (claude-repl--log ws "register-worktree-ws ws-id=%s ws=%s path=%s" ws-id ws path)
     (claude-repl--ws-put ws :worktree-p t)
     (claude-repl--ws-put ws :project-dir (claude-repl--path-canonical path))))
@@ -451,9 +456,12 @@ Git operations (fetch, worktree add) run asynchronously so Emacs is not blocked.
 
 (defun claude-repl--new-workspace ()
   "Create a new workspace and open magit-status in it, mirroring
-the behavior of `+workspaces-switch-project-function'."
+the behavior of `+workspaces-switch-project-function'.
+Signals an error if not inside a git repository."
   (interactive)
-  (let ((root (or (claude-repl--git-root) default-directory)))
+  (let ((root (claude-repl--git-root)))
+    (unless root
+      (error "claude-repl--new-workspace: not in a git repository"))
     (claude-repl--log nil "new-workspace: root=%s" root)
     (+workspace/new)
     (claude-repl--ws-put (+workspace-current-name) :project-dir (claude-repl--path-canonical root))
