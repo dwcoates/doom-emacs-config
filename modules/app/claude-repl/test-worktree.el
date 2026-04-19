@@ -1535,11 +1535,11 @@ Covers the full call the interactive `SPC TAB n' path builds up."
         ;; current is removed from other-ws, so ws-a should be the default
         (should (equal captured-default "ws-a"))))))
 
-;;;; ---- Tests: workspace-merge-do calls claude-repl-reload ----
+;;;; ---- Tests: workspace-merge-do reloads config ----
 
-(ert-deftest claude-repl-test-workspace-merge-do-calls-reload ()
-  "workspace-merge-do calls claude-repl-reload after cherry-picking."
-  (let ((reload-called nil))
+(ert-deftest claude-repl-test-workspace-merge-do-reloads-config ()
+  "workspace-merge-do calls load-file on claude-repl--config-file after cherry-picking."
+  (let ((loaded-file nil))
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
                ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
                ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
@@ -1547,13 +1547,13 @@ Covers the full call the interactive `SPC TAB n' path builds up."
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
                ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
-               ((symbol-function 'claude-repl-reload) (lambda () (setq reload-called t)))
+               ((symbol-function 'load-file) (lambda (f) (setq loaded-file f)))
                ((symbol-function 'magit-status) #'ignore))
       (claude-repl--workspace-merge-do "other-ws")
-      (should reload-called))))
+      (should (equal loaded-file claude-repl--config-file)))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-reloads-before-magit ()
-  "workspace-merge-do calls claude-repl-reload before magit-status."
+  "workspace-merge-do reloads config before opening magit-status."
   (let ((call-order nil))
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
                ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
@@ -1562,7 +1562,7 @@ Covers the full call the interactive `SPC TAB n' path builds up."
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
                ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
-               ((symbol-function 'claude-repl-reload) (lambda () (push 'reload call-order)))
+               ((symbol-function 'load-file) (lambda (_f) (push 'reload call-order)))
                ((symbol-function 'magit-status) (lambda () (push 'magit call-order))))
       (claude-repl--workspace-merge-do "other-ws")
       (should (equal (nreverse call-order) '(reload magit))))))

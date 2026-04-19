@@ -743,7 +743,7 @@ individually. Aborts cleanly if any commit conflicts."
         (claude-repl--cherry-pick-commits project-root target-ws base target-branch))
       (claude-repl--finish-workspace target-ws)
       (message "Merged workspace '%s' -> '%s'." target-ws current-ws)
-      (claude-repl-reload)
+      (load-file claude-repl--config-file)
       (magit-status))))
 
 (defalias '+dwc/workspace-merge--do #'claude-repl--workspace-merge-do)

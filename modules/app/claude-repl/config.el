@@ -13,9 +13,9 @@
 
 (message "[claude-repl] Loading Claude-Repl package...")
 
-(defvar claude-repl--module-dir
-  (file-name-directory (or load-file-name buffer-file-name))
-  "Directory containing the claude-repl module files.")
+(defvar claude-repl--config-file
+  (or load-file-name buffer-file-name)
+  "Absolute path to this config.el, captured at load time for reloading.")
 
 (defvar claude-repl--load-errors nil
   "List of (FILE . ERROR) pairs for sub-files that failed to load.")
@@ -30,33 +30,21 @@
       (push (cons ,file err) claude-repl--load-errors)
       (message "[claude-repl] FAILED to load %s.el: %S" ,file err))))
 
-(defvar claude-repl--module-files
-  '("core" "install" "notifications" "history" "overlay" "status"
-    "autosave" "sentinel" "input" "commands" "session" "panels"
-    "worktree" "keybindings" "magit")
-  "Sub-module files in dependency order.")
-
-(defun claude-repl-reload ()
-  "Reload all claude-repl sub-modules from disk.
-Useful after merging a branch that may have changed module code."
-  (interactive)
-  (message "[claude-repl] Reloading Claude-Repl package...")
-  (setq claude-repl--load-errors nil)
-  (dolist (file claude-repl--module-files)
-    (let ((path (expand-file-name (concat file ".el") claude-repl--module-dir)))
-      (condition-case err
-          (progn
-            (load-file path)
-            (message "[claude-repl] %s.el reloaded." file))
-        (error
-         (push (cons file err) claude-repl--load-errors)
-         (message "[claude-repl] FAILED to reload %s.el: %S" file err)))))
-  (if claude-repl--load-errors
-      (message "[claude-repl] Reloaded with %d ERROR(S)." (length claude-repl--load-errors))
-    (message "[claude-repl] Reloaded Claude-Repl package.")))
-
-(dolist (file claude-repl--module-files)
-  (claude-repl--load-module file))
+(claude-repl--load-module "core")
+(claude-repl--load-module "install")
+(claude-repl--load-module "notifications")
+(claude-repl--load-module "history")
+(claude-repl--load-module "overlay")
+(claude-repl--load-module "status")
+(claude-repl--load-module "autosave")
+(claude-repl--load-module "sentinel")
+(claude-repl--load-module "input")
+(claude-repl--load-module "commands")
+(claude-repl--load-module "session")
+(claude-repl--load-module "panels")
+(claude-repl--load-module "worktree")
+(claude-repl--load-module "keybindings")
+(claude-repl--load-module "magit")
 
 (if claude-repl--load-errors
     (progn
