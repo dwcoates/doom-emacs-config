@@ -430,6 +430,32 @@
             :sandbox nil))
     (should (equal (claude-repl--ws-get "ws" :project-dir) "/saved/root"))))
 
+(ert-deftest claude-repl-test-apply-restored-state-restores-active-env ()
+  "apply-restored-state restores :active-env from saved state."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :active-env :bare-metal)
+    (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+    (claude-repl--apply-restored-state
+     "ws" '(:project-dir "/saved/root"
+            :active-env :sandbox
+            :bare-metal (:session-id "x" :had-session nil)
+            :sandbox (:session-id "s1" :had-session t)))
+    (should (eq (claude-repl--ws-get "ws" :active-env) :sandbox))))
+
+(ert-deftest claude-repl-test-apply-restored-state-nil-active-env-preserves-default ()
+  "apply-restored-state does not overwrite :active-env when saved value is nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :active-env :bare-metal)
+    (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+    (claude-repl--apply-restored-state
+     "ws" '(:project-dir "/saved/root"
+            :active-env nil
+            :bare-metal (:session-id "x" :had-session nil)
+            :sandbox nil))
+    (should (eq (claude-repl--ws-get "ws" :active-env) :bare-metal))))
+
 (ert-deftest claude-repl-test-apply-restored-state-nil-project-dir ()
   "apply-restored-state does not overwrite :project-dir when saved is nil."
   (claude-repl-test--with-clean-state
@@ -489,9 +515,38 @@
             (claude-repl--state-restore "ws")
             ;; Verify state was applied
             (should (equal (claude-repl--ws-get "ws" :project-dir) "/restored/root"))
+            (should (eq (claude-repl--ws-get "ws" :active-env) :sandbox))
             (should (equal (claude-repl-instantiation-session-id
                             (claude-repl--ws-get "ws" :bare-metal))
                            "bm-id")))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-state-save-restore-active-env-round-trip ()
+  "state-save followed by state-restore preserves :active-env across restart."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-env-" t)))
+      (unwind-protect
+          (progn
+            ;; Simulate pre-restart state: sandbox was active
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :sandbox)
+            (claude-repl--ws-put "ws" :bare-metal
+                                 (make-claude-repl-instantiation :session-id "bm1"))
+            (claude-repl--ws-put "ws" :sandbox
+                                 (make-claude-repl-instantiation :session-id "sb1" :had-session t))
+            (claude-repl--state-save "ws")
+            ;; Simulate post-restart: fresh workspace with bare-metal default
+            (clrhash claude-repl--workspaces)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--state-restore "ws")
+            ;; :active-env should be restored to :sandbox
+            (should (eq (claude-repl--ws-get "ws" :active-env) :sandbox))
+            (should (equal (claude-repl-instantiation-session-id
+                            (claude-repl--ws-get "ws" :sandbox))
+                           "sb1")))
         (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-test-state-restore-no-file ()

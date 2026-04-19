@@ -176,13 +176,17 @@ plist to each environment's instantiation struct."
 
 (defun claude-repl--apply-restored-state (ws state)
   "Apply persisted STATE plist to workspace WS.
-Sets :project-dir and restores instantiation fields for all environments."
-  (let ((saved-dir (plist-get state :project-dir)))
+Sets :project-dir, :active-env, and restores instantiation fields for
+all environments."
+  (let ((saved-dir (plist-get state :project-dir))
+        (saved-env (plist-get state :active-env)))
     (when saved-dir
       (claude-repl--ws-put ws :project-dir (claude-repl--path-canonical saved-dir)))
+    (when saved-env
+      (claude-repl--ws-put ws :active-env saved-env))
     (claude-repl--restore-env-state ws state)
-    (claude-repl--log ws "state-restore ws=%s project-dir=%s envs=%S"
-                      ws saved-dir
+    (claude-repl--log ws "state-restore ws=%s project-dir=%s active-env=%s envs=%S"
+                      ws saved-dir saved-env
                       (cl-loop for key in claude-repl--environment-keys
                                collect (cons key (plist-get state key))))))
 
