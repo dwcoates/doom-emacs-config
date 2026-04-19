@@ -398,16 +398,19 @@ When t, it should call `message'."
 
 ;;;; ---- Tests: log-to-file ----
 
-(ert-deftest claude-repl-test-logfile-path-returns-path-in-git-root ()
-  "`claude-repl--logfile-path' should return .claude-repl.log under the main git root."
-  (let ((claude-repl--main-git-root "/fake/repo/"))
-    (should (equal (claude-repl--logfile-path) "/fake/repo/.claude-repl.log"))))
+(ert-deftest claude-repl-test-logfile-path-returns-fixed-path ()
+  "`claude-repl--logfile-path' should return ~/.claude/doom-claude-repl.log."
+  (should (equal (claude-repl--logfile-path)
+                 (expand-file-name "~/.claude/doom-claude-repl.log"))))
 
-(ert-deftest claude-repl-test-logfile-path-nil-when-no-root ()
-  "`claude-repl--logfile-path' should return nil when no git root is available."
-  (let ((claude-repl--main-git-root ""))
-    (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) nil)))
-      (should-not (claude-repl--logfile-path)))))
+(ert-deftest claude-repl-test-logfile-path-honors-defcustom ()
+  "`claude-repl--logfile-path' should expand `claude-repl-log-file-name'."
+  (let* ((tmpdir (make-temp-file "test-logpath-" t))
+         (custom-path (expand-file-name "sub/custom.log" tmpdir))
+         (claude-repl-log-file-name custom-path))
+    (unwind-protect
+        (should (equal (claude-repl--logfile-path) custom-path))
+      (delete-directory tmpdir t))))
 
 (ert-deftest claude-repl-test-do-log-to-file-writes-when-enabled ()
   "`claude-repl--do-log-to-file' should append text to the logfile."

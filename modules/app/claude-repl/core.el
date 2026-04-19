@@ -36,8 +36,7 @@ high-frequency events (window changes, resolve-root)."
   :group 'claude-repl)
 
 (defcustom claude-repl-log-to-file t
-  "When non-nil, append all log output to a hidden file in the repository root.
-The file is `.claude-repl.log' at the git root of the current project.
+  "When non-nil, append all log output to `~/.claude/doom-claude-repl.log'.
 Logging to file occurs independently of `claude-repl-debug' — messages are
 written to the file whenever they pass through `claude-repl--do-log',
 regardless of the current debug level.  Use
@@ -51,8 +50,10 @@ Longer values reduce collision risk in setups with many workspaces."
   :type 'integer
   :group 'claude-repl)
 
-(defcustom claude-repl-log-file-name ".claude-repl.log"
-  "Name of the log file written to the git root directory."
+(defcustom claude-repl-log-file-name "~/.claude/doom-claude-repl.log"
+  "Path to the claude-repl log file.
+The value is passed through `expand-file-name', and the parent directory
+is created on demand by `claude-repl--logfile-path'."
   :type 'string
   :group 'claude-repl)
 
@@ -176,15 +177,13 @@ metadata as an argument rather than splicing it into the format."
             safe-fmt (claude-repl--format-ws-metadata ws))))
 
 (defun claude-repl--logfile-path ()
-  "Return the path to `.claude-repl.log' in the git root, or nil.
-Uses `claude-repl--main-git-root' when available (set at module load time),
-falling back to `claude-repl--git-root' for pre-init calls.  Returns nil
-if no git root can be determined."
-  (when-let ((root (if (and (boundp 'claude-repl--main-git-root)
-                            (not (string-empty-p claude-repl--main-git-root)))
-                       claude-repl--main-git-root
-                     (claude-repl--git-root))))
-    (expand-file-name claude-repl-log-file-name root)))
+  "Return the expanded path of `claude-repl-log-file-name'.
+The parent directory is created if it does not exist."
+  (let* ((path (expand-file-name claude-repl-log-file-name))
+         (dir (file-name-directory path)))
+    (unless (file-directory-p dir)
+      (make-directory dir t))
+    path))
 
 (defun claude-repl--do-log-to-file (text)
   "Append TEXT as a line to the logfile when `claude-repl-log-to-file' is non-nil.
