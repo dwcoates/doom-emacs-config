@@ -1535,4 +1535,36 @@ Covers the full call the interactive `SPC TAB n' path builds up."
         ;; current is removed from other-ws, so ws-a should be the default
         (should (equal captured-default "ws-a"))))))
 
+;;;; ---- Tests: workspace-merge-do calls claude-repl-reload ----
+
+(ert-deftest claude-repl-test-workspace-merge-do-calls-reload ()
+  "workspace-merge-do calls claude-repl-reload after cherry-picking."
+  (let ((reload-called nil))
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
+               ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
+               ((symbol-function 'claude-repl-reload) (lambda () (setq reload-called t)))
+               ((symbol-function 'magit-status) #'ignore))
+      (claude-repl--workspace-merge-do "other-ws")
+      (should reload-called))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-reloads-before-magit ()
+  "workspace-merge-do calls claude-repl-reload before magit-status."
+  (let ((call-order nil))
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
+               ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
+               ((symbol-function 'claude-repl-reload) (lambda () (push 'reload call-order)))
+               ((symbol-function 'magit-status) (lambda () (push 'magit call-order))))
+      (claude-repl--workspace-merge-do "other-ws")
+      (should (equal (nreverse call-order) '(reload magit))))))
+
 ;;; test-worktree.el ends here
