@@ -61,16 +61,19 @@ Returns nil when INST is nil."
     (claude-repl--log nil "instantiation-to-plist: inst is nil, returning nil")
     nil))
 
-(defun claude-repl--instantiation-from-plist (inst saved)
-  "Restore instantiation INST fields from SAVED plist."
-  (when (and inst saved)
-    (claude-repl--log nil "instantiation-from-plist: restoring session-id=%s had-session=%s"
-                      (plist-get saved :session-id)
-                      (plist-get saved :had-session))
-    (setf (claude-repl-instantiation-session-id inst)
-          (plist-get saved :session-id))
-    (setf (claude-repl-instantiation-had-session inst)
-          (plist-get saved :had-session))))
+(defun claude-repl--make-instantiation-from-plist (saved)
+  "Create a new `claude-repl-instantiation' from SAVED plist.
+Returns a fresh empty instantiation when SAVED is nil."
+  (if saved
+      (progn
+        (claude-repl--log nil "make-instantiation-from-plist: session-id=%s had-session=%s"
+                          (plist-get saved :session-id)
+                          (plist-get saved :had-session))
+        (make-claude-repl-instantiation
+         :session-id (plist-get saved :session-id)
+         :had-session (plist-get saved :had-session)))
+    (claude-repl--log nil "make-instantiation-from-plist: nil saved, creating empty")
+    (make-claude-repl-instantiation)))
 
 ;;;; Persistence file paths
 
@@ -165,51 +168,68 @@ project root (alongside .claude-repl-history)."
           (claude-repl--write-sexp-file file state)
           (claude-repl--log ws "state-save: write complete ws=%s file=%s" ws file))))))
 
-(defun claude-repl--restore-env-state (ws state)
-  "Restore instantiation fields for each environment in WS from STATE plist.
-Iterates over `claude-repl--environment-keys' and applies the saved
-plist to each environment's instantiation struct."
-  (dolist (key claude-repl--environment-keys)
-    (claude-repl--log ws "restore-env-state: ws=%s key=%s" ws key)
-    (claude-repl--instantiation-from-plist
-     (claude-repl--ws-get ws key) (plist-get state key))))
-
 (defun claude-repl--apply-restored-state (ws state)
   "Apply persisted STATE plist to workspace WS.
-Sets :project-dir, :active-env, and restores instantiation fields for
-all environments."
+Creates instantiation structs from saved data and sets :project-dir
+and :active-env.  Each environment gets a struct built from its saved
+plist; environments with nil saved data get a fresh empty struct."
   (let ((saved-dir (plist-get state :project-dir))
         (saved-env (plist-get state :active-env)))
     (when saved-dir
       (claude-repl--ws-put ws :project-dir (claude-repl--path-canonical saved-dir)))
     (when saved-env
       (claude-repl--ws-put ws :active-env saved-env))
-    (claude-repl--restore-env-state ws state)
-    (claude-repl--log ws "state-restore ws=%s project-dir=%s active-env=%s envs=%S"
+    (dolist (key claude-repl--environment-keys)
+      (claude-repl--log ws "apply-restored-state: ws=%s key=%s" ws key)
+      (claude-repl--ws-put ws key
+                           (claude-repl--make-instantiation-from-plist
+                            (plist-get state key))))
+    (claude-repl--log ws "apply-restored-state ws=%s project-dir=%s active-env=%s envs=%S"
                       ws saved-dir saved-env
                       (cl-loop for key in claude-repl--environment-keys
                                collect (cons key (plist-get state key))))))
 
-(defun claude-repl--state-restore (ws)
-  "Restore persisted session state for workspace WS from disk.
-Populates had-session, session-id, and :project-dir on the workspace
-from .claude-repl-state.  After Emacs restart the in-memory hash table
-has no :project-dir yet, so we fall back to `default-directory' (which
-persp-mode restores per workspace) to locate the state file."
+(defun claude-repl--fresh-ws-env (ws)
+  "Initialize workspace WS with default fresh environment state.
+Sets :active-env to :bare-metal and creates empty instantiation structs
+for all environments."
+  (claude-repl--log ws "fresh-ws-env: ws=%s" ws)
+  (claude-repl--ws-put ws :active-env :bare-metal)
+  (dolist (key claude-repl--environment-keys)
+    (claude-repl--ws-put ws key (make-claude-repl-instantiation))))
+
+(defun claude-repl--validate-ws-env (ws)
+  "Validate that workspace WS has well-formed environment state.
+Signals an error with a descriptive message when validation fails."
+  (let ((active-env (claude-repl--ws-get ws :active-env)))
+    (unless (memq active-env claude-repl--environment-keys)
+      (error "claude-repl: ws %s has invalid :active-env %S (expected one of %S)"
+             ws active-env claude-repl--environment-keys))
+    (dolist (key claude-repl--environment-keys)
+      (let ((inst (claude-repl--ws-get ws key)))
+        (unless (claude-repl-instantiation-p inst)
+          (error "claude-repl: ws %s missing instantiation struct for %s (got %S)"
+                 ws key inst))
+        (let ((sid (claude-repl-instantiation-session-id inst)))
+          (unless (or (null sid) (stringp sid))
+            (error "claude-repl: ws %s env %s has invalid session-id %S (expected string or nil)"
+                   ws key sid)))
+        (let ((hs (claude-repl-instantiation-had-session inst)))
+          (unless (memq hs '(nil t))
+            (error "claude-repl: ws %s env %s has invalid had-session %S (expected t or nil)"
+                   ws key hs))))))
+  (claude-repl--log ws "validate-ws-env: ws=%s passed" ws))
+
+(defun claude-repl--read-state-file (ws)
+  "Read the persisted state file for workspace WS, or nil if none exists.
+Determines the project root from :project-dir or git-root fallback,
+then reads .claude-repl-state if present."
   (let* ((root (or (claude-repl--ws-get ws :project-dir)
                    (claude-repl--git-root default-directory)))
-         (file (claude-repl--state-file root))
-         (data (when file (claude-repl--read-sexp-file-if-exists file))))
-    (cond
-     ((null root)
-      (claude-repl--log ws "state-restore: no root found for ws=%s, skipping" ws))
-     ((null file)
-      (claude-repl--log ws "state-restore: no state file for ws=%s root=%s, skipping" ws root))
-     ((null data)
-      (claude-repl--log ws "state-restore: no data in file ws=%s file=%s, skipping" ws file))
-     (t
-      (claude-repl--with-error-logging "state-restore"
-        (claude-repl--apply-restored-state ws data))))))
+         (file (claude-repl--state-file root)))
+    (claude-repl--log ws "read-state-file: ws=%s root=%s file=%s" ws root file)
+    (when file
+      (claude-repl--read-sexp-file-if-exists file))))
 
 ;;;; Input history
 

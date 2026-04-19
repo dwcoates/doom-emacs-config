@@ -311,29 +311,34 @@
     (should (equal (claude-repl--instantiation-to-plist inst)
                    '(:session-id nil :had-session nil)))))
 
-(ert-deftest claude-repl-test-instantiation-from-plist-restores ()
-  "instantiation-from-plist restores session-id and had-session."
-  (let ((inst (make-claude-repl-instantiation)))
-    (claude-repl--instantiation-from-plist
-     inst '(:session-id "xyz-789" :had-session t))
+(ert-deftest claude-repl-test-make-instantiation-from-plist-basic ()
+  "make-instantiation-from-plist creates a struct with session-id and had-session."
+  (let ((inst (claude-repl--make-instantiation-from-plist
+               '(:session-id "xyz-789" :had-session t))))
+    (should (claude-repl-instantiation-p inst))
     (should (equal (claude-repl-instantiation-session-id inst) "xyz-789"))
     (should (eq (claude-repl-instantiation-had-session inst) t))))
 
-(ert-deftest claude-repl-test-instantiation-from-plist-nil-inst ()
-  "instantiation-from-plist does nothing when inst is nil."
-  ;; Should not error
-  (claude-repl--instantiation-from-plist nil '(:session-id "abc" :had-session t)))
+(ert-deftest claude-repl-test-make-instantiation-from-plist-nil ()
+  "make-instantiation-from-plist with nil creates a fresh empty struct."
+  (let ((inst (claude-repl--make-instantiation-from-plist nil)))
+    (should (claude-repl-instantiation-p inst))
+    (should-not (claude-repl-instantiation-session-id inst))
+    (should-not (claude-repl-instantiation-had-session inst))))
 
-(ert-deftest claude-repl-test-instantiation-from-plist-nil-saved ()
-  "instantiation-from-plist does nothing when saved is nil."
-  (let ((inst (make-claude-repl-instantiation :session-id "original")))
-    (claude-repl--instantiation-from-plist inst nil)
-    ;; Should remain unchanged
-    (should (equal (claude-repl-instantiation-session-id inst) "original"))))
+(ert-deftest claude-repl-test-make-instantiation-from-plist-extra-keys ()
+  "make-instantiation-from-plist ignores extra keys in saved plist."
+  (let ((inst (claude-repl--make-instantiation-from-plist
+               '(:session-id "xyz" :had-session t :unknown-key "val"))))
+    (should (equal (claude-repl-instantiation-session-id inst) "xyz"))
+    (should (eq (claude-repl-instantiation-had-session inst) t))))
 
-(ert-deftest claude-repl-test-instantiation-from-plist-both-nil ()
-  "instantiation-from-plist does nothing when both args are nil."
-  (claude-repl--instantiation-from-plist nil nil))
+(ert-deftest claude-repl-test-make-instantiation-from-plist-partial-keys ()
+  "make-instantiation-from-plist with only :session-id leaves had-session nil."
+  (let ((inst (claude-repl--make-instantiation-from-plist
+               '(:session-id "partial"))))
+    (should (equal (claude-repl-instantiation-session-id inst) "partial"))
+    (should-not (claude-repl-instantiation-had-session inst))))
 
 ;;;; ---- Tests: state-file ----
 
@@ -400,42 +405,53 @@
       (should-not (plist-get state :bare-metal))
       (should-not (plist-get state :sandbox)))))
 
-;;;; ---- Tests: restore-env-state ----
+;;;; ---- Tests: fresh-ws-env ----
 
-(ert-deftest claude-repl-test-restore-env-state ()
-  "restore-env-state populates instantiation structs from saved state."
+(ert-deftest claude-repl-test-fresh-ws-env ()
+  "fresh-ws-env creates default state with :bare-metal and empty structs."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
-    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
-    (claude-repl--restore-env-state
-     "ws" '(:bare-metal (:session-id "bm1" :had-session t)
-            :sandbox (:session-id "sb1" :had-session nil)))
-    (let ((bm (claude-repl--ws-get "ws" :bare-metal))
-          (sb (claude-repl--ws-get "ws" :sandbox)))
-      (should (equal (claude-repl-instantiation-session-id bm) "bm1"))
-      (should (eq (claude-repl-instantiation-had-session bm) t))
-      (should (equal (claude-repl-instantiation-session-id sb) "sb1"))
-      (should-not (claude-repl-instantiation-had-session sb)))))
+    (claude-repl--fresh-ws-env "ws")
+    (should (eq (claude-repl--ws-get "ws" :active-env) :bare-metal))
+    (should (claude-repl-instantiation-p (claude-repl--ws-get "ws" :bare-metal)))
+    (should (claude-repl-instantiation-p (claude-repl--ws-get "ws" :sandbox)))
+    (should-not (claude-repl-instantiation-session-id
+                 (claude-repl--ws-get "ws" :bare-metal)))
+    (should-not (claude-repl-instantiation-session-id
+                 (claude-repl--ws-get "ws" :sandbox)))))
 
 ;;;; ---- Tests: apply-restored-state ----
 
 (ert-deftest claude-repl-test-apply-restored-state-sets-project-dir ()
   "apply-restored-state sets :project-dir from saved state."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
-    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
     (claude-repl--apply-restored-state
      "ws" '(:project-dir "/saved/root"
+            :active-env :bare-metal
             :bare-metal (:session-id "x" :had-session nil)
             :sandbox nil))
     (should (equal (claude-repl--ws-get "ws" :project-dir) "/saved/root"))))
+
+(ert-deftest claude-repl-test-apply-restored-state-creates-structs ()
+  "apply-restored-state creates instantiation structs from saved plists."
+  (claude-repl-test--with-clean-state
+    (claude-repl--apply-restored-state
+     "ws" '(:project-dir "/root"
+            :active-env :bare-metal
+            :bare-metal (:session-id "bm1" :had-session t)
+            :sandbox (:session-id "sb1" :had-session nil)))
+    (let ((bm (claude-repl--ws-get "ws" :bare-metal))
+          (sb (claude-repl--ws-get "ws" :sandbox)))
+      (should (claude-repl-instantiation-p bm))
+      (should (claude-repl-instantiation-p sb))
+      (should (equal (claude-repl-instantiation-session-id bm) "bm1"))
+      (should (eq (claude-repl-instantiation-had-session bm) t))
+      (should (equal (claude-repl-instantiation-session-id sb) "sb1"))
+      (should-not (claude-repl-instantiation-had-session sb)))))
 
 (ert-deftest claude-repl-test-apply-restored-state-restores-active-env ()
   "apply-restored-state restores :active-env from saved state."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws" :active-env :bare-metal)
-    (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
-    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
     (claude-repl--apply-restored-state
      "ws" '(:project-dir "/saved/root"
             :active-env :sandbox
@@ -447,8 +463,6 @@
   "apply-restored-state does not overwrite :active-env when saved value is nil."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws" :active-env :bare-metal)
-    (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
-    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
     (claude-repl--apply-restored-state
      "ws" '(:project-dir "/saved/root"
             :active-env nil
@@ -460,11 +474,23 @@
   "apply-restored-state does not overwrite :project-dir when saved is nil."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws" :project-dir "/existing")
-    (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
-    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
-    (claude-repl--apply-restored-state "ws" '(:project-dir nil))
+    (claude-repl--apply-restored-state "ws" '(:project-dir nil
+                                              :active-env :bare-metal))
     ;; :project-dir should remain "/existing" since saved was nil
     (should (equal (claude-repl--ws-get "ws" :project-dir) "/existing"))))
+
+(ert-deftest claude-repl-test-apply-restored-state-nil-env-creates-empty-struct ()
+  "apply-restored-state creates empty struct when saved env data is nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl--apply-restored-state
+     "ws" '(:project-dir "/root"
+            :active-env :bare-metal
+            :bare-metal (:session-id "bm1" :had-session t)
+            :sandbox nil))
+    (let ((sb (claude-repl--ws-get "ws" :sandbox)))
+      (should (claude-repl-instantiation-p sb))
+      (should-not (claude-repl-instantiation-session-id sb))
+      (should-not (claude-repl-instantiation-had-session sb)))))
 
 ;;;; ---- Tests: state-save ----
 
@@ -493,36 +519,162 @@
     ;; No :project-dir set -- should not error
     (claude-repl--state-save "ws")))
 
-;;;; ---- Tests: state-restore ----
+;;;; ---- Tests: read-state-file ----
 
-(ert-deftest claude-repl-test-state-restore-reads-file ()
-  "state-restore reads state from disk and applies it."
+(ert-deftest claude-repl-test-read-state-file-with-project-dir ()
+  "read-state-file reads state from disk using :project-dir."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-" t)))
       (unwind-protect
           (progn
-            ;; Write a state file
             (claude-repl--write-sexp-file
              (expand-file-name ".claude-repl-state" tmpdir)
              '(:project-dir "/restored/root"
                :active-env :sandbox
                :bare-metal (:session-id "bm-id" :had-session t)
                :sandbox (:session-id "sb-id" :had-session nil)))
-            ;; Set up workspace with project-dir pointing to tmpdir
             (claude-repl--ws-put "ws" :project-dir tmpdir)
-            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
-            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
-            (claude-repl--state-restore "ws")
-            ;; Verify state was applied
-            (should (equal (claude-repl--ws-get "ws" :project-dir) "/restored/root"))
-            (should (eq (claude-repl--ws-get "ws" :active-env) :sandbox))
-            (should (equal (claude-repl-instantiation-session-id
-                            (claude-repl--ws-get "ws" :bare-metal))
-                           "bm-id")))
+            (let ((data (claude-repl--read-state-file "ws")))
+              (should (equal (plist-get data :project-dir) "/restored/root"))
+              (should (eq (plist-get data :active-env) :sandbox))
+              (should (equal (plist-get (plist-get data :bare-metal) :session-id) "bm-id"))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest claude-repl-test-state-save-restore-active-env-round-trip ()
-  "state-save followed by state-restore preserves :active-env across restart."
+(ert-deftest claude-repl-test-read-state-file-no-file ()
+  "read-state-file returns nil when no state file exists."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (should-not (claude-repl--read-state-file "ws")))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-read-state-file-fallback-to-git-root ()
+  "read-state-file falls back to git-root when :project-dir is not set."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (expand-file-name ".claude-repl-state" tmpdir)
+             '(:project-dir "/fallback/root"
+               :active-env :bare-metal))
+            (cl-letf (((symbol-function 'claude-repl--git-root)
+                       (lambda (&optional _d) tmpdir)))
+              (let ((data (claude-repl--read-state-file "ws")))
+                (should (equal (plist-get data :project-dir) "/fallback/root")))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-read-state-file-both-roots-nil ()
+  "read-state-file returns nil when both :project-dir and git-root are nil."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--git-root)
+               (lambda (&optional _d) nil)))
+      (should-not (claude-repl--read-state-file "ws")))))
+
+;;;; ---- Tests: validate-ws-env ----
+
+(ert-deftest claude-repl-test-validate-ws-env-valid ()
+  "validate-ws-env passes for well-formed workspace state."
+  (claude-repl-test--with-clean-state
+    (claude-repl--fresh-ws-env "ws")
+    ;; Should not error
+    (claude-repl--validate-ws-env "ws")))
+
+(ert-deftest claude-repl-test-validate-ws-env-valid-with-session ()
+  "validate-ws-env passes when instantiation has a string session-id."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :active-env :sandbox)
+    (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+    (claude-repl--ws-put "ws" :sandbox
+                         (make-claude-repl-instantiation :session-id "abc" :had-session t))
+    (claude-repl--validate-ws-env "ws")))
+
+(ert-deftest claude-repl-test-validate-ws-env-invalid-active-env ()
+  "validate-ws-env errors on invalid :active-env."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :active-env :bogus)
+    (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+    (should-error (claude-repl--validate-ws-env "ws"))))
+
+(ert-deftest claude-repl-test-validate-ws-env-nil-active-env ()
+  "validate-ws-env errors when :active-env is nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+    (should-error (claude-repl--validate-ws-env "ws"))))
+
+(ert-deftest claude-repl-test-validate-ws-env-missing-struct ()
+  "validate-ws-env errors when an environment has no instantiation struct."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :active-env :bare-metal)
+    (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+    ;; :sandbox is missing
+    (should-error (claude-repl--validate-ws-env "ws"))))
+
+(ert-deftest claude-repl-test-validate-ws-env-invalid-session-id ()
+  "validate-ws-env errors when session-id is not a string or nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :active-env :bare-metal)
+    (claude-repl--ws-put "ws" :bare-metal
+                         (make-claude-repl-instantiation :session-id 42))
+    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+    (should-error (claude-repl--validate-ws-env "ws"))))
+
+(ert-deftest claude-repl-test-validate-ws-env-invalid-had-session ()
+  "validate-ws-env errors when had-session is not t or nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :active-env :bare-metal)
+    (claude-repl--ws-put "ws" :bare-metal
+                         (make-claude-repl-instantiation :had-session "yes"))
+    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+    (should-error (claude-repl--validate-ws-env "ws"))))
+
+;;;; ---- Tests: ensure-ws-env integration ----
+
+(ert-deftest claude-repl-test-ensure-ws-env-restores-from-file ()
+  "ensure-ws-env restores full state from disk including :active-env."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (expand-file-name ".claude-repl-state" tmpdir)
+             '(:project-dir "/restored/root"
+               :active-env :sandbox
+               :bare-metal (:session-id "bm-id" :had-session t)
+               :sandbox (:session-id "sb-id" :had-session nil)))
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ensure-ws-env "ws")
+            (should (eq (claude-repl--ws-get "ws" :active-env) :sandbox))
+            (should (equal (claude-repl--ws-get "ws" :project-dir) "/restored/root"))
+            (should (equal (claude-repl-instantiation-session-id
+                            (claude-repl--ws-get "ws" :bare-metal))
+                           "bm-id"))
+            (should (equal (claude-repl-instantiation-session-id
+                            (claude-repl--ws-get "ws" :sandbox))
+                           "sb-id")))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-ensure-ws-env-fresh-when-no-file ()
+  "ensure-ws-env creates fresh defaults when no state file exists."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ensure-ws-env "ws")
+            (should (eq (claude-repl--ws-get "ws" :active-env) :bare-metal))
+            (should (claude-repl-instantiation-p (claude-repl--ws-get "ws" :bare-metal)))
+            (should (claude-repl-instantiation-p (claude-repl--ws-get "ws" :sandbox)))
+            (should-not (claude-repl-instantiation-session-id
+                         (claude-repl--ws-get "ws" :bare-metal))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-ensure-ws-env-save-restore-round-trip ()
+  "state-save followed by ensure-ws-env restores :active-env across restart."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-env-" t)))
       (unwind-protect
@@ -535,46 +687,15 @@
             (claude-repl--ws-put "ws" :sandbox
                                  (make-claude-repl-instantiation :session-id "sb1" :had-session t))
             (claude-repl--state-save "ws")
-            ;; Simulate post-restart: fresh workspace with bare-metal default
+            ;; Simulate post-restart: clear in-memory state
             (clrhash claude-repl--workspaces)
-            (claude-repl--ws-put "ws" :active-env :bare-metal)
-            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
-            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
             (claude-repl--ws-put "ws" :project-dir tmpdir)
-            (claude-repl--state-restore "ws")
+            (claude-repl--ensure-ws-env "ws")
             ;; :active-env should be restored to :sandbox
             (should (eq (claude-repl--ws-get "ws" :active-env) :sandbox))
             (should (equal (claude-repl-instantiation-session-id
                             (claude-repl--ws-get "ws" :sandbox))
                            "sb1")))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest claude-repl-test-state-restore-no-file ()
-  "state-restore does nothing gracefully when no state file exists."
-  (claude-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-" t)))
-      (unwind-protect
-          (progn
-            (claude-repl--ws-put "ws" :project-dir tmpdir)
-            ;; No .claude-repl-state file exists
-            (claude-repl--state-restore "ws"))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest claude-repl-test-state-restore-fallback-to-git-root ()
-  "state-restore falls back to git-root when :project-dir is not set."
-  (claude-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-" t)))
-      (unwind-protect
-          (progn
-            ;; Write state file
-            (claude-repl--write-sexp-file
-             (expand-file-name ".claude-repl-state" tmpdir)
-             '(:project-dir "/fallback/root"))
-            ;; No :project-dir on workspace -- fall back to git-root
-            (cl-letf (((symbol-function 'claude-repl--git-root)
-                       (lambda (&optional _d) tmpdir)))
-              (claude-repl--state-restore "ws")
-              (should (equal (claude-repl--ws-get "ws" :project-dir) "/fallback/root"))))
         (delete-directory tmpdir t)))))
 
 ;;;; ---- Tests: history-save / history-restore round-trip ----
@@ -744,23 +865,8 @@
     (should (equal plist '(:session-id "abc" :had-session t)))
     (should-not (plist-member plist :start-cmd))))
 
-;;;; ---- Tests: instantiation-from-plist edge cases ----
-
-(ert-deftest claude-repl-test-instantiation-from-plist-extra-keys ()
-  "instantiation-from-plist silently ignores extra keys in saved plist."
-  (let ((inst (make-claude-repl-instantiation)))
-    (claude-repl--instantiation-from-plist
-     inst '(:session-id "xyz" :had-session t :unknown-key "val" :another 42))
-    (should (equal (claude-repl-instantiation-session-id inst) "xyz"))
-    (should (eq (claude-repl-instantiation-had-session inst) t))))
-
-(ert-deftest claude-repl-test-instantiation-from-plist-partial-keys ()
-  "instantiation-from-plist handles plist with only :session-id (no :had-session)."
-  (let ((inst (make-claude-repl-instantiation :had-session t)))
-    (claude-repl--instantiation-from-plist inst '(:session-id "partial"))
-    (should (equal (claude-repl-instantiation-session-id inst) "partial"))
-    ;; :had-session was not in plist, so plist-get returns nil, overwriting old value
-    (should-not (claude-repl-instantiation-had-session inst))))
+;;;; ---- Tests: make-instantiation-from-plist edge cases ----
+;; (basic, nil, extra-keys, and partial-keys tests are in the main section above)
 
 ;;;; ---- Tests: ws-live-input-buffer edge cases ----
 
@@ -862,72 +968,19 @@
     ;; Should not signal an error thanks to with-error-logging
     (claude-repl--state-save "ws")))
 
-;;;; ---- Tests: restore-env-state edge cases ----
+;;;; ---- Tests: ensure-ws-env edge cases ----
 
-(ert-deftest claude-repl-test-restore-env-state-nil-for-one-env ()
-  "restore-env-state handles nil saved state for one environment."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :bare-metal
-                         (make-claude-repl-instantiation :session-id "orig"))
-    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
-    (claude-repl--restore-env-state
-     "ws" '(:bare-metal nil
-            :sandbox (:session-id "sb1" :had-session t)))
-    ;; :bare-metal had nil saved, so instantiation-from-plist is a no-op
-    (should (equal (claude-repl-instantiation-session-id
-                    (claude-repl--ws-get "ws" :bare-metal))
-                   "orig"))
-    ;; :sandbox should be restored
-    (should (equal (claude-repl-instantiation-session-id
-                    (claude-repl--ws-get "ws" :sandbox))
-                   "sb1"))))
-
-(ert-deftest claude-repl-test-restore-env-state-ws-struct-nil ()
-  "restore-env-state handles nil workspace struct for one environment."
-  (claude-repl-test--with-clean-state
-    ;; :bare-metal has no instantiation struct on the workspace
-    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
-    (claude-repl--restore-env-state
-     "ws" '(:bare-metal (:session-id "bm1" :had-session t)
-            :sandbox (:session-id "sb1" :had-session nil)))
-    ;; Should not error; :bare-metal struct is nil so from-plist is a no-op
-    (should (equal (claude-repl-instantiation-session-id
-                    (claude-repl--ws-get "ws" :sandbox))
-                   "sb1"))))
-
-;;;; ---- Tests: apply-restored-state edge cases ----
-
-(ert-deftest claude-repl-test-apply-restored-state-empty-plist ()
-  "apply-restored-state handles a completely empty state plist without error."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
-    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
-    ;; Should not error with empty plist
-    (claude-repl--apply-restored-state "ws" '())))
-
-;;;; ---- Tests: state-restore edge cases ----
-
-(ert-deftest claude-repl-test-state-restore-both-roots-nil ()
-  "state-restore does nothing when both :project-dir and git-root are nil."
-  (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--git-root)
-               (lambda (&optional _d) nil)))
-      ;; No :project-dir set, git-root returns nil -> state-file returns nil
-      (claude-repl--state-restore "ws"))))
-
-(ert-deftest claude-repl-test-state-restore-corrupt-data ()
-  "state-restore handles corrupt data via with-error-logging."
+(ert-deftest claude-repl-test-ensure-ws-env-corrupt-data-errors ()
+  "ensure-ws-env propagates errors from corrupt state files."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-corrupt-" t)))
       (unwind-protect
           (progn
-            ;; Write a number (not a plist) as state data -- apply-restored-state
-            ;; will try to plist-get on it, which may error
+            ;; Write a number (not a plist) as state data
             (claude-repl--write-sexp-file
              (expand-file-name ".claude-repl-state" tmpdir) 42)
             (claude-repl--ws-put "ws" :project-dir tmpdir)
-            ;; Should not propagate error
-            (claude-repl--state-restore "ws"))
+            (should-error (claude-repl--ensure-ws-env "ws")))
         (delete-directory tmpdir t)))))
 
 ;;;; ---- Tests: history-push edge cases ----

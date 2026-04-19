@@ -668,25 +668,29 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
 (ert-deftest claude-repl-test-ensure-ws-env-initializes-once ()
   "ensure-ws-env should initialize environment only when :active-env is not set."
   (claude-repl-test--with-clean-state
-    (let ((restore-count 0))
-      (cl-letf (((symbol-function 'claude-repl--state-restore)
-                 (lambda (_ws) (cl-incf restore-count))))
-        ;; First call: should initialize
-        (claude-repl--ensure-ws-env "ws1")
-        (should (eq (claude-repl--ws-get "ws1" :active-env) :bare-metal))
-        (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :sandbox)))
-        (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :bare-metal)))
-        ;; Second call: should not re-initialize but still restore
-        (claude-repl--ensure-ws-env "ws1")
-        (should (= restore-count 2))))))
+    (cl-letf (((symbol-function 'claude-repl--read-state-file)
+               (lambda (_ws) nil)))
+      ;; First call: should initialize fresh
+      (claude-repl--ensure-ws-env "ws1")
+      (should (eq (claude-repl--ws-get "ws1" :active-env) :bare-metal))
+      (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :sandbox)))
+      (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :bare-metal)))
+      ;; Second call: should be a no-op (already initialized)
+      (setf (claude-repl-instantiation-session-id
+             (claude-repl--ws-get "ws1" :bare-metal)) "abc")
+      (claude-repl--ensure-ws-env "ws1")
+      ;; session-id should be unchanged — not re-initialized
+      (should (equal (claude-repl-instantiation-session-id
+                      (claude-repl--ws-get "ws1" :bare-metal)) "abc")))))
 
 (ert-deftest claude-repl-test-ensure-ws-env-preserves-existing ()
   "ensure-ws-env should not overwrite existing :active-env."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :active-env :sandbox)
-    (cl-letf (((symbol-function 'claude-repl--state-restore) #'ignore))
-      (claude-repl--ensure-ws-env "ws1")
-      (should (eq (claude-repl--ws-get "ws1" :active-env) :sandbox)))))
+    (claude-repl--ws-put "ws1" :sandbox (make-claude-repl-instantiation))
+    (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
+    (claude-repl--ensure-ws-env "ws1")
+    (should (eq (claude-repl--ws-get "ws1" :active-env) :sandbox))))
 
 ;;;; ---- Tests: prompt-sandbox-build ----
 

@@ -139,17 +139,20 @@ Returns (:needs-build t :install-script PATH) if the image is not built yet."
 
 (defun claude-repl--ensure-ws-env (ws)
   "Initialize environment state for workspace WS if not already set.
-Sets up bare-metal as the default :active-env, creates instantiation
-structs for both :sandbox and :bare-metal, then restores any persisted
-state from disk.  Session IDs are delivered by hooks, not scanned here."
+If a .claude-repl-state file exists, restores state from it; otherwise
+creates fresh defaults.  Validates the result either way.
+Session IDs are delivered by hooks, not scanned here."
   (claude-repl--log ws "ensure-ws-env: ws=%s" ws)
   (if (claude-repl--ws-get ws :active-env)
-      (claude-repl--log ws "ensure-ws-env: restoring existing env for ws=%s" ws)
-    (claude-repl--log ws "ensure-ws-env: initializing for first time ws=%s" ws)
-    (claude-repl--ws-put ws :active-env :bare-metal)
-    (claude-repl--ws-put ws :sandbox (make-claude-repl-instantiation))
-    (claude-repl--ws-put ws :bare-metal (make-claude-repl-instantiation)))
-  (claude-repl--state-restore ws))
+      (claude-repl--log ws "ensure-ws-env: already initialized ws=%s" ws)
+    (let ((saved (claude-repl--read-state-file ws)))
+      (if saved
+          (progn
+            (claude-repl--log ws "ensure-ws-env: restoring from state file ws=%s" ws)
+            (claude-repl--apply-restored-state ws saved))
+        (claude-repl--log ws "ensure-ws-env: no state file, creating fresh ws=%s" ws)
+        (claude-repl--fresh-ws-env ws)))
+    (claude-repl--validate-ws-env ws)))
 
 (defun claude-repl--prompt-sandbox-build (sandbox-config)
   "Prompt the user to build a missing sandbox image from SANDBOX-CONFIG.
