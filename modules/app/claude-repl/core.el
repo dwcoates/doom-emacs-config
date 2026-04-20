@@ -281,15 +281,6 @@ Suitable for init-time calls that may run outside a git repository."
   (claude-repl--git-string-quiet "rev-parse" "--abbrev-ref" "HEAD")
   "The git branch active when claude-repl config was loaded.")
 
-(defvar claude-repl--main-git-root
-  (let ((raw (claude-repl--git-string-quiet "rev-parse" "--show-toplevel")))
-    (if (string-empty-p raw)
-        (error "claude-repl: loaded outside a git repository — cannot determine main git root")
-      (file-name-as-directory raw)))
-  "The main git root captured at module load time.
-Used by the workspace-generation file watcher so new sessions are always
-created from the main repo, not the currently selected worktree.")
-
 (defun claude-repl--resolve-current-git-root ()
   "Resolve the git root for the caller's current context.
 Prefers the current workspace's `:project-dir' when one is registered,
@@ -321,10 +312,9 @@ via `directory-file-name' so that the same directory always produces the same ha
 (defun claude-repl--workspace-id ()
   "Return a short identifier for the current git workspace.
 Uses an MD5 hash of the canonical project root path from the workspace hashmap.
-Falls back to `claude-repl--main-git-root' when no workspace is active yet."
-  (let* ((root (or (ignore-errors (claude-repl--ws-dir (+workspace-current-name)))
-                   (and (not (string-empty-p claude-repl--main-git-root))
-                        (claude-repl--path-canonical claude-repl--main-git-root))))
+Returns nil when no workspace has a registered `:project-dir' — callers are
+expected to only invoke this from contexts where a workspace is active."
+  (let* ((root (ignore-errors (claude-repl--ws-dir (+workspace-current-name))))
          (id (when root
                (substring (md5 (claude-repl--path-canonical root)) 0 claude-repl-workspace-id-length))))
     (claude-repl--log-verbose nil "workspace-id: root=%s id=%s" root id)

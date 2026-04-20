@@ -24,15 +24,6 @@
     (should (equal (claude-repl--workspace-id)
                    (substring (md5 (claude-repl--path-canonical "/test/project")) 0 8)))))
 
-(ert-deftest claude-repl-test-workspace-id-fallback-to-main-git-root ()
-  "Workspace ID falls back to main-git-root when ws-dir errors."
-  (let ((claude-repl--main-git-root "/fallback/dir/"))
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-              ((symbol-function 'claude-repl--ws-dir)
-               (lambda (_ws) (error "no dir"))))
-      (should (equal (claude-repl--workspace-id)
-                     (substring (md5 (claude-repl--path-canonical "/fallback/dir/")) 0 8))))))
-
 ;;;; ---- Tests: resolve-current-git-root ----
 
 (ert-deftest claude-repl-test-resolve-current-git-root-prefers-ws-dir ()
@@ -76,7 +67,6 @@ signals `user-error' rather than silently returning a bogus path."
             ((symbol-function 'claude-repl--git-string-quiet)
              (lambda (&rest _) "")))
     (should-error (claude-repl--resolve-current-git-root) :type 'user-error)))
-
 
 ;;;; ---- Tests: Buffer naming ----
 
@@ -720,13 +710,12 @@ environments without notification tools (terminal-notifier or osascript)."
 
 ;;;; ---- Tests: workspace-id ----
 
-(ert-deftest claude-repl-test-workspace-id-nil-root ()
-  "workspace-id should return nil when ws-dir errors and main-git-root is empty."
-  (let ((claude-repl--main-git-root ""))
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-              ((symbol-function 'claude-repl--ws-dir)
-               (lambda (_ws) (error "no dir"))))
-      (should-not (claude-repl--workspace-id)))))
+(ert-deftest claude-repl-test-workspace-id-nil-when-no-ws-dir ()
+  "workspace-id should return nil when no workspace has a :project-dir."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+            ((symbol-function 'claude-repl--ws-dir)
+             (lambda (_ws) (error "no dir"))))
+    (should-not (claude-repl--workspace-id))))
 
 (ert-deftest claude-repl-test-workspace-id-hash-length ()
   "workspace-id should return exactly 8 characters."
