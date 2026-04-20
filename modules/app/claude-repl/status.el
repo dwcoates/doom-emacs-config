@@ -247,6 +247,12 @@ A no-op if a check is already in progress for WS."
 (defconst claude-repl--color-done-green       "#1a7a1a"
   "Dark green used for :done and :permission tab backgrounds.")
 
+(defconst claude-repl--color-idle-orange      "#d97706"
+  "Orange used for the :idle claude-state tab background.
+:idle means \"session alive, awaiting prompt or decayed from :done\" — an
+explicit palette entry (not a fallback) so idle workspaces are
+visually distinct from states that have no palette mapping.")
+
 (defconst claude-repl--color-done-green-bright "#2a8c2a"
   "Brighter green used for :done / :permission bracket-fg on selected
 tabs; readable against `claude-repl--color-selected-bg'.")
@@ -325,14 +331,22 @@ asking for a permission decision.")
                   :fg ,claude-repl--color-dark
                   :bracket-fg ,claude-repl--color-done-green-bright
                   :weight ,claude-repl--tab-weight
-                  :face-override claude-repl-tab-permission)))
+                  :face-override claude-repl-tab-permission))
+    (:idle
+     :face       claude-repl-tab-idle
+     :unselected (:bg ,claude-repl--color-idle-orange
+                  :fg ,claude-repl--color-dark
+                  :bracket-fg ,claude-repl--color-default-bracket
+                  :weight ,claude-repl--tab-weight)
+     :selected   (:bg ,claude-repl--color-selected-bg
+                  :fg ,claude-repl--color-dark
+                  :bracket-fg ,claude-repl--color-idle-orange
+                  :weight ,claude-repl--tab-weight)))
   "Per-state tab-appearance palette.
 Each entry fully describes both selected and unselected looks for a
 claude-state keyword via nested `:unselected' and `:selected' plists.
-Absent states fall back to `claude-repl--tab-default'.
-`:idle' intentionally has no entry — an idle workspace renders with the
-default tab face.  `:repl-state :inactive' does not contribute to color
-either (it is bookkeeping only).")
+`:repl-state :inactive' does not contribute to color (it is bookkeeping
+only).")
 
 (defun claude-repl--tab-spec (state selected)
   "Return the appearance spec (plist) for STATE with SELECTED flag.
@@ -372,6 +386,12 @@ Keys in the returned plist: :bg :fg :bracket-fg :weight and optionally
        :foreground ,claude-repl--color-dark
        :weight ,claude-repl--tab-weight))
   "Face for workspace tabs where Claude needs permission (green + emoji).")
+
+(defface claude-repl-tab-idle
+  `((t :background ,claude-repl--color-idle-orange
+       :foreground ,claude-repl--color-dark
+       :weight ,claude-repl--tab-weight))
+  "Face for workspace tabs where Claude is idle (orange).")
 
 (defun claude-repl--render-tab (name spec label name-face img-str)
   "Render a tab string for workspace NAME from SPEC.
