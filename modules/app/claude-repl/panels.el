@@ -40,7 +40,7 @@ window is selected so the user can start typing immediately."
   "Return non-nil if the buffer stored at KEY in current workspace is visible."
   (let* ((buf (claude-repl--ws-get (+workspace-current-name) key))
          (result (and buf (buffer-live-p buf) (get-buffer-window buf))))
-    (claude-repl--log-verbose nil "ws-buffer-visible-p: key=%s result=%s" key (if result "visible" "hidden"))
+    (claude-repl--log-verbose (+workspace-current-name) "ws-buffer-visible-p: key=%s result=%s" key (if result "visible" "hidden"))
     result))
 
 (defun claude-repl--input-visible-p ()
@@ -55,7 +55,7 @@ window is selected so the user can start typing immediately."
   "Return t if both panels are visible."
   (let ((result (and (claude-repl--input-visible-p)
                      (claude-repl--vterm-visible-p))))
-    (claude-repl--log-verbose nil "panels-visible-p: result=%s" (if result "visible" "hidden"))
+    (claude-repl--log-verbose (+workspace-current-name) "panels-visible-p: result=%s" (if result "visible" "hidden"))
     result))
 
 ;;;; Panel display and hide
@@ -74,7 +74,7 @@ window is selected so the user can start typing immediately."
 
 (defun claude-repl--close-buffer-windows (&rest bufs)
   "Close windows displaying any of BUFS."
-  (claude-repl--log nil "close-buffer-windows %s" (mapcar #'claude-repl--safe-buffer-name bufs))
+  (claude-repl--log (+workspace-current-name) "close-buffer-windows %s" (mapcar #'claude-repl--safe-buffer-name bufs))
   (dolist (buf bufs)
     (when (and buf (buffer-live-p buf))
       (claude-repl--close-buffer-window buf))))
@@ -91,7 +91,7 @@ Keyboard-navigation isolation is handled dynamically by
 `no-other-window' parameter — that way windmove/`other-window' can see
 vterm, but any non-mouse selection gets auto-corrected back to the
 input panel (or a warning if the input isn't displayed)."
-  (claude-repl--log nil "configure-vterm-window: win=%s" win)
+  (claude-repl--log (+workspace-current-name) "configure-vterm-window: win=%s" win)
   (set-window-dedicated-p win t)
   (set-window-parameter win 'window-size-fixed 'width)
   (set-window-parameter win 'no-delete-other-windows t))
@@ -126,7 +126,7 @@ are not split from a bottom popup (e.g. a regular vterm)."
   "Focus the input panel window and enter insert state.
 Signals an error if the input buffer or its window cannot be found —
 callers should ensure panels are displayed before calling this."
-  (claude-repl--log nil "focus-input-panel")
+  (claude-repl--log (+workspace-current-name) "focus-input-panel")
   (let ((ws (+workspace-current-name)))
     (let ((buf (claude-repl--ws-get ws :input-buffer)))
       (unless buf
@@ -149,7 +149,7 @@ Convenience wrapper combining `claude-repl--show-panels' and
 (defun claude-repl--vterm-redraw ()
   "Redraw the current vterm buffer with read-only suppressed.
 Assumes the current buffer is in vterm-mode."
-  (claude-repl--log-verbose nil "vterm-redraw: buf=%s" (buffer-name))
+  (claude-repl--log-verbose (+workspace-current-name) "vterm-redraw: buf=%s" (buffer-name))
   (let ((inhibit-read-only t))
     (when vterm--term
       (vterm--redraw vterm--term))))
@@ -157,7 +157,7 @@ Assumes the current buffer is in vterm-mode."
 (defun claude-repl--do-refresh ()
   "Low-level refresh of the current vterm buffer.
 Must be called with a vterm-mode buffer current."
-  (claude-repl--log-verbose nil "do-refresh: buf=%s" (buffer-name))
+  (claude-repl--log-verbose (+workspace-current-name) "do-refresh: buf=%s" (buffer-name))
   (claude-repl--vterm-redraw)
   (redisplay t))
 
@@ -167,10 +167,10 @@ Must be called with a vterm-mode buffer current."
         (orig-win (selected-window)))
     (if (and vterm-win (not (eq vterm-win orig-win)))
         (progn
-          (claude-repl--log-verbose nil "fix-vterm-scroll: fixing scroll for buf=%s" (buffer-name buf))
+          (claude-repl--log-verbose (+workspace-current-name) "fix-vterm-scroll: fixing scroll for buf=%s" (buffer-name buf))
           (select-window vterm-win 'norecord)
           (select-window orig-win 'norecord))
-      (claude-repl--log-verbose nil "fix-vterm-scroll: skipped buf=%s vterm-win=%s same-win=%s"
+      (claude-repl--log-verbose (+workspace-current-name) "fix-vterm-scroll: skipped buf=%s vterm-win=%s same-win=%s"
                                 (buffer-name buf) (if vterm-win "yes" "no")
                                 (if (eq vterm-win orig-win) "yes" "no")))))
 
@@ -180,11 +180,11 @@ Uses the current buffer if it is in vterm-mode, otherwise looks up the
 workspace's vterm buffer."
   (if (eq major-mode 'vterm-mode)
       (progn
-        (claude-repl--log-verbose nil "resolve-vterm-buffer: path=vterm-mode buf=%s" (buffer-name))
+        (claude-repl--log-verbose (+workspace-current-name) "resolve-vterm-buffer: path=vterm-mode buf=%s" (buffer-name))
         (current-buffer))
     (when-let ((ws (+workspace-current-name)))
       (let ((buf (claude-repl--ws-get ws :vterm-buffer)))
-        (claude-repl--log-verbose nil "resolve-vterm-buffer: path=workspace-lookup ws=%s buf=%s"
+        (claude-repl--log-verbose (+workspace-current-name) "resolve-vterm-buffer: path=workspace-lookup ws=%s buf=%s"
                                   ws (claude-repl--safe-buffer-name buf))
         buf))))
 
@@ -194,14 +194,14 @@ Works from any buffer or from within the vterm buffer itself."
   (let ((buf (claude-repl--resolve-vterm-buffer)))
     (cond
      ((not buf)
-      (claude-repl--log-verbose nil "refresh-vterm: no buffer found"))
+      (claude-repl--log-verbose (+workspace-current-name) "refresh-vterm: no buffer found"))
      ((not (buffer-live-p buf))
-      (claude-repl--log-verbose nil "refresh-vterm: buffer not live buf=%s" (buffer-name buf)))
+      (claude-repl--log-verbose (+workspace-current-name) "refresh-vterm: buffer not live buf=%s" (buffer-name buf)))
      (t
       (with-current-buffer buf
         (if (eq major-mode 'vterm-mode)
             (claude-repl--do-refresh)
-          (claude-repl--log-verbose nil "refresh-vterm: buf=%s not vterm-mode (mode=%s)"
+          (claude-repl--log-verbose (+workspace-current-name) "refresh-vterm: buf=%s not vterm-mode (mode=%s)"
                                     (buffer-name buf) major-mode)))
       (claude-repl--fix-vterm-scroll buf)))))
 
@@ -267,16 +267,16 @@ Skips redirect if claude is the only window (fullscreen case)."
 (defun claude-repl--before-persp-deactivate (&rest _)
   "Save window state before perspective deactivation.
 Redirects away from Claude buffers and saves frame state."
-  (claude-repl--log nil "before-persp-deactivate: entry")
+  (claude-repl--log (+workspace-current-name) "before-persp-deactivate: entry")
   (claude-repl--redirect-from-claude-before-save)
   (condition-case err
       (persp-frame-save-state)
     (error (message "[claude-repl] WARNING: persp-frame-save-state failed: %S" err)
-           (claude-repl--log nil "before-persp-deactivate: persp-frame-save-state error: %S" err))))
+           (claude-repl--log (+workspace-current-name) "before-persp-deactivate: persp-frame-save-state error: %S" err))))
 
 (defun claude-repl--after-persp-activated (&rest _)
   "Handle perspective activation by scheduling a workspace switch."
-  (claude-repl--log nil "after-persp-activated: entry")
+  (claude-repl--log (+workspace-current-name) "after-persp-activated: entry")
   (run-at-time 0 nil #'claude-repl--on-workspace-switch))
 
 (when (modulep! :ui workspaces)
@@ -352,20 +352,20 @@ loading placeholder exists (the vterm has not been swapped in yet)."
                         (or (not is-input)
                             (not (get-buffer claude-repl-loading-placeholder-name))))))
       (when result
-        (claude-repl--log-verbose nil "orphaned-panel-p: name=%s partner=%s is-orphaned" name partner))
+        (claude-repl--log-verbose (+workspace-current-name) "orphaned-panel-p: name=%s partner=%s is-orphaned" name partner))
       result)))
 
 (defun claude-repl--sync-panels ()
   "Close any Claude panel whose partner is no longer visible."
-  (claude-repl--log-verbose nil "sync-panels: entry windows=%d" (length (window-list)))
+  (claude-repl--log-verbose (+workspace-current-name) "sync-panels: entry windows=%d" (length (window-list)))
   (let ((orphan-count 0))
     (dolist (win (window-list))
       (let ((name (buffer-name (window-buffer win))))
         (when (claude-repl--orphaned-panel-p name)
           (setq orphan-count (1+ orphan-count))
-          (claude-repl--log nil "sync-panels closing orphaned %s" name)
+          (claude-repl--log (+workspace-current-name) "sync-panels closing orphaned %s" name)
           (delete-window win))))
-    (claude-repl--log-verbose nil "sync-panels: closed %d orphans" orphan-count)))
+    (claude-repl--log-verbose (+workspace-current-name) "sync-panels: closed %d orphans" orphan-count)))
 
 ;; Keep visible Claude vterm buffers scrolled to the cursor.
 ;; Skips the selected window so clicking into vterm to read/copy isn't disrupted.
@@ -374,7 +374,7 @@ loading placeholder exists (the vterm has not been swapped in yet)."
 Resets cursor, redraws, and syncs window point."
   (let ((buf (window-buffer win)))
     (when (and buf (buffer-live-p buf) (claude-repl--claude-buffer-p buf))
-      (claude-repl--log-verbose nil "refresh-vterm-window: win=%s buf=%s" win (buffer-name buf))
+      (claude-repl--log-verbose (+workspace-current-name) "refresh-vterm-window: win=%s buf=%s" win (buffer-name buf))
       (with-current-buffer buf
         (when (and (eq major-mode 'vterm-mode)
                    (fboundp 'vterm-reset-cursor-point))
@@ -388,7 +388,7 @@ Resets cursor, redraws, and syncs window point."
 
 (defun claude-repl--reset-vterm-cursors ()
   "Refresh every visible Claude vterm window except the selected one."
-  (claude-repl--log-verbose nil "reset-vterm-cursors: entry")
+  (claude-repl--log-verbose (+workspace-current-name) "reset-vterm-cursors: entry")
   (let ((sel (selected-window)))
     (dolist (win (window-list))
       (unless (eq win sel)
@@ -403,7 +403,7 @@ Resets cursor, redraws, and syncs window point."
 (defun claude-repl--on-window-change ()
   "Deferred handler for window configuration changes.
 Syncs orphaned panels, refreshes overlay, and resets cursors."
-  (claude-repl--log-verbose nil "on-window-change")
+  (claude-repl--log-verbose (+workspace-current-name) "on-window-change")
   (claude-repl--sync-panels)
   (claude-repl--update-hide-overlay)
   (claude-repl--reset-vterm-cursors))
@@ -453,11 +453,11 @@ this bounce alone is sufficient to keep keyboard nav out of vterm."
                (input-win (and input-buf (get-buffer-window input-buf))))
           (if input-win
               (progn
-                (claude-repl--log-verbose nil "bounce-from-vterm: bouncing to input-win=%s" input-win)
+                (claude-repl--log-verbose (+workspace-current-name) "bounce-from-vterm: bouncing to input-win=%s" input-win)
                 (select-window input-win))
             (message "[claude-repl] keyboard navigation landed in Claude vterm but input panel isn't visible — stuck here until you click out or reopen panels")
-            (claude-repl--log nil "bounce-from-vterm: no input-win to bounce to (warned)")))
-      (claude-repl--log-verbose nil "bounce-from-vterm: skipped vterm-buffer=%s mouse=%s"
+            (claude-repl--log (+workspace-current-name) "bounce-from-vterm: no input-win to bounce to (warned)")))
+      (claude-repl--log-verbose (+workspace-current-name) "bounce-from-vterm: skipped vterm-buffer=%s mouse=%s"
                                 (if (claude-repl--claude-buffer-p (window-buffer win)) "yes" "no")
                                 (if (mouse-event-p last-input-event) "yes" "no")))))
 
@@ -482,10 +482,10 @@ Errors if the buffer is already initialized (already in `claude-input-mode')."
 WS defaults to the current workspace."
   (let ((existing (get-buffer (claude-repl--buffer-name nil ws))))
     (if (not existing)
-        (claude-repl--log nil "kill-stale-vterm: no existing buffer")
+        (claude-repl--log (+workspace-current-name) "kill-stale-vterm: no existing buffer")
       (if (get-buffer-process existing)
-          (claude-repl--log nil "kill-stale-vterm: buf=%s has live process no-op" (buffer-name existing))
-        (claude-repl--log nil "kill-stale-vterm: killing stale buf=%s" (buffer-name existing))
+          (claude-repl--log (+workspace-current-name) "kill-stale-vterm: buf=%s has live process no-op" (buffer-name existing))
+        (claude-repl--log (+workspace-current-name) "kill-stale-vterm: killing stale buf=%s" (buffer-name existing))
         (kill-buffer existing)))))
 
 ;;;; Panel show/hide strategies
@@ -636,7 +636,7 @@ If panels hidden: show both panels."
 
 (defun claude-repl--kill-placeholder ()
   "Close and kill the loading placeholder buffer if it exists."
-  (claude-repl--log nil "kill-placeholder exists=%s" (if (get-buffer claude-repl-loading-placeholder-name) "yes" "no"))
+  (claude-repl--log (+workspace-current-name) "kill-placeholder exists=%s" (if (get-buffer claude-repl-loading-placeholder-name) "yes" "no"))
   (when-let ((placeholder (get-buffer claude-repl-loading-placeholder-name)))
     (claude-repl--close-buffer-window placeholder)
     (kill-buffer placeholder)))
@@ -644,17 +644,17 @@ If panels hidden: show both panels."
 (defun claude-repl--sigkill-if-alive (proc)
   "Send SIGKILL to PROC if it is still alive."
   (when (process-live-p proc)
-    (claude-repl--log nil "sigkill fallback for lingering process")
+    (claude-repl--log (+workspace-current-name) "sigkill fallback for lingering process")
     (signal-process proc 'SIGKILL)))
 
 (defun claude-repl--schedule-sigkill (proc)
   "Schedule a SIGKILL for PROC after 0.5s if it's still alive."
-  (claude-repl--log nil "schedule-sigkill: scheduling for proc=%s" proc)
+  (claude-repl--log (+workspace-current-name) "schedule-sigkill: scheduling for proc=%s" proc)
   (run-at-time claude-repl-sigkill-delay nil #'claude-repl--sigkill-if-alive proc))
 
 (defun claude-repl--kill-vterm-process (buf)
   "Kill the vterm buffer BUF and its process."
-  (claude-repl--log nil "kill-vterm-process buf=%s" (claude-repl--safe-buffer-name buf))
+  (claude-repl--log (+workspace-current-name) "kill-vterm-process buf=%s" (claude-repl--safe-buffer-name buf))
   (when (and buf (buffer-live-p buf))
     (let ((proc (get-buffer-process buf)))
       (when proc
@@ -683,7 +683,7 @@ If panels hidden: show both panels."
 
 (defun claude-repl--destroy-session-buffers (vterm-buf input-buf)
   "Close windows and kill VTERM-BUF, INPUT-BUF, and any placeholder."
-  (claude-repl--log nil "destroy-session-buffers")
+  (claude-repl--log (+workspace-current-name) "destroy-session-buffers")
   (claude-repl--close-buffer-windows vterm-buf input-buf)
   (claude-repl--kill-placeholder)
   (claude-repl--kill-vterm-process vterm-buf)
@@ -756,7 +756,7 @@ If Claude isn't running, start it (same as `claude-repl')."
 
 (defun claude-repl--delete-non-panel-windows (vterm-buf input-buf)
   "Delete all windows not showing VTERM-BUF or INPUT-BUF."
-  (claude-repl--log nil "delete-non-panel-windows: window-count=%d" (length (window-list)))
+  (claude-repl--log (+workspace-current-name) "delete-non-panel-windows: window-count=%d" (length (window-list)))
   (dolist (win (window-list))
     (unless (memq (window-buffer win) (list vterm-buf input-buf))
       (condition-case err
@@ -805,7 +805,7 @@ to the input buffer.  When restoring, just restores the layout."
 (defun claude-repl-cycle ()
   "Send backtab to Claude vterm to cycle through options."
   (interactive)
-  (claude-repl--log nil "cycle")
+  (claude-repl--log (+workspace-current-name) "cycle")
   (when (claude-repl--vterm-live-p)
     (with-current-buffer (claude-repl--ws-get (+workspace-current-name) :vterm-buffer)
       (vterm-send-key "<backtab>"))))
