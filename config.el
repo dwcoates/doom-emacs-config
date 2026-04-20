@@ -1029,3 +1029,7 @@ If found, the class name is returned, otherwise STR is returned"
 (after! claude-repl
   (add-to-list 'claude-repl-workspace-initial-buffers
                '("open-claude-config" . ("modules/app/claude-repl/config.el"))))
+
+(map! :leader
+      "TAB <" #'+workspace/swap-left
+      "TAB >" #'+workspace/swap-right)
