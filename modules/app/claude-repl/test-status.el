@@ -123,6 +123,14 @@
   (should (eq :idle (claude-repl--composed-state :idle nil)))
   (should (eq :idle (claude-repl--composed-state :idle :inactive))))
 
+(ert-deftest claude-repl-test-composed-nil-dead ()
+  "Composed (nil, :dead) → :dead — vterm died, show ❌ badge."
+  (should (eq :dead (claude-repl--composed-state nil :dead))))
+
+(ert-deftest claude-repl-test-composed-thinking-dead ()
+  "Composed (:thinking, :dead) → :thinking — claude-state dominates repl-state."
+  (should (eq :thinking (claude-repl--composed-state :thinking :dead))))
+
 (ert-deftest claude-repl-test-composed-unknown-returns-nil ()
   "DIAGNOSTIC: unknown claude-state currently logs + returns nil (temporary —
 to be reverted to should-error once the leaking writer is found)."
@@ -166,6 +174,13 @@ to be reverted to should-error once the leaking writer is found)."
     (claude-repl--ws-set-claude-state "ws1" :permission)
     (claude-repl--ws-set-repl-state "ws1" :inactive)
     (should (eq :permission (claude-repl--ws-display-state "ws1")))))
+
+(ert-deftest claude-repl-test-display-state-dead-vterm ()
+  "A workspace with :repl-state :dead and nil :claude-state renders :dead."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :claude-state nil)
+    (claude-repl--ws-set-repl-state "ws1" :dead)
+    (should (eq :dead (claude-repl--ws-display-state "ws1")))))
 
 ;;;; ---- Tests: Legacy wrappers still populate both axes ----
 
@@ -275,13 +290,23 @@ to be reverted to should-error once the leaking writer is found)."
         (should (string-match-p "other-ws" result))))))
 
 (ert-deftest claude-repl-test-tabline-permission-label ()
-  "Tabline should show ❓ for permission state."
+  "Tabline should show index and ❓ for permission state."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "test-ws" :permission)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function '+workspace-list-names) (lambda () '("test-ws"))))
       (let ((result (claude-repl--tabline-advice '("test-ws"))))
-        (should (string-match-p "❓" result))))))
+        (should (string-match-p "1❓" result))))))
+
+(ert-deftest claude-repl-test-tabline-dead-label ()
+  "Tabline should show index and ❌ for dead session."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :claude-state nil)
+    (claude-repl--ws-set-repl-state "test-ws" :dead)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
+              ((symbol-function '+workspace-list-names) (lambda () '("test-ws"))))
+      (let ((result (claude-repl--tabline-advice '("test-ws"))))
+        (should (string-match-p "1❌" result))))))
 
 (ert-deftest claude-repl-test-tabline-done-face ()
   "A background tab with :done should use `claude-repl-tab-done' face."
@@ -587,6 +612,13 @@ to be reverted to should-error once the leaking writer is found)."
   (let ((spec (claude-repl--tab-spec :permission t)))
     (should (eq (plist-get spec :face-override) 'claude-repl-tab-permission))))
 
+(ert-deftest claude-repl-test-tab-spec-dead-falls-back-to-default ()
+  "The :dead state has no appearance spec; tab-spec returns the default."
+  (let ((unsel (claude-repl--tab-spec :dead nil))
+        (sel   (claude-repl--tab-spec :dead t)))
+    (should (equal (plist-get unsel :bracket-fg) "white"))
+    (should (equal (plist-get sel :bg) "#c0c0c0"))))
+
 ;;;; ---- Tests: bracket-bg on selected tabs ----
 
 (ert-deftest claude-repl-test-tab-spec-selected-init-bracket-bg ()
@@ -665,6 +697,18 @@ to be reverted to should-error once the leaking writer is found)."
 (ert-deftest claude-repl-test-tab-label-zero-index ()
   "tab-label should return \"0\" when index is 0 and state has no :label."
   (should (equal (claude-repl--tab-label :thinking 0) "0")))
+
+(ert-deftest claude-repl-test-tab-label-permission-includes-index ()
+  "tab-label for :permission appends ❓ after the numeric index."
+  (should (equal (claude-repl--tab-label :permission 3) "3❓")))
+
+(ert-deftest claude-repl-test-tab-label-dead-includes-index ()
+  "tab-label for :dead appends ❌ after the numeric index."
+  (should (equal (claude-repl--tab-label :dead 2) "2❌")))
+
+(ert-deftest claude-repl-test-tab-label-no-suffix-for-thinking ()
+  "tab-label for :thinking returns only the numeric index (no suffix)."
+  (should (equal (claude-repl--tab-label :thinking 5) "5")))
 
 ;;;; ---- Tests: tab-face direct tests ----
 
@@ -1053,6 +1097,13 @@ trees; under the revised model only the Stop hook writes :done."
     (claude-repl--mark-dead-vterm "ws1")
     ;; Second call must not re-run the clear — claude-state stays as-is.
     (should (eq (claude-repl--ws-claude-state "ws1") :done))))
+
+(ert-deftest claude-repl-test-mark-dead-vterm-display-state ()
+  "mark-dead-vterm results in :dead display state (❌ badge visible)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :done)
+    (claude-repl--mark-dead-vterm "ws1")
+    (should (eq :dead (claude-repl--ws-display-state "ws1")))))
 
 (ert-deftest claude-repl-test-mark-dead-vterm-preserves-init ()
   "mark-dead-vterm is a no-op when :claude-state is :init.

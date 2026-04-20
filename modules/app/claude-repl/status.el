@@ -92,7 +92,8 @@ Populates `claude-repl--priority-images' with display-ready image specs."
 ;;                     :active   — panels open, session running.
 ;;                     :inactive — panels closed, session preserved.
 ;;                     :dead     — vterm process has died.
-;;                   Does not contribute to tab color.
+;;                   Only :dead contributes to tab display (❌ badge);
+;;                   other values are bookkeeping only.
 
 (defun claude-repl--ws-state (ws)
   "Return the current :claude-state keyword for workspace WS, or nil.
@@ -299,8 +300,12 @@ tabs; readable against `claude-repl--color-selected-bg'.")
   "Dark foreground for light state backgrounds.")
 
 (defconst claude-repl--label-permission       "❓"
-  "Bracket label shown in place of the numeric index when Claude is
+  "Bracket label shown adjacent to the numeric index when Claude is
 asking for a permission decision.")
+
+(defconst claude-repl--label-dead             "❌"
+  "Bracket label shown adjacent to the numeric index when the vterm
+process has died.")
 
 (defconst claude-repl--tab-weight             'bold
   "Font weight applied to every tab face.")
@@ -375,7 +380,9 @@ asking for a permission decision.")
                   :fg ,claude-repl--color-dark
                   :bracket-bg ,claude-repl--color-idle-orange
                   :bracket-fg ,claude-repl--color-light
-                  :weight ,claude-repl--tab-weight)))
+                  :weight ,claude-repl--tab-weight))
+    (:dead
+     :label      ,claude-repl--label-dead))
   "Per-state tab-appearance palette.
 Each entry fully describes both selected and unselected looks for a
 claude-state keyword via nested `:unselected' and `:selected' plists.
@@ -447,10 +454,13 @@ emoji).  IMG-STR, when non-nil, is inserted between bracket and name."
 
 (defun claude-repl--tab-label (state index)
   "Return the tab label for STATE and numeric INDEX.
-Uses a palette-defined `:label' when present (e.g. \"❓\"), otherwise
-the index as a string."
-  (or (plist-get (alist-get state claude-repl--tab-palette) :label)
-      (number-to-string index)))
+When the palette defines a `:label' for STATE (e.g. \"❓\" for permission,
+\"❌\" for dead), the suffix is appended after the numeric index
+\(e.g. \"1❓\").  Otherwise returns the index as a plain string."
+  (let ((suffix (plist-get (alist-get state claude-repl--tab-palette) :label)))
+    (if suffix
+        (concat (number-to-string index) suffix)
+      (number-to-string index))))
 
 (defun claude-repl--tab-face (state selected)
   "Return the face symbol for the NAME portion of a tab.
@@ -471,12 +481,12 @@ green badge visible), or falls back to `+workspace-tab-selected-face'."
     (when-let ((img (claude-repl--priority-image priority)))
       (propertize " " 'display img))))
 
-(defun claude-repl--composed-state (claude _repl &optional ws)
-  "Project CLAUDE (and optionally _REPL) onto the palette's display key.
-`:repl-state' contributes no color — tab color is a pure function of
-`:claude-state'.  The second argument is retained so callers keep the
-pair-based convention and a future feature can hook in without a
-signature change.
+(defun claude-repl--composed-state (claude repl &optional ws)
+  "Project CLAUDE and REPL onto the palette's display key.
+Tab color is primarily a function of `:claude-state'.  The one
+`:repl-state' value that contributes is `:dead' — when the vterm
+process has died (`:claude-state' nil, `:repl-state' :dead), the tab
+shows an ❌ badge.
 
 Optional WS is threaded through for diagnostic logging only; it does
 not affect the mapping.
@@ -490,13 +500,15 @@ Rule:
   :init       → :init                     (blue — Claude starting)
   :done       → :done                     (green — unacknowledged work)
   :idle       → :idle                     (orange)
-  nil         → nil                       (transitional: replaced by :unborn/:dead)"
+  nil + :dead → :dead                     (default + ❌)
+  nil         → nil                       (no session / unborn)"
   (cond
    ((eq claude :thinking)   :thinking)
    ((eq claude :permission) :permission)
    ((eq claude :init)       :init)
    ((eq claude :done)       :done)
    ((eq claude :idle)       :idle)
+   ((and (null claude) (eq repl :dead)) :dead)
    ((null claude)           nil)
    (t
     ;; DIAG: we expected this branch to be unreachable — every writer of
