@@ -50,7 +50,7 @@ After any changes to `modules/app/claude-repl/`, always run the claude-repl test
 emacs -batch -Q -l ert -l modules/app/claude-repl/test-claude-repl.el -f ert-run-tests-batch-and-exit
 ```
 
-**Zero tolerance for test failures.** Every test failure is a real bug that must be fixed before your work is done. There is no such thing as a "pre-existing" or "known" failure — if a test fails, fix it. Do not skip, ignore, rationalize, or dismiss any test failure for any reason. If you encounter a failing test, either fix the test or fix the code. Never report work as complete while any test is failing.
+**Zero tolerance for test failures.** Every test failure is a real bug that must be fixed before your work is done. **There is NO such thing as a "pre-existing" failure — not under ANY circumstances, EVER.** Do not investigate whether a failure predates your work. Do not check git history. Do not stash, checkout, or touch git state to "verify" it was already broken. Do not rationalize, dismiss, categorize, defer, or explain away any test failure for any reason whatsoever. If a test fails, fix it. Every failing test is your responsibility the moment you observe it. Never report work as complete while any test is failing.
 
 ## Paren Checking
 
