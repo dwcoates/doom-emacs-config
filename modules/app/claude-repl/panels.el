@@ -716,15 +716,16 @@ Captures the current buffer references before teardown clears them."
     (claude-repl--kill-session ws)))
 
 (defun claude-repl-restart ()
-  "Kill Claude REPL and restart with `claude -c` to continue session."
+  "Hard restart Claude for the current workspace.
+Kills the process, windows, and buffers for the current session and
+re-initializes. The Claude state file on disk is preserved so the new
+process resumes via `--continue'. Panels reopen once the new session
+signals ready."
   (interactive)
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "restart")
     (claude-repl-kill)
-    (claude-repl--initialize-claude-output ws)
-    (claude-repl--initialize-input-buffer ws)
-    (claude-repl--enable-hide-overlay)
-    (claude-repl--show-panels-and-focus)))
+    (claude-repl--initialize-claude ws)))
 
 (defun claude-repl-focus-input ()
   "Focus the Claude input buffer, or return to previous window if already there.

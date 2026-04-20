@@ -1496,6 +1496,20 @@ writes :claude-state :init, and announces startup when Claude is not running."
         (ignore-errors (delete-window new-win)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
+;;;; ---- Tests: claude-repl-restart ----
+
+(ert-deftest claude-repl-test-panels-restart-kills-then-initializes ()
+  "claude-repl-restart calls claude-repl-kill then claude-repl--initialize-claude in order."
+  (claude-repl-test--with-clean-state
+    (let ((order nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl-kill)
+                 (lambda () (push 'kill order)))
+                ((symbol-function 'claude-repl--initialize-claude)
+                 (lambda (_ws) (push 'init order))))
+        (claude-repl-restart)
+        (should (equal (nreverse order) '(kill init)))))))
+
 ;;;; ---- Tests: claude-repl-kill no workspace ----
 
 (ert-deftest claude-repl-test-panels-kill-no-workspace ()
