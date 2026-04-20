@@ -63,7 +63,7 @@ Populates `claude-repl--priority-images' with display-ready image specs."
 ;;                   :idle | :thinking | :done | :permission.
 ;;                   Written primarily by hook sentinels; narrow
 ;;                   Emacs-side exceptions at lifecycle boundaries
-;;                   (start-fresh writes :init; kill clears).
+;;                   (initialize-claude writes :init; kill clears).
 ;;   :repl-state   — Emacs-owned session-lifecycle flag.  Values:
 ;;                     nil       — workspace registered, no Claude
 ;;                                 session has ever been attached.

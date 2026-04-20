@@ -253,71 +253,49 @@
 
 ;;;; ---- claude-repl--send-to-claude ----
 
-(ert-deftest claude-repl-cmd-test-send-to-claude/calls-ensure-and-send ()
-  "send-to-claude ensures session and sends text to vterm buffer."
-  (let (ensured-p sent-buf sent-text)
+(ert-deftest claude-repl-cmd-test-send-to-claude/not-running-initializes-first ()
+  "send-to-claude calls initialize-claude when Claude is not running."
+  (let (init-called sent-text)
     (claude-repl-test--with-clean-state
       (let ((fake-vterm-buf (get-buffer-create " *test-vterm*")))
         (unwind-protect
             (progn
               (claude-repl--ws-put "test-ws" :vterm-buffer fake-vterm-buf)
-              (cl-letf (((symbol-function 'claude-repl--ensure-session)
-                         (lambda () (setq ensured-p t)))
-                        ((symbol-function '+workspace-current-name)
+              (cl-letf (((symbol-function '+workspace-current-name)
                          (lambda () "test-ws"))
+                        ((symbol-function 'claude-repl--claude-running-p)
+                         (lambda (_ws) nil))
+                        ((symbol-function 'claude-repl--initialize-claude)
+                         (lambda (_ws) (setq init-called t)))
+                        ((symbol-function 'claude-repl--send-input-to-vterm)
+                         (lambda (_buf text) (setq sent-text text))))
+                (claude-repl--send-to-claude "hello claude")
+                (should init-called)
+                (should (equal sent-text "hello claude"))))
+          (kill-buffer fake-vterm-buf))))))
+
+(ert-deftest claude-repl-cmd-test-send-to-claude/running-skips-init ()
+  "send-to-claude skips initialize-claude when Claude is already running."
+  (let (init-called sent-buf sent-text)
+    (claude-repl-test--with-clean-state
+      (let ((fake-vterm-buf (get-buffer-create " *test-vterm*")))
+        (unwind-protect
+            (progn
+              (claude-repl--ws-put "test-ws" :vterm-buffer fake-vterm-buf)
+              (cl-letf (((symbol-function '+workspace-current-name)
+                         (lambda () "test-ws"))
+                        ((symbol-function 'claude-repl--claude-running-p)
+                         (lambda (_ws) t))
+                        ((symbol-function 'claude-repl--initialize-claude)
+                         (lambda (_ws) (setq init-called t)))
                         ((symbol-function 'claude-repl--send-input-to-vterm)
                          (lambda (buf text)
                            (setq sent-buf buf sent-text text))))
                 (claude-repl--send-to-claude "hello claude")
-                (should ensured-p)
+                (should-not init-called)
                 (should (eq sent-buf fake-vterm-buf))
                 (should (equal sent-text "hello claude"))))
           (kill-buffer fake-vterm-buf))))))
-
-;;;; ---- claude-repl--ensure-session ----
-
-(ert-deftest claude-repl-cmd-test-ensure-session/no-workspace-signals-error ()
-  "ensure-session errors when no workspace is active."
-  (cl-letf (((symbol-function '+workspace-current-name)
-             (lambda () nil)))
-    (should-error (claude-repl--ensure-session) :type 'error)))
-
-(ert-deftest claude-repl-cmd-test-ensure-session/already-running-is-noop ()
-  "ensure-session is a no-op when vterm is already running."
-  (let (vterm-created-p)
-    (claude-repl-test--with-clean-state
-      (cl-letf (((symbol-function '+workspace-current-name)
-                 (lambda () "test-ws"))
-                ((symbol-function 'claude-repl--claude-running-p)
-                 (lambda (_ws) t))
-                ((symbol-function 'claude-repl--initialize-claude-output)
-                 (lambda (_ws) (setq vterm-created-p t))))
-        (claude-repl--ensure-session)
-        (should-not vterm-created-p)))))
-
-(ert-deftest claude-repl-cmd-test-ensure-session/starts-new-session ()
-  "ensure-session creates vterm, input buffer, sets counter, enables overlay."
-  (let (vterm-ensured input-ensured overlay-enabled counter-set)
-    (claude-repl-test--with-clean-state
-      (cl-letf (((symbol-function '+workspace-current-name)
-                 (lambda () "test-ws"))
-                ((symbol-function 'claude-repl--claude-running-p)
-                 (lambda (_ws) nil))
-                ((symbol-function 'claude-repl--initialize-claude-output)
-                 (lambda (_ws) (setq vterm-ensured t)))
-                ((symbol-function 'claude-repl--initialize-input-buffer)
-                 (lambda (_ws) (setq input-ensured t)))
-                ((symbol-function 'claude-repl--ws-put)
-                 (lambda (ws key val)
-                   (when (and (equal ws "test-ws") (eq key :prefix-counter) (= val 0))
-                     (setq counter-set t))))
-                ((symbol-function 'claude-repl--enable-hide-overlay)
-                 (lambda () (setq overlay-enabled t))))
-        (claude-repl--ensure-session "test-ws")
-        (should vterm-ensured)
-        (should input-ensured)
-        (should counter-set)
-        (should overlay-enabled)))))
 
 ;;;; ---- claude-repl-explain ----
 

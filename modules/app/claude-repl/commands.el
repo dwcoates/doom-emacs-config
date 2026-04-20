@@ -82,25 +82,12 @@ First %s is the change-spec, second %s is the prompt."
 
 ;;;; Session helpers
 
-(defun claude-repl--ensure-session (&optional ws)
-  "Ensure a Claude session exists (vterm + input + overlay) for WS.
-WS defaults to the current workspace name.  No-op if already running."
-  (let ((ws (or ws (+workspace-current-name))))
-    (unless ws (error "claude-repl--ensure-session: no active workspace"))
-    (if (claude-repl--claude-running-p ws)
-        (claude-repl--log ws "ensure-session: already running for ws=%s" ws)
-      (progn
-        (claude-repl--log ws "ensure-session: starting new session for ws=%s" ws)
-        (claude-repl--initialize-claude-output ws)
-        (claude-repl--initialize-input-buffer ws)
-        (claude-repl--ws-put ws :prefix-counter 0)
-        (claude-repl--enable-hide-overlay)))))
-
 (defun claude-repl--send-to-claude (text)
   "Send TEXT to Claude, starting it if needed."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "send-to-claude len=%d" (length text))
-    (claude-repl--ensure-session)
+    (unless (claude-repl--claude-running-p ws)
+      (claude-repl--initialize-claude ws))
     (claude-repl--send-input-to-vterm
      (claude-repl--ws-get ws :vterm-buffer) text)))
 

@@ -168,7 +168,7 @@ Initializes sandbox and bare-metal instantiations; sets :active-env."
   (claude-repl--ws-put ws :bare-metal (make-claude-repl-instantiation))
   (claude-repl--ws-put ws :active-env (if force-bare-metal :bare-metal :sandbox))
   (let ((default-directory (file-name-as-directory path)))
-    (claude-repl--ensure-session ws))
+    (claude-repl--initialize-claude ws))
   (claude-repl--log ws "worktree pre-started Claude ws=%s cmd=%s"
                     ws (claude-repl-instantiation-start-cmd (claude-repl--active-inst ws))))
 

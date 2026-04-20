@@ -327,12 +327,13 @@ Complex function: splits windows, sets buffers, configures windows.
 |-----------|---------|------|
 | Normal placeholder creation and swap | No | Requires window management |
 
-### `claude-repl--start-fresh ()`
+### `claude-repl--initialize-claude (&optional ws)`
 
 | Edge Case | Covered | Test |
 |-----------|---------|------|
-| Normal start with workspace | No | Requires full session infrastructure |
-| No active workspace (error) | No | |
+| Starts new session (output, input, counter, overlay, :init, message) | Yes | `initialize-claude-starts-new-session` |
+| Already running (error) | Yes | `initialize-claude-already-running-errors` |
+| No active workspace (error) | Yes | `initialize-claude-no-workspace` |
 
 ### `claude-repl--show-existing-panels ()`
 
@@ -362,7 +363,7 @@ Complex function: splits windows, sets buffers, configures windows.
 
 | Edge Case | Covered | Test |
 |-----------|---------|------|
-| Not running -> start-fresh | Yes | `entry-point-not-running-starts-fresh` |
+| Not running -> initialize-claude | Yes | `entry-point-not-running-initializes-claude` |
 | Session starting -> loading message | Yes | `entry-point-session-starting-shows-message` |
 | Panels visible -> hide | Yes | `entry-point-visible-hides` |
 | Panels hidden -> show | Yes | `entry-point-hidden-shows` |

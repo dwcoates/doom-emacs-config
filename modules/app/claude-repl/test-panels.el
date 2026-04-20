@@ -421,8 +421,8 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
 
 ;;;; ---- Tests: Entry point (claude-repl) dispatch ----
 
-(ert-deftest claude-repl-test-panels-entry-point-not-running-starts-fresh ()
-  "claude-repl starts fresh when nothing is running."
+(ert-deftest claude-repl-test-panels-entry-point-not-running-initializes-claude ()
+  "claude-repl initializes a new Claude session when nothing is running."
   (claude-repl-test--with-clean-state
     (let ((started nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
@@ -430,7 +430,7 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
                 ((symbol-function 'claude-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'use-region-p) (lambda () nil))
-                ((symbol-function 'claude-repl--start-fresh) (lambda () (setq started t))))
+                ((symbol-function 'claude-repl--initialize-claude) (lambda (&rest _) (setq started t))))
         (claude-repl)
         (should started)))))
 
@@ -1374,34 +1374,54 @@ we at least surface the stuck state so the user knows to click out."
               ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil)))
       (should-error (claude-repl--show-existing-panels)))))
 
-;;;; ---- Tests: start-fresh no workspace ----
+;;;; ---- Tests: initialize-claude ----
 
-(ert-deftest claude-repl-test-panels-start-fresh-no-workspace ()
-  "start-fresh errors when no workspace is active."
+(ert-deftest claude-repl-test-panels-initialize-claude-no-workspace ()
+  "initialize-claude errors when no workspace is active."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
-      (should-error (claude-repl--start-fresh)))))
+      (should-error (claude-repl--initialize-claude)))))
 
-(ert-deftest claude-repl-test-panels-start-fresh-sets-init ()
-  "start-fresh writes :claude-state :init after ensure-session launches vterm."
+(ert-deftest claude-repl-test-panels-initialize-claude-already-running-errors ()
+  "initialize-claude errors when Claude is already running."
   (claude-repl-test--with-clean-state
-    (let ((init-set nil)
-          (ensure-called nil)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'claude-repl--claude-running-p) (lambda (_ws) t)))
+      (should-error (claude-repl--initialize-claude)))))
+
+(ert-deftest claude-repl-test-panels-initialize-claude-starts-new-session ()
+  "initialize-claude creates output + input buffers, sets prefix counter, enables overlay,
+writes :claude-state :init, and announces startup when Claude is not running."
+  (claude-repl-test--with-clean-state
+    (let ((output-init nil)
+          (input-init nil)
+          (counter-set nil)
+          (overlay-enabled nil)
+          (init-set nil)
           (fake-inst (make-claude-repl-instantiation :start-cmd "claude")))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'delete-other-windows) #'ignore)
-                ((symbol-function 'claude-repl--ensure-session)
-                 (lambda () (setq ensure-called t)))
-                ((symbol-function 'claude-repl--show-loading-panels) #'ignore)
-                ((symbol-function 'claude-repl--active-inst)
-                 (lambda (_) fake-inst))
-                ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
-                ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/"))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda (_ws) nil))
+                ((symbol-function 'claude-repl--initialize-claude-output)
+                 (lambda (_ws) (setq output-init t)))
+                ((symbol-function 'claude-repl--initialize-input-buffer)
+                 (lambda (_ws) (setq input-init t)))
+                ((symbol-function 'claude-repl--ws-put)
+                 (lambda (ws key val)
+                   (when (and (equal ws "test-ws") (eq key :prefix-counter) (= val 0))
+                     (setq counter-set t))))
+                ((symbol-function 'claude-repl--enable-hide-overlay)
+                 (lambda () (setq overlay-enabled t)))
                 ((symbol-function 'claude-repl--ws-set-claude-state)
                  (lambda (ws state)
-                   (when (eq state :init) (setq init-set ws)))))
-        (claude-repl--start-fresh)
-        (should ensure-called)
+                   (when (eq state :init) (setq init-set ws))))
+                ((symbol-function 'claude-repl--active-inst) (lambda (_) fake-inst))
+                ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
+                ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/")))
+        (claude-repl--initialize-claude)
+        (should output-init)
+        (should input-init)
+        (should counter-set)
+        (should overlay-enabled)
         (should (equal init-set "test-ws"))))))
 
 ;;;; ---- Tests: schedule-sigkill ----

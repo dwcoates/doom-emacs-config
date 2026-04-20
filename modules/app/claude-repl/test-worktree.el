@@ -930,7 +930,7 @@ Returns the full SHA of the new commit."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
                (lambda (_ws-id _path _ws) nil))
-              ((symbol-function 'claude-repl--ensure-session)
+              ((symbol-function 'claude-repl--initialize-claude)
                (lambda (_ws) nil))
               ((symbol-function 'claude-repl--active-inst)
                (lambda (_ws) (make-claude-repl-instantiation :start-cmd "claude"))))
@@ -942,7 +942,7 @@ Returns the full SHA of the new commit."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
                (lambda (_ws-id _path _ws) nil))
-              ((symbol-function 'claude-repl--ensure-session)
+              ((symbol-function 'claude-repl--initialize-claude)
                (lambda (_ws) nil))
               ((symbol-function 'claude-repl--active-inst)
                (lambda (_ws) (make-claude-repl-instantiation :start-cmd "claude"))))
@@ -950,12 +950,12 @@ Returns the full SHA of the new commit."
       (should (eq (claude-repl--ws-get "ws1" :active-env) :sandbox)))))
 
 (ert-deftest claude-repl-test-setup-worktree-session-binds-default-directory ()
-  "During ensure-session, default-directory is bound to the worktree path."
+  "During initialize-claude, default-directory is bound to the worktree path."
   (claude-repl-test--with-clean-state
     (let ((captured-dir nil))
       (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
                  (lambda (_ws-id _path _ws) nil))
-                ((symbol-function 'claude-repl--ensure-session)
+                ((symbol-function 'claude-repl--initialize-claude)
                  (lambda (_ws) (setq captured-dir default-directory)))
                 ((symbol-function 'claude-repl--active-inst)
                  (lambda (_ws) (make-claude-repl-instantiation :start-cmd "claude"))))
@@ -967,7 +967,7 @@ Returns the full SHA of the new commit."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
                (lambda (_ws-id _path _ws) nil))
-              ((symbol-function 'claude-repl--ensure-session)
+              ((symbol-function 'claude-repl--initialize-claude)
                (lambda (_ws) nil))
               ((symbol-function 'claude-repl--active-inst)
                (lambda (_ws) (make-claude-repl-instantiation :start-cmd "claude"))))

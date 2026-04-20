@@ -56,8 +56,8 @@
 
 ## Section 3: `&optional` Parameters
 
-### Instance 11 -- `claude-repl--ensure-session` optional `ws`
-- **Line(s):** 63, 66-67
+### Instance 11 -- `claude-repl--initialize-claude` optional `ws`
+- **Location:** panels.el
 - **Three code paths:** explicit ws, inferred workspace, error signal
 
 ---

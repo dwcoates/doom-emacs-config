@@ -74,65 +74,58 @@ Tested indirectly through the macro expansion tests:
 | 3 | Scope overrides used for update-pr-diff family | YES | `claude-repl-cmd-test-diff-commands/update-pr-diff-uses-override` |
 | 4 | Branch scope uses the custom variable value | YES | `claude-repl-cmd-test-diff-commands/branch-uses-custom-var` |
 
-### 8. `claude-repl--ensure-session`
+### 8. `claude-repl--send-to-claude`
 
 | # | Edge Case | Test? | Test Name |
 |---|-----------|-------|-----------|
-| 1 | No workspace (nil) signals error | YES | `claude-repl-cmd-test-ensure-session/no-workspace-signals-error` |
-| 2 | Vterm already running -- no-op | YES | `claude-repl-cmd-test-ensure-session/already-running-is-noop` |
-| 3 | New session: creates vterm, input, counter, overlay | YES | `claude-repl-cmd-test-ensure-session/starts-new-session` |
+| 1 | Claude not running -> calls initialize-claude before send | YES | `claude-repl-cmd-test-send-to-claude/not-running-initializes-first` |
+| 2 | Claude already running -> skips initialize-claude | YES | `claude-repl-cmd-test-send-to-claude/running-skips-init` |
 
-### 9. `claude-repl--send-to-claude`
-
-| # | Edge Case | Test? | Test Name |
-|---|-----------|-------|-----------|
-| 1 | Calls ensure-session and sends text to vterm | YES | `claude-repl-cmd-test-send-to-claude/calls-ensure-and-send` |
-
-### 10. `claude-repl-explain` (interactive)
+### 9. `claude-repl-explain` (interactive)
 
 | # | Edge Case | Test? | Test Name |
 |---|-----------|-------|-----------|
 | 1 | Sends "please explain REF" with context reference | YES | `claude-repl-cmd-test-explain/sends-context-reference` |
 
-### 11. `claude-repl--send-interrupt-escape`
+### 10. `claude-repl--send-interrupt-escape`
 
 | # | Edge Case | Test? | Test Name |
 |---|-----------|-------|-----------|
 | 1 | Sends exactly two escape key presses | YES | `claude-repl-cmd-test-send-interrupt-escape/sends-two-escapes` |
 
-### 12. `claude-repl--enter-insert-mode`
+### 11. `claude-repl--enter-insert-mode`
 
 | # | Edge Case | Test? | Test Name |
 |---|-----------|-------|-----------|
 | 1 | Live buffer: sends "i" | YES | `claude-repl-cmd-test-enter-insert-mode/live-buffer` |
 | 2 | Dead (killed) buffer: no-op | YES | `claude-repl-cmd-test-enter-insert-mode/dead-buffer` |
 
-### 13. `claude-repl-interrupt` (interactive)
+### 12. `claude-repl-interrupt` (interactive)
 
 | # | Edge Case | Test? | Test Name |
 |---|-----------|-------|-----------|
 | 1 | Vterm live: sends escape and schedules insert-mode re-entry | YES | `claude-repl-cmd-test-interrupt/sends-escape-when-vterm-live` |
 | 2 | Vterm not live: complete no-op | YES | `claude-repl-cmd-test-interrupt/noop-when-vterm-not-live` |
 
-### 14. `claude-repl-update-pr` (interactive)
+### 13. `claude-repl-update-pr` (interactive)
 
 | # | Edge Case | Test? | Test Name |
 |---|-----------|-------|-----------|
 | 1 | Sends the configured prompt string | YES | `claude-repl-cmd-test-update-pr/sends-prompt` |
 
-### 15. `claude-repl-copy-reference` (interactive)
+### 14. `claude-repl-copy-reference` (interactive)
 
 | # | Edge Case | Test? | Test Name |
 |---|-----------|-------|-----------|
 | 1 | Puts file:line reference on kill ring | YES | `claude-repl-cmd-test-copy-reference/copies-to-kill-ring` |
 
-### 16. Customization Variables (9 defcustom declarations)
+### 15. Customization Variables (9 defcustom declarations)
 
 | # | Edge Case | Test? | Test Name |
 |---|-----------|-------|-----------|
 | 1 | All 9 custom variables are non-empty strings | YES | `claude-repl-cmd-test-customization-defaults` |
 
-### 17. Constants (`claude-repl--diff-scopes`, `claude-repl--diff-scope-labels`, `claude-repl--update-pr-diff-scopes`)
+### 16. Constants (`claude-repl--diff-scopes`, `claude-repl--diff-scope-labels`, `claude-repl--update-pr-diff-scopes`)
 
 These are data constants tested indirectly through the macro expansion and resolve-change-spec tests.
 

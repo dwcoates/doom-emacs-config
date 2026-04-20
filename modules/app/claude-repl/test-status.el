@@ -947,7 +947,7 @@ trees; under the revised model only the Stop hook writes :done."
 
 (ert-deftest claude-repl-test-mark-dead-vterm-preserves-init ()
   "mark-dead-vterm is a no-op when :claude-state is :init.
-During start-fresh, the timer may tick before claude-running-p returns t
+During initialize-claude, the timer may tick before claude-running-p returns t
 even though the session is legitimately coming up; under the old code
 this clobbered :init with :dead.  The :init guard prevents that."
   (claude-repl-test--with-clean-state

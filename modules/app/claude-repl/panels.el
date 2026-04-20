@@ -532,8 +532,11 @@ The placeholder is swapped for the real vterm buffer once Claude is ready."
     (claude-repl--show-panels-and-focus)
     (claude-repl--ws-put ws :vterm-buffer real-vterm)))
 
-(defun claude-repl--start-fresh ()
-  "Start a new Claude session without showing panels yet.
+(defun claude-repl--initialize-claude (&optional ws)
+  "Initialize a Claude session for WS: output buffer + input buffer + overlay,
+launch Claude in the output buffer, and announce the startup. Errors if
+Claude is already running for WS.
+
 Writes `:claude-state :init' immediately after launching the vterm
 process (documented lifecycle exception to the sentinel-only-writes
 rule — no hook fires between process launch and session-start, so
@@ -542,10 +545,15 @@ Panels are deliberately NOT opened here — `on-session-start-event'
 opens them once `:claude-state' transitions from `:init' to `:idle'.
 During that window the user sees the blue `:init' tab and the
 echo-area message below."
-  (let ((ws (+workspace-current-name)))
-    (claude-repl--log ws "start-fresh")
-    (unless ws (error "claude-repl--start-fresh: no active workspace"))
-    (claude-repl--ensure-session)
+  (let ((ws (or ws (+workspace-current-name))))
+    (unless ws (error "claude-repl--initialize-claude: no active workspace"))
+    (when (claude-repl--claude-running-p ws)
+      (error "claude-repl--initialize-claude: already running ws=%s" ws))
+    (claude-repl--log ws "initialize-claude: starting new session for ws=%s" ws)
+    (claude-repl--initialize-claude-output ws)
+    (claude-repl--initialize-input-buffer ws)
+    (claude-repl--ws-put ws :prefix-counter 0)
+    (claude-repl--enable-hide-overlay)
     (claude-repl--ws-set-claude-state ws :init)
     (let ((start-cmd (claude-repl-instantiation-start-cmd (claude-repl--active-inst ws))))
       (message "Starting Claude... ws=%s ws-id=%s dir=%s cmd=%s"
@@ -610,7 +618,7 @@ If panels hidden: show both panels."
       (claude-repl--send-to-claude selection))
      ;; Nothing running - start fresh with placeholder until Claude is ready
      ((not vterm-running)
-      (claude-repl--start-fresh))
+      (claude-repl--initialize-claude))
      ;; Vterm alive but Claude not yet ready - hold off, panels will open automatically
      (session-starting
       (message "Claude is loading…"))
@@ -701,7 +709,7 @@ Captures the current buffer references before teardown clears them."
     ;; reset to nil.  (Documented exception to "sentinel-only writes
     ;; claude-state" — see analysis/12.)  :repl-state nil means "no panels
     ;; and no particular inactive/dead designation"; the workspace returns
-    ;; to a pristine no-Claude state awaiting the next start-fresh.
+    ;; to a pristine no-Claude state awaiting the next initialize-claude.
     (claude-repl--ws-put ws :claude-state nil)
     (claude-repl--ws-put ws :repl-state nil)
     (force-mode-line-update t)
@@ -730,7 +738,7 @@ If Claude isn't running, start it (same as `claude-repl')."
       (evil-window-left 1))
      ;; Not running — start fresh
      ((not (claude-repl--claude-running-p))
-      (claude-repl--log ws "focus-input branch=start-fresh")
+      (claude-repl--log ws "focus-input branch=initialize-claude")
       (claude-repl))
      ;; Running but panels hidden — show them
      (t
@@ -851,5 +859,5 @@ independently.  Requires a worktree workspace with a captured session ID."
     (message "Switching to %s (resuming session %s...)"
              (if (eq new-env :sandbox) "Docker sandbox" "bare-metal")
              (substring session-id 0 claude-repl-session-id-display-length))
-    (claude-repl--ensure-session ws)
+    (claude-repl--initialize-claude ws)
     (claude-repl--show-panels-and-focus)))
