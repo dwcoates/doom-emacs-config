@@ -385,13 +385,26 @@ command-receipt, not at timer-fire."
        (t
         (funcall add-fn))))))
 
+(defun claude-repl--remove-doom-dashboard ()
+  "Remove the Doom dashboard buffer from the current workspace.
+Called after `magit-status' opens so that magit is the sole main buffer
+in a new workspace, rather than the Doom splash screen lingering in the
+buffer list."
+  (when (and (boundp '+doom-dashboard-buffer-name)
+             (fboundp 'persp-remove-buffer))
+    (when-let ((dash (get-buffer +doom-dashboard-buffer-name)))
+      (claude-repl--log (+workspace-current-name)
+                        "remove-doom-dashboard: removing buffer=%s" (buffer-name dash))
+      (ignore-errors (persp-remove-buffer dash)))))
+
 (defun claude-repl--worktree-creation-switch-callback (path dirname)
   "Switch to the newly created worktree workspace and open magit.
 PATH is the worktree directory; DIRNAME is the workspace name."
   (claude-repl--log dirname "worktree-creation-switch-callback: path=%s dirname=%s fboundp(+workspace-switch-to)=%s current-ws=%s target=%s"
                     path dirname (fboundp '+workspace-switch-to) (+workspace-current-name) dirname)
   (claude-repl--switch-to-workspace dirname)
-  (magit-status path))
+  (magit-status path)
+  (claude-repl--remove-doom-dashboard))
 
 (defun claude-repl-create-worktree-workspace (arg)
   "Create a new git worktree and switch to it as a project workspace.
@@ -474,7 +487,8 @@ Signals an error if not inside a git repository."
     ;; via the sole writer, `initialize-ws-env'). `magit-status' only needs
     ;; a directory — we don't start Claude yet.
     (claude-repl--initialize-ws-env (+workspace-current-name) root)
-    (magit-status root)))
+    (magit-status root)
+    (claude-repl--remove-doom-dashboard)))
 
 ;;; Prompt dispatch
 

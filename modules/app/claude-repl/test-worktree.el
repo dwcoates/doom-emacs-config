@@ -1674,4 +1674,80 @@ Covers the full call the interactive `SPC TAB n' path builds up."
       (claude-repl--workspace-merge-do "other-ws")
       (should (equal magit-dir "/tmp/fake")))))
 
+;;;; ---- Tests: remove-doom-dashboard ----
+
+(ert-deftest claude-repl-test-remove-doom-dashboard-removes-existing-buffer ()
+  "Dashboard buffer is removed from the workspace when it exists."
+  (let ((removed nil)
+        (+doom-dashboard-buffer-name "*doom*"))
+    (claude-repl-test--with-temp-buffer "*doom*"
+      (cl-letf (((symbol-function 'persp-remove-buffer)
+                 (lambda (buf) (setq removed buf)))
+                ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+        (claude-repl--remove-doom-dashboard)
+        (should removed)
+        (should (equal (buffer-name removed) "*doom*"))))))
+
+(ert-deftest claude-repl-test-remove-doom-dashboard-noop-when-no-buffer ()
+  "No error when the dashboard buffer does not exist."
+  (let ((removed nil)
+        (+doom-dashboard-buffer-name "*doom-nonexistent-xyz*"))
+    (cl-letf (((symbol-function 'persp-remove-buffer)
+               (lambda (buf) (setq removed buf)))
+              ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+      (claude-repl--remove-doom-dashboard)
+      (should-not removed))))
+
+(ert-deftest claude-repl-test-remove-doom-dashboard-noop-when-unbound ()
+  "No error when `+doom-dashboard-buffer-name' is unbound."
+  (let ((removed nil))
+    (cl-letf (((symbol-function 'persp-remove-buffer)
+               (lambda (buf) (setq removed buf)))
+              ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+      ;; Temporarily unbind the variable
+      (let ((had-binding (boundp '+doom-dashboard-buffer-name)))
+        (when had-binding (makunbound '+doom-dashboard-buffer-name))
+        (unwind-protect
+            (progn
+              (claude-repl--remove-doom-dashboard)
+              (should-not removed))
+          (when had-binding
+            (setq +doom-dashboard-buffer-name "*doom*")))))))
+
+(ert-deftest claude-repl-test-worktree-callback-removes-dashboard ()
+  "worktree-creation-switch-callback calls remove-doom-dashboard after magit."
+  (let ((call-order nil)
+        (+doom-dashboard-buffer-name "*doom*"))
+    (claude-repl-test--with-temp-buffer "*doom*"
+      (cl-letf (((symbol-function 'claude-repl--switch-to-workspace)
+                 (lambda (_ws) (push 'switch call-order)))
+                ((symbol-function 'magit-status)
+                 (lambda (_path) (push 'magit call-order)))
+                ((symbol-function 'persp-remove-buffer)
+                 (lambda (_buf) (push 'remove-dash call-order)))
+                ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+        (claude-repl--worktree-creation-switch-callback "/tmp/fake" "test-ws")
+        ;; call-order is pushed, so reversed
+        (should (equal (reverse call-order) '(switch magit remove-dash)))))))
+
+(ert-deftest claude-repl-test-new-workspace-removes-dashboard ()
+  "new-workspace calls remove-doom-dashboard after magit."
+  (let ((call-order nil)
+        (+doom-dashboard-buffer-name "*doom*"))
+    (claude-repl-test--with-temp-buffer "*doom*"
+      (claude-repl-test--with-clean-state
+        (cl-letf (((symbol-function 'claude-repl--git-root)
+                   (lambda () "/tmp/fake-root"))
+                  ((symbol-function '+workspace/new)
+                   (lambda (&rest _) (push 'ws-new call-order)))
+                  ((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--initialize-ws-env)
+                   (lambda (_ws _root) (push 'init-env call-order)))
+                  ((symbol-function 'magit-status)
+                   (lambda (_path) (push 'magit call-order)))
+                  ((symbol-function 'persp-remove-buffer)
+                   (lambda (_buf) (push 'remove-dash call-order))))
+          (claude-repl--new-workspace)
+          (should (equal (reverse call-order) '(ws-new init-env magit remove-dash))))))))
+
 ;;; test-worktree.el ends here

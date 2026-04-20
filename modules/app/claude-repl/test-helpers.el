@@ -141,8 +141,14 @@
   (defun persp-persps () "Stub." nil))
 (unless (fboundp 'persp-contain-buffer-p)
   (defun persp-contain-buffer-p (_buf _persp) "Stub." nil))
+(unless (fboundp 'persp-remove-buffer)
+  (defun persp-remove-buffer (_buf &optional _persp) "Stub." nil))
 (unless (fboundp 'safe-persp-name)
   (defun safe-persp-name (persp) "Stub." persp))
+
+;; Doom dashboard stubs
+(unless (boundp '+doom-dashboard-buffer-name)
+  (defvar +doom-dashboard-buffer-name "*doom*" "Stub."))
 
 ;; filenotify stub (prevent side effects at load time)
 (require 'filenotify)
