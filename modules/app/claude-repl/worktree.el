@@ -220,7 +220,7 @@ Returns a plist with keys :git-root, :dirname, :branch-name,
                               (make-directory wt-dir t)
                               wt-dir)))
          (path (claude-repl--path-canonical (expand-file-name dirname worktree-parent))))
-    (claude-repl--log nil "resolve-worktree-paths: git-root=%s dirname=%s branch-name=%s worktree-parent=%s path=%s in-worktree=%s"
+    (claude-repl--log name "resolve-worktree-paths: git-root=%s dirname=%s branch-name=%s worktree-parent=%s path=%s in-worktree=%s"
                       git-root dirname name worktree-parent path in-worktree)
     (list :git-root git-root
           :dirname dirname
@@ -240,7 +240,7 @@ value is stored via `claude-repl--ws-put'."
 (defun claude-repl--register-projectile-project (path dirname)
   "Write a .projectile marker and register PATH (named DIRNAME) with projectile."
   (write-region dirname nil (expand-file-name ".projectile" path))
-  (claude-repl--log nil "worktree wrote .projectile, adding to projectile known projects")
+  (claude-repl--log dirname "worktree wrote .projectile, adding to projectile known projects")
   (projectile-add-known-project (file-name-as-directory path)))
 
 (defconst claude-repl--autonomous-prompt-prefix
@@ -266,7 +266,7 @@ Registers the project with projectile, creates a Doom workspace, applies
 optional PREEMPTIVE-PROMPT, PRIORITY, and FORK-SESSION-ID settings, starts
 the Claude session (with FORCE-BARE-METAL controlling the environment),
 and invokes CALLBACK with (PATH DIRNAME) when done."
-  (claude-repl--log nil "finalize-worktree-workspace: path=%s dirname=%s priority=%s fork-session-id=%s force-bare-metal=%s"
+  (claude-repl--log dirname "finalize-worktree-workspace: path=%s dirname=%s priority=%s fork-session-id=%s force-bare-metal=%s"
                     path dirname priority fork-session-id force-bare-metal)
   (claude-repl--register-projectile-project path dirname)
   (let* ((canonical (claude-repl--path-canonical path))
@@ -290,14 +290,14 @@ and invokes CALLBACK with (PATH DIRNAME) when done."
 OK and OUTPUT are the success flag and git output.  The remaining arguments
 describe the workspace being created and are forwarded to
 `claude-repl--finalize-worktree-workspace'."
-  (claude-repl--log nil "worktree git result: %s" output)
+  (claude-repl--log dirname "worktree git result: %s" output)
   (if ok
       (progn
-        (claude-repl--log nil "worktree-add-callback: ok=t path=%s dirname=%s" path dirname)
+        (claude-repl--log dirname "worktree-add-callback: ok=t path=%s dirname=%s" path dirname)
         (claude-repl--finalize-worktree-workspace
          path dirname preemptive-prompt
          priority fork-session-id force-bare-metal callback))
-    (claude-repl--log nil "worktree-add-callback: ok=nil (git worktree add failed) path=%s" path)
+    (claude-repl--log dirname "worktree-add-callback: ok=nil (git worktree add failed) path=%s" path)
     (message "git worktree add failed: %s" output)))
 
 (defun claude-repl--async-worktree-add (git-root branch-name path base-commit
@@ -309,7 +309,7 @@ Creates the worktree at PATH on BRANCH-NAME off BASE-COMMIT in GIT-ROOT.
 When the git command finishes, `claude-repl--worktree-add-callback'
 finalizes the workspace."
   (let ((add-args (list "worktree" "add" "-b" branch-name path base-commit)))
-    (claude-repl--log nil "worktree async git add: %S" add-args)
+    (claude-repl--log dirname "worktree async git add: %S" add-args)
     (claude-repl--async-git
      "worktree-add" git-root add-args
      (apply-partially #'claude-repl--worktree-add-callback
@@ -327,14 +327,14 @@ Logs OUTPUT and then calls ADD-FN to proceed with the worktree-add step."
 Checks that NAME is non-empty, PATH does not already exist as a project,
 and BRANCH-NAME does not already exist in GIT-ROOT.  DIRNAME is used for
 error messages.  Signals `user-error' on any failure."
-  (claude-repl--log nil "validate-worktree-creation: name=%s git-root=%s dirname=%s branch-name=%s path=%s"
+  (claude-repl--log name "validate-worktree-creation: name=%s git-root=%s dirname=%s branch-name=%s path=%s"
                     name git-root dirname branch-name path)
   (when (string-empty-p name)
     (user-error "Name cannot be empty"))
   (when (projectile-project-p path)
     (user-error "Worktree '%s' already exists — use SPC p p to switch to it" dirname))
   (when (claude-repl--git-branch-exists-p git-root branch-name)
-    (claude-repl--log nil "ERROR: branch '%s' already exists — cannot create worktree" branch-name)
+    (claude-repl--log name "ERROR: branch '%s' already exists — cannot create worktree" branch-name)
     (user-error "Branch '%s' already exists — delete it first or choose a different name" branch-name)))
 
 (defun claude-repl--do-create-worktree-workspace (name &optional force-bare-metal fork-session-id preemptive-prompt callback priority base-commit git-root)
@@ -365,7 +365,7 @@ command-receipt, not at timer-fire."
          (in-worktree (plist-get paths :in-worktree))
          (path (plist-get paths :path)))
     (claude-repl--validate-worktree-creation name git-root dirname branch-name path)
-    (claude-repl--log nil "worktree git-root=%s name=%s dirname=%s branch=%s base=%s in-worktree=%s path=%s old-ws=%s old-ws-id=%s"
+    (claude-repl--log name "worktree git-root=%s name=%s dirname=%s branch=%s base=%s in-worktree=%s path=%s old-ws=%s old-ws-id=%s"
              git-root name dirname (or branch-name "none") base-commit in-worktree path
              (+workspace-current-name) (claude-repl--workspace-id))
     ;; --- kick off: fetch (if base is a remote ref) then add ---------------
@@ -389,7 +389,7 @@ command-receipt, not at timer-fire."
 (defun claude-repl--worktree-creation-switch-callback (path dirname)
   "Switch to the newly created worktree workspace and open magit.
 PATH is the worktree directory; DIRNAME is the workspace name."
-  (claude-repl--log nil "worktree-creation-switch-callback: path=%s dirname=%s fboundp(+workspace-switch-to)=%s current-ws=%s target=%s"
+  (claude-repl--log dirname "worktree-creation-switch-callback: path=%s dirname=%s fboundp(+workspace-switch-to)=%s current-ws=%s target=%s"
                     path dirname (fboundp '+workspace-switch-to) (+workspace-current-name) dirname)
   (claude-repl--switch-to-workspace dirname)
   (magit-status path))
@@ -421,7 +421,7 @@ Git operations (fetch, worktree add) run asynchronously so Emacs is not blocked.
          (has-preemptive (and raw-prompt (not (string-empty-p raw-prompt))))
          (preemptive-prompt (when has-preemptive
                               (concat claude-repl--autonomous-prompt-prefix raw-prompt))))
-    (claude-repl--log nil "create-worktree-workspace: name=%s base-commit=%s has-preemptive=%s"
+    (claude-repl--log name "create-worktree-workspace: name=%s base-commit=%s has-preemptive=%s"
                       name base-commit has-preemptive)
     (claude-repl--do-create-worktree-workspace
      name nil nil preemptive-prompt
@@ -448,14 +448,14 @@ Git operations (fetch, worktree add) run asynchronously so Emacs is not blocked.
                       (claude-repl--active-inst (+workspace-current-name)))))
             (unless sid
               (user-error "No session ID for current workspace — cannot fork"))
-            (claude-repl--log nil "fork-worktree-workspace: fork requested, sid=%s" sid)
+            (claude-repl--log (+workspace-current-name) "fork-worktree-workspace: fork requested, sid=%s" sid)
             sid))
          (name (read-string "Worktree name: "))
          (raw-prompt (read-string "Preemptive prompt (blank to switch there normally): "))
          (has-preemptive (and raw-prompt (not (string-empty-p raw-prompt))))
          (preemptive-prompt (when has-preemptive
                               (concat claude-repl--autonomous-prompt-prefix raw-prompt))))
-    (claude-repl--log nil "fork-worktree-workspace: name=%s force-bare-metal=%s fork-session-id=%s has-preemptive=%s"
+    (claude-repl--log name "fork-worktree-workspace: name=%s force-bare-metal=%s fork-session-id=%s has-preemptive=%s"
                       name force-bare-metal fork-session-id has-preemptive)
     (claude-repl--do-create-worktree-workspace
      name force-bare-metal fork-session-id preemptive-prompt
@@ -469,7 +469,7 @@ Signals an error if not inside a git repository."
   (let ((root (claude-repl--git-root)))
     (unless root
       (error "claude-repl--new-workspace: not in a git repository"))
-    (claude-repl--log nil "new-workspace: root=%s" root)
+    (claude-repl--log (+workspace-current-name) "new-workspace: root=%s" root)
     (+workspace/new)
     (claude-repl--ws-put (+workspace-current-name) :project-dir (claude-repl--path-canonical root))
     (magit-status root)))
@@ -562,7 +562,7 @@ resolved root reflects the user's context at command-receipt rather than
 whatever workspace happens to be active when the timer fires.
 When FORK-SESSION-ID is non-nil, the new worktree branches from HEAD and
 resumes the fork source's Claude session."
-  (claude-repl--log nil "create-worktree-from-command: name=%s git-root=%s priority=%s fork-session-id=%s"
+  (claude-repl--log name "create-worktree-from-command: name=%s git-root=%s priority=%s fork-session-id=%s"
                     name git-root priority fork-session-id)
   (claude-repl--do-create-worktree-workspace
    name nil fork-session-id prompt nil priority nil git-root))
@@ -587,18 +587,18 @@ and an error message is shown to the user."
           (condition-case err
               (claude-repl--resolve-fork-session-id fork-from)
             (error
-             (claude-repl--log nil "handle-create-command: ABORTING workspace '%s' — fork resolution failed: %s"
+             (claude-repl--log name "handle-create-command: ABORTING workspace '%s' — fork resolution failed: %s"
                               name (error-message-string err))
              (message "[claude-repl] ERROR: cannot create workspace '%s' — %s" name (error-message-string err))
              nil))))
     ;; If fork_from was requested but resolution failed, refuse to create.
     (if (and fork-from (null fork-session-id))
-        (claude-repl--log nil "handle-create-command: SKIPPED workspace '%s' (fork_from=%s failed, refusing silent fallback)"
+        (claude-repl--log name "handle-create-command: SKIPPED workspace '%s' (fork_from=%s failed, refusing silent fallback)"
                           name fork-from)
       ;; Capture git-root at enqueue time so the timer fires with the user's
       ;; current context, not whatever workspace is active at fire time.
       (let ((git-root (claude-repl--resolve-current-git-root)))
-        (claude-repl--log nil "workspace-commands-file create: %s (delay %.1fs) priority=%s fork-session-id=%s git-root=%s"
+        (claude-repl--log name "workspace-commands-file create: %s (delay %.1fs) priority=%s fork-session-id=%s git-root=%s"
                           name delay priority fork-session-id git-root)
         (run-with-timer delay nil
                         #'claude-repl--create-worktree-from-command
