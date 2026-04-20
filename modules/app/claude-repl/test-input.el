@@ -1900,11 +1900,10 @@ and surfaces a user-visible error."
 
 ;;;; ---- Tests: Permission state clearing on send ----
 
-(ert-deftest claude-repl-test-do-send-transitions-permission-to-thinking ()
-  "`claude-repl--do-send' transitions :permission -> :thinking after sending.
+(ert-deftest claude-repl-test-do-send-clears-permission-state ()
+  "`claude-repl--do-send' clears :permission after sending input.
 Permission responses don't trigger a prompt_submit hook, so do-send
-must transition the state itself.  Claude is working on the permitted
-action, so :thinking is the correct state."
+must clear the state itself."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-temp-buffer "*claude-panel-do-send-perm*"
       (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
@@ -1912,7 +1911,7 @@ action, so :thinking is the correct state."
       (cl-letf (((symbol-function 'claude-repl--send-input-to-vterm) #'ignore)
                 ((symbol-function 'claude-repl--run-send-posthooks) #'ignore))
         (claude-repl--do-send "ws1" "y" "y"))
-      (should (eq (claude-repl--ws-claude-state "ws1") :thinking)))))
+      (should-not (claude-repl--ws-claude-state "ws1")))))
 
 (ert-deftest claude-repl-test-do-send-does-not-clear-thinking-state ()
   "`claude-repl--do-send' only clears :permission, not other states."
@@ -1925,8 +1924,8 @@ action, so :thinking is the correct state."
         (claude-repl--do-send "ws1" "input" "raw"))
       (should (eq (claude-repl--ws-claude-state "ws1") :thinking)))))
 
-(ert-deftest claude-repl-test-send-char-transitions-permission-to-thinking ()
-  "`claude-repl-send-char' transitions :permission -> :thinking after sending."
+(ert-deftest claude-repl-test-send-char-clears-permission-state ()
+  "`claude-repl-send-char' clears :permission after sending."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-temp-buffer "*claude-panel-sendchar-perm*"
       (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
@@ -1936,7 +1935,7 @@ action, so :thinking is the correct state."
                 ((symbol-function 'vterm-send-string) #'ignore)
                 ((symbol-function 'vterm-send-return) #'ignore))
         (claude-repl-send-char "y"))
-      (should (eq (claude-repl--ws-claude-state "test-ws") :thinking)))))
+      (should-not (claude-repl--ws-claude-state "test-ws")))))
 
 (ert-deftest claude-repl-test-send-char-does-not-clear-thinking-state ()
   "`claude-repl-send-char' only clears :permission, not other states."
