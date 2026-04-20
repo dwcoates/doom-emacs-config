@@ -289,12 +289,12 @@ Complex function: splits windows, sets buffers, configures windows.
 
 ## Buffer creation
 
-### `claude-repl--ensure-input-buffer (ws)`
+### `claude-repl--initialize-input-buffer (ws)`
 
 | Edge Case | Covered | Test |
 |-----------|---------|------|
-| First creation (mode initialization + history restore) | No | Requires mode infrastructure |
-| Buffer already exists in correct mode (no-op on mode) | No | |
+| First creation (mode initialization + history restore) | Yes | `claude-repl-test-initialize-input-buffer-fresh` |
+| Buffer already in claude-input-mode (signals error) | Yes | `claude-repl-test-initialize-input-buffer-already-initialized` |
 
 ### `claude-repl--kill-stale-vterm ()`
 

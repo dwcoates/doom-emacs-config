@@ -465,15 +465,17 @@ this bounce alone is sufficient to keep keyboard nav out of vterm."
 
 ;;;; Buffer creation
 
-(defun claude-repl--ensure-input-buffer (ws)
-  "Create input buffer for workspace WS if needed, put in claude-input-mode."
-  (claude-repl--log ws "ensure-input-buffer")
+(defun claude-repl--initialize-input-buffer (ws)
+  "Create the Claude input buffer for workspace WS and enable claude-input-mode.
+Errors if the buffer is already initialized (already in `claude-input-mode')."
+  (claude-repl--log ws "initialize-input-buffer")
   (let ((input-buf (claude-repl--create-buffer ws "-input")))
     (claude-repl--ws-put ws :input-buffer input-buf)
     (with-current-buffer input-buf
-      (unless (eq major-mode 'claude-input-mode)
-        (claude-input-mode)
-        (claude-repl--history-restore ws)))))
+      (when (eq major-mode 'claude-input-mode)
+        (error "claude-repl--initialize-input-buffer: already initialized ws=%s" ws))
+      (claude-input-mode)
+      (claude-repl--history-restore ws))))
 
 (defun claude-repl--kill-stale-vterm (&optional ws)
   "Kill the Claude vterm buffer for WS if it exists but has no live process.
@@ -713,7 +715,7 @@ Captures the current buffer references before teardown clears them."
     (claude-repl--log ws "restart")
     (claude-repl-kill)
     (claude-repl--ensure-vterm-buffer ws)
-    (claude-repl--ensure-input-buffer ws)
+    (claude-repl--initialize-input-buffer ws)
     (claude-repl--enable-hide-overlay)
     (claude-repl--show-panels-and-focus)))
 

@@ -305,7 +305,7 @@
                  (lambda (_ws) nil))
                 ((symbol-function 'claude-repl--ensure-vterm-buffer)
                  (lambda (_ws) (setq vterm-ensured t)))
-                ((symbol-function 'claude-repl--ensure-input-buffer)
+                ((symbol-function 'claude-repl--initialize-input-buffer)
                  (lambda (_ws) (setq input-ensured t)))
                 ((symbol-function 'claude-repl--ws-put)
                  (lambda (ws key val)

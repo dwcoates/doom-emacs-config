@@ -1212,6 +1212,40 @@ we at least surface the stuck state so the user knows to click out."
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
         (when-let ((b (get-buffer "*claude-panel-input-test-ws*"))) (kill-buffer b))))))
 
+;;;; ---- Tests: initialize-input-buffer ----
+
+(ert-deftest claude-repl-test-initialize-input-buffer-fresh ()
+  "initialize-input-buffer enables claude-input-mode and restores history on a fresh buffer."
+  (claude-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *init-input-fresh*"))
+          (mode-called nil)
+          (history-called nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'claude-repl--create-buffer)
+                     (lambda (_ws &optional _s) buf))
+                    ((symbol-function 'claude-input-mode)
+                     (lambda () (setq mode-called t)))
+                    ((symbol-function 'claude-repl--history-restore)
+                     (lambda (_ws) (setq history-called t))))
+            (claude-repl--initialize-input-buffer "test-ws")
+            (should mode-called)
+            (should history-called)
+            (should (eq (claude-repl--ws-get "test-ws" :input-buffer) buf)))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest claude-repl-test-initialize-input-buffer-already-initialized ()
+  "initialize-input-buffer errors when the buffer is already in claude-input-mode."
+  (claude-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *init-input-already*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (setq major-mode 'claude-input-mode))
+            (cl-letf (((symbol-function 'claude-repl--create-buffer)
+                       (lambda (_ws &optional _s) buf)))
+              (should-error (claude-repl--initialize-input-buffer "test-ws"))))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
 ;;;; ---- Tests: kill-stale-vterm ----
 
 (ert-deftest claude-repl-test-panels-kill-stale-vterm-no-buffer ()
