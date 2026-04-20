@@ -1898,6 +1898,70 @@ and surfaces a user-visible error."
               (should-not (cl-some (lambda (s) (string-match-p "source-ws" s))
                                    sent-strings)))))))))
 
+;;;; ---- Tests: Permission state clearing on send ----
+
+(ert-deftest claude-repl-test-do-send-transitions-permission-to-thinking ()
+  "`claude-repl--do-send' transitions :permission -> :thinking after sending.
+Claude Code does not emit UserPromptSubmit for permission responses,
+so do-send is the only place to clear the state.  Claude is working
+on the permitted action, so :thinking is correct."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-do-send-perm*"
+      (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+      (claude-repl--ws-set-claude-state "ws1" :permission)
+      (cl-letf (((symbol-function 'claude-repl--send-input-to-vterm) #'ignore)
+                ((symbol-function 'claude-repl--run-send-posthooks) #'ignore))
+        (claude-repl--do-send "ws1" "y" "y"))
+      (should (eq (claude-repl--ws-claude-state "ws1") :thinking)))))
+
+(ert-deftest claude-repl-test-do-send-does-not-touch-non-permission-state ()
+  "`claude-repl--do-send' only transitions :permission, not other states."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-do-send-think2*"
+      (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+      (claude-repl--ws-set-claude-state "ws1" :thinking)
+      (cl-letf (((symbol-function 'claude-repl--send-input-to-vterm) #'ignore)
+                ((symbol-function 'claude-repl--run-send-posthooks) #'ignore))
+        (claude-repl--do-send "ws1" "input" "raw"))
+      (should (eq (claude-repl--ws-claude-state "ws1") :thinking)))))
+
+(ert-deftest claude-repl-test-send-char-transitions-permission-to-thinking ()
+  "`claude-repl-send-char' transitions :permission -> :thinking after sending."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-sendchar-perm*"
+      (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+      (claude-repl--ws-set-claude-state "test-ws" :permission)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                ((symbol-function 'vterm-send-string) #'ignore)
+                ((symbol-function 'vterm-send-return) #'ignore))
+        (claude-repl-send-char "y"))
+      (should (eq (claude-repl--ws-claude-state "test-ws") :thinking)))))
+
+(ert-deftest claude-repl-test-send-char-does-not-touch-non-permission-state ()
+  "`claude-repl-send-char' only transitions :permission, not other states."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-sendchar-think*"
+      (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+      (claude-repl--ws-set-claude-state "test-ws" :thinking)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                ((symbol-function 'vterm-send-string) #'ignore)
+                ((symbol-function 'vterm-send-return) #'ignore))
+        (claude-repl-send-char "y"))
+      (should (eq (claude-repl--ws-claude-state "test-ws") :thinking)))))
+
+(ert-deftest claude-repl-test-send-char-no-vterm-keeps-permission ()
+  "`claude-repl-send-char' does not transition when no vterm exists.
+The char was never sent, so the permission prompt is still active."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :vterm-buffer nil)
+    (claude-repl--ws-set-claude-state "test-ws" :permission)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'claude-repl--vterm-live-p) (lambda () nil)))
+      (claude-repl-send-char "y"))
+    (should (eq (claude-repl--ws-claude-state "test-ws") :permission))))
+
 (provide 'test-input)
 
 ;;; test-input.el ends here

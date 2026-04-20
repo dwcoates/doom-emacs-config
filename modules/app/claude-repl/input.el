@@ -463,12 +463,20 @@ Does NOT write `:claude-state :thinking' — that transition is the
 exclusive province of the `prompt_submit' Claude Code hook (routed
 through `on-prompt-submit-event').  The brief gap between RET and the
 red tab reflects that the hook is the source of truth for Claude's
-state."
+state.
+
+Exception: transitions `:permission' → `:thinking' after sending.
+Claude Code does not emit a `UserPromptSubmit' hook when the user
+answers a permission prompt, so the Emacs-side keypress is the only
+available signal.  After the user responds, Claude is working on the
+permitted action — `:thinking' is the correct state."
   (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (claude-repl--log ws "do-send ws=%s len=%d" ws (length input))
     (claude-repl--increment-prefix-counter ws)
     (claude-repl--pin-owning-workspace vterm-buf ws)
     (claude-repl--send-input-to-vterm vterm-buf input)
+    (when (eq (claude-repl--ws-claude-state ws) :permission)
+      (claude-repl--mark-ws-thinking ws))
     (claude-repl--run-send-posthooks ws raw)))
 
 (defun claude-repl--commit-input-buffer (ws input-buf raw &optional clear-p)
@@ -547,16 +555,21 @@ Handles input preparation, sending, history, and persistence."
   (claude-repl--send))
 
 (defun claude-repl-send-char (char)
-  "Send a single character to Claude."
-  (claude-repl--log (+workspace-current-name) "send-char: char=%s" char)
-  (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
-      (progn
-        (claude-repl--log (+workspace-current-name) "send-char: sending %s + <return> to vterm=%s" char (buffer-name vterm-buf))
-        (with-current-buffer vterm-buf
-          (vterm-send-string char)
-          (vterm-send-return)))
-    (message "[claude-repl] no live Claude session — '%s' not sent" char)
-    (claude-repl--log (+workspace-current-name) "send-char: no live vterm, skipping char=%s" char)))
+  "Send a single character to Claude.
+Transitions `:permission' → `:thinking' after sending — see
+`claude-repl--do-send' docstring for rationale."
+  (let ((ws (+workspace-current-name)))
+    (claude-repl--log ws "send-char: char=%s" char)
+    (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
+        (progn
+          (claude-repl--log ws "send-char: sending %s + <return> to vterm=%s" char (buffer-name vterm-buf))
+          (with-current-buffer vterm-buf
+            (vterm-send-string char)
+            (vterm-send-return))
+          (when (eq (claude-repl--ws-claude-state ws) :permission)
+            (claude-repl--mark-ws-thinking ws)))
+      (message "[claude-repl] no live Claude session — '%s' not sent" char)
+      (claude-repl--log ws "send-char: no live vterm, skipping char=%s" char))))
 
 ;;; Slash-command pass-through mode
 ;;
