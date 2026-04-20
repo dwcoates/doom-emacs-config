@@ -146,7 +146,8 @@ Session IDs are delivered by hooks, not scanned here.
 Intended to be called only on workspace initialization
 "
   (claude-repl--log ws "initialize-ws-env: ws=%s" ws)
-  ;; FIXME: what's this if statement doing?
+  ;; Guard: callers should check :active-env before calling; this catches
+  ;; programming errors where initialize-ws-env is invoked twice.
   (when (claude-repl--ws-get ws :active-env)
       (claude-repl--error ws "initialize-ws-env: already initialized ws=%s" ws))
   (let ((saved (claude-repl--read-state-file ws)))
@@ -305,7 +306,8 @@ For worktree workspaces with :active-env :sandbox, delegates to
 .claude/sandbox/claude-sandbox if a sandbox image is configured.
 Falls back to bare-metal Claude otherwise."
   (let* ((start-info (progn
-                       (claude-repl--initialize-ws-env ws)
+                       (unless (claude-repl--ws-get ws :active-env)
+                         (claude-repl--initialize-ws-env ws))
                        (claude-repl--build-start-cmd ws)))
          (cmd         (plist-get start-info :cmd))
          (sandboxed-p (plist-get start-info :sandboxed-p))

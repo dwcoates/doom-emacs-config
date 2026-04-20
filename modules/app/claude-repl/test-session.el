@@ -1022,6 +1022,37 @@ buffer-local may not be pinned yet."
           (claude-repl--start-claude "explicit-arg-ws")
           (should (equal ws-used "explicit-arg-ws")))))))
 
+(ert-deftest claude-repl-test-start-claude-skips-init-when-env-set ()
+  "start-claude should skip initialize-ws-env when :active-env is already set.
+This is the kill-then-restart path: the environment state survives kill
+so re-initialization must not be attempted."
+  (claude-repl-test--with-temp-buffer " *test-start-skip-init*"
+    (setq-local claude-repl--owning-workspace "ws1")
+    (claude-repl-test--with-clean-state
+      (claude-repl--ws-put "ws1" :active-env :bare-metal)
+      (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
+      (claude-repl--ws-put "ws1" :sandbox (make-claude-repl-instantiation))
+      (let ((init-called nil))
+        (cl-letf (((symbol-function 'claude-repl--initialize-ws-env)
+                   (lambda (_ws) (setq init-called t)))
+                  ((symbol-function 'claude-repl--build-start-cmd)
+                   (lambda (_ws) (list :cmd "claude"
+                                       :sandboxed-p nil
+                                       :docker-image nil
+                                       :session-id nil
+                                       :fork-session-id nil
+                                       :worktree-p nil
+                                       :active-env :bare-metal
+                                       :inst (make-claude-repl-instantiation))))
+                  ((symbol-function 'vterm-send-string) #'ignore)
+                  ((symbol-function 'vterm-send-return) #'ignore)
+                  ((symbol-function 'claude-repl--schedule-ready-timer) #'ignore)
+                  ((symbol-function 'claude-repl--log-session-start) #'ignore)
+                  ((symbol-function 'claude-repl--sandbox-mode-line)
+                   (lambda (_s _d) '("test"))))
+          (claude-repl--start-claude "ws1")
+          (should-not init-called))))))
+
 ;;;; ---- Tests: log-session-start ----
 
 (ert-deftest claude-repl-test-log-session-start-all-fields ()
