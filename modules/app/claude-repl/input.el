@@ -465,15 +465,18 @@ through `on-prompt-submit-event').  The brief gap between RET and the
 red tab reflects that the hook is the source of truth for Claude's
 state.
 
-Exception: clears `:permission' after sending, since the user has
-responded to the permission prompt and no hook fires to transition
-away from `:permission' on its own."
+Exception: transitions `:permission' → `:thinking' after sending,
+since the user has responded to the permission prompt and Claude is
+now working on the permitted action.  No hook reliably fires to
+transition away from `:permission' (permission responses don't
+trigger `prompt_submit')."
   (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (claude-repl--log ws "do-send ws=%s len=%d" ws (length input))
     (claude-repl--increment-prefix-counter ws)
     (claude-repl--pin-owning-workspace vterm-buf ws)
     (claude-repl--send-input-to-vterm vterm-buf input)
-    (claude-repl--ws-claude-state-clear-if ws :permission)
+    (when (eq (claude-repl--ws-claude-state ws) :permission)
+      (claude-repl--mark-ws-thinking ws))
     (claude-repl--run-send-posthooks ws raw)))
 
 (defun claude-repl--commit-input-buffer (ws input-buf raw &optional clear-p)
@@ -553,8 +556,9 @@ Handles input preparation, sending, history, and persistence."
 
 (defun claude-repl-send-char (char)
   "Send a single character to Claude.
-Clears `:permission' state after sending, since single-char responses
-\(y/n/digit) are the primary way users answer permission prompts."
+Transitions `:permission' → `:thinking' after sending, since
+single-char responses (y/n/digit) are the primary way users answer
+permission prompts and Claude works on the permitted action afterward."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "send-char: char=%s" char)
     (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
@@ -563,7 +567,8 @@ Clears `:permission' state after sending, since single-char responses
           (with-current-buffer vterm-buf
             (vterm-send-string char)
             (vterm-send-return))
-          (claude-repl--ws-claude-state-clear-if ws :permission))
+          (when (eq (claude-repl--ws-claude-state ws) :permission)
+            (claude-repl--mark-ws-thinking ws)))
       (message "[claude-repl] no live Claude session — '%s' not sent" char)
       (claude-repl--log ws "send-char: no live vterm, skipping char=%s" char))))
 
