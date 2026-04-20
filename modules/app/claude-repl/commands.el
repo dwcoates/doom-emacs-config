@@ -91,7 +91,7 @@ WS defaults to the current workspace name.  No-op if already running."
         (claude-repl--log ws "ensure-session: already running for ws=%s" ws)
       (progn
         (claude-repl--log ws "ensure-session: starting new session for ws=%s" ws)
-        (claude-repl--ensure-vterm-buffer ws)
+        (claude-repl--initialize-claude-output ws)
         (claude-repl--initialize-input-buffer ws)
         (claude-repl--ws-put ws :prefix-counter 0)
         (claude-repl--enable-hide-overlay)))))

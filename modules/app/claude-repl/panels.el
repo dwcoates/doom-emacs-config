@@ -497,25 +497,24 @@ entered vterm-mode."
   (setq-local truncate-lines nil)
   (setq-local word-wrap t)
   (claude-repl--set-buffer-background claude-repl--vterm-background-grey)
-  (claude-repl--log ws "ensure-vterm created %s root=%s" (buffer-name) root)
+  (claude-repl--log ws "initialize-new-vterm created %s root=%s" (buffer-name) root)
   (claude-repl--start-claude ws))
 
-(defun claude-repl--ensure-vterm-buffer (ws)
-  "Create vterm buffer for workspace WS running claude if needed.
-Starts claude from the git root.  Reuses an existing vterm buffer if one
-is already in vterm-mode."
+(defun claude-repl--initialize-claude-output (ws)
+  "Create the Claude output buffer for workspace WS and start Claude.
+The output buffer hosts the vterm running the Claude CLI; it is started
+from the git root. Errors if the buffer is already in `vterm-mode'."
   (let* ((root (claude-repl--ws-dir ws))
          (default-directory root))
-    (claude-repl--log ws "ensure-vterm-buffer ws=%s root=%s default-directory=%s" ws root default-directory)
+    (claude-repl--log ws "initialize-claude-output ws=%s root=%s default-directory=%s" ws root default-directory)
     (claude-repl--record-project-dir ws root)
     (claude-repl--kill-stale-vterm ws)
     (let ((vterm-buf (claude-repl--create-buffer ws)))
       (claude-repl--ws-put ws :vterm-buffer vterm-buf)
       (with-current-buffer vterm-buf
-        (if (eq major-mode 'vterm-mode)
-            (progn
-              (claude-repl--log ws "ensure-vterm REUSING existing buffer %s for ws=%s (no --start-claude)" (buffer-name vterm-buf) ws))
-          (claude-repl--initialize-new-vterm ws root))))))
+        (when (eq major-mode 'vterm-mode)
+          (error "claude-repl--initialize-claude-output: already initialized ws=%s" ws))
+        (claude-repl--initialize-new-vterm ws root)))))
 
 ;;;; Panel show/hide strategies
 
@@ -714,7 +713,7 @@ Captures the current buffer references before teardown clears them."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "restart")
     (claude-repl-kill)
-    (claude-repl--ensure-vterm-buffer ws)
+    (claude-repl--initialize-claude-output ws)
     (claude-repl--initialize-input-buffer ws)
     (claude-repl--enable-hide-overlay)
     (claude-repl--show-panels-and-focus)))

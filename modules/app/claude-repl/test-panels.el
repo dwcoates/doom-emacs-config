@@ -1246,6 +1246,24 @@ we at least surface the stuck state so the user knows to click out."
               (should-error (claude-repl--initialize-input-buffer "test-ws"))))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
+;;;; ---- Tests: initialize-claude-output ----
+
+(ert-deftest claude-repl-test-initialize-claude-output-already-initialized ()
+  "initialize-claude-output errors when the buffer is already in vterm-mode."
+  (claude-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *init-output-already*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (setq major-mode 'vterm-mode))
+            (cl-letf (((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp"))
+                      ((symbol-function 'claude-repl--record-project-dir) #'ignore)
+                      ((symbol-function 'claude-repl--kill-stale-vterm) #'ignore)
+                      ((symbol-function 'claude-repl--create-buffer)
+                       (lambda (_ws &optional _s) buf)))
+              (should-error (claude-repl--initialize-claude-output "test-ws"))))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
 ;;;; ---- Tests: kill-stale-vterm ----
 
 (ert-deftest claude-repl-test-panels-kill-stale-vterm-no-buffer ()

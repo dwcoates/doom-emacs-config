@@ -310,12 +310,12 @@ Complex function: splits windows, sets buffers, configures windows.
 |-----------|---------|------|
 | Normal initialization | No | Requires vterm-mode |
 
-### `claude-repl--ensure-vterm-buffer (ws)`
+### `claude-repl--initialize-claude-output (ws)`
 
 | Edge Case | Covered | Test |
 |-----------|---------|------|
 | New buffer creation | No | Requires vterm infrastructure |
-| Reusing existing vterm-mode buffer | No | |
+| Buffer already in vterm-mode (signals error) | Yes | `claude-repl-test-initialize-claude-output-already-initialized` |
 
 ---
 
@@ -507,7 +507,7 @@ Complex function: splits windows, sets buffers, configures windows.
 
 1. **Multi-window operations**: Functions like `show-panels`, `focus-input-panel`, `sync-panels`, `bounce-from-vterm`, and `toggle-fullscreen` require multi-window frame setups that are difficult in batch mode.
 
-2. **Vterm-dependent functions**: `vterm-redraw`, `do-refresh`, `refresh-vterm`, `refresh-vterm-window`, `initialize-new-vterm`, and `ensure-vterm-buffer` require real vterm-mode buffers.
+2. **Vterm-dependent functions**: `vterm-redraw`, `do-refresh`, `refresh-vterm`, `refresh-vterm-window`, `initialize-new-vterm`, and `initialize-claude-output` require real vterm-mode buffers.
 
 3. **Session lifecycle**: `teardown-session-state`, `destroy-session-buffers`, `kill-session`, `kill` (interactive), `restart`, and `switch-environment` require full session infrastructure with running processes.
 
