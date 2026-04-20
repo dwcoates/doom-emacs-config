@@ -743,17 +743,18 @@ Returns the full SHA of the new commit."
 
 ;;;; ---- Tests: resolve-worktree-paths ----
 
-(ert-deftest claude-repl-test-resolve-worktree-paths-uses-main-git-root ()
-  "Uses `claude-repl--main-git-root' instead of running git from default-directory."
+(ert-deftest claude-repl-test-resolve-worktree-paths-uses-passed-git-root ()
+  "Uses the GIT-ROOT argument, not `default-directory' or any cached variable."
   (let ((tmpdir (claude-repl--path-canonical
                  (make-temp-file "resolve-wt-test-" t))))
     (unwind-protect
         (let* ((fake-root (expand-file-name "my-repo" tmpdir)))
           (make-directory fake-root t)
           (make-directory (expand-file-name ".git" fake-root) t)
-          (let ((claude-repl--main-git-root (file-name-as-directory fake-root))
-                (default-directory "/nonexistent/should-not-matter/"))
-            (let ((result (claude-repl--resolve-worktree-paths "new-feature")))
+          (let ((default-directory "/nonexistent/should-not-matter/"))
+            (let ((result (claude-repl--resolve-worktree-paths
+                           (file-name-as-directory fake-root)
+                           "new-feature")))
               (should (equal (plist-get result :git-root)
                              (claude-repl--path-canonical fake-root))))))
       (delete-directory tmpdir t))))
@@ -771,16 +772,17 @@ Returns the full SHA of the new commit."
           ;; Simulate worktree: .git is a regular file, not a directory
           (write-region "gitdir: /some/other/.git/worktrees/existing-wt"
                         nil (expand-file-name ".git" fake-root))
-          (let ((claude-repl--main-git-root (file-name-as-directory fake-root)))
-            (let ((result (claude-repl--resolve-worktree-paths "new-feature")))
-              ;; :in-worktree should be t
-              (should (eq (plist-get result :in-worktree) t))
-              ;; :worktree-parent should be the parent of fake-root (i.e. tmpdir)
-              (should (equal (plist-get result :worktree-parent)
-                             (file-name-directory (directory-file-name fake-root))))
-              ;; :path should be sibling
-              (should (equal (plist-get result :path)
-                             (expand-file-name "new-feature" tmpdir))))))
+          (let ((result (claude-repl--resolve-worktree-paths
+                         (file-name-as-directory fake-root)
+                         "new-feature")))
+            ;; :in-worktree should be t
+            (should (eq (plist-get result :in-worktree) t))
+            ;; :worktree-parent should be the parent of fake-root (i.e. tmpdir)
+            (should (equal (plist-get result :worktree-parent)
+                           (file-name-directory (directory-file-name fake-root))))
+            ;; :path should be sibling
+            (should (equal (plist-get result :path)
+                           (expand-file-name "new-feature" tmpdir)))))
       (delete-directory tmpdir t))))
 
 (ert-deftest claude-repl-test-resolve-worktree-paths-normal-repo ()
@@ -792,19 +794,20 @@ Returns the full SHA of the new commit."
           (make-directory fake-root t)
           ;; Simulate normal repo: .git is a directory
           (make-directory (expand-file-name ".git" fake-root) t)
-          (let ((claude-repl--main-git-root (file-name-as-directory fake-root)))
-            (let ((result (claude-repl--resolve-worktree-paths "new-feature")))
-              ;; :in-worktree should be nil
-              (should-not (plist-get result :in-worktree))
-              ;; :worktree-parent should be <parent>/my-repo-worktrees/
-              (let ((expected-parent (expand-file-name "my-repo-worktrees" tmpdir)))
-                (should (equal (plist-get result :worktree-parent) expected-parent))
-                ;; The -worktrees directory should have been created
-                (should (file-directory-p expected-parent)))
-              ;; :path should be inside the -worktrees directory
-              (should (equal (plist-get result :path)
-                             (expand-file-name "new-feature"
-                                               (expand-file-name "my-repo-worktrees" tmpdir)))))))
+          (let ((result (claude-repl--resolve-worktree-paths
+                         (file-name-as-directory fake-root)
+                         "new-feature")))
+            ;; :in-worktree should be nil
+            (should-not (plist-get result :in-worktree))
+            ;; :worktree-parent should be <parent>/my-repo-worktrees/
+            (let ((expected-parent (expand-file-name "my-repo-worktrees" tmpdir)))
+              (should (equal (plist-get result :worktree-parent) expected-parent))
+              ;; The -worktrees directory should have been created
+              (should (file-directory-p expected-parent)))
+            ;; :path should be inside the -worktrees directory
+            (should (equal (plist-get result :path)
+                           (expand-file-name "new-feature"
+                                             (expand-file-name "my-repo-worktrees" tmpdir))))))
       (delete-directory tmpdir t))))
 
 (ert-deftest claude-repl-test-resolve-worktree-paths-nested-name-extracts-dirname ()
@@ -815,12 +818,13 @@ Returns the full SHA of the new commit."
         (let* ((fake-root (expand-file-name "my-repo" tmpdir)))
           (make-directory fake-root t)
           (make-directory (expand-file-name ".git" fake-root) t)
-          (let ((claude-repl--main-git-root (file-name-as-directory fake-root)))
-            (let ((result (claude-repl--resolve-worktree-paths "DWC/CV-100/cool-branch")))
-              (should (equal (plist-get result :dirname) "cool-branch"))
-              (should (equal (plist-get result :branch-name) "DWC/CV-100/cool-branch"))
-              (should (equal (plist-get result :git-root)
-                             (claude-repl--path-canonical fake-root))))))
+          (let ((result (claude-repl--resolve-worktree-paths
+                         (file-name-as-directory fake-root)
+                         "DWC/CV-100/cool-branch")))
+            (should (equal (plist-get result :dirname) "cool-branch"))
+            (should (equal (plist-get result :branch-name) "DWC/CV-100/cool-branch"))
+            (should (equal (plist-get result :git-root)
+                           (claude-repl--path-canonical fake-root)))))
       (delete-directory tmpdir t))))
 
 ;;;; ---- Tests: workspace-branch ----
@@ -1188,29 +1192,35 @@ Returns the full SHA of the new commit."
       (claude-repl--ws-put "source-ws" :active-env :bare-metal)
       (claude-repl--ws-put "source-ws" :bare-metal inst)
       (let ((captured-args nil))
-        (cl-letf (((symbol-function 'run-with-timer)
+        (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+                   (lambda () "/fake/root/"))
+                  ((symbol-function 'run-with-timer)
                    (lambda (_delay _repeat fn &rest args)
                      (setq captured-args args))))
           (claude-repl--handle-create-command
            '((type . "create") (name . "DWC/new-ws") (fork_from . "source-ws"))
            0)
-          ;; captured-args = (name prompt priority fork-session-id)
-          (should (equal (nth 0 captured-args) "DWC/new-ws"))
-          (should (equal (nth 3 captured-args) "fork-sid-789")))))))
+          ;; captured-args = (git-root name prompt priority fork-session-id)
+          (should (equal (nth 0 captured-args) "/fake/root/"))
+          (should (equal (nth 1 captured-args) "DWC/new-ws"))
+          (should (equal (nth 4 captured-args) "fork-sid-789")))))))
 
 (ert-deftest claude-repl-test-handle-create-command-without-fork-from ()
   "handle-create-command without fork_from should pass nil fork-session-id."
   (claude-repl-test--with-clean-state
     (let ((captured-args nil))
-      (cl-letf (((symbol-function 'run-with-timer)
+      (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+                 (lambda () "/fake/root/"))
+                ((symbol-function 'run-with-timer)
                  (lambda (_delay _repeat fn &rest args)
                    (setq captured-args args))))
         (claude-repl--handle-create-command
          '((type . "create") (name . "DWC/new-ws"))
          0)
-        ;; fork-session-id (4th arg) should be nil
-        (should (equal (nth 0 captured-args) "DWC/new-ws"))
-        (should-not (nth 3 captured-args))))))
+        ;; captured-args = (git-root name prompt priority fork-session-id)
+        (should (equal (nth 0 captured-args) "/fake/root/"))
+        (should (equal (nth 1 captured-args) "DWC/new-ws"))
+        (should-not (nth 4 captured-args))))))
 
 (ert-deftest claude-repl-test-handle-create-command-fork-from-no-session-aborts ()
   "handle-create-command with fork_from but no session should refuse to create workspace."
@@ -1341,9 +1351,11 @@ Returns the full SHA of the new commit."
 Preserves the programmatic worktree-creation path used by
 `create-worktree-from-command' (Slack/command-file workspace creation)."
   (let ((add-args nil))
-    (cl-letf (((symbol-function 'claude-repl--resolve-worktree-paths)
-               (lambda (_name) (list :git-root "/g" :dirname "d" :branch-name "b"
-                                     :in-worktree nil :path "/g/d")))
+    (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+               (lambda () "/g/"))
+              ((symbol-function 'claude-repl--resolve-worktree-paths)
+               (lambda (_git-root _name) (list :git-root "/g" :dirname "d" :branch-name "b"
+                                               :in-worktree nil :path "/g/d")))
               ((symbol-function 'claude-repl--validate-worktree-creation)
                (lambda (&rest _) nil))
               ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
@@ -1361,9 +1373,11 @@ Preserves the programmatic worktree-creation path used by
 Fork workflows need the session's tip; fetching origin/master would
 reset that context."
   (let ((add-base nil))
-    (cl-letf (((symbol-function 'claude-repl--resolve-worktree-paths)
-               (lambda (_name) (list :git-root "/g" :dirname "d" :branch-name "b"
-                                     :in-worktree nil :path "/g/d")))
+    (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+               (lambda () "/g/"))
+              ((symbol-function 'claude-repl--resolve-worktree-paths)
+               (lambda (_git-root _name) (list :git-root "/g" :dirname "d" :branch-name "b"
+                                               :in-worktree nil :path "/g/d")))
               ((symbol-function 'claude-repl--validate-worktree-creation)
                (lambda (&rest _) nil))
               ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
@@ -1378,9 +1392,11 @@ reset that context."
 This is the path `claude-repl-create-worktree-workspace' uses to
 force HEAD even without a fork-session-id."
   (let ((add-base nil))
-    (cl-letf (((symbol-function 'claude-repl--resolve-worktree-paths)
-               (lambda (_name) (list :git-root "/g" :dirname "d" :branch-name "b"
-                                     :in-worktree nil :path "/g/d")))
+    (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+               (lambda () "/g/"))
+              ((symbol-function 'claude-repl--resolve-worktree-paths)
+               (lambda (_git-root _name) (list :git-root "/g" :dirname "d" :branch-name "b"
+                                               :in-worktree nil :path "/g/d")))
               ((symbol-function 'claude-repl--validate-worktree-creation)
                (lambda (&rest _) nil))
               ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
@@ -1394,9 +1410,11 @@ force HEAD even without a fork-session-id."
   "No fetch runs when BASE-COMMIT is HEAD — nothing to pull from origin."
   (let ((fetch-called nil)
         (add-called nil))
-    (cl-letf (((symbol-function 'claude-repl--resolve-worktree-paths)
-               (lambda (_name) (list :git-root "/g" :dirname "d" :branch-name "b"
-                                     :in-worktree nil :path "/g/d")))
+    (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+               (lambda () "/g/"))
+              ((symbol-function 'claude-repl--resolve-worktree-paths)
+               (lambda (_git-root _name) (list :git-root "/g" :dirname "d" :branch-name "b"
+                                               :in-worktree nil :path "/g/d")))
               ((symbol-function 'claude-repl--validate-worktree-creation)
                (lambda (&rest _) nil))
               ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
@@ -1413,9 +1431,11 @@ force HEAD even without a fork-session-id."
   "Fetch uses the ref name parsed from BASE-COMMIT after the origin/ prefix.
 Supports bases other than origin/master without hard-coding the ref."
   (let ((fetch-args nil))
-    (cl-letf (((symbol-function 'claude-repl--resolve-worktree-paths)
-               (lambda (_name) (list :git-root "/g" :dirname "d" :branch-name "b"
-                                     :in-worktree nil :path "/g/d")))
+    (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+               (lambda () "/g/"))
+              ((symbol-function 'claude-repl--resolve-worktree-paths)
+               (lambda (_git-root _name) (list :git-root "/g" :dirname "d" :branch-name "b"
+                                               :in-worktree nil :path "/g/d")))
               ((symbol-function 'claude-repl--validate-worktree-creation)
                (lambda (&rest _) nil))
               ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
@@ -1431,9 +1451,11 @@ Supports bases other than origin/master without hard-coding the ref."
 Even if someone passed an origin/ base-commit by mistake, the fork
 path short-circuits to avoid disturbing the fork source's refs."
   (let ((fetch-called nil))
-    (cl-letf (((symbol-function 'claude-repl--resolve-worktree-paths)
-               (lambda (_name) (list :git-root "/g" :dirname "d" :branch-name "b"
-                                     :in-worktree nil :path "/g/d")))
+    (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+               (lambda () "/g/"))
+              ((symbol-function 'claude-repl--resolve-worktree-paths)
+               (lambda (_git-root _name) (list :git-root "/g" :dirname "d" :branch-name "b"
+                                               :in-worktree nil :path "/g/d")))
               ((symbol-function 'claude-repl--validate-worktree-creation)
                (lambda (&rest _) nil))
               ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
@@ -1445,6 +1467,68 @@ path short-circuits to avoid disturbing the fork source's refs."
       (claude-repl--do-create-worktree-workspace
        "name" nil "sid-1" nil nil nil "origin/master")
       (should-not fetch-called))))
+
+(ert-deftest claude-repl-test-do-create-uses-explicit-git-root-and-skips-resolver ()
+  "When GIT-ROOT is passed explicitly, `--resolve-current-git-root' is NOT called.
+This matters for the commands-file flow, which captures git-root at
+enqueue and must not have it re-resolved at timer-fire time."
+  (let ((resolver-called nil)
+        (resolve-paths-root nil))
+    (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+               (lambda () (setq resolver-called t) "/SHOULD-NOT-BE-USED/"))
+              ((symbol-function 'claude-repl--resolve-worktree-paths)
+               (lambda (git-root _name)
+                 (setq resolve-paths-root git-root)
+                 (list :git-root git-root :dirname "d" :branch-name "b"
+                       :in-worktree nil :path "/g/d")))
+              ((symbol-function 'claude-repl--validate-worktree-creation)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
+              ((symbol-function '+workspace-current-name) (lambda () "ws"))
+              ((symbol-function 'claude-repl--async-worktree-add)
+               (lambda (&rest _) nil)))
+      (claude-repl--do-create-worktree-workspace
+       "name" nil nil nil nil nil "HEAD" "/explicit/root/")
+      (should-not resolver-called)
+      (should (equal resolve-paths-root "/explicit/root/")))))
+
+(ert-deftest claude-repl-test-do-create-resolves-git-root-when-omitted ()
+  "When GIT-ROOT is nil, `--resolve-current-git-root' is called exactly once
+and its result is threaded into `--resolve-worktree-paths'."
+  (let ((resolver-calls 0)
+        (resolve-paths-root nil))
+    (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+               (lambda () (cl-incf resolver-calls) "/resolved/root/"))
+              ((symbol-function 'claude-repl--resolve-worktree-paths)
+               (lambda (git-root _name)
+                 (setq resolve-paths-root git-root)
+                 (list :git-root git-root :dirname "d" :branch-name "b"
+                       :in-worktree nil :path "/g/d")))
+              ((symbol-function 'claude-repl--validate-worktree-creation)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
+              ((symbol-function '+workspace-current-name) (lambda () "ws"))
+              ((symbol-function 'claude-repl--async-worktree-add)
+               (lambda (&rest _) nil)))
+      (claude-repl--do-create-worktree-workspace
+       "name" nil nil nil nil nil "HEAD")
+      (should (= resolver-calls 1))
+      (should (equal resolve-paths-root "/resolved/root/")))))
+
+(ert-deftest claude-repl-test-create-worktree-from-command-forwards-git-root ()
+  "`--create-worktree-from-command' forwards GIT-ROOT as the 8th arg to
+`--do-create-worktree-workspace', preserving the value captured at enqueue."
+  (let ((forwarded-args nil))
+    (cl-letf (((symbol-function 'claude-repl--do-create-worktree-workspace)
+               (lambda (&rest args) (setq forwarded-args args))))
+      (claude-repl--create-worktree-from-command
+       "/captured/root/" "ws-name" "some prompt" :high "fork-sid")
+      ;; args: (name force-bare fork-sid prompt cb priority base-commit git-root)
+      (should (equal (nth 0 forwarded-args) "ws-name"))
+      (should (equal (nth 2 forwarded-args) "fork-sid"))
+      (should (equal (nth 3 forwarded-args) "some prompt"))
+      (should (equal (nth 5 forwarded-args) :high))
+      (should (equal (nth 7 forwarded-args) "/captured/root/")))))
 
 ;;;; ---- Tests: async-worktree-add base-commit ----
 
