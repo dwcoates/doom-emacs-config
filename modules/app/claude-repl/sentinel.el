@@ -230,19 +230,9 @@ Callback for the permission_prompt sentinel handler."
     (claude-repl--log-verbose ws "on-permission-event: ws=%s status-AFTER=%s" ws (claude-repl--ws-get ws :claude-state))))
 
 (defun claude-repl--on-stop-event (ws dir)
-  "Handle a stop event for workspace WS with directory DIR.
-Logs the resolution, clears :thinking, and runs the finished handler."
-  (let ((before (claude-repl--ws-get ws :claude-state))
-        (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
-    (claude-repl--log ws "on-stop-event: ENTER ws=%s dir=%S status-BEFORE=%s vterm-buf=%S vterm-live=%s"
-                      ws dir before
-                      (when vterm-buf (buffer-name vterm-buf))
-                      (if (and vterm-buf (buffer-live-p vterm-buf)) "yes" "no"))
-    (claude-repl--ws-claude-state-clear-if ws :thinking)
-    (let ((after-clear (claude-repl--ws-get ws :claude-state)))
-      (claude-repl--log ws "on-stop-event: after ws-clear status=%s (was %s, expected nil)" after-clear before)
-      (claude-repl--handle-claude-finished ws)
-      (claude-repl--log ws "on-stop-event: EXIT ws=%s status-AFTER=%s" ws (claude-repl--ws-get ws :claude-state)))))
+  "Handle a stop event for workspace WS with directory DIR."
+  (claude-repl--log ws "on-stop-event: ws=%s dir=%S" ws dir)
+  (claude-repl--handle-claude-finished ws))
 
 (defun claude-repl--on-prompt-submit-event (ws _dir)
   "Mark workspace WS as thinking after a prompt submission."

@@ -223,26 +223,13 @@ re-dispatched by the poll fallback observing a still-present file."
 
 ;;;; ---- Tests: on-stop-event handler ----
 
-(ert-deftest claude-repl-test-on-stop-event-clears-thinking-calls-finished ()
-  "on-stop-event should clear :thinking and call handle-claude-finished."
+(ert-deftest claude-repl-test-on-stop-event-calls-finished ()
+  "on-stop-event should delegate unconditionally to handle-claude-finished."
   (claude-repl-test--with-clean-state
-    (let ((cleared nil) (finished-ws nil))
-      (claude-repl--ws-set "ws1" :thinking)
-      (cl-letf (((symbol-function 'claude-repl--ws-claude-state-clear-if)
-                 (lambda (ws state)
-                   (when (eq state :thinking)
-                     (setq cleared ws))))
-                ((symbol-function 'claude-repl--handle-claude-finished)
-                 (lambda (ws) (setq finished-ws ws)))
-                ((symbol-function 'claude-repl--ws-get)
-                 (lambda (_ws key)
-                   (pcase key
-                     (:claude-state :thinking)
-                     (:status :thinking)
-                     (:vterm-buffer nil)
-                     (_ nil)))))
+    (let ((finished-ws nil))
+      (cl-letf (((symbol-function 'claude-repl--handle-claude-finished)
+                 (lambda (ws) (setq finished-ws ws))))
         (claude-repl--on-stop-event "ws1" "/some/dir")
-        (should (equal cleared "ws1"))
         (should (equal finished-ws "ws1"))))))
 
 (ert-deftest claude-repl-test-on-stop-event-tolerates-nil-workspace ()
@@ -632,30 +619,21 @@ re-dispatched by the poll fallback observing a still-present file."
         (should (equal set-args '("test-ws" :permission)))))))
 
 (ert-deftest claude-repl-test-end-to-end-stop-dispatch ()
-  "Full dispatch: stop_* file -> on-stop-event -> ws-claude-state-clear-if :thinking + handle-finished."
+  "Full dispatch: stop_* file -> on-stop-event -> handle-finished."
   (claude-repl-test--with-clean-state
-    (let ((cleared nil) (finished nil))
+    (let ((finished nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
                  (lambda (_f) '(:dir "/project/dir" :session-id "test-sid")))
                 ((symbol-function 'claude-repl--ws-for-dir)
                  (lambda (_d) "test-ws"))
-                ((symbol-function 'claude-repl--ws-claude-state-clear-if)
-                 (lambda (ws state)
-                   (when (eq state :thinking) (setq cleared ws))))
                 ((symbol-function 'claude-repl--update-session-id-from-sentinel)
                  #'ignore)
                 ((symbol-function 'claude-repl--handle-claude-finished)
                  (lambda (ws) (setq finished ws)))
                 ((symbol-function 'claude-repl--ws-get)
-                 (lambda (_ws key)
-                   (pcase key
-                     (:claude-state :thinking)
-                     (:status :thinking)
-                     (:vterm-buffer nil)
-                     (_ nil))))
+                 (lambda (_ws _key) nil))
                 ((symbol-function 'delete-file) #'ignore))
         (claude-repl--dispatch-sentinel-file "/dir/stop_123")
-        (should (equal cleared "test-ws"))
         (should (equal finished "test-ws"))))))
 
 (ert-deftest claude-repl-test-end-to-end-prompt-submit-dispatch ()
@@ -911,53 +889,11 @@ is still skipped and the file is still deleted."
 
 ;;;; ---- Tests: on-stop-event uncovered edge cases ----
 
-(ert-deftest claude-repl-test-on-stop-event-status-not-thinking ()
-  "on-stop-event should call ws-claude-state-clear-if even when state is not :thinking."
-  (claude-repl-test--with-clean-state
-    (let ((cleared nil) (finished-ws nil))
-      (claude-repl--ws-set "ws1" :permission)
-      (cl-letf (((symbol-function 'claude-repl--ws-claude-state-clear-if)
-                 (lambda (ws state)
-                   (when (eq state :thinking)
-                     (setq cleared (list ws state)))))
-                ((symbol-function 'claude-repl--handle-claude-finished)
-                 (lambda (ws) (setq finished-ws ws)))
-                ((symbol-function 'claude-repl--ws-get)
-                 (lambda (_ws key)
-                   (pcase key
-                     (:claude-state :permission)
-                     (:status :permission)
-                     (:vterm-buffer nil)
-                     (_ nil)))))
-        (claude-repl--on-stop-event "ws1" "/some/dir")
-        ;; ws-claude-state-clear-if is still called (though clear-if is a no-op)
-        (should (equal cleared '("ws1" :thinking)))
-        (should (equal finished-ws "ws1"))))))
-
-(ert-deftest claude-repl-test-on-stop-event-nil-status ()
-  "on-stop-event should still call ws-claude-state-clear-if and handle-finished when claude-state is nil."
-  (claude-repl-test--with-clean-state
-    (let ((cleared nil) (finished-ws nil))
-      (cl-letf (((symbol-function 'claude-repl--ws-claude-state-clear-if)
-                 (lambda (ws state)
-                   (when (eq state :thinking)
-                     (setq cleared (list ws state)))))
-                ((symbol-function 'claude-repl--handle-claude-finished)
-                 (lambda (ws) (setq finished-ws ws)))
-                ((symbol-function 'claude-repl--ws-get)
-                 (lambda (_ws _key) nil)))
-        (claude-repl--on-stop-event "ws1" "/some/dir")
-        (should (equal cleared '("ws1" :thinking)))
-        (should (equal finished-ws "ws1"))))))
-
 (ert-deftest claude-repl-test-on-stop-event-handle-finished-error ()
   "on-stop-event should propagate error from handle-claude-finished."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--ws-claude-state-clear-if) #'ignore)
-              ((symbol-function 'claude-repl--handle-claude-finished)
-               (lambda (_ws) (error "finished handler boom")))
-              ((symbol-function 'claude-repl--ws-get)
-               (lambda (_ws _key) :thinking)))
+    (cl-letf (((symbol-function 'claude-repl--handle-claude-finished)
+               (lambda (_ws) (error "finished handler boom"))))
       (should-error (claude-repl--on-stop-event "ws1" "/some/dir")))))
 
 ;;;; ---- Tests: on-prompt-submit-event uncovered edge cases ----
@@ -1087,17 +1023,14 @@ is still skipped and the file is still deleted."
 
 ;;;; ---- Tests: sentinel event edge cases (status transitions .md) ----
 
-(ert-deftest claude-repl-test-on-stop-event-when-permission-clear-noop ()
-  "Stop event when status is :permission: ws-clear :thinking is a no-op, but handle-finished still runs."
+(ert-deftest claude-repl-test-on-stop-event-delegates-regardless-of-state ()
+  "Stop event delegates to handle-finished regardless of the current claude-state."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :permission)
     (let ((finished-called nil))
       (cl-letf (((symbol-function 'claude-repl--handle-claude-finished)
                  (lambda (ws) (setq finished-called ws))))
         (claude-repl--on-stop-event "ws1" "/some/dir")
-        ;; :permission should be unchanged (ws-clear :thinking was a no-op)
-        (should (eq (claude-repl--ws-state "ws1") :permission))
-        ;; handle-finished should still have been called
         (should (equal finished-called "ws1"))))))
 
 (ert-deftest claude-repl-test-on-permission-event-overwrites-done ()
