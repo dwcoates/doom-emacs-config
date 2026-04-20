@@ -99,7 +99,7 @@ First %s is the change-spec, second %s is the prompt."
     (unless file
       (user-error "Buffer %s is not visiting a file" (buffer-name)))
     (let ((rel (file-relative-name (claude-repl--path-canonical file) (claude-repl--ws-dir (+workspace-current-name)))))
-      (claude-repl--log nil "buffer-relative-path: path=%s" rel)
+      (claude-repl--log (+workspace-current-name) "buffer-relative-path: path=%s" rel)
       rel)))
 
 (defun claude-repl--format-file-ref ()
@@ -111,9 +111,9 @@ Without region: returns file:line."
         (let ((start-line (line-number-at-pos (region-beginning)))
               (end-line (line-number-at-pos (region-end))))
           (deactivate-mark)
-          (claude-repl--log nil "format-file-ref: region branch start=%d end=%d" start-line end-line)
+          (claude-repl--log (+workspace-current-name) "format-file-ref: region branch start=%d end=%d" start-line end-line)
           (format "%s:%d-%d" rel start-line end-line))
-      (claude-repl--log nil "format-file-ref: single-line branch line=%d" (line-number-at-pos (point)))
+      (claude-repl--log (+workspace-current-name) "format-file-ref: single-line branch line=%d" (line-number-at-pos (point)))
       (format "%s:%d" rel (line-number-at-pos (point))))))
 
 (defun claude-repl--format-magit-hunk-ref ()
@@ -129,7 +129,7 @@ Returns a \"file:startline-endline\" string based on the hunk's to-range."
                (claude-repl--path-canonical (expand-file-name file (magit-toplevel)))
                (claude-repl--ws-dir (+workspace-current-name))))
          (ref (format "%s:%d-%d" rel start end)))
-    (claude-repl--log nil "format-magit-hunk-ref: ref=%s" ref)
+    (claude-repl--log (+workspace-current-name) "format-magit-hunk-ref: ref=%s" ref)
     ref))
 
 (defun claude-repl--context-reference ()
@@ -141,9 +141,9 @@ both active region and point-at-line cases)."
                            'magit-revision-mode)
            (magit-section-match 'hunk))
       (progn
-        (claude-repl--log nil "context-reference: magit-hunk branch")
+        (claude-repl--log (+workspace-current-name) "context-reference: magit-hunk branch")
         (claude-repl--format-magit-hunk-ref))
-    (claude-repl--log nil "context-reference: standard branch")
+    (claude-repl--log (+workspace-current-name) "context-reference: standard branch")
     (claude-repl--format-file-ref)))
 
 ;;;; Diff analysis infrastructure
@@ -153,7 +153,7 @@ both active region and point-at-line cases)."
 CHANGE-SPEC describes which changes (e.g. \"unstaged changes (git diff)\").
 PROMPT is the analysis instruction."
   (let ((msg (format claude-repl-diff-analysis-message-template change-spec prompt)))
-    (claude-repl--log nil "diff-analysis: %s" change-spec)
+    (claude-repl--log (+workspace-current-name) "diff-analysis: %s" change-spec)
     (claude-repl--send-to-claude msg)))
 
 (defconst claude-repl--diff-scopes
@@ -192,13 +192,13 @@ Returns a string literal or the symbol `claude-repl-branch-diff-spec'."
                        (cdr (assq scope (eval scope-overrides))))))
     (cond
      (override
-      (claude-repl--log nil "resolve-change-spec: override branch scope=%s" scope)
+      (claude-repl--log (+workspace-current-name) "resolve-change-spec: override branch scope=%s" scope)
       override)
      ((eq default-spec :use-branch-diff-spec)
-      (claude-repl--log nil "resolve-change-spec: branch-spec branch scope=%s" scope)
+      (claude-repl--log (+workspace-current-name) "resolve-change-spec: branch-spec branch scope=%s" scope)
       'claude-repl-branch-diff-spec)
      (t
-      (claude-repl--log nil "resolve-change-spec: default branch scope=%s" scope)
+      (claude-repl--log (+workspace-current-name) "resolve-change-spec: default branch scope=%s" scope)
       default-spec))))
 
 (defun claude-repl--diff-command-form (scope-entry family doc-verb prompt-var scope-overrides)
@@ -268,7 +268,7 @@ Without region: sends file path and current line."
   (interactive)
   (let* ((ref (claude-repl--context-reference))
          (msg (format claude-repl-explain-prompt-template ref)))
-    (claude-repl--log nil "explain %s" msg)
+    (claude-repl--log (+workspace-current-name) "explain %s" msg)
     (claude-repl--send-to-claude msg)))
 
 (defun claude-repl--send-interrupt-escape (ws vterm-buf)
@@ -283,10 +283,10 @@ WS is the current workspace name for logging."
   "Send \"i\" to VTERM-BUF to re-enter insert mode."
   (if (buffer-live-p vterm-buf)
       (progn
-        (claude-repl--log nil "enter-insert-mode: sending \"i\" to vterm=%s" (buffer-name vterm-buf))
+        (claude-repl--log (+workspace-current-name) "enter-insert-mode: sending \"i\" to vterm=%s" (buffer-name vterm-buf))
         (with-current-buffer vterm-buf
           (vterm-send-string "i")))
-    (claude-repl--log nil "enter-insert-mode: vterm is dead, skipping")))
+    (claude-repl--log (+workspace-current-name) "enter-insert-mode: vterm is dead, skipping")))
 
 (defun claude-repl-interrupt ()
   "Interrupt Claude and re-enter insert mode after a short delay.
@@ -304,7 +304,7 @@ sends \"i\" after 0.25s to return to insert mode."
 (defun claude-repl-update-pr ()
   "Ask Claude to update the PR description for the current branch."
   (interactive)
-  (claude-repl--log nil "update-pr: sending update-pr prompt")
+  (claude-repl--log (+workspace-current-name) "update-pr: sending update-pr prompt")
   (claude-repl--send-to-claude claude-repl-update-pr-prompt))
 
 (defun claude-repl--nuke-one-workspace (ws)
@@ -366,7 +366,7 @@ Prompts once with the count before proceeding."
     (unless (y-or-n-p (format "Nuke ALL %d claude-repl workspace(s)? This kills processes, buffers, and removes all state. "
                               count))
       (user-error "Aborted"))
-    (claude-repl--log nil "nuke-all-workspaces: count=%d" count)
+    (claude-repl--log (+workspace-current-name) "nuke-all-workspaces: count=%d" count)
     ;; Snapshot keys before iterating; each call mutates the hash.
     (dolist (ws known)
       (claude-repl--nuke-one-workspace ws))
@@ -378,7 +378,7 @@ Prompts once with the count before proceeding."
 With active region: copies file:startline-endline.
 Without region: copies file:line."
   (interactive)
-  (claude-repl--log nil "copy-reference: copying file reference")
+  (claude-repl--log (+workspace-current-name) "copy-reference: copying file reference")
   (let ((ref (claude-repl--format-file-ref)))
     (kill-new ref)
     (message "Copied: %s" ref)))
