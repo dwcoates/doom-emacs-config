@@ -86,21 +86,23 @@ Returns a fresh empty instantiation when SAVED is nil."
   (when root
     (expand-file-name claude-repl-state-filename root)))
 
-(defvar claude-repl--per-project-files
-  (list claude-repl-state-filename claude-repl-history-filename)
-  "Filenames this module persists at each workspace's project root.
-Listed so `claude-repl--state-purge' can unlink them without having to
-hunt them down individually.")
+(defvar claude-repl--per-project-state-files
+  (list claude-repl-state-filename)
+  "State filenames purged when a workspace is nuked.
+Only includes ephemeral session state (`.claude-repl-state'); the
+history file is intentionally preserved so input history survives
+workspace recreation.")
 
 (defun claude-repl--state-purge (root)
-  "Delete every per-project persistence file under ROOT.
-Iterates `claude-repl--per-project-files' and unlinks each when
+  "Delete per-project state files under ROOT.
+Iterates `claude-repl--per-project-state-files' and unlinks each when
 present.  No-op when ROOT is nil or a file is missing.  Called by the
 nuke paths so a freshly-destroyed workspace cannot resurrect its
 stale session-id via `state-restore' on the next
-`claude-repl--register-worktree-ws' at the same project root."
+`claude-repl--register-worktree-ws' at the same project root.
+The history file is intentionally preserved."
   (when root
-    (dolist (filename claude-repl--per-project-files)
+    (dolist (filename claude-repl--per-project-state-files)
       (let ((path (expand-file-name filename root)))
         (when (file-exists-p path)
           (claude-repl--log nil "state-purge: deleting %s" path)

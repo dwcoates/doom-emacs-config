@@ -463,12 +463,12 @@
     (should-error (claude-repl-nuke-workspace) :type 'user-error)))
 
 (ert-deftest claude-repl-cmd-test-nuke-workspace/kills-session-and-removes-hashmap ()
-  "nuke-workspace kills session, deletes persp, and removes hashmap entry."
+  "nuke-workspace kills session, kills persp workspace, and removes hashmap entry."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
     (claude-repl--ws-put "doomed" :status :done)
     (let ((session-killed nil)
-          (persp-deleted nil)
+          (persp-killed nil)
           (persp-mode t))
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt _coll &rest _) "doomed"))
@@ -477,12 +477,12 @@
                  (lambda (ws) (setq session-killed ws)))
                 ((symbol-function '+workspace-current-name) (lambda () "other-ws"))
                 ((symbol-function 'persp-get-by-name) (lambda (_n) t))
-                ((symbol-function '+workspace/delete)
-                 (lambda (ws) (setq persp-deleted ws)))
+                ((symbol-function '+workspace/kill)
+                 (lambda (ws) (setq persp-killed ws)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (claude-repl-nuke-workspace)
         (should (equal session-killed "doomed"))
-        (should (equal persp-deleted "doomed"))
+        (should (equal persp-killed "doomed"))
         (should-not (gethash "doomed" claude-repl--workspaces))))))
 
 (ert-deftest claude-repl-cmd-test-nuke-workspace/aborts-on-deny ()
@@ -517,23 +517,23 @@
         (claude-repl-nuke-workspace)
         (should proc-deleted)))))
 
-(ert-deftest claude-repl-cmd-test-nuke-workspace/switches-away-if-current ()
-  "nuke-workspace switches to another workspace before deleting if target is current."
+(ert-deftest claude-repl-cmd-test-nuke-workspace/kills-persp-workspace ()
+  "nuke-workspace calls +workspace/kill to tear down the persp workspace."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
-    (let ((switched nil)
+    (let ((killed-ws nil)
           (persp-mode t))
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt _coll &rest _) "doomed"))
                 ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
                 ((symbol-function 'claude-repl--kill-session) #'ignore)
-                ((symbol-function '+workspace-current-name) (lambda () "doomed"))
-                ((symbol-function '+workspace/other) (lambda () (setq switched t)))
+                ((symbol-function '+workspace-current-name) (lambda () "other"))
                 ((symbol-function 'persp-get-by-name) (lambda (_n) t))
-                ((symbol-function '+workspace/delete) #'ignore)
+                ((symbol-function '+workspace/kill)
+                 (lambda (ws) (setq killed-ws ws)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (claude-repl-nuke-workspace)
-        (should switched)))))
+        (should (equal killed-ws "doomed"))))))
 
 (ert-deftest claude-repl-cmd-test-nuke-workspace/no-persp-still-cleans-hashmap ()
   "nuke-workspace removes hashmap entry even when persp workspace doesn't exist."
@@ -562,8 +562,8 @@
       (claude-repl-nuke-workspace)
       (should-not (gethash "doomed" claude-repl--workspaces)))))
 
-(ert-deftest claude-repl-cmd-test-nuke-workspace/removes-hashmap-when-persp-delete-errors ()
-  "nuke-workspace still removes the hashmap entry when +workspace/delete errors."
+(ert-deftest claude-repl-cmd-test-nuke-workspace/removes-hashmap-when-workspace-kill-errors ()
+  "nuke-workspace still removes the hashmap entry when +workspace/kill errors."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
     (cl-letf (((symbol-function 'completing-read)
@@ -572,8 +572,8 @@
               ((symbol-function 'claude-repl--kill-session) #'ignore)
               ((symbol-function '+workspace-current-name) (lambda () "other"))
               ((symbol-function 'persp-get-by-name) (lambda (_n) t))
-              ((symbol-function '+workspace/delete)
-               (lambda (_ws) (error "simulated persp-delete failure")))
+              ((symbol-function '+workspace/kill)
+               (lambda (_ws) (error "simulated workspace-kill failure")))
               ((symbol-function 'force-mode-line-update) #'ignore))
       (claude-repl-nuke-workspace)
       (should-not (gethash "doomed" claude-repl--workspaces)))))

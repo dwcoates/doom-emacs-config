@@ -962,8 +962,8 @@
 
 ;;;; ---- Tests: state-purge ----
 
-(ert-deftest claude-repl-test-state-purge-removes-both-files ()
-  "state-purge deletes .claude-repl-state and .claude-repl-history under ROOT."
+(ert-deftest claude-repl-test-state-purge-removes-state-preserves-history ()
+  "state-purge deletes .claude-repl-state but preserves .claude-repl-history."
   (let ((tmpdir (make-temp-file "claude-purge-" t)))
     (unwind-protect
         (let ((state-file   (expand-file-name ".claude-repl-state"   tmpdir))
@@ -974,7 +974,7 @@
           (should (file-exists-p history-file))
           (claude-repl--state-purge tmpdir)
           (should-not (file-exists-p state-file))
-          (should-not (file-exists-p history-file)))
+          (should (file-exists-p history-file)))
       (delete-directory tmpdir t))))
 
 (ert-deftest claude-repl-test-state-purge-nil-root-noop ()
