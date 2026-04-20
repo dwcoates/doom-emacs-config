@@ -64,7 +64,7 @@ wrong perspective."
            (let* ((proj (claude-repl--ws-get ws :project-dir))
                   (canonical-proj (when proj
                                     (claude-repl--path-canonical proj))))
-             (claude-repl--log-verbose nil "ws-for-dir-fast: check ws=%s proj=%S canonical=%S match=%s"
+             (claude-repl--log-verbose ws "ws-for-dir-fast: check ws=%s proj=%S canonical=%S match=%s"
                                        ws proj canonical-proj
                                        (if (and canonical-proj
                                                 (string= canonical-target canonical-proj))
@@ -103,7 +103,7 @@ Return the workspace name or nil."
                                               (claude-repl--path-canonical proj-dir))
                             for basename = (when canonical
                                              (file-name-nondirectory canonical))
-                            do (claude-repl--log-verbose nil "ws-for-dir-container: checking ws=%s proj-dir=%S canonical=%S basename=%S vs container-root=%S match=%s"
+                            do (claude-repl--log-verbose ws "ws-for-dir-container: checking ws=%s proj-dir=%S canonical=%S basename=%S vs container-root=%S match=%s"
                                                  ws proj-dir canonical basename container-root
                                                  (if (and basename (string= container-root basename)) "YES" "no"))
                             when (and basename (string= container-root basename))
@@ -205,7 +205,7 @@ name and the directory."
       (error
        (message "[claude-repl] WARNING: could not delete sentinel file %s: %S"
                 (file-name-nondirectory file) err)))
-    (claude-repl--log nil "process-sentinel-file: handler=%s file=%s dir=%S session-id=%S ws=%s"
+    (claude-repl--log ws "process-sentinel-file: handler=%s file=%s dir=%S session-id=%S ws=%s"
                       (plist-get handler :name) (file-name-nondirectory file) dir session-id ws)
     (cond
      ((null dir)
