@@ -1346,7 +1346,7 @@ we at least surface the stuck state so the user knows to click out."
                 ((symbol-function 'claude-repl--active-inst)
                  (lambda (_) fake-inst))
                 ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
-                ((symbol-function 'claude-repl--resolve-root) (lambda () "/"))
+                ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/"))
                 ((symbol-function 'claude-repl--ws-set-claude-state)
                  (lambda (ws state)
                    (when (eq state :init) (setq init-set ws)))))

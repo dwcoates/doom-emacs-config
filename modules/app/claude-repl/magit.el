@@ -58,7 +58,8 @@ First %s is the repo name, second %s is the commit SHA."
 (defun +dwc/magit-open-commit-in-github ()
   "Open the current commit in GitHub browser."
   (interactive)
-  (let* ((commit-sha (string-trim (shell-command-to-string "git rev-parse HEAD")))
+  (let* ((default-directory (claude-repl--ws-dir (+workspace-current-name)))
+         (commit-sha (string-trim (shell-command-to-string "git rev-parse HEAD")))
          (remote-url (string-trim (shell-command-to-string "git config --get remote.origin.url")))
          (cleaned-url (replace-regexp-in-string claude-repl-magit-github-ssh-prefix-regexp claude-repl-magit-github-base-url
                                                 (replace-regexp-in-string "\\.git$" "" remote-url)))
@@ -73,7 +74,7 @@ First %s is the repo name, second %s is the commit SHA."
   "Copy GitHub link for commit at point in magit buffer."
   (interactive)
   (let* ((commit-sha (magit-commit-at-point))
-         (default-directory (magit-toplevel))
+         (default-directory (claude-repl--ws-dir (+workspace-current-name)))
          (remote-url (string-trim (shell-command-to-string "git config --get remote.origin.url")))
          (cleaned-url (replace-regexp-in-string claude-repl-magit-github-ssh-prefix-regexp claude-repl-magit-github-base-url
                                                 (replace-regexp-in-string "\\.git$" "" remote-url)))

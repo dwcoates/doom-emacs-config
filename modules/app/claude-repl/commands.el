@@ -111,7 +111,7 @@ WS defaults to the current workspace name.  No-op if already running."
   (let ((file (buffer-file-name)))
     (unless file
       (user-error "Buffer %s is not visiting a file" (buffer-name)))
-    (let ((rel (file-relative-name (claude-repl--path-canonical file) (claude-repl--resolve-root))))
+    (let ((rel (file-relative-name (claude-repl--path-canonical file) (claude-repl--ws-dir (+workspace-current-name)))))
       (claude-repl--log nil "buffer-relative-path: path=%s" rel)
       rel)))
 
@@ -140,7 +140,7 @@ Returns a \"file:startline-endline\" string based on the hunk's to-range."
          (end (+ start len -1))
          (rel (file-relative-name
                (claude-repl--path-canonical (expand-file-name file (magit-toplevel)))
-               (claude-repl--resolve-root)))
+               (claude-repl--ws-dir (+workspace-current-name))))
          (ref (format "%s:%d-%d" rel start end)))
     (claude-repl--log nil "format-magit-hunk-ref: ref=%s" ref)
     ref))

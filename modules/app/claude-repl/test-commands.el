@@ -25,32 +25,40 @@
   "buffer-relative-path returns path relative to project root."
   (cl-letf (((symbol-function 'buffer-file-name)
              (lambda (&optional _buf) "/project/src/foo.el"))
-            ((symbol-function 'claude-repl--resolve-root)
-             (lambda () "/project/")))
+            ((symbol-function 'claude-repl--ws-dir)
+             (lambda (_ws) "/project/"))
+            ((symbol-function '+workspace-current-name)
+             (lambda () "test-ws")))
     (should (equal (claude-repl--buffer-relative-path) "src/foo.el"))))
 
 (ert-deftest claude-repl-cmd-test-buffer-relative-path/nested-subdir ()
   "buffer-relative-path works for deeply nested paths."
   (cl-letf (((symbol-function 'buffer-file-name)
              (lambda (&optional _buf) "/project/a/b/c/deep.el"))
-            ((symbol-function 'claude-repl--resolve-root)
-             (lambda () "/project/")))
+            ((symbol-function 'claude-repl--ws-dir)
+             (lambda (_ws) "/project/"))
+            ((symbol-function '+workspace-current-name)
+             (lambda () "test-ws")))
     (should (equal (claude-repl--buffer-relative-path) "a/b/c/deep.el"))))
 
 (ert-deftest claude-repl-cmd-test-buffer-relative-path/file-at-root ()
   "buffer-relative-path returns bare filename when file is at project root."
   (cl-letf (((symbol-function 'buffer-file-name)
              (lambda (&optional _buf) "/project/file.el"))
-            ((symbol-function 'claude-repl--resolve-root)
-             (lambda () "/project/")))
+            ((symbol-function 'claude-repl--ws-dir)
+             (lambda (_ws) "/project/"))
+            ((symbol-function '+workspace-current-name)
+             (lambda () "test-ws")))
     (should (equal (claude-repl--buffer-relative-path) "file.el"))))
 
 (ert-deftest claude-repl-cmd-test-buffer-relative-path/root-without-trailing-slash ()
-  "buffer-relative-path works when resolve-root omits trailing slash."
+  "buffer-relative-path works when ws-dir omits trailing slash."
   (cl-letf (((symbol-function 'buffer-file-name)
              (lambda (&optional _buf) "/project/src/bar.el"))
-            ((symbol-function 'claude-repl--resolve-root)
-             (lambda () "/project")))
+            ((symbol-function 'claude-repl--ws-dir)
+             (lambda (_ws) "/project"))
+            ((symbol-function '+workspace-current-name)
+             (lambda () "test-ws")))
     (should (equal (claude-repl--buffer-relative-path) "src/bar.el"))))
 
 ;;;; ---- claude-repl--format-file-ref ----
@@ -122,8 +130,10 @@
                (lambda (_obj _slot) '(10 5)))
               ((symbol-function 'magit-toplevel)
                (lambda () "/project/"))
-              ((symbol-function 'claude-repl--resolve-root)
-               (lambda () "/project/")))
+              ((symbol-function 'claude-repl--ws-dir)
+               (lambda (_ws) "/project/"))
+              ((symbol-function '+workspace-current-name)
+               (lambda () "test-ws")))
       (should (equal (claude-repl--format-magit-hunk-ref) "src/main.go:10-14")))))
 
 (ert-deftest claude-repl-cmd-test-format-magit-hunk-ref/single-line-hunk ()
@@ -137,12 +147,14 @@
                (lambda (_obj _slot) '(25 1)))
               ((symbol-function 'magit-toplevel)
                (lambda () "/repo/"))
-              ((symbol-function 'claude-repl--resolve-root)
-               (lambda () "/repo/")))
+              ((symbol-function 'claude-repl--ws-dir)
+               (lambda (_ws) "/repo/"))
+              ((symbol-function '+workspace-current-name)
+               (lambda () "test-ws")))
       (should (equal (claude-repl--format-magit-hunk-ref) "file.py:25-25")))))
 
 (ert-deftest claude-repl-cmd-test-format-magit-hunk-ref/different-roots ()
-  "format-magit-hunk-ref computes relative path from resolve-root, not magit-toplevel."
+  "format-magit-hunk-ref computes relative path from ws-dir, not magit-toplevel."
   (let ((mock-section (record 'magit-section nil nil nil nil nil nil nil nil)))
     (cl-letf (((symbol-function 'magit-current-section)
                (lambda () mock-section))
@@ -152,8 +164,10 @@
                (lambda (_obj _slot) '(1 3)))
               ((symbol-function 'magit-toplevel)
                (lambda () "/workspace/project/"))
-              ((symbol-function 'claude-repl--resolve-root)
-               (lambda () "/workspace/project/")))
+              ((symbol-function 'claude-repl--ws-dir)
+               (lambda (_ws) "/workspace/project/"))
+              ((symbol-function '+workspace-current-name)
+               (lambda () "test-ws")))
       (should (equal (claude-repl--format-magit-hunk-ref) "subdir/file.rs:1-3")))))
 
 ;;;; ---- claude-repl--context-reference ----

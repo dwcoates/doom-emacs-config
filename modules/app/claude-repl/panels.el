@@ -461,7 +461,7 @@ this bounce alone is sufficient to keep keyboard nav out of vterm."
 (defun claude-repl--ensure-input-buffer (ws)
   "Create input buffer for workspace WS if needed, put in claude-input-mode."
   (claude-repl--log ws "ensure-input-buffer")
-  (let* ((root (claude-repl--resolve-root))
+  (let* ((root (claude-repl--ws-dir ws))
          (input-buf (claude-repl--create-buffer ws "-input")))
     (claude-repl--ws-put ws :input-buffer input-buf)
     (with-current-buffer input-buf
@@ -497,7 +497,7 @@ entered vterm-mode."
   "Create vterm buffer for workspace WS running claude if needed.
 Starts claude from the git root.  Reuses an existing vterm buffer if one
 is already in vterm-mode."
-  (let* ((root (claude-repl--resolve-root))
+  (let* ((root (claude-repl--ws-dir ws))
          (default-directory root))
     (claude-repl--log ws "ensure-vterm-buffer ws=%s root=%s default-directory=%s" ws root default-directory)
     (claude-repl--record-project-dir ws root)
@@ -546,7 +546,7 @@ echo-area message below."
       (message "Starting Claude... ws=%s ws-id=%s dir=%s cmd=%s"
                ws
                (claude-repl--workspace-id)
-               (claude-repl--resolve-root)
+               (claude-repl--ws-dir ws)
                (or start-cmd "?")))))
 
 (defun claude-repl--show-existing-panels ()
@@ -808,7 +808,7 @@ Signals `user-error' if any precondition is not met."
     (user-error "Cannot switch environment while Claude is thinking"))
   (when (and (eq new-env :sandbox)
              (not (claude-repl--resolve-sandbox-config
-                   (claude-repl--git-root (claude-repl--ws-get ws :project-dir)))))
+                   (claude-repl--ws-get ws :project-dir))))
     (user-error "No sandbox configuration found for this workspace")))
 
 (defun claude-repl--seed-new-env-session (ws new-env session-id)

@@ -743,12 +743,20 @@ Returns the full SHA of the new commit."
 
 ;;;; ---- Tests: resolve-worktree-paths ----
 
-(ert-deftest claude-repl-test-resolve-worktree-paths-not-in-git-repo ()
-  "When git rev-parse returns a fatal message, signals user-error."
-  (cl-letf (((symbol-function 'claude-repl--git-string)
-             (lambda (&rest _args) "fatal: not a git repository")))
-    (should-error (claude-repl--resolve-worktree-paths "my-branch")
-                  :type 'user-error)))
+(ert-deftest claude-repl-test-resolve-worktree-paths-uses-main-git-root ()
+  "Uses `claude-repl--main-git-root' instead of running git from default-directory."
+  (let ((tmpdir (claude-repl--path-canonical
+                 (make-temp-file "resolve-wt-test-" t))))
+    (unwind-protect
+        (let* ((fake-root (expand-file-name "my-repo" tmpdir)))
+          (make-directory fake-root t)
+          (make-directory (expand-file-name ".git" fake-root) t)
+          (let ((claude-repl--main-git-root (file-name-as-directory fake-root))
+                (default-directory "/nonexistent/should-not-matter/"))
+            (let ((result (claude-repl--resolve-worktree-paths "new-feature")))
+              (should (equal (plist-get result :git-root)
+                             (claude-repl--path-canonical fake-root))))))
+      (delete-directory tmpdir t))))
 
 (ert-deftest claude-repl-test-resolve-worktree-paths-inside-worktree ()
   "Inside a worktree (.git is a file), new worktree is a sibling directory."
@@ -763,8 +771,7 @@ Returns the full SHA of the new commit."
           ;; Simulate worktree: .git is a regular file, not a directory
           (write-region "gitdir: /some/other/.git/worktrees/existing-wt"
                         nil (expand-file-name ".git" fake-root))
-          (cl-letf (((symbol-function 'claude-repl--git-string)
-                     (lambda (&rest _args) fake-root)))
+          (let ((claude-repl--main-git-root (file-name-as-directory fake-root)))
             (let ((result (claude-repl--resolve-worktree-paths "new-feature")))
               ;; :in-worktree should be t
               (should (eq (plist-get result :in-worktree) t))
@@ -785,8 +792,7 @@ Returns the full SHA of the new commit."
           (make-directory fake-root t)
           ;; Simulate normal repo: .git is a directory
           (make-directory (expand-file-name ".git" fake-root) t)
-          (cl-letf (((symbol-function 'claude-repl--git-string)
-                     (lambda (&rest _args) fake-root)))
+          (let ((claude-repl--main-git-root (file-name-as-directory fake-root)))
             (let ((result (claude-repl--resolve-worktree-paths "new-feature")))
               ;; :in-worktree should be nil
               (should-not (plist-get result :in-worktree))
@@ -809,12 +815,12 @@ Returns the full SHA of the new commit."
         (let* ((fake-root (expand-file-name "my-repo" tmpdir)))
           (make-directory fake-root t)
           (make-directory (expand-file-name ".git" fake-root) t)
-          (cl-letf (((symbol-function 'claude-repl--git-string)
-                     (lambda (&rest _args) fake-root)))
+          (let ((claude-repl--main-git-root (file-name-as-directory fake-root)))
             (let ((result (claude-repl--resolve-worktree-paths "DWC/CV-100/cool-branch")))
               (should (equal (plist-get result :dirname) "cool-branch"))
               (should (equal (plist-get result :branch-name) "DWC/CV-100/cool-branch"))
-              (should (equal (plist-get result :git-root) fake-root)))))
+              (should (equal (plist-get result :git-root)
+                             (claude-repl--path-canonical fake-root))))))
       (delete-directory tmpdir t))))
 
 ;;;; ---- Tests: workspace-branch ----

@@ -18,34 +18,21 @@
 ;;;; ---- Tests: Workspace ID / root resolution ----
 
 (ert-deftest claude-repl-test-workspace-id-from-project-root ()
-  "Workspace ID should be first 8 chars of MD5 of project root."
-  (claude-repl-test--with-temp-buffer " *test-ws-id*"
-    (setq-local claude-repl--project-root "/test/project")
-    (let ((default-directory "/nonexistent/"))
-      ;; git-root will fail, so resolve-root falls through to project-root
-      (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) nil)))
-        (should (equal (claude-repl--workspace-id)
-                       (substring (md5 "/test/project") 0 8)))))))
+  "Workspace ID should be first 8 chars of MD5 of the canonical ws-dir path."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+            ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/test/project")))
+    (should (equal (claude-repl--workspace-id)
+                   (substring (md5 (claude-repl--path-canonical "/test/project")) 0 8)))))
 
-(ert-deftest claude-repl-test-workspace-id-default-directory ()
-  "Workspace ID signals an error when no git root or project root."
-  (claude-repl-test--with-temp-buffer " *test-ws-id-dd*"
-    (setq-local claude-repl--project-root nil)
-    (let ((default-directory "/fallback/dir/"))
-      (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) nil)))
-        (should-error (claude-repl--workspace-id) :type 'error)))))
+(ert-deftest claude-repl-test-workspace-id-fallback-to-main-git-root ()
+  "Workspace ID falls back to main-git-root when ws-dir errors."
+  (let ((claude-repl--main-git-root "/fallback/dir/"))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'claude-repl--ws-dir)
+               (lambda (_ws) (error "no dir"))))
+      (should (equal (claude-repl--workspace-id)
+                     (substring (md5 (claude-repl--path-canonical "/fallback/dir/")) 0 8))))))
 
-(ert-deftest claude-repl-test-resolve-root-priority ()
-  "resolve-root should prefer git-root > project-root > default-directory."
-  (claude-repl-test--with-temp-buffer " *test-resolve*"
-    (setq-local claude-repl--project-root "/project")
-    (let ((default-directory "/default/"))
-      ;; With git root available
-      (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) "/git-root")))
-        (should (equal (claude-repl--resolve-root) "/git-root")))
-      ;; Without git root
-      (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) nil)))
-        (should (equal (claude-repl--resolve-root) "/project"))))))
 
 ;;;; ---- Tests: Buffer naming ----
 
@@ -687,56 +674,39 @@ environments without notification tools (terminal-notifier or osascript)."
   (let ((result (claude-repl--path-canonical "")))
     (should (stringp result))))
 
-;;;; ---- Tests: resolve-root ----
-
-(ert-deftest claude-repl-test-resolve-root-default-directory-only ()
-  "resolve-root should signal an error when git and project root are nil."
-  (claude-repl-test--with-temp-buffer " *test-resolve-dd*"
-    (setq-local claude-repl--project-root nil)
-    (let ((default-directory "/fallback/"))
-      (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) nil)))
-        (should-error (claude-repl--resolve-root) :type 'error)))))
-
-(ert-deftest claude-repl-test-resolve-root-verbose-logging ()
-  "resolve-root should call log-verbose with source label."
-  (let ((log-called nil))
-    (claude-repl-test--with-temp-buffer " *test-resolve-log*"
-      (setq-local claude-repl--project-root "/test/project")
-      (let ((claude-repl-debug 'verbose))
-        (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) nil))
-                  ((symbol-function 'claude-repl--log-verbose)
-                   (lambda (_ws fmt &rest _args)
-                     (when (string-match-p "resolve-root" fmt)
-                       (setq log-called t)))))
-          (claude-repl--resolve-root)
-          (should log-called))))))
-
 ;;;; ---- Tests: workspace-id ----
 
 (ert-deftest claude-repl-test-workspace-id-nil-root ()
-  "workspace-id should return nil when resolve-root returns nil."
-  (cl-letf (((symbol-function 'claude-repl--resolve-root) (lambda () nil)))
-    (should-not (claude-repl--workspace-id))))
+  "workspace-id should return nil when ws-dir errors and main-git-root is empty."
+  (let ((claude-repl--main-git-root ""))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'claude-repl--ws-dir)
+               (lambda (_ws) (error "no dir"))))
+      (should-not (claude-repl--workspace-id)))))
 
 (ert-deftest claude-repl-test-workspace-id-hash-length ()
   "workspace-id should return exactly 8 characters."
-  (cl-letf (((symbol-function 'claude-repl--resolve-root) (lambda () "/test/project")))
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+            ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/test/project")))
     (let ((id (claude-repl--workspace-id)))
       (should (= (length id) 8)))))
 
 (ert-deftest claude-repl-test-workspace-id-different-roots ()
   "Two different roots should produce different IDs."
   (let (id1 id2)
-    (cl-letf (((symbol-function 'claude-repl--resolve-root) (lambda () "/path/one")))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/path/one")))
       (setq id1 (claude-repl--workspace-id)))
-    (cl-letf (((symbol-function 'claude-repl--resolve-root) (lambda () "/path/two")))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws2"))
+              ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/path/two")))
       (setq id2 (claude-repl--workspace-id)))
     (should-not (equal id1 id2))))
 
 (ert-deftest claude-repl-test-workspace-id-deterministic ()
   "Same root should always produce the same ID."
   (let (id1 id2)
-    (cl-letf (((symbol-function 'claude-repl--resolve-root) (lambda () "/stable/path")))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/stable/path")))
       (setq id1 (claude-repl--workspace-id))
       (setq id2 (claude-repl--workspace-id)))
     (should (equal id1 id2))))

@@ -268,6 +268,11 @@ by vterm-buf presence; the :done write is not."
   "compute-perm-flag with nil project-dir should signal an error."
   (should-error (claude-repl--compute-perm-flag nil nil) :type 'error))
 
+(ert-deftest claude-repl-test-compute-perm-flag-chesscom-dir ()
+  "compute-perm-flag with ChessCom project-dir returns auto permissions."
+  (should (equal (claude-repl--compute-perm-flag nil "/tmp/ChessCom/test")
+                 "--permission-mode auto")))
+
 (ert-deftest claude-repl-test-assemble-cmd-sandboxed ()
   "assemble-cmd should use sandbox script when sandboxed."
   (let ((config (list :script "/usr/bin/claude-sandbox" :image "img")))
@@ -850,15 +855,17 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
         (should-not (plist-get result :sandboxed-p))))))
 
 (ert-deftest claude-repl-test-build-start-cmd-nil-project-dir ()
-  "build-start-cmd with nil :project-dir should signal an error."
+  "build-start-cmd with personal :project-dir should produce a command."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :active-env :bare-metal)
     (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
     (claude-repl--ws-put "ws1" :worktree-p nil)
-    (claude-repl--ws-put "ws1" :project-dir nil)
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/personal/project")
     (cl-letf (((symbol-function 'claude-repl--ensure-sandbox-image)
                (lambda (_ws) nil)))
-      (should-error (claude-repl--build-start-cmd "ws1") :type 'error))))
+      (let* ((result (claude-repl--build-start-cmd "ws1")))
+        (should (stringp (plist-get result :cmd)))
+        (should (string-match-p "claude" (plist-get result :cmd)))))))
 
 (ert-deftest claude-repl-test-build-start-cmd-empty-session-id ()
   "build-start-cmd with nil session-id should not include --resume or --continue."

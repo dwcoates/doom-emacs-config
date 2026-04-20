@@ -77,9 +77,9 @@ Returns a fresh empty instantiation when SAVED is nil."
 
 ;;;; Persistence file paths
 
-(defun claude-repl--history-file ()
-  "Return the path to the history file for the current project."
-  (expand-file-name claude-repl-history-filename (claude-repl--resolve-root)))
+(defun claude-repl--history-file (root)
+  "Return the path to the history file under ROOT."
+  (expand-file-name claude-repl-history-filename root))
 
 (defun claude-repl--state-file (root)
   "Return the path to the state file under ROOT, or nil if ROOT is nil."
@@ -128,17 +128,21 @@ rather than `default-directory' of whatever buffer is current.
 WS defaults to the current workspace name."
   (claude-repl--log ws "history-save ws=%s" ws)
   (if-let ((buf (claude-repl--ws-live-input-buffer ws)))
-      (let ((history (buffer-local-value 'claude-repl--input-history buf))
-            (file (with-current-buffer buf (claude-repl--history-file))))
+      (let* ((root (buffer-local-value 'claude-repl--project-root buf))
+             (history (buffer-local-value 'claude-repl--input-history buf))
+             (file (when root (claude-repl--history-file root))))
         (if history
             (claude-repl--write-sexp-file file history)
           (claude-repl--log ws "history-save: no history to save ws=%s" ws)))
     (claude-repl--log ws "history-save: no live input buffer ws=%s" ws)))
 
 (defun claude-repl--history-restore ()
-  "Load input history from disk into the current buffer."
+  "Load input history from disk into the current buffer.
+Uses buffer-local `claude-repl--project-root' to locate the history file."
   (claude-repl--log nil "history-restore")
-  (let ((data (claude-repl--read-sexp-file-if-exists (claude-repl--history-file))))
+  (let ((data (when claude-repl--project-root
+                (claude-repl--read-sexp-file-if-exists
+                 (claude-repl--history-file claude-repl--project-root)))))
     (if data
         (setq claude-repl--input-history data)
       (claude-repl--log nil "history-restore: no data found, history unchanged"))))

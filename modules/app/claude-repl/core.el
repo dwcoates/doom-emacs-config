@@ -301,25 +301,13 @@ Expands tildes and symlinks via `file-truename', then strips any trailing slash
 via `directory-file-name' so that the same directory always produces the same hash."
   (directory-file-name (file-truename path)))
 
-(defun claude-repl--resolve-root ()
-  "Return the project root directory.
-Tries git root, then buffer-local project root.  Signals an error if
-neither is available — falling back to `default-directory' is too
-dangerous (wrong workspace identity, wrong logfile, wrong project)."
-  (let* ((git (claude-repl--git-root))
-         (root (or git claude-repl--project-root)))
-    (unless root
-      (error "claude-repl--resolve-root: no git root and no buffer-local project root (default-directory=%s)"
-             default-directory))
-    (let ((source (if git "git" "buffer-local")))
-      (claude-repl--log-verbose nil "resolve-root source=%s root=%s" source root)
-      (claude-repl--path-canonical root))))
-
 (defun claude-repl--workspace-id ()
   "Return a short identifier for the current git workspace.
-Uses an MD5 hash of the canonical git root path.  Falls back to the buffer-local
-`claude-repl--project-root' and then `default-directory'."
-  (let* ((root (claude-repl--resolve-root))
+Uses an MD5 hash of the canonical project root path from the workspace hashmap.
+Falls back to `claude-repl--main-git-root' when no workspace is active yet."
+  (let* ((root (or (ignore-errors (claude-repl--ws-dir (+workspace-current-name)))
+                   (and (not (string-empty-p claude-repl--main-git-root))
+                        (claude-repl--path-canonical claude-repl--main-git-root))))
          (id (when root
                (substring (md5 (claude-repl--path-canonical root)) 0 claude-repl-workspace-id-length))))
     (claude-repl--log-verbose nil "workspace-id: root=%s id=%s" root id)

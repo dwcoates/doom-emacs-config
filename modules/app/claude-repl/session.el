@@ -176,8 +176,7 @@ needs building, optionally kicking off the build first."
          (active-env (claude-repl--ws-get ws :active-env))
          (project-dir (claude-repl--ws-get ws :project-dir))
          (sandbox-config (when (and worktree-p (eq active-env :sandbox))
-                           (claude-repl--resolve-sandbox-config
-                            (claude-repl--git-root project-dir)))))
+                           (claude-repl--resolve-sandbox-config project-dir))))
     (claude-repl--log ws "ensure-sandbox-image: ws=%s worktree-p=%s env=%s config=%s"
                       ws (if worktree-p "yes" "no") active-env
                       (if sandbox-config "found" "nil"))
@@ -287,7 +286,8 @@ SANDBOXED-P means Docker mode with DOCKER-IMAGE; otherwise bare metal."
         (worktree-str    (if (plist-get start-info :worktree-p) "yes" "no"))
         (active-env      (plist-get start-info :active-env)))
     (claude-repl--log ws "start-claude ws=%s session-id=%s fork-session-id=%s worktree=%s env=%s cmd=%s dir=%s"
-                      ws session-id fork-session-id worktree-str active-env cmd default-directory)))
+                      ws session-id fork-session-id worktree-str active-env cmd
+                      (claude-repl--ws-get ws :project-dir))))
 
 (defun claude-repl--start-claude (ws)
   "Send the claude startup command to the current vterm buffer for WS.

@@ -206,10 +206,7 @@ CALLBACK is called with (SUCCESS-P OUTPUT) when the process exits."
   "Compute worktree paths for branch NAME.
 Returns a plist with keys :git-root, :dirname, :branch-name,
 :worktree-parent, :path, and :in-worktree."
-  (let* ((git-root-raw (claude-repl--git-string "rev-parse" "--show-toplevel"))
-         (_ (when (string-match-p "^fatal" git-root-raw)
-              (user-error "Not in a git repository")))
-         (git-root (claude-repl--path-canonical git-root-raw))
+  (let* ((git-root (claude-repl--path-canonical claude-repl--main-git-root))
          (dirname (claude-repl--bare-workspace-name name))
          (git-root-parent (file-name-directory git-root))
          (in-worktree (file-regular-p (expand-file-name ".git" git-root)))
@@ -492,14 +489,10 @@ it is normalized to the dirname before lookup."
   "Remove the git worktree at PROJECT-DIR and deregister it from projectile.
 Locates the parent git repo by searching upward from PROJECT-DIR's parent."
   (claude-repl--log nil "remove-git-worktree: project-dir=%s" project-dir)
-  (let* ((parent (file-name-directory (directory-file-name project-dir)))
-         (git-root (locate-dominating-file parent ".git")))
-    (if git-root
-        (let ((result (claude-repl--git-string
-                       "-C" (expand-file-name git-root)
-                       "worktree" "remove" (expand-file-name project-dir))))
-          (claude-repl--log nil "finish-workspace worktree-remove: %s" result))
-      (claude-repl--log nil "remove-git-worktree: no git root found above %s, skipping worktree remove" parent)))
+  (let ((result (claude-repl--git-string
+                 "-C" claude-repl--main-git-root
+                 "worktree" "remove" (expand-file-name project-dir))))
+    (claude-repl--log nil "finish-workspace worktree-remove: %s" result))
   (projectile-remove-known-project (file-name-as-directory project-dir)))
 
 (defun claude-repl--finish-workspace (ws)

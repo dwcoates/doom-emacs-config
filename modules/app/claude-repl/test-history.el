@@ -132,9 +132,8 @@
 
 (ert-deftest claude-repl-test-history-file-path ()
   "`claude-repl--history-file' returns `<root>/.claude-repl-history'."
-  (cl-letf (((symbol-function 'claude-repl--resolve-root) (lambda () "/test/root")))
-    (should (equal (claude-repl--history-file)
-                   (expand-file-name ".claude-repl-history" "/test/root")))))
+  (should (equal (claude-repl--history-file "/test/root")
+                 (expand-file-name ".claude-repl-history" "/test/root"))))
 
 ;;;; ---- Tests: Bug 8 - history-save uses input buffer root ----
 
@@ -741,10 +740,9 @@
   "history-restore leaves history nil when no file exists."
   (claude-repl-test--with-temp-buffer " *test-hist-restore-none*"
     (setq-local claude-repl--input-history nil)
-    (cl-letf (((symbol-function 'claude-repl--resolve-root)
-               (lambda () "/nonexistent/path")))
-      (claude-repl--history-restore)
-      (should-not claude-repl--input-history))))
+    (setq-local claude-repl--project-root "/nonexistent/path")
+    (claude-repl--history-restore)
+    (should-not claude-repl--input-history)))
 
 ;;;; ---- Tests: with-error-logging edge cases ----
 
@@ -869,12 +867,10 @@
             (setq-local claude-repl--project-root tmpdir)
             (setq-local claude-repl--input-history '("only-one"))
             (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
-            (cl-letf (((symbol-function 'claude-repl--resolve-root)
-                       (lambda () tmpdir)))
-              (claude-repl--history-save "test-ws")
-              ;; Read back and verify
-              (let ((file (expand-file-name ".claude-repl-history" tmpdir)))
-                (should (equal (claude-repl--read-sexp-file file) '("only-one"))))))
+            (claude-repl--history-save "test-ws")
+            ;; Read back and verify
+            (let ((file (expand-file-name ".claude-repl-history" tmpdir)))
+              (should (equal (claude-repl--read-sexp-file file) '("only-one")))))
         (delete-directory tmpdir t)))))
 
 ;;;; ---- Tests: history-restore edge cases ----
@@ -885,13 +881,12 @@
     (unwind-protect
         (claude-repl-test--with-temp-buffer " *test-hist-nonlist*"
           (setq-local claude-repl--input-history nil)
+          (setq-local claude-repl--project-root tmpdir)
           ;; Write a string (non-list) to the history file
           (claude-repl--write-sexp-file
            (expand-file-name ".claude-repl-history" tmpdir) "just-a-string")
-          (cl-letf (((symbol-function 'claude-repl--resolve-root)
-                     (lambda () tmpdir)))
-            (claude-repl--history-restore)
-            (should (equal claude-repl--input-history "just-a-string"))))
+          (claude-repl--history-restore)
+          (should (equal claude-repl--input-history "just-a-string")))
       (delete-directory tmpdir t))))
 
 (ert-deftest claude-repl-test-history-restore-overwrites-existing ()
@@ -900,12 +895,11 @@
     (unwind-protect
         (claude-repl-test--with-temp-buffer " *test-hist-overwrite*"
           (setq-local claude-repl--input-history '("old1" "old2"))
+          (setq-local claude-repl--project-root tmpdir)
           (claude-repl--write-sexp-file
            (expand-file-name ".claude-repl-history" tmpdir) '("new1"))
-          (cl-letf (((symbol-function 'claude-repl--resolve-root)
-                     (lambda () tmpdir)))
-            (claude-repl--history-restore)
-            (should (equal claude-repl--input-history '("new1")))))
+          (claude-repl--history-restore)
+          (should (equal claude-repl--input-history '("new1"))))
       (delete-directory tmpdir t))))
 
 ;;;; ---- Tests: collect-env-state edge cases ----
