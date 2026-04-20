@@ -344,6 +344,34 @@ environments without notification tools (terminal-notifier or osascript)."
       (claude-repl--do-log nil "test" nil)
       (should (string-match-p "^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\\." captured-msg)))))
 
+(ert-deftest claude-repl-test-do-log-error-p-signals-error ()
+  "do-log with ERROR-P non-nil should signal `error' instead of calling `message'."
+  (let ((message-called nil))
+    (cl-letf (((symbol-function 'message)
+               (lambda (&rest _) (setq message-called t)))
+              ((symbol-function 'claude-repl--do-log-to-file) #'ignore))
+      (should-error (claude-repl--do-log nil "boom %s" '("reason") t) :type 'error)
+      (should-not message-called))))
+
+(ert-deftest claude-repl-test-do-log-error-p-includes-formatted-body ()
+  "do-log with ERROR-P should include FMT expansion in the error's data."
+  (cl-letf (((symbol-function 'claude-repl--do-log-to-file) #'ignore))
+    (condition-case err
+        (progn
+          (claude-repl--do-log nil "thing failed: %s" '("why") t)
+          (should nil))
+      (error
+       (should (string-match-p "thing failed: why" (error-message-string err)))))))
+
+(ert-deftest claude-repl-test-do-log-error-p-writes-to-file-before-signalling ()
+  "do-log with ERROR-P should write to the logfile before the error unwinds execution."
+  (let ((file-write-called nil))
+    (cl-letf (((symbol-function 'claude-repl--do-log-to-file)
+               (lambda (_text) (setq file-write-called t))))
+      (ignore-errors
+        (claude-repl--do-log nil "boom" nil t))
+      (should file-write-called))))
+
 ;;;; ---- Tests: log ----
 
 (ert-deftest claude-repl-test-log-verbose-symbol-still-logs ()
@@ -419,6 +447,34 @@ environments without notification tools (terminal-notifier or osascript)."
       (let ((claude-repl-debug 'verbose))
         (claude-repl--log-verbose nil "ts check")
         (should (string-match-p "^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\\." captured-msg))))))
+
+;;;; ---- Tests: error ----
+
+(ert-deftest claude-repl-test-error-signals-regardless-of-debug ()
+  "`claude-repl--error' should signal even when `claude-repl-debug' is nil."
+  (cl-letf (((symbol-function 'claude-repl--do-log-to-file) #'ignore))
+    (let ((claude-repl-debug nil))
+      (should-error (claude-repl--error nil "bad %s" "thing") :type 'error))))
+
+(ert-deftest claude-repl-test-error-formats-fmt-and-args ()
+  "`claude-repl--error' should expand FMT with ARGS in the error message."
+  (cl-letf (((symbol-function 'claude-repl--do-log-to-file) #'ignore))
+    (condition-case err
+        (progn
+          (claude-repl--error nil "ws=%s code=%d" "foo" 7)
+          (should nil))
+      (error
+       (should (string-match-p "ws=foo code=7" (error-message-string err)))))))
+
+(ert-deftest claude-repl-test-error-includes-claude-repl-tag ()
+  "`claude-repl--error' output should include the [claude-repl] tag."
+  (cl-letf (((symbol-function 'claude-repl--do-log-to-file) #'ignore))
+    (condition-case err
+        (progn
+          (claude-repl--error nil "something")
+          (should nil))
+      (error
+       (should (string-match-p "\\[claude-repl\\] something" (error-message-string err)))))))
 
 ;;;; ---- Tests: log-to-file ----
 
@@ -941,7 +997,7 @@ ownership intact across that transition."
 ;;;; ---- Tests: active-inst ----
 
 (ert-deftest claude-repl-test-active-inst-default-bare-metal ()
-  "active-inst should error when no :active-env is set (ensure-ws-env not called)."
+  "active-inst should error when no :active-env is set (initialize-ws-env not called)."
   (claude-repl-test--with-clean-state
     (should-error (claude-repl--active-inst "ws1") :type 'error)))
 

@@ -137,23 +137,26 @@ Returns (:needs-build t :install-script PATH) if the image is not built yet."
 
 ;;;; Workspace environment initialization
 
-(defun claude-repl--ensure-ws-env (ws)
+(defun claude-repl--initialize-ws-env (ws)
   "Initialize environment state for workspace WS if not already set.
 If a .claude-repl-state file exists, restores state from it; otherwise
 creates fresh defaults.  Validates the result either way.
-Session IDs are delivered by hooks, not scanned here."
-  (claude-repl--log ws "ensure-ws-env: ws=%s" ws)
-  (if (claude-repl--ws-get ws :active-env)
-      (claude-repl--log ws "ensure-ws-env: already initialized ws=%s" ws)
-    (let ((saved (claude-repl--read-state-file ws)))
-      (if saved
-          (progn
-            (claude-repl--log ws "ensure-ws-env: restoring from state file ws=%s" ws)
-            (claude-repl--apply-restored-state ws saved))
-        (claude-repl--log ws "ensure-ws-env: no state file, creating fresh ws=%s" ws)
-        (claude-repl--fresh-ws-env ws)
-        (claude-repl--state-save ws)))
-    (claude-repl--validate-ws-env ws)))
+Session IDs are delivered by hooks, not scanned here.
+
+Intended to be called only on workspace initialization
+"
+  (claude-repl--log ws "initialize-ws-env: ws=%s" ws)
+  ;; FIXME: what's this if statement doing?
+  (when (claude-repl--ws-get ws :active-env)
+      (claude-repl--error ws "initialize-ws-env: already initialized ws=%s" ws))
+  (let ((saved (claude-repl--read-state-file ws)))
+    (if saved
+        (progn
+          (claude-repl--apply-restored-state ws saved))
+      (claude-repl--log ws "initialize-ws-env: no state file, creating fresh ws=%s" ws)
+      (claude-repl--fresh-ws-env ws)))
+  (claude-repl--validate-ws-env ws)
+  )
 
 (defun claude-repl--prompt-sandbox-build (sandbox-config)
   "Prompt the user to build a missing sandbox image from SANDBOX-CONFIG.
@@ -247,6 +250,7 @@ Returns a plist (:cmd CMD :sandboxed-p BOOL :docker-image IMAGE
 with everything the caller needs for logging and mode-line setup."
   (claude-repl--log ws "build-start-cmd: ws=%s" ws)
   (let* ((inst (claude-repl--active-inst ws))
+         ;; FIXME we have to ensure that every time we start claude process for any reason, we have sentinel watching for a session-id update. we can't eb always blindly reading session-id from a file, because chance
          (session-id (claude-repl-instantiation-session-id inst))
          (worktree-p (claude-repl--ws-get ws :worktree-p))
          (project-dir (claude-repl--ws-get ws :project-dir))
@@ -301,7 +305,7 @@ For worktree workspaces with :active-env :sandbox, delegates to
 .claude/sandbox/claude-sandbox if a sandbox image is configured.
 Falls back to bare-metal Claude otherwise."
   (let* ((start-info (progn
-                       (claude-repl--ensure-ws-env ws)
+                       (claude-repl--initialize-ws-env ws)
                        (claude-repl--build-start-cmd ws)))
          (cmd         (plist-get start-info :cmd))
          (sandboxed-p (plist-get start-info :sandboxed-p))
@@ -312,7 +316,7 @@ Falls back to bare-metal Claude otherwise."
       (claude-repl--ws-put ws :fork-session-id nil))
     (setq-local mode-line-format
                 (claude-repl--sandbox-mode-line sandboxed-p
-                                               (plist-get start-info :docker-image)))
+                                                (plist-get start-info :docker-image)))
     (claude-repl--log-session-start ws start-info)
     (claude-repl--log ws "start-claude: setting ready=nil for ws=%s" ws)
     (setq-local claude-repl--ready nil)
@@ -561,7 +565,7 @@ Gives up after 30s. This is a fallback — the title-change path is the happy pa
   (claude-repl--cancel-ready-timer ws)
   (let ((start-time (float-time)))
     (claude-repl--ws-put ws :ready-timer
-      (run-at-time
-       claude-repl-ready-poll-interval claude-repl-ready-poll-interval
-       #'claude-repl--ready-timer-tick
-       ws start-time))))
+                         (run-at-time
+                          claude-repl-ready-poll-interval claude-repl-ready-poll-interval
+                          #'claude-repl--ready-timer-tick
+                          ws start-time))))

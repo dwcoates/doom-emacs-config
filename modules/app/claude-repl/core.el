@@ -196,12 +196,16 @@ an error — logging must not break the caller."
           (write-region (concat text "\n") nil path t 'silent)
         (error (message "[claude-repl] WARNING: log write failed to %s: %S" path err))))))
 
-(defun claude-repl--do-log (ws fmt args)
+(defun claude-repl--do-log (ws fmt args &optional error-p)
   "Internal: emit FMT + ARGS via `message' with a timestamp prefix and trailing WS metadata.
 The message body comes immediately after the [claude-repl] tag, with workspace
 metadata appended at the end for readability.  Workspace metadata is concatenated
 after formatting, so any `%' characters in metadata are treated as data, not
 format directives.
+
+When ERROR-P is non-nil, signals the formatted line via `error' instead of
+`message'.  The logfile write happens first so the line is still captured
+before execution unwinds.
 
 When FMT isn't a string (a caller bug), captures a backtrace to
 *claude-repl-log-bug* on the first occurrence, then logs a safe
@@ -216,8 +220,10 @@ When FMT isn't a string (a caller bug), captures a backtrace to
                         (format-time-string "%H:%M:%S.%3N")
                         fmt
                         (claude-repl--format-ws-metadata ws)))))
-    (message "%s" text)
-    (claude-repl--do-log-to-file text)))
+    (claude-repl--do-log-to-file text)
+    (if error-p
+        (error "%s" text)
+      (message "%s" text))))
 
 (defun claude-repl--log (ws fmt &rest args)
   "Log a timestamped debug message when `claude-repl-debug' is non-nil.
@@ -234,16 +240,18 @@ Used for high-frequency, low-signal events."
   (when (eq claude-repl-debug 'verbose)
     (claude-repl--do-log ws fmt args)))
 
-;;; Git and workspace identity
+(defun claude-repl--error (ws fmt &rest args)
+  "Signal an error with a [claude-repl] tag, timestamp, and workspace metadata.
+WS is the workspace name for context (or nil).  FMT and ARGS are formatted
+the same way `claude-repl--log' formats them, and the resulting line is also
+written to the logfile before the error is signalled so the failure is
+captured regardless of whether debug logging is on.
 
-(defvar-local claude-repl--project-root nil
-  "Buffer-local git root for Claude REPL buffers.
-Set when vterm/input buffers are created so workspace-id works from them.")
-;; Survive `kill-all-local-variables' from major-mode activation.  Callers
-;; would otherwise have to re-set this after every `vterm-mode' /
-;; `claude-input-mode' call, which is easy to forget and was in fact
-;; missing from `claude-repl--ensure-input-buffer'.
-(put 'claude-repl--project-root 'permanent-local t)
+Unlike `claude-repl--log', this fires regardless of `claude-repl-debug' —
+errors are not gated on the debug flag."
+  (claude-repl--do-log ws fmt args t))
+
+;;; Git and workspace identity
 
 (defun claude-repl--dir-has-git-p (d)
   "Return non-nil if directory D contains a .git directory or file."
@@ -277,6 +285,7 @@ Suitable for init-time calls that may run outside a git repository."
     (concat (mapconcat #'shell-quote-argument (cons "git" args) " ")
             " 2>/dev/null"))))
 
+;; FIXME: rename this to claude-repl--debug-git-bracnh. this is not meant for production code!
 (defvar claude-repl-git-branch
   (claude-repl--git-string-quiet "rev-parse" "--abbrev-ref" "HEAD")
   "The git branch active when claude-repl config was loaded.")
@@ -375,13 +384,13 @@ the canonical worktree path) wins over a drifted `default-directory'."
 (defun claude-repl--active-inst (ws)
   "Return the active `claude-repl-instantiation' for workspace WS.
 Signals an error if the environment or instantiation struct is missing —
-both must be initialized by `claude-repl--ensure-ws-env' before this is called."
+both must be initialized by `claude-repl--initialize-ws-env' before this is called."
   (let ((env (claude-repl--ws-get ws :active-env)))
     (unless env
-      (error "claude-repl--active-inst: workspace %s has no :active-env (ensure-ws-env not called?)" ws))
+      (error "claude-repl--active-inst: workspace %s has no :active-env (initialize-ws-env not called?)" ws))
     (let ((inst (claude-repl--ws-get ws env)))
       (unless inst
-        (error "claude-repl--active-inst: no instantiation struct for ws=%s env=%s (ensure-ws-env not called?)" ws env))
+        (error "claude-repl--active-inst: no instantiation struct for ws=%s env=%s (initialize-ws-env not called?)" ws env))
       inst)))
 
 (defvar-local claude-repl--owning-workspace nil

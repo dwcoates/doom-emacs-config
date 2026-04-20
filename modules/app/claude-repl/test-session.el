@@ -679,32 +679,25 @@ against stop events arriving after kill."
 
 ;;;; ---- Tests: Workspace environment initialization ----
 
-(ert-deftest claude-repl-test-ensure-ws-env-initializes-once ()
-  "ensure-ws-env should initialize environment only when :active-env is not set."
+(ert-deftest claude-repl-test-initialize-ws-env-initializes-fresh ()
+  "initialize-ws-env on a fresh workspace with no state file should set up
+default `:active-env' and instantiation structs for each environment."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function 'claude-repl--read-state-file)
                (lambda (_ws) nil)))
-      ;; First call: should initialize fresh
-      (claude-repl--ensure-ws-env "ws1")
+      (claude-repl--initialize-ws-env "ws1")
       (should (eq (claude-repl--ws-get "ws1" :active-env) :bare-metal))
       (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :sandbox)))
-      (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :bare-metal)))
-      ;; Second call: should be a no-op (already initialized)
-      (setf (claude-repl-instantiation-session-id
-             (claude-repl--ws-get "ws1" :bare-metal)) "abc")
-      (claude-repl--ensure-ws-env "ws1")
-      ;; session-id should be unchanged — not re-initialized
-      (should (equal (claude-repl-instantiation-session-id
-                      (claude-repl--ws-get "ws1" :bare-metal)) "abc")))))
+      (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :bare-metal))))))
 
-(ert-deftest claude-repl-test-ensure-ws-env-preserves-existing ()
-  "ensure-ws-env should not overwrite existing :active-env."
+(ert-deftest claude-repl-test-initialize-ws-env-errors-when-already-initialized ()
+  "initialize-ws-env signals an error when the workspace already has
+`:active-env' set.  The function is a one-time initializer; a second call
+indicates a caller-side contract violation, so failing loudly is preferable
+to silently re-running and clobbering session-ids on the instantiation structs."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :active-env :sandbox)
-    (claude-repl--ws-put "ws1" :sandbox (make-claude-repl-instantiation))
-    (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
-    (claude-repl--ensure-ws-env "ws1")
-    (should (eq (claude-repl--ws-get "ws1" :active-env) :sandbox))))
+    (should-error (claude-repl--initialize-ws-env "ws1") :type 'error)))
 
 ;;;; ---- Tests: prompt-sandbox-build ----
 
@@ -900,7 +893,7 @@ against stop events arriving after kill."
       (let ((sent-string nil)
             (return-sent nil)
             (timer-scheduled nil))
-        (cl-letf (((symbol-function 'claude-repl--ensure-ws-env) #'ignore)
+        (cl-letf (((symbol-function 'claude-repl--initialize-ws-env) #'ignore)
                   ((symbol-function 'claude-repl--build-start-cmd)
                    (lambda (_ws) (list :cmd "claude --dangerously-skip-permissions"
                                        :sandboxed-p nil
@@ -930,7 +923,7 @@ against stop events arriving after kill."
     (setq-local claude-repl--owning-workspace "ws1")
     (claude-repl-test--with-clean-state
       (claude-repl--ws-put "ws1" :fork-session-id "fork-abc")
-      (cl-letf (((symbol-function 'claude-repl--ensure-ws-env) #'ignore)
+      (cl-letf (((symbol-function 'claude-repl--initialize-ws-env) #'ignore)
                 ((symbol-function 'claude-repl--build-start-cmd)
                  (lambda (_ws) (list :cmd "claude --resume fork-abc --fork-session"
                                      :sandboxed-p nil
@@ -954,7 +947,7 @@ against stop events arriving after kill."
   (claude-repl-test--with-temp-buffer " *test-start-claude-modeline*"
     (setq-local claude-repl--owning-workspace "ws1")
     (claude-repl-test--with-clean-state
-      (cl-letf (((symbol-function 'claude-repl--ensure-ws-env) #'ignore)
+      (cl-letf (((symbol-function 'claude-repl--initialize-ws-env) #'ignore)
                 ((symbol-function 'claude-repl--build-start-cmd)
                  (lambda (_ws) (list :cmd "claude-sandbox"
                                      :sandboxed-p t
@@ -978,7 +971,7 @@ against stop events arriving after kill."
     (setq-local claude-repl--ready t)
     (claude-repl-test--with-clean-state
       (let ((ready-at-send nil))
-        (cl-letf (((symbol-function 'claude-repl--ensure-ws-env) #'ignore)
+        (cl-letf (((symbol-function 'claude-repl--initialize-ws-env) #'ignore)
                   ((symbol-function 'claude-repl--build-start-cmd)
                    (lambda (_ws) (list :cmd "claude"
                                        :sandboxed-p nil
@@ -1009,7 +1002,7 @@ buffer-local may not be pinned yet."
     (claude-repl-test--with-clean-state
       (let ((ws-used nil))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "persp-current-ws"))
-                  ((symbol-function 'claude-repl--ensure-ws-env)
+                  ((symbol-function 'claude-repl--initialize-ws-env)
                    (lambda (ws) (setq ws-used ws)))
                   ((symbol-function 'claude-repl--build-start-cmd)
                    (lambda (_ws) (list :cmd "claude"

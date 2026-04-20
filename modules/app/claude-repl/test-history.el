@@ -135,20 +135,22 @@
   (should (equal (claude-repl--history-file "/test/root")
                  (expand-file-name ".claude-repl-history" "/test/root"))))
 
-;;;; ---- Tests: Bug 8 - history-save uses input buffer root ----
+;;;; ---- Tests: history-save path resolution ----
 
-(ert-deftest claude-repl-test-bug8-history-save-uses-input-buffer-root ()
-  "Bug 8: history-save should use the input buffer's project root."
+(ert-deftest claude-repl-test-history-save-uses-ws-project-dir ()
+  "history-save should compute the history file path from the workspace's
+`:project-dir', not from `default-directory' or any buffer-local."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer " *test-hist-save*"
-      (setq-local claude-repl--project-root "/input-buffer-root")
-      (setq-local claude-repl--input-history '("entry1" "entry2"))
-      (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
-      ;; Verify the file path computed from the input buffer's project root
-      (let* ((buf (claude-repl--ws-get "test-ws" :input-buffer))
-             (root (buffer-local-value 'claude-repl--project-root buf))
-             (file (expand-file-name ".claude-repl-history" root)))
-        (should (string-match-p "/input-buffer-root" file))))))
+    (let ((tmpdir (make-temp-file "test-hist-pdir-" t)))
+      (unwind-protect
+          (claude-repl-test--with-temp-buffer " *test-hist-save-pdir*"
+            (setq-local claude-repl--input-history '("entry1" "entry2"))
+            (claude-repl--ws-put "test-ws" :project-dir tmpdir)
+            (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
+            (let ((default-directory "/should-not-be-used/"))
+              (claude-repl--history-save "test-ws"))
+            (should (file-exists-p (expand-file-name ".claude-repl-history" tmpdir))))
+        (delete-directory tmpdir t)))))
 
 ;;;; ---- Tests: history-push with explicit text argument ----
 
@@ -614,10 +616,10 @@
     (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
     (should-error (claude-repl--validate-ws-env "ws"))))
 
-;;;; ---- Tests: ensure-ws-env integration ----
+;;;; ---- Tests: initialize-ws-env integration ----
 
-(ert-deftest claude-repl-test-ensure-ws-env-restores-from-file ()
-  "ensure-ws-env restores full state from disk including :active-env."
+(ert-deftest claude-repl-test-initialize-ws-env-restores-from-file ()
+  "initialize-ws-env restores full state from disk including :active-env."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-" t)))
       (unwind-protect
@@ -629,7 +631,7 @@
                :bare-metal (:session-id "bm-id")
                :sandbox (:session-id "sb-id")))
             (claude-repl--ws-put "ws" :project-dir tmpdir)
-            (claude-repl--ensure-ws-env "ws")
+            (claude-repl--initialize-ws-env "ws")
             (should (eq (claude-repl--ws-get "ws" :active-env) :sandbox))
             (should (equal (claude-repl--ws-get "ws" :project-dir) "/restored/root"))
             (should (equal (claude-repl-instantiation-session-id
@@ -640,14 +642,14 @@
                            "sb-id")))
         (delete-directory tmpdir t)))))
 
-(ert-deftest claude-repl-test-ensure-ws-env-fresh-when-no-file ()
-  "ensure-ws-env creates fresh defaults when no state file exists."
+(ert-deftest claude-repl-test-initialize-ws-env-fresh-when-no-file ()
+  "initialize-ws-env creates fresh defaults when no state file exists."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-" t)))
       (unwind-protect
           (progn
             (claude-repl--ws-put "ws" :project-dir tmpdir)
-            (claude-repl--ensure-ws-env "ws")
+            (claude-repl--initialize-ws-env "ws")
             (should (eq (claude-repl--ws-get "ws" :active-env) :bare-metal))
             (should (claude-repl-instantiation-p (claude-repl--ws-get "ws" :bare-metal)))
             (should (claude-repl-instantiation-p (claude-repl--ws-get "ws" :sandbox)))
@@ -655,8 +657,8 @@
                          (claude-repl--ws-get "ws" :bare-metal))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest claude-repl-test-ensure-ws-env-save-restore-round-trip ()
-  "state-save followed by ensure-ws-env restores :active-env across restart."
+(ert-deftest claude-repl-test-initialize-ws-env-save-restore-round-trip ()
+  "state-save followed by initialize-ws-env restores :active-env across restart."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-env-" t)))
       (unwind-protect
@@ -672,7 +674,7 @@
             ;; Simulate post-restart: clear in-memory state
             (clrhash claude-repl--workspaces)
             (claude-repl--ws-put "ws" :project-dir tmpdir)
-            (claude-repl--ensure-ws-env "ws")
+            (claude-repl--initialize-ws-env "ws")
             ;; :active-env should be restored to :sandbox
             (should (eq (claude-repl--ws-get "ws" :active-env) :sandbox))
             (should (equal (claude-repl-instantiation-session-id
@@ -688,16 +690,15 @@
     (let ((tmpdir (make-temp-file "test-hist-" t)))
       (unwind-protect
           (claude-repl-test--with-temp-buffer " *test-hist-round-trip*"
-            (setq-local claude-repl--project-root tmpdir)
             (setq-local default-directory tmpdir)
             (setq-local claude-repl--input-history '("third" "second" "first"))
+            (claude-repl--ws-put "test-ws" :project-dir tmpdir)
             (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
             ;; Save
             (claude-repl--history-save "test-ws")
             ;; Clear and restore
             (setq-local claude-repl--input-history nil)
-            (let ((default-directory tmpdir))
-              (claude-repl--history-restore))
+            (claude-repl--history-restore "test-ws")
             (should (equal claude-repl--input-history '("third" "second" "first"))))
         (delete-directory tmpdir t)))))
 
@@ -707,8 +708,8 @@
     (let ((tmpdir (make-temp-file "test-hist-" t)))
       (unwind-protect
           (claude-repl-test--with-temp-buffer " *test-hist-save-nil*"
-            (setq-local claude-repl--project-root tmpdir)
             (setq-local claude-repl--input-history nil)
+            (claude-repl--ws-put "test-ws" :project-dir tmpdir)
             (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
             (claude-repl--history-save "test-ws")
             ;; File should not exist
@@ -738,11 +739,12 @@
 
 (ert-deftest claude-repl-test-history-restore-no-file ()
   "history-restore leaves history nil when no file exists."
-  (claude-repl-test--with-temp-buffer " *test-hist-restore-none*"
-    (setq-local claude-repl--input-history nil)
-    (setq-local claude-repl--project-root "/nonexistent/path")
-    (claude-repl--history-restore)
-    (should-not claude-repl--input-history)))
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-hist-restore-none*"
+      (setq-local claude-repl--input-history nil)
+      (claude-repl--ws-put "test-ws" :project-dir "/nonexistent/path")
+      (claude-repl--history-restore "test-ws")
+      (should-not claude-repl--input-history))))
 
 ;;;; ---- Tests: with-error-logging edge cases ----
 
@@ -864,8 +866,8 @@
     (let ((tmpdir (make-temp-file "test-hist-single-" t)))
       (unwind-protect
           (claude-repl-test--with-temp-buffer " *test-hist-single*"
-            (setq-local claude-repl--project-root tmpdir)
             (setq-local claude-repl--input-history '("only-one"))
+            (claude-repl--ws-put "test-ws" :project-dir tmpdir)
             (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
             (claude-repl--history-save "test-ws")
             ;; Read back and verify
@@ -877,30 +879,32 @@
 
 (ert-deftest claude-repl-test-history-restore-non-list-data ()
   "history-restore sets history to whatever is in the file, even non-list."
-  (let ((tmpdir (make-temp-file "test-hist-nonlist-" t)))
-    (unwind-protect
-        (claude-repl-test--with-temp-buffer " *test-hist-nonlist*"
-          (setq-local claude-repl--input-history nil)
-          (setq-local claude-repl--project-root tmpdir)
-          ;; Write a string (non-list) to the history file
-          (claude-repl--write-sexp-file
-           (expand-file-name ".claude-repl-history" tmpdir) "just-a-string")
-          (claude-repl--history-restore)
-          (should (equal claude-repl--input-history "just-a-string")))
-      (delete-directory tmpdir t))))
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-hist-nonlist-" t)))
+      (unwind-protect
+          (claude-repl-test--with-temp-buffer " *test-hist-nonlist*"
+            (setq-local claude-repl--input-history nil)
+            (claude-repl--ws-put "test-ws" :project-dir tmpdir)
+            ;; Write a string (non-list) to the history file
+            (claude-repl--write-sexp-file
+             (expand-file-name ".claude-repl-history" tmpdir) "just-a-string")
+            (claude-repl--history-restore "test-ws")
+            (should (equal claude-repl--input-history "just-a-string")))
+        (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-test-history-restore-overwrites-existing ()
   "history-restore overwrites existing history, does not append."
-  (let ((tmpdir (make-temp-file "test-hist-overwrite-" t)))
-    (unwind-protect
-        (claude-repl-test--with-temp-buffer " *test-hist-overwrite*"
-          (setq-local claude-repl--input-history '("old1" "old2"))
-          (setq-local claude-repl--project-root tmpdir)
-          (claude-repl--write-sexp-file
-           (expand-file-name ".claude-repl-history" tmpdir) '("new1"))
-          (claude-repl--history-restore)
-          (should (equal claude-repl--input-history '("new1"))))
-      (delete-directory tmpdir t))))
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-hist-overwrite-" t)))
+      (unwind-protect
+          (claude-repl-test--with-temp-buffer " *test-hist-overwrite*"
+            (setq-local claude-repl--input-history '("old1" "old2"))
+            (claude-repl--ws-put "test-ws" :project-dir tmpdir)
+            (claude-repl--write-sexp-file
+             (expand-file-name ".claude-repl-history" tmpdir) '("new1"))
+            (claude-repl--history-restore "test-ws")
+            (should (equal claude-repl--input-history '("new1"))))
+        (delete-directory tmpdir t)))))
 
 ;;;; ---- Tests: collect-env-state edge cases ----
 
@@ -985,10 +989,10 @@
             (should (equal (claude-repl--read-state-file "ws") 42)))
         (delete-directory tmpdir t)))))
 
-;;;; ---- Tests: ensure-ws-env with missing/corrupt state files ----
+;;;; ---- Tests: initialize-ws-env with missing/corrupt state files ----
 
-(ert-deftest claude-repl-test-ensure-ws-env-empty-file-creates-fresh ()
-  "ensure-ws-env creates fresh state when state file is empty."
+(ert-deftest claude-repl-test-initialize-ws-env-empty-file-creates-fresh ()
+  "initialize-ws-env creates fresh state when state file is empty."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-empty-" t)))
       (unwind-protect
@@ -996,7 +1000,7 @@
             (with-temp-file (expand-file-name ".claude-repl-state" tmpdir)
               (insert ""))
             (claude-repl--ws-put "ws" :project-dir tmpdir)
-            (claude-repl--ensure-ws-env "ws")
+            (claude-repl--initialize-ws-env "ws")
             (should (eq (claude-repl--ws-get "ws" :active-env) :bare-metal))
             (should (claude-repl-instantiation-p
                      (claude-repl--ws-get "ws" :bare-metal)))
@@ -1004,8 +1008,8 @@
                          (claude-repl--ws-get "ws" :bare-metal))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest claude-repl-test-ensure-ws-env-invalid-elisp-creates-fresh ()
-  "ensure-ws-env creates fresh state when state file has unreadable elisp."
+(ert-deftest claude-repl-test-initialize-ws-env-invalid-elisp-creates-fresh ()
+  "initialize-ws-env creates fresh state when state file has unreadable elisp."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-invalid-" t)))
       (unwind-protect
@@ -1014,7 +1018,7 @@
             (with-temp-file (expand-file-name ".claude-repl-state" tmpdir)
               (insert "(unclosed paren"))
             (claude-repl--ws-put "ws" :project-dir tmpdir)
-            (claude-repl--ensure-ws-env "ws")
+            (claude-repl--initialize-ws-env "ws")
             (should (eq (claude-repl--ws-get "ws" :active-env) :bare-metal))
             (should (claude-repl-instantiation-p
                      (claude-repl--ws-get "ws" :bare-metal)))
@@ -1022,15 +1026,15 @@
                          (claude-repl--ws-get "ws" :bare-metal))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest claude-repl-test-ensure-ws-env-missing-file-writes-state ()
-  "ensure-ws-env creates state file on disk when it was missing."
+(ert-deftest claude-repl-test-initialize-ws-env-missing-file-writes-state ()
+  "initialize-ws-env creates state file on disk when it was missing."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-write-" t)))
       (unwind-protect
           (let ((state-path (expand-file-name ".claude-repl-state" tmpdir)))
             (claude-repl--ws-put "ws" :project-dir tmpdir)
             (should-not (file-exists-p state-path))
-            (claude-repl--ensure-ws-env "ws")
+            (claude-repl--initialize-ws-env "ws")
             (should (file-exists-p state-path))
             ;; Verify the written file is valid and round-trips
             (let ((data (claude-repl--read-sexp-file state-path)))

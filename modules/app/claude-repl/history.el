@@ -122,30 +122,32 @@ WS defaults to the current workspace name."
       nil)))
 
 (defun claude-repl--history-save (&optional ws)
-  "Write input history to disk.
-Resolves the project root from the input buffer's local variable
-rather than `default-directory' of whatever buffer is current.
+  "Write input history to disk for workspace WS.
+Resolves the project root via `claude-repl--ws-dir' so the location
+follows the workspace record rather than whatever buffer is current.
 WS defaults to the current workspace name."
-  (claude-repl--log ws "history-save ws=%s" ws)
-  (if-let ((buf (claude-repl--ws-live-input-buffer ws)))
-      (let* ((root (buffer-local-value 'claude-repl--project-root buf))
-             (history (buffer-local-value 'claude-repl--input-history buf))
-             (file (when root (claude-repl--history-file root))))
-        (if history
-            (claude-repl--write-sexp-file file history)
-          (claude-repl--log ws "history-save: no history to save ws=%s" ws)))
-    (claude-repl--log ws "history-save: no live input buffer ws=%s" ws)))
+  (let ((ws (or ws (+workspace-current-name))))
+    (claude-repl--log ws "history-save ws=%s" ws)
+    (if-let ((buf (claude-repl--ws-live-input-buffer ws)))
+        (let* ((root (claude-repl--ws-dir ws))
+               (history (buffer-local-value 'claude-repl--input-history buf))
+               (file (when root (claude-repl--history-file root))))
+          (if history
+              (claude-repl--write-sexp-file file history)
+            (claude-repl--log ws "history-save: no history to save ws=%s" ws)))
+      (claude-repl--log ws "history-save: no live input buffer ws=%s" ws))))
 
-(defun claude-repl--history-restore ()
-  "Load input history from disk into the current buffer.
-Uses buffer-local `claude-repl--project-root' to locate the history file."
-  (claude-repl--log nil "history-restore")
-  (let ((data (when claude-repl--project-root
-                (claude-repl--read-sexp-file-if-exists
-                 (claude-repl--history-file claude-repl--project-root)))))
+(defun claude-repl--history-restore (ws)
+  "Load input history from disk into the current buffer for workspace WS.
+Resolves the history file location via `claude-repl--ws-dir'."
+  (claude-repl--log ws "history-restore ws=%s" ws)
+  (let* ((root (ignore-errors (claude-repl--ws-dir ws)))
+         (data (when root
+                 (claude-repl--read-sexp-file-if-exists
+                  (claude-repl--history-file root)))))
     (if data
         (setq claude-repl--input-history data)
-      (claude-repl--log nil "history-restore: no data found, history unchanged"))))
+      (claude-repl--log ws "history-restore: no data found, history unchanged"))))
 
 ;;;; Session state persistence
 
@@ -180,6 +182,7 @@ Written to .claude-repl-state in the project root (alongside
 Creates instantiation structs from saved data and sets :project-dir
 and :active-env.  Each environment gets a struct built from its saved
 plist; environments with nil saved data get a fresh empty struct."
+  (claude-repl--log ws "initialize-ws-env: restoring from state file ws=%s" ws)
   (let ((saved-dir (plist-get state :project-dir))
         (saved-env (plist-get state :active-env)))
     (when saved-dir
@@ -201,9 +204,10 @@ plist; environments with nil saved data get a fresh empty struct."
 Sets :active-env to :bare-metal and creates empty instantiation structs
 for all environments."
   (claude-repl--log ws "fresh-ws-env: ws=%s" ws)
-  (claude-repl--ws-put ws :active-env :bare-metal)
+  (claude-repl--ws-put ws :active-env :bare-metal) ;; FIXME: why is this :bare-metal here? are we defaulting to bare-metal for new workspaces?
   (dolist (key claude-repl--environment-keys)
-    (claude-repl--ws-put ws key (make-claude-repl-instantiation))))
+    (claude-repl--ws-put ws key (make-claude-repl-instantiation)))
+  (claude-repl--state-save ws))
 
 (defun claude-repl--validate-ws-env (ws)
   "Validate that workspace WS has well-formed environment state.

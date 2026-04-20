@@ -468,14 +468,12 @@ this bounce alone is sufficient to keep keyboard nav out of vterm."
 (defun claude-repl--ensure-input-buffer (ws)
   "Create input buffer for workspace WS if needed, put in claude-input-mode."
   (claude-repl--log ws "ensure-input-buffer")
-  (let* ((root (claude-repl--ws-dir ws))
-         (input-buf (claude-repl--create-buffer ws "-input")))
+  (let ((input-buf (claude-repl--create-buffer ws "-input")))
     (claude-repl--ws-put ws :input-buffer input-buf)
     (with-current-buffer input-buf
-      (setq-local claude-repl--project-root root)
       (unless (eq major-mode 'claude-input-mode)
         (claude-input-mode)
-        (claude-repl--history-restore)))))
+        (claude-repl--history-restore ws)))))
 
 (defun claude-repl--kill-stale-vterm (&optional ws)
   "Kill the Claude vterm buffer for WS if it exists but has no live process.
@@ -515,8 +513,7 @@ is already in vterm-mode."
         (if (eq major-mode 'vterm-mode)
             (progn
               (claude-repl--log ws "ensure-vterm REUSING existing buffer %s for ws=%s (no --start-claude)" (buffer-name vterm-buf) ws))
-          (claude-repl--initialize-new-vterm ws root))
-        (setq-local claude-repl--project-root root)))))
+          (claude-repl--initialize-new-vterm ws root))))))
 
 ;;;; Panel show/hide strategies
 
