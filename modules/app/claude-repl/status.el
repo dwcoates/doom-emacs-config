@@ -460,7 +460,16 @@ Rule:
    ((eq claude :done)       :done)
    ((eq claude :idle)       :idle)
    ((null claude)           nil)
-   (t (error "claude-repl--composed-state: unknown claude-state %S" claude))))
+   (t
+    ;; DIAG: we expected this branch to be unreachable — every writer of
+    ;; :claude-state goes through the typed setter and passes one of the
+    ;; documented keywords. If we hit this, some other path is leaking an
+    ;; unexpected value into the hashmap. Log once per value and return
+    ;; nil so redisplay doesn't blank the tab-bar while we investigate.
+    (claude-repl--log nil
+                      "composed-state: UNKNOWN claude-state %S (type=%s) — returning nil"
+                      claude (type-of claude))
+    nil)))
 
 (defun claude-repl--ws-display-state (ws)
   "Return the palette display key for WS.

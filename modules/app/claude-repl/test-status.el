@@ -123,9 +123,10 @@
   (should (eq :idle (claude-repl--composed-state :idle nil)))
   (should (eq :idle (claude-repl--composed-state :idle :inactive))))
 
-(ert-deftest claude-repl-test-composed-unknown-errors ()
-  "Composed with an unknown claude-state should error hard — no silent fallback."
-  (should-error (claude-repl--composed-state :bogus nil)))
+(ert-deftest claude-repl-test-composed-unknown-returns-nil ()
+  "DIAGNOSTIC: unknown claude-state currently logs + returns nil (temporary —
+to be reverted to should-error once the leaking writer is found)."
+  (should-not (claude-repl--composed-state :bogus nil)))
 
 ;;;; ---- Tests: ws-display-state reads both axes ----
 
@@ -798,17 +799,17 @@
   ":done + clean → :idle (user staged/committed; nothing outstanding)."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :done)
-    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) t)))
-      (claude-repl--update-ws-state "ws1")
-      (should (eq (claude-repl--ws-claude-state "ws1") :idle)))))
+    (claude-repl--ws-put "ws1" :git-clean 'clean)
+    (claude-repl--update-ws-state "ws1")
+    (should (eq (claude-repl--ws-claude-state "ws1") :idle))))
 
 (ert-deftest claude-repl-test-update-ws-state-done-dirty-stays-done ()
   ":done + dirty stays :done — waiting on user to stage/commit."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :done)
-    (cl-letf (((symbol-function 'claude-repl--workspace-clean-p) (lambda (_ws) nil)))
-      (claude-repl--update-ws-state "ws1")
-      (should (eq (claude-repl--ws-claude-state "ws1") :done)))))
+    (claude-repl--ws-put "ws1" :git-clean 'dirty)
+    (claude-repl--update-ws-state "ws1")
+    (should (eq (claude-repl--ws-claude-state "ws1") :done))))
 
 (ert-deftest claude-repl-test-update-ws-state-inactive-dirty ()
   ":inactive + dirty should remain :inactive.
