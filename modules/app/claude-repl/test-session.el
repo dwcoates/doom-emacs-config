@@ -1103,25 +1103,25 @@ so re-initialization must not be attempted."
     (should (string-match-p "worktree=yes" msg-yes))
     (should (string-match-p "worktree=no" msg-no))))
 
-;;;; ---- Tests: vterm-running-p ----
+;;;; ---- Tests: claude-running-p ----
 
-(ert-deftest claude-repl-test-vterm-running-p-explicit-ws ()
-  "vterm-running-p with explicit ws should delegate to vterm-process-alive-p."
+(ert-deftest claude-repl-test-claude-running-p-explicit-ws ()
+  "claude-running-p with explicit ws should delegate to vterm-process-alive-p."
   (claude-repl-test--with-clean-state
     (let ((checked-ws nil))
       (cl-letf (((symbol-function 'claude-repl--vterm-process-alive-p)
                  (lambda (ws) (setq checked-ws ws) t)))
-        (should (claude-repl--vterm-running-p "my-ws"))
+        (should (claude-repl--claude-running-p "my-ws"))
         (should (equal checked-ws "my-ws"))))))
 
-(ert-deftest claude-repl-test-vterm-running-p-nil-ws-uses-current ()
-  "vterm-running-p with nil ws should fall back to +workspace-current-name."
+(ert-deftest claude-repl-test-claude-running-p-nil-ws-uses-current ()
+  "claude-running-p with nil ws should fall back to +workspace-current-name."
   (claude-repl-test--with-clean-state
     (let ((checked-ws nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
                 ((symbol-function 'claude-repl--vterm-process-alive-p)
                  (lambda (ws) (setq checked-ws ws) nil)))
-        (should-not (claude-repl--vterm-running-p))
+        (should-not (claude-repl--claude-running-p))
         (should (equal checked-ws "current-ws"))))))
 
 ;;;; ---- Tests: session edge cases (status transitions .md) ----

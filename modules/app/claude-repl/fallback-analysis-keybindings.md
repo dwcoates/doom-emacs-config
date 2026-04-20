@@ -55,7 +55,7 @@ Key instances:
 | 15 | 227-230 | `pcase` with **no catch-all** | `nil` for label -- **confusing output** |
 | 16 | 246-247 | `if path` for log file path | Empty string (no path shown) |
 | 28 | 341 | `if proc-alive` | String `"dead/nil"` (ambiguous) |
-| 39 | 28-32 | `if vterm-running-p` | No-op before workspace delete |
+| 39 | 28-32 | `if claude-running-p` | No-op before workspace delete |
 | 40 | 86-91 | `if vterm-live-p` | Paste silently dropped |
 
 ---

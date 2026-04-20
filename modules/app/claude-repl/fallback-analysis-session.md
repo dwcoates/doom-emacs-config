@@ -103,7 +103,7 @@
 
 | # | Line | Function |
 |---|---|---|
-| 33 | 435-438 | `claude-repl--vterm-running-p` |
+| 33 | 435-438 | `claude-repl--claude-running-p` |
 | 34 | 440-448 | `claude-repl--session-starting-p` |
 
 Both: `(or ws (+workspace-current-name))` -- could produce incorrect results if called from wrong workspace context.

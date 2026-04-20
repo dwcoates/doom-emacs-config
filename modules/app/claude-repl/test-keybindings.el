@@ -79,7 +79,7 @@
 (ert-deftest claude-repl-test-kill-before-workspace-delete-when-running ()
   "kill-before-workspace-delete should call claude-repl-kill when vterm is running."
   (let ((killed nil))
-    (cl-letf (((symbol-function 'claude-repl--vterm-running-p) (lambda () t))
+    (cl-letf (((symbol-function 'claude-repl--claude-running-p) (lambda () t))
               ((symbol-function 'claude-repl-kill) (lambda () (setq killed t))))
       (claude-repl--kill-before-workspace-delete)
       (should killed))))
@@ -87,7 +87,7 @@
 (ert-deftest claude-repl-test-kill-before-workspace-delete-when-not-running ()
   "kill-before-workspace-delete should not call claude-repl-kill when vterm is not running."
   (let ((killed nil))
-    (cl-letf (((symbol-function 'claude-repl--vterm-running-p) (lambda () nil))
+    (cl-letf (((symbol-function 'claude-repl--claude-running-p) (lambda () nil))
               ((symbol-function 'claude-repl-kill) (lambda () (setq killed t))))
       (claude-repl--kill-before-workspace-delete)
       (should-not killed))))
@@ -95,7 +95,7 @@
 (ert-deftest claude-repl-test-kill-before-workspace-delete-ignores-args ()
   "kill-before-workspace-delete should accept and ignore any arguments."
   (let ((killed nil))
-    (cl-letf (((symbol-function 'claude-repl--vterm-running-p) (lambda () t))
+    (cl-letf (((symbol-function 'claude-repl--claude-running-p) (lambda () t))
               ((symbol-function 'claude-repl-kill) (lambda () (setq killed t))))
       (claude-repl--kill-before-workspace-delete "arg1" "arg2" 42)
       (should killed))))

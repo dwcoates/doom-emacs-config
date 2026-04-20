@@ -428,7 +428,7 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
   (claude-repl-test--with-clean-state
     (let ((started nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'claude-repl--vterm-running-p) (lambda () nil))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda () nil))
                 ((symbol-function 'claude-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'use-region-p) (lambda () nil))
@@ -441,7 +441,7 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
   (claude-repl-test--with-clean-state
     (let ((messages nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'claude-repl--vterm-running-p) (lambda () t))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
                 ((symbol-function 'claude-repl--session-starting-p) (lambda () t))
                 ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'use-region-p) (lambda () nil))
@@ -454,7 +454,7 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
   (claude-repl-test--with-clean-state
     (let ((hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'claude-repl--vterm-running-p) (lambda () t))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
                 ((symbol-function 'claude-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
                 ((symbol-function 'use-region-p) (lambda () nil))
@@ -468,7 +468,7 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
   (claude-repl-test--with-clean-state
     (let ((shown nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'claude-repl--vterm-running-p) (lambda () t))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
                 ((symbol-function 'claude-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'use-region-p) (lambda () nil))
@@ -482,7 +482,7 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
   (claude-repl-test--with-clean-state
     (let ((sent-text nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'claude-repl--vterm-running-p) (lambda () t))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
                 ((symbol-function 'claude-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
                 ((symbol-function 'use-region-p) (lambda () t))

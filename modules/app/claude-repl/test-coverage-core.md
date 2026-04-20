@@ -343,8 +343,8 @@ actually test functionality defined in other source files:
 
 | Test | Actual source file |
 |------|--------------------|
-| `claude-repl-test-vterm-running-p-no-process` | session.el |
-| `claude-repl-test-vterm-running-p-with-process` | session.el |
+| `claude-repl-test-claude-running-p-no-process` | session.el |
+| `claude-repl-test-claude-running-p-with-process` | session.el |
 | `claude-repl-test-deferred-macro` | panels.el |
 | `claude-repl-test-bug1-cursor-reset-timer-defvar` | panels.el |
 | `claude-repl-test-bug9-paste-delay-configurable` | input.el |

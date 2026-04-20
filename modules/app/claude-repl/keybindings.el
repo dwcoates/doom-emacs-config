@@ -45,7 +45,7 @@
 This ensures Claude buffers and windows are cleaned up while the workspace
 is still current."
   (claude-repl--log nil "kill-before-workspace-delete: entry")
-  (if (claude-repl--vterm-running-p)
+  (if (claude-repl--claude-running-p)
       (progn
         (claude-repl--log nil "kill-before-workspace-delete: vterm running, killing session")
         (claude-repl-kill))

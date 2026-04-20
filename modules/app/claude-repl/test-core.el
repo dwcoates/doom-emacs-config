@@ -164,15 +164,15 @@ When t, it should call `message'."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
         (should (claude-repl--vterm-live-p))))))
 
-(ert-deftest claude-repl-test-vterm-running-p-no-process ()
+(ert-deftest claude-repl-test-claude-running-p-no-process ()
   "Returns nil when buffer is live but has no process."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-temp-buffer " *test-no-proc*"
       (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-        (should-not (claude-repl--vterm-running-p))))))
+        (should-not (claude-repl--claude-running-p))))))
 
-(ert-deftest claude-repl-test-vterm-running-p-with-process ()
+(ert-deftest claude-repl-test-claude-running-p-with-process ()
   "Returns non-nil when buffer has a live process."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-temp-buffer " *test-with-proc*"
@@ -180,7 +180,7 @@ When t, it should call `message'."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'get-buffer-process)
                  (lambda (_buf) 'fake-process)))
-        (should (claude-repl--vterm-running-p))))))
+        (should (claude-repl--claude-running-p))))))
 
 ;;;; ---- Tests: Deferred macro ----
 

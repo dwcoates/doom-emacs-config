@@ -511,12 +511,12 @@ Otherwise, only show panels if WS is the current workspace."
     (claude-repl--log-verbose ws "vterm-process-alive-p: ws=%s alive=%s" ws (if result "yes" "no"))
     result))
 
-(defun claude-repl--vterm-running-p (&optional ws)
+(defun claude-repl--claude-running-p (&optional ws)
   "Return t if Claude vterm buffer for WS exists with a live process.
 WS defaults to the current workspace name.  Signals an error if no
 workspace can be determined."
   (let ((ws (or ws (+workspace-current-name))))
-    (unless ws (error "claude-repl--vterm-running-p: no workspace specified and no current workspace"))
+    (unless ws (error "claude-repl--claude-running-p: no workspace specified and no current workspace"))
     (claude-repl--vterm-process-alive-p ws)))
 
 (defun claude-repl--session-starting-p (&optional ws)

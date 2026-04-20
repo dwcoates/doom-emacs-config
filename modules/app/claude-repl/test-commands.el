@@ -288,7 +288,7 @@
     (claude-repl-test--with-clean-state
       (cl-letf (((symbol-function '+workspace-current-name)
                  (lambda () "test-ws"))
-                ((symbol-function 'claude-repl--vterm-running-p)
+                ((symbol-function 'claude-repl--claude-running-p)
                  (lambda (_ws) t))
                 ((symbol-function 'claude-repl--ensure-vterm-buffer)
                  (lambda (_ws) (setq vterm-created-p t))))
@@ -301,7 +301,7 @@
     (claude-repl-test--with-clean-state
       (cl-letf (((symbol-function '+workspace-current-name)
                  (lambda () "test-ws"))
-                ((symbol-function 'claude-repl--vterm-running-p)
+                ((symbol-function 'claude-repl--claude-running-p)
                  (lambda (_ws) nil))
                 ((symbol-function 'claude-repl--ensure-vterm-buffer)
                  (lambda (_ws) (setq vterm-ensured t)))

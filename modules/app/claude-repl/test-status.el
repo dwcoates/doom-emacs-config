@@ -886,7 +886,7 @@ trees; under the revised model only the Stop hook writes :done."
       ;; Register ws1 in the hashmap so the iterator finds it
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore)
-                ((symbol-function 'claude-repl--vterm-running-p) (lambda (_ws) t))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda (_ws) t))
                 ((symbol-function 'claude-repl--update-ws-state)
                  (lambda (ws) (setq updated-ws ws)))
                 ((symbol-function 'claude-repl--async-refresh-git-status)
@@ -902,7 +902,7 @@ trees; under the revised model only the Stop hook writes :done."
       ;; Register ws1 in the hashmap so the iterator finds it
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore)
-                ((symbol-function 'claude-repl--vterm-running-p) (lambda (_ws) nil))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda (_ws) nil))
                 ((symbol-function 'claude-repl--mark-dead-vterm)
                  (lambda (ws) (setq dead-ws ws))))
         (claude-repl--update-all-workspace-states)
@@ -947,7 +947,7 @@ trees; under the revised model only the Stop hook writes :done."
 
 (ert-deftest claude-repl-test-mark-dead-vterm-preserves-init ()
   "mark-dead-vterm is a no-op when :claude-state is :init.
-During start-fresh, the timer may tick before vterm-running-p returns t
+During start-fresh, the timer may tick before claude-running-p returns t
 even though the session is legitimately coming up; under the old code
 this clobbered :init with :dead.  The :init guard prevents that."
   (claude-repl-test--with-clean-state
@@ -1059,7 +1059,7 @@ this clobbered :init with :dead.  The :init guard prevents that."
       (claude-repl--ws-put "running-ws" :project-dir "/tmp/running")
       (claude-repl--ws-put "dead-ws" :project-dir "/tmp/dead")
       (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore)
-                ((symbol-function 'claude-repl--vterm-running-p)
+                ((symbol-function 'claude-repl--claude-running-p)
                  (lambda (ws) (equal ws "running-ws")))
                 ((symbol-function 'claude-repl--update-ws-state)
                  (lambda (ws) (push ws updated)))

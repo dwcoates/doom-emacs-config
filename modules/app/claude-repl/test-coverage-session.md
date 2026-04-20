@@ -80,7 +80,7 @@
 | Function | Covered | Tests |
 |----------|---------|-------|
 | `claude-repl--vterm-process-alive-p` | Yes | no buffer, dead buffer, no process |
-| `claude-repl--vterm-running-p` | **No** | trivial wrapper around vterm-process-alive-p |
+| `claude-repl--claude-running-p` | **No** | trivial wrapper around vterm-process-alive-p |
 | `claude-repl--session-starting-p` | Yes | not running, ready, starting |
 
 ### Readiness Timer
@@ -180,7 +180,7 @@ Trivial setter: `(setf (claude-repl-instantiation-session-id (claude-repl--activ
 
 **Recommendation:** No dedicated test needed.
 
-### `claude-repl--vterm-running-p`
+### `claude-repl--claude-running-p`
 
 Trivial wrapper: `(claude-repl--vterm-process-alive-p (or ws (+workspace-current-name)))`.
 
@@ -241,5 +241,5 @@ Trivial wrapper: `(claude-repl--vterm-process-alive-p (or ws (+workspace-current
 3. **Medium:** `claude-repl--prompt-sandbox-build` -- user-facing error paths
 4. **Medium:** `claude-repl--start-claude` -- top-level but heavily side-effectful
 5. **Low:** `claude-repl--log-session-start` -- pure logging
-6. **Low:** `claude-repl--vterm-running-p` -- trivial wrapper
+6. **Low:** `claude-repl--claude-running-p` -- trivial wrapper
 7. **Low:** `claude-repl--set-session-id` -- trivial setter

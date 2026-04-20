@@ -596,7 +596,7 @@ If panels visible: hide both panels.
 If panels hidden: show both panels."
   (interactive)
   (let* ((ws (+workspace-current-name))
-         (vterm-running (claude-repl--vterm-running-p))
+         (vterm-running (claude-repl--claude-running-p))
          (session-starting (claude-repl--session-starting-p))
          (panels-visible (claude-repl--panels-visible-p))
          (selection (when (use-region-p)
@@ -729,7 +729,7 @@ If Claude isn't running, start it (same as `claude-repl')."
       (claude-repl--log ws "focus-input branch=jump-back")
       (evil-window-left 1))
      ;; Not running — start fresh
-     ((not (claude-repl--vterm-running-p))
+     ((not (claude-repl--claude-running-p))
       (claude-repl--log ws "focus-input branch=start-fresh")
       (claude-repl))
      ;; Running but panels hidden — show them

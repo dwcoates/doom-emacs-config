@@ -87,7 +87,7 @@ First %s is the change-spec, second %s is the prompt."
 WS defaults to the current workspace name.  No-op if already running."
   (let ((ws (or ws (+workspace-current-name))))
     (unless ws (error "claude-repl--ensure-session: no active workspace"))
-    (if (claude-repl--vterm-running-p ws)
+    (if (claude-repl--claude-running-p ws)
         (claude-repl--log ws "ensure-session: already running for ws=%s" ws)
       (progn
         (claude-repl--log ws "ensure-session: starting new session for ws=%s" ws)

@@ -609,7 +609,7 @@ panel visibility (panels may be hidden via `SPC o c')."
   (let ((ws-names (hash-table-keys claude-repl--workspaces)))
     (claude-repl--log-verbose nil "update-all-workspace-states: count=%d" (length ws-names))
     (dolist (ws ws-names)
-      (if (claude-repl--vterm-running-p ws)
+      (if (claude-repl--claude-running-p ws)
           (progn
             (claude-repl--update-ws-state ws)
             (claude-repl--async-refresh-git-status ws))
