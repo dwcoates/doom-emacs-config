@@ -76,18 +76,18 @@ Runs as a buffer-local `pre-command-hook'."
   (when (memq this-command claude-repl--backspace-commands)
     (if claude-slash-input-mode
         (progn
-          (claude-repl--log-verbose nil "slash-intercept-backspace: slash-mode branch this-command=%s" this-command)
+          (claude-repl--log-verbose (+workspace-current-name) "slash-intercept-backspace: slash-mode branch this-command=%s" this-command)
           (setq this-command #'claude-repl--slash-backspace))
       (if (= (buffer-size) 0)
           (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
               (progn
-                (claude-repl--log-verbose nil "slash-intercept-backspace: empty-buffer-forward sending <backspace> to vterm=%s this-command=%s"
+                (claude-repl--log-verbose (+workspace-current-name) "slash-intercept-backspace: empty-buffer-forward sending <backspace> to vterm=%s this-command=%s"
                                           (buffer-name vterm-buf) this-command)
                 (with-current-buffer vterm-buf
                   (vterm-send-key "<backspace>")))
             (message "[claude-repl] no live Claude session — backspace not forwarded")
-            (claude-repl--log-verbose nil "slash-intercept-backspace: empty-buffer-forward no live vterm, skipping this-command=%s" this-command))
-        (claude-repl--log-verbose nil "slash-intercept-backspace: normal branch this-command=%s" this-command)))))
+            (claude-repl--log-verbose (+workspace-current-name) "slash-intercept-backspace: empty-buffer-forward no live vterm, skipping this-command=%s" this-command))
+        (claude-repl--log-verbose (+workspace-current-name) "slash-intercept-backspace: normal branch this-command=%s" this-command)))))
 
 (defcustom claude-repl-input-background-shade 37
   "Greyscale level (0-255) for the input buffer background."
@@ -108,7 +108,7 @@ Runs as a buffer-local `pre-command-hook'."
 (defun claude-repl-discard-input ()
   "Save current input to history, clear the buffer, and enter insert state."
   (interactive)
-  (claude-repl--log nil "discard-input")
+  (claude-repl--log (+workspace-current-name) "discard-input")
   (when claude-slash-input-mode
     (claude-repl--exit-slash-mode))
   (claude-repl--history-push)
@@ -128,7 +128,7 @@ at a Claude prompt in raw-input mode — which is what actually clears the
 input line.  On failure, logs and surfaces an error (no silent fallback)."
   (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
       (progn
-        (claude-repl--log nil "send-raw-ctrl-c: sending ETX (0x03) to vterm=%s" (buffer-name vterm-buf))
+        (claude-repl--log (+workspace-current-name) "send-raw-ctrl-c: sending ETX (0x03) to vterm=%s" (buffer-name vterm-buf))
         (with-current-buffer vterm-buf
           (process-send-string vterm--process "\C-c"))
         t)
@@ -142,7 +142,7 @@ if the local input buffer isn't already empty, also discards its contents.
 Previously this only sent Ctrl-C when the local buffer was empty, which
 left users with a half-cleared state."
   (interactive)
-  (claude-repl--log nil "discard-or-send-interrupt: clearing Claude prompt + local buffer (local-empty=%s)"
+  (claude-repl--log (+workspace-current-name) "discard-or-send-interrupt: clearing Claude prompt + local buffer (local-empty=%s)"
                     (string-blank-p (buffer-string)))
   (unless (string-blank-p (buffer-string))
     (claude-repl-discard-input))
@@ -154,11 +154,11 @@ left users with a half-cleared state."
   "Send KEY-NAME to the Claude vterm buffer."
   (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
       (progn
-        (claude-repl--log nil "send-vterm-key: sending %s to vterm=%s" key-name (buffer-name vterm-buf))
+        (claude-repl--log (+workspace-current-name) "send-vterm-key: sending %s to vterm=%s" key-name (buffer-name vterm-buf))
         (with-current-buffer vterm-buf
           (vterm-send-key key-name)))
     (message "[claude-repl] no live Claude session — %s not forwarded" key-name)
-    (claude-repl--log nil "send-vterm-key: no live vterm, skipping key=%s" key-name)))
+    (claude-repl--log (+workspace-current-name) "send-vterm-key: no live vterm, skipping key=%s" key-name)))
 
 (defun claude-repl--send-up-arrow ()
   "Forward up-arrow to vterm for terminal line navigation (insert mode)."
@@ -177,22 +177,22 @@ left users with a half-cleared state."
   (interactive)
   (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
       (progn
-        (claude-repl--log nil "send-vterm-down: sending <down> to vterm=%s" (buffer-name vterm-buf))
+        (claude-repl--log (+workspace-current-name) "send-vterm-down: sending <down> to vterm=%s" (buffer-name vterm-buf))
         (with-current-buffer vterm-buf
           (vterm-send-down)))
     (message "[claude-repl] no live Claude session — down not forwarded")
-    (claude-repl--log nil "send-vterm-down: no live vterm, skipping")))
+    (claude-repl--log (+workspace-current-name) "send-vterm-down: no live vterm, skipping")))
 
 (defun claude-repl--send-vterm-up ()
   "Scroll vterm history backward (previous item)."
   (interactive)
   (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
       (progn
-        (claude-repl--log nil "send-vterm-up: sending <up> to vterm=%s" (buffer-name vterm-buf))
+        (claude-repl--log (+workspace-current-name) "send-vterm-up: sending <up> to vterm=%s" (buffer-name vterm-buf))
         (with-current-buffer vterm-buf
           (vterm-send-up)))
     (message "[claude-repl] no live Claude session — up not forwarded")
-    (claude-repl--log nil "send-vterm-up: no live vterm, skipping")))
+    (claude-repl--log (+workspace-current-name) "send-vterm-up: no live vterm, skipping")))
 
 ;; Public aliases -- used in keybindings and tests.
 (defalias 'claude-repl-scroll-down #'claude-repl--send-vterm-down)
@@ -208,7 +208,7 @@ left users with a half-cleared state."
 (defun claude-repl--scroll-vterm-output (scroll-fn)
   "Scroll the Claude vterm output window using SCROLL-FN.
 SCROLL-FN is called with a line count (e.g. `scroll-up' or `scroll-down')."
-  (claude-repl--log nil "scroll-vterm-output: fn=%s" scroll-fn)
+  (claude-repl--log (+workspace-current-name) "scroll-vterm-output: fn=%s" scroll-fn)
   (claude-repl--with-vterm-buf
    (let ((vterm-win (get-buffer-window vterm-buf)))
      (when vterm-win
@@ -282,7 +282,7 @@ SCROLL-FN is called with a line count (e.g. `scroll-up' or `scroll-down')."
 Extracts the base digit from `last-command-event' (e.g. C-S-3 -> \"3\")."
   (interactive)
   (let ((digit (number-to-string (- (event-basic-type last-command-event) ?0))))
-    (claude-repl--log nil "input-send-digit-char: digit=%s" digit)
+    (claude-repl--log (+workspace-current-name) "input-send-digit-char: digit=%s" digit)
     (claude-repl-send-char digit)))
 
 (dotimes (i 10)
@@ -296,7 +296,7 @@ Extracts the base digit from `last-command-event' (e.g. C-S-3 -> \"3\")."
 Otherwise insert the digit normally.  The digit is determined from
 `last-command-event'."
   (interactive)
-  (claude-repl--log nil "insert-digit-or-passthrough: digit=%s buffer-size=%d" (string last-command-event) (buffer-size))
+  (claude-repl--log (+workspace-current-name) "insert-digit-or-passthrough: digit=%s buffer-size=%d" (string last-command-event) (buffer-size))
   (claude-repl--passthrough-start (string last-command-event)))
 
 (dotimes (i 10)
@@ -319,7 +319,7 @@ ignoring trailing whitespace."
   (let* ((trimmed (string-trim-right raw))
          (result (or (member trimmed claude-repl-metaprompt-exempt-strings)
                      (string-match-p "^[0-9]+$" trimmed))))
-    (claude-repl--log-verbose nil "skip-metaprompt-p: result=%s" result)
+    (claude-repl--log-verbose (+workspace-current-name) "skip-metaprompt-p: result=%s" result)
     result))
 
 (defvar claude-repl-send-posthooks
@@ -349,7 +349,7 @@ COUNTER is the current prefix counter.  FORCE bypasses the counter check."
                      claude-repl-command-prefix
                      (not (claude-repl--skip-metaprompt-p raw))
                      (or force (zerop (mod counter claude-repl-prefix-period))))))
-    (claude-repl--log-verbose nil "should-prepend-metaprompt-p: result=%s counter=%d force=%s" result counter force)
+    (claude-repl--log-verbose (+workspace-current-name) "should-prepend-metaprompt-p: result=%s counter=%d force=%s" result counter force)
     result))
 
 (defun claude-repl--prepare-input (ws raw &optional force-metaprompt)
@@ -365,7 +365,7 @@ When FORCE-METAPROMPT is non-nil, always prepend (ignoring the counter)."
 
 (defun claude-repl--send-input-direct (vterm-buf input)
   "Send small INPUT string directly to VTERM-BUF and refresh."
-  (claude-repl--log-verbose nil "send-input-direct: len=%d" (length input))
+  (claude-repl--log-verbose (+workspace-current-name) "send-input-direct: len=%d" (length input))
   (with-current-buffer vterm-buf
     (vterm-send-string input)
     (vterm-send-return)
@@ -378,7 +378,7 @@ Called by `run-at-time' as the timer callback for `claude-repl--vterm-deferred-a
       (let ((inhibit-quit t))
         (with-current-buffer buf
           (funcall action)))
-    (claude-repl--log nil "run-deferred-action: buffer is dead, skipping action=%s" action)))
+    (claude-repl--log (+workspace-current-name) "run-deferred-action: buffer is dead, skipping action=%s" action)))
 
 (defun claude-repl--vterm-deferred-action (buf delay action)
   "Run ACTION in BUF after DELAY seconds, if BUF is still alive.
@@ -389,7 +389,7 @@ ACTION is called with `inhibit-quit' bound to t."
 (defun claude-repl--bracketed-finalize ()
   "Send a final Return and refresh vterm after bracketed paste.
 Used as the second deferred action in the bracketed paste pipeline."
-  (claude-repl--log-verbose nil "bracketed-finalize: sending final return")
+  (claude-repl--log-verbose (+workspace-current-name) "bracketed-finalize: sending final return")
   (vterm-send-return)
   (claude-repl--refresh-vterm))
 
@@ -401,7 +401,7 @@ Used as the second deferred action in the bracketed paste pipeline."
 (defun claude-repl--bracketed-send-return (vterm-buf)
   "Send Return to VTERM-BUF and schedule a finalize step.
 Used as the first deferred action in the bracketed paste pipeline."
-  (claude-repl--log-verbose nil "bracketed-send-return: sending return, scheduling finalize")
+  (claude-repl--log-verbose (+workspace-current-name) "bracketed-send-return: sending return, scheduling finalize")
   (vterm-send-return)
   (claude-repl--vterm-deferred-action
    vterm-buf claude-repl-bracketed-finalize-delay
@@ -410,7 +410,7 @@ Used as the first deferred action in the bracketed paste pipeline."
 (defun claude-repl--send-input-bracketed (vterm-buf input)
   "Send large INPUT string to VTERM-BUF using bracketed paste mode.
 Uses `claude-repl-paste-delay' to wait before sending Return."
-  (claude-repl--log-verbose nil "send-input-bracketed: len=%d" (length input))
+  (claude-repl--log-verbose (+workspace-current-name) "send-input-bracketed: len=%d" (length input))
   (with-current-buffer vterm-buf
     (vterm-send-string input t)
     (claude-repl--vterm-deferred-action
@@ -428,7 +428,7 @@ to avoid terminal truncation."
   "Send INPUT string to VTERM-BUF.
 Uses paste mode for large inputs to avoid truncation."
   (let ((use-paste (> (length input) claude-repl-bracketed-paste-threshold)))
-    (claude-repl--log-verbose nil "send-input-to-vterm len=%d mode=%s"
+    (claude-repl--log-verbose (+workspace-current-name) "send-input-to-vterm len=%d mode=%s"
                       (length input) (if use-paste "paste" "direct"))
     (if use-paste
         (claude-repl--send-input-bracketed vterm-buf input)
@@ -518,45 +518,45 @@ Handles input preparation, sending, history, and persistence."
 (defun claude-repl-send-and-hide ()
   "Send input to Claude and hide both panels."
   (interactive)
-  (claude-repl--log nil "send-and-hide")
+  (claude-repl--log (+workspace-current-name) "send-and-hide")
   (claude-repl--send)
   (claude-repl--on-close))
 
 (defun claude-repl-send-with-metaprompt ()
   "Send input with the metaprompt prefix, bypassing the counter."
   (interactive)
-  (claude-repl--log nil "send-with-metaprompt")
+  (claude-repl--log (+workspace-current-name) "send-with-metaprompt")
   (claude-repl--send nil nil t))
 
 (defun claude-repl--append-to-input-buffer (text)
   "Append TEXT to the end of the current workspace's input buffer."
-  (claude-repl--log nil "append-to-input-buffer: len=%d" (length text))
+  (claude-repl--log (+workspace-current-name) "append-to-input-buffer: len=%d" (length text))
   (let ((buf (claude-repl--ws-get (+workspace-current-name) :input-buffer)))
     (if buf
         (with-current-buffer buf
           (goto-char (point-max))
           (insert text))
       (message "[claude-repl] WARNING: no input buffer for current workspace — text not appended")
-      (claude-repl--log nil "append-to-input-buffer: no input buffer, text discarded"))))
+      (claude-repl--log (+workspace-current-name) "append-to-input-buffer: no input buffer, text discarded"))))
 
 (defun claude-repl-send-with-postfix ()
   "Append `claude-repl-send-postfix' to the input buffer, then send."
   (interactive)
-  (claude-repl--log nil "send-with-postfix")
+  (claude-repl--log (+workspace-current-name) "send-with-postfix")
   (claude-repl--append-to-input-buffer claude-repl-send-postfix)
   (claude-repl--send))
 
 (defun claude-repl-send-char (char)
   "Send a single character to Claude."
-  (claude-repl--log nil "send-char: char=%s" char)
+  (claude-repl--log (+workspace-current-name) "send-char: char=%s" char)
   (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
       (progn
-        (claude-repl--log nil "send-char: sending %s + <return> to vterm=%s" char (buffer-name vterm-buf))
+        (claude-repl--log (+workspace-current-name) "send-char: sending %s + <return> to vterm=%s" char (buffer-name vterm-buf))
         (with-current-buffer vterm-buf
           (vterm-send-string char)
           (vterm-send-return)))
     (message "[claude-repl] no live Claude session — '%s' not sent" char)
-    (claude-repl--log nil "send-char: no live vterm, skipping char=%s" char)))
+    (claude-repl--log (+workspace-current-name) "send-char: no live vterm, skipping char=%s" char)))
 
 ;;; Slash-command pass-through mode
 ;;
@@ -592,14 +592,14 @@ leaves insert state, but only acts when the buffer-local
 `claude-slash-input-mode' is active — so it's effectively scoped to the
 Claude input buffer."
   (when claude-slash-input-mode
-    (claude-repl--log nil "slash-on-insert-state-exit: exiting slash mode (evil left insert state)")
+    (claude-repl--log (+workspace-current-name) "slash-on-insert-state-exit: exiting slash mode (evil left insert state)")
     (claude-repl--slash-quit)))
 
 (add-hook 'evil-insert-state-exit-hook #'claude-repl--slash-on-insert-state-exit)
 
 (defun claude-repl--exit-slash-mode ()
   "Clear the slash stack and disable `claude-slash-input-mode'."
-  (claude-repl--log nil "exit-slash-mode: stack-depth=%d" (length claude-repl--slash-stack))
+  (claude-repl--log (+workspace-current-name) "exit-slash-mode: stack-depth=%d" (length claude-repl--slash-stack))
   (setq claude-repl--slash-stack nil)
   (claude-slash-input-mode -1))
 
@@ -621,7 +621,7 @@ Return t on success, nil if there is no live vterm.  Must run the send
 inside the vterm buffer via `with-current-buffer' — `vterm-send-string'
 reads `vterm--term' buffer-locally and silently no-ops otherwise.
 On failure, logs + surfaces a user-visible error."
-  (claude-repl--log-verbose nil "slash-vterm-send: str=%S" str)
+  (claude-repl--log-verbose (+workspace-current-name) "slash-vterm-send: str=%S" str)
   (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
       (progn
         (with-current-buffer vterm-buf
@@ -638,10 +638,10 @@ vterm) did not actually happen."
   (if (claude-repl--slash-vterm-send str)
       (progn
         (push str claude-repl--slash-stack)
-        (claude-repl--log-verbose nil "slash-try-send-and-push: char=%S stack-depth=%d"
+        (claude-repl--log-verbose (+workspace-current-name) "slash-try-send-and-push: char=%S stack-depth=%d"
                                   str (length claude-repl--slash-stack))
         t)
-    (claude-repl--log nil "slash-try-send-and-push: REFUSED to push char=%S — send failed"
+    (claude-repl--log (+workspace-current-name) "slash-try-send-and-push: REFUSED to push char=%S — send failed"
                       str)
     nil))
 
@@ -651,7 +651,7 @@ Used when an in-flight slash-mode forward fails: we exit the mode (so the
 user is no longer trapped), drop the current key into the input buffer (so
 nothing is silently discarded), and leave already-forwarded characters in
 vterm untouched (no rollback — they've already been sent)."
-  (claude-repl--log nil "slash-abort-and-insert: char=%S stack-depth-before-exit=%d"
+  (claude-repl--log (+workspace-current-name) "slash-abort-and-insert: char=%S stack-depth-before-exit=%d"
                     char (length claude-repl--slash-stack))
   (claude-repl--exit-slash-mode)
   (self-insert-command 1 (string-to-char char)))
@@ -662,7 +662,7 @@ If the forward fails, exit slash mode and drop the character into the
 input buffer — never silently discard user input."
   (interactive)
   (let ((char (string last-command-event)))
-    (claude-repl--log-verbose nil "slash-forward-char: char=%S" char)
+    (claude-repl--log-verbose (+workspace-current-name) "slash-forward-char: char=%S" char)
     (unless (claude-repl--slash-try-send-and-push char)
       (claude-repl--slash-abort-and-insert char))))
 
@@ -673,12 +673,12 @@ was actually sent."
   (interactive)
   (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
       (progn
-        (claude-repl--log-verbose nil "slash-backspace: sending <backspace> to vterm=%s" (buffer-name vterm-buf))
+        (claude-repl--log-verbose (+workspace-current-name) "slash-backspace: sending <backspace> to vterm=%s" (buffer-name vterm-buf))
         (with-current-buffer vterm-buf
           (vterm-send-key "<backspace>"))
         (pop claude-repl--slash-stack)
         (let ((remaining (length claude-repl--slash-stack)))
-          (claude-repl--log-verbose nil "slash-backspace: remaining-depth=%d exiting=%s"
+          (claude-repl--log-verbose (+workspace-current-name) "slash-backspace: remaining-depth=%d exiting=%s"
                                     remaining (if (null claude-repl--slash-stack) "t" "nil"))
           (when (null claude-repl--slash-stack)
             (claude-repl--exit-slash-mode))))
@@ -710,7 +710,7 @@ initiated the generation.  Does not push to the slash stack (this is
 injected text, not user keystrokes)."
   (when (claude-repl--slash-workspace-command-p)
     (let ((ws (+workspace-current-name)))
-      (claude-repl--log nil "slash-maybe-inject-source-ws: injecting source-ws=%s" ws)
+      (claude-repl--log (+workspace-current-name) "slash-maybe-inject-source-ws: injecting source-ws=%s" ws)
       (claude-repl--slash-vterm-send (format " [source-ws:%s]" ws)))))
 
 (defun claude-repl--slash-return ()
@@ -720,11 +720,11 @@ workspace-generation and workspace-update skills know the originating workspace.
 Exits the mode regardless of send outcome — being stuck in slash mode when
 vterm is gone is strictly worse than having one unforwarded RET."
   (interactive)
-  (claude-repl--log nil "slash-return: exiting slash mode")
+  (claude-repl--log (+workspace-current-name) "slash-return: exiting slash mode")
   (claude-repl--slash-maybe-inject-source-ws)
   (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
       (progn
-        (claude-repl--log nil "slash-return: sending <return> to vterm=%s" (buffer-name vterm-buf))
+        (claude-repl--log (+workspace-current-name) "slash-return: sending <return> to vterm=%s" (buffer-name vterm-buf))
         (with-current-buffer vterm-buf
           (vterm-send-return)))
     (claude-repl--slash-no-vterm-error "return" nil))
@@ -737,7 +737,7 @@ vterm is gone is strictly worse than having one unforwarded RET."
 If the forward fails, exit slash mode and insert TAB — see
 `claude-repl--slash-forward-char'."
   (interactive)
-  (claude-repl--log-verbose nil "slash-tab: forwarding tab")
+  (claude-repl--log-verbose (+workspace-current-name) "slash-tab: forwarding tab")
   (unless (claude-repl--slash-try-send-and-push "\t")
     (claude-repl--slash-abort-and-insert "\t")))
 
@@ -747,7 +747,7 @@ Bound to C-g so the user can always bail out of slash mode regardless of
 vterm state — cheap insurance against any future silent-fallback bugs in
 the slash-mode plumbing."
   (interactive)
-  (claude-repl--log nil "slash-quit: user-initiated emergency exit stack-depth=%d"
+  (claude-repl--log (+workspace-current-name) "slash-quit: user-initiated emergency exit stack-depth=%d"
                     (length claude-repl--slash-stack))
   (claude-repl--exit-slash-mode))
 
@@ -760,26 +760,26 @@ the input buffer instead of vanishing into a stuck-mode stack.
 Per AGENTS.md: no silent fallback, no dropped user input."
   (cond
    ((/= (buffer-size) 0)
-    (claude-repl--log nil "passthrough-start: non-empty buffer, inserting normally char=%S" char)
+    (claude-repl--log (+workspace-current-name) "passthrough-start: non-empty buffer, inserting normally char=%S" char)
     (self-insert-command 1 (string-to-char char)))
    ((null (claude-repl--current-ws-live-vterm))
     (claude-repl--slash-no-vterm-error "passthrough-start" char)
     (self-insert-command 1 (string-to-char char)))
    (t
-    (claude-repl--log nil "passthrough-start: entering slash mode char=%S" char)
+    (claude-repl--log (+workspace-current-name) "passthrough-start: entering slash mode char=%S" char)
     (claude-slash-input-mode 1)
     ;; Race guard: vterm could die between the check above and the send.
     ;; Undo mode entry + insert the char so we never end up in slash mode
     ;; with an empty stack and no way to exit via the normal paths.
     (unless (claude-repl--slash-try-send-and-push char)
-      (claude-repl--log nil "passthrough-start: race — vterm died during entry, aborting")
+      (claude-repl--log (+workspace-current-name) "passthrough-start: race — vterm died during entry, aborting")
       (claude-repl--exit-slash-mode)
       (self-insert-command 1 (string-to-char char))))))
 
 (defun claude-repl--slash-start ()
   "Enter pass-through mode if the buffer is empty, else insert / normally."
   (interactive)
-  (claude-repl--log nil "slash-start: buffer-size=%d" (buffer-size))
+  (claude-repl--log (+workspace-current-name) "slash-start: buffer-size=%d" (buffer-size))
   (claude-repl--passthrough-start "/"))
 
 (map! :map claude-slash-input-mode-map
