@@ -137,27 +137,68 @@ Returns (:needs-build t :install-script PATH) if the image is not built yet."
 
 ;;;; Workspace environment initialization
 
-(defun claude-repl--initialize-ws-env (ws)
-  "Initialize environment state for workspace WS if not already set.
-If a .claude-repl-state file exists, restores state from it; otherwise
-creates fresh defaults.  Validates the result either way.
-Session IDs are delivered by hooks, not scanned here.
+(defun claude-repl--initialize-ws-env (ws &optional project-dir-hint active-env-hint)
+  "Initialize environment state for workspace WS (idempotent).
+Writes `:project-dir', `:active-env', and per-env instantiation
+structs for WS, and validates the result.
 
-Intended to be called only on workspace initialization
-"
-  (claude-repl--log ws "initialize-ws-env: ws=%s" ws)
-  ;; Guard: callers should check :active-env before calling; this catches
-  ;; programming errors where initialize-ws-env is invoked twice.
-  (when (claude-repl--ws-get ws :active-env)
-      (claude-repl--error ws "initialize-ws-env: already initialized ws=%s" ws))
-  (let ((saved (claude-repl--read-state-file ws)))
-    (if saved
-        (progn
-          (claude-repl--apply-restored-state ws saved))
-      (claude-repl--log ws "initialize-ws-env: no state file, creating fresh ws=%s" ws)
-      (claude-repl--fresh-ws-env ws)))
-  (claude-repl--validate-ws-env ws)
-  )
+The project root is resolved in this order:
+  1. PROJECT-DIR-HINT, if provided (creation path — worktree setup
+     or new-workspace pass the known path here).
+  2. The already-set `:project-dir' in the workspace plist.
+  3. `(claude-repl--git-root default-directory)' — the repo of the
+     current buffer.
+
+The state file at that root (`.claude-repl-state') is loaded when
+present and its contents supersede the derived defaults (`:project-dir'
+from the file is canonical, and per-env instantiation structs are
+reconstructed from the saved plists).  When absent, fresh defaults are
+written (`:active-env' from ACTIVE-ENV-HINT or `:bare-metal', empty
+instantiation structs) and an initial state file is persisted.
+
+Signals an error if `:project-dir' cannot be resolved from any of the
+three sources.  Idempotent: safe to call more than once for the same
+workspace (a prior partial init is overwritten).
+
+Must not be called while WS has a live Claude session — instantiation
+structs would be clobbered with any session-id mutations since the last
+state-save.  Callers already guard on `claude-repl--claude-running-p'."
+  (let* ((root-candidate (or project-dir-hint
+                             (claude-repl--ws-get ws :project-dir)
+                             (claude-repl--git-root default-directory)))
+         (root (and root-candidate (claude-repl--path-canonical root-candidate)))
+         (state-file (and root (claude-repl--state-file root)))
+         (saved (and state-file
+                     (file-exists-p state-file)
+                     (condition-case err
+                         (claude-repl--read-sexp-file state-file)
+                       (error
+                        (claude-repl--log ws "initialize-ws-env: state file read error file=%s err=%S"
+                                          state-file err)
+                        nil)))))
+    (unless root
+      (error "claude-repl--initialize-ws-env: cannot derive :project-dir for ws=%s (no hint, no prior :project-dir, no git-root for default-directory=%s)"
+             ws default-directory))
+    (claude-repl--log ws "initialize-ws-env: ws=%s root=%s saved=%s hint=%s env-hint=%s"
+                      ws root (if saved "yes" "no")
+                      (if project-dir-hint "yes" "no")
+                      (or active-env-hint "nil"))
+    (claude-repl--ws-put ws :project-dir
+                         (if saved
+                             (claude-repl--path-canonical (plist-get saved :project-dir))
+                           root))
+    (claude-repl--ws-put ws :active-env
+                         (or (and saved (plist-get saved :active-env))
+                             active-env-hint
+                             :bare-metal))
+    (dolist (key claude-repl--environment-keys)
+      (claude-repl--ws-put ws key
+                           (claude-repl--make-instantiation-from-plist
+                            (and saved (plist-get saved key)))))
+    (claude-repl--validate-ws-env ws)
+    (unless saved
+      (claude-repl--log ws "initialize-ws-env: no state file, writing initial state ws=%s root=%s" ws root)
+      (claude-repl--state-save ws))))
 
 (defun claude-repl--prompt-sandbox-build (sandbox-config)
   "Prompt the user to build a missing sandbox image from SANDBOX-CONFIG.

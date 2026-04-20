@@ -680,24 +680,71 @@ against stop events arriving after kill."
 ;;;; ---- Tests: Workspace environment initialization ----
 
 (ert-deftest claude-repl-test-initialize-ws-env-initializes-fresh ()
-  "initialize-ws-env on a fresh workspace with no state file should set up
-default `:active-env' and instantiation structs for each environment."
+  "initialize-ws-env on a fresh workspace with no state file sets up
+default `:active-env' and instantiation structs for each environment.
+The project-dir hint is used to locate the (absent) state file."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--read-state-file)
-               (lambda (_ws) nil)))
-      (claude-repl--initialize-ws-env "ws1")
-      (should (eq (claude-repl--ws-get "ws1" :active-env) :bare-metal))
-      (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :sandbox)))
-      (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :bare-metal))))))
+    (let ((tmpdir (make-temp-file "test-init-fresh-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--initialize-ws-env "ws1" tmpdir)
+            (should (eq (claude-repl--ws-get "ws1" :active-env) :bare-metal))
+            (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :sandbox)))
+            (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :bare-metal))))
+        (delete-directory tmpdir t)))))
 
-(ert-deftest claude-repl-test-initialize-ws-env-errors-when-already-initialized ()
-  "initialize-ws-env signals an error when the workspace already has
-`:active-env' set.  The function is a one-time initializer; a second call
-indicates a caller-side contract violation, so failing loudly is preferable
-to silently re-running and clobbering session-ids on the instantiation structs."
+(ert-deftest claude-repl-test-initialize-ws-env-errors-when-no-root-derivable ()
+  "initialize-ws-env errors when :project-dir cannot be derived from any source."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws1" :active-env :sandbox)
-    (should-error (claude-repl--initialize-ws-env "ws1") :type 'error)))
+    (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&optional _d) nil)))
+      (should-error (claude-repl--initialize-ws-env "ws1") :type 'error))))
+
+(ert-deftest claude-repl-test-initialize-ws-env-idempotent-recovers-partial-state ()
+  "initialize-ws-env can be called on a workspace with partial state
+(`:active-env' set, `:project-dir' nil) and re-initializes it correctly
+using the project-dir hint.  Models the fix for the partial-init bug
+where fresh-ws-env wrote :active-env without :project-dir."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-partial-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :active-env :bare-metal)
+            ;; No :project-dir set — exactly the partial-init case.
+            (claude-repl--initialize-ws-env "ws1" tmpdir)
+            (should (equal (claude-repl--ws-get "ws1" :project-dir)
+                           (claude-repl--path-canonical tmpdir)))
+            (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :bare-metal))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-initialize-ws-env-active-env-hint-sets-sandbox ()
+  "initialize-ws-env uses ACTIVE-ENV-HINT when provided and no state file exists."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-sandbox-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--initialize-ws-env "ws1" tmpdir :sandbox)
+            (should (eq (claude-repl--ws-get "ws1" :active-env) :sandbox)))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-initialize-ws-env-state-file-beats-hint ()
+  "State file value for :project-dir and :active-env overrides caller hints."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-override-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (expand-file-name ".claude-repl-state"
+                               (claude-repl--path-canonical tmpdir))
+             `(:project-dir ,(claude-repl--path-canonical tmpdir)
+               :active-env :sandbox
+               :bare-metal (:session-id "bm-saved")
+               :sandbox (:session-id "sb-saved")))
+            (claude-repl--initialize-ws-env "ws1" tmpdir :bare-metal)
+            (should (eq (claude-repl--ws-get "ws1" :active-env) :sandbox))
+            (should (equal (claude-repl-instantiation-session-id
+                            (claude-repl--ws-get "ws1" :bare-metal))
+                           "bm-saved")))
+        (delete-directory tmpdir t)))))
 
 ;;;; ---- Tests: prompt-sandbox-build ----
 

@@ -370,17 +370,6 @@ Internally uses plist-put (which returns a new list) threaded into puthash."
   "Remove all state for workspace WS."
   (remhash ws claude-repl--workspaces))
 
-(defun claude-repl--record-project-dir (ws root)
-  "Record ROOT as WS's `:project-dir' if not already set.
-`claude-repl--ws-for-dir-fast' resolves session_start/stop sentinel
-directories back to workspaces by matching this key; an unset
-`:project-dir' is why restarting Claude after `SPC j x' produced
-\"session-start dir=… matched no workspace\" warnings.  No-ops when
-`:project-dir' is already set so worktree registration (which stores
-the canonical worktree path) wins over a drifted `default-directory'."
-  (unless (claude-repl--ws-get ws :project-dir)
-    (claude-repl--ws-put ws :project-dir root)))
-
 (defun claude-repl--active-inst (ws)
   "Return the active `claude-repl-instantiation' for workspace WS.
 Signals an error if the environment or instantiation struct is missing —

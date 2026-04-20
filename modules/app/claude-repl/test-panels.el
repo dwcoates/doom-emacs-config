@@ -1515,31 +1515,37 @@ from `create-buffer'.  Stubs can be overridden by wrapping BODY in another
               (should-not (claude-repl--ws-get "test-ws" :fork-session-id))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
-(ert-deftest claude-repl-test-panels-initialize-claude-calls-ws-env-init-when-unset ()
-  "initialize-claude calls initialize-ws-env when :active-env is unset."
+(ert-deftest claude-repl-test-panels-initialize-claude-always-calls-ws-env-init ()
+  "initialize-claude always calls initialize-ws-env, regardless of prior
+`:active-env'.  initialize-ws-env is idempotent, so unconditional call is
+safe and ensures the state file is re-read on every session start."
   (claude-repl-test--with-clean-state
     (let ((vterm-buf (generate-new-buffer " *init-claude-ws-env*"))
-          (init-called nil))
+          (init-call-count 0))
       (unwind-protect
           (claude-repl-test--initialize-claude-stubs vterm-buf
             (cl-letf (((symbol-function 'claude-repl--initialize-ws-env)
-                       (lambda (_ws) (setq init-called t))))
+                       (lambda (_ws &rest _) (cl-incf init-call-count))))
               (claude-repl--initialize-claude)
-              (should init-called)))
+              (should (= init-call-count 1))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
-(ert-deftest claude-repl-test-panels-initialize-claude-skips-ws-env-init-when-set ()
-  "initialize-claude skips initialize-ws-env when :active-env is already set."
+(ert-deftest claude-repl-test-panels-initialize-claude-passes-hints-to-ws-env-init ()
+  "initialize-claude forwards project-dir-hint and active-env-hint to
+initialize-ws-env.  Models the worktree-creation / new-workspace paths."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-claude-skip-env*"))
-          (init-called nil))
+    (let ((vterm-buf (generate-new-buffer " *init-claude-hints*"))
+          (got-hint nil)
+          (got-env nil))
       (unwind-protect
           (claude-repl-test--initialize-claude-stubs vterm-buf
             (cl-letf (((symbol-function 'claude-repl--initialize-ws-env)
-                       (lambda (_ws) (setq init-called t))))
-              (claude-repl--initialize-claude)
-              (should-not init-called)))
+                       (lambda (_ws &optional dir env)
+                         (setq got-hint dir)
+                         (setq got-env env))))
+              (claude-repl--initialize-claude "test-ws" "/tmp/worktree" :sandbox)
+              (should (equal got-hint "/tmp/worktree"))
+              (should (eq got-env :sandbox))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
 (ert-deftest claude-repl-test-panels-initialize-claude-uses-explicit-ws-arg ()

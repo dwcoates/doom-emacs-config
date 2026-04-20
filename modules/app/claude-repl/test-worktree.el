@@ -925,55 +925,57 @@ Returns the full SHA of the new commit."
 
 ;;;; ---- Tests: setup-worktree-session ----
 
-(ert-deftest claude-repl-test-setup-worktree-session-bare-metal ()
-  "When force-bare-metal is t, :active-env is set to :bare-metal."
+(ert-deftest claude-repl-test-setup-worktree-session-passes-bare-metal-hint ()
+  "When force-bare-metal is t, initialize-claude receives :bare-metal as the env hint."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
-               (lambda (_ws-id _path _ws) nil))
-              ((symbol-function 'claude-repl--initialize-claude)
-               (lambda (_ws) nil))
-              ((symbol-function 'claude-repl--active-inst)
-               (lambda (_ws) (make-claude-repl-instantiation :start-cmd "claude"))))
-      (claude-repl--setup-worktree-session "abc123" "/tmp/path" "ws1" t)
-      (should (eq (claude-repl--ws-get "ws1" :active-env) :bare-metal)))))
+    (let ((captured-env nil))
+      (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
+                 (lambda (_ws-id &optional _ws) nil))
+                ((symbol-function 'claude-repl--initialize-claude)
+                 (lambda (_ws &optional _dir env) (setq captured-env env)))
+                ((symbol-function 'claude-repl--active-inst)
+                 (lambda (_ws) (make-claude-repl-instantiation :start-cmd "claude"))))
+        (claude-repl--setup-worktree-session "abc123" "/tmp/path" "ws1" t)
+        (should (eq captured-env :bare-metal))))))
 
-(ert-deftest claude-repl-test-setup-worktree-session-sandbox ()
-  "When force-bare-metal is nil, :active-env is set to :sandbox."
+(ert-deftest claude-repl-test-setup-worktree-session-passes-sandbox-hint ()
+  "When force-bare-metal is nil, initialize-claude receives :sandbox as the env hint."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
-               (lambda (_ws-id _path _ws) nil))
-              ((symbol-function 'claude-repl--initialize-claude)
-               (lambda (_ws) nil))
-              ((symbol-function 'claude-repl--active-inst)
-               (lambda (_ws) (make-claude-repl-instantiation :start-cmd "claude"))))
-      (claude-repl--setup-worktree-session "abc123" "/tmp/path" "ws1" nil)
-      (should (eq (claude-repl--ws-get "ws1" :active-env) :sandbox)))))
+    (let ((captured-env nil))
+      (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
+                 (lambda (_ws-id &optional _ws) nil))
+                ((symbol-function 'claude-repl--initialize-claude)
+                 (lambda (_ws &optional _dir env) (setq captured-env env)))
+                ((symbol-function 'claude-repl--active-inst)
+                 (lambda (_ws) (make-claude-repl-instantiation :start-cmd "claude"))))
+        (claude-repl--setup-worktree-session "abc123" "/tmp/path" "ws1" nil)
+        (should (eq captured-env :sandbox))))))
+
+(ert-deftest claude-repl-test-setup-worktree-session-passes-path-hint ()
+  "initialize-claude receives the worktree PATH as the project-dir hint."
+  (claude-repl-test--with-clean-state
+    (let ((captured-dir-hint nil))
+      (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
+                 (lambda (_ws-id &optional _ws) nil))
+                ((symbol-function 'claude-repl--initialize-claude)
+                 (lambda (_ws &optional dir _env) (setq captured-dir-hint dir)))
+                ((symbol-function 'claude-repl--active-inst)
+                 (lambda (_ws) (make-claude-repl-instantiation :start-cmd "claude"))))
+        (claude-repl--setup-worktree-session "abc123" "/tmp/my-worktree" "ws1" nil)
+        (should (equal captured-dir-hint "/tmp/my-worktree"))))))
 
 (ert-deftest claude-repl-test-setup-worktree-session-binds-default-directory ()
   "During initialize-claude, default-directory is bound to the worktree path."
   (claude-repl-test--with-clean-state
     (let ((captured-dir nil))
       (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
-                 (lambda (_ws-id _path _ws) nil))
+                 (lambda (_ws-id &optional _ws) nil))
                 ((symbol-function 'claude-repl--initialize-claude)
-                 (lambda (_ws) (setq captured-dir default-directory)))
+                 (lambda (_ws &optional _dir _env) (setq captured-dir default-directory)))
                 ((symbol-function 'claude-repl--active-inst)
                  (lambda (_ws) (make-claude-repl-instantiation :start-cmd "claude"))))
         (claude-repl--setup-worktree-session "abc123" "/tmp/my-worktree" "ws1" nil)
         (should (equal captured-dir "/tmp/my-worktree/"))))))
-
-(ert-deftest claude-repl-test-setup-worktree-session-creates-instantiations ()
-  "Both :sandbox and :bare-metal instantiation structs are created."
-  (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
-               (lambda (_ws-id _path _ws) nil))
-              ((symbol-function 'claude-repl--initialize-claude)
-               (lambda (_ws) nil))
-              ((symbol-function 'claude-repl--active-inst)
-               (lambda (_ws) (make-claude-repl-instantiation :start-cmd "claude"))))
-      (claude-repl--setup-worktree-session "abc123" "/tmp/path" "ws1" t)
-      (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :sandbox)))
-      (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :bare-metal))))))
 
 ;;;; ---- Tests: async-git-sentinel ----
 

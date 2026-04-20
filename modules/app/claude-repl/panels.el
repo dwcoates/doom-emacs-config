@@ -504,13 +504,16 @@ The placeholder is swapped for the real vterm buffer once Claude is ready."
     (claude-repl--show-panels-and-focus)
     (claude-repl--ws-put ws :vterm-buffer real-vterm)))
 
-(defun claude-repl--initialize-claude (&optional ws)
+(defun claude-repl--initialize-claude (&optional ws project-dir-hint active-env-hint)
   "Initialize a Claude session for WS.
-Loads persisted env state (which restores `:project-dir' when a state
-file exists), creates the output vterm buffer, launches the Claude
-CLI inside it, creates the input buffer, enables the hide-overlay,
-marks `:claude-state' as `:init', and announces the startup.  Errors
-if Claude is already running for WS.
+Calls `initialize-ws-env' with PROJECT-DIR-HINT and ACTIVE-ENV-HINT
+(creation paths — worktree setup or new-workspace — pass known values
+here; regular `SPC o c' passes nil and lets the helper derive from
+the state file or the current buffer's git-root).  Then creates the
+output vterm buffer, launches the Claude CLI inside it, creates the
+input buffer, enables the hide-overlay, marks `:claude-state' as
+`:init', and announces the startup.  Errors if Claude is already
+running for WS.
 
 Writes `:claude-state :init' immediately after launching the vterm
 process (documented lifecycle exception to the sentinel-only-writes
@@ -525,11 +528,9 @@ echo-area message below."
     (when (claude-repl--claude-running-p ws)
       (error "claude-repl--initialize-claude: already running ws=%s" ws))
     (claude-repl--log ws "initialize-claude: starting new session for ws=%s" ws)
-    (unless (claude-repl--ws-get ws :active-env)
-      (claude-repl--initialize-ws-env ws))
+    (claude-repl--initialize-ws-env ws project-dir-hint active-env-hint)
     (let* ((root (claude-repl--ws-dir ws))
            (default-directory root))
-      (claude-repl--record-project-dir ws root)
       (claude-repl--kill-stale-vterm ws)
       (let* ((vterm-buf (claude-repl--create-buffer ws))
              (start-info (claude-repl--build-start-cmd ws))

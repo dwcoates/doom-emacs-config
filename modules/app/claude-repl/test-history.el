@@ -401,90 +401,6 @@
       (should-not (plist-get state :bare-metal))
       (should-not (plist-get state :sandbox)))))
 
-;;;; ---- Tests: fresh-ws-env ----
-
-(ert-deftest claude-repl-test-fresh-ws-env ()
-  "fresh-ws-env creates default state with :bare-metal and empty structs."
-  (claude-repl-test--with-clean-state
-    (claude-repl--fresh-ws-env "ws")
-    (should (eq (claude-repl--ws-get "ws" :active-env) :bare-metal))
-    (should (claude-repl-instantiation-p (claude-repl--ws-get "ws" :bare-metal)))
-    (should (claude-repl-instantiation-p (claude-repl--ws-get "ws" :sandbox)))
-    (should-not (claude-repl-instantiation-session-id
-                 (claude-repl--ws-get "ws" :bare-metal)))
-    (should-not (claude-repl-instantiation-session-id
-                 (claude-repl--ws-get "ws" :sandbox)))))
-
-;;;; ---- Tests: apply-restored-state ----
-
-(ert-deftest claude-repl-test-apply-restored-state-sets-project-dir ()
-  "apply-restored-state sets :project-dir from saved state."
-  (claude-repl-test--with-clean-state
-    (claude-repl--apply-restored-state
-     "ws" '(:project-dir "/saved/root"
-            :active-env :bare-metal
-            :bare-metal (:session-id "x")
-            :sandbox nil))
-    (should (equal (claude-repl--ws-get "ws" :project-dir) "/saved/root"))))
-
-(ert-deftest claude-repl-test-apply-restored-state-creates-structs ()
-  "apply-restored-state creates instantiation structs from saved plists."
-  (claude-repl-test--with-clean-state
-    (claude-repl--apply-restored-state
-     "ws" '(:project-dir "/root"
-            :active-env :bare-metal
-            :bare-metal (:session-id "bm1")
-            :sandbox (:session-id "sb1")))
-    (let ((bm (claude-repl--ws-get "ws" :bare-metal))
-          (sb (claude-repl--ws-get "ws" :sandbox)))
-      (should (claude-repl-instantiation-p bm))
-      (should (claude-repl-instantiation-p sb))
-      (should (equal (claude-repl-instantiation-session-id bm) "bm1"))
-      (should (equal (claude-repl-instantiation-session-id sb) "sb1")))))
-
-(ert-deftest claude-repl-test-apply-restored-state-restores-active-env ()
-  "apply-restored-state restores :active-env from saved state."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :active-env :bare-metal)
-    (claude-repl--apply-restored-state
-     "ws" '(:project-dir "/saved/root"
-            :active-env :sandbox
-            :bare-metal (:session-id "x")
-            :sandbox (:session-id "s1")))
-    (should (eq (claude-repl--ws-get "ws" :active-env) :sandbox))))
-
-(ert-deftest claude-repl-test-apply-restored-state-nil-active-env-preserves-default ()
-  "apply-restored-state does not overwrite :active-env when saved value is nil."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :active-env :bare-metal)
-    (claude-repl--apply-restored-state
-     "ws" '(:project-dir "/saved/root"
-            :active-env nil
-            :bare-metal (:session-id "x")
-            :sandbox nil))
-    (should (eq (claude-repl--ws-get "ws" :active-env) :bare-metal))))
-
-(ert-deftest claude-repl-test-apply-restored-state-nil-project-dir ()
-  "apply-restored-state does not overwrite :project-dir when saved is nil."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :project-dir "/existing")
-    (claude-repl--apply-restored-state "ws" '(:project-dir nil
-                                              :active-env :bare-metal))
-    ;; :project-dir should remain "/existing" since saved was nil
-    (should (equal (claude-repl--ws-get "ws" :project-dir) "/existing"))))
-
-(ert-deftest claude-repl-test-apply-restored-state-nil-env-creates-empty-struct ()
-  "apply-restored-state creates empty struct when saved env data is nil."
-  (claude-repl-test--with-clean-state
-    (claude-repl--apply-restored-state
-     "ws" '(:project-dir "/root"
-            :active-env :bare-metal
-            :bare-metal (:session-id "bm1")
-            :sandbox nil))
-    (let ((sb (claude-repl--ws-get "ws" :sandbox)))
-      (should (claude-repl-instantiation-p sb))
-      (should-not (claude-repl-instantiation-session-id sb)))))
-
 ;;;; ---- Tests: state-save ----
 
 (ert-deftest claude-repl-test-state-save-writes-file ()
@@ -512,66 +428,14 @@
     ;; No :project-dir set -- should not error
     (claude-repl--state-save "ws")))
 
-;;;; ---- Tests: read-state-file ----
-
-(ert-deftest claude-repl-test-read-state-file-with-project-dir ()
-  "read-state-file reads state from disk using :project-dir."
-  (claude-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-" t)))
-      (unwind-protect
-          (progn
-            (claude-repl--write-sexp-file
-             (expand-file-name ".claude-repl-state" tmpdir)
-             '(:project-dir "/restored/root"
-               :active-env :sandbox
-               :bare-metal (:session-id "bm-id")
-               :sandbox (:session-id "sb-id")))
-            (claude-repl--ws-put "ws" :project-dir tmpdir)
-            (let ((data (claude-repl--read-state-file "ws")))
-              (should (equal (plist-get data :project-dir) "/restored/root"))
-              (should (eq (plist-get data :active-env) :sandbox))
-              (should (equal (plist-get (plist-get data :bare-metal) :session-id) "bm-id"))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest claude-repl-test-read-state-file-no-file ()
-  "read-state-file returns nil when no state file exists."
-  (claude-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-" t)))
-      (unwind-protect
-          (progn
-            (claude-repl--ws-put "ws" :project-dir tmpdir)
-            (should-not (claude-repl--read-state-file "ws")))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest claude-repl-test-read-state-file-fallback-to-git-root ()
-  "read-state-file falls back to git-root when :project-dir is not set."
-  (claude-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-" t)))
-      (unwind-protect
-          (progn
-            (claude-repl--write-sexp-file
-             (expand-file-name ".claude-repl-state" tmpdir)
-             '(:project-dir "/fallback/root"
-               :active-env :bare-metal))
-            (cl-letf (((symbol-function 'claude-repl--git-root)
-                       (lambda (&optional _d) tmpdir)))
-              (let ((data (claude-repl--read-state-file "ws")))
-                (should (equal (plist-get data :project-dir) "/fallback/root")))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest claude-repl-test-read-state-file-both-roots-nil ()
-  "read-state-file returns nil when both :project-dir and git-root are nil."
-  (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--git-root)
-               (lambda (&optional _d) nil)))
-      (should-not (claude-repl--read-state-file "ws")))))
-
 ;;;; ---- Tests: validate-ws-env ----
 
 (ert-deftest claude-repl-test-validate-ws-env-valid ()
   "validate-ws-env passes for well-formed workspace state."
   (claude-repl-test--with-clean-state
-    (claude-repl--fresh-ws-env "ws")
+    (claude-repl--ws-put "ws" :active-env :bare-metal)
+    (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
     ;; Should not error
     (claude-repl--validate-ws-env "ws")))
 
@@ -948,47 +812,6 @@
     ;; Should not signal an error thanks to with-error-logging
     (claude-repl--state-save "ws")))
 
-;;;; ---- Tests: read-state-file with corrupt/empty files ----
-
-(ert-deftest claude-repl-test-read-state-file-empty-file ()
-  "read-state-file returns nil when state file exists but is empty."
-  (claude-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-empty-" t)))
-      (unwind-protect
-          (progn
-            ;; Create an empty state file (simulates interrupted write)
-            (with-temp-file (expand-file-name ".claude-repl-state" tmpdir)
-              (insert ""))
-            (claude-repl--ws-put "ws" :project-dir tmpdir)
-            (should-not (claude-repl--read-state-file "ws")))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest claude-repl-test-read-state-file-invalid-elisp ()
-  "read-state-file returns nil when state file contains unreadable elisp."
-  (claude-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-invalid-" t)))
-      (unwind-protect
-          (progn
-            ;; Unclosed paren triggers end-of-file error in (read ...)
-            (with-temp-file (expand-file-name ".claude-repl-state" tmpdir)
-              (insert "(unclosed paren"))
-            (claude-repl--ws-put "ws" :project-dir tmpdir)
-            (should-not (claude-repl--read-state-file "ws")))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest claude-repl-test-read-state-file-corrupt-data ()
-  "read-state-file returns whatever the file contains (caller validates)."
-  (claude-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-corrupt-" t)))
-      (unwind-protect
-          (progn
-            ;; A number is valid elisp but not a plist — reader returns it
-            (claude-repl--write-sexp-file
-             (expand-file-name ".claude-repl-state" tmpdir) 42)
-            (claude-repl--ws-put "ws" :project-dir tmpdir)
-            (should (equal (claude-repl--read-state-file "ws") 42)))
-        (delete-directory tmpdir t)))))
-
 ;;;; ---- Tests: initialize-ws-env with missing/corrupt state files ----
 
 (ert-deftest claude-repl-test-initialize-ws-env-empty-file-creates-fresh ()
@@ -1031,7 +854,8 @@
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-write-" t)))
       (unwind-protect
-          (let ((state-path (expand-file-name ".claude-repl-state" tmpdir)))
+          (let ((state-path (expand-file-name ".claude-repl-state"
+                                              (claude-repl--path-canonical tmpdir))))
             (claude-repl--ws-put "ws" :project-dir tmpdir)
             (should-not (file-exists-p state-path))
             (claude-repl--initialize-ws-env "ws")
@@ -1039,7 +863,8 @@
             ;; Verify the written file is valid and round-trips
             (let ((data (claude-repl--read-sexp-file state-path)))
               (should (eq (plist-get data :active-env) :bare-metal))
-              (should (equal (plist-get data :project-dir) tmpdir))))
+              (should (equal (plist-get data :project-dir)
+                             (claude-repl--path-canonical tmpdir)))))
         (delete-directory tmpdir t)))))
 
 ;;;; ---- Tests: history-push edge cases ----

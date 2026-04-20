@@ -177,38 +177,6 @@ Written to .claude-repl-state in the project root (alongside
           (claude-repl--write-sexp-file file state)
           (claude-repl--log ws "state-save: write complete ws=%s file=%s" ws file))))))
 
-(defun claude-repl--apply-restored-state (ws state)
-  "Apply persisted STATE plist to workspace WS.
-Creates instantiation structs from saved data and sets :project-dir
-and :active-env.  Each environment gets a struct built from its saved
-plist; environments with nil saved data get a fresh empty struct."
-  (claude-repl--log ws "initialize-ws-env: restoring from state file ws=%s" ws)
-  (let ((saved-dir (plist-get state :project-dir))
-        (saved-env (plist-get state :active-env)))
-    (when saved-dir
-      (claude-repl--ws-put ws :project-dir (claude-repl--path-canonical saved-dir)))
-    (when saved-env
-      (claude-repl--ws-put ws :active-env saved-env))
-    (dolist (key claude-repl--environment-keys)
-      (claude-repl--log ws "apply-restored-state: ws=%s key=%s" ws key)
-      (claude-repl--ws-put ws key
-                           (claude-repl--make-instantiation-from-plist
-                            (plist-get state key))))
-    (claude-repl--log ws "apply-restored-state ws=%s project-dir=%s active-env=%s envs=%S"
-                      ws saved-dir saved-env
-                      (cl-loop for key in claude-repl--environment-keys
-                               collect (cons key (plist-get state key))))))
-
-(defun claude-repl--fresh-ws-env (ws)
-  "Initialize workspace WS with default fresh environment state.
-Sets :active-env to :bare-metal and creates empty instantiation structs
-for all environments."
-  (claude-repl--log ws "fresh-ws-env: ws=%s" ws)
-  (claude-repl--ws-put ws :active-env :bare-metal) ;; FIXME: why is this :bare-metal here? are we defaulting to bare-metal for new workspaces?
-  (dolist (key claude-repl--environment-keys)
-    (claude-repl--ws-put ws key (make-claude-repl-instantiation)))
-  (claude-repl--state-save ws))
-
 (defun claude-repl--validate-ws-env (ws)
   "Validate that workspace WS has well-formed environment state.
 Signals an error with a descriptive message when validation fails."
@@ -226,23 +194,6 @@ Signals an error with a descriptive message when validation fails."
             (error "claude-repl: ws %s env %s has invalid session-id %S (expected string or nil)"
                    ws key sid))))))
   (claude-repl--log ws "validate-ws-env: ws=%s passed" ws))
-
-(defun claude-repl--read-state-file (ws)
-  "Read the persisted state file for workspace WS, or nil if none exists.
-Determines the project root from :project-dir or git-root fallback,
-then reads .claude-repl-state if present.  Returns nil on missing,
-empty, or corrupt files so the caller can fall back to fresh state."
-  (let* ((root (or (claude-repl--ws-get ws :project-dir)
-                   (claude-repl--git-root default-directory)))
-         (file (claude-repl--state-file root)))
-    (claude-repl--log ws "read-state-file: ws=%s root=%s file=%s" ws root file)
-    (when file
-      (condition-case err
-          (claude-repl--read-sexp-file-if-exists file)
-        (error
-         (claude-repl--log ws "read-state-file: error reading %s: %S — returning nil"
-                           file err)
-         nil)))))
 
 ;;;; Input history
 

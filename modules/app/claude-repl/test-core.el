@@ -880,34 +880,6 @@ environments without notification tools (terminal-notifier or osascript)."
     (should-not (claude-repl--ws-get "ws1" :status))
     (should-not (claude-repl--ws-get "ws1" :priority))))
 
-;;;; ---- Tests: record-project-dir ----
-
-(ert-deftest claude-repl-test-record-project-dir-sets-when-unset ()
-  "record-project-dir writes :project-dir when workspace has none."
-  (claude-repl-test--with-clean-state
-    (claude-repl--record-project-dir "ws1" "/path/to/ws1")
-    (should (equal (claude-repl--ws-get "ws1" :project-dir) "/path/to/ws1"))))
-
-(ert-deftest claude-repl-test-record-project-dir-preserves-existing ()
-  "record-project-dir never overwrites an already-set :project-dir.
-Load-bearing: worktree workspaces store their canonical path via
-`register-worktree-ws' before initialize-claude runs, and a drifted
-`default-directory' from elsewhere must not clobber it."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws1" :project-dir "/canonical/worktree")
-    (claude-repl--record-project-dir "ws1" "/drifted/default-dir")
-    (should (equal (claude-repl--ws-get "ws1" :project-dir) "/canonical/worktree"))))
-
-(ert-deftest claude-repl-test-record-project-dir-creates-ws-entry ()
-  "record-project-dir works even when the workspace has no hash entry yet.
-`ws-put' via `plist-put' on nil produces a fresh plist, so a workspace
-that was never registered still gets :project-dir — this is the exact
-path that closes the SPC-j-x-restart warning."
-  (claude-repl-test--with-clean-state
-    (should-not (gethash "fresh-ws" claude-repl--workspaces))
-    (claude-repl--record-project-dir "fresh-ws" "/path")
-    (should (equal (claude-repl--ws-get "fresh-ws" :project-dir) "/path"))))
-
 ;;;; ---- Tests: create-buffer ----
 
 (ert-deftest claude-repl-test-create-buffer-vterm-name ()

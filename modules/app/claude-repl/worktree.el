@@ -148,27 +148,26 @@ WS is used only for the error message."
 
 ;;; Worktree registration and session setup
 
-(defun claude-repl--register-worktree-ws (ws-id path &optional ws)
-  "Mark workspace WS as a worktree workspace rooted at PATH.
+(defun claude-repl--register-worktree-ws (ws-id &optional ws)
+  "Mark workspace WS as a worktree workspace.
 WS-ID is the hash identifier (used for logging/buffer naming); the state
 is stored under WS, defaulting to `+workspace-current-name'.
-Signals an error if no workspace name can be determined."
+Signals an error if no workspace name can be determined.  The project
+root is recorded by `claude-repl--initialize-ws-env', not here."
   (let ((ws (or ws (+workspace-current-name))))
     (unless ws
       (error "claude-repl--register-worktree-ws: no workspace name provided and no current workspace"))
-    (claude-repl--log ws "register-worktree-ws ws-id=%s ws=%s path=%s" ws-id ws path)
-    (claude-repl--ws-put ws :worktree-p t)
-    (claude-repl--ws-put ws :project-dir (claude-repl--path-canonical path))))
+    (claude-repl--log ws "register-worktree-ws ws-id=%s ws=%s" ws-id ws)
+    (claude-repl--ws-put ws :worktree-p t)))
 
 (defun claude-repl--setup-worktree-session (ws-id path ws force-bare-metal)
   "Register WS as a worktree at PATH and start its Claude session.
-Initializes sandbox and bare-metal instantiations; sets :active-env."
-  (claude-repl--register-worktree-ws ws-id path ws)
-  (claude-repl--ws-put ws :sandbox (make-claude-repl-instantiation))
-  (claude-repl--ws-put ws :bare-metal (make-claude-repl-instantiation))
-  (claude-repl--ws-put ws :active-env (if force-bare-metal :bare-metal :sandbox))
+Passes PATH and the desired environment as hints to `initialize-claude',
+which threads them into `initialize-ws-env' (the sole writer of
+`:project-dir', `:active-env', and per-env instantiation structs)."
+  (claude-repl--register-worktree-ws ws-id ws)
   (let ((default-directory (file-name-as-directory path)))
-    (claude-repl--initialize-claude ws))
+    (claude-repl--initialize-claude ws path (if force-bare-metal :bare-metal :sandbox)))
   (claude-repl--log ws "worktree pre-started Claude ws=%s cmd=%s"
                     ws (claude-repl-instantiation-start-cmd (claude-repl--active-inst ws))))
 
@@ -471,7 +470,10 @@ Signals an error if not inside a git repository."
       (error "claude-repl--new-workspace: not in a git repository"))
     (claude-repl--log (+workspace-current-name) "new-workspace: root=%s" root)
     (+workspace/new)
-    (claude-repl--ws-put (+workspace-current-name) :project-dir (claude-repl--path-canonical root))
+    ;; Hydrate the new workspace's env state (writes :project-dir from ROOT
+    ;; via the sole writer, `initialize-ws-env'). `magit-status' only needs
+    ;; a directory — we don't start Claude yet.
+    (claude-repl--initialize-ws-env (+workspace-current-name) root)
     (magit-status root)))
 
 ;;; Prompt dispatch
