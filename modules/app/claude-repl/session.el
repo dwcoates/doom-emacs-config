@@ -302,8 +302,9 @@ SANDBOXED-P means Docker mode with DOCKER-IMAGE; otherwise bare metal."
 Only acts when BUF is still live.  Each window showing PLACEHOLDER is
 un-dedicated, switched to BUF, and re-dedicated."
   (when (buffer-live-p buf)
-    (let ((wins (get-buffer-window-list placeholder nil t)))
-      (claude-repl--log nil "swap-placeholder-into-windows: swapping %d window(s) buf=%s"
+    (let ((wins (get-buffer-window-list placeholder nil t))
+          (ws (buffer-local-value 'claude-repl--owning-workspace buf)))
+      (claude-repl--log ws "swap-placeholder-into-windows: swapping %d window(s) buf=%s"
                         (length wins) (buffer-name buf))
       (dolist (win wins)
         (set-window-dedicated-p win nil)
@@ -314,7 +315,8 @@ un-dedicated, switched to BUF, and re-dedicated."
 (defun claude-repl--swap-placeholder (buf)
   "Replace the loading placeholder window with the real vterm buffer BUF.
 Called once when Claude becomes ready (via session_start hook)."
-  (claude-repl--log nil "swap-placeholder buf=%s" (if buf (buffer-name buf) "nil"))
+  (claude-repl--log (and buf (buffer-local-value 'claude-repl--owning-workspace buf))
+                    "swap-placeholder buf=%s" (if buf (buffer-name buf) "nil"))
   (let ((placeholder (get-buffer " *claude-loading*")))
     (when placeholder
       (run-at-time 0 nil
@@ -360,14 +362,16 @@ bit on `:repl-state':
 
 (defun claude-repl--refresh-vterm-after-finish (vterm-buf)
   "Refresh display and scroll position for VTERM-BUF if it is still live."
-  (claude-repl--log nil "refresh-vterm-after-finish: buf=%s" (buffer-name vterm-buf))
-  (if (buffer-live-p vterm-buf)
-      (progn
-        (with-current-buffer vterm-buf
-          (claude-repl--do-refresh)
-          (claude-repl--update-hide-overlay))
-        (claude-repl--fix-vterm-scroll vterm-buf))
-    (claude-repl--log nil "refresh-vterm-after-finish: buffer is dead buf=%s" (buffer-name vterm-buf))))
+  (let ((ws (and (buffer-live-p vterm-buf)
+                 (buffer-local-value 'claude-repl--owning-workspace vterm-buf))))
+    (claude-repl--log ws "refresh-vterm-after-finish: buf=%s" (buffer-name vterm-buf))
+    (if (buffer-live-p vterm-buf)
+        (progn
+          (with-current-buffer vterm-buf
+            (claude-repl--do-refresh)
+            (claude-repl--update-hide-overlay))
+          (claude-repl--fix-vterm-scroll vterm-buf))
+      (claude-repl--log ws "refresh-vterm-after-finish: buffer is dead buf=%s" (buffer-name vterm-buf)))))
 
 (defun claude-repl--handle-claude-finished (ws)
   "Handle Claude finishing in WS.
