@@ -447,12 +447,14 @@ Rule:
   :permission → :permission               (green + ❓)
   :init       → :init                     (blue — Claude starting)
   :done       → :done                     (green — unacknowledged work)
-  :idle / nil / other → nil               (default face)"
+  :idle       → :idle                     (orange)
+  nil / other → nil                       (default face)"
   (cond
    ((eq claude :thinking)   :thinking)
    ((eq claude :permission) :permission)
    ((eq claude :init)       :init)
    ((eq claude :done)       :done)
+   ((eq claude :idle)       :idle)
    (t                       nil)))
 
 (defun claude-repl--ws-display-state (ws)

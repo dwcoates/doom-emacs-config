@@ -119,9 +119,9 @@
   (should (eq :init (claude-repl--composed-state :init :inactive))))
 
 (ert-deftest claude-repl-test-composed-idle ()
-  "Composed (:idle, any) → nil — idle Claude renders as default face."
-  (should-not (claude-repl--composed-state :idle nil))
-  (should-not (claude-repl--composed-state :idle :inactive)))
+  "Composed (:idle, any) → :idle — idle Claude renders via explicit palette entry (orange)."
+  (should (eq :idle (claude-repl--composed-state :idle nil)))
+  (should (eq :idle (claude-repl--composed-state :idle :inactive))))
 
 ;;;; ---- Tests: ws-display-state reads both axes ----
 
