@@ -28,7 +28,7 @@ Returns nil if the buffer is empty or the region would be degenerate.
 The number of lines hidden is controlled by `claude-repl--hide-overlay-line-count'."
   (if (<= (point-max) 1)
       (progn
-        (claude-repl--log-verbose nil "hide-overlay-region: nil (buffer empty)")
+        (claude-repl--log-verbose (+workspace-current-name) "hide-overlay-region: nil (buffer empty)")
         nil)
     (let* ((end (point-max))
            (start (save-excursion
@@ -37,9 +37,9 @@ The number of lines hidden is controlled by `claude-repl--hide-overlay-line-coun
                     (line-beginning-position))))
       (if (< start end)
           (progn
-            (claude-repl--log-verbose nil "hide-overlay-region: start=%d end=%d" start end)
+            (claude-repl--log-verbose (+workspace-current-name) "hide-overlay-region: start=%d end=%d" start end)
             (cons start end))
-        (claude-repl--log-verbose nil "hide-overlay-region: nil (degenerate region start=%d end=%d)" start end)
+        (claude-repl--log-verbose (+workspace-current-name) "hide-overlay-region: nil (degenerate region start=%d end=%d)" start end)
         nil))))
 
 (defun claude-repl--create-hide-overlay ()
@@ -47,23 +47,23 @@ The number of lines hidden is controlled by `claude-repl--hide-overlay-line-coun
 Only acts when `claude-repl-hide-input-box' is non-nil.
 The region is computed by `claude-repl--hide-overlay-region'."
   (if (not claude-repl-hide-input-box)
-      (claude-repl--log-verbose nil "create-hide-overlay: skipped (hide-input-box nil)")
+      (claude-repl--log-verbose (+workspace-current-name) "create-hide-overlay: skipped (hide-input-box nil)")
     (let ((region (claude-repl--hide-overlay-region)))
       (if (not region)
-          (claude-repl--log-verbose nil "create-hide-overlay: skipped (no region)")
+          (claude-repl--log-verbose (+workspace-current-name) "create-hide-overlay: skipped (no region)")
         (setq claude-repl-hide-overlay (make-overlay (car region) (cdr region) nil t nil))
         (overlay-put claude-repl-hide-overlay 'display "")
         (overlay-put claude-repl-hide-overlay 'evaporate t)
-        (claude-repl--log-verbose nil "create-hide-overlay: created start=%d end=%d" (car region) (cdr region))))))
+        (claude-repl--log-verbose (+workspace-current-name) "create-hide-overlay: created start=%d end=%d" (car region) (cdr region))))))
 
 (defun claude-repl--delete-hide-overlay ()
   "Delete the hide overlay if it exists and clear the variable."
   (if (and claude-repl-hide-overlay
            (overlay-buffer claude-repl-hide-overlay))
       (progn
-        (claude-repl--log-verbose nil "delete-hide-overlay: deleted")
+        (claude-repl--log-verbose (+workspace-current-name) "delete-hide-overlay: deleted")
         (delete-overlay claude-repl-hide-overlay))
-    (claude-repl--log-verbose nil "delete-hide-overlay: no overlay to delete"))
+    (claude-repl--log-verbose (+workspace-current-name) "delete-hide-overlay: no overlay to delete"))
   (setq claude-repl-hide-overlay nil))
 
 (defun claude-repl--resolve-overlay-target-buffer ()
@@ -72,7 +72,7 @@ When called from within a claude buffer, returns it directly.
 Otherwise looks up the vterm buffer for the current workspace."
   (if (claude-repl--claude-buffer-p)
       (progn
-        (claude-repl--log-verbose nil "resolve-overlay-target-buffer: using current claude buffer")
+        (claude-repl--log-verbose (+workspace-current-name) "resolve-overlay-target-buffer: using current claude buffer")
         (current-buffer))
     (let ((ws (+workspace-current-name)))
       (claude-repl--log-verbose ws "resolve-overlay-target-buffer: workspace lookup ws=%s" ws)
@@ -83,8 +83,8 @@ Otherwise looks up the vterm buffer for the current workspace."
 Resolves the target buffer, then deletes and recreates the overlay in it."
   (let ((buf (claude-repl--resolve-overlay-target-buffer)))
     (if (not (and buf (buffer-live-p buf)))
-        (claude-repl--log-verbose nil "update-hide-overlay: skipped (buf nil or dead)")
-      (claude-repl--log-verbose nil "update-hide-overlay: updating buf=%s" (buffer-name buf))
+        (claude-repl--log-verbose (+workspace-current-name) "update-hide-overlay: skipped (buf nil or dead)")
+      (claude-repl--log-verbose (+workspace-current-name) "update-hide-overlay: updating buf=%s" (buffer-name buf))
       (with-current-buffer buf
         (claude-repl--delete-hide-overlay)
         (claude-repl--create-hide-overlay)))))
@@ -94,7 +94,7 @@ Resolves the target buffer, then deletes and recreates the overlay in it."
 (defun claude-repl--enable-hide-overlay ()
   "Enable the hide overlay advice.
 Uses reference counting so multiple sessions don't clobber each other."
-  (claude-repl--log nil "enable-hide-overlay refcount=%d" claude-repl--hide-overlay-refcount)
+  (claude-repl--log (+workspace-current-name) "enable-hide-overlay refcount=%d" claude-repl--hide-overlay-refcount)
   (when (zerop claude-repl--hide-overlay-refcount)
     (advice-add 'vterm--redraw :after #'claude-repl--vterm-redraw-advice))
   (cl-incf claude-repl--hide-overlay-refcount))
@@ -102,10 +102,10 @@ Uses reference counting so multiple sessions don't clobber each other."
 (defun claude-repl--vterm-redraw-advice (&rest _)
   "Apply hide overlay after vterm redraws."
   (if claude-repl--in-redraw-advice
-      (claude-repl--log-verbose nil "vterm-redraw-advice: skipped (recursion guard)")
+      (claude-repl--log-verbose (+workspace-current-name) "vterm-redraw-advice: skipped (recursion guard)")
     (let ((claude-repl--in-redraw-advice t))
       (if (not (claude-repl--claude-buffer-p))
-          (claude-repl--log-verbose nil "vterm-redraw-advice: skipped (non-claude buffer)")
+          (claude-repl--log-verbose (+workspace-current-name) "vterm-redraw-advice: skipped (non-claude buffer)")
         (claude-repl--update-hide-overlay)))))
 
 (defun claude-repl--disable-hide-overlay ()
@@ -114,7 +114,7 @@ Uses reference counting so the advice is only removed when the last
 session releases it."
   (setq claude-repl--hide-overlay-refcount
         (max 0 (1- claude-repl--hide-overlay-refcount)))
-  (claude-repl--log nil "disable-hide-overlay refcount=%d" claude-repl--hide-overlay-refcount)
+  (claude-repl--log (+workspace-current-name) "disable-hide-overlay refcount=%d" claude-repl--hide-overlay-refcount)
   (when (zerop claude-repl--hide-overlay-refcount)
     (advice-remove 'vterm--redraw #'claude-repl--vterm-redraw-advice))
   (claude-repl--delete-hide-overlay))
@@ -124,7 +124,7 @@ session releases it."
 (defun claude-repl-toggle-hide-input-box ()
   "Toggle hiding of Claude CLI's input box in the vterm buffer."
   (interactive)
-  (claude-repl--log nil "toggle-hide-input-box -> %s" (not claude-repl-hide-input-box))
+  (claude-repl--log (+workspace-current-name) "toggle-hide-input-box -> %s" (not claude-repl-hide-input-box))
   (setq claude-repl-hide-input-box (not claude-repl-hide-input-box))
   (claude-repl--update-hide-overlay)
   (message "Claude input box hiding %s" (if claude-repl-hide-input-box "enabled" "disabled")))
@@ -164,7 +164,7 @@ solaire-mode remap the default face."
     (if (and (claude-repl--default-background-request-p index args)
              (claude-repl--claude-buffer-p))
         (let ((override (claude-repl--grey-hex claude-repl--vterm-background-grey)))
-          (claude-repl--log-verbose nil "vterm-color-advice: claude buffer background override color=%s" override)
+          (claude-repl--log-verbose (+workspace-current-name) "vterm-color-advice: claude buffer background override color=%s" override)
           override)
       result)))
 

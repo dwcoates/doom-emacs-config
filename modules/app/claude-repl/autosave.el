@@ -2,16 +2,17 @@
 
 ;;; Code:
 
-(defun claude-repl--save-buffer-if-modified (buf)
+(defun claude-repl--save-buffer-if-modified (buf &optional ws)
   "Save BUF silently if it is a live, modified, file-visiting buffer.
-Return non-nil if the buffer was saved."
+Return non-nil if the buffer was saved.  Optional WS is threaded through
+for diagnostic logging context."
   (when (and (buffer-live-p buf)
              (buffer-file-name buf)
              (buffer-modified-p buf))
     (with-current-buffer buf
       (let ((inhibit-message t))
         (save-buffer)))
-    (claude-repl--log-verbose nil "save-buffer-if-modified: saved buffer=%s" (buffer-name buf))
+    (claude-repl--log-verbose ws "save-buffer-if-modified: saved buffer=%s" (buffer-name buf))
     t))
 
 (defun claude-repl--autosave-workspace-buffers ()
@@ -25,9 +26,10 @@ Runs silently every 5 minutes to prevent data loss."
          ;; nil is persp-mode's "no perspective" container — expected, skip silently.
          ((null persp) nil)
          ((not (symbolp persp))
-          (dolist (buf (persp-buffers persp))
-            (when (claude-repl--save-buffer-if-modified buf)
-              (cl-incf saved))))
+          (let ((ws (safe-persp-name persp)))
+            (dolist (buf (persp-buffers persp))
+              (when (claude-repl--save-buffer-if-modified buf ws)
+                (cl-incf saved)))))
          (t
           (claude-repl--log nil "WARN: autosave encountered non-perspective entry: %S" persp))))
       (if (> saved 0)

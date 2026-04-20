@@ -44,12 +44,12 @@
   "Before-advice for `+workspace/kill': tear down any running Claude session.
 This ensures Claude buffers and windows are cleaned up while the workspace
 is still current."
-  (claude-repl--log nil "kill-before-workspace-delete: entry")
+  (claude-repl--log (+workspace-current-name) "kill-before-workspace-delete: entry")
   (if (claude-repl--claude-running-p)
       (progn
-        (claude-repl--log nil "kill-before-workspace-delete: vterm running, killing session")
+        (claude-repl--log (+workspace-current-name) "kill-before-workspace-delete: vterm running, killing session")
         (claude-repl-kill))
-    (claude-repl--log nil "kill-before-workspace-delete: vterm not running, no-op")))
+    (claude-repl--log (+workspace-current-name) "kill-before-workspace-delete: vterm not running, no-op")))
 
 (defun claude-repl--read-workspace (prompt)
   "Prompt for a workspace name with PROMPT.  Requires an exact match."
@@ -76,7 +76,7 @@ the obvious target).  Signals `user-error' when no workspaces exist."
 Ensures the output directory exists.  Returns the full path of the written file."
   (make-directory claude-repl--output-dir t)
   (let ((file (expand-file-name filename claude-repl--output-dir)))
-    (claude-repl--log nil "write-output-json: filename=%s dir=%s" filename claude-repl--output-dir)
+    (claude-repl--log (+workspace-current-name) "write-output-json: filename=%s dir=%s" filename claude-repl--output-dir)
     (with-temp-file file
       (insert (json-encode content)))
     file))
@@ -94,7 +94,7 @@ Extracts the trailing digit from the key sequence (e.g. SPC o 3 -> \"3\")."
   (interactive)
   (let* ((keys (this-command-keys-vector))
          (last-key (aref keys (1- (length keys)))))
-    (claude-repl--log nil "send-digit-char: digit=%s" (string last-key))
+    (claude-repl--log (+workspace-current-name) "send-digit-char: digit=%s" (string last-key))
     (claude-repl-send-char (string last-key))))
 
 ;; C-v paste forwarding to vterm
@@ -102,10 +102,10 @@ Extracts the trailing digit from the key sequence (e.g. SPC o 3 -> \"3\")."
   "Forward a Ctrl-V keystroke to the Claude vterm buffer.
 This lets Claude CLI handle paste natively, including images."
   (interactive)
-  (claude-repl--log nil "paste-to-vterm: entry")
+  (claude-repl--log (+workspace-current-name) "paste-to-vterm: entry")
   (if (claude-repl--vterm-live-p)
       (progn
-        (claude-repl--log nil "paste-to-vterm: vterm live, forwarding C-v")
+        (claude-repl--log (+workspace-current-name) "paste-to-vterm: vterm live, forwarding C-v")
         (with-current-buffer (claude-repl--ws-get (+workspace-current-name) :vterm-buffer)
           (vterm-send-key "v" nil nil t)))
     (user-error "No live Claude session — paste not forwarded")))
@@ -128,7 +128,7 @@ PRIORITY is one of \"p05\", \"p1\", \"p2\", \"p3\", or \"\" to clear."
 (defun claude-repl-revert-and-eval-buffer ()
   "Revert the current buffer from disk, then evaluate it as Elisp."
   (interactive)
-  (claude-repl--log nil "revert-and-eval-buffer: entry buffer=%s" (buffer-name))
+  (claude-repl--log (+workspace-current-name) "revert-and-eval-buffer: entry buffer=%s" (buffer-name))
   (revert-buffer :ignore-auto :noconfirm)
   (eval-buffer))
 
@@ -147,7 +147,7 @@ NAMES is an optional list of branch name strings; defaults to a single test entr
   (interactive)
   (let* ((names (or names (list claude-repl-debug-mock-workspace-default-name)))
          (file (claude-repl--write-output-json "workspace_generation.json" names)))
-    (claude-repl--log nil "mock workspace-generation file written: %s names=%s" file names)
+    (claude-repl--log (+workspace-current-name) "mock workspace-generation file written: %s names=%s" file names)
     (message "Wrote mock workspace_generation.json: %s" names)))
 
 (defun claude-repl-debug/mock-workspace-commands-with-priority ()
@@ -174,7 +174,7 @@ Use this to verify the processor works independently of the file watcher."
                  claude-repl--output-dir)
       (message "Found %d file(s), processing..." (length files))
       (dolist (file files)
-        (claude-repl--log nil "process-pending-commands: processing file=%s" file)
+        (claude-repl--log (+workspace-current-name) "process-pending-commands: processing file=%s" file)
         (claude-repl--process-workspace-commands-file file)))))
 
 (defun claude-repl-debug/workspace-states ()
@@ -255,7 +255,7 @@ window changes, git-diff sentinels, resolve-root, etc.)."
     (message "[claude-repl] debug logging: %s" label)
     ;; Also emit via the log system so it appears in the log stream.
     (when claude-repl-debug
-      (claude-repl--log nil "debug logging toggled: %s" label))))
+      (claude-repl--log (+workspace-current-name) "debug logging toggled: %s" label))))
 
 (defun claude-repl-debug/toggle-log-to-file ()
   "Toggle writing debug log output to `~/.claude/doom-claude-repl.log'.

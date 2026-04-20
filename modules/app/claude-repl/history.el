@@ -261,14 +261,15 @@ empty, or corrupt files so the caller can fall back to fresh state."
 (defun claude-repl--history-push (&optional text)
   "Save TEXT (or current buffer text) to history.
 Skips empty strings and duplicates of the most recent entry."
-  (let ((text (string-trim (or text (buffer-string)))))
+  (let ((text (string-trim (or text (buffer-string))))
+        (ws (+workspace-current-name)))
     (cond
      ((string-empty-p text)
-      (claude-repl--log nil "history-push: skipped empty text"))
+      (claude-repl--log ws "history-push: skipped empty text"))
      ((equal text (car claude-repl--input-history))
-      (claude-repl--log nil "history-push: skipped duplicate text=%s" text))
+      (claude-repl--log ws "history-push: skipped duplicate text=%s" text))
      (t
-      (claude-repl--log nil "history-push: pushed text=%s" text)
+      (claude-repl--log ws "history-push: pushed text=%s" text)
       (push text claude-repl--input-history)))))
 
 (defun claude-repl--history-reset ()
@@ -285,7 +286,7 @@ Binds `claude-repl--history-navigating' to suppress `history-on-change'."
 (defun claude-repl--history-show-entry (index)
   "Display the history entry at INDEX, or the stash when INDEX is negative.
 Updates `claude-repl--history-index' and replaces the buffer contents."
-  (claude-repl--log nil "history-show-entry: index=%d" index)
+  (claude-repl--log (+workspace-current-name) "history-show-entry: index=%d" index)
   (setq claude-repl--history-index index)
   (claude-repl--history-replace-buffer-text
    (if (< index 0)
@@ -295,7 +296,7 @@ Updates `claude-repl--history-index' and replaces the buffer contents."
 (defun claude-repl--history-prev ()
   "Navigate to the previous (older) history entry."
   (interactive)
-  (claude-repl--log nil "history-prev index=%d" claude-repl--history-index)
+  (claude-repl--log (+workspace-current-name) "history-prev index=%d" claude-repl--history-index)
   (when claude-repl--input-history
     (let ((next-index (1+ claude-repl--history-index)))
       (when (< next-index (length claude-repl--input-history))
@@ -306,7 +307,7 @@ Updates `claude-repl--history-index' and replaces the buffer contents."
 (defun claude-repl--history-next ()
   "Navigate to the next (newer) history entry, or restore stashed text."
   (interactive)
-  (claude-repl--log nil "history-next index=%d" claude-repl--history-index)
+  (claude-repl--log (+workspace-current-name) "history-next index=%d" claude-repl--history-index)
   (when (>= claude-repl--history-index 0)
     (claude-repl--history-show-entry (1- claude-repl--history-index))))
 
@@ -314,5 +315,5 @@ Updates `claude-repl--history-index' and replaces the buffer contents."
   "Reset history browsing when the user edits the buffer directly."
   (when (and (not claude-repl--history-navigating)
              (>= claude-repl--history-index 0))
-    (claude-repl--log nil "history-on-change resetting from index=%d" claude-repl--history-index)
+    (claude-repl--log (+workspace-current-name) "history-on-change resetting from index=%d" claude-repl--history-index)
     (claude-repl--history-reset)))

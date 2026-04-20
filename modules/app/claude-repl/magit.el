@@ -98,7 +98,7 @@ revert the buffer in place instead of opening a fresh one."
                                    (derived-mode-p 'magit-status-mode))
                             return win)))
     (when (fboundp 'claude-repl--log)
-      (claude-repl--log nil
+      (claude-repl--log (+workspace-current-name)
                         "magit-status-workspace: ENTER windows=%d magit-win=%s magit-buf=%s"
                         (length (window-list))
                         (if magit-win "found" "nil")
@@ -106,13 +106,13 @@ revert the buffer in place instead of opening a fresh one."
     (if magit-win
         (progn
           (when (fboundp 'claude-repl--log)
-            (claude-repl--log nil "magit-status-workspace: BRANCH=reuse toplevel=%s"
+            (claude-repl--log (+workspace-current-name) "magit-status-workspace: BRANCH=reuse toplevel=%s"
                               (with-current-buffer (window-buffer magit-win)
                                 (ignore-errors (magit-toplevel)))))
           (select-window magit-win)
           (revert-buffer nil t))
       (when (fboundp 'claude-repl--log)
-        (claude-repl--log nil "magit-status-workspace: BRANCH=fresh-open dir=%s"
+        (claude-repl--log (+workspace-current-name) "magit-status-workspace: BRANCH=fresh-open dir=%s"
                           (claude-repl--ws-dir (+workspace-current-name))))
       (magit-status (claude-repl--ws-dir (+workspace-current-name))))))
 

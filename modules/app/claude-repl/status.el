@@ -651,10 +651,10 @@ No-op in two cases:
   "Refresh claude vterm and update all workspace states when Emacs regains focus."
   (if (frame-focus-state)
       (progn
-        (claude-repl--log nil "on-frame-focus: focused")
+        (claude-repl--log (+workspace-current-name) "on-frame-focus: focused")
         (claude-repl--refresh-vterm)
         (claude-repl--update-all-workspace-states))
-    (claude-repl--log-verbose nil "on-frame-focus: not focused")))
+    (claude-repl--log-verbose (+workspace-current-name) "on-frame-focus: not focused")))
 
 (add-function :after after-focus-change-function #'claude-repl--on-frame-focus)
 
