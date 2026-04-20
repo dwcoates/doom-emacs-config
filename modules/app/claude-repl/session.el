@@ -189,18 +189,21 @@ needs building, optionally kicking off the build first."
 
 (defun claude-repl--compute-claude-flags (session-id fork-session-id perm-flag)
   "Build the CLI flags string for the Claude command.
-SESSION-ID is the current session to resume, FORK-SESSION-ID is
-a session to fork from, and PERM-FLAG is the permission flag string
-or nil.  Returns a trimmed flags string."
+SESSION-ID, when non-nil, signals this env has run Claude before and we
+should resume its most recent session via `--continue'.  FORK-SESSION-ID
+is a session UUID to fork from (used when a new worktree/env needs to
+carry a conversation across from another env — the target env has no
+local history yet, so `--continue' won't find anything).  PERM-FLAG is
+the permission flag string or nil.  Returns a trimmed flags string."
   (let ((flags (string-trim
                 (mapconcat #'identity
                            (delq nil (list
-                                      ;; Fork from another session (worktree creation).
+                                      ;; Fork from another session (cross-env/worktree seed).
                                       (when fork-session-id
                                         (format "--resume %s --fork-session" fork-session-id))
-                                      ;; Resume known session in this environment.
+                                      ;; Resume most recent session in this env's cwd.
                                       (when (and (not fork-session-id) session-id)
-                                        (format "--resume %s" session-id))
+                                        "--continue")
                                       perm-flag))
                            " "))))
     (claude-repl--log nil "compute-claude-flags: flags=%s" flags)
@@ -291,7 +294,7 @@ SANDBOXED-P means Docker mode with DOCKER-IMAGE; otherwise bare metal."
 WS is the workspace whose instantiation drives the command; passing it
 explicitly avoids a `(+workspace-current-name)' fallback that would
 otherwise resolve to the caller's persp (and read that workspace's
-session-id), producing a stray `--resume' when a fresh worktree is
+session-id), producing a stray `--continue' when a fresh worktree is
 being created from another persp.
 For worktree workspaces with :active-env :sandbox, delegates to
 .claude/sandbox/claude-sandbox if a sandbox image is configured.

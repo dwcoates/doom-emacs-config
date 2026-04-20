@@ -216,21 +216,25 @@ by vterm-buf presence; the :done write is not."
 
 ;;;; ---- Tests: Command building ----
 
-(ert-deftest claude-repl-test-compute-claude-flags-resume ()
-  "compute-claude-flags should add --resume when session-id is set."
+(ert-deftest claude-repl-test-compute-claude-flags-continue ()
+  "compute-claude-flags should emit --continue when session-id is set and no fork."
   (should (equal (claude-repl--compute-claude-flags "abc123" nil nil)
-                 "--resume abc123")))
+                 "--continue")))
+
+(ert-deftest claude-repl-test-compute-claude-flags-no-continue-without-session-id ()
+  "compute-claude-flags should not emit --continue when session-id is nil."
+  (should (equal (claude-repl--compute-claude-flags nil nil nil) "")))
 
 (ert-deftest claude-repl-test-compute-claude-flags-fork ()
-  "compute-claude-flags should prefer fork over resume."
+  "compute-claude-flags should emit --resume <id> --fork-session for forks."
   (should (equal (claude-repl--compute-claude-flags "current" "fork-id" nil)
                  "--resume fork-id --fork-session")))
 
 (ert-deftest claude-repl-test-compute-claude-flags-fork-ignores-session ()
-  "compute-claude-flags with fork should not also add --resume for session-id."
+  "compute-claude-flags with fork should not also emit --continue for session-id."
   (let ((result (claude-repl--compute-claude-flags "current" "fork-id" nil)))
-    (should (string-match-p "--resume fork-id" result))
-    (should-not (string-match-p "--resume current" result))))
+    (should (string-match-p "--resume fork-id --fork-session" result))
+    (should-not (string-match-p "--continue" result))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-perm-flag ()
   "compute-claude-flags should include permission flag when provided."
@@ -241,10 +245,10 @@ by vterm-buf presence; the :done write is not."
   "compute-claude-flags should return empty string when all args are nil."
   (should (equal (claude-repl--compute-claude-flags nil nil nil) "")))
 
-(ert-deftest claude-repl-test-compute-claude-flags-resume-plus-perm ()
-  "compute-claude-flags should combine resume and perm flag."
+(ert-deftest claude-repl-test-compute-claude-flags-continue-plus-perm ()
+  "compute-claude-flags should combine --continue and perm flag."
   (should (equal (claude-repl--compute-claude-flags "sess1" nil "--dangerously-skip-permissions")
-                 "--resume sess1 --dangerously-skip-permissions")))
+                 "--continue --dangerously-skip-permissions")))
 
 (ert-deftest claude-repl-test-compute-perm-flag-sandboxed ()
   "compute-perm-flag should return nil when sandboxed."
@@ -802,7 +806,7 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
         (should-not (plist-get result :sandboxed-p))))))
 
 (ert-deftest claude-repl-test-build-start-cmd-sandbox-with-session ()
-  "build-start-cmd for worktree sandbox with session should use sandbox script + --resume."
+  "build-start-cmd for worktree sandbox with session should use sandbox script + --continue."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :active-env :sandbox)
     (claude-repl--ws-put "ws1" :sandbox
@@ -813,7 +817,8 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
                (lambda (_ws) '(:image "img:latest" :script "/usr/bin/claude-sandbox"))))
       (let ((result (claude-repl--build-start-cmd "ws1")))
         (should (string-match-p "/usr/bin/claude-sandbox" (plist-get result :cmd)))
-        (should (string-match-p "--resume sess-123" (plist-get result :cmd)))
+        (should (string-match-p "--continue" (plist-get result :cmd)))
+        (should-not (string-match-p "--resume sess-123" (plist-get result :cmd)))
         (should (plist-get result :sandboxed-p))
         (should (equal (plist-get result :docker-image) "img:latest"))))))
 
@@ -856,7 +861,7 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
       (should-error (claude-repl--build-start-cmd "ws1") :type 'error))))
 
 (ert-deftest claude-repl-test-build-start-cmd-empty-session-id ()
-  "build-start-cmd with nil session-id should not include --resume."
+  "build-start-cmd with nil session-id should not include --resume or --continue."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :active-env :bare-metal)
     (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation :session-id nil))
@@ -865,7 +870,8 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
     (cl-letf (((symbol-function 'claude-repl--ensure-sandbox-image)
                (lambda (_ws) nil)))
       (let ((result (claude-repl--build-start-cmd "ws1")))
-        (should-not (string-match-p "--resume" (plist-get result :cmd)))))))
+        (should-not (string-match-p "--resume" (plist-get result :cmd)))
+        (should-not (string-match-p "--continue" (plist-get result :cmd)))))))
 
 ;;;; ---- Tests: start-claude ----
 

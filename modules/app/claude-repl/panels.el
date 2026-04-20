@@ -814,7 +814,9 @@ Signals `user-error' if any precondition is not met."
 (defun claude-repl--seed-new-env-session (ws new-env session-id)
   "Ensure the NEW-ENV instantiation for WS has a session-id.
 If this is the first switch, seeds the new environment's session-id
-from SESSION-ID so --resume carries the conversation across."
+from SESSION-ID.  The value signals to `compute-claude-flags' that
+the env should emit `--continue' on start — which picks up the most
+recent session in the worktree's cwd (i.e. the one we just left)."
   (let ((new-inst (or (claude-repl--ws-get ws new-env)
                       (make-claude-repl-instantiation))))
     (if (claude-repl-instantiation-session-id new-inst)
@@ -828,9 +830,9 @@ from SESSION-ID so --resume carries the conversation across."
   "Switch the current workspace between Docker sandbox and bare-metal.
 Kills the current Claude process and resumes it in the other environment.
 On the first switch, the new environment seeds its session-id from the
-current one so --resume carries the conversation across.  On subsequent
-switches each environment resumes its own prior session independently.
-Requires a worktree workspace with a captured session ID."
+current one so `--continue' in the other env picks up the conversation.
+On subsequent switches each environment resumes its own prior session
+independently.  Requires a worktree workspace with a captured session ID."
   (interactive)
   (let* ((ws (+workspace-current-name))
          (active-env (claude-repl--ws-get ws :active-env))
