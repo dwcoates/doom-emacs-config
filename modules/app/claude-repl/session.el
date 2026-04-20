@@ -385,10 +385,15 @@ update-ws-state timer."
 
 (defun claude-repl--handle-claude-finished (ws)
   "Handle Claude finishing in WS.
-Always marks claude-state as :done (visibility is no longer a gate),
-refreshes the vterm display if the buffer is still live, notifies the
-user if the frame is unfocused, and emits a finished-in-workspace
-message when the current workspace is different."
+Errors hard if WS is not registered in `claude-repl--workspaces' — a
+stop event arriving for an unknown workspace indicates a race (e.g.
+sentinel firing after kill cleared state) that we surface rather than
+silently absorb.  Otherwise: marks claude-state as :done, refreshes the
+vterm display if the buffer is still live, notifies the user if the
+frame is unfocused, and emits a finished-in-workspace message when the
+current workspace is different."
+  (unless (gethash ws claude-repl--workspaces)
+    (error "claude-repl--handle-claude-finished: ws=%S not registered in claude-repl--workspaces" ws))
   (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (claude-repl--log ws "handle-claude-finished ws=%s" ws)
     (claude-repl--mark-claude-done ws)

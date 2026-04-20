@@ -94,7 +94,9 @@ the vterm buffer is still around.  Refresh-vterm-after-finish is guarded
 by vterm-buf presence; the :done write is not."
   (claude-repl-test--with-clean-state
     (let ((done-set nil))
-      ;; Do NOT register :vterm-buffer for "ws1"
+      ;; Register ws1 (required by handle-claude-finished guard) but
+      ;; do NOT set :vterm-buffer.
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/fake")
       (cl-letf (((symbol-function 'claude-repl--do-refresh) #'ignore)
                 ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
                 ((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
@@ -363,6 +365,7 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
 (ert-deftest claude-repl-test-handle-claude-finished-notifies-other-ws ()
   "handle-claude-finished should message when WS is not the current workspace."
   (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/fake")
     (let ((messaged nil))
       (cl-letf (((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
                 ((symbol-function '+workspace-current-name) (lambda () "other-ws"))
@@ -376,6 +379,7 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
 (ert-deftest claude-repl-test-handle-claude-finished-no-message-current-ws ()
   "handle-claude-finished should NOT message when WS is the current workspace."
   (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/fake")
     (let ((messaged nil))
       (cl-letf (((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
                 ((symbol-function '+workspace-current-name) (lambda () "ws1"))
@@ -385,6 +389,12 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
                      (setq messaged t)))))
         (claude-repl--handle-claude-finished "ws1")
         (should-not messaged)))))
+
+(ert-deftest claude-repl-test-handle-claude-finished-errors-on-unregistered-ws ()
+  "handle-claude-finished errors hard when WS is not registered — guards
+against stop events arriving after kill."
+  (claude-repl-test--with-clean-state
+    (should-error (claude-repl--handle-claude-finished "not-a-ws"))))
 
 ;;;; ---- Tests: maybe-notify-finished edge cases ----
 
