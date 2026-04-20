@@ -338,7 +338,6 @@ Uses an MD5 hash of the canonical git root path.  Falls back to the buffer-local
 (cl-defstruct claude-repl-instantiation
   "Per-environment session state for a Claude REPL workspace.
 Each workspace has one instantiation for :sandbox and one for :bare-metal."
-  had-session   ; non-nil once Claude has run in this environment
   session-id    ; Claude Code session ID, captured from the `session_start' hook payload via `claude-repl--update-session-id-from-sentinel'
   start-cmd)    ; last startup command (for logging/display)
 

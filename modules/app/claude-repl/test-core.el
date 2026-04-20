@@ -974,7 +974,6 @@ ownership intact across that transition."
     (claude-repl--ws-put "ws1" :active-env :bare-metal)
     (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
     (let ((inst (claude-repl--active-inst "ws1")))
-      (should-not (claude-repl-instantiation-had-session inst))
       (should-not (claude-repl-instantiation-session-id inst))
       (should-not (claude-repl-instantiation-start-cmd inst)))))
 
@@ -1244,17 +1243,14 @@ Use `claude-repl--claude-buffer-p' for the vterm-vs-input distinction —
 (ert-deftest claude-repl-test-instantiation-default-fields ()
   "Instantiation struct fields should default to nil."
   (let ((inst (make-claude-repl-instantiation)))
-    (should-not (claude-repl-instantiation-had-session inst))
     (should-not (claude-repl-instantiation-session-id inst))
     (should-not (claude-repl-instantiation-start-cmd inst))))
 
 (ert-deftest claude-repl-test-instantiation-setf ()
   "Instantiation struct fields should be modifiable with setf."
   (let ((inst (make-claude-repl-instantiation)))
-    (setf (claude-repl-instantiation-had-session inst) t)
     (setf (claude-repl-instantiation-session-id inst) "sess-123")
     (setf (claude-repl-instantiation-start-cmd inst) "claude --resume")
-    (should (eq (claude-repl-instantiation-had-session inst) t))
     (should (equal (claude-repl-instantiation-session-id inst) "sess-123"))
     (should (equal (claude-repl-instantiation-start-cmd inst) "claude --resume"))))
 

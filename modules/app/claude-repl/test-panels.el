@@ -1284,10 +1284,9 @@ we at least surface the stuck state so the user knows to click out."
                 ;; Buffer refs should be cleared
                 (should-not (claude-repl--ws-get "test-ws" :vterm-buffer))
                 (should-not (claude-repl--ws-get "test-ws" :input-buffer))
-                ;; Instantiation should have start-cmd cleared and had-session set
+                ;; Instantiation should have start-cmd cleared
                 (let ((inst (claude-repl--ws-get "test-ws" :bare-metal)))
-                  (should-not (claude-repl-instantiation-start-cmd inst))
-                  (should (claude-repl-instantiation-had-session inst)))))))))))
+                  (should-not (claude-repl-instantiation-start-cmd inst)))))))))))
 
 ;;;; ---- Tests: destroy-session-buffers input dead ----
 

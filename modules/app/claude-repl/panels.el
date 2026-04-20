@@ -650,7 +650,7 @@ If panels hidden: show both panels."
 
 (defun claude-repl--teardown-session-state (ws)
   "Save history, disable overlay, cancel timers, and clear session state for workspace WS."
-  (claude-repl--log ws "teardown-session-state ws=%s env=%s (setting had-session t)"
+  (claude-repl--log ws "teardown-session-state ws=%s env=%s"
                     ws (claude-repl--ws-get ws :active-env))
   (condition-case err
       (claude-repl--disable-hide-overlay)
@@ -661,8 +661,7 @@ If panels hidden: show both panels."
   ;; Update instantiation and persist state BEFORE clearing buffer refs,
   ;; since state-save needs the vterm buffer to resolve the project root.
   (let ((inst (claude-repl--active-inst ws)))
-    (setf (claude-repl-instantiation-start-cmd inst) nil)
-    (setf (claude-repl-instantiation-had-session inst) t))
+    (setf (claude-repl-instantiation-start-cmd inst) nil))
   (claude-repl--state-save ws)
   (claude-repl--ws-put ws :vterm-buffer nil)
   (claude-repl--ws-put ws :input-buffer nil))

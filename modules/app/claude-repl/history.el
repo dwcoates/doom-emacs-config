@@ -59,8 +59,7 @@ then logs the full error via `claude-repl--log'."
   "Serialize instantiation INST to a plist for persistence.
 Returns nil when INST is nil."
   (if inst
-      `(:session-id ,(claude-repl-instantiation-session-id inst)
-        :had-session ,(claude-repl-instantiation-had-session inst))
+      `(:session-id ,(claude-repl-instantiation-session-id inst))
     (claude-repl--log nil "instantiation-to-plist: inst is nil, returning nil")
     nil))
 
@@ -69,12 +68,10 @@ Returns nil when INST is nil."
 Returns a fresh empty instantiation when SAVED is nil."
   (if saved
       (progn
-        (claude-repl--log nil "make-instantiation-from-plist: session-id=%s had-session=%s"
-                          (plist-get saved :session-id)
-                          (plist-get saved :had-session))
+        (claude-repl--log nil "make-instantiation-from-plist: session-id=%s"
+                          (plist-get saved :session-id))
         (make-claude-repl-instantiation
-         :session-id (plist-get saved :session-id)
-         :had-session (plist-get saved :had-session)))
+         :session-id (plist-get saved :session-id)))
     (claude-repl--log nil "make-instantiation-from-plist: nil saved, creating empty")
     (make-claude-repl-instantiation)))
 
@@ -159,9 +156,9 @@ environment's instantiation struct to a plist."
 
 (defun claude-repl--state-save (ws)
   "Persist session state for workspace WS to disk.
-Saves session-id and had-session for each environment so they
-survive Emacs restarts.  Written to .claude-repl-state in the
-project root (alongside .claude-repl-history)."
+Saves session-id for each environment so it survives Emacs restarts.
+Written to .claude-repl-state in the project root (alongside
+.claude-repl-history)."
   (let* ((root (claude-repl--ws-get ws :project-dir))
          (file (claude-repl--state-file root)))
     (claude-repl--log ws "state-save ws=%s file=%s" ws file)
@@ -219,11 +216,7 @@ Signals an error with a descriptive message when validation fails."
         (let ((sid (claude-repl-instantiation-session-id inst)))
           (unless (or (null sid) (stringp sid))
             (error "claude-repl: ws %s env %s has invalid session-id %S (expected string or nil)"
-                   ws key sid)))
-        (let ((hs (claude-repl-instantiation-had-session inst)))
-          (unless (memq hs '(nil t))
-            (error "claude-repl: ws %s env %s has invalid had-session %S (expected t or nil)"
-                   ws key hs))))))
+                   ws key sid))))))
   (claude-repl--log ws "validate-ws-env: ws=%s passed" ws))
 
 (defun claude-repl--read-state-file (ws)
