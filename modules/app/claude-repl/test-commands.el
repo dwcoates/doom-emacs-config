@@ -548,6 +548,36 @@
       (claude-repl-nuke-workspace)
       (should-not (gethash "ghost" claude-repl--workspaces)))))
 
+(ert-deftest claude-repl-cmd-test-nuke-workspace/removes-hashmap-when-kill-session-errors ()
+  "nuke-workspace still removes the hashmap entry when kill-session errors."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _coll &rest _) "doomed"))
+              ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+              ((symbol-function 'claude-repl--kill-session)
+               (lambda (_ws) (error "simulated kill-session failure")))
+              ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
+              ((symbol-function 'force-mode-line-update) #'ignore))
+      (claude-repl-nuke-workspace)
+      (should-not (gethash "doomed" claude-repl--workspaces)))))
+
+(ert-deftest claude-repl-cmd-test-nuke-workspace/removes-hashmap-when-persp-delete-errors ()
+  "nuke-workspace still removes the hashmap entry when +workspace/delete errors."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _coll &rest _) "doomed"))
+              ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+              ((symbol-function 'claude-repl--kill-session) #'ignore)
+              ((symbol-function '+workspace-current-name) (lambda () "other"))
+              ((symbol-function 'persp-get-by-name) (lambda (_n) t))
+              ((symbol-function '+workspace/delete)
+               (lambda (_ws) (error "simulated persp-delete failure")))
+              ((symbol-function 'force-mode-line-update) #'ignore))
+      (claude-repl-nuke-workspace)
+      (should-not (gethash "doomed" claude-repl--workspaces)))))
+
 (ert-deftest claude-repl-cmd-test-nuke-workspace/purges-state-file ()
   "nuke-workspace unlinks the .claude-repl-state file at the project root.
 Without this, a subsequent workspace registered at the same root would

@@ -319,28 +319,36 @@ reusable from both `claude-repl-nuke-workspace' (one-shot) and
 
 The `:project-dir' is captured up front because `kill-session' runs
 `teardown-session-state' which nils out buffer refs — the path would
-be unreachable by the time we unlink the state files."
+be unreachable by the time we unlink the state files.
+
+The hashmap removal (`ws-del') and state-file purge run inside an
+`unwind-protect' cleanup so they always happen, even when kill-session
+or persp deletion errors partway through.  Callers can rely on the
+post-condition: after nuke returns \(or throws), WS is not in
+`claude-repl--workspaces'."
   (claude-repl--log ws "nuke-one-workspace: ws=%s" ws)
   (let ((root (claude-repl--ws-get ws :project-dir)))
-    (when-let ((proc (claude-repl--ws-get ws :git-proc)))
-      (when (process-live-p proc)
-        (claude-repl--log ws "nuke-one-workspace: killing git-proc")
-        (delete-process proc)))
-    (condition-case err
-        (claude-repl--kill-session ws)
-      (error (claude-repl--log ws "nuke-one-workspace: kill-session error: %S" err)))
-    (when (and (bound-and-true-p persp-mode)
-               (persp-get-by-name ws))
-      (when (string= ws (+workspace-current-name))
-        (+workspace/other))
-      (claude-repl--log ws "nuke-one-workspace: deleting persp workspace")
-      (+workspace/delete ws))
-    (claude-repl--ws-del ws)
-    ;; `teardown-session-state' (via kill-session) just wrote the
-    ;; in-memory session-id to `.claude-repl-state' at ROOT.  Unlink
-    ;; it now so a subsequent workspace registered at the same root
-    ;; cannot resume into that stale session.
-    (claude-repl--state-purge root)))
+    (unwind-protect
+        (progn
+          (when-let ((proc (claude-repl--ws-get ws :git-proc)))
+            (when (process-live-p proc)
+              (claude-repl--log ws "nuke-one-workspace: killing git-proc")
+              (delete-process proc)))
+          (condition-case err
+              (claude-repl--kill-session ws)
+            (error (claude-repl--log ws "nuke-one-workspace: kill-session error: %S" err)))
+          (condition-case err
+              (when (and (bound-and-true-p persp-mode)
+                         (persp-get-by-name ws))
+                (when (string= ws (+workspace-current-name))
+                  (+workspace/other))
+                (claude-repl--log ws "nuke-one-workspace: deleting persp workspace")
+                (+workspace/delete ws))
+            (error (claude-repl--log ws "nuke-one-workspace: persp-delete error: %S" err))))
+      ;; Cleanup: always remove the hashmap entry and purge persisted state,
+      ;; regardless of any error in the steps above.
+      (claude-repl--ws-del ws)
+      (claude-repl--state-purge root))))
 
 (defun claude-repl-nuke-workspace ()
   "Completely destroy a claude-repl workspace: session, buffers, persp, and hashmap entry.
