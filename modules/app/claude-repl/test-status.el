@@ -123,6 +123,10 @@
   (should (eq :idle (claude-repl--composed-state :idle nil)))
   (should (eq :idle (claude-repl--composed-state :idle :inactive))))
 
+(ert-deftest claude-repl-test-composed-unknown-errors ()
+  "Composed with an unknown claude-state should error hard — no silent fallback."
+  (should-error (claude-repl--composed-state :bogus nil)))
+
 ;;;; ---- Tests: ws-display-state reads both axes ----
 
 (ert-deftest claude-repl-test-display-state-repl-inactive-does-not-change-color ()

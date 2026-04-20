@@ -442,20 +442,25 @@ green badge visible), or falls back to `+workspace-tab-selected-face'."
 `:claude-state'.  The second argument is retained so callers keep the
 pair-based convention and a future feature can hook in without a
 signature change.
+
+Every known claude-state is mapped explicitly.  Unknown states error
+hard — no silent fallback.
+
 Rule:
   :thinking   → :thinking                (red)
   :permission → :permission               (green + ❓)
   :init       → :init                     (blue — Claude starting)
   :done       → :done                     (green — unacknowledged work)
   :idle       → :idle                     (orange)
-  nil / other → nil                       (default face)"
+  nil         → nil                       (transitional: replaced by :unborn/:dead)"
   (cond
    ((eq claude :thinking)   :thinking)
    ((eq claude :permission) :permission)
    ((eq claude :init)       :init)
    ((eq claude :done)       :done)
    ((eq claude :idle)       :idle)
-   (t                       nil)))
+   ((null claude)           nil)
+   (t (error "claude-repl--composed-state: unknown claude-state %S" claude))))
 
 (defun claude-repl--ws-display-state (ws)
   "Return the palette display key for WS.
