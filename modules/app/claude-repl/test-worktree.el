@@ -1655,8 +1655,23 @@ Covers the full call the interactive `SPC TAB n' path builds up."
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
                ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
                ((symbol-function 'load-file) (lambda (_f) (push 'reload call-order)))
-               ((symbol-function 'magit-status) (lambda () (push 'magit call-order))))
+               ((symbol-function 'magit-status) (lambda (_dir) (push 'magit call-order))))
       (claude-repl--workspace-merge-do "other-ws")
       (should (equal (nreverse call-order) '(reload magit))))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-magit-receives-project-dir ()
+  "workspace-merge-do passes the current workspace's project directory to magit-status."
+  (let ((magit-dir nil))
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
+               ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
+               ((symbol-function 'load-file) #'ignore)
+               ((symbol-function 'magit-status) (lambda (dir) (setq magit-dir dir))))
+      (claude-repl--workspace-merge-do "other-ws")
+      (should (equal magit-dir "/tmp/fake")))))
 
 ;;; test-worktree.el ends here
