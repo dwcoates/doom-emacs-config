@@ -128,6 +128,22 @@
 to be reverted to should-error once the leaking writer is found)."
   (should-not (claude-repl--composed-state :bogus nil)))
 
+(ert-deftest claude-repl-test-composed-unknown-threads-ws-to-log ()
+  "The UNKNOWN-state diagnostic log call receives the WS argument."
+  (let ((logged-ws 'unset))
+    (cl-letf (((symbol-function 'claude-repl--log)
+               (lambda (ws &rest _) (setq logged-ws ws))))
+      (claude-repl--composed-state :bogus nil "diag-ws")
+      (should (equal logged-ws "diag-ws")))))
+
+(ert-deftest claude-repl-test-display-state-passes-ws-to-composed ()
+  "ws-display-state forwards its ws into composed-state so diagnostics carry context."
+  (let ((received-ws 'unset))
+    (cl-letf (((symbol-function 'claude-repl--composed-state)
+               (lambda (_c _r &optional ws) (setq received-ws ws) nil)))
+      (claude-repl--ws-display-state "diag-ws")
+      (should (equal received-ws "diag-ws")))))
+
 ;;;; ---- Tests: ws-display-state reads both axes ----
 
 (ert-deftest claude-repl-test-display-state-repl-inactive-does-not-change-color ()

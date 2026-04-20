@@ -442,12 +442,15 @@ green badge visible), or falls back to `+workspace-tab-selected-face'."
     (when-let ((img (claude-repl--priority-image priority)))
       (propertize " " 'display img))))
 
-(defun claude-repl--composed-state (claude _repl)
+(defun claude-repl--composed-state (claude _repl &optional ws)
   "Project CLAUDE (and optionally _REPL) onto the palette's display key.
 `:repl-state' contributes no color — tab color is a pure function of
 `:claude-state'.  The second argument is retained so callers keep the
 pair-based convention and a future feature can hook in without a
 signature change.
+
+Optional WS is threaded through for diagnostic logging only; it does
+not affect the mapping.
 
 Every known claude-state is mapped explicitly.  Unknown states error
 hard — no silent fallback.
@@ -472,7 +475,7 @@ Rule:
     ;; documented keywords. If we hit this, some other path is leaking an
     ;; unexpected value into the hashmap. Log once per value and return
     ;; nil so redisplay doesn't blank the tab-bar while we investigate.
-    (claude-repl--log nil
+    (claude-repl--log ws
                       "composed-state: UNKNOWN claude-state %S (type=%s) — returning nil"
                       claude (type-of claude))
     nil)))
@@ -481,7 +484,8 @@ Rule:
   "Return the palette display key for WS.
 Reads `:claude-state' (the source of truth for tab color)."
   (claude-repl--composed-state (claude-repl--ws-claude-state ws)
-                               (claude-repl--ws-repl-state ws)))
+                               (claude-repl--ws-repl-state ws)
+                               ws))
 
 (defun claude-repl--render-tab-entry (name current-name index)
   "Render a single tab entry for workspace NAME.
