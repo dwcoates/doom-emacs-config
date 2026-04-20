@@ -290,6 +290,23 @@ Suitable for init-time calls that may run outside a git repository."
 Used by the workspace-generation file watcher so new sessions are always
 created from the main repo, not the currently selected worktree.")
 
+(defun claude-repl--resolve-current-git-root ()
+  "Resolve the git root for the caller's current context.
+Prefers the current workspace's `:project-dir' when one is registered,
+otherwise falls back to `default-directory'.  Signals `user-error' when
+the resolved directory is not inside a git repository.
+
+Intended to be called exactly once per workspace, at creation time, so
+new worktrees are always rooted at the repository the user is currently
+working in (rather than wherever Emacs happened to be launched)."
+  (let* ((ws-dir (ignore-errors (claude-repl--ws-dir (+workspace-current-name))))
+         (dir (or ws-dir default-directory))
+         (default-directory dir)
+         (raw (claude-repl--git-string-quiet "rev-parse" "--show-toplevel")))
+    (when (string-empty-p raw)
+      (user-error "claude-repl: %s is not inside a git repository" dir))
+    (file-name-as-directory raw)))
+
 (defun claude-repl-print-git-branch ()
   "Print the git branch that was active when claude-repl config was loaded."
   (interactive)

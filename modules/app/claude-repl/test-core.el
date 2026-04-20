@@ -33,6 +33,50 @@
       (should (equal (claude-repl--workspace-id)
                      (substring (md5 (claude-repl--path-canonical "/fallback/dir/")) 0 8))))))
 
+;;;; ---- Tests: resolve-current-git-root ----
+
+(ert-deftest claude-repl-test-resolve-current-git-root-prefers-ws-dir ()
+  "When the current workspace has a :project-dir, the resolver uses it as
+the directory to run `git rev-parse --show-toplevel' from (not
+`default-directory')."
+  (let ((captured-default-dir nil))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'claude-repl--ws-dir)
+               (lambda (_ws) "/repo/subdir"))
+              ((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest _)
+                 (setq captured-default-dir default-directory)
+                 "/repo")))
+      (let ((default-directory "/elsewhere/"))
+        (should (equal (claude-repl--resolve-current-git-root) "/repo/"))
+        ;; git was invoked from the ws-dir, not default-directory
+        (should (equal captured-default-dir "/repo/subdir"))))))
+
+(ert-deftest claude-repl-test-resolve-current-git-root-falls-back-to-default-directory ()
+  "When no workspace has a :project-dir, the resolver runs git from
+`default-directory'."
+  (let ((captured-default-dir nil))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'claude-repl--ws-dir)
+               (lambda (_ws) (error "no dir")))
+              ((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest _)
+                 (setq captured-default-dir default-directory)
+                 "/fallback/repo")))
+      (let ((default-directory "/fallback/repo/deep/"))
+        (should (equal (claude-repl--resolve-current-git-root) "/fallback/repo/"))
+        (should (equal captured-default-dir "/fallback/repo/deep/"))))))
+
+(ert-deftest claude-repl-test-resolve-current-git-root-errors-outside-repo ()
+  "When `git rev-parse' returns empty (not inside any repo), the resolver
+signals `user-error' rather than silently returning a bogus path."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+            ((symbol-function 'claude-repl--ws-dir)
+             (lambda (_ws) (error "no dir")))
+            ((symbol-function 'claude-repl--git-string-quiet)
+             (lambda (&rest _) "")))
+    (should-error (claude-repl--resolve-current-git-root) :type 'user-error)))
+
 
 ;;;; ---- Tests: Buffer naming ----
 
