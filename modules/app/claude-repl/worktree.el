@@ -243,7 +243,7 @@ value is stored via `claude-repl--ws-put'."
   (projectile-add-known-project (file-name-as-directory path)))
 
 (defconst claude-repl--autonomous-prompt-prefix
-  "Do not wait for further instructions. Come up with a plan and then immediately execute on it. When finished, commit the result. Here is the task:\n\n"
+  "Do not wait for further instructions. Come up with a plan and then immediately execute on it. When finished, commit the result. Commit often for each subchange, but do not commit before corresponding tests (if any) have run. Here is the task:\n\n"
   "Prefix prepended to preemptive prompts to instruct Claude to plan,
 execute, and commit autonomously without waiting for confirmation.")
 
