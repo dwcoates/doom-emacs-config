@@ -688,7 +688,7 @@ The project-dir hint is used to locate the (absent) state file."
       (unwind-protect
           (progn
             (claude-repl--initialize-ws-env "ws1" tmpdir)
-            (should (eq (claude-repl--ws-get "ws1" :active-env) :bare-metal))
+            (should (eq (claude-repl--ws-get "ws1" :active-env) :sandbox))
             (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :sandbox)))
             (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :bare-metal))))
         (delete-directory tmpdir t)))))

@@ -153,7 +153,7 @@ The state file at that root (`.claude-repl-state') is loaded when
 present and its contents supersede the derived defaults (`:project-dir'
 from the file is canonical, and per-env instantiation structs are
 reconstructed from the saved plists).  When absent, fresh defaults are
-written (`:active-env' from ACTIVE-ENV-HINT or `:bare-metal', empty
+written (`:active-env' from ACTIVE-ENV-HINT or `:sandbox', empty
 instantiation structs) and an initial state file is persisted.
 
 Signals an error if `:project-dir' cannot be resolved from any of the
@@ -190,7 +190,7 @@ state-save.  Callers already guard on `claude-repl--claude-running-p'."
     (claude-repl--ws-put ws :active-env
                          (or (and saved (plist-get saved :active-env))
                              active-env-hint
-                             :bare-metal))
+                             :sandbox))
     (dolist (key claude-repl--environment-keys)
       (claude-repl--ws-put ws key
                            (claude-repl--make-instantiation-from-plist
