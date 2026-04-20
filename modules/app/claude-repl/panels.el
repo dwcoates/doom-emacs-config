@@ -564,7 +564,6 @@ session is in use."
     (claude-repl--ws-set-repl-state ws :active)
     (claude-repl--refresh-vterm)
     (delete-other-windows)
-    (claude-repl--ensure-input-buffer ws)
     (claude-repl--show-panels-and-focus)
     (claude-repl--update-hide-overlay)))
 
@@ -736,7 +735,6 @@ If Claude isn't running, start it (same as `claude-repl')."
      (t
       (claude-repl--log ws "focus-input branch=show-or-focus")
       (unless (claude-repl--panels-visible-p)
-        (claude-repl--ensure-input-buffer ws)
         (claude-repl--show-panels))
       (when-let ((win (get-buffer-window (claude-repl--ws-get ws :input-buffer))))
         (select-window win)
