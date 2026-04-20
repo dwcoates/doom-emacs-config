@@ -31,6 +31,28 @@
 (defvar claude-repl--priority-images nil
   "Alist mapping priority strings (\"p05\" \"p1\" \"p2\" \"p3\") to Emacs image specs.")
 
+;; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;; !! DO NOT REMOVE `claude-repl--tabline-space-toggle' OR ITS USAGE   !!
+;; !! IN `claude-repl--tabline-advice' AND                             !!
+;; !! `claude-repl--update-all-workspace-states'.                      !!
+;; !!                                                                  !!
+;; !! The tab-bar will NOT repaint unless the string it displays       !!
+;; !! actually changes between ticks.  Toggling a trailing space on    !!
+;; !! every poll cycle forces the tab-bar to detect a "new" string     !!
+;; !! and re-render, giving us real-time visual updates.  Without      !!
+;; !! this, state-color changes (thinking → done, etc.) are invisible  !!
+;; !! until the user manually triggers a redisplay.                    !!
+;; !!                                                                  !!
+;; !! This has been accidentally removed multiple times.  DO NOT       !!
+;; !! remove it again.  It is NOT dead code.  It is NOT cosmetic.     !!
+;; !! It is the mechanism that makes tab-bar updates work.             !!
+;; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+(defvar claude-repl--tabline-space-toggle nil
+  "Non-nil means append an extra trailing space to the tabline string.
+Flipped every poll cycle by `claude-repl--update-all-workspace-states'.
+Read by `claude-repl--tabline-advice' to produce an alternating string
+that forces the tab-bar to repaint.  DO NOT REMOVE — see comment above.")
+
 (defun claude-repl--load-priority-images ()
   "Load priority badge PNGs from the module images/ directory.
 Populates `claude-repl--priority-images' with display-ready image specs."
@@ -238,6 +260,7 @@ A no-op if a check is already in progress for WS."
 ;;   :bg          — bracket (and separator) background.
 ;;   :fg          — separator foreground.
 ;;   :bracket-fg  — [LABEL] foreground.
+;;   :bracket-bg  — [LABEL] background (optional; falls back to :bg).
 ;;   :weight      — font weight (default `bold').
 ;;
 ;; Use `unspecified' (the symbol) for "inherit from frame default".
@@ -263,8 +286,8 @@ visually distinct from states that have no palette mapping.")
   "Brighter green used for :done / :permission bracket-fg on selected
 tabs; readable against `claude-repl--color-selected-bg'.")
 
-(defconst claude-repl--color-default-bracket  "#4477cc"
-  "Blue used for bracket numerals on unselected tabs of any state.")
+(defconst claude-repl--color-default-bracket  "white"
+  "White used for bracket numerals on unselected tabs of any state.")
 
 (defconst claude-repl--color-selected-bg      "#c0c0c0"
   "Grey used for the background of selected tabs.")
@@ -304,7 +327,8 @@ asking for a permission decision.")
                   :weight ,claude-repl--tab-weight)
      :selected   (:bg ,claude-repl--color-selected-bg
                   :fg ,claude-repl--color-dark
-                  :bracket-fg ,claude-repl--color-init-blue
+                  :bracket-bg ,claude-repl--color-init-blue
+                  :bracket-fg ,claude-repl--color-light
                   :weight ,claude-repl--tab-weight))
     (:thinking
      :face       claude-repl-tab-thinking
@@ -314,7 +338,8 @@ asking for a permission decision.")
                   :weight ,claude-repl--tab-weight)
      :selected   (:bg ,claude-repl--color-selected-bg
                   :fg ,claude-repl--color-dark
-                  :bracket-fg ,claude-repl--color-thinking-red
+                  :bracket-bg ,claude-repl--color-thinking-red
+                  :bracket-fg ,claude-repl--color-light
                   :weight ,claude-repl--tab-weight))
     (:done
      :face       claude-repl-tab-done
@@ -324,7 +349,8 @@ asking for a permission decision.")
                   :weight ,claude-repl--tab-weight)
      :selected   (:bg ,claude-repl--color-selected-bg
                   :fg ,claude-repl--color-dark
-                  :bracket-fg ,claude-repl--color-done-green-bright
+                  :bracket-bg ,claude-repl--color-done-green
+                  :bracket-fg ,claude-repl--color-light
                   :weight ,claude-repl--tab-weight))
     (:permission
      :face       claude-repl-tab-permission
@@ -335,7 +361,8 @@ asking for a permission decision.")
                   :weight ,claude-repl--tab-weight)
      :selected   (:bg ,claude-repl--color-selected-bg
                   :fg ,claude-repl--color-dark
-                  :bracket-fg ,claude-repl--color-done-green-bright
+                  :bracket-bg ,claude-repl--color-done-green
+                  :bracket-fg ,claude-repl--color-light
                   :weight ,claude-repl--tab-weight
                   :face-override claude-repl-tab-permission))
     (:idle
@@ -346,7 +373,8 @@ asking for a permission decision.")
                   :weight ,claude-repl--tab-weight)
      :selected   (:bg ,claude-repl--color-selected-bg
                   :fg ,claude-repl--color-dark
-                  :bracket-fg ,claude-repl--color-idle-orange
+                  :bracket-bg ,claude-repl--color-idle-orange
+                  :bracket-fg ,claude-repl--color-light
                   :weight ,claude-repl--tab-weight)))
   "Per-state tab-appearance palette.
 Each entry fully describes both selected and unselected looks for a
@@ -357,8 +385,8 @@ only).")
 (defun claude-repl--tab-spec (state selected)
   "Return the appearance spec (plist) for STATE with SELECTED flag.
 Falls back to `claude-repl--tab-default' when STATE has no palette entry.
-Keys in the returned plist: :bg :fg :bracket-fg :weight and optionally
-:face-override."
+Keys in the returned plist: :bg :fg :bracket-fg :bracket-bg :weight
+and optionally :face-override."
   (let* ((row (alist-get state claude-repl--tab-palette))
          (key (if selected :selected :unselected)))
     (or (plist-get row key)
@@ -407,10 +435,11 @@ workspace-name portion.  LABEL is the bracket content (number or
 emoji).  IMG-STR, when non-nil, is inserted between bracket and name."
   (let* ((bg         (or (plist-get spec :bg)         'unspecified))
          (fg         (or (plist-get spec :fg)         'unspecified))
+         (bracket-bg (or (plist-get spec :bracket-bg) bg))
          (bracket-fg (or (plist-get spec :bracket-fg) 'unspecified))
          (weight     (or (plist-get spec :weight)     'normal))
          (separator-face `(:background unspecified :foreground ,fg :weight ,weight))
-         (bracket-face   `(:background ,bg          :foreground ,bracket-fg :weight ,weight)))
+         (bracket-face   `(:background ,bracket-bg  :foreground ,bracket-fg :weight ,weight)))
     (concat (propertize " " 'face separator-face)
             (propertize (format claude-repl-tab-bracket-format label) 'face bracket-face)
             (when img-str (concat " " img-str))
@@ -510,12 +539,16 @@ resolved via `claude-repl--tab-spec'."
                          names)))
     (claude-repl--log-verbose nil "tabline-advice: current=%s states=%S"
                               current-name states)
-    (mapconcat
-     #'identity
-     (cl-loop for name in names
-              for i from 1
-              collect (claude-repl--render-tab-entry name current-name i))
-     " ")))
+    (concat
+     (mapconcat
+      #'identity
+      (cl-loop for name in names
+               for i from 1
+               collect (claude-repl--render-tab-entry name current-name i))
+      " ")
+     ;; Trailing space toggle — DO NOT REMOVE.  See the block comment
+     ;; above `claude-repl--tabline-space-toggle' for why this exists.
+     (if claude-repl--tabline-space-toggle " " ""))))
 
 (advice-add '+workspace--tabline :override #'claude-repl--tabline-advice)
 
@@ -609,6 +642,10 @@ Uses cached git status (`:git-clean') and kicks off async refreshes.
 Also polls for orphaned sentinel files that file-notify may have missed.
 State machine runs whenever a live vterm process exists, regardless of
 panel visibility (panels may be hidden via `SPC o c')."
+  ;; Flip the trailing-space toggle so the tab-bar string changes on every
+  ;; tick, forcing a repaint.  DO NOT REMOVE — see the block comment above
+  ;; `claude-repl--tabline-space-toggle'.
+  (setq claude-repl--tabline-space-toggle (not claude-repl--tabline-space-toggle))
   (claude-repl--poll-workspace-notifications)
   (let ((ws-names (hash-table-keys claude-repl--workspaces)))
     (claude-repl--log-verbose nil "update-all-workspace-states: count=%d" (length ws-names))

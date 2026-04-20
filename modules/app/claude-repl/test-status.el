@@ -567,24 +567,74 @@ to be reverted to should-error once the leaking writer is found)."
 (ert-deftest claude-repl-test-tab-spec-selected-known-state ()
   "tab-spec returns the :selected plist from the palette for a known state."
   (let ((spec (claude-repl--tab-spec :done t)))
-    (should (equal (plist-get spec :bracket-fg) "#2a8c2a"))))
+    (should (equal (plist-get spec :bracket-fg) "white"))
+    (should (equal (plist-get spec :bracket-bg) "#1a7a1a"))))
 
 (ert-deftest claude-repl-test-tab-spec-unknown-state-falls-back-to-default ()
   "tab-spec returns the default spec for states absent from the palette."
   (let ((unsel (claude-repl--tab-spec :bogus nil))
         (sel   (claude-repl--tab-spec :bogus t)))
-    (should (equal (plist-get unsel :bracket-fg) "#4477cc"))
+    (should (equal (plist-get unsel :bracket-fg) "white"))
     (should (equal (plist-get sel :bg) "#c0c0c0"))))
 
 (ert-deftest claude-repl-test-tab-spec-nil-state-uses-default ()
   "tab-spec with nil state returns the default spec."
   (should (equal (plist-get (claude-repl--tab-spec nil nil) :bracket-fg)
-                 "#4477cc")))
+                 "white")))
 
 (ert-deftest claude-repl-test-tab-spec-permission-has-face-override ()
   "The :permission :selected spec carries :face-override = the permission face."
   (let ((spec (claude-repl--tab-spec :permission t)))
     (should (eq (plist-get spec :face-override) 'claude-repl-tab-permission))))
+
+;;;; ---- Tests: bracket-bg on selected tabs ----
+
+(ert-deftest claude-repl-test-tab-spec-selected-init-bracket-bg ()
+  "Selected :init bracket-bg should be the init blue color."
+  (let ((spec (claude-repl--tab-spec :init t)))
+    (should (equal (plist-get spec :bracket-bg) "#3366cc"))
+    (should (equal (plist-get spec :bracket-fg) "white"))))
+
+(ert-deftest claude-repl-test-tab-spec-selected-thinking-bracket-bg ()
+  "Selected :thinking bracket-bg should be the thinking red color."
+  (let ((spec (claude-repl--tab-spec :thinking t)))
+    (should (equal (plist-get spec :bracket-bg) "#cc3333"))
+    (should (equal (plist-get spec :bracket-fg) "white"))))
+
+(ert-deftest claude-repl-test-tab-spec-selected-idle-bracket-bg ()
+  "Selected :idle bracket-bg should be the idle orange color."
+  (let ((spec (claude-repl--tab-spec :idle t)))
+    (should (equal (plist-get spec :bracket-bg) "#d97706"))
+    (should (equal (plist-get spec :bracket-fg) "white"))))
+
+(ert-deftest claude-repl-test-tab-spec-selected-permission-bracket-bg ()
+  "Selected :permission bracket-bg should be the done green color."
+  (let ((spec (claude-repl--tab-spec :permission t)))
+    (should (equal (plist-get spec :bracket-bg) "#1a7a1a"))
+    (should (equal (plist-get spec :bracket-fg) "white"))))
+
+(ert-deftest claude-repl-test-tab-spec-unselected-has-no-bracket-bg ()
+  "Unselected specs should not have :bracket-bg (falls back to :bg in renderer)."
+  (dolist (state '(:init :thinking :done :permission :idle))
+    (let ((spec (claude-repl--tab-spec state nil)))
+      (should-not (plist-get spec :bracket-bg)))))
+
+(ert-deftest claude-repl-test-render-tab-bracket-bg-applied ()
+  "render-tab should use :bracket-bg for the bracket background when present."
+  (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-bg "#cc3333" :bracket-fg "white" :weight bold))
+         (result (claude-repl--render-tab "ws1" spec "1" '+workspace-tab-face nil))
+         (bracket-pos (string-match "\\[" result))
+         (face (get-text-property bracket-pos 'face result)))
+    (should (equal (plist-get face :background) "#cc3333"))
+    (should (equal (plist-get face :foreground) "white"))))
+
+(ert-deftest claude-repl-test-render-tab-bracket-bg-falls-back-to-bg ()
+  "render-tab should fall back to :bg for bracket background when :bracket-bg is absent."
+  (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
+         (result (claude-repl--render-tab "ws1" spec "1" '+workspace-tab-face nil))
+         (bracket-pos (string-match "\\[" result))
+         (face (get-text-property bracket-pos 'face result)))
+    (should (equal (plist-get face :background) "#c0c0c0"))))
 
 ;;;; ---- Tests: render-tab (spec-driven) ----
 
@@ -654,12 +704,12 @@ to be reverted to should-error once the leaking writer is found)."
   "render-tab-entry should render as unselected when current-name matches nothing."
   (claude-repl-test--with-clean-state
     (let ((result (claude-repl--render-tab-entry "ws1" "no-such-ws" 1)))
-      ;; Should render as unselected (bracket foreground is blue #4477cc)
+      ;; Should render as unselected (bracket foreground is white)
       (should (string-match-p "ws1" result))
       (let ((bracket-pos (string-match "\\[" result)))
         (should bracket-pos)
         (let ((face (get-text-property bracket-pos 'face result)))
-          (should (equal (plist-get face :foreground) "#4477cc")))))))
+          (should (equal (plist-get face :foreground) "white")))))))
 
 ;;;; ---- Tests: tabline-advice edge cases ----
 
@@ -675,9 +725,52 @@ to be reverted to should-error once the leaking writer is found)."
 (ert-deftest claude-repl-test-tabline-advice-empty-names ()
   "tabline-advice with an empty names list should return an empty string."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-      (let ((result (claude-repl--tabline-advice '())))
-        (should (equal result ""))))))
+    (let ((claude-repl--tabline-space-toggle nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+        (let ((result (claude-repl--tabline-advice '())))
+          (should (equal result "")))))))
+
+;;;; ---- Tests: tabline space toggle ----
+
+(ert-deftest claude-repl-test-tabline-space-toggle-off ()
+  "tabline-advice appends no trailing space when toggle is nil."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--tabline-space-toggle nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function '+workspace-list-names) (lambda () '("ws1"))))
+        (let ((result (claude-repl--tabline-advice '("ws1"))))
+          (should-not (string-suffix-p "  " result)))))))
+
+(ert-deftest claude-repl-test-tabline-space-toggle-on ()
+  "tabline-advice appends a trailing space when toggle is non-nil."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--tabline-space-toggle t))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function '+workspace-list-names) (lambda () '("ws1"))))
+        (let ((result (claude-repl--tabline-advice '("ws1"))))
+          (should (string-suffix-p " " result)))))))
+
+(ert-deftest claude-repl-test-tabline-space-toggle-alternates ()
+  "Consecutive tabline-advice calls with opposite toggle values produce different strings."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function '+workspace-list-names) (lambda () '("ws1"))))
+      (let* ((claude-repl--tabline-space-toggle nil)
+             (r1 (claude-repl--tabline-advice '("ws1")))
+             (claude-repl--tabline-space-toggle t)
+             (r2 (claude-repl--tabline-advice '("ws1"))))
+        (should-not (equal r1 r2))))))
+
+(ert-deftest claude-repl-test-update-all-flips-space-toggle ()
+  "update-all-workspace-states flips the space toggle on each call."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--tabline-space-toggle nil))
+      (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore)
+                ((symbol-function 'hash-table-keys) (lambda (_ht) nil)))
+        (claude-repl--update-all-workspace-states)
+        (should (eq claude-repl--tabline-space-toggle t))
+        (claude-repl--update-all-workspace-states)
+        (should (eq claude-repl--tabline-space-toggle nil))))))
 
 ;;;; ---- Tests: wconf-has-claude-p ----
 
