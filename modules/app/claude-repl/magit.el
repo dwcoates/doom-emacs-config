@@ -41,6 +41,12 @@ First %s is the repo name, second %s is the commit SHA."
   (setq magit-no-confirm (append magit-no-confirm claude-repl-magit-no-confirm-extras)
         magit-diff-visit-previous-blob nil)
 
+  ;; Unfold these sections by default in magit-status
+  (setq magit-section-initial-visibility-alist
+        '((unpushed . show)
+          (stashes  . show)
+          (untracked . show)))
+
   (map! :map (magit-unstaged-section-map magit-staged-section-map magit-untracked-section-map magit-mode-map)
         :desc "Jump to recent commits"
         "g r"
