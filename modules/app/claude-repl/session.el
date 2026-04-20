@@ -151,7 +151,8 @@ Session IDs are delivered by hooks, not scanned here."
             (claude-repl--log ws "ensure-ws-env: restoring from state file ws=%s" ws)
             (claude-repl--apply-restored-state ws saved))
         (claude-repl--log ws "ensure-ws-env: no state file, creating fresh ws=%s" ws)
-        (claude-repl--fresh-ws-env ws)))
+        (claude-repl--fresh-ws-env ws)
+        (claude-repl--state-save ws)))
     (claude-repl--validate-ws-env ws)))
 
 (defun claude-repl--prompt-sandbox-build (sandbox-config)

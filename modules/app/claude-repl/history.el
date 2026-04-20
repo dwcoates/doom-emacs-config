@@ -226,13 +226,19 @@ Signals an error with a descriptive message when validation fails."
 (defun claude-repl--read-state-file (ws)
   "Read the persisted state file for workspace WS, or nil if none exists.
 Determines the project root from :project-dir or git-root fallback,
-then reads .claude-repl-state if present."
+then reads .claude-repl-state if present.  Returns nil on missing,
+empty, or corrupt files so the caller can fall back to fresh state."
   (let* ((root (or (claude-repl--ws-get ws :project-dir)
                    (claude-repl--git-root default-directory)))
          (file (claude-repl--state-file root)))
     (claude-repl--log ws "read-state-file: ws=%s root=%s file=%s" ws root file)
     (when file
-      (claude-repl--read-sexp-file-if-exists file))))
+      (condition-case err
+          (claude-repl--read-sexp-file-if-exists file)
+        (error
+         (claude-repl--log ws "read-state-file: error reading %s: %S — returning nil"
+                           file err)
+         nil)))))
 
 ;;;; Input history
 

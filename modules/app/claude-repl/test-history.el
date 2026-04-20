@@ -944,19 +944,98 @@
     ;; Should not signal an error thanks to with-error-logging
     (claude-repl--state-save "ws")))
 
-;;;; ---- Tests: ensure-ws-env edge cases ----
+;;;; ---- Tests: read-state-file with corrupt/empty files ----
 
-(ert-deftest claude-repl-test-ensure-ws-env-corrupt-data-errors ()
-  "ensure-ws-env propagates errors from corrupt state files."
+(ert-deftest claude-repl-test-read-state-file-empty-file ()
+  "read-state-file returns nil when state file exists but is empty."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-empty-" t)))
+      (unwind-protect
+          (progn
+            ;; Create an empty state file (simulates interrupted write)
+            (with-temp-file (expand-file-name ".claude-repl-state" tmpdir)
+              (insert ""))
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (should-not (claude-repl--read-state-file "ws")))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-read-state-file-invalid-elisp ()
+  "read-state-file returns nil when state file contains unreadable elisp."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-invalid-" t)))
+      (unwind-protect
+          (progn
+            ;; Unclosed paren triggers end-of-file error in (read ...)
+            (with-temp-file (expand-file-name ".claude-repl-state" tmpdir)
+              (insert "(unclosed paren"))
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (should-not (claude-repl--read-state-file "ws")))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-read-state-file-corrupt-data ()
+  "read-state-file returns whatever the file contains (caller validates)."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-corrupt-" t)))
       (unwind-protect
           (progn
-            ;; Write a number (not a plist) as state data
+            ;; A number is valid elisp but not a plist — reader returns it
             (claude-repl--write-sexp-file
              (expand-file-name ".claude-repl-state" tmpdir) 42)
             (claude-repl--ws-put "ws" :project-dir tmpdir)
-            (should-error (claude-repl--ensure-ws-env "ws")))
+            (should (equal (claude-repl--read-state-file "ws") 42)))
+        (delete-directory tmpdir t)))))
+
+;;;; ---- Tests: ensure-ws-env with missing/corrupt state files ----
+
+(ert-deftest claude-repl-test-ensure-ws-env-empty-file-creates-fresh ()
+  "ensure-ws-env creates fresh state when state file is empty."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-empty-" t)))
+      (unwind-protect
+          (progn
+            (with-temp-file (expand-file-name ".claude-repl-state" tmpdir)
+              (insert ""))
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ensure-ws-env "ws")
+            (should (eq (claude-repl--ws-get "ws" :active-env) :bare-metal))
+            (should (claude-repl-instantiation-p
+                     (claude-repl--ws-get "ws" :bare-metal)))
+            (should-not (claude-repl-instantiation-session-id
+                         (claude-repl--ws-get "ws" :bare-metal))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-ensure-ws-env-invalid-elisp-creates-fresh ()
+  "ensure-ws-env creates fresh state when state file has unreadable elisp."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-invalid-" t)))
+      (unwind-protect
+          (progn
+            ;; Unclosed paren triggers end-of-file error in (read ...)
+            (with-temp-file (expand-file-name ".claude-repl-state" tmpdir)
+              (insert "(unclosed paren"))
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ensure-ws-env "ws")
+            (should (eq (claude-repl--ws-get "ws" :active-env) :bare-metal))
+            (should (claude-repl-instantiation-p
+                     (claude-repl--ws-get "ws" :bare-metal)))
+            (should-not (claude-repl-instantiation-session-id
+                         (claude-repl--ws-get "ws" :bare-metal))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-ensure-ws-env-missing-file-writes-state ()
+  "ensure-ws-env creates state file on disk when it was missing."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-write-" t)))
+      (unwind-protect
+          (let ((state-path (expand-file-name ".claude-repl-state" tmpdir)))
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (should-not (file-exists-p state-path))
+            (claude-repl--ensure-ws-env "ws")
+            (should (file-exists-p state-path))
+            ;; Verify the written file is valid and round-trips
+            (let ((data (claude-repl--read-sexp-file state-path)))
+              (should (eq (plist-get data :active-env) :bare-metal))
+              (should (equal (plist-get data :project-dir) tmpdir))))
         (delete-directory tmpdir t)))))
 
 ;;;; ---- Tests: history-push edge cases ----
