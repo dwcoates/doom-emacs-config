@@ -891,7 +891,7 @@ environments without notification tools (terminal-notifier or osascript)."
 (ert-deftest claude-repl-test-record-project-dir-preserves-existing ()
   "record-project-dir never overwrites an already-set :project-dir.
 Load-bearing: worktree workspaces store their canonical path via
-`register-worktree-ws' before initialize-claude-output runs, and a drifted
+`register-worktree-ws' before initialize-claude runs, and a drifted
 `default-directory' from elsewhere must not clobber it."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :project-dir "/canonical/worktree")

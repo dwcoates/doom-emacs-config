@@ -291,41 +291,9 @@ SANDBOXED-P means Docker mode with DOCKER-IMAGE; otherwise bare metal."
         (fork-session-id (plist-get start-info :fork-session-id))
         (worktree-str    (if (plist-get start-info :worktree-p) "yes" "no"))
         (active-env      (plist-get start-info :active-env)))
-    (claude-repl--log ws "start-claude ws=%s session-id=%s fork-session-id=%s worktree=%s env=%s cmd=%s dir=%s"
+    (claude-repl--log ws "log-session-start ws=%s session-id=%s fork-session-id=%s worktree=%s env=%s cmd=%s dir=%s"
                       ws session-id fork-session-id worktree-str active-env cmd
                       (claude-repl--ws-get ws :project-dir))))
-
-(defun claude-repl--start-claude (ws)
-  "Send the claude startup command to the current vterm buffer for WS.
-WS is the workspace whose instantiation drives the command; passing it
-explicitly avoids a `(+workspace-current-name)' fallback that would
-otherwise resolve to the caller's persp (and read that workspace's
-session-id), producing a stray `--continue' when a fresh worktree is
-being created from another persp.
-For worktree workspaces with :active-env :sandbox, delegates to
-.claude/sandbox/claude-sandbox if a sandbox image is configured.
-Falls back to bare-metal Claude otherwise."
-  (let* ((start-info (progn
-                       (unless (claude-repl--ws-get ws :active-env)
-                         (claude-repl--initialize-ws-env ws))
-                       (claude-repl--build-start-cmd ws)))
-         (cmd         (plist-get start-info :cmd))
-         (sandboxed-p (plist-get start-info :sandboxed-p))
-         (inst        (plist-get start-info :inst)))
-    (setf (claude-repl-instantiation-start-cmd inst) cmd)
-    (when (plist-get start-info :fork-session-id)
-      (claude-repl--log ws "start-claude: clearing fork-session-id for ws=%s" ws)
-      (claude-repl--ws-put ws :fork-session-id nil))
-    (setq-local mode-line-format
-                (claude-repl--sandbox-mode-line sandboxed-p
-                                                (plist-get start-info :docker-image)))
-    (claude-repl--log-session-start ws start-info)
-    (claude-repl--log ws "start-claude: setting ready=nil for ws=%s" ws)
-    (setq-local claude-repl--ready nil)
-    (claude-repl--log ws "start-claude: sending startup cmd + <return> to vterm len=%d" (length cmd))
-    (vterm-send-string (concat claude-repl-startup-prefix cmd))
-    (vterm-send-return)
-    (claude-repl--schedule-ready-timer ws)))
 
 ;;;; Loading placeholder
 

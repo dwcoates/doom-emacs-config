@@ -1246,24 +1246,6 @@ we at least surface the stuck state so the user knows to click out."
               (should-error (claude-repl--initialize-input-buffer "test-ws"))))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
-;;;; ---- Tests: initialize-claude-output ----
-
-(ert-deftest claude-repl-test-initialize-claude-output-already-initialized ()
-  "initialize-claude-output errors when the buffer is already in vterm-mode."
-  (claude-repl-test--with-clean-state
-    (let ((buf (generate-new-buffer " *init-output-already*")))
-      (unwind-protect
-          (progn
-            (with-current-buffer buf
-              (setq major-mode 'vterm-mode))
-            (cl-letf (((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp"))
-                      ((symbol-function 'claude-repl--record-project-dir) #'ignore)
-                      ((symbol-function 'claude-repl--kill-stale-vterm) #'ignore)
-                      ((symbol-function 'claude-repl--create-buffer)
-                       (lambda (_ws &optional _s) buf)))
-              (should-error (claude-repl--initialize-claude-output "test-ws"))))
-        (when (buffer-live-p buf) (kill-buffer buf))))))
-
 ;;;; ---- Tests: kill-stale-vterm ----
 
 (ert-deftest claude-repl-test-panels-kill-stale-vterm-no-buffer ()
@@ -1389,40 +1371,192 @@ we at least surface the stuck state so the user knows to click out."
               ((symbol-function 'claude-repl--claude-running-p) (lambda (_ws) t)))
       (should-error (claude-repl--initialize-claude)))))
 
+(defmacro claude-repl-test--initialize-claude-stubs (vterm-buf-var &rest body)
+  "Run BODY with the stubs needed to exercise `claude-repl--initialize-claude'.
+VTERM-BUF-VAR is the name of a `let'-bound buffer that will be returned
+from `create-buffer'.  Stubs can be overridden by wrapping BODY in another
+`cl-letf' that rebinds the same symbols."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+             ((symbol-function 'claude-repl--claude-running-p) (lambda (&optional _ws) nil))
+             ((symbol-function 'claude-repl--initialize-ws-env) #'ignore)
+             ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp"))
+             ((symbol-function 'claude-repl--record-project-dir) #'ignore)
+             ((symbol-function 'claude-repl--kill-stale-vterm) (lambda (&optional _ws) nil))
+             ((symbol-function 'claude-repl--create-buffer)
+              (lambda (_ws &optional _s) ,vterm-buf-var))
+             ((symbol-function 'claude-repl--build-start-cmd)
+              (lambda (_ws) (list :cmd "claude"
+                                  :sandboxed-p nil
+                                  :docker-image nil
+                                  :session-id nil
+                                  :fork-session-id nil
+                                  :worktree-p nil
+                                  :active-env :bare-metal
+                                  :inst (make-claude-repl-instantiation))))
+             ((symbol-function 'claude-repl--log-session-start) #'ignore)
+             ((symbol-function 'vterm-mode) #'ignore)
+             ((symbol-function 'claude-repl--set-buffer-background) #'ignore)
+             ((symbol-function 'claude-repl--sandbox-mode-line) (lambda (_s _d) '("test")))
+             ((symbol-function 'vterm-send-string) #'ignore)
+             ((symbol-function 'vterm-send-return) #'ignore)
+             ((symbol-function 'claude-repl--schedule-ready-timer) #'ignore)
+             ((symbol-function 'claude-repl--initialize-input-buffer) #'ignore)
+             ((symbol-function 'claude-repl--enable-hide-overlay) #'ignore)
+             ((symbol-function 'claude-repl--workspace-id) (lambda () "id")))
+     ,@body))
+
 (ert-deftest claude-repl-test-panels-initialize-claude-starts-new-session ()
-  "initialize-claude creates output + input buffers, sets prefix counter, enables overlay,
-writes :claude-state :init, and announces startup when Claude is not running."
+  "initialize-claude sets prefix counter, enables overlay, writes :claude-state :init."
   (claude-repl-test--with-clean-state
-    (let ((output-init nil)
-          (input-init nil)
-          (counter-set nil)
-          (overlay-enabled nil)
-          (init-set nil)
-          (fake-inst (make-claude-repl-instantiation :start-cmd "claude")))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'claude-repl--claude-running-p) (lambda (_ws) nil))
-                ((symbol-function 'claude-repl--initialize-claude-output)
-                 (lambda (_ws) (setq output-init t)))
-                ((symbol-function 'claude-repl--initialize-input-buffer)
-                 (lambda (_ws) (setq input-init t)))
-                ((symbol-function 'claude-repl--ws-put)
-                 (lambda (ws key val)
-                   (when (and (equal ws "test-ws") (eq key :prefix-counter) (= val 0))
-                     (setq counter-set t))))
-                ((symbol-function 'claude-repl--enable-hide-overlay)
-                 (lambda () (setq overlay-enabled t)))
-                ((symbol-function 'claude-repl--ws-set-claude-state)
-                 (lambda (ws state)
-                   (when (eq state :init) (setq init-set ws))))
-                ((symbol-function 'claude-repl--active-inst) (lambda (_) fake-inst))
-                ((symbol-function 'claude-repl--workspace-id) (lambda () "id"))
-                ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/")))
-        (claude-repl--initialize-claude)
-        (should output-init)
-        (should input-init)
-        (should counter-set)
-        (should overlay-enabled)
-        (should (equal init-set "test-ws"))))))
+    (claude-repl--ws-put "test-ws" :active-env :bare-metal)
+    (let ((vterm-buf (generate-new-buffer " *init-claude-fixture*"))
+          (overlay-called nil))
+      (unwind-protect
+          (claude-repl-test--initialize-claude-stubs vterm-buf
+            (cl-letf (((symbol-function 'claude-repl--enable-hide-overlay)
+                       (lambda () (setq overlay-called t))))
+              (claude-repl--initialize-claude)
+              (should (equal (claude-repl--ws-get "test-ws" :prefix-counter) 0))
+              (should (eq (claude-repl--ws-get "test-ws" :claude-state) :init))
+              (should overlay-called)))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
+(ert-deftest claude-repl-test-panels-initialize-claude-sends-cmd-and-return ()
+  "initialize-claude sends the startup cmd string and a return to the vterm buffer."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :active-env :bare-metal)
+    (let ((vterm-buf (generate-new-buffer " *init-claude-send*"))
+          (sent-string nil)
+          (return-sent nil))
+      (unwind-protect
+          (claude-repl-test--initialize-claude-stubs vterm-buf
+            (cl-letf (((symbol-function 'vterm-send-string)
+                       (lambda (s) (setq sent-string s)))
+                      ((symbol-function 'vterm-send-return)
+                       (lambda () (setq return-sent t))))
+              (claude-repl--initialize-claude)
+              (should (string-match-p "claude" sent-string))
+              (should return-sent)))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
+(ert-deftest claude-repl-test-panels-initialize-claude-schedules-ready-timer ()
+  "initialize-claude schedules the readiness timer for the workspace."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :active-env :bare-metal)
+    (let ((vterm-buf (generate-new-buffer " *init-claude-timer*"))
+          (timer-ws nil))
+      (unwind-protect
+          (claude-repl-test--initialize-claude-stubs vterm-buf
+            (cl-letf (((symbol-function 'claude-repl--schedule-ready-timer)
+                       (lambda (ws) (setq timer-ws ws))))
+              (claude-repl--initialize-claude)
+              (should (equal timer-ws "test-ws"))))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
+(ert-deftest claude-repl-test-panels-initialize-claude-sets-ready-nil ()
+  "initialize-claude sets buffer-local claude-repl--ready to nil in the vterm buffer."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :active-env :bare-metal)
+    (let ((vterm-buf (generate-new-buffer " *init-claude-ready*"))
+          (ready-at-send 'unset))
+      (unwind-protect
+          (progn
+            (with-current-buffer vterm-buf
+              (setq-local claude-repl--ready t))
+            (claude-repl-test--initialize-claude-stubs vterm-buf
+              (cl-letf (((symbol-function 'vterm-send-string)
+                         (lambda (_s) (setq ready-at-send claude-repl--ready))))
+                (claude-repl--initialize-claude)
+                (should-not ready-at-send))))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
+(ert-deftest claude-repl-test-panels-initialize-claude-sets-sandbox-mode-line ()
+  "initialize-claude sets mode-line-format via sandbox-mode-line in the vterm buffer."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :active-env :sandbox)
+    (let ((vterm-buf (generate-new-buffer " *init-claude-ml*")))
+      (unwind-protect
+          (claude-repl-test--initialize-claude-stubs vterm-buf
+            (cl-letf (((symbol-function 'claude-repl--build-start-cmd)
+                       (lambda (_ws) (list :cmd "claude-sandbox"
+                                           :sandboxed-p t
+                                           :docker-image "img:latest"
+                                           :session-id nil
+                                           :fork-session-id nil
+                                           :worktree-p t
+                                           :active-env :sandbox
+                                           :inst (make-claude-repl-instantiation))))
+                      ((symbol-function 'claude-repl--sandbox-mode-line)
+                       (lambda (_s _d) '("SANDBOX-ML"))))
+              (claude-repl--initialize-claude)
+              (with-current-buffer vterm-buf
+                (should (equal mode-line-format '("SANDBOX-ML"))))))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
+(ert-deftest claude-repl-test-panels-initialize-claude-clears-fork-session-id ()
+  "initialize-claude clears :fork-session-id after building the cmd."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :active-env :bare-metal)
+    (claude-repl--ws-put "test-ws" :fork-session-id "fork-abc")
+    (let ((vterm-buf (generate-new-buffer " *init-claude-fork*")))
+      (unwind-protect
+          (claude-repl-test--initialize-claude-stubs vterm-buf
+            (cl-letf (((symbol-function 'claude-repl--build-start-cmd)
+                       (lambda (_ws) (list :cmd "claude"
+                                           :sandboxed-p nil
+                                           :docker-image nil
+                                           :session-id nil
+                                           :fork-session-id "fork-abc"
+                                           :worktree-p nil
+                                           :active-env :bare-metal
+                                           :inst (make-claude-repl-instantiation)))))
+              (claude-repl--initialize-claude)
+              (should-not (claude-repl--ws-get "test-ws" :fork-session-id))))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
+(ert-deftest claude-repl-test-panels-initialize-claude-calls-ws-env-init-when-unset ()
+  "initialize-claude calls initialize-ws-env when :active-env is unset."
+  (claude-repl-test--with-clean-state
+    (let ((vterm-buf (generate-new-buffer " *init-claude-ws-env*"))
+          (init-called nil))
+      (unwind-protect
+          (claude-repl-test--initialize-claude-stubs vterm-buf
+            (cl-letf (((symbol-function 'claude-repl--initialize-ws-env)
+                       (lambda (_ws) (setq init-called t))))
+              (claude-repl--initialize-claude)
+              (should init-called)))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
+(ert-deftest claude-repl-test-panels-initialize-claude-skips-ws-env-init-when-set ()
+  "initialize-claude skips initialize-ws-env when :active-env is already set."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :active-env :bare-metal)
+    (let ((vterm-buf (generate-new-buffer " *init-claude-skip-env*"))
+          (init-called nil))
+      (unwind-protect
+          (claude-repl-test--initialize-claude-stubs vterm-buf
+            (cl-letf (((symbol-function 'claude-repl--initialize-ws-env)
+                       (lambda (_ws) (setq init-called t))))
+              (claude-repl--initialize-claude)
+              (should-not init-called)))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
+(ert-deftest claude-repl-test-panels-initialize-claude-uses-explicit-ws-arg ()
+  "initialize-claude uses the explicit WS argument rather than +workspace-current-name."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "explicit-arg-ws" :active-env :bare-metal)
+    (let ((vterm-buf (generate-new-buffer " *init-claude-explicit*"))
+          (running-ws nil))
+      (unwind-protect
+          (claude-repl-test--initialize-claude-stubs vterm-buf
+            (cl-letf (((symbol-function '+workspace-current-name)
+                       (lambda () "persp-current-ws"))
+                      ((symbol-function 'claude-repl--claude-running-p)
+                       (lambda (ws) (setq running-ws ws) nil)))
+              (claude-repl--initialize-claude "explicit-arg-ws")
+              (should (equal running-ws "explicit-arg-ws"))))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
 ;;;; ---- Tests: schedule-sigkill ----
 

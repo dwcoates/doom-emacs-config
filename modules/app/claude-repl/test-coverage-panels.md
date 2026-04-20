@@ -304,19 +304,6 @@ Complex function: splits windows, sets buffers, configures windows.
 | Buffer has live process (keep alive) | No | |
 | No buffer exists | No | |
 
-### `claude-repl--initialize-new-vterm (root)`
-
-| Edge Case | Covered | Test |
-|-----------|---------|------|
-| Normal initialization | No | Requires vterm-mode |
-
-### `claude-repl--initialize-claude-output (ws)`
-
-| Edge Case | Covered | Test |
-|-----------|---------|------|
-| New buffer creation | No | Requires vterm infrastructure |
-| Buffer already in vterm-mode (signals error) | Yes | `claude-repl-test-initialize-claude-output-already-initialized` |
-
 ---
 
 ## Panel show/hide strategies
@@ -329,11 +316,23 @@ Complex function: splits windows, sets buffers, configures windows.
 
 ### `claude-repl--initialize-claude (&optional ws)`
 
+Single entry point for starting a Claude session.  Absorbs what used
+to live in `initialize-claude-output`, `initialize-new-vterm`, and
+`start-claude`.
+
 | Edge Case | Covered | Test |
 |-----------|---------|------|
-| Starts new session (output, input, counter, overlay, :init, message) | Yes | `initialize-claude-starts-new-session` |
-| Already running (error) | Yes | `initialize-claude-already-running-errors` |
 | No active workspace (error) | Yes | `initialize-claude-no-workspace` |
+| Already running (error) | Yes | `initialize-claude-already-running-errors` |
+| Sets prefix counter, overlay, :claude-state :init | Yes | `initialize-claude-starts-new-session` |
+| Sends startup cmd + return to vterm | Yes | `initialize-claude-sends-cmd-and-return` |
+| Schedules readiness timer | Yes | `initialize-claude-schedules-ready-timer` |
+| Sets buffer-local `claude-repl--ready` to nil | Yes | `initialize-claude-sets-ready-nil` |
+| Sets sandbox mode-line in vterm buffer | Yes | `initialize-claude-sets-sandbox-mode-line` |
+| Clears `:fork-session-id` after cmd build | Yes | `initialize-claude-clears-fork-session-id` |
+| Calls `initialize-ws-env` when `:active-env` unset | Yes | `initialize-claude-calls-ws-env-init-when-unset` |
+| Skips `initialize-ws-env` when `:active-env` set | Yes | `initialize-claude-skips-ws-env-init-when-set` |
+| Uses explicit WS arg over `+workspace-current-name` | Yes | `initialize-claude-uses-explicit-ws-arg` |
 
 ### `claude-repl--show-existing-panels ()`
 
@@ -508,7 +507,7 @@ Complex function: splits windows, sets buffers, configures windows.
 
 1. **Multi-window operations**: Functions like `show-panels`, `focus-input-panel`, `sync-panels`, `bounce-from-vterm`, and `toggle-fullscreen` require multi-window frame setups that are difficult in batch mode.
 
-2. **Vterm-dependent functions**: `vterm-redraw`, `do-refresh`, `refresh-vterm`, `refresh-vterm-window`, `initialize-new-vterm`, and `initialize-claude-output` require real vterm-mode buffers.
+2. **Vterm-dependent functions**: `vterm-redraw`, `do-refresh`, `refresh-vterm`, `refresh-vterm-window` require real vterm-mode buffers.
 
 3. **Session lifecycle**: `teardown-session-state`, `destroy-session-buffers`, `kill-session`, `kill` (interactive), `restart`, and `switch-environment` require full session infrastructure with running processes.
 

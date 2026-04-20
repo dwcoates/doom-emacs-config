@@ -36,7 +36,9 @@
 |----------|---------|-------|
 | `claude-repl--sandbox-mode-line` | Yes | sandboxed, bare metal |
 | `claude-repl--log-session-start` | **No** | pure logging, low value |
-| `claude-repl--start-claude` | **No** | see edge cases below |
+
+(Session startup was merged into `claude-repl--initialize-claude` in panels.el; see
+`test-coverage-panels.md`.)
 
 ### Loading Placeholder
 
@@ -144,21 +146,6 @@ Integration function assembling all parts of the start command.
 
 **Recommendation:** Add integration-level tests with comprehensive stubs.
 
-### `claude-repl--start-claude`
-
-Top-level session starter that sends commands to vterm.
-
-**Edge cases:**
-1. Normal startup -- sends clear && cmd, schedules ready timer
-2. Fork session -- should clear :fork-session-id after building cmd
-3. Mode-line set to sandboxed vs bare-metal
-4. `claude-repl--ready` should be set to nil before sending command
-5. No owning workspace (uses +workspace-current-name)
-
-**Why not tested:** Requires vterm buffer context, sends strings to vterm, sets buffer-local mode-line-format. Highly side-effectful.
-
-**Recommendation:** Test with a generated buffer and comprehensive stubs for vterm-send-string, vterm-send-return, ensure-ws-env, build-start-cmd, schedule-ready-timer.
-
 ### `claude-repl--log-session-start`
 
 Pure logging function.
@@ -239,7 +226,6 @@ Trivial wrapper: `(claude-repl--vterm-process-alive-p (or ws (+workspace-current
 1. **High:** `claude-repl--get-sandbox-image` -- orchestration logic with branching
 2. **High:** `claude-repl--build-start-cmd` -- integration point for all command building
 3. **Medium:** `claude-repl--prompt-sandbox-build` -- user-facing error paths
-4. **Medium:** `claude-repl--start-claude` -- top-level but heavily side-effectful
-5. **Low:** `claude-repl--log-session-start` -- pure logging
-6. **Low:** `claude-repl--claude-running-p` -- trivial wrapper
-7. **Low:** `claude-repl--set-session-id` -- trivial setter
+4. **Low:** `claude-repl--log-session-start` -- pure logging
+5. **Low:** `claude-repl--claude-running-p` -- trivial wrapper
+6. **Low:** `claude-repl--set-session-id` -- trivial setter

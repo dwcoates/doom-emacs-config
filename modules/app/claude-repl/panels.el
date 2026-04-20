@@ -488,34 +488,6 @@ WS defaults to the current workspace."
         (claude-repl--log nil "kill-stale-vterm: killing stale buf=%s" (buffer-name existing))
         (kill-buffer existing)))))
 
-(defun claude-repl--initialize-new-vterm (ws root)
-  "Set up a freshly created vterm buffer and start Claude.
-WS is the workspace name.  ROOT is the project root directory.
-Assumes the current buffer is the new vterm buffer that has not yet
-entered vterm-mode."
-  (vterm-mode)
-  (setq-local truncate-lines nil)
-  (setq-local word-wrap t)
-  (claude-repl--set-buffer-background claude-repl--vterm-background-grey)
-  (claude-repl--log ws "initialize-new-vterm created %s root=%s" (buffer-name) root)
-  (claude-repl--start-claude ws))
-
-(defun claude-repl--initialize-claude-output (ws)
-  "Create the Claude output buffer for workspace WS and start Claude.
-The output buffer hosts the vterm running the Claude CLI; it is started
-from the git root. Errors if the buffer is already in `vterm-mode'."
-  (let* ((root (claude-repl--ws-dir ws))
-         (default-directory root))
-    (claude-repl--log ws "initialize-claude-output ws=%s root=%s default-directory=%s" ws root default-directory)
-    (claude-repl--record-project-dir ws root)
-    (claude-repl--kill-stale-vterm ws)
-    (let ((vterm-buf (claude-repl--create-buffer ws)))
-      (claude-repl--ws-put ws :vterm-buffer vterm-buf)
-      (with-current-buffer vterm-buf
-        (when (eq major-mode 'vterm-mode)
-          (error "claude-repl--initialize-claude-output: already initialized ws=%s" ws))
-        (claude-repl--initialize-new-vterm ws root)))))
-
 ;;;; Panel show/hide strategies
 
 (defun claude-repl--show-loading-panels ()
@@ -533,9 +505,12 @@ The placeholder is swapped for the real vterm buffer once Claude is ready."
     (claude-repl--ws-put ws :vterm-buffer real-vterm)))
 
 (defun claude-repl--initialize-claude (&optional ws)
-  "Initialize a Claude session for WS: output buffer + input buffer + overlay,
-launch Claude in the output buffer, and announce the startup. Errors if
-Claude is already running for WS.
+  "Initialize a Claude session for WS.
+Loads persisted env state (which restores `:project-dir' when a state
+file exists), creates the output vterm buffer, launches the Claude
+CLI inside it, creates the input buffer, enables the hide-overlay,
+marks `:claude-state' as `:init', and announces the startup.  Errors
+if Claude is already running for WS.
 
 Writes `:claude-state :init' immediately after launching the vterm
 process (documented lifecycle exception to the sentinel-only-writes
@@ -550,17 +525,45 @@ echo-area message below."
     (when (claude-repl--claude-running-p ws)
       (error "claude-repl--initialize-claude: already running ws=%s" ws))
     (claude-repl--log ws "initialize-claude: starting new session for ws=%s" ws)
-    (claude-repl--initialize-claude-output ws)
-    (claude-repl--initialize-input-buffer ws)
-    (claude-repl--ws-put ws :prefix-counter 0)
-    (claude-repl--enable-hide-overlay)
-    (claude-repl--ws-set-claude-state ws :init)
-    (let ((start-cmd (claude-repl-instantiation-start-cmd (claude-repl--active-inst ws))))
-      (message "Starting Claude... ws=%s ws-id=%s dir=%s cmd=%s"
-               ws
-               (claude-repl--workspace-id)
-               (claude-repl--ws-dir ws)
-               (or start-cmd "?")))))
+    (unless (claude-repl--ws-get ws :active-env)
+      (claude-repl--initialize-ws-env ws))
+    (let* ((root (claude-repl--ws-dir ws))
+           (default-directory root))
+      (claude-repl--record-project-dir ws root)
+      (claude-repl--kill-stale-vterm ws)
+      (let* ((vterm-buf (claude-repl--create-buffer ws))
+             (start-info (claude-repl--build-start-cmd ws))
+             (cmd         (plist-get start-info :cmd))
+             (sandboxed-p (plist-get start-info :sandboxed-p))
+             (inst        (plist-get start-info :inst)))
+        (claude-repl--ws-put ws :vterm-buffer vterm-buf)
+        (setf (claude-repl-instantiation-start-cmd inst) cmd)
+        (when (plist-get start-info :fork-session-id)
+          (claude-repl--log ws "initialize-claude: clearing fork-session-id for ws=%s" ws)
+          (claude-repl--ws-put ws :fork-session-id nil))
+        (claude-repl--log-session-start ws start-info)
+        (with-current-buffer vterm-buf
+          (when (eq major-mode 'vterm-mode)
+            (error "claude-repl--initialize-claude: vterm buffer already initialized ws=%s" ws))
+          (vterm-mode)
+          (setq-local truncate-lines nil)
+          (setq-local word-wrap t)
+          (claude-repl--set-buffer-background claude-repl--vterm-background-grey)
+          (setq-local mode-line-format
+                      (claude-repl--sandbox-mode-line sandboxed-p
+                                                      (plist-get start-info :docker-image)))
+          (setq-local claude-repl--ready nil)
+          (claude-repl--log ws "initialize-claude: vterm=%s sending cmd len=%d"
+                            (buffer-name) (length cmd))
+          (vterm-send-string (concat claude-repl-startup-prefix cmd))
+          (vterm-send-return))
+        (claude-repl--schedule-ready-timer ws)
+        (claude-repl--initialize-input-buffer ws)
+        (claude-repl--ws-put ws :prefix-counter 0)
+        (claude-repl--enable-hide-overlay)
+        (claude-repl--ws-set-claude-state ws :init)
+        (message "Starting Claude... ws=%s ws-id=%s dir=%s cmd=%s"
+                 ws (claude-repl--workspace-id) root (or cmd "?"))))))
 
 (defun claude-repl--show-existing-panels ()
   "Show panels for an already-running Claude session.
