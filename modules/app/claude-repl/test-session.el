@@ -734,32 +734,32 @@ to silently re-running and clobbering session-ids on the instantiation structs."
    (claude-repl--prompt-sandbox-build '(:image "" :install-script nil))
    :type 'user-error))
 
-;;;; ---- Tests: ensure-sandbox-image ----
+;;;; ---- Tests: get-sandbox-image ----
 
-(ert-deftest claude-repl-test-ensure-sandbox-image-non-worktree ()
-  "ensure-sandbox-image should return nil for non-worktree workspaces."
+(ert-deftest claude-repl-test-get-sandbox-image-non-worktree ()
+  "get-sandbox-image should return nil for non-worktree workspaces."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :worktree-p nil)
     (claude-repl--ws-put "ws1" :active-env :bare-metal)
     (let ((resolve-called nil))
       (cl-letf (((symbol-function 'claude-repl--resolve-sandbox-config)
                  (lambda (_r) (setq resolve-called t) nil)))
-        (should-not (claude-repl--ensure-sandbox-image "ws1"))
+        (should-not (claude-repl--get-sandbox-image "ws1"))
         (should-not resolve-called)))))
 
-(ert-deftest claude-repl-test-ensure-sandbox-image-not-sandbox-env ()
-  "ensure-sandbox-image should return nil when :active-env is not :sandbox."
+(ert-deftest claude-repl-test-get-sandbox-image-not-sandbox-env ()
+  "get-sandbox-image should return nil when :active-env is not :sandbox."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :worktree-p t)
     (claude-repl--ws-put "ws1" :active-env :bare-metal)
     (let ((resolve-called nil))
       (cl-letf (((symbol-function 'claude-repl--resolve-sandbox-config)
                  (lambda (_r) (setq resolve-called t) nil)))
-        (should-not (claude-repl--ensure-sandbox-image "ws1"))
+        (should-not (claude-repl--get-sandbox-image "ws1"))
         (should-not resolve-called)))))
 
-(ert-deftest claude-repl-test-ensure-sandbox-image-exists ()
-  "ensure-sandbox-image should return config plist when image is ready."
+(ert-deftest claude-repl-test-get-sandbox-image-exists ()
+  "get-sandbox-image should return config plist when image is ready."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :worktree-p t)
     (claude-repl--ws-put "ws1" :active-env :sandbox)
@@ -767,12 +767,12 @@ to silently re-running and clobbering session-ids on the instantiation structs."
     (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (_d) "/my/project"))
               ((symbol-function 'claude-repl--resolve-sandbox-config)
                (lambda (_r) '(:image "img:latest" :script "/usr/bin/claude-sandbox"))))
-      (let ((result (claude-repl--ensure-sandbox-image "ws1")))
+      (let ((result (claude-repl--get-sandbox-image "ws1")))
         (should (equal (plist-get result :image) "img:latest"))
         (should (equal (plist-get result :script) "/usr/bin/claude-sandbox"))))))
 
-(ert-deftest claude-repl-test-ensure-sandbox-image-needs-build ()
-  "ensure-sandbox-image should call prompt-sandbox-build when image needs building."
+(ert-deftest claude-repl-test-get-sandbox-image-needs-build ()
+  "get-sandbox-image should call prompt-sandbox-build when image needs building."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :worktree-p t)
     (claude-repl--ws-put "ws1" :active-env :sandbox)
@@ -784,11 +784,11 @@ to silently re-running and clobbering session-ids on the instantiation structs."
                                 :install-script "/repo/install.sh")))
                 ((symbol-function 'claude-repl--prompt-sandbox-build)
                  (lambda (_cfg) (setq prompt-called t))))
-        (claude-repl--ensure-sandbox-image "ws1")
+        (claude-repl--get-sandbox-image "ws1")
         (should prompt-called)))))
 
-(ert-deftest claude-repl-test-ensure-sandbox-image-nil-project-dir ()
-  "ensure-sandbox-image should return nil when :project-dir is nil."
+(ert-deftest claude-repl-test-get-sandbox-image-nil-project-dir ()
+  "get-sandbox-image should return nil when :project-dir is nil."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :worktree-p t)
     (claude-repl--ws-put "ws1" :active-env :sandbox)
@@ -796,7 +796,7 @@ to silently re-running and clobbering session-ids on the instantiation structs."
     (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (_d) nil))
               ((symbol-function 'claude-repl--resolve-sandbox-config)
                (lambda (_r) nil)))
-      (should-not (claude-repl--ensure-sandbox-image "ws1")))))
+      (should-not (claude-repl--get-sandbox-image "ws1")))))
 
 ;;;; ---- Tests: build-start-cmd ----
 
@@ -807,7 +807,7 @@ to silently re-running and clobbering session-ids on the instantiation structs."
     (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
     (claude-repl--ws-put "ws1" :worktree-p nil)
     (claude-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-    (cl-letf (((symbol-function 'claude-repl--ensure-sandbox-image)
+    (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
                (lambda (_ws) nil)))
       (let ((result (claude-repl--build-start-cmd "ws1")))
         (should (equal (plist-get result :cmd) "claude --dangerously-skip-permissions"))
@@ -821,7 +821,7 @@ to silently re-running and clobbering session-ids on the instantiation structs."
                          (make-claude-repl-instantiation :session-id "sess-123"))
     (claude-repl--ws-put "ws1" :worktree-p t)
     (claude-repl--ws-put "ws1" :project-dir "/home/user/project")
-    (cl-letf (((symbol-function 'claude-repl--ensure-sandbox-image)
+    (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
                (lambda (_ws) '(:image "img:latest" :script "/usr/bin/claude-sandbox"))))
       (let ((result (claude-repl--build-start-cmd "ws1")))
         (should (string-match-p "/usr/bin/claude-sandbox" (plist-get result :cmd)))
@@ -838,7 +838,7 @@ to silently re-running and clobbering session-ids on the instantiation structs."
     (claude-repl--ws-put "ws1" :worktree-p nil)
     (claude-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
     (claude-repl--ws-put "ws1" :fork-session-id "fork-abc")
-    (cl-letf (((symbol-function 'claude-repl--ensure-sandbox-image)
+    (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
                (lambda (_ws) nil)))
       (let ((result (claude-repl--build-start-cmd "ws1")))
         (should (string-match-p "--resume fork-abc --fork-session" (plist-get result :cmd)))
@@ -851,7 +851,7 @@ to silently re-running and clobbering session-ids on the instantiation structs."
     (claude-repl--ws-put "ws1" :sandbox (make-claude-repl-instantiation))
     (claude-repl--ws-put "ws1" :worktree-p t)
     (claude-repl--ws-put "ws1" :project-dir "/home/user/project")
-    (cl-letf (((symbol-function 'claude-repl--ensure-sandbox-image)
+    (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
                (lambda (_ws) '(:needs-build t :image "img:latest"))))
       (let ((result (claude-repl--build-start-cmd "ws1")))
         (should-not (plist-get result :docker-image))
@@ -864,7 +864,7 @@ to silently re-running and clobbering session-ids on the instantiation structs."
     (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
     (claude-repl--ws-put "ws1" :worktree-p nil)
     (claude-repl--ws-put "ws1" :project-dir "/tmp/personal/project")
-    (cl-letf (((symbol-function 'claude-repl--ensure-sandbox-image)
+    (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
                (lambda (_ws) nil)))
       (let* ((result (claude-repl--build-start-cmd "ws1")))
         (should (stringp (plist-get result :cmd)))
@@ -877,7 +877,7 @@ to silently re-running and clobbering session-ids on the instantiation structs."
     (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation :session-id nil))
     (claude-repl--ws-put "ws1" :worktree-p nil)
     (claude-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-    (cl-letf (((symbol-function 'claude-repl--ensure-sandbox-image)
+    (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
                (lambda (_ws) nil)))
       (let ((result (claude-repl--build-start-cmd "ws1")))
         (should-not (string-match-p "--resume" (plist-get result :cmd)))

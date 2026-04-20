@@ -19,7 +19,7 @@
 | `claude-repl--find-install-script` | Yes | exists, missing |
 | `claude-repl--resolve-sandbox-config` | Yes | no launcher, image ready, needs build, empty image |
 | `claude-repl--prompt-sandbox-build` | **No** | see edge cases below |
-| `claude-repl--ensure-sandbox-image` | **No** | see edge cases below |
+| `claude-repl--get-sandbox-image` | **No** | see edge cases below |
 
 ### Command Building
 
@@ -113,7 +113,7 @@ Interactive function that calls `y-or-n-p` and signals `user-error`.
 
 **Recommendation:** Add tests using `cl-letf` to stub `y-or-n-p`, `compile`, and `should-error` to catch the `user-error`.
 
-### `claude-repl--ensure-sandbox-image`
+### `claude-repl--get-sandbox-image`
 
 Orchestrator that combines workspace state lookup with `resolve-sandbox-config` and `prompt-sandbox-build`.
 
@@ -140,7 +140,7 @@ Integration function assembling all parts of the start command.
 5. Nil project-dir
 6. Empty session-id on instantiation
 
-**Why not tested:** Heavy orchestration depending on ensure-sandbox-image (which may signal user-error) and multiple workspace state lookups. Each sub-function is individually tested.
+**Why not tested:** Heavy orchestration depending on get-sandbox-image (which may signal user-error) and multiple workspace state lookups. Each sub-function is individually tested.
 
 **Recommendation:** Add integration-level tests with comprehensive stubs.
 
@@ -236,7 +236,7 @@ Trivial wrapper: `(claude-repl--vterm-process-alive-p (or ws (+workspace-current
 
 ## Recommended Priority for Remaining Coverage
 
-1. **High:** `claude-repl--ensure-sandbox-image` -- orchestration logic with branching
+1. **High:** `claude-repl--get-sandbox-image` -- orchestration logic with branching
 2. **High:** `claude-repl--build-start-cmd` -- integration point for all command building
 3. **Medium:** `claude-repl--prompt-sandbox-build` -- user-facing error paths
 4. **Medium:** `claude-repl--start-claude` -- top-level but heavily side-effectful

@@ -172,8 +172,8 @@ or telling the user to do it manually."
           (user-error "Run 'SPC o c' again once the build completes"))
       (user-error "Sandbox image '%s' not built — run .agents-sandbox/install-claude.sh manually" image))))
 
-(defun claude-repl--ensure-sandbox-image (ws)
-  "Ensure the sandbox Docker image for workspace WS is available.
+(defun claude-repl--get-sandbox-image (ws)
+  "Return the sandbox Docker image config plist for workspace WS.
 Returns a sandbox-config plist from `claude-repl--resolve-sandbox-config',
 or nil if sandboxing is not applicable.  Signals `user-error' if the image
 needs building, optionally kicking off the build first."
@@ -182,7 +182,7 @@ needs building, optionally kicking off the build first."
          (project-dir (claude-repl--ws-get ws :project-dir))
          (sandbox-config (when (and worktree-p (eq active-env :sandbox))
                            (claude-repl--resolve-sandbox-config project-dir))))
-    (claude-repl--log ws "ensure-sandbox-image: ws=%s worktree-p=%s env=%s config=%s"
+    (claude-repl--log ws "get-sandbox-image: ws=%s worktree-p=%s env=%s config=%s"
                       ws (if worktree-p "yes" "no") active-env
                       (if sandbox-config "found" "nil"))
     (when (plist-get sandbox-config :needs-build)
@@ -257,7 +257,7 @@ with everything the caller needs for logging and mode-line setup."
          (project-dir (claude-repl--ws-get ws :project-dir))
          (active-env (claude-repl--ws-get ws :active-env))
          (fork-session-id (claude-repl--ws-get ws :fork-session-id))
-         (sandbox-config (claude-repl--ensure-sandbox-image ws))
+         (sandbox-config (claude-repl--get-sandbox-image ws))
          (docker-image (and (not (plist-get sandbox-config :needs-build))
                             (plist-get sandbox-config :image)))
          (sandboxed-p (and worktree-p docker-image))
