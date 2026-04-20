@@ -45,6 +45,7 @@
 (claude-repl--load-module "worktree")
 (claude-repl--load-module "keybindings")
 (claude-repl--load-module "magit")
+(claude-repl--load-module "emoji")
 
 (if claude-repl--load-errors
     (progn
