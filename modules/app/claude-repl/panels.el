@@ -564,7 +564,8 @@ echo-area message below."
         (claude-repl--enable-hide-overlay)
         (claude-repl--ws-set-claude-state ws :init)
         (message "Starting Claude... ws=%s ws-id=%s dir=%s cmd=%s"
-                 ws (claude-repl--workspace-id) root (or cmd "?"))))))
+                 ws (claude-repl--workspace-id) root (or cmd "?"))
+        (claude-repl--state-save ws)))))
 
 (defun claude-repl--show-existing-panels ()
   "Show panels for an already-running Claude session.

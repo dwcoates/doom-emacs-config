@@ -1548,6 +1548,20 @@ initialize-ws-env.  Models the worktree-creation / new-workspace paths."
               (should (eq got-env :sandbox))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
+(ert-deftest claude-repl-test-panels-initialize-claude-persists-state-on-success ()
+  "initialize-claude calls state-save at the end of a successful start."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :active-env :bare-metal)
+    (let ((vterm-buf (generate-new-buffer " *init-claude-state-save*"))
+          (saved-ws nil))
+      (unwind-protect
+          (claude-repl-test--initialize-claude-stubs vterm-buf
+            (cl-letf (((symbol-function 'claude-repl--state-save)
+                       (lambda (ws) (setq saved-ws ws))))
+              (claude-repl--initialize-claude)
+              (should (equal saved-ws "test-ws"))))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
 (ert-deftest claude-repl-test-panels-initialize-claude-uses-explicit-ws-arg ()
   "initialize-claude uses the explicit WS argument rather than +workspace-current-name."
   (claude-repl-test--with-clean-state
