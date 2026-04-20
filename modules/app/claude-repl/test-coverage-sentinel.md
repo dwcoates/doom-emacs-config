@@ -46,8 +46,8 @@ Reads and trims sentinel file contents. Handles race conditions.
 |---|-----------|---------|-----------|
 | 1 | Normal file with whitespace padding | YES | `test-read-sentinel-file-returns-trimmed-content` |
 | 2 | File missing (file-missing error / race condition) | YES | `test-read-sentinel-file-returns-nil-on-missing` |
-| 3 | Empty file | YES | `test-read-sentinel-file-empty-file` |
-| 4 | File with only whitespace/newlines | NO | - |
+| 3 | Empty file (rejected as bogus -> nil) | YES | `test-read-sentinel-file-empty-file` |
+| 4 | File with only whitespace/newlines (rejected as bogus -> nil) | YES | `test-read-sentinel-file-whitespace-only` |
 | 5 | File with multi-line content (only first line relevant?) | NO | - |
 | 6 | File read triggers non-file-missing error (generic error branch) | NO | - |
 | 7 | File with very long content | NO | - |

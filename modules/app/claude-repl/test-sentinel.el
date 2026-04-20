@@ -302,15 +302,13 @@ re-dispatched by the poll fallback observing a still-present file."
     (should-not (claude-repl--read-sentinel-file "/nonexistent/path/sentinel_file"))))
 
 (ert-deftest claude-repl-test-read-sentinel-file-empty-file ()
-  "read-sentinel-file should return plist with empty :dir for empty file."
+  "read-sentinel-file rejects an empty file (empty :dir is bogus) and returns nil."
   (claude-repl-test--with-clean-state
     (let ((tmp (make-temp-file "sentinel-test-")))
       (unwind-protect
           (progn
             (write-region "" nil tmp)
-            (let ((result (claude-repl--read-sentinel-file tmp)))
-              (should (equal (plist-get result :dir) ""))
-              (should-not (plist-get result :session-id))))
+            (should-not (claude-repl--read-sentinel-file tmp)))
         (ignore-errors (delete-file tmp))))))
 
 ;;;; ---- Tests: ws-for-dir-fast ----
@@ -739,15 +737,13 @@ strips trailing slashes."
 ;;;; ---- Tests: read-sentinel-file uncovered edge cases ----
 
 (ert-deftest claude-repl-test-read-sentinel-file-whitespace-only ()
-  "read-sentinel-file should return plist with empty :dir for whitespace-only file."
+  "read-sentinel-file rejects a whitespace-only file (empty :dir is bogus) and returns nil."
   (claude-repl-test--with-clean-state
     (let ((tmp (make-temp-file "sentinel-test-")))
       (unwind-protect
           (progn
             (write-region "   \n\t\n  " nil tmp)
-            (let ((result (claude-repl--read-sentinel-file tmp)))
-              (should (equal (plist-get result :dir) ""))
-              (should-not (plist-get result :session-id))))
+            (should-not (claude-repl--read-sentinel-file tmp)))
         (ignore-errors (delete-file tmp))))))
 
 (ert-deftest claude-repl-test-read-sentinel-file-multiline-content ()
