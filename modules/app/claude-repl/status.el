@@ -96,8 +96,14 @@ STATE is one of: nil, :init, :idle, :thinking, :done, :permission."
 
 (defun claude-repl--ws-set-repl-state (ws state)
   "Set workspace WS's :repl-state to STATE.
-STATE is one of: nil, :active, :inactive, :dead.  Independent of the
-Claude-state axis."
+STATE is one of:
+  nil        — freshly killed / no session
+  :active    — panels displayed, session alive
+  :inactive  — panels hidden, session alive
+  :dead      — vterm process gone
+  :viewed    — panels displayed AND user has selected this workspace
+               since `:claude-state' entered `:done'.  Acts as a gate
+               for decay :done → :idle in `update-ws-state'."
   (unless ws (error "claude-repl--ws-set-repl-state: ws is nil"))
   (claude-repl--log ws "repl-state %s -> %s" ws state)
   (claude-repl--ws-put ws :repl-state state)
@@ -559,31 +565,37 @@ For background workspaces, inspects the saved persp window configuration."
 ;;; State machine ------------------------------------------------------------
 
 (defun claude-repl--update-ws-state (ws)
-  "Decay WS's claude-state from :done to :idle when the worktree is clean.
+  "Decay WS's claude-state from :done to :idle when conditions are met.
 
 This is the sole transition the timer drives on the claude-state axis.
 Every other transition is sentinel-owned (see the hook handlers in
 `sentinel.el').  When Claude finishes a turn the Stop hook writes
-`:done'; if the worktree is clean (nothing was changed, or the user
-has staged/committed), there is nothing outstanding and the tab decays
-to `:idle' (default face, no attention needed).  If the worktree is
-dirty, the tab stays green until the user stages or commits.
+`:done'; if the worktree is clean AND the user has viewed the
+workspace (`:repl-state :viewed'), there is nothing outstanding and
+the tab decays to `:idle'.  If the worktree is dirty OR the user has
+not yet viewed the workspace, the tab stays green.
+
+Decay also resets `:repl-state' from `:viewed' back to `:active' so a
+future :done cycle starts from a clean slate.
 
 State table:
-  :done + clean → :idle         (this function)
-  :done + dirty → unchanged     (wait for user to stage/commit)
-  anything else → unchanged     (sentinel-owned or already terminal)"
+  :done + clean + :viewed → :idle   (this function)
+  :done + clean + !viewed → unchanged (wait for user to view)
+  :done + dirty           → unchanged (wait for user to stage/commit)
+  anything else           → unchanged (sentinel-owned or already terminal)"
   (let ((state (claude-repl--ws-claude-state ws))
+        (repl-state (claude-repl--ws-repl-state ws))
         (git-status (claude-repl--ws-get ws :git-clean)))
     (cond
      ((null git-status)
       (claude-repl--log-verbose ws "update-ws-state ws=%s state=%s git-clean not yet populated, skipping" ws state))
-     ((and (eq state :done) (eq git-status 'clean))
-      (claude-repl--log ws "update-ws-state ws=%s :done->:idle (clean)" ws)
-      (claude-repl--ws-set-claude-state ws :idle))
+     ((and (eq state :done) (eq git-status 'clean) (eq repl-state :viewed))
+      (claude-repl--log ws "update-ws-state ws=%s :done->:idle (clean, viewed)" ws)
+      (claude-repl--ws-set-claude-state ws :idle)
+      (claude-repl--ws-set-repl-state ws :active))
      (t
-      (claude-repl--log-verbose ws "update-ws-state ws=%s state=%s git-status=%s no-op"
-                                ws state git-status)))))
+      (claude-repl--log-verbose ws "update-ws-state ws=%s state=%s repl-state=%s git-status=%s no-op"
+                                ws state repl-state git-status)))))
 
 (defun claude-repl--update-all-workspace-states ()
   "Update state for claude-repl workspaces based on visibility and git status.

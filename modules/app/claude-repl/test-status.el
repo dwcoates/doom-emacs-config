@@ -795,18 +795,31 @@ to be reverted to should-error once the leaking writer is found)."
       (claude-repl--update-ws-state "ws1")
       (should (eq (claude-repl--ws-state "ws1") :thinking)))))
 
-(ert-deftest claude-repl-test-update-ws-state-done-clean-to-idle ()
-  ":done + clean → :idle (user staged/committed; nothing outstanding)."
+(ert-deftest claude-repl-test-update-ws-state-done-clean-viewed-to-idle ()
+  ":done + clean + :viewed → :idle (user has seen it; nothing outstanding)."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :done)
+    (claude-repl--ws-set-repl-state "ws1" :viewed)
     (claude-repl--ws-put "ws1" :git-clean 'clean)
     (claude-repl--update-ws-state "ws1")
-    (should (eq (claude-repl--ws-claude-state "ws1") :idle))))
+    (should (eq (claude-repl--ws-claude-state "ws1") :idle))
+    ;; :repl-state should also reset from :viewed back to :active
+    (should (eq (claude-repl--ws-repl-state "ws1") :active))))
+
+(ert-deftest claude-repl-test-update-ws-state-done-clean-not-viewed-stays-done ()
+  ":done + clean + NOT viewed stays :done — wait for user to view."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :done)
+    (claude-repl--ws-set-repl-state "ws1" :active)
+    (claude-repl--ws-put "ws1" :git-clean 'clean)
+    (claude-repl--update-ws-state "ws1")
+    (should (eq (claude-repl--ws-claude-state "ws1") :done))))
 
 (ert-deftest claude-repl-test-update-ws-state-done-dirty-stays-done ()
   ":done + dirty stays :done — waiting on user to stage/commit."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :done)
+    (claude-repl--ws-set-repl-state "ws1" :viewed)
     (claude-repl--ws-put "ws1" :git-clean 'dirty)
     (claude-repl--update-ws-state "ws1")
     (should (eq (claude-repl--ws-claude-state "ws1") :done))))

@@ -228,9 +228,16 @@ Respects `claude-repl-autoselect-input-on-workspace-switch'."
 (defun claude-repl--on-workspace-switch ()
   "Handle workspace switch: update all workspace states, refresh vterm, reset cursors.
 Also opens panels for workspaces that were created with a preemptive prompt,
-and auto-selects the input window if visible."
+and auto-selects the input window if visible.
+
+If the newly-active workspace has `:claude-state :done', marks its
+`:repl-state' as `:viewed' so the decay timer can clear :done → :idle
+on the next tick.  This implements \"only decay after the user has
+viewed the workspace.\""
   (let ((ws (+workspace-current-name)))
     (claude-repl--log-verbose ws "workspace-switch ws=%s" ws)
+    (when (eq (claude-repl--ws-claude-state ws) :done)
+      (claude-repl--ws-set-repl-state ws :viewed))
     (claude-repl--update-all-workspace-states)
     (claude-repl--refresh-vterm)
     (claude-repl--reset-vterm-cursors)
