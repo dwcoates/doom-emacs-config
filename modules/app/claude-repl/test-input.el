@@ -131,22 +131,28 @@
           (claude-repl-cycle)
           (should backtab-called))))))
 
-(ert-deftest claude-repl-test-send-input-direct-mode ()
-  "For input <=200 chars, `send-input-to-vterm' calls `vterm-send-string' without paste flag."
+(ert-deftest claude-repl-test-send-input-short-uses-paste ()
+  "Short input uses bracketed paste to avoid the vterm--update/process-send-string race."
   (claude-repl-test--with-clean-state
     (let ((send-string-args nil)
-          (return-called nil))
+          (return-called nil)
+          (timer-args nil))
       (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
                    (lambda () (setq return-called t)))
-                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore))
+                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+                  ((symbol-function 'run-at-time)
+                   (lambda (&rest args) (setq timer-args args))))
           (claude-repl--send-input-to-vterm (current-buffer) "short input")
-          ;; Should have been called with just the string (no paste flag)
+          ;; paste flag (2nd arg) should be t
           (should (equal (car send-string-args) "short input"))
-          (should (null (cdr send-string-args)))
-          (should return-called))))))
+          (should (equal (cadr send-string-args) t))
+          ;; return should NOT have been called directly (deferred)
+          (should-not return-called)
+          ;; run-at-time should have been called
+          (should timer-args))))))
 
 (ert-deftest claude-repl-test-send-input-paste-mode ()
   "For input >200 chars, calls `vterm-send-string' WITH paste flag, defers return."
@@ -418,44 +424,50 @@
       ;; Should not error
       (claude-repl--append-to-input-buffer "text"))))
 
-;;;; ---- Tests: send-input-to-vterm routing ----
+;;;; ---- Tests: send-input-to-vterm always-bracketed-paste ----
 
 (ert-deftest claude-repl-test-send-input-to-vterm-exact-threshold ()
-  "Input at exactly the threshold (200 chars) should use direct mode."
+  "Input at exactly the old threshold (200 chars) uses bracketed paste."
   (claude-repl-test--with-clean-state
     (let ((send-string-args nil)
-          (return-called nil))
+          (return-called nil)
+          (timer-args nil))
       (claude-repl-test--with-temp-buffer "*claude-panel-threshold*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
                    (lambda () (setq return-called t)))
-                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore))
+                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+                  ((symbol-function 'run-at-time)
+                   (lambda (&rest args) (setq timer-args args))))
           (let ((exact-input (make-string 200 ?x)))
             (claude-repl--send-input-to-vterm (current-buffer) exact-input)
-            ;; Exactly 200 -> direct mode (no paste flag)
-            (should (null (cdr send-string-args)))
-            (should return-called)))))))
+            (should (equal (cadr send-string-args) t))
+            (should-not return-called)
+            (should timer-args)))))))
 
 (ert-deftest claude-repl-test-send-input-empty-string ()
-  "Empty string should use direct mode."
+  "Empty string uses bracketed paste (consistent with all other sends)."
   (claude-repl-test--with-clean-state
     (let ((send-string-args nil)
-          (return-called nil))
+          (return-called nil)
+          (timer-args nil))
       (claude-repl-test--with-temp-buffer "*claude-panel-empty*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
                    (lambda () (setq return-called t)))
-                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore))
+                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+                  ((symbol-function 'run-at-time)
+                   (lambda (&rest args) (setq timer-args args))))
           (claude-repl--send-input-to-vterm (current-buffer) "")
           (should (equal (car send-string-args) ""))
-          (should return-called))))))
+          (should (equal (cadr send-string-args) t))
+          (should-not return-called)
+          (should timer-args))))))
 
 (ert-deftest claude-repl-test-send-input-newline-uses-paste ()
-  "Short input containing a newline should use bracketed paste, not direct mode.
-In direct mode `vterm-send-string' sends \\n as a literal newline byte which
-Claude Code interprets as Enter (submit), splitting multi-line input."
+  "Input containing a newline uses bracketed paste."
   (claude-repl-test--with-clean-state
     (let ((send-string-args nil)
           (return-called nil)
@@ -469,15 +481,12 @@ Claude Code interprets as Enter (submit), splitting multi-line input."
                   ((symbol-function 'run-at-time)
                    (lambda (&rest args) (setq timer-args args))))
           (claude-repl--send-input-to-vterm (current-buffer) "line1\nline2")
-          ;; paste flag (2nd arg) should be t
           (should (equal (cadr send-string-args) t))
-          ;; return should NOT have been called directly (deferred)
           (should-not return-called)
-          ;; run-at-time should have been called
           (should timer-args))))))
 
 (ert-deftest claude-repl-test-send-input-trailing-newline-uses-paste ()
-  "Input with only a trailing newline should still use bracketed paste."
+  "Input with only a trailing newline uses bracketed paste."
   (claude-repl-test--with-clean-state
     (let ((send-string-args nil)
           (return-called nil)
@@ -495,21 +504,24 @@ Claude Code interprets as Enter (submit), splitting multi-line input."
           (should-not return-called)
           (should timer-args))))))
 
-(ert-deftest claude-repl-test-send-input-no-newline-short-uses-direct ()
-  "Short input without newlines should still use direct mode."
+(ert-deftest claude-repl-test-send-input-no-newline-short-uses-paste ()
+  "Short input without newlines uses bracketed paste (no more direct mode)."
   (claude-repl-test--with-clean-state
     (let ((send-string-args nil)
-          (return-called nil))
+          (return-called nil)
+          (timer-args nil))
       (claude-repl-test--with-temp-buffer "*claude-panel-no-nl*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
                    (lambda () (setq return-called t)))
-                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore))
+                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+                  ((symbol-function 'run-at-time)
+                   (lambda (&rest args) (setq timer-args args))))
           (claude-repl--send-input-to-vterm (current-buffer) "no newlines here")
-          ;; No paste flag — direct mode
-          (should (null (cdr send-string-args)))
-          (should return-called))))))
+          (should (equal (cadr send-string-args) t))
+          (should-not return-called)
+          (should timer-args))))))
 
 ;;;; ---- Tests: commit-input-buffer ----
 
@@ -787,9 +799,29 @@ where the user pressed C-c C-c expecting a full reset."
 
 ;;;; ---- Tests: bracketed paste pipeline ----
 
-(ert-deftest claude-repl-test-bracketed-paste-threshold-constant ()
-  "The bracketed paste threshold should be 200."
-  (should (= claude-repl-bracketed-paste-threshold 200)))
+;;;; ---- Tests: vterm-send-return-logged ----
+
+(ert-deftest claude-repl-test-vterm-send-return-logged-delivers ()
+  "`claude-repl--vterm-send-return-logged' sends return when vterm--term is alive."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*test-return-logged*"
+      (setq-local vterm--term 'fake-term)
+      (let ((return-called nil))
+        (cl-letf (((symbol-function 'vterm-send-return)
+                   (lambda () (setq return-called t))))
+          (claude-repl--vterm-send-return-logged "test-label")
+          (should return-called))))))
+
+(ert-deftest claude-repl-test-vterm-send-return-logged-nil-term ()
+  "`claude-repl--vterm-send-return-logged' does NOT send when vterm--term is nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*test-return-logged-nil*"
+      (setq-local vterm--term nil)
+      (let ((return-called nil))
+        (cl-letf (((symbol-function 'vterm-send-return)
+                   (lambda () (setq return-called t))))
+          (claude-repl--vterm-send-return-logged "test-label")
+          (should-not return-called))))))
 
 (ert-deftest claude-repl-test-send-input-direct-calls-send-return ()
   "`claude-repl--send-input-direct' sends string then return then refreshes."
@@ -1606,13 +1638,15 @@ The dead-buffer check happens inside `run-deferred-action' at callback time."
 
 (ert-deftest claude-repl-test-bracketed-finalize ()
   "`claude-repl--bracketed-finalize' sends return and refreshes."
-  (let ((calls nil))
-    (cl-letf (((symbol-function 'vterm-send-return)
-               (lambda () (push 'return calls)))
-              ((symbol-function 'claude-repl--refresh-vterm)
-               (lambda () (push 'refresh calls))))
-      (claude-repl--bracketed-finalize)
-      (should (equal (reverse calls) '(return refresh))))))
+  (claude-repl-test--with-temp-buffer "*test-bracketed-fin*"
+    (setq-local vterm--term 'fake-term)
+    (let ((calls nil))
+      (cl-letf (((symbol-function 'vterm-send-return)
+                 (lambda () (push 'return calls)))
+                ((symbol-function 'claude-repl--refresh-vterm)
+                 (lambda () (push 'refresh calls))))
+        (claude-repl--bracketed-finalize)
+        (should (equal (reverse calls) '(return refresh)))))))
 
 ;;; bracketed-send-return: sends return + schedules finalize
 
@@ -1621,6 +1655,7 @@ The dead-buffer check happens inside `run-deferred-action' at callback time."
   (let ((return-called nil)
         (deferred-args nil))
     (claude-repl-test--with-temp-buffer "*test-bracketed-return*"
+      (setq-local vterm--term 'fake-term)
       (cl-letf (((symbol-function 'vterm-send-return)
                  (lambda () (setq return-called t)))
                 ((symbol-function 'claude-repl--vterm-deferred-action)
