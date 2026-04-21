@@ -393,6 +393,8 @@
   (setq persp-auto-resume-time 0.1)
   ;; Never ask for confirmation when killing a buffer not in the current workspace
   (setq persp-kill-foreign-buffer-behaviour 'kill)
+  ;; Only show buffers belonging to the current workspace in buffer lists (SPC ,)
+  (setq persp-set-frame-buffer-predicate t)
 
   ;; --- Tab-bar cache-busting, aka the alternating-space trick ----------
   ;;
