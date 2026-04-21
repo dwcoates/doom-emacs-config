@@ -192,13 +192,13 @@ Returns a string literal or the symbol `claude-repl-branch-diff-spec'."
                        (cdr (assq scope (eval scope-overrides))))))
     (cond
      (override
-      (claude-repl--log (+workspace-current-name) "resolve-change-spec: override branch scope=%s" scope)
+      (claude-repl--log nil "resolve-change-spec: override branch scope=%s" scope)
       override)
      ((eq default-spec :use-branch-diff-spec)
-      (claude-repl--log (+workspace-current-name) "resolve-change-spec: branch-spec branch scope=%s" scope)
+      (claude-repl--log nil "resolve-change-spec: branch-spec branch scope=%s" scope)
       'claude-repl-branch-diff-spec)
      (t
-      (claude-repl--log (+workspace-current-name) "resolve-change-spec: default branch scope=%s" scope)
+      (claude-repl--log nil "resolve-change-spec: default branch scope=%s" scope)
       default-spec))))
 
 (defun claude-repl--diff-command-form (scope-entry family doc-verb prompt-var scope-overrides)

@@ -709,4 +709,70 @@ Returns a cons (EXIT-CODE . OUTPUT)."
                      json 'Stop "~/.claude/hooks/stop-notify.sh"))))
       (test-install-bash--cleanup tmphome))))
 
+;;;; ---- maybe-install-hooks ----
+
+(ert-deftest claude-repl-test-maybe-install-runs-when-issues ()
+  "maybe-install-hooks invokes install when doctor reports issues."
+  (let ((called nil))
+    (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+              ((symbol-function 'claude-repl--doctor-issues)
+               (lambda () '((error . "missing"))))
+              ((symbol-function 'claude-repl-install-hooks)
+               (lambda (&rest _) (setq called t)))
+              (claude-repl-auto-install-hooks t))
+      (claude-repl--maybe-install-hooks)
+      (should called))))
+
+(ert-deftest claude-repl-test-maybe-install-skips-when-clean ()
+  "maybe-install-hooks no-ops when doctor reports no issues."
+  (let ((called nil))
+    (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+              ((symbol-function 'claude-repl--doctor-issues) (lambda () nil))
+              ((symbol-function 'claude-repl-install-hooks)
+               (lambda (&rest _) (setq called t)))
+              (claude-repl-auto-install-hooks t))
+      (claude-repl--maybe-install-hooks)
+      (should-not called))))
+
+(ert-deftest claude-repl-test-maybe-install-skips-in-sandbox ()
+  "maybe-install-hooks no-ops in sandbox even when issues would be reported."
+  (let ((called nil))
+    (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () t))
+              ((symbol-function 'claude-repl--doctor-issues)
+               (lambda () '((error . "missing"))))
+              ((symbol-function 'claude-repl-install-hooks)
+               (lambda (&rest _) (setq called t)))
+              (claude-repl-auto-install-hooks t))
+      (claude-repl--maybe-install-hooks)
+      (should-not called))))
+
+(ert-deftest claude-repl-test-maybe-install-skips-when-disabled ()
+  "maybe-install-hooks no-ops when the custom flag is nil."
+  (let ((called nil))
+    (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+              ((symbol-function 'claude-repl--doctor-issues)
+               (lambda () '((error . "missing"))))
+              ((symbol-function 'claude-repl-install-hooks)
+               (lambda (&rest _) (setq called t)))
+              (claude-repl-auto-install-hooks nil))
+      (claude-repl--maybe-install-hooks)
+      (should-not called))))
+
+(ert-deftest claude-repl-test-maybe-install-swallows-error ()
+  "Errors from install-hooks are caught, not propagated to startup."
+  (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+            ((symbol-function 'claude-repl--doctor-issues)
+             (lambda () '((error . "missing"))))
+            ((symbol-function 'claude-repl-install-hooks)
+             (lambda (&rest _) (error "boom")))
+            (claude-repl-auto-install-hooks t))
+    ;; Must not propagate the error — return value is irrelevant.
+    (claude-repl--maybe-install-hooks)
+    (should t)))
+
+(ert-deftest claude-repl-test-maybe-install-not-on-startup-hook ()
+  "Auto-install must NOT be deferred to `emacs-startup-hook' — later
+claude-repl sub-modules depend on hooks being registered at load time."
+  (should-not (memq 'claude-repl--maybe-install-hooks emacs-startup-hook)))
+
 ;;; test-install.el ends here

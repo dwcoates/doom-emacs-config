@@ -185,6 +185,35 @@ foreign entries untouched) and deletes the managed scripts from
   (interactive)
   (claude-repl--run-install-action "reinstall"))
 
+;;;; ---- Auto-install on load ---------------------------------------------
+
+(defcustom claude-repl-auto-install-hooks t
+  "When non-nil, install managed Claude Code hooks on Emacs startup if missing.
+The install script is idempotent, but unconditional runs spam
+`~/.claude/settings.json.bak.<ts>' backups on every start — so the
+auto-install short-circuits when `claude-repl--doctor-issues' reports no
+problems.  No-op inside the sandbox."
+  :type 'boolean
+  :group 'claude-repl)
+
+(defun claude-repl--maybe-install-hooks ()
+  "Run `claude-repl-install-hooks' only when registration or scripts are off.
+Guarded by `claude-repl--doctor-issues' so a healthy load is a pure
+JSON-parse (no bash, no backup file).  No-op in sandbox or when
+`claude-repl-auto-install-hooks' is nil.  Called inline from this file's
+load so hooks are registered before later claude-repl sub-modules
+(sentinel, notifications, ...) start relying on them."
+  (when (and claude-repl-auto-install-hooks
+             (not (claude-repl--in-sandbox-p))
+             (claude-repl--doctor-issues))
+    (condition-case err
+        (claude-repl-install-hooks)
+      (error
+       (message "[claude-repl] auto-install failed: %S" err)))))
+
+;; The actual call happens at the bottom of this file, after
+;; `claude-repl--doctor-issues' and its helpers are defined.
+
 ;;;; ---- Doctor support ---------------------------------------------------
 
 (defconst claude-repl--hook-severity
@@ -287,6 +316,12 @@ returned and the per-hook checks are skipped."
         (claude-repl--check-registration (cdr (assq 'hooks json)) issues)
         (claude-repl--check-script-files issues))
       (nreverse (car issues)))))
+
+;; Run inline at load time so hooks are registered before later
+;; claude-repl sub-modules (sentinel, notifications, ...) start relying
+;; on them.  Guarded to no-op on healthy installs — see the function's
+;; docstring for details.
+(claude-repl--maybe-install-hooks)
 
 (provide 'claude-repl-install)
 
