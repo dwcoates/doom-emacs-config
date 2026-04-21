@@ -683,6 +683,84 @@ with `--resume <stale-sid>' — the exact failure the purge closes."
         (ignore-errors (claude-repl-nuke-all-workspaces))
         (should (string-match-p "ALL 2" seen-prompt))))))
 
+;;;; ---- Tests: workspace snapshot save/load ----
+
+(ert-deftest claude-repl-cmd-test-save-workspace-snapshot/writes-entries ()
+  "save-workspace-snapshot writes a (NAME . PROJECT-DIR) alist to the file."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-")))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+            (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+            (claude-repl-save-workspace-snapshot)
+            (let ((data (claude-repl--read-sexp-file snapshot-file)))
+              (should (= 2 (length data)))
+              (should (equal (cdr (assoc "ws1" data)) "/tmp/ws1"))
+              (should (equal (cdr (assoc "ws2" data)) "/tmp/ws2"))))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-save-workspace-snapshot/skips-missing-project-dir ()
+  "save-workspace-snapshot omits workspaces with no :project-dir."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-")))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+            (claude-repl--ws-put "ws2" :vterm-buffer nil)
+            (claude-repl-save-workspace-snapshot)
+            (let ((data (claude-repl--read-sexp-file snapshot-file)))
+              (should (= 1 (length data)))
+              (should (equal (cdr (assoc "ws1" data)) "/tmp/ws1"))
+              (should-not (assoc "ws2" data))))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/errors-when-file-missing ()
+  "load-workspace-snapshot signals user-error when the snapshot file is absent."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-workspace-snapshot-file "/nonexistent/claude-snap.el"))
+      (should-error (claude-repl-load-workspace-snapshot) :type 'user-error))))
+
+(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/calls-switch-for-each-entry ()
+  "load-workspace-snapshot invokes +dwc/switch-to-project once per existing entry."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (dir-a (make-temp-file "claude-proj-a-" t))
+          (dir-b (make-temp-file "claude-proj-b-" t))
+          (switched nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("ws-a" . ,dir-a)
+                                            ("ws-b" . ,dir-b)))
+            (cl-letf (((symbol-function '+dwc/switch-to-project)
+                       (lambda (project) (push project switched))))
+              (claude-repl-load-workspace-snapshot)
+              (should (= 2 (length switched)))
+              (should (member dir-a switched))
+              (should (member dir-b switched))))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)))))
+
+(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/skips-missing-dirs ()
+  "load-workspace-snapshot does not switch to entries whose directory is gone."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (real-dir (make-temp-file "claude-proj-real-" t))
+          (switched nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("ws-real" . ,real-dir)
+                                            ("ws-gone" . "/nonexistent/path")))
+            (cl-letf (((symbol-function '+dwc/switch-to-project)
+                       (lambda (project) (push project switched))))
+              (claude-repl-load-workspace-snapshot)
+              (should (equal switched (list real-dir)))))
+        (delete-file snapshot-file)
+        (delete-directory real-dir t)))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here

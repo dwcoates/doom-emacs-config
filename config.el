@@ -788,11 +788,14 @@ If found, the class name is returned, otherwise STR is returned"
   (advice-add 'lsp-workspace-root :around #'+dwc/lsp-workspace-root)
   
   ;; Custom project switching behavior
-  (defun +dwc/switch-to-project ()
-    "Switch to project and open most recent file from that project."
+  (defun +dwc/switch-to-project (&optional project)
+    "Switch to project and open most recent file from that project.
+When PROJECT (a project root path) is non-nil, use it directly;
+otherwise prompt via `projectile-completing-read'."
     (interactive)
-    (let ((project (projectile-completing-read "Switch to project: "
-                                               (projectile-relevant-known-projects))))
+    (let ((project (or project
+                       (projectile-completing-read "Switch to project: "
+                                                   (projectile-relevant-known-projects)))))
       (projectile-switch-project-by-name project)
       ;; Try to open the most recent file from this project
       (let ((recent-file (+dwc/get-most-recent-file-in-project project)))

@@ -407,3 +407,50 @@ Without region: copies file:line."
   (let ((ref (claude-repl--format-file-ref)))
     (kill-new ref)
     (message "Copied: %s" ref)))
+
+;;;; Workspace snapshot save/load
+
+(defcustom claude-repl-workspace-snapshot-file
+  (expand-file-name ".workspace-snapshot.el"
+                    (file-name-directory (or load-file-name
+                                              buffer-file-name
+                                              default-directory)))
+  "Path to the hidden file where workspace snapshots are persisted.
+Defaults to `.workspace-snapshot.el' in the claude-repl module directory."
+  :type 'file
+  :group 'claude-repl)
+
+(defun claude-repl-save-workspace-snapshot ()
+  "Save the current set of claude-repl workspaces to a hidden file.
+Writes a list of (NAME . PROJECT-DIR) pairs from
+`claude-repl--workspaces' to `claude-repl-workspace-snapshot-file'.
+Workspaces without a registered :project-dir are skipped."
+  (interactive)
+  (let ((snapshot nil))
+    (maphash (lambda (ws _plist)
+               (when-let ((dir (claude-repl--ws-get ws :project-dir)))
+                 (push (cons ws dir) snapshot)))
+             claude-repl--workspaces)
+    (claude-repl--write-sexp-file claude-repl-workspace-snapshot-file snapshot)
+    (message "Saved %d workspace(s) to %s"
+             (length snapshot) claude-repl-workspace-snapshot-file)))
+
+(defun claude-repl-load-workspace-snapshot ()
+  "Load workspaces from `claude-repl-workspace-snapshot-file'.
+For each saved (NAME . PROJECT-DIR) entry, calls `+dwc/switch-to-project'
+with the directory.  Entries whose directory no longer exists are skipped."
+  (interactive)
+  (let ((snapshot (claude-repl--read-sexp-file-if-exists
+                   claude-repl-workspace-snapshot-file)))
+    (unless snapshot
+      (user-error "No workspace snapshot at %s" claude-repl-workspace-snapshot-file))
+    (let ((loaded 0)
+          (skipped 0))
+      (dolist (entry snapshot)
+        (let ((dir (cdr entry)))
+          (if (and dir (file-directory-p dir))
+              (progn
+                (+dwc/switch-to-project dir)
+                (cl-incf loaded))
+            (cl-incf skipped))))
+      (message "Loaded %d workspace(s), skipped %d" loaded skipped))))
