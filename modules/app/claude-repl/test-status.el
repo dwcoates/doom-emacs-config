@@ -677,6 +677,24 @@ to be reverted to should-error once the leaking writer is found)."
     (should (string-match-p "IMG" result))
     (should (string-match-p "ws1" result))))
 
+(ert-deftest claude-repl-test-render-tab-img-str-trailing-space-unfaced ()
+  "render-tab should place a single un-faced space between img-str and the name segment."
+  (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
+         (result (claude-repl--render-tab "ws1" spec "1" '+workspace-tab-face "IMG"))
+         (img-pos (string-match "IMG" result))
+         (gap-pos (+ img-pos 3))
+         (name-pos (string-match "ws1" result)))
+    (should img-pos)
+    (should name-pos)
+    ;; Exactly one un-faced space between IMG and the name-face padding's
+    ;; leading space (which is part of " ws1 ").
+    (should (equal (substring result gap-pos (1+ gap-pos)) " "))
+    (should-not (get-text-property gap-pos 'face result))
+    ;; The next character is the name-face's leading padding space.
+    (should (equal (substring result (1+ gap-pos) (+ gap-pos 2)) " "))
+    (should (eq (get-text-property (1+ gap-pos) 'face result)
+                '+workspace-tab-face))))
+
 (ert-deftest claude-repl-test-render-tab-empty-name ()
   "render-tab should handle an empty name string."
   (let* ((spec '(:bg unspecified :fg "black" :bracket-fg "blue" :weight bold))

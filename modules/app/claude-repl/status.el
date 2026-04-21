@@ -439,7 +439,9 @@ and optionally :face-override."
 SPEC is a plist with keys :bg :fg :bracket-fg :weight (see
 `claude-repl--tab-palette' docstring).  NAME-FACE is applied to the
 workspace-name portion.  LABEL is the bracket content (number or
-emoji).  IMG-STR, when non-nil, is inserted between bracket and name."
+emoji).  IMG-STR, when non-nil, is inserted between bracket and name
+with a single un-faced space on each side so the image does not butt
+up against the name's background."
   (let* ((bg         (or (plist-get spec :bg)         'unspecified))
          (fg         (or (plist-get spec :fg)         'unspecified))
          (bracket-bg (or (plist-get spec :bracket-bg) bg))
@@ -449,7 +451,7 @@ emoji).  IMG-STR, when non-nil, is inserted between bracket and name."
          (bracket-face   `(:background ,bracket-bg  :foreground ,bracket-fg :weight ,weight)))
     (concat (propertize " " 'face separator-face)
             (propertize (format claude-repl-tab-bracket-format label) 'face bracket-face)
-            (when img-str (concat " " img-str))
+            (when img-str (concat " " img-str " "))
             (propertize (format claude-repl-tab-name-padding name) 'face name-face))))
 
 (defun claude-repl--tab-label (state index)
