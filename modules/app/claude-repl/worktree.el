@@ -264,7 +264,9 @@ Sets :pending-show-panels so panels open after switching to WS."
 Registers the project with projectile, creates a Doom workspace, applies
 optional PREEMPTIVE-PROMPT, PRIORITY, and FORK-SESSION-ID settings, starts
 the Claude session (with FORCE-BARE-METAL controlling the environment),
-and invokes CALLBACK with (PATH DIRNAME) when done."
+and invokes CALLBACK with (PATH DIRNAME) when done.
+Always opens `magit-status' in the new workspace and removes the Doom
+dashboard so that magit is the sole main buffer."
   (claude-repl--log dirname "finalize-worktree-workspace: path=%s dirname=%s priority=%s fork-session-id=%s force-bare-metal=%s"
                     path dirname priority fork-session-id force-bare-metal)
   (claude-repl--register-projectile-project path dirname)
@@ -273,6 +275,8 @@ and invokes CALLBACK with (PATH DIRNAME) when done."
          (ws dirname))
     (claude-repl--log ws "worktree creating workspace %s" ws)
     (+workspace-new ws)
+    (magit-status path)
+    (claude-repl--remove-doom-dashboard)
     (claude-repl--open-initial-buffers ws path)
     (claude-repl--enqueue-preemptive-prompt ws preemptive-prompt)
     (claude-repl--apply-workspace-properties ws
@@ -398,13 +402,12 @@ buffer list."
       (ignore-errors (persp-remove-buffer dash)))))
 
 (defun claude-repl--worktree-creation-switch-callback (path dirname)
-  "Switch to the newly created worktree workspace and open magit.
-PATH is the worktree directory; DIRNAME is the workspace name."
+  "Switch to the newly created worktree workspace.
+PATH is the worktree directory; DIRNAME is the workspace name.
+Magit-status is already opened by `finalize-worktree-workspace'."
   (claude-repl--log dirname "worktree-creation-switch-callback: path=%s dirname=%s fboundp(+workspace-switch-to)=%s current-ws=%s target=%s"
                     path dirname (fboundp '+workspace-switch-to) (+workspace-current-name) dirname)
-  (claude-repl--switch-to-workspace dirname)
-  (magit-status path)
-  (claude-repl--remove-doom-dashboard))
+  (claude-repl--switch-to-workspace dirname))
 
 (defun claude-repl-create-worktree-workspace (arg)
   "Create a new git worktree and switch to it as a project workspace.

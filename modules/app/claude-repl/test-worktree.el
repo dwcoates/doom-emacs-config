@@ -1714,21 +1714,15 @@ Covers the full call the interactive `SPC TAB n' path builds up."
           (when had-binding
             (setq +doom-dashboard-buffer-name "*doom*")))))))
 
-(ert-deftest claude-repl-test-worktree-callback-removes-dashboard ()
-  "worktree-creation-switch-callback calls remove-doom-dashboard after magit."
-  (let ((call-order nil)
-        (+doom-dashboard-buffer-name "*doom*"))
-    (claude-repl-test--with-temp-buffer "*doom*"
-      (cl-letf (((symbol-function 'claude-repl--switch-to-workspace)
-                 (lambda (_ws) (push 'switch call-order)))
-                ((symbol-function 'magit-status)
-                 (lambda (_path) (push 'magit call-order)))
-                ((symbol-function 'persp-remove-buffer)
-                 (lambda (_buf) (push 'remove-dash call-order)))
-                ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-        (claude-repl--worktree-creation-switch-callback "/tmp/fake" "test-ws")
-        ;; call-order is pushed, so reversed
-        (should (equal (reverse call-order) '(switch magit remove-dash)))))))
+(ert-deftest claude-repl-test-worktree-callback-only-switches ()
+  "worktree-creation-switch-callback only switches workspace.
+Magit-status and dashboard removal are handled by finalize-worktree-workspace."
+  (let ((call-order nil))
+    (cl-letf (((symbol-function 'claude-repl--switch-to-workspace)
+               (lambda (_ws) (push 'switch call-order)))
+              ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+      (claude-repl--worktree-creation-switch-callback "/tmp/fake" "test-ws")
+      (should (equal (reverse call-order) '(switch))))))
 
 (ert-deftest claude-repl-test-new-workspace-removes-dashboard ()
   "new-workspace calls remove-doom-dashboard after magit."
@@ -1749,5 +1743,72 @@ Covers the full call the interactive `SPC TAB n' path builds up."
                    (lambda (_buf) (push 'remove-dash call-order))))
           (claude-repl--new-workspace)
           (should (equal (reverse call-order) '(ws-new init-env magit remove-dash))))))))
+
+;;;; ---- Tests: finalize-worktree-workspace opens magit ----
+
+(ert-deftest claude-repl-test-finalize-opens-magit-and-removes-dashboard ()
+  "finalize-worktree-workspace opens magit-status and removes the doom dashboard."
+  (let ((call-order nil)
+        (+doom-dashboard-buffer-name "*doom*"))
+    (claude-repl-test--with-temp-buffer "*doom*"
+      (claude-repl-test--with-clean-state
+        (cl-letf (((symbol-function 'claude-repl--register-projectile-project) #'ignore)
+                  ((symbol-function 'claude-repl--path-canonical) #'identity)
+                  ((symbol-function '+workspace-new)
+                   (lambda (&rest _) (push 'ws-new call-order)))
+                  ((symbol-function 'magit-status)
+                   (lambda (_path) (push 'magit call-order)))
+                  ((symbol-function 'persp-remove-buffer)
+                   (lambda (_buf) (push 'remove-dash call-order)))
+                  ((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--open-initial-buffers) #'ignore)
+                  ((symbol-function 'claude-repl--enqueue-preemptive-prompt) #'ignore)
+                  ((symbol-function 'claude-repl--apply-workspace-properties) #'ignore)
+                  ((symbol-function 'claude-repl--setup-worktree-session) #'ignore))
+          (claude-repl--finalize-worktree-workspace
+           "/tmp/fake" "test-ws" nil nil nil nil nil)
+          (should (equal (reverse call-order) '(ws-new magit remove-dash))))))))
+
+(ert-deftest claude-repl-test-finalize-opens-magit-with-preemptive-prompt ()
+  "finalize-worktree-workspace opens magit-status even when a preemptive prompt is set."
+  (let ((call-order nil)
+        (+doom-dashboard-buffer-name "*doom*"))
+    (claude-repl-test--with-temp-buffer "*doom*"
+      (claude-repl-test--with-clean-state
+        (cl-letf (((symbol-function 'claude-repl--register-projectile-project) #'ignore)
+                  ((symbol-function 'claude-repl--path-canonical) #'identity)
+                  ((symbol-function '+workspace-new)
+                   (lambda (&rest _) (push 'ws-new call-order)))
+                  ((symbol-function 'magit-status)
+                   (lambda (_path) (push 'magit call-order)))
+                  ((symbol-function 'persp-remove-buffer)
+                   (lambda (_buf) (push 'remove-dash call-order)))
+                  ((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--open-initial-buffers) #'ignore)
+                  ((symbol-function 'claude-repl--enqueue-preemptive-prompt) #'ignore)
+                  ((symbol-function 'claude-repl--apply-workspace-properties) #'ignore)
+                  ((symbol-function 'claude-repl--setup-worktree-session) #'ignore))
+          (claude-repl--finalize-worktree-workspace
+           "/tmp/fake" "test-ws" "do something" nil nil nil nil)
+          (should (equal (reverse call-order) '(ws-new magit remove-dash))))))))
+
+(ert-deftest claude-repl-test-finalize-passes-path-to-magit ()
+  "finalize-worktree-workspace passes the worktree path to magit-status."
+  (let ((magit-path nil))
+    (claude-repl-test--with-clean-state
+      (cl-letf (((symbol-function 'claude-repl--register-projectile-project) #'ignore)
+                ((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function '+workspace-new) #'ignore)
+                ((symbol-function 'magit-status)
+                 (lambda (path) (setq magit-path path)))
+                ((symbol-function 'claude-repl--remove-doom-dashboard) #'ignore)
+                ((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--open-initial-buffers) #'ignore)
+                ((symbol-function 'claude-repl--enqueue-preemptive-prompt) #'ignore)
+                ((symbol-function 'claude-repl--apply-workspace-properties) #'ignore)
+                ((symbol-function 'claude-repl--setup-worktree-session) #'ignore))
+        (claude-repl--finalize-worktree-workspace
+         "/tmp/my-worktree" "test-ws" nil nil nil nil nil)
+        (should (equal magit-path "/tmp/my-worktree"))))))
 
 ;;; test-worktree.el ends here
