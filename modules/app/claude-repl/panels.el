@@ -119,6 +119,7 @@ are not split from a bottom popup (e.g. a regular vterm)."
       (set-window-buffer input-win input-buf)
       (claude-repl--configure-vterm-window vterm-win)
       (set-window-dedicated-p input-win t)
+      (set-window-parameter input-win 'window-size-fixed 'height)
       (set-window-parameter input-win 'no-delete-other-windows t)))
   (claude-repl--update-all-workspace-states))
 

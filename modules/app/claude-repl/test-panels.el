@@ -823,6 +823,27 @@ so that commands like magit-status cannot destroy panel layout."
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
         (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
 
+(ert-deftest claude-repl-test-panels-show-panels-locks-input-height ()
+  "show-panels sets `window-size-fixed' to height on the input window
+so that window management operations cannot shrink it."
+  (claude-repl-test--with-clean-state
+    (let ((vterm-buf (get-buffer-create "*show-hfix-vterm*"))
+          (input-buf (get-buffer-create "*show-hfix-input*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
+                    ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil)))
+            (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (delete-other-windows)
+            (claude-repl--show-panels)
+            (let ((input-win (get-buffer-window input-buf)))
+              (should (eq (window-parameter input-win 'window-size-fixed) 'height))))
+        ;; Clean up
+        (delete-other-windows)
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
 ;;;; ---- Tests: focus-input-panel edge cases ----
 
 (ert-deftest claude-repl-test-panels-focus-input-panel-nil-buffer ()
