@@ -819,6 +819,29 @@ where the user pressed C-c C-c expecting a full reset."
           (should (equal (car send-args) "big input"))
           (should (equal (cadr send-args) t)))))))
 
+(ert-deftest claude-repl-test-send-input-direct-returns-zero ()
+  "`claude-repl--send-input-direct' returns 0 (no pending timers)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-direct-settle*"
+      (cl-letf (((symbol-function 'vterm-send-string) #'ignore)
+                ((symbol-function 'vterm-send-return) #'ignore)
+                ((symbol-function 'claude-repl--refresh-vterm) #'ignore))
+        (should (= (claude-repl--send-input-direct (current-buffer) "x") 0))))))
+
+(ert-deftest claude-repl-test-send-input-bracketed-returns-settle-time ()
+  "`claude-repl--send-input-bracketed' returns paste-delay + finalize-delay."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-bracketed-settle*"
+      (cl-letf (((symbol-function 'vterm-send-string) #'ignore)
+                ((symbol-function 'run-at-time) (lambda (&rest _) nil)))
+        (should (= (claude-repl--send-input-bracketed (current-buffer) "x")
+                   (+ claude-repl-paste-delay claude-repl-bracketed-finalize-delay)))))))
+
+(ert-deftest claude-repl-test-send-settle-time ()
+  "`claude-repl--send-settle-time' returns paste-delay + finalize-delay."
+  (should (= (claude-repl--send-settle-time)
+             (+ claude-repl-paste-delay claude-repl-bracketed-finalize-delay))))
+
 ;;;; ---- Tests: slash mode ----
 
 (ert-deftest claude-repl-test-slash-try-send-and-push-success ()

@@ -364,12 +364,14 @@ When FORCE-METAPROMPT is non-nil, always prepend (ignoring the counter)."
 ;;; Send pipeline
 
 (defun claude-repl--send-input-direct (vterm-buf input)
-  "Send small INPUT string directly to VTERM-BUF and refresh."
+  "Send small INPUT string directly to VTERM-BUF and refresh.
+Returns 0 — the send is fully committed with no pending timers."
   (claude-repl--log-verbose (+workspace-current-name) "send-input-direct: len=%d" (length input))
   (with-current-buffer vterm-buf
     (vterm-send-string input)
     (vterm-send-return)
-    (claude-repl--refresh-vterm)))
+    (claude-repl--refresh-vterm))
+  0)
 
 (defun claude-repl--run-deferred-action (buf action)
   "Execute ACTION in BUF if BUF is still alive, with `inhibit-quit' bound to t.
@@ -409,13 +411,15 @@ Used as the first deferred action in the bracketed paste pipeline."
 
 (defun claude-repl--send-input-bracketed (vterm-buf input)
   "Send large INPUT string to VTERM-BUF using bracketed paste mode.
-Uses `claude-repl-paste-delay' to wait before sending Return."
+Uses `claude-repl-paste-delay' to wait before sending Return.
+Returns the settle time — seconds until all deferred actions complete."
   (claude-repl--log-verbose (+workspace-current-name) "send-input-bracketed: len=%d" (length input))
   (with-current-buffer vterm-buf
     (vterm-send-string input t)
     (claude-repl--vterm-deferred-action
      vterm-buf claude-repl-paste-delay
-     (apply-partially #'claude-repl--bracketed-send-return vterm-buf))))
+     (apply-partially #'claude-repl--bracketed-send-return vterm-buf)))
+  (+ claude-repl-paste-delay claude-repl-bracketed-finalize-delay))
 
 (defcustom claude-repl-bracketed-paste-threshold 200
   "Input length above which bracketed paste mode is used.
@@ -429,7 +433,9 @@ to avoid terminal truncation."
 Uses paste mode for large inputs to avoid truncation, and for any
 input containing newlines — in direct mode `vterm-send-string'
 sends \\n as a literal newline byte which Claude Code interprets as
-Enter (submit), splitting multi-line input into separate prompts."
+Enter (submit), splitting multi-line input into separate prompts.
+Returns settle time — seconds until the send is fully committed
+\(0 for direct mode, paste-delay + finalize-delay for bracketed)."
   (let ((use-paste (or (> (length input) claude-repl-bracketed-paste-threshold)
                        (string-match-p "\n" input))))
     (claude-repl--log-verbose (+workspace-current-name) "send-input-to-vterm len=%d mode=%s"
@@ -458,10 +464,19 @@ buffer drifts between perspectives."
     (with-current-buffer vterm-buf
       (setq-local claude-repl--owning-workspace ws))))
 
+(defun claude-repl--send-settle-time ()
+  "Return the maximum settle time for a single send.
+This is the worst-case delay before all deferred vterm actions
+complete — i.e. `claude-repl-paste-delay' + `claude-repl-bracketed-finalize-delay'.
+Callers that schedule multiple sends back-to-back should space them
+by at least this much."
+  (+ claude-repl-paste-delay claude-repl-bracketed-finalize-delay))
+
 (defun claude-repl--do-send (ws input raw)
   "Core send: dispatch INPUT to WS's vterm.
 Increments the prefix counter, pins the owning workspace, sends INPUT,
 and runs posthooks with RAW (the undecorated text).
+Returns settle time from the vterm send (see `claude-repl--send-input-to-vterm').
 
 Does NOT write `:claude-state :thinking' — that transition is the
 exclusive province of the `prompt_submit' Claude Code hook (routed
@@ -478,10 +493,11 @@ permitted action — `:thinking' is the correct state."
     (claude-repl--log ws "do-send ws=%s len=%d" ws (length input))
     (claude-repl--increment-prefix-counter ws)
     (claude-repl--pin-owning-workspace vterm-buf ws)
-    (claude-repl--send-input-to-vterm vterm-buf input)
-    (when (eq (claude-repl--ws-claude-state ws) :permission)
-      (claude-repl--mark-ws-thinking ws))
-    (claude-repl--run-send-posthooks ws raw)))
+    (let ((settle (claude-repl--send-input-to-vterm vterm-buf input)))
+      (when (eq (claude-repl--ws-claude-state ws) :permission)
+        (claude-repl--mark-ws-thinking ws))
+      (claude-repl--run-send-posthooks ws raw)
+      settle)))
 
 (defun claude-repl--commit-input-buffer (ws input-buf raw &optional clear-p)
   "Record RAW input in history and optionally clear INPUT-BUF.
@@ -507,7 +523,9 @@ When CLEAR-P is non-nil, erase the input buffer after saving history."
 When PROMPT is nil, reads from the input buffer and clears it after sending.
 When WS is nil, uses the current workspace.
 When FORCE-METAPROMPT is non-nil, always prepend the metaprompt prefix.
-Handles input preparation, sending, history, and persistence."
+Handles input preparation, sending, history, and persistence.
+Returns settle time from the send (see `claude-repl--do-send'), or nil
+if nothing was sent."
   (interactive)
   (let ((ws (or ws (+workspace-current-name))))
     (unless ws (error "claude-repl--send: no active workspace"))
@@ -523,9 +541,10 @@ Handles input preparation, sending, history, and persistence."
       (when (and vterm-buf (not (buffer-live-p vterm-buf)))
         (claude-repl--log ws "send: early return -- vterm-buf is dead for ws=%s" ws))
       (when (and raw vterm-buf (buffer-live-p vterm-buf))
-        (let ((input (claude-repl--prepare-input ws raw force-metaprompt)))
-          (claude-repl--do-send ws input raw)
-          (claude-repl--commit-input-buffer ws input-buf raw from-buf))))))
+        (let* ((input  (claude-repl--prepare-input ws raw force-metaprompt))
+               (settle (claude-repl--do-send ws input raw)))
+          (claude-repl--commit-input-buffer ws input-buf raw from-buf)
+          settle)))))
 
 (defun claude-repl-send-and-hide ()
   "Send input to Claude and hide both panels."

@@ -445,6 +445,7 @@ against stop events arriving after kill."
   "deliver-pending-prompts sends first prompt immediately, defers rest."
   (let ((sent nil)
         (timer-calls nil)
+        (settle (claude-repl--send-settle-time))
         (fake-buf (generate-new-buffer " *test-deliver*")))
     (unwind-protect
         (cl-letf (((symbol-function 'claude-repl--send)
@@ -455,9 +456,9 @@ against stop events arriving after kill."
           (claude-repl--deliver-pending-prompts fake-buf '("a" "b") "ws1")
           ;; First prompt sent immediately
           (should (equal sent '("a")))
-          ;; Second prompt scheduled via timer
+          ;; Second prompt scheduled via timer at settle time
           (should (= (length timer-calls) 1))
-          (should (= (caar timer-calls) claude-repl-inter-prompt-delay)))
+          (should (= (caar timer-calls) settle)))
       (kill-buffer fake-buf))))
 
 (ert-deftest claude-repl-test-deliver-pending-prompts-single-no-timer ()
@@ -477,9 +478,10 @@ against stop events arriving after kill."
       (kill-buffer fake-buf))))
 
 (ert-deftest claude-repl-test-deliver-pending-prompts-three-staggered ()
-  "deliver-pending-prompts with three prompts staggers delays cumulatively."
+  "deliver-pending-prompts with three prompts staggers by send-settle-time."
   (let ((sent nil)
         (timer-calls nil)
+        (settle (claude-repl--send-settle-time))
         (fake-buf (generate-new-buffer " *test-deliver-three*")))
     (unwind-protect
         (cl-letf (((symbol-function 'claude-repl--send)
@@ -490,11 +492,11 @@ against stop events arriving after kill."
           (claude-repl--deliver-pending-prompts fake-buf '("a" "b" "c") "ws1")
           ;; First prompt sent immediately
           (should (equal sent '("a")))
-          ;; Two timers scheduled with cumulative delays
+          ;; Two timers scheduled with cumulative settle-time delays
           (should (= (length timer-calls) 2))
           (let ((delays (sort (mapcar #'car timer-calls) #'<)))
-            (should (= (nth 0 delays) claude-repl-inter-prompt-delay))
-            (should (= (nth 1 delays) (* 2 claude-repl-inter-prompt-delay)))))
+            (should (= (nth 0 delays) settle))
+            (should (= (nth 1 delays) (* 2 settle)))))
       (kill-buffer fake-buf))))
 
 (ert-deftest claude-repl-test-deliver-pending-prompts-dead-buf ()
