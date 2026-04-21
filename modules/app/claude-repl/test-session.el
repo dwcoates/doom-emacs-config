@@ -396,6 +396,105 @@ against stop events arriving after kill."
   (claude-repl-test--with-clean-state
     (should-error (claude-repl--handle-claude-finished "not-a-ws"))))
 
+;;;; ---- Tests: refresh-magit-status ----
+
+(ert-deftest claude-repl-test-refresh-magit-status-refreshes-matching-buffer ()
+  "refresh-magit-status calls magit-refresh on a magit-status buffer whose
+default-directory matches the workspace's :project-dir."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "claude-magit-" t))
+          (buf (generate-new-buffer " *test-magit-match*"))
+          (refreshed 0))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :project-dir tmpdir)
+            (with-current-buffer buf
+              (setq-local major-mode 'magit-status-mode)
+              (setq-local default-directory (file-name-as-directory tmpdir)))
+            (cl-letf (((symbol-function 'magit-refresh)
+                       (lambda (&rest _) (cl-incf refreshed))))
+              (claude-repl--refresh-magit-status "ws1")
+              (should (= refreshed 1))))
+        (kill-buffer buf)
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-refresh-magit-status-skips-non-matching-dir ()
+  "refresh-magit-status does not refresh a magit-status buffer whose
+default-directory points at a different repo."
+  (claude-repl-test--with-clean-state
+    (let ((ws-dir (make-temp-file "claude-magit-ws-" t))
+          (other-dir (make-temp-file "claude-magit-other-" t))
+          (buf (generate-new-buffer " *test-magit-other*"))
+          (refreshed 0))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :project-dir ws-dir)
+            (with-current-buffer buf
+              (setq-local major-mode 'magit-status-mode)
+              (setq-local default-directory (file-name-as-directory other-dir)))
+            (cl-letf (((symbol-function 'magit-refresh)
+                       (lambda (&rest _) (cl-incf refreshed))))
+              (claude-repl--refresh-magit-status "ws1")
+              (should (= refreshed 0))))
+        (kill-buffer buf)
+        (delete-directory ws-dir t)
+        (delete-directory other-dir t)))))
+
+(ert-deftest claude-repl-test-refresh-magit-status-skips-non-magit-buffer ()
+  "refresh-magit-status does not refresh a non-magit buffer even when
+default-directory matches the workspace."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "claude-magit-" t))
+          (buf (generate-new-buffer " *test-non-magit*"))
+          (refreshed 0))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :project-dir tmpdir)
+            (with-current-buffer buf
+              (setq-local major-mode 'fundamental-mode)
+              (setq-local default-directory (file-name-as-directory tmpdir)))
+            (cl-letf (((symbol-function 'magit-refresh)
+                       (lambda (&rest _) (cl-incf refreshed))))
+              (claude-repl--refresh-magit-status "ws1")
+              (should (= refreshed 0))))
+        (kill-buffer buf)
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-refresh-magit-status-no-buffer-is-noop ()
+  "refresh-magit-status is a no-op when no magit-status buffer exists for WS."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "claude-magit-" t))
+          (refreshed 0))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :project-dir tmpdir)
+            (cl-letf (((symbol-function 'magit-refresh)
+                       (lambda (&rest _) (cl-incf refreshed))))
+              (claude-repl--refresh-magit-status "ws1")
+              (should (= refreshed 0))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-refresh-magit-status-no-project-dir-is-noop ()
+  "refresh-magit-status is a no-op when WS has no :project-dir."
+  (claude-repl-test--with-clean-state
+    (let ((refreshed 0))
+      (cl-letf (((symbol-function 'magit-refresh)
+                 (lambda (&rest _) (cl-incf refreshed))))
+        (claude-repl--refresh-magit-status "ws1")
+        (should (= refreshed 0))))))
+
+(ert-deftest claude-repl-test-handle-claude-finished-refreshes-magit ()
+  "handle-claude-finished calls refresh-magit-status as part of the done policy."
+  (claude-repl-test--with-clean-state
+    (let ((refresh-ws nil))
+      (claude-repl--ws-put "ws1" :vterm-buffer nil)
+      (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
+                ((symbol-function 'claude-repl--refresh-magit-status)
+                 (lambda (ws) (setq refresh-ws ws))))
+        (claude-repl--handle-claude-finished "ws1")
+        (should (equal refresh-ws "ws1"))))))
+
 ;;;; ---- Tests: maybe-notify-finished edge cases ----
 
 (ert-deftest claude-repl-test-maybe-notify-first-call-no-last-time ()

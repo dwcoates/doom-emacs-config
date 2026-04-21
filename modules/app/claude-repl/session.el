@@ -414,13 +414,28 @@ bit on `:repl-state':
           (claude-repl--fix-vterm-scroll vterm-buf))
       (claude-repl--log ws "refresh-vterm-after-finish: buffer is dead buf=%s" (buffer-name vterm-buf)))))
 
+(defun claude-repl--refresh-magit-status (ws)
+  "Refresh any magit-status buffer whose repo root matches WS's :project-dir.
+No-op when WS has no :project-dir or no matching buffer exists."
+  (when-let* ((root (claude-repl--ws-get ws :project-dir))
+              (canonical (claude-repl--path-canonical root)))
+    (dolist (buf (buffer-list))
+      (when (and (buffer-live-p buf)
+                 (with-current-buffer buf
+                   (and (eq major-mode 'magit-status-mode)
+                        (equal (claude-repl--path-canonical default-directory)
+                               canonical))))
+        (claude-repl--log ws "refresh-magit-status: refreshing buf=%s" (buffer-name buf))
+        (with-current-buffer buf (magit-refresh))))))
+
 (defun claude-repl--handle-claude-finished (ws)
   "Handle Claude finishing in WS.
 Errors hard if WS is not registered in `claude-repl--workspaces' — a
 stop event arriving for an unknown workspace indicates a race (e.g.
 sentinel firing after kill cleared state) that we surface rather than
 silently absorb.  Otherwise: marks claude-state as :done, refreshes the
-vterm display if the buffer is still live, notifies the user if the
+vterm display if the buffer is still live, refreshes any open
+magit-status buffer for the workspace's repo, notifies the user if the
 frame is unfocused, and emits a finished-in-workspace message when the
 current workspace is different."
   (unless (gethash ws claude-repl--workspaces)
@@ -430,6 +445,7 @@ current workspace is different."
     (claude-repl--mark-claude-done ws)
     (when vterm-buf
       (claude-repl--refresh-vterm-after-finish vterm-buf))
+    (claude-repl--refresh-magit-status ws)
     (claude-repl--maybe-notify-finished ws)
     (unless (claude-repl--current-ws-p ws)
       (message "Claude finished in workspace: %s" ws))))
