@@ -416,13 +416,14 @@ Reports comprehensive diagnostics."
 ;; SPC j -- Tell Claude to do a predefined thing
 (map! :leader
       (:prefix ("j" . "claude")
-       :desc "Explain line/region/hunk"      "e" #'claude-repl-explain
+       :desc "Explain line/region/hunk (prompt)" "e" #'claude-repl-explain-prompt
+       :desc "Explain line/region/hunk (canned)" "E" #'claude-repl-explain
        :desc "Update GitHub PR description"  "r" #'claude-repl-update-pr
        :desc "Nuke workspace"           "x" #'claude-repl-nuke-workspace
        :desc "Nuke ALL workspaces"      "X" #'claude-repl-nuke-all-workspaces
        :desc "Dump workspace state"     "p" #'claude-repl-debug/dump-workspace
        :desc "Toggle debug logging"    "D" #'claude-repl-debug/toggle-logging
-       (:prefix ("E" . "explain diff")
+       (:prefix ("d" . "explain diff")
         :desc "worktree"    "w" #'claude-repl-explain-diff-worktree
         :desc "staged"      "s" #'claude-repl-explain-diff-staged
         :desc "uncommitted" "u" #'claude-repl-explain-diff-uncommitted

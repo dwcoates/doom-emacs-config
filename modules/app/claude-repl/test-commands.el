@@ -309,6 +309,44 @@
       (claude-repl-explain)
       (should (equal sent-text "please explain src/foo.el:42")))))
 
+;;;; ---- claude-repl-explain-prompt ----
+
+(ert-deftest claude-repl-cmd-test-explain-prompt/sends-user-input ()
+  "explain-prompt sends user-provided text to claude."
+  (let (sent-text)
+    (cl-letf (((symbol-function 'claude-repl--context-reference)
+               (lambda () "src/foo.el:42"))
+              ((symbol-function 'read-string)
+               (lambda (_prompt _initial) "review src/foo.el:42 for bugs"))
+              ((symbol-function 'claude-repl--send-to-claude)
+               (lambda (text) (setq sent-text text))))
+      (claude-repl-explain-prompt)
+      (should (equal sent-text "review src/foo.el:42 for bugs")))))
+
+(ert-deftest claude-repl-cmd-test-explain-prompt/prefills-context-reference ()
+  "explain-prompt pre-fills the minibuffer with the context reference."
+  (let (initial-input)
+    (cl-letf (((symbol-function 'claude-repl--context-reference)
+               (lambda () "src/bar.el:10-20"))
+              ((symbol-function 'read-string)
+               (lambda (_prompt initial) (setq initial-input initial) "anything"))
+              ((symbol-function 'claude-repl--send-to-claude)
+               (lambda (_text))))
+      (claude-repl-explain-prompt)
+      (should (equal initial-input "src/bar.el:10-20")))))
+
+(ert-deftest claude-repl-cmd-test-explain-prompt/empty-input-does-not-send ()
+  "explain-prompt does not send when user provides empty input."
+  (let (sent-text)
+    (cl-letf (((symbol-function 'claude-repl--context-reference)
+               (lambda () "src/foo.el:1"))
+              ((symbol-function 'read-string)
+               (lambda (_prompt _initial) ""))
+              ((symbol-function 'claude-repl--send-to-claude)
+               (lambda (text) (setq sent-text text))))
+      (claude-repl-explain-prompt)
+      (should (null sent-text)))))
+
 ;;;; ---- claude-repl--send-interrupt-escape ----
 
 (ert-deftest claude-repl-cmd-test-send-interrupt-escape/sends-two-escapes ()

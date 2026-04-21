@@ -271,6 +271,19 @@ Without region: sends file path and current line."
     (claude-repl--log (+workspace-current-name) "explain %s" msg)
     (claude-repl--send-to-claude msg)))
 
+(defun claude-repl-explain-prompt ()
+  "Prompt the user for a message to send to Claude about the current context.
+Pre-fills the minibuffer with the context reference (file:line or file:range).
+In a magit hunk: pre-fills with the hunk's file path and line range.
+With active region: pre-fills with file path and line range.
+Without region: pre-fills with file path and current line."
+  (interactive)
+  (let* ((ref (claude-repl--context-reference))
+         (msg (read-string "Send to Claude: " ref)))
+    (when (and msg (not (string-empty-p msg)))
+      (claude-repl--log (+workspace-current-name) "explain-prompt %s" msg)
+      (claude-repl--send-to-claude msg))))
+
 (defun claude-repl--send-interrupt-escape (ws vterm-buf)
   "Send two Escape key presses to VTERM-BUF to interrupt Claude.
 WS is the current workspace name for logging."
