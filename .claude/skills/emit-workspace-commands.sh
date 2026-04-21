@@ -1,1 +1,1 @@
-/home/claude/.claude/skills/emit-workspace-commands.sh
+../../../../.claude/skills/emit-workspace-commands.sh
