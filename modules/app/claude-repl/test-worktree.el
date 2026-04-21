@@ -904,11 +904,11 @@ Returns the full SHA of the new commit."
         (claude-repl-fork-worktree-workspace nil)
         (should (equal captured-fork-sid "sess-abc-123"))))))
 
-(ert-deftest claude-repl-test-fork-worktree-workspace-bare-metal ()
-  "With prefix arg, fork passes force-bare-metal as t."
+(ert-deftest claude-repl-test-fork-worktree-workspace-force-sandbox ()
+  "With prefix arg, fork passes force-sandbox as t."
   (claude-repl-test--with-clean-state
     (let ((inst (make-claude-repl-instantiation :session-id "sess-xyz"))
-          (captured-bare nil))
+          (captured-sandbox nil))
       (cl-letf (((symbol-function 'claude-repl--active-inst)
                  (lambda (_ws) inst))
                 ((symbol-function '+workspace-current-name)
@@ -918,15 +918,15 @@ Returns the full SHA of the new commit."
                    (if (string-match-p "name" prompt) "my-fork"
                      "")))
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
-                 (lambda (_name bare _fork-sid &rest _)
-                   (setq captured-bare bare))))
+                 (lambda (_name sandbox _fork-sid &rest _)
+                   (setq captured-sandbox sandbox))))
         (claude-repl-fork-worktree-workspace '(4))
-        (should (eq captured-bare t))))))
+        (should (eq captured-sandbox t))))))
 
 ;;;; ---- Tests: setup-worktree-session ----
 
-(ert-deftest claude-repl-test-setup-worktree-session-passes-bare-metal-hint ()
-  "When force-bare-metal is t, initialize-claude receives :bare-metal as the env hint."
+(ert-deftest claude-repl-test-setup-worktree-session-passes-sandbox-hint-when-forced ()
+  "When force-sandbox is t, initialize-claude receives :sandbox as the env hint."
   (claude-repl-test--with-clean-state
     (let ((captured-env nil))
       (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
@@ -936,10 +936,10 @@ Returns the full SHA of the new commit."
                 ((symbol-function 'claude-repl--active-inst)
                  (lambda (_ws) (make-claude-repl-instantiation :start-cmd "claude"))))
         (claude-repl--setup-worktree-session "abc123" "/tmp/path" "ws1" t)
-        (should (eq captured-env :bare-metal))))))
+        (should (eq captured-env :sandbox))))))
 
-(ert-deftest claude-repl-test-setup-worktree-session-passes-sandbox-hint ()
-  "When force-bare-metal is nil, initialize-claude receives :sandbox as the env hint."
+(ert-deftest claude-repl-test-setup-worktree-session-passes-bare-metal-hint-by-default ()
+  "When force-sandbox is nil, initialize-claude receives :bare-metal as the env hint."
   (claude-repl-test--with-clean-state
     (let ((captured-env nil))
       (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
@@ -949,7 +949,7 @@ Returns the full SHA of the new commit."
                 ((symbol-function 'claude-repl--active-inst)
                  (lambda (_ws) (make-claude-repl-instantiation :start-cmd "claude"))))
         (claude-repl--setup-worktree-session "abc123" "/tmp/path" "ws1" nil)
-        (should (eq captured-env :sandbox))))))
+        (should (eq captured-env :bare-metal))))))
 
 (ert-deftest claude-repl-test-setup-worktree-session-passes-path-hint ()
   "initialize-claude receives the worktree PATH as the project-dir hint."

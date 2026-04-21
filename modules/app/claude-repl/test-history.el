@@ -514,11 +514,11 @@
           (progn
             (claude-repl--ws-put "ws" :project-dir tmpdir)
             (claude-repl--initialize-ws-env "ws")
-            (should (eq (claude-repl--ws-get "ws" :active-env) :sandbox))
+            (should (eq (claude-repl--ws-get "ws" :active-env) :bare-metal))
             (should (claude-repl-instantiation-p (claude-repl--ws-get "ws" :bare-metal)))
             (should (claude-repl-instantiation-p (claude-repl--ws-get "ws" :sandbox)))
             (should-not (claude-repl-instantiation-session-id
-                         (claude-repl--ws-get "ws" :sandbox))))
+                         (claude-repl--ws-get "ws" :bare-metal))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-test-initialize-ws-env-save-restore-round-trip ()
@@ -824,11 +824,11 @@
               (insert ""))
             (claude-repl--ws-put "ws" :project-dir tmpdir)
             (claude-repl--initialize-ws-env "ws")
-            (should (eq (claude-repl--ws-get "ws" :active-env) :sandbox))
+            (should (eq (claude-repl--ws-get "ws" :active-env) :bare-metal))
             (should (claude-repl-instantiation-p
-                     (claude-repl--ws-get "ws" :sandbox)))
+                     (claude-repl--ws-get "ws" :bare-metal)))
             (should-not (claude-repl-instantiation-session-id
-                         (claude-repl--ws-get "ws" :sandbox))))
+                         (claude-repl--ws-get "ws" :bare-metal))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-test-initialize-ws-env-invalid-elisp-creates-fresh ()
@@ -842,11 +842,11 @@
               (insert "(unclosed paren"))
             (claude-repl--ws-put "ws" :project-dir tmpdir)
             (claude-repl--initialize-ws-env "ws")
-            (should (eq (claude-repl--ws-get "ws" :active-env) :sandbox))
+            (should (eq (claude-repl--ws-get "ws" :active-env) :bare-metal))
             (should (claude-repl-instantiation-p
-                     (claude-repl--ws-get "ws" :sandbox)))
+                     (claude-repl--ws-get "ws" :bare-metal)))
             (should-not (claude-repl-instantiation-session-id
-                         (claude-repl--ws-get "ws" :sandbox))))
+                         (claude-repl--ws-get "ws" :bare-metal))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-test-initialize-ws-env-missing-file-writes-state ()
@@ -862,7 +862,7 @@
             (should (file-exists-p state-path))
             ;; Verify the written file is valid and round-trips
             (let ((data (claude-repl--read-sexp-file state-path)))
-              (should (eq (plist-get data :active-env) :sandbox))
+              (should (eq (plist-get data :active-env) :bare-metal))
               (should (equal (plist-get data :project-dir)
                              (claude-repl--path-canonical tmpdir)))))
         (delete-directory tmpdir t)))))
