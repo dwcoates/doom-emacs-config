@@ -452,21 +452,19 @@ current workspace is different."
 (defun claude-repl--deliver-pending-prompts (vterm-buf pending ws)
   "Deliver PENDING prompts to WS if VTERM-BUF is still live.
 Each prompt is sent via `claude-repl--send'.  When there are
-multiple prompts, subsequent ones are scheduled with increasing
-delays derived from `claude-repl--send-settle-time' so each send's
-deferred Return (from bracketed paste) completes before the next
-prompt arrives."
+multiple prompts, each send's ON-SETTLE callback triggers the next
+send — guaranteeing the previous send's deferred Return has completed
+before the next prompt arrives."
   (claude-repl--log ws "deliver-pending-prompts: ws=%s count=%d" ws (length pending))
   (unless (buffer-live-p vterm-buf)
     (error "claude-repl--deliver-pending-prompts: vterm buffer is dead for ws=%s — %d prompt(s) lost"
            ws (length pending)))
-  (let ((delay 0)
-        (settle (claude-repl--send-settle-time)))
-    (dolist (p pending)
-      (if (zerop delay)
-          (claude-repl--send p ws)
-        (run-at-time delay nil #'claude-repl--send p ws))
-      (setq delay (+ delay settle)))))
+  (when pending
+    (claude-repl--send
+     (car pending) ws nil
+     (when (cdr pending)
+       (lambda ()
+         (claude-repl--deliver-pending-prompts vterm-buf (cdr pending) ws))))))
 
 (defun claude-repl--drain-pending-prompts (ws)
   "Drain queued prompts for workspace WS after Claude becomes ready.

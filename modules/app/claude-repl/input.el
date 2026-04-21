@@ -363,15 +363,16 @@ When FORCE-METAPROMPT is non-nil, always prepend (ignoring the counter)."
 
 ;;; Send pipeline
 
-(defun claude-repl--send-input-direct (vterm-buf input)
+(defun claude-repl--send-input-direct (vterm-buf input &optional on-settle)
   "Send small INPUT string directly to VTERM-BUF and refresh.
-Returns 0 — the send is fully committed with no pending timers."
+When ON-SETTLE is non-nil, call it after sending — the send is fully
+committed with no pending timers, so the callback fires immediately."
   (claude-repl--log-verbose (+workspace-current-name) "send-input-direct: len=%d" (length input))
   (with-current-buffer vterm-buf
     (vterm-send-string input)
     (vterm-send-return)
     (claude-repl--refresh-vterm))
-  0)
+  (when on-settle (funcall on-settle)))
 
 (defun claude-repl--run-deferred-action (buf action)
   "Execute ACTION in BUF if BUF is still alive, with `inhibit-quit' bound to t.
@@ -388,38 +389,45 @@ ACTION is called with `inhibit-quit' bound to t."
   (run-at-time delay nil
                #'claude-repl--run-deferred-action buf action))
 
-(defun claude-repl--bracketed-finalize ()
+(defun claude-repl--bracketed-finalize (&optional on-settle)
   "Send a final Return and refresh vterm after bracketed paste.
-Used as the second deferred action in the bracketed paste pipeline."
+Used as the second deferred action in the bracketed paste pipeline.
+When ON-SETTLE is non-nil, call it after the finalize is complete."
   (claude-repl--log-verbose (+workspace-current-name) "bracketed-finalize: sending final return")
   (vterm-send-return)
-  (claude-repl--refresh-vterm))
+  (claude-repl--refresh-vterm)
+  (when on-settle (funcall on-settle)))
 
 (defcustom claude-repl-bracketed-finalize-delay 0.05
   "Seconds between sending Return and the finalize step in bracketed paste."
   :type 'number
   :group 'claude-repl)
 
-(defun claude-repl--bracketed-send-return (vterm-buf)
+(defun claude-repl--bracketed-send-return (vterm-buf &optional on-settle)
   "Send Return to VTERM-BUF and schedule a finalize step.
-Used as the first deferred action in the bracketed paste pipeline."
+Used as the first deferred action in the bracketed paste pipeline.
+ON-SETTLE, if non-nil, is forwarded to `claude-repl--bracketed-finalize'."
   (claude-repl--log-verbose (+workspace-current-name) "bracketed-send-return: sending return, scheduling finalize")
   (vterm-send-return)
   (claude-repl--vterm-deferred-action
    vterm-buf claude-repl-bracketed-finalize-delay
-   #'claude-repl--bracketed-finalize))
+   (if on-settle
+       (lambda () (claude-repl--bracketed-finalize on-settle))
+     #'claude-repl--bracketed-finalize)))
 
-(defun claude-repl--send-input-bracketed (vterm-buf input)
+(defun claude-repl--send-input-bracketed (vterm-buf input &optional on-settle)
   "Send large INPUT string to VTERM-BUF using bracketed paste mode.
 Uses `claude-repl-paste-delay' to wait before sending Return.
-Returns the settle time — seconds until all deferred actions complete."
+When ON-SETTLE is non-nil, it is called after the finalize step
+completes — i.e. after all deferred actions have run."
   (claude-repl--log-verbose (+workspace-current-name) "send-input-bracketed: len=%d" (length input))
   (with-current-buffer vterm-buf
     (vterm-send-string input t)
     (claude-repl--vterm-deferred-action
      vterm-buf claude-repl-paste-delay
-     (apply-partially #'claude-repl--bracketed-send-return vterm-buf)))
-  (+ claude-repl-paste-delay claude-repl-bracketed-finalize-delay))
+     (if on-settle
+         (lambda () (claude-repl--bracketed-send-return vterm-buf on-settle))
+       (apply-partially #'claude-repl--bracketed-send-return vterm-buf)))))
 
 (defcustom claude-repl-bracketed-paste-threshold 200
   "Input length above which bracketed paste mode is used.
@@ -428,21 +436,21 @@ to avoid terminal truncation."
   :type 'integer
   :group 'claude-repl)
 
-(defun claude-repl--send-input-to-vterm (vterm-buf input)
+(defun claude-repl--send-input-to-vterm (vterm-buf input &optional on-settle)
   "Send INPUT string to VTERM-BUF.
 Uses paste mode for large inputs to avoid truncation, and for any
 input containing newlines — in direct mode `vterm-send-string'
 sends \\n as a literal newline byte which Claude Code interprets as
 Enter (submit), splitting multi-line input into separate prompts.
-Returns settle time — seconds until the send is fully committed
-\(0 for direct mode, paste-delay + finalize-delay for bracketed)."
+When ON-SETTLE is non-nil, it is called once the send is fully
+committed (immediately for direct mode, after finalize for bracketed)."
   (let ((use-paste (or (> (length input) claude-repl-bracketed-paste-threshold)
                        (string-match-p "\n" input))))
     (claude-repl--log-verbose (+workspace-current-name) "send-input-to-vterm len=%d mode=%s"
                       (length input) (if use-paste "paste" "direct"))
     (if use-paste
-        (claude-repl--send-input-bracketed vterm-buf input)
-      (claude-repl--send-input-direct vterm-buf input))))
+        (claude-repl--send-input-bracketed vterm-buf input on-settle)
+      (claude-repl--send-input-direct vterm-buf input on-settle))))
 
 (defun claude-repl--mark-ws-thinking (ws)
   "Mark workspace WS as thinking: set claude-state."
@@ -464,19 +472,12 @@ buffer drifts between perspectives."
     (with-current-buffer vterm-buf
       (setq-local claude-repl--owning-workspace ws))))
 
-(defun claude-repl--send-settle-time ()
-  "Return the maximum settle time for a single send.
-This is the worst-case delay before all deferred vterm actions
-complete — i.e. `claude-repl-paste-delay' + `claude-repl-bracketed-finalize-delay'.
-Callers that schedule multiple sends back-to-back should space them
-by at least this much."
-  (+ claude-repl-paste-delay claude-repl-bracketed-finalize-delay))
-
-(defun claude-repl--do-send (ws input raw)
+(defun claude-repl--do-send (ws input raw &optional on-settle)
   "Core send: dispatch INPUT to WS's vterm.
 Increments the prefix counter, pins the owning workspace, sends INPUT,
 and runs posthooks with RAW (the undecorated text).
-Returns settle time from the vterm send (see `claude-repl--send-input-to-vterm').
+ON-SETTLE, if non-nil, is forwarded to `claude-repl--send-input-to-vterm'
+and called once the send is fully committed.
 
 Does NOT write `:claude-state :thinking' — that transition is the
 exclusive province of the `prompt_submit' Claude Code hook (routed
@@ -493,11 +494,10 @@ permitted action — `:thinking' is the correct state."
     (claude-repl--log ws "do-send ws=%s len=%d" ws (length input))
     (claude-repl--increment-prefix-counter ws)
     (claude-repl--pin-owning-workspace vterm-buf ws)
-    (let ((settle (claude-repl--send-input-to-vterm vterm-buf input)))
-      (when (eq (claude-repl--ws-claude-state ws) :permission)
-        (claude-repl--mark-ws-thinking ws))
-      (claude-repl--run-send-posthooks ws raw)
-      settle)))
+    (claude-repl--send-input-to-vterm vterm-buf input on-settle)
+    (when (eq (claude-repl--ws-claude-state ws) :permission)
+      (claude-repl--mark-ws-thinking ws))
+    (claude-repl--run-send-posthooks ws raw)))
 
 (defun claude-repl--commit-input-buffer (ws input-buf raw &optional clear-p)
   "Record RAW input in history and optionally clear INPUT-BUF.
@@ -518,14 +518,14 @@ When CLEAR-P is non-nil, erase the input buffer after saving history."
     (when (buffer-live-p buf)
       (with-current-buffer buf (buffer-string)))))
 
-(defun claude-repl--send (&optional prompt ws force-metaprompt)
+(defun claude-repl--send (&optional prompt ws force-metaprompt on-settle)
   "Send PROMPT (or input buffer contents) to Claude in workspace WS.
 When PROMPT is nil, reads from the input buffer and clears it after sending.
 When WS is nil, uses the current workspace.
 When FORCE-METAPROMPT is non-nil, always prepend the metaprompt prefix.
-Handles input preparation, sending, history, and persistence.
-Returns settle time from the send (see `claude-repl--do-send'), or nil
-if nothing was sent."
+ON-SETTLE, if non-nil, is called once the send is fully committed
+\(immediately for direct mode, after deferred actions for bracketed paste).
+Handles input preparation, sending, history, and persistence."
   (interactive)
   (let ((ws (or ws (+workspace-current-name))))
     (unless ws (error "claude-repl--send: no active workspace"))
@@ -541,10 +541,9 @@ if nothing was sent."
       (when (and vterm-buf (not (buffer-live-p vterm-buf)))
         (claude-repl--log ws "send: early return -- vterm-buf is dead for ws=%s" ws))
       (when (and raw vterm-buf (buffer-live-p vterm-buf))
-        (let* ((input  (claude-repl--prepare-input ws raw force-metaprompt))
-               (settle (claude-repl--do-send ws input raw)))
-          (claude-repl--commit-input-buffer ws input-buf raw from-buf)
-          settle)))))
+        (let ((input (claude-repl--prepare-input ws raw force-metaprompt)))
+          (claude-repl--do-send ws input raw on-settle)
+          (claude-repl--commit-input-buffer ws input-buf raw from-buf))))))
 
 (defun claude-repl-send-and-hide ()
   "Send input to Claude and hide both panels."

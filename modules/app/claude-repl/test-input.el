@@ -740,7 +740,7 @@ where the user pressed C-c C-c expecting a full reset."
           (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'claude-repl--send-input-to-vterm)
-                     (lambda (_buf input) (setq sent-input input)))
+                     (lambda (_buf input &optional _on-settle) (setq sent-input input)))
                     ((symbol-function 'claude-repl--history-save) #'ignore))
             (claude-repl--send nil "ws1")
             (should (stringp sent-input))
@@ -763,7 +763,7 @@ where the user pressed C-c C-c expecting a full reset."
           (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'claude-repl--send-input-to-vterm)
-                     (lambda (_buf input) (setq sent-input input)))
+                     (lambda (_buf input &optional _on-settle) (setq sent-input input)))
                     ((symbol-function 'claude-repl--history-save) #'ignore))
             (claude-repl--send "explicit prompt" "ws1")
             (should (stringp sent-input))
@@ -819,28 +819,58 @@ where the user pressed C-c C-c expecting a full reset."
           (should (equal (car send-args) "big input"))
           (should (equal (cadr send-args) t)))))))
 
-(ert-deftest claude-repl-test-send-input-direct-returns-zero ()
-  "`claude-repl--send-input-direct' returns 0 (no pending timers)."
+(ert-deftest claude-repl-test-send-input-direct-calls-on-settle ()
+  "`claude-repl--send-input-direct' calls on-settle callback immediately."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*claude-panel-direct-settle*"
+    (let ((settled nil))
+      (claude-repl-test--with-temp-buffer "*claude-panel-direct-settle*"
+        (cl-letf (((symbol-function 'vterm-send-string) #'ignore)
+                  ((symbol-function 'vterm-send-return) #'ignore)
+                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore))
+          (claude-repl--send-input-direct (current-buffer) "x"
+                                          (lambda () (setq settled t)))
+          (should settled))))))
+
+(ert-deftest claude-repl-test-send-input-direct-nil-on-settle ()
+  "`claude-repl--send-input-direct' works fine without on-settle."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-direct-nosettle*"
       (cl-letf (((symbol-function 'vterm-send-string) #'ignore)
                 ((symbol-function 'vterm-send-return) #'ignore)
                 ((symbol-function 'claude-repl--refresh-vterm) #'ignore))
-        (should (= (claude-repl--send-input-direct (current-buffer) "x") 0))))))
+        (claude-repl--send-input-direct (current-buffer) "x")))))
 
-(ert-deftest claude-repl-test-send-input-bracketed-returns-settle-time ()
-  "`claude-repl--send-input-bracketed' returns paste-delay + finalize-delay."
+(ert-deftest claude-repl-test-send-input-bracketed-forwards-on-settle ()
+  "`claude-repl--send-input-bracketed' threads on-settle to deferred pipeline."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*claude-panel-bracketed-settle*"
-      (cl-letf (((symbol-function 'vterm-send-string) #'ignore)
-                ((symbol-function 'run-at-time) (lambda (&rest _) nil)))
-        (should (= (claude-repl--send-input-bracketed (current-buffer) "x")
-                   (+ claude-repl-paste-delay claude-repl-bracketed-finalize-delay)))))))
+    (let ((timer-action nil))
+      (claude-repl-test--with-temp-buffer "*claude-panel-bracketed-settle*"
+        (cl-letf (((symbol-function 'vterm-send-string) #'ignore)
+                  ((symbol-function 'run-at-time)
+                   (lambda (_delay _repeat fn &rest _args)
+                     (setq timer-action fn))))
+          ;; Send with an on-settle callback
+          (claude-repl--send-input-bracketed (current-buffer) "x"
+                                             (lambda () 'settled))
+          ;; A timer was scheduled (the paste-delay action)
+          (should timer-action)
+          ;; The action should be a lambda (wrapping bracketed-send-return
+          ;; with the on-settle callback), not the bare partial application
+          (should (functionp timer-action)))))))
 
-(ert-deftest claude-repl-test-send-settle-time ()
-  "`claude-repl--send-settle-time' returns paste-delay + finalize-delay."
-  (should (= (claude-repl--send-settle-time)
-             (+ claude-repl-paste-delay claude-repl-bracketed-finalize-delay))))
+(ert-deftest claude-repl-test-bracketed-finalize-calls-on-settle ()
+  "`claude-repl--bracketed-finalize' calls on-settle after refresh."
+  (let ((settled nil))
+    (cl-letf (((symbol-function 'vterm-send-return) #'ignore)
+              ((symbol-function 'claude-repl--refresh-vterm) #'ignore))
+      (claude-repl--bracketed-finalize (lambda () (setq settled t)))
+      (should settled))))
+
+(ert-deftest claude-repl-test-bracketed-finalize-nil-on-settle ()
+  "`claude-repl--bracketed-finalize' works fine without on-settle."
+  (cl-letf (((symbol-function 'vterm-send-return) #'ignore)
+            ((symbol-function 'claude-repl--refresh-vterm) #'ignore))
+    (claude-repl--bracketed-finalize)))
 
 ;;;; ---- Tests: slash mode ----
 

@@ -442,61 +442,62 @@ against stop events arriving after kill."
         (kill-buffer fake-buf)))))
 
 (ert-deftest claude-repl-test-deliver-pending-prompts-live-buf ()
-  "deliver-pending-prompts sends first prompt immediately, defers rest."
+  "deliver-pending-prompts sends first prompt and passes on-settle for next."
   (let ((sent nil)
-        (timer-calls nil)
-        (settle (claude-repl--send-settle-time))
+        (on-settle-cb nil)
         (fake-buf (generate-new-buffer " *test-deliver*")))
     (unwind-protect
         (cl-letf (((symbol-function 'claude-repl--send)
-                   (lambda (p _ws) (push p sent)))
-                  ((symbol-function 'run-at-time)
-                   (lambda (delay _repeat fn &rest args)
-                     (push (list delay fn args) timer-calls))))
+                   (lambda (p _ws _force-meta on-settle)
+                     (push p sent)
+                     (setq on-settle-cb on-settle))))
           (claude-repl--deliver-pending-prompts fake-buf '("a" "b") "ws1")
           ;; First prompt sent immediately
           (should (equal sent '("a")))
-          ;; Second prompt scheduled via timer at settle time
-          (should (= (length timer-calls) 1))
-          (should (= (caar timer-calls) settle)))
+          ;; on-settle callback was provided (for chaining to "b")
+          (should on-settle-cb)
+          ;; Simulate the settle: invoke the callback to deliver "b"
+          (funcall on-settle-cb)
+          (should (equal (reverse sent) '("a" "b"))))
       (kill-buffer fake-buf))))
 
-(ert-deftest claude-repl-test-deliver-pending-prompts-single-no-timer ()
-  "deliver-pending-prompts with one prompt sends immediately, no timer."
+(ert-deftest claude-repl-test-deliver-pending-prompts-single-no-callback ()
+  "deliver-pending-prompts with one prompt sends immediately, no on-settle."
   (let ((sent nil)
-        (timer-calls nil)
+        (on-settle-cb nil)
         (fake-buf (generate-new-buffer " *test-deliver-single*")))
     (unwind-protect
         (cl-letf (((symbol-function 'claude-repl--send)
-                   (lambda (p _ws) (push p sent)))
-                  ((symbol-function 'run-at-time)
-                   (lambda (delay _repeat fn &rest args)
-                     (push (list delay fn args) timer-calls))))
+                   (lambda (p _ws _force-meta on-settle)
+                     (push p sent)
+                     (setq on-settle-cb on-settle))))
           (claude-repl--deliver-pending-prompts fake-buf '("only") "ws1")
           (should (equal sent '("only")))
-          (should-not timer-calls))
+          ;; No more prompts → no callback
+          (should-not on-settle-cb))
       (kill-buffer fake-buf))))
 
-(ert-deftest claude-repl-test-deliver-pending-prompts-three-staggered ()
-  "deliver-pending-prompts with three prompts staggers by send-settle-time."
+(ert-deftest claude-repl-test-deliver-pending-prompts-three-chains ()
+  "deliver-pending-prompts with three prompts chains via on-settle callbacks."
   (let ((sent nil)
-        (timer-calls nil)
-        (settle (claude-repl--send-settle-time))
+        (callbacks nil)
         (fake-buf (generate-new-buffer " *test-deliver-three*")))
     (unwind-protect
         (cl-letf (((symbol-function 'claude-repl--send)
-                   (lambda (p _ws) (push p sent)))
-                  ((symbol-function 'run-at-time)
-                   (lambda (delay _repeat fn &rest args)
-                     (push (list delay fn args) timer-calls))))
+                   (lambda (p _ws _force-meta on-settle)
+                     (push p sent)
+                     (push on-settle callbacks))))
           (claude-repl--deliver-pending-prompts fake-buf '("a" "b" "c") "ws1")
-          ;; First prompt sent immediately
+          ;; Only "a" sent so far
           (should (equal sent '("a")))
-          ;; Two timers scheduled with cumulative settle-time delays
-          (should (= (length timer-calls) 2))
-          (let ((delays (sort (mapcar #'car timer-calls) #'<)))
-            (should (= (nth 0 delays) settle))
-            (should (= (nth 1 delays) (* 2 settle)))))
+          ;; Simulate settle for "a" → triggers "b"
+          (funcall (car callbacks))
+          (should (equal (reverse sent) '("a" "b")))
+          ;; Simulate settle for "b" → triggers "c"
+          (funcall (car callbacks))
+          (should (equal (reverse sent) '("a" "b" "c")))
+          ;; "c" is the last — no callback
+          (should-not (car callbacks)))
       (kill-buffer fake-buf))))
 
 (ert-deftest claude-repl-test-deliver-pending-prompts-dead-buf ()
