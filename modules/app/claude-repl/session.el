@@ -449,15 +449,29 @@ current workspace is different."
 
 ;;;; Readiness and pending prompt handling
 
+(defcustom claude-repl-inter-prompt-delay 0.4
+  "Seconds between delivering consecutive pending prompts.
+Must exceed `claude-repl-paste-delay' + `claude-repl-bracketed-finalize-delay'
+so each prompt's deferred Return completes before the next prompt is sent."
+  :type 'number
+  :group 'claude-repl)
+
 (defun claude-repl--deliver-pending-prompts (vterm-buf pending ws)
   "Deliver PENDING prompts to WS if VTERM-BUF is still live.
-Each prompt in PENDING is sent via `claude-repl--send'."
+Each prompt is sent via `claude-repl--send'.  When there are
+multiple prompts, subsequent ones are scheduled with increasing
+delays so each send's deferred Return (from bracketed paste)
+completes before the next prompt arrives."
   (claude-repl--log ws "deliver-pending-prompts: ws=%s count=%d" ws (length pending))
   (unless (buffer-live-p vterm-buf)
     (error "claude-repl--deliver-pending-prompts: vterm buffer is dead for ws=%s — %d prompt(s) lost"
            ws (length pending)))
-  (dolist (p pending)
-    (claude-repl--send p ws)))
+  (let ((delay 0))
+    (dolist (p pending)
+      (if (zerop delay)
+          (claude-repl--send p ws)
+        (run-at-time delay nil #'claude-repl--send p ws))
+      (setq delay (+ delay claude-repl-inter-prompt-delay)))))
 
 (defun claude-repl--drain-pending-prompts (ws)
   "Drain queued prompts for workspace WS after Claude becomes ready.

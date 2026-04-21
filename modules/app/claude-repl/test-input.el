@@ -452,6 +452,65 @@
           (should (equal (car send-string-args) ""))
           (should return-called))))))
 
+(ert-deftest claude-repl-test-send-input-newline-uses-paste ()
+  "Short input containing a newline should use bracketed paste, not direct mode.
+In direct mode `vterm-send-string' sends \\n as a literal newline byte which
+Claude Code interprets as Enter (submit), splitting multi-line input."
+  (claude-repl-test--with-clean-state
+    (let ((send-string-args nil)
+          (return-called nil)
+          (timer-args nil))
+      (claude-repl-test--with-temp-buffer "*claude-panel-newline*"
+        (cl-letf (((symbol-function 'vterm-send-string)
+                   (lambda (s &rest args) (setq send-string-args (cons s args))))
+                  ((symbol-function 'vterm-send-return)
+                   (lambda () (setq return-called t)))
+                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+                  ((symbol-function 'run-at-time)
+                   (lambda (&rest args) (setq timer-args args))))
+          (claude-repl--send-input-to-vterm (current-buffer) "line1\nline2")
+          ;; paste flag (2nd arg) should be t
+          (should (equal (cadr send-string-args) t))
+          ;; return should NOT have been called directly (deferred)
+          (should-not return-called)
+          ;; run-at-time should have been called
+          (should timer-args))))))
+
+(ert-deftest claude-repl-test-send-input-trailing-newline-uses-paste ()
+  "Input with only a trailing newline should still use bracketed paste."
+  (claude-repl-test--with-clean-state
+    (let ((send-string-args nil)
+          (return-called nil)
+          (timer-args nil))
+      (claude-repl-test--with-temp-buffer "*claude-panel-trailing-nl*"
+        (cl-letf (((symbol-function 'vterm-send-string)
+                   (lambda (s &rest args) (setq send-string-args (cons s args))))
+                  ((symbol-function 'vterm-send-return)
+                   (lambda () (setq return-called t)))
+                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+                  ((symbol-function 'run-at-time)
+                   (lambda (&rest args) (setq timer-args args))))
+          (claude-repl--send-input-to-vterm (current-buffer) "hello\n")
+          (should (equal (cadr send-string-args) t))
+          (should-not return-called)
+          (should timer-args))))))
+
+(ert-deftest claude-repl-test-send-input-no-newline-short-uses-direct ()
+  "Short input without newlines should still use direct mode."
+  (claude-repl-test--with-clean-state
+    (let ((send-string-args nil)
+          (return-called nil))
+      (claude-repl-test--with-temp-buffer "*claude-panel-no-nl*"
+        (cl-letf (((symbol-function 'vterm-send-string)
+                   (lambda (s &rest args) (setq send-string-args (cons s args))))
+                  ((symbol-function 'vterm-send-return)
+                   (lambda () (setq return-called t)))
+                  ((symbol-function 'claude-repl--refresh-vterm) #'ignore))
+          (claude-repl--send-input-to-vterm (current-buffer) "no newlines here")
+          ;; No paste flag — direct mode
+          (should (null (cdr send-string-args)))
+          (should return-called))))))
+
 ;;;; ---- Tests: commit-input-buffer ----
 
 (ert-deftest claude-repl-test-commit-input-buffer-no-clear ()

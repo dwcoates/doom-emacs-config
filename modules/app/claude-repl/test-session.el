@@ -442,14 +442,59 @@ against stop events arriving after kill."
         (kill-buffer fake-buf)))))
 
 (ert-deftest claude-repl-test-deliver-pending-prompts-live-buf ()
-  "deliver-pending-prompts should call send for each prompt when buffer is live."
+  "deliver-pending-prompts sends first prompt immediately, defers rest."
   (let ((sent nil)
+        (timer-calls nil)
         (fake-buf (generate-new-buffer " *test-deliver*")))
     (unwind-protect
         (cl-letf (((symbol-function 'claude-repl--send)
-                   (lambda (p _ws) (push p sent))))
+                   (lambda (p _ws) (push p sent)))
+                  ((symbol-function 'run-at-time)
+                   (lambda (delay _repeat fn &rest args)
+                     (push (list delay fn args) timer-calls))))
           (claude-repl--deliver-pending-prompts fake-buf '("a" "b") "ws1")
-          (should (equal (reverse sent) '("a" "b"))))
+          ;; First prompt sent immediately
+          (should (equal sent '("a")))
+          ;; Second prompt scheduled via timer
+          (should (= (length timer-calls) 1))
+          (should (= (caar timer-calls) claude-repl-inter-prompt-delay)))
+      (kill-buffer fake-buf))))
+
+(ert-deftest claude-repl-test-deliver-pending-prompts-single-no-timer ()
+  "deliver-pending-prompts with one prompt sends immediately, no timer."
+  (let ((sent nil)
+        (timer-calls nil)
+        (fake-buf (generate-new-buffer " *test-deliver-single*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--send)
+                   (lambda (p _ws) (push p sent)))
+                  ((symbol-function 'run-at-time)
+                   (lambda (delay _repeat fn &rest args)
+                     (push (list delay fn args) timer-calls))))
+          (claude-repl--deliver-pending-prompts fake-buf '("only") "ws1")
+          (should (equal sent '("only")))
+          (should-not timer-calls))
+      (kill-buffer fake-buf))))
+
+(ert-deftest claude-repl-test-deliver-pending-prompts-three-staggered ()
+  "deliver-pending-prompts with three prompts staggers delays cumulatively."
+  (let ((sent nil)
+        (timer-calls nil)
+        (fake-buf (generate-new-buffer " *test-deliver-three*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--send)
+                   (lambda (p _ws) (push p sent)))
+                  ((symbol-function 'run-at-time)
+                   (lambda (delay _repeat fn &rest args)
+                     (push (list delay fn args) timer-calls))))
+          (claude-repl--deliver-pending-prompts fake-buf '("a" "b" "c") "ws1")
+          ;; First prompt sent immediately
+          (should (equal sent '("a")))
+          ;; Two timers scheduled with cumulative delays
+          (should (= (length timer-calls) 2))
+          (let ((delays (sort (mapcar #'car timer-calls) #'<)))
+            (should (= (nth 0 delays) claude-repl-inter-prompt-delay))
+            (should (= (nth 1 delays) (* 2 claude-repl-inter-prompt-delay)))))
       (kill-buffer fake-buf))))
 
 (ert-deftest claude-repl-test-deliver-pending-prompts-dead-buf ()

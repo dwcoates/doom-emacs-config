@@ -426,8 +426,12 @@ to avoid terminal truncation."
 
 (defun claude-repl--send-input-to-vterm (vterm-buf input)
   "Send INPUT string to VTERM-BUF.
-Uses paste mode for large inputs to avoid truncation."
-  (let ((use-paste (> (length input) claude-repl-bracketed-paste-threshold)))
+Uses paste mode for large inputs to avoid truncation, and for any
+input containing newlines — in direct mode `vterm-send-string'
+sends \\n as a literal newline byte which Claude Code interprets as
+Enter (submit), splitting multi-line input into separate prompts."
+  (let ((use-paste (or (> (length input) claude-repl-bracketed-paste-threshold)
+                       (string-match-p "\n" input))))
     (claude-repl--log-verbose (+workspace-current-name) "send-input-to-vterm len=%d mode=%s"
                       (length input) (if use-paste "paste" "direct"))
     (if use-paste
