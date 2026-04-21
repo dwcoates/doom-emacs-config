@@ -73,6 +73,25 @@ of where the Doom config tree is mounted.")
 (defconst claude-repl--hooks-dest-dir "~/.claude/hooks/"
   "Destination directory where managed hook scripts are installed.")
 
+(defconst claude-repl--managed-skills
+  '("emit-workspace-commands.sh"
+    "generate-workspace"
+    "workspace-update")
+  "Bare names for managed host-level skill symlinks.
+Must match the `SKILLS' array in `.claude/install.sh'.")
+
+(defconst claude-repl--skills-dest-dir "~/.claude/skills/"
+  "Destination directory where managed skill symlinks are created.")
+
+(defcustom claude-repl-skills-src-dir
+  "~/workspace/ChessCom/explanation-engine/.claude/skills/"
+  "Source directory for managed skill targets.
+Must match the `SKILLS_SRC' default in `.claude/install.sh' (or the
+`CLAUDE_REPL_SKILLS_SRC' env var override).  No hardcoded user path:
+`~' expands per the running Emacs's HOME."
+  :type 'directory
+  :group 'claude-repl)
+
 ;;;; ---- Sandbox detection ------------------------------------------------
 
 (defun claude-repl--in-sandbox-p ()
@@ -297,6 +316,43 @@ CMD is of the form \"~/.claude/hooks/<name>.sh\"."
          (format "Managed script drift: %s differs from checked-in source — run M-x claude-repl-reinstall-hooks"
                  path)))))))
 
+(defun claude-repl--skill-dest-path (name)
+  "Absolute install destination for skill NAME."
+  (expand-file-name name (expand-file-name claude-repl--skills-dest-dir)))
+
+(defun claude-repl--skill-src-path (name)
+  "Absolute canonical source target for skill NAME."
+  (expand-file-name name (expand-file-name claude-repl-skills-src-dir)))
+
+(defun claude-repl--skill-link-ok-p (name)
+  "Return non-nil when the host-level symlink for skill NAME is correct.
+\"Correct\" means DEST is a symlink whose immediate target (via
+`file-symlink-p', not dereferenced) resolves to the expected source
+path.  This ensures we only flag *ours* as healthy — foreign files at
+the same path are treated as problems."
+  (let* ((dest (claude-repl--skill-dest-path name))
+         (target (file-symlink-p dest))
+         (expected (claude-repl--skill-src-path name)))
+    (and target
+         (equal (expand-file-name target (file-name-directory dest))
+                expected))))
+
+(defun claude-repl--check-skill-links (issues-cell)
+  "Populate ISSUES-CELL with problems for managed skill symlinks."
+  (dolist (name claude-repl--managed-skills)
+    (let ((dest (claude-repl--skill-dest-path name)))
+      (cond
+       ((not (file-exists-p dest))
+        (claude-repl--push-issue
+         issues-cell 'warn
+         (format "Skill symlink missing: %s — run M-x claude-repl-install-hooks"
+                 dest)))
+       ((not (claude-repl--skill-link-ok-p name))
+        (claude-repl--push-issue
+         issues-cell 'warn
+         (format "Skill symlink points elsewhere: %s — run M-x claude-repl-reinstall-hooks"
+                 dest)))))))
+
 (defun claude-repl--doctor-issues ()
   "Return a list of (LEVEL . MESSAGE) describing hook-install problems.
 LEVEL is `error' or `warn'.  Empty list means all managed hooks are
@@ -315,6 +371,7 @@ returned and the per-hook checks are skipped."
                    (expand-file-name claude-repl--settings-file)))
         (claude-repl--check-registration (cdr (assq 'hooks json)) issues)
         (claude-repl--check-script-files issues))
+      (claude-repl--check-skill-links issues)
       (nreverse (car issues)))))
 
 ;; Run inline at load time so hooks are registered before later

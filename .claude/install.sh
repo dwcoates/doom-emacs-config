@@ -35,6 +35,11 @@ fi
 # --- Constants ---
 SETTINGS="$HOME/.claude/settings.json"
 HOOKS_DIR="$HOME/.claude/hooks"
+SKILLS_DIR="$HOME/.claude/skills"
+# Source tree for managed skills.  Override via CLAUDE_REPL_SKILLS_SRC.
+# Symlinks are created at install time, so $HOME expands on the host;
+# nothing is committed with a hardcoded user path.
+SKILLS_SRC="${CLAUDE_REPL_SKILLS_SRC:-$HOME/workspace/ChessCom/explanation-engine/.claude/skills}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOOK_SCRIPTS_SRC="$SCRIPT_DIR/../modules/app/claude-repl/hooks"
 
@@ -45,6 +50,14 @@ HOOKS=(
   "UserPromptSubmit|prompt-submit-notify.sh|"
   "SessionStart|session-start-notify.sh|"
   "Notification|permission-notify.sh|permission_prompt"
+)
+
+# Host-level skill symlinks managed by this script.  Each name resolves
+# to $SKILLS_DIR/<name> -> $SKILLS_SRC/<name>.
+SKILLS=(
+  "emit-workspace-commands.sh"
+  "generate-workspace"
+  "workspace-update"
 )
 
 # --- Helpers ---
@@ -130,6 +143,29 @@ do_install() {
     echo "[install] Registered hook: $event -> $script"
   done
 
+  # Managed skill symlinks under ~/.claude/skills/.  Idempotent: replace
+  # when the target differs, skip when correct, warn when source absent.
+  mkdir -p "$SKILLS_DIR"
+  if [ ! -d "$SKILLS_SRC" ]; then
+    echo "[install] WARNING: skills source dir not found: $SKILLS_SRC"
+    echo "[install] Skill symlinks will be skipped.  Set CLAUDE_REPL_SKILLS_SRC to override."
+  else
+    for name in "${SKILLS[@]}"; do
+      src="$SKILLS_SRC/$name"
+      dest="$SKILLS_DIR/$name"
+      if [ ! -e "$src" ] && [ ! -L "$src" ]; then
+        echo "[install] WARNING: skill source missing: $src (skipped)"
+        continue
+      fi
+      if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$src" ]; then
+        echo "[install] Skill already linked: $name (skipped)"
+        continue
+      fi
+      ln -sfn "$src" "$dest"
+      echo "[install] Linked skill: $dest -> $src"
+    done
+  fi
+
   echo "[install] Done. Hooks registered in $SETTINGS"
 }
 
@@ -167,6 +203,17 @@ do_uninstall() {
     if [ -f "$HOOKS_DIR/$script" ]; then
       rm -f "$HOOKS_DIR/$script"
       echo "[uninstall] Removed $HOOKS_DIR/$script"
+    fi
+  done
+
+  # Remove managed skill symlinks — only ours (those pointing at SKILLS_SRC).
+  # Foreign files under the same name are left alone.
+  for name in "${SKILLS[@]}"; do
+    dest="$SKILLS_DIR/$name"
+    expected="$SKILLS_SRC/$name"
+    if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$expected" ]; then
+      rm -f "$dest"
+      echo "[uninstall] Removed skill link: $dest"
     fi
   done
 

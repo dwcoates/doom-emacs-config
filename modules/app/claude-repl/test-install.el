@@ -775,4 +775,86 @@ Returns a cons (EXIT-CODE . OUTPUT)."
 claude-repl sub-modules depend on hooks being registered at load time."
   (should-not (memq 'claude-repl--maybe-install-hooks emacs-startup-hook)))
 
+;;;; ---- skill-link helpers ----
+
+(defun test-install--make-skills-tmp ()
+  "Build a temp-dir pair (SRC . DEST) for skill-link tests.
+Creates SRC/<managed-skill-names> as real directories so the symlink
+target resolves, and DEST as an empty directory ready for links."
+  (let* ((root (make-temp-file "claude-repl-skill-test-" t))
+         (src (expand-file-name "src/" root))
+         (dest (expand-file-name "dest/" root)))
+    (make-directory src t)
+    (make-directory dest t)
+    (dolist (name claude-repl--managed-skills)
+      (make-directory (expand-file-name name src) t))
+    (cons src dest)))
+
+(defmacro test-install--with-skill-dirs (bindings &rest body)
+  "Run BODY with SRC/DEST dirs materialized and the defcustoms pointed at them.
+BINDINGS is ignored — provided so future test helpers can extend."
+  (declare (indent 1))
+  (ignore bindings)
+  `(let* ((pair (test-install--make-skills-tmp))
+          (src (car pair))
+          (dest (cdr pair)))
+     (let ((claude-repl-skills-src-dir src)
+           (claude-repl--skills-dest-dir dest))
+       (unwind-protect (progn ,@body)
+         (delete-directory (file-name-directory (directory-file-name src)) t)))))
+
+(ert-deftest claude-repl-test-skill-link-ok-correct ()
+  "skill-link-ok-p returns t when dest is a symlink to the expected src."
+  (test-install--with-skill-dirs ()
+    (let ((name (car claude-repl--managed-skills)))
+      (make-symbolic-link (claude-repl--skill-src-path name)
+                          (claude-repl--skill-dest-path name))
+      (should (claude-repl--skill-link-ok-p name)))))
+
+(ert-deftest claude-repl-test-skill-link-ok-missing ()
+  "skill-link-ok-p returns nil when dest does not exist at all."
+  (test-install--with-skill-dirs ()
+    (should-not
+     (claude-repl--skill-link-ok-p (car claude-repl--managed-skills)))))
+
+(ert-deftest claude-repl-test-skill-link-ok-foreign-target ()
+  "skill-link-ok-p returns nil when dest points at something other than our src."
+  (test-install--with-skill-dirs ()
+    (let* ((name (car claude-repl--managed-skills))
+           (dest (claude-repl--skill-dest-path name)))
+      (make-symbolic-link "/tmp/elsewhere" dest)
+      (should-not (claude-repl--skill-link-ok-p name)))))
+
+(ert-deftest claude-repl-test-check-skill-links-missing ()
+  "Missing symlink produces one warn per managed skill."
+  (test-install--with-skill-dirs ()
+    (let ((issues (list nil)))
+      (claude-repl--check-skill-links issues)
+      (should (= (length (car issues))
+                 (length claude-repl--managed-skills)))
+      (should (cl-every (lambda (i) (eq (car i) 'warn)) (car issues))))))
+
+(ert-deftest claude-repl-test-check-skill-links-all-ok ()
+  "All skills linked correctly produces no issues."
+  (test-install--with-skill-dirs ()
+    (dolist (name claude-repl--managed-skills)
+      (make-symbolic-link (claude-repl--skill-src-path name)
+                          (claude-repl--skill-dest-path name)))
+    (let ((issues (list nil)))
+      (claude-repl--check-skill-links issues)
+      (should (null (car issues))))))
+
+(ert-deftest claude-repl-test-check-skill-links-foreign ()
+  "A foreign file at the dest path is flagged as warn."
+  (test-install--with-skill-dirs ()
+    (let ((name (car claude-repl--managed-skills)))
+      (write-region "" nil (claude-repl--skill-dest-path name))
+      (let ((issues (list nil)))
+        (claude-repl--check-skill-links issues)
+        (should (= 1 (length
+                      (cl-remove-if-not
+                       (lambda (i) (string-match-p "points elsewhere"
+                                                    (cdr i)))
+                       (car issues)))))))))
+
 ;;; test-install.el ends here
