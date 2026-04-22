@@ -324,9 +324,11 @@ sends \"i\" after 0.25s to return to insert mode."
   "Tear down a single claude-repl workspace WS without prompting.
 Kills any in-flight git-diff process, tears down the vterm session
 and buffers, removes WS from `claude-repl--workspaces', purges the
-per-project state file (see `claude-repl--state-purge'), and finally
-kills the persp workspace via `+workspace/kill'.  Designed to be
-reusable from both `claude-repl-nuke-workspace' (one-shot) and
+per-project state file (see `claude-repl--state-purge'), kills every
+remaining buffer (and attached process) that belongs to the persp via
+`claude-repl--kill-workspace-buffers', and finally kills the persp
+workspace via `+workspace/kill'.  Designed to be reusable from both
+`claude-repl-nuke-workspace' (one-shot) and
 `claude-repl-nuke-all-workspaces' (loop).
 
 The `:project-dir' is captured up front because `kill-session' runs
@@ -358,6 +360,15 @@ returns \(or throws), WS is not in `claude-repl--workspaces'."
           (claude-repl--ws-del ws)
         (error (claude-repl--log ws "nuke-one-workspace: ws-del error: %S" err)))
       (claude-repl--state-purge root)
+      ;; Kill every remaining buffer (and attached process) that belongs to
+      ;; the persp before tearing down the persp itself.  `kill-session'
+      ;; only handles the vterm/input panels it tracks in the hashmap;
+      ;; this sweep catches file buffers, magit buffers, auxiliary shells,
+      ;; or anything else the user opened while inside the workspace so
+      ;; nothing is orphaned after the persp goes away.
+      (condition-case err
+          (claude-repl--kill-workspace-buffers ws)
+        (error (claude-repl--log ws "nuke-one-workspace: kill-workspace-buffers error: %S" err)))
       ;; Kill the persp workspace last so all internal state is already
       ;; cleaned up before the UI workspace disappears.
       (condition-case err

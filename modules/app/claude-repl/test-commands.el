@@ -637,6 +637,62 @@ with `--resume <stale-sid>' — the exact failure the purge closes."
               (should-not (file-exists-p state-file))))
         (delete-directory tmpdir t)))))
 
+(ert-deftest claude-repl-cmd-test-nuke-workspace/kills-workspace-buffers ()
+  "nuke-workspace invokes kill-workspace-buffers so every persp buffer is torn down."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
+    (let ((kwb-arg nil))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "doomed"))
+                ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                ((symbol-function 'claude-repl--kill-session) #'ignore)
+                ((symbol-function 'claude-repl--kill-workspace-buffers)
+                 (lambda (ws) (setq kwb-arg ws)))
+                ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-nuke-workspace)
+        (should (equal kwb-arg "doomed"))))))
+
+(ert-deftest claude-repl-cmd-test-nuke-workspace/kills-buffers-even-when-kill-session-errors ()
+  "nuke-workspace still sweeps persp buffers when kill-session throws.
+kill-workspace-buffers lives in the `unwind-protect' cleanup so the
+buffer sweep is not skipped by an earlier teardown failure."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
+    (let ((kwb-called nil))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "doomed"))
+                ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                ((symbol-function 'claude-repl--kill-session)
+                 (lambda (_ws) (error "simulated kill-session failure")))
+                ((symbol-function 'claude-repl--kill-workspace-buffers)
+                 (lambda (_ws) (setq kwb-called t)))
+                ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-nuke-workspace)
+        (should kwb-called)))))
+
+(ert-deftest claude-repl-cmd-test-nuke-workspace/workspace-kill-runs-after-buffer-sweep ()
+  "nuke-workspace kills the persp buffers BEFORE tearing down the persp itself.
+Reversing the order would make the buffer sweep a no-op because
+`persp-get-by-name' returns nil once the persp is gone."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
+    (let ((call-order nil)
+          (persp-mode t))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "doomed"))
+                ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                ((symbol-function 'claude-repl--kill-session) #'ignore)
+                ((symbol-function 'claude-repl--kill-workspace-buffers)
+                 (lambda (_ws) (push 'kwb call-order)))
+                ((symbol-function 'persp-get-by-name) (lambda (_n) t))
+                ((symbol-function '+workspace/kill)
+                 (lambda (_ws) (push 'persp-kill call-order)))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-nuke-workspace)
+        (should (equal (nreverse call-order) '(kwb persp-kill)))))))
+
 ;;;; ---- claude-repl-nuke-all-workspaces ----
 
 (ert-deftest claude-repl-cmd-test-nuke-all/no-workspaces ()

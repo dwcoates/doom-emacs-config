@@ -717,6 +717,36 @@ Captures the current buffer references before teardown clears them."
     (claude-repl--teardown-session-state ws)
     (claude-repl--destroy-session-buffers vterm-buf input-buf)))
 
+(defun claude-repl--kill-workspace-buffers (ws)
+  "Kill every buffer (and attached process) belonging to persp WS.
+Idempotent: no-op when persp-mode is inactive, the persp does not
+exist, or the persp slot holds a symbol sentinel rather than a real
+perspective.  Each buffer is killed inside its own `condition-case' so
+one bad buffer cannot block the rest.  File-visiting buffers are
+marked unmodified before killing so `kill-buffer' does not prompt —
+the user has already confirmed the destructive nuke."
+  (when (and (bound-and-true-p persp-mode)
+             (fboundp 'persp-get-by-name)
+             (fboundp 'persp-buffers))
+    (when-let ((persp (persp-get-by-name ws)))
+      (unless (symbolp persp)
+        (let ((bufs (persp-buffers persp))
+              (kill-buffer-query-functions nil))
+          (claude-repl--log ws "kill-workspace-buffers: count=%d" (length bufs))
+          (dolist (buf bufs)
+            (condition-case err
+                (when (buffer-live-p buf)
+                  (when-let ((proc (get-buffer-process buf)))
+                    (set-process-query-on-exit-flag proc nil)
+                    (ignore-errors (delete-process proc))
+                    (claude-repl--schedule-sigkill proc))
+                  (with-current-buffer buf
+                    (set-buffer-modified-p nil))
+                  (kill-buffer buf))
+              (error
+               (claude-repl--log ws "kill-workspace-buffers: error on %s: %S"
+                                 (claude-repl--safe-buffer-name buf) err)))))))))
+
 ;;;; User commands
 
 (defun claude-repl-kill ()

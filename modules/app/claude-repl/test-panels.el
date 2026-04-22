@@ -1416,6 +1416,139 @@ we at least surface the stuck state so the user knows to click out."
         ;; Should not error with dead input buffer
         (claude-repl--destroy-session-buffers vterm-buf input-buf)))))
 
+;;;; ---- Tests: kill-workspace-buffers ----
+
+(ert-deftest claude-repl-test-panels-kill-workspace-buffers/persp-mode-off ()
+  "kill-workspace-buffers is a no-op when persp-mode is not active."
+  (let ((persp-mode nil)
+        (buf (get-buffer-create "*kwb-persp-off*")))
+    (unwind-protect
+        (progn
+          (claude-repl--kill-workspace-buffers "some-ws")
+          ;; Buffer survives because persp-mode is off.
+          (should (buffer-live-p buf)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-panels-kill-workspace-buffers/no-persp-for-ws ()
+  "kill-workspace-buffers is a no-op when the persp does not exist."
+  (let ((persp-mode t)
+        (buf (get-buffer-create "*kwb-no-persp*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_ws) nil)))
+          (claude-repl--kill-workspace-buffers "ghost-ws")
+          (should (buffer-live-p buf)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-panels-kill-workspace-buffers/symbol-persp-skipped ()
+  "kill-workspace-buffers skips when persp-get-by-name returns a symbol sentinel.
+persp-mode uses symbol sentinels (e.g. t) for the \"no perspective\"
+container — those don't have a `persp-buffers' slot and must be skipped."
+  (let ((persp-mode t)
+        (buf (get-buffer-create "*kwb-symbol-persp*"))
+        (persp-buffers-called nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_ws) 'none))
+                  ((symbol-function 'persp-buffers)
+                   (lambda (_p) (setq persp-buffers-called t) nil)))
+          (claude-repl--kill-workspace-buffers "sym-ws")
+          (should-not persp-buffers-called)
+          (should (buffer-live-p buf)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-panels-kill-workspace-buffers/kills-all-live-buffers ()
+  "kill-workspace-buffers kills every live buffer returned by persp-buffers."
+  (let ((persp-mode t)
+        (b1 (get-buffer-create "*kwb-live-1*"))
+        (b2 (get-buffer-create "*kwb-live-2*"))
+        (b3 (get-buffer-create "*kwb-live-3*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_ws) (list 'persp)))
+                  ((symbol-function 'persp-buffers) (lambda (_p) (list b1 b2 b3))))
+          (claude-repl--kill-workspace-buffers "live-ws")
+          (should-not (buffer-live-p b1))
+          (should-not (buffer-live-p b2))
+          (should-not (buffer-live-p b3)))
+      (dolist (b (list b1 b2 b3))
+        (when (buffer-live-p b) (kill-buffer b))))))
+
+(ert-deftest claude-repl-test-panels-kill-workspace-buffers/skips-dead-and-nil ()
+  "kill-workspace-buffers tolerates dead and nil entries in the buffer list."
+  (let ((persp-mode t)
+        (live (get-buffer-create "*kwb-mixed-live*"))
+        (dead (get-buffer-create "*kwb-mixed-dead*")))
+    (kill-buffer dead)
+    (unwind-protect
+        (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_ws) (list 'persp)))
+                  ((symbol-function 'persp-buffers) (lambda (_p) (list nil dead live))))
+          ;; Should not error despite nil / dead entries.
+          (claude-repl--kill-workspace-buffers "mixed-ws")
+          (should-not (buffer-live-p live)))
+      (when (buffer-live-p live) (kill-buffer live)))))
+
+(ert-deftest claude-repl-test-panels-kill-workspace-buffers/kills-attached-process ()
+  "kill-workspace-buffers deletes a process attached to a workspace buffer."
+  (let* ((persp-mode t)
+         (buf (get-buffer-create "*kwb-proc*"))
+         (proc (start-process "kwb-fake-proc" buf "sleep" "60"))
+         (deleted-procs nil)
+         (query-cleared-procs nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_ws) (list 'persp)))
+                  ((symbol-function 'persp-buffers) (lambda (_p) (list buf)))
+                  ((symbol-function 'delete-process)
+                   (lambda (p) (push p deleted-procs)))
+                  ((symbol-function 'set-process-query-on-exit-flag)
+                   (lambda (p _f) (push p query-cleared-procs)))
+                  ((symbol-function 'claude-repl--schedule-sigkill) #'ignore))
+          (claude-repl--kill-workspace-buffers "proc-ws")
+          (should (memq proc deleted-procs))
+          (should (memq proc query-cleared-procs))
+          (should-not (buffer-live-p buf)))
+      (when (process-live-p proc) (delete-process proc))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-panels-kill-workspace-buffers/kills-modified-buffer-without-prompt ()
+  "kill-workspace-buffers kills a modified file-visiting buffer without prompting."
+  (let* ((persp-mode t)
+         (buf (get-buffer-create "*kwb-modified*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (insert "unsaved work")
+            (set-buffer-modified-p t))
+          ;; If kill-buffer-query-functions were consulted this would block
+          ;; interactively; in batch mode an unbound y-or-n-p would error.
+          (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_ws) (list 'persp)))
+                    ((symbol-function 'persp-buffers) (lambda (_p) (list buf))))
+            (claude-repl--kill-workspace-buffers "modified-ws"))
+          (should-not (buffer-live-p buf)))
+      (when (buffer-live-p buf)
+        (with-current-buffer buf (set-buffer-modified-p nil))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-panels-kill-workspace-buffers/continues-after-error ()
+  "kill-workspace-buffers keeps killing remaining buffers when one errors."
+  (let ((persp-mode t)
+        (b1 (get-buffer-create "*kwb-err-1*"))
+        (b2 (get-buffer-create "*kwb-err-2*"))
+        (b3 (get-buffer-create "*kwb-err-3*"))
+        (original-kill-buffer (symbol-function 'kill-buffer)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_ws) (list 'persp)))
+                  ((symbol-function 'persp-buffers) (lambda (_p) (list b1 b2 b3)))
+                  ((symbol-function 'kill-buffer)
+                   (lambda (b)
+                     (if (eq b b2)
+                         (error "simulated kill failure")
+                       (funcall original-kill-buffer b)))))
+          (claude-repl--kill-workspace-buffers "err-ws")
+          ;; b1 killed normally, b2 errored (still live), b3 killed after the error.
+          (should-not (buffer-live-p b1))
+          (should (buffer-live-p b2))
+          (should-not (buffer-live-p b3)))
+      (dolist (b (list b1 b2 b3))
+        (when (buffer-live-p b) (kill-buffer b))))))
+
 ;;;; ---- Tests: seed-new-env-session existing inst without session-id ----
 
 (ert-deftest claude-repl-test-panels-seed-new-env-existing-no-session-id ()
