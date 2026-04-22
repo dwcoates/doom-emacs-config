@@ -428,6 +428,39 @@
     ;; No :project-dir set -- should not error
     (claude-repl--state-save "ws")))
 
+(ert-deftest claude-repl-test-state-save-includes-priority ()
+  "state-save serializes `:priority' so badges survive restarts."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :priority "p1")
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (equal (plist-get data :priority) "p1"))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-state-save-nil-priority ()
+  "state-save writes `:priority' nil when no badge is set (no badge == nil)."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (null (plist-get data :priority)))))
+        (delete-directory tmpdir t)))))
+
 ;;;; ---- Tests: validate-ws-env ----
 
 (ert-deftest claude-repl-test-validate-ws-env-valid ()

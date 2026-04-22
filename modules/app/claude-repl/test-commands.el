@@ -742,7 +742,7 @@ Reversing the order would make the buffer sweep a no-op because
 ;;;; ---- Tests: workspace snapshot save/load ----
 
 (ert-deftest claude-repl-cmd-test-save-workspace-snapshot/writes-entries ()
-  "save-workspace-snapshot writes a (NAME . PROJECT-DIR) alist to the file."
+  "save-workspace-snapshot writes `(NAME :project-dir DIR :priority PRI)' entries."
   (claude-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "claude-snap-")))
       (unwind-protect
@@ -752,8 +752,8 @@ Reversing the order would make the buffer sweep a no-op because
             (claude-repl-save-workspace-snapshot)
             (let ((data (claude-repl--read-sexp-file snapshot-file)))
               (should (= 2 (length data)))
-              (should (equal (cdr (assoc "ws1" data)) "/tmp/ws1"))
-              (should (equal (cdr (assoc "ws2" data)) "/tmp/ws2"))))
+              (should (equal (plist-get (cdr (assoc "ws1" data)) :project-dir) "/tmp/ws1"))
+              (should (equal (plist-get (cdr (assoc "ws2" data)) :project-dir) "/tmp/ws2"))))
         (delete-file snapshot-file)))))
 
 (ert-deftest claude-repl-cmd-test-save-workspace-snapshot/skips-missing-project-dir ()
@@ -767,7 +767,7 @@ Reversing the order would make the buffer sweep a no-op because
             (claude-repl-save-workspace-snapshot)
             (let ((data (claude-repl--read-sexp-file snapshot-file)))
               (should (= 1 (length data)))
-              (should (equal (cdr (assoc "ws1" data)) "/tmp/ws1"))
+              (should (equal (plist-get (cdr (assoc "ws1" data)) :project-dir) "/tmp/ws1"))
               (should-not (assoc "ws2" data))))
         (delete-file snapshot-file)))))
 
@@ -883,6 +883,200 @@ runs would otherwise clobber the user's real snapshot file."
                  (lambda () (error "boom"))))
         (claude-repl--save-workspace-snapshot-on-quit)
         (should t)))))
+
+;;;; ---- Tests: snapshot entry normalizer ----
+
+(ert-deftest claude-repl-cmd-test-snapshot-entry-normalize/legacy-shape ()
+  "Legacy `(NAME . DIR-STRING)' entries become `(NAME :project-dir DIR)'."
+  (let ((n (claude-repl--snapshot-entry-normalize '("ws" . "/tmp/proj"))))
+    (should (equal (car n) "ws"))
+    (should (equal (plist-get (cdr n) :project-dir) "/tmp/proj"))
+    (should (null (plist-get (cdr n) :priority)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-entry-normalize/plist-shape ()
+  "Plist entries are passed through unchanged."
+  (let ((n (claude-repl--snapshot-entry-normalize
+            '("ws" :project-dir "/tmp/proj" :priority "p2"))))
+    (should (equal (car n) "ws"))
+    (should (equal (plist-get (cdr n) :project-dir) "/tmp/proj"))
+    (should (equal (plist-get (cdr n) :priority) "p2"))))
+
+;;;; ---- Tests: save-workspace-snapshot (plist format + merge) ----
+
+(ert-deftest claude-repl-cmd-test-save-workspace-snapshot/writes-plist-with-priority ()
+  "Save writes plist-per-entry including the workspace's :priority."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-")))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
+            (claude-repl--ws-put "ws-a" :priority "p1")
+            (claude-repl-save-workspace-snapshot)
+            (let* ((data (claude-repl--read-sexp-file snapshot-file))
+                   (entry (assoc "ws-a" data)))
+              (should entry)
+              (should (equal (plist-get (cdr entry) :project-dir) "/tmp/a"))
+              (should (equal (plist-get (cdr entry) :priority) "p1"))))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-save-workspace-snapshot/merges-pending-entries ()
+  "Save includes entries still in `claude-repl--pending-snapshot-workspaces'
+(workspaces loaded from snapshot but never visited this session)."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal)))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--ws-put "ws-visited" :project-dir "/tmp/visited")
+            (puthash "ws-pending"
+                     (list :project-dir "/tmp/pending" :priority "p3")
+                     claude-repl--pending-snapshot-workspaces)
+            (claude-repl-save-workspace-snapshot)
+            (let ((data (claude-repl--read-sexp-file snapshot-file)))
+              (should (assoc "ws-visited" data))
+              (should (assoc "ws-pending" data))
+              (should (equal (plist-get (cdr (assoc "ws-pending" data)) :priority)
+                             "p3"))))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-save-workspace-snapshot/hash-wins-over-pending ()
+  "When a workspace appears in both the live hash and the pending set, the
+live hash value is written (user visited it — pending data is stale)."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal)))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--ws-put "ws" :project-dir "/tmp/live")
+            (claude-repl--ws-put "ws" :priority "p1")
+            (puthash "ws"
+                     (list :project-dir "/tmp/stale" :priority "p3")
+                     claude-repl--pending-snapshot-workspaces)
+            (claude-repl-save-workspace-snapshot)
+            (let ((entry (assoc "ws" (claude-repl--read-sexp-file snapshot-file))))
+              (should (equal (plist-get (cdr entry) :project-dir) "/tmp/live"))
+              (should (equal (plist-get (cdr entry) :priority) "p1"))))
+        (delete-file snapshot-file)))))
+
+;;;; ---- Tests: load-workspace-snapshot (back-compat + hydration + pending) ----
+
+(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/reads-legacy-format ()
+  "Loader still accepts the legacy `(NAME . DIR-STRING)' shape."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (real-dir (make-temp-file "claude-proj-" t))
+          (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal))
+          (switched nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file `(("ws-legacy" . ,real-dir)))
+            (cl-letf (((symbol-function '+dwc/switch-to-project)
+                       (lambda (project) (push project switched))))
+              (claude-repl-load-workspace-snapshot)
+              (should (member real-dir switched))
+              (should (equal (claude-repl--ws-get "ws-legacy" :project-dir) real-dir))
+              (should (gethash "ws-legacy" claude-repl--pending-snapshot-workspaces))))
+        (delete-file snapshot-file)
+        (delete-directory real-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/hydrates-priority ()
+  "Loader hydrates `:priority' into the workspace plist so badges render
+immediately, before claude starts."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (real-dir (make-temp-file "claude-proj-" t))
+          (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal)))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file
+             snapshot-file
+             `(("ws-pri" :project-dir ,real-dir :priority "p1")))
+            (cl-letf (((symbol-function '+dwc/switch-to-project)
+                       (lambda (_project) nil)))
+              (claude-repl-load-workspace-snapshot)
+              (should (equal (claude-repl--ws-get "ws-pri" :priority) "p1"))))
+        (delete-file snapshot-file)
+        (delete-directory real-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/sets-loading-flag ()
+  "During the loader loop, `claude-repl--loading-snapshot-p' is bound `t'
+so the lazy-start hook skips firing for each restored workspace."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (real-dir (make-temp-file "claude-proj-" t))
+          (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal))
+          (observed-flag nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file
+             snapshot-file `(("ws" :project-dir ,real-dir)))
+            (cl-letf (((symbol-function '+dwc/switch-to-project)
+                       (lambda (_project)
+                         (setq observed-flag claude-repl--loading-snapshot-p))))
+              (claude-repl-load-workspace-snapshot)
+              (should (eq observed-flag t))
+              (should-not claude-repl--loading-snapshot-p)))
+        (delete-file snapshot-file)
+        (delete-directory real-dir t)))))
+
+;;;; ---- Tests: lazy-start hook (maybe-start-on-activate) ----
+
+(ert-deftest claude-repl-cmd-test-maybe-start-on-activate/skips-during-loading ()
+  "Hook is a no-op while `claude-repl--loading-snapshot-p' is t."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--loading-snapshot-p t)
+          (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal))
+          (started nil))
+      (puthash "test-ws" (list :project-dir "/tmp")
+               claude-repl--pending-snapshot-workspaces)
+      (cl-letf (((symbol-function 'claude-repl--initialize-claude)
+                 (lambda (&rest _) (setq started t)))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil)))
+        (claude-repl--maybe-start-on-activate)
+        (should-not started)
+        (should (gethash "test-ws" claude-repl--pending-snapshot-workspaces))))))
+
+(ert-deftest claude-repl-cmd-test-maybe-start-on-activate/starts-pending-workspace ()
+  "Hook starts claude for a pending workspace and removes it from the set."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--loading-snapshot-p nil)
+          (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal))
+          (started-for nil))
+      (puthash "test-ws" (list :project-dir "/tmp")
+               claude-repl--pending-snapshot-workspaces)
+      (cl-letf (((symbol-function 'claude-repl--initialize-claude)
+                 (lambda (ws &rest _) (setq started-for ws)))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil)))
+        (claude-repl--maybe-start-on-activate)
+        (should (equal started-for "test-ws"))
+        (should-not (gethash "test-ws" claude-repl--pending-snapshot-workspaces))))))
+
+(ert-deftest claude-repl-cmd-test-maybe-start-on-activate/skips-unknown-workspace ()
+  "Hook does not auto-start workspaces that weren't restored from snapshot."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--loading-snapshot-p nil)
+          (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal))
+          (started nil))
+      (cl-letf (((symbol-function 'claude-repl--initialize-claude)
+                 (lambda (&rest _) (setq started t)))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil)))
+        (claude-repl--maybe-start-on-activate)
+        (should-not started)))))
+
+(ert-deftest claude-repl-cmd-test-maybe-start-on-activate/skips-if-already-running ()
+  "Hook removes a pending entry but doesn't re-start claude if it's live."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--loading-snapshot-p nil)
+          (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal))
+          (started nil))
+      (puthash "test-ws" (list :project-dir "/tmp")
+               claude-repl--pending-snapshot-workspaces)
+      (cl-letf (((symbol-function 'claude-repl--initialize-claude)
+                 (lambda (&rest _) (setq started t)))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) t)))
+        (claude-repl--maybe-start-on-activate)
+        (should-not started)
+        (should-not (gethash "test-ws" claude-repl--pending-snapshot-workspaces))))))
 
 (provide 'test-commands)
 

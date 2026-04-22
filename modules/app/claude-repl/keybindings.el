@@ -115,12 +115,14 @@ This lets Claude CLI handle paste natively, including images."
 ;; modifying that file.
 (defun claude-repl-set-priority (priority)
   "Set the priority badge for the current workspace.
-PRIORITY is one of \"p05\", \"p1\", \"p2\", \"p3\", or \"\" to clear."
+PRIORITY is one of \"p05\", \"p1\", \"p2\", \"p3\", or \"\" to clear.
+Persists through `claude-repl--state-save' so the badge survives restarts."
   (interactive
    (list (completing-read "Priority: " (append claude-repl-priority-levels '("")) nil t)))
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "set-priority: ws=%s priority=%s" ws (if (string-empty-p priority) "(cleared)" priority))
     (claude-repl--ws-put ws :priority (if (string-empty-p priority) nil priority))
+    (claude-repl--state-save ws)
     (force-mode-line-update t)
     (message "Workspace '%s' priority: %s" ws (if (string-empty-p priority) "cleared" priority))))
 

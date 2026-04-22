@@ -191,6 +191,12 @@ state-save.  Callers already guard on `claude-repl--claude-running-p'."
                          (or (and saved (plist-get saved :active-env))
                              active-env-hint
                              :bare-metal))
+    ;; Priority: prefer the saved value, fall back to whatever is already in
+    ;; the plist (e.g., `claude-repl-set-priority' called before any
+    ;; state-save happened for this workspace).
+    (claude-repl--ws-put ws :priority
+                         (or (and saved (plist-get saved :priority))
+                             (claude-repl--ws-get ws :priority)))
     (dolist (key claude-repl--environment-keys)
       (claude-repl--ws-put ws key
                            (claude-repl--make-instantiation-from-plist

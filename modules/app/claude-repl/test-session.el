@@ -893,6 +893,36 @@ where fresh-ws-env wrote :active-env without :project-dir."
                            "bm-saved")))
         (delete-directory tmpdir t)))))
 
+(ert-deftest claude-repl-test-initialize-ws-env-restores-priority-from-state ()
+  "initialize-ws-env hydrates `:priority' from the saved state file."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-pri-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (expand-file-name ".claude-repl-state"
+                               (claude-repl--path-canonical tmpdir))
+             `(:project-dir ,(claude-repl--path-canonical tmpdir)
+               :active-env :bare-metal
+               :priority "p1"
+               :bare-metal nil
+               :sandbox nil))
+            (claude-repl--initialize-ws-env "ws1" tmpdir)
+            (should (equal (claude-repl--ws-get "ws1" :priority) "p1")))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-initialize-ws-env-priority-fallback-to-plist ()
+  "With no saved priority, existing plist `:priority' is preserved (covers
+`claude-repl-set-priority' running before any state-save)."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-pri-fb-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :priority "p2")
+            (claude-repl--initialize-ws-env "ws1" tmpdir)
+            (should (equal (claude-repl--ws-get "ws1" :priority) "p2")))
+        (delete-directory tmpdir t)))))
+
 ;;;; ---- Tests: prompt-sandbox-build ----
 
 (ert-deftest claude-repl-test-prompt-sandbox-build-yes-compiles-and-errors ()

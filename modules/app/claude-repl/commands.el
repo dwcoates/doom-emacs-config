@@ -431,40 +431,110 @@ Defaults to `.workspace-snapshot.el' in the claude-repl module directory."
   :type 'file
   :group 'claude-repl)
 
+(defvar claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal)
+  "Workspaces restored from snapshot but not yet visited this session.
+Keys are workspace names, values are plists (at least `:project-dir',
+optionally `:priority').  The lazy-start hook consumes from this set
+on `persp-activated-functions' and starts claude for matching workspaces.
+Entries remain here until the user actually switches to them, so
+`claude-repl-save-workspace-snapshot' can still record them at quit
+time even if they were never visited.")
+
+(defvar claude-repl--loading-snapshot-p nil
+  "Non-nil while `claude-repl-load-workspace-snapshot' is iterating entries.
+The lazy-start hook checks this and skips firing during the loader loop
+— otherwise each `+dwc/switch-to-project' call would eager-start claude
+and defeat lazy restore.")
+
+(defun claude-repl--snapshot-entry-normalize (entry)
+  "Normalize a snapshot ENTRY to (NAME . PLIST).
+Accepts the legacy `(NAME . DIR-STRING)' shape and the current
+`(NAME :project-dir DIR :priority PRI)' plist shape."
+  (let ((name (car entry))
+        (payload (cdr entry)))
+    (cons name
+          (cond
+           ((stringp payload) (list :project-dir payload))
+           ((listp payload) payload)
+           (t (error "claude-repl: malformed snapshot entry: %S" entry))))))
+
 (defun claude-repl-save-workspace-snapshot ()
   "Save the current set of claude-repl workspaces to a hidden file.
-Writes a list of (NAME . PROJECT-DIR) pairs from
-`claude-repl--workspaces' to `claude-repl-workspace-snapshot-file'.
-Workspaces without a registered :project-dir are skipped."
+Writes a list of (NAME :project-dir DIR :priority PRI) entries.  Sources:
+workspaces registered in `claude-repl--workspaces' with a `:project-dir',
+merged with any entries still pending in
+`claude-repl--pending-snapshot-workspaces' (restored from snapshot but
+never visited — included so unvisited workspaces aren't dropped)."
   (interactive)
-  (let ((snapshot nil))
+  (let ((entries (make-hash-table :test 'equal)))
+    ;; Visited workspaces — the live hash is the source of truth.
     (maphash (lambda (ws _plist)
                (when-let ((dir (claude-repl--ws-get ws :project-dir)))
-                 (push (cons ws dir) snapshot)))
+                 (puthash ws
+                          (list :project-dir dir
+                                :priority (claude-repl--ws-get ws :priority))
+                          entries)))
              claude-repl--workspaces)
-    (claude-repl--write-sexp-file claude-repl-workspace-snapshot-file snapshot)
-    (message "Saved %d workspace(s) to %s"
-             (length snapshot) claude-repl-workspace-snapshot-file)))
+    ;; Pending (unvisited) entries fill in anything still outstanding.
+    (maphash (lambda (ws plist)
+               (unless (gethash ws entries)
+                 (puthash ws plist entries)))
+             claude-repl--pending-snapshot-workspaces)
+    (let (snapshot)
+      (maphash (lambda (ws plist) (push (cons ws plist) snapshot))
+               entries)
+      (claude-repl--write-sexp-file claude-repl-workspace-snapshot-file snapshot)
+      (message "Saved %d workspace(s) to %s"
+               (length snapshot) claude-repl-workspace-snapshot-file))))
 
 (defun claude-repl-load-workspace-snapshot ()
   "Load workspaces from `claude-repl-workspace-snapshot-file'.
-For each saved (NAME . PROJECT-DIR) entry, calls `+dwc/switch-to-project'
-with the directory.  Entries whose directory no longer exists are skipped."
+For each entry, calls `+dwc/switch-to-project' to create/switch to the
+project's persp workspace and hydrates `:project-dir' and `:priority'
+into `claude-repl--workspaces' so the tabline paints the priority badge
+immediately.  Entries whose directory no longer exists are skipped.
+Claude itself is not started here — the workspace is added to
+`claude-repl--pending-snapshot-workspaces' and the lazy-start hook on
+`persp-activated-functions' starts claude on first visit."
   (interactive)
   (let ((snapshot (claude-repl--read-sexp-file-if-exists
                    claude-repl-workspace-snapshot-file)))
     (unless snapshot
       (user-error "No workspace snapshot at %s" claude-repl-workspace-snapshot-file))
     (let ((loaded 0)
-          (skipped 0))
-      (dolist (entry snapshot)
-        (let ((dir (cdr entry)))
+          (skipped 0)
+          (claude-repl--loading-snapshot-p t))
+      (dolist (raw snapshot)
+        (let* ((entry (claude-repl--snapshot-entry-normalize raw))
+               (ws (car entry))
+               (plist (cdr entry))
+               (dir (plist-get plist :project-dir))
+               (priority (plist-get plist :priority)))
           (if (and dir (file-directory-p dir))
               (progn
                 (+dwc/switch-to-project dir)
+                (claude-repl--ws-put ws :project-dir dir)
+                (when priority
+                  (claude-repl--ws-put ws :priority priority))
+                (puthash ws plist claude-repl--pending-snapshot-workspaces)
                 (cl-incf loaded))
             (cl-incf skipped))))
+      (force-mode-line-update t)
       (message "Loaded %d workspace(s), skipped %d" loaded skipped))))
+
+(defun claude-repl--maybe-start-on-activate (&rest _)
+  "Lazy-start hook for `persp-activated-functions'.
+Starts claude for the just-activated workspace iff it was restored from
+snapshot (still in `claude-repl--pending-snapshot-workspaces') and
+claude isn't already running.  Skipped during snapshot loading so the
+loader's own `+dwc/switch-to-project' calls don't eager-start claude."
+  (unless claude-repl--loading-snapshot-p
+    (let ((ws (+workspace-current-name)))
+      (when (and ws (gethash ws claude-repl--pending-snapshot-workspaces))
+        (remhash ws claude-repl--pending-snapshot-workspaces)
+        (unless (claude-repl--claude-running-p ws)
+          (claude-repl--log ws "maybe-start-on-activate: starting ws=%s" ws)
+          (claude-repl--initialize-claude ws))))))
 
 (defun claude-repl--load-workspace-snapshot-on-startup ()
   "Restore the workspace snapshot silently at Emacs startup.

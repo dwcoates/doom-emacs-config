@@ -61,9 +61,12 @@
 
 ;; Workspace snapshot restore (startup) and save (quit).  Replaces
 ;; persp-mode's own auto-save/auto-resume, which is disabled in the top-level
-;; config.el.
+;; config.el.  Lazy start via `persp-activated-functions' boots claude on
+;; first visit to each restored workspace.
 (add-hook 'emacs-startup-hook #'claude-repl--load-workspace-snapshot-on-startup)
 (add-hook 'kill-emacs-hook #'claude-repl--save-workspace-snapshot-on-quit)
+(with-eval-after-load 'persp-mode
+  (add-hook 'persp-activated-functions #'claude-repl--maybe-start-on-activate))
 
 (provide 'claude-repl)
 ;;; config.el ends here

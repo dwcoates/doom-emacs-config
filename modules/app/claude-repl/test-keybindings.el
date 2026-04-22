@@ -1023,4 +1023,29 @@ value and writes :repl-state :dead."
       (claude-repl-debug/cancel-timers)
       (should (null claude-repl--timers)))))
 
+(ert-deftest claude-repl-test-set-priority-persists-to-state ()
+  "set-priority calls state-save so the badge survives restarts."
+  (claude-repl-test--with-clean-state
+    (let ((saved-ws nil))
+      (cl-letf (((symbol-function 'claude-repl--state-save)
+                 (lambda (ws) (setq saved-ws ws)))
+                ((symbol-function 'force-mode-line-update) (lambda (&rest _) nil))
+                ((symbol-function 'message) (lambda (&rest _) nil)))
+        (claude-repl-set-priority "p1")
+        (should (equal (claude-repl--ws-get (+workspace-current-name) :priority) "p1"))
+        (should (equal saved-ws (+workspace-current-name)))))))
+
+(ert-deftest claude-repl-test-set-priority-clears-and-persists ()
+  "Clearing priority (empty string) nils the plist field and still persists."
+  (claude-repl-test--with-clean-state
+    (let ((saved-ws nil))
+      (claude-repl--ws-put (+workspace-current-name) :priority "p2")
+      (cl-letf (((symbol-function 'claude-repl--state-save)
+                 (lambda (ws) (setq saved-ws ws)))
+                ((symbol-function 'force-mode-line-update) (lambda (&rest _) nil))
+                ((symbol-function 'message) (lambda (&rest _) nil)))
+        (claude-repl-set-priority "")
+        (should (null (claude-repl--ws-get (+workspace-current-name) :priority)))
+        (should (equal saved-ws (+workspace-current-name)))))))
+
 ;;; test-keybindings.el ends here

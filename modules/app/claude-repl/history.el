@@ -173,7 +173,8 @@ Written to .claude-repl-state in the project root (alongside
     (if (null file)
         (claude-repl--log ws "state-save: no :project-dir for ws=%s, skipping" ws)
       (let ((state (append `(:project-dir ,root
-                              :active-env ,(claude-repl--ws-get ws :active-env))
+                              :active-env ,(claude-repl--ws-get ws :active-env)
+                              :priority ,(claude-repl--ws-get ws :priority))
                            (claude-repl--collect-env-state ws))))
         (claude-repl--with-error-logging "state-save"
           (claude-repl--write-sexp-file file state)

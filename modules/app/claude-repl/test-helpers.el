@@ -220,6 +220,8 @@
   "Execute BODY with fresh claude-repl global state."
   (declare (indent 0))
   `(let ((claude-repl--workspaces (make-hash-table :test 'equal))
+         (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal))
+         (claude-repl--loading-snapshot-p nil)
          (claude-repl--fullscreen-config nil)
          (claude-repl--sync-timer nil)
          (claude-repl--cursor-reset-timer nil)
