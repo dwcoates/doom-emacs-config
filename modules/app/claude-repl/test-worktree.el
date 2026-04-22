@@ -1194,13 +1194,12 @@ Returns the full SHA of the new commit."
       (claude-repl--ws-put "source-ws" :active-env :bare-metal)
       (claude-repl--ws-put "source-ws" :bare-metal inst)
       (let ((captured-args nil))
-        (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
-                   (lambda () "/fake/root/"))
-                  ((symbol-function 'run-with-timer)
+        (cl-letf (((symbol-function 'run-with-timer)
                    (lambda (_delay _repeat fn &rest args)
                      (setq captured-args args))))
           (claude-repl--handle-create-command
-           '((type . "create") (name . "DWC/new-ws") (fork_from . "source-ws"))
+           '((type . "create") (name . "DWC/new-ws")
+             (git_root . "/fake/root") (fork_from . "source-ws"))
            0)
           ;; captured-args = (git-root name prompt priority fork-session-id)
           (should (equal (nth 0 captured-args) "/fake/root/"))
@@ -1211,13 +1210,11 @@ Returns the full SHA of the new commit."
   "handle-create-command without fork_from should pass nil fork-session-id."
   (claude-repl-test--with-clean-state
     (let ((captured-args nil))
-      (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
-                 (lambda () "/fake/root/"))
-                ((symbol-function 'run-with-timer)
+      (cl-letf (((symbol-function 'run-with-timer)
                  (lambda (_delay _repeat fn &rest args)
                    (setq captured-args args))))
         (claude-repl--handle-create-command
-         '((type . "create") (name . "DWC/new-ws"))
+         '((type . "create") (name . "DWC/new-ws") (git_root . "/fake/root"))
          0)
         ;; captured-args = (git-root name prompt priority fork-session-id)
         (should (equal (nth 0 captured-args) "/fake/root/"))
@@ -1251,6 +1248,73 @@ Returns the full SHA of the new commit."
          '((type . "create") (name . "DWC/new-ws") (fork_from . "nonexistent"))
          0)
         (should-not timer-scheduled)))))
+
+(ert-deftest claude-repl-test-handle-create-command-uses-explicit-git-root ()
+  "handle-create-command with git_root in cmd should use it verbatim and skip ambient resolution."
+  (claude-repl-test--with-clean-state
+    (let ((captured-args nil)
+          (resolve-calls 0))
+      (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+                 (lambda () (cl-incf resolve-calls) "/ambient/root/"))
+                ((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat _fn &rest args)
+                   (setq captured-args args))))
+        (claude-repl--handle-create-command
+         '((type . "create") (name . "DWC/new-ws") (git_root . "/explicit/root"))
+         0)
+        ;; captured-args = (git-root name prompt priority fork-session-id)
+        (should (equal (nth 0 captured-args) "/explicit/root/"))
+        (should (equal resolve-calls 0))))))
+
+(ert-deftest claude-repl-test-handle-create-command-expands-tilde-in-git-root ()
+  "handle-create-command should expand `~' in an explicit git_root before dispatch."
+  (claude-repl-test--with-clean-state
+    (let ((captured-args nil)
+          (home (expand-file-name "~")))
+      (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+                 (lambda () "/ambient/root/"))
+                ((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat _fn &rest args)
+                   (setq captured-args args))))
+        (claude-repl--handle-create-command
+         '((type . "create") (name . "DWC/new-ws") (git_root . "~/some/repo"))
+         0)
+        (should (equal (nth 0 captured-args)
+                       (file-name-as-directory (expand-file-name "~/some/repo"))))
+        ;; Sanity: the expanded value is rooted at HOME, not the literal tilde.
+        (should (string-prefix-p home (nth 0 captured-args)))))))
+
+(ert-deftest claude-repl-test-handle-create-command-empty-git-root-refuses ()
+  "handle-create-command with an empty git_root string must refuse — no ambient fallback."
+  (claude-repl-test--with-clean-state
+    (let ((timer-scheduled nil)
+          (resolve-calls 0))
+      (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+                 (lambda () (cl-incf resolve-calls) "/ambient/root/"))
+                ((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat _fn &rest _args)
+                   (setq timer-scheduled t))))
+        (claude-repl--handle-create-command
+         '((type . "create") (name . "DWC/new-ws") (git_root . ""))
+         0)
+        (should-not timer-scheduled)
+        (should (equal resolve-calls 0))))))
+
+(ert-deftest claude-repl-test-handle-create-command-missing-git-root-refuses ()
+  "handle-create-command with no git_root key must refuse — no ambient fallback."
+  (claude-repl-test--with-clean-state
+    (let ((timer-scheduled nil)
+          (resolve-calls 0))
+      (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+                 (lambda () (cl-incf resolve-calls) "/ambient/root/"))
+                ((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat _fn &rest _args)
+                   (setq timer-scheduled t))))
+        (claude-repl--handle-create-command
+         '((type . "create") (name . "DWC/new-ws"))
+         0)
+        (should-not timer-scheduled)
+        (should (equal resolve-calls 0))))))
 
 ;;;; ---- Tests: create-worktree-workspace (interactive) ----
 

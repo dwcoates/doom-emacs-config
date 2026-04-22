@@ -597,11 +597,17 @@ Prevents concurrent Claude startups from corrupting ~/.claude.json."
 When CMD contains a \"fork_from\" field, resolves it to a session ID so the
 new workspace forks from the source workspace's Claude session and HEAD.
 If fork_from is present but resolution fails, the workspace is NOT created
-and an error message is shown to the user."
+and an error message is shown to the user.
+
+CMD MUST contain a non-empty \"git_root\" field naming the target repository;
+it is used verbatim after `expand-file-name'.  If \"git_root\" is missing or
+empty, the workspace is NOT created — callers must emit git_root explicitly
+rather than relying on the ambient Emacs context."
   (let* ((name (alist-get 'name cmd))
          (prompt (alist-get 'prompt cmd nil))
          (priority (alist-get 'priority cmd nil))
          (fork-from (alist-get 'fork_from cmd nil))
+         (cmd-git-root (alist-get 'git_root cmd nil))
          (fork-session-id
           (condition-case err
               (claude-repl--resolve-fork-session-id fork-from)
@@ -610,18 +616,24 @@ and an error message is shown to the user."
                               name (error-message-string err))
              (message "[claude-repl] ERROR: cannot create workspace '%s' — %s" name (error-message-string err))
              nil))))
-    ;; If fork_from was requested but resolution failed, refuse to create.
-    (if (and fork-from (null fork-session-id))
-        (claude-repl--log name "handle-create-command: SKIPPED workspace '%s' (fork_from=%s failed, refusing silent fallback)"
-                          name fork-from)
-      ;; Capture git-root at enqueue time so the timer fires with the user's
-      ;; current context, not whatever workspace is active at fire time.
-      (let ((git-root (claude-repl--resolve-current-git-root)))
+    (cond
+     ;; If fork_from was requested but resolution failed, refuse to create.
+     ((and fork-from (null fork-session-id))
+      (claude-repl--log name "handle-create-command: SKIPPED workspace '%s' (fork_from=%s failed, refusing silent fallback)"
+                        name fork-from))
+     ;; git_root is mandatory — no ambient fallback.
+     ((or (null cmd-git-root) (string-empty-p cmd-git-root))
+      (claude-repl--log name "handle-create-command: SKIPPED workspace '%s' (missing/empty git_root, refusing silent fallback)"
+                        name)
+      (message "[claude-repl] ERROR: cannot create workspace '%s' — git_root is required and must be non-empty"
+               name))
+     (t
+      (let ((git-root (file-name-as-directory (expand-file-name cmd-git-root))))
         (claude-repl--log name "workspace-commands-file create: %s (delay %.1fs) priority=%s fork-session-id=%s git-root=%s"
                           name delay priority fork-session-id git-root)
         (run-with-timer delay nil
                         #'claude-repl--create-worktree-from-command
-                        git-root name prompt priority fork-session-id)))))
+                        git-root name prompt priority fork-session-id))))))
 
 (defun claude-repl--handle-prompt-command (cmd)
   "Handle a \"prompt\" workspace command CMD."
