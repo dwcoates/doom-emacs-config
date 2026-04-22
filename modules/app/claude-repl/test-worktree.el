@@ -1344,6 +1344,15 @@ Returns the full SHA of the new commit."
         (claude-repl-create-worktree-workspace '(4))
         (should (equal captured-base "origin/master"))))))
 
+(ert-deftest claude-repl-test-create-worktree-workspace-from-origin-master-delegates-with-prefix ()
+  "`SPC TAB N' wrapper delegates to the main command with a `(4)' prefix arg
+so the underlying command selects the origin/master base."
+  (let ((captured-arg :unset))
+    (cl-letf (((symbol-function 'claude-repl-create-worktree-workspace)
+               (lambda (arg) (setq captured-arg arg))))
+      (claude-repl-create-worktree-workspace-from-origin-master)
+      (should (equal captured-arg '(4))))))
+
 (ert-deftest claude-repl-test-create-worktree-workspace-prefixes-preemptive-prompt ()
   "When a preemptive prompt is given, it is prefixed with the autonomous instruction."
   (claude-repl-test--with-clean-state

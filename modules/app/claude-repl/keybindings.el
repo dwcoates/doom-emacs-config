@@ -406,8 +406,7 @@ Reports comprehensive diagnostics."
 (map! :leader
       (:prefix "TAB"
        :desc "New worktree ws (from current)" "n" #'claude-repl-create-worktree-workspace
-       :desc "New worktree ws (from origin/master)" "N"
-       (lambda () (interactive) (claude-repl-create-worktree-workspace '(4)))
+       :desc "New worktree ws (from origin/master)" "N" #'claude-repl-create-worktree-workspace-from-origin-master
        :desc "Fork worktree ws + fork Claude session" "f" #'claude-repl-fork-worktree-workspace
        :desc "Merge workspace into current" "m" #'+dwc/workspace-merge
        :desc "Merge current workspace into master" "M" #'+dwc/workspace-merge-current-into-master

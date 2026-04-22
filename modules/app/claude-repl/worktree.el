@@ -445,6 +445,14 @@ Git operations (fetch, worktree add) run asynchronously so Emacs is not blocked.
      (unless has-preemptive #'claude-repl--worktree-creation-switch-callback)
      nil base-commit)))
 
+(defun claude-repl-create-worktree-workspace-from-origin-master ()
+  "Create a new worktree workspace branched from `origin/master'.
+Thin wrapper around `claude-repl-create-worktree-workspace' that
+forces the origin/master base so a keybinding can invoke it directly
+without synthesizing a prefix argument."
+  (interactive)
+  (claude-repl-create-worktree-workspace '(4)))
+
 (defun claude-repl-fork-worktree-workspace (arg)
   "Fork the current Claude session into a new worktree workspace.
 Like `claude-repl-create-worktree-workspace', but branches from HEAD (not
