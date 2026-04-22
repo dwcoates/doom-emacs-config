@@ -527,9 +527,13 @@ Claude itself is not started here — the workspace is added to
 Starts claude for the just-activated workspace iff it was restored from
 snapshot (still in `claude-repl--pending-snapshot-workspaces') and
 claude isn't already running.  Skipped during snapshot loading so the
-loader's own `+dwc/switch-to-project' calls don't eager-start claude."
-  (unless claude-repl--loading-snapshot-p
-    (let ((ws (+workspace-current-name)))
+loader's own `+dwc/switch-to-project' calls don't eager-start claude.
+No-op if the Doom workspace API isn't fboundp yet — the hook may be
+invoked early in persp-mode activation before Doom's `+workspace-*'
+autoloads are in place."
+  (when (and (not claude-repl--loading-snapshot-p)
+             (fboundp '+workspace-current-name))
+    (let ((ws (ignore-errors (+workspace-current-name))))
       (when (and ws (gethash ws claude-repl--pending-snapshot-workspaces))
         (remhash ws claude-repl--pending-snapshot-workspaces)
         (unless (claude-repl--claude-running-p ws)

@@ -59,11 +59,15 @@
         (error "[claude-repl] FATAL: core.el failed to load — module is non-functional")))
   (message "[claude-repl] Loaded Claude-Repl package."))
 
-;; Workspace snapshot restore (startup) and save (quit).  Replaces
-;; persp-mode's own auto-save/auto-resume, which is disabled in the top-level
-;; config.el.  Lazy start via `persp-activated-functions' boots claude on
-;; first visit to each restored workspace.
-(add-hook 'emacs-startup-hook #'claude-repl--load-workspace-snapshot-on-startup)
+;; Workspace snapshot save (quit) and lazy claude start (on first visit to
+;; a restored workspace).  The restore side is NOT wired to
+;; `emacs-startup-hook' — calling `+dwc/switch-to-project' 10x at startup
+;; hits `magit-status' per project and can hang the UI / race
+;; persp-mode's initialization (causing void-function errors on
+;; `safe-persp-name').  Users run `M-x claude-repl-load-workspace-snapshot'
+;; manually once Emacs is fully up.  TODO: re-enable auto-restore behind a
+;; safer entry point (e.g. `doom-init-ui-hook' + idle timer, with a
+;; lighter persp-creation path that skips magit/recent-file openings).
 (add-hook 'kill-emacs-hook #'claude-repl--save-workspace-snapshot-on-quit)
 (with-eval-after-load 'persp-mode
   (add-hook 'persp-activated-functions #'claude-repl--maybe-start-on-activate))
