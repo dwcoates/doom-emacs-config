@@ -1332,7 +1332,7 @@ Returns the full SHA of the new commit."
         (should (equal captured-base "HEAD"))))))
 
 (ert-deftest claude-repl-test-create-worktree-workspace-c-u-base-is-origin-master ()
-  "`C-u SPC TAB n' branches off origin/master."
+  "`SPC TAB N' (C-u prefix) branches off origin/master."
   (claude-repl-test--with-clean-state
     (let ((captured-base nil))
       (cl-letf (((symbol-function 'read-string)

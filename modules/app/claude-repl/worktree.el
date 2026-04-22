@@ -351,7 +351,7 @@ BASE-COMMIT is the git ref the new branch is created from.  When nil,
 defaults to \"HEAD\" if FORK-SESSION-ID is set (forks track the live
 session's tip) and \"origin/master\" otherwise.  The interactive entry
 point passes \"HEAD\" explicitly so `SPC TAB n' always branches off the
-current worktree; `C-u SPC TAB n' passes \"origin/master\".
+current worktree; `SPC TAB N' passes \"origin/master\".
 
 The fetch step runs only when BASE-COMMIT has an \"origin/\" prefix
 \(i.e. the new branch needs an up-to-date remote ref).
