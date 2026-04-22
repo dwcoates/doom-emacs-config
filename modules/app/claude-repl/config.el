@@ -59,5 +59,11 @@
         (error "[claude-repl] FATAL: core.el failed to load — module is non-functional")))
   (message "[claude-repl] Loaded Claude-Repl package."))
 
+;; Workspace snapshot restore (startup) and save (quit).  Replaces
+;; persp-mode's own auto-save/auto-resume, which is disabled in the top-level
+;; config.el.
+(add-hook 'emacs-startup-hook #'claude-repl--load-workspace-snapshot-on-startup)
+(add-hook 'kill-emacs-hook #'claude-repl--save-workspace-snapshot-on-quit)
+
 (provide 'claude-repl)
 ;;; config.el ends here

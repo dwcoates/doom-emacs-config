@@ -817,6 +817,73 @@ Reversing the order would make the buffer sweep a no-op because
         (delete-file snapshot-file)
         (delete-directory real-dir t)))))
 
+;;;; ---- Tests: snapshot startup/quit wrappers ----
+
+(ert-deftest claude-repl-cmd-test-load-snapshot-on-startup/no-op-when-file-absent ()
+  "Startup wrapper returns quietly when the snapshot file does not exist."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-workspace-snapshot-file "/nonexistent/claude-snap.el")
+          (called nil))
+      (cl-letf (((symbol-function 'claude-repl-load-workspace-snapshot)
+                 (lambda () (setq called t))))
+        (claude-repl--load-workspace-snapshot-on-startup)
+        (should-not called)))))
+
+(ert-deftest claude-repl-cmd-test-load-snapshot-on-startup/invokes-load-when-file-present ()
+  "Startup wrapper calls the real loader when the snapshot file exists."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (called nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (cl-letf (((symbol-function 'claude-repl-load-workspace-snapshot)
+                       (lambda () (setq called t))))
+              (claude-repl--load-workspace-snapshot-on-startup)
+              (should called)))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-load-snapshot-on-startup/swallows-errors ()
+  "Startup wrapper must not propagate errors from the loader."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-")))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (cl-letf (((symbol-function 'claude-repl-load-workspace-snapshot)
+                       (lambda () (error "boom"))))
+              (claude-repl--load-workspace-snapshot-on-startup)
+              (should t)))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-save-snapshot-on-quit/invokes-save ()
+  "Quit wrapper calls the real save function in an interactive session."
+  (claude-repl-test--with-clean-state
+    (let ((called nil)
+          (noninteractive nil))
+      (cl-letf (((symbol-function 'claude-repl-save-workspace-snapshot)
+                 (lambda () (setq called t))))
+        (claude-repl--save-workspace-snapshot-on-quit)
+        (should called)))))
+
+(ert-deftest claude-repl-cmd-test-save-snapshot-on-quit/skipped-in-batch-mode ()
+  "Quit wrapper must not run in batch/noninteractive sessions — batch ERT
+runs would otherwise clobber the user's real snapshot file."
+  (claude-repl-test--with-clean-state
+    (let ((called nil)
+          (noninteractive t))
+      (cl-letf (((symbol-function 'claude-repl-save-workspace-snapshot)
+                 (lambda () (setq called t))))
+        (claude-repl--save-workspace-snapshot-on-quit)
+        (should-not called)))))
+
+(ert-deftest claude-repl-cmd-test-save-snapshot-on-quit/swallows-errors ()
+  "Quit wrapper must not propagate errors out of `kill-emacs-hook'."
+  (claude-repl-test--with-clean-state
+    (let ((noninteractive nil))
+      (cl-letf (((symbol-function 'claude-repl-save-workspace-snapshot)
+                 (lambda () (error "boom"))))
+        (claude-repl--save-workspace-snapshot-on-quit)
+        (should t)))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here

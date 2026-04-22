@@ -387,10 +387,8 @@
 
 ;; Workspace configuration
 (after! persp-mode
-  ;; Auto-save workspaces when Emacs is killed (e.g. SPC q Q)
-  (setq persp-auto-save-opt 1)
-  ;; Auto-restore workspaces from last session on startup
-  (setq persp-auto-resume-time 0.1)
+  ;; persp-mode's own session persistence is disabled; claude-repl manages
+  ;; workspace save/restore via its snapshot mechanism (see modules/app/claude-repl/config.el).
   ;; Never ask for confirmation when killing a buffer not in the current workspace
   (setq persp-kill-foreign-buffer-behaviour 'kill)
   ;; Only show buffers belonging to the current workspace in buffer lists (SPC ,)

@@ -465,3 +465,22 @@ with the directory.  Entries whose directory no longer exists are skipped."
                 (cl-incf loaded))
             (cl-incf skipped))))
       (message "Loaded %d workspace(s), skipped %d" loaded skipped))))
+
+(defun claude-repl--load-workspace-snapshot-on-startup ()
+  "Restore the workspace snapshot silently at Emacs startup.
+Does nothing if the snapshot file is absent.  Errors are logged but
+never propagated, so a corrupt snapshot can't block startup."
+  (when (file-exists-p claude-repl-workspace-snapshot-file)
+    (condition-case err
+        (claude-repl-load-workspace-snapshot)
+      (error (message "[claude-repl] snapshot load failed: %S" err)))))
+
+(defun claude-repl--save-workspace-snapshot-on-quit ()
+  "Save the workspace snapshot when Emacs quits.
+Skipped in `noninteractive' (batch) sessions so ERT test runs don't
+clobber the user's real snapshot.  Errors are caught so a snapshot-write
+failure never blocks quit."
+  (unless noninteractive
+    (condition-case err
+        (claude-repl-save-workspace-snapshot)
+      (error (message "[claude-repl] snapshot save failed: %S" err)))))
