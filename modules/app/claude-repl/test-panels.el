@@ -190,6 +190,66 @@
         (claude-repl--drain-pending-show-panels "test-ws")
         (should-not called)))))
 
+;;;; ---- Tests: drain-pending-magit ----
+
+(ert-deftest claude-repl-test-panels-drain-pending-magit-when-set ()
+  "drain-pending-magit calls magit-status with :project-dir and clears the flag."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :pending-magit t)
+    (claude-repl--ws-put "test-ws" :project-dir "/tmp/my-worktree")
+    (let ((magit-path nil)
+          (dash-called nil))
+      (cl-letf (((symbol-function 'magit-status)
+                 (lambda (path) (setq magit-path path)))
+                ((symbol-function 'claude-repl--remove-doom-dashboard)
+                 (lambda () (setq dash-called t))))
+        (claude-repl--drain-pending-magit "test-ws")
+        (should (equal magit-path "/tmp/my-worktree"))
+        (should dash-called)
+        (should-not (claude-repl--ws-get "test-ws" :pending-magit))))))
+
+(ert-deftest claude-repl-test-panels-drain-pending-magit-when-not-set ()
+  "drain-pending-magit does nothing when :pending-magit flag is nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :project-dir "/tmp/my-worktree")
+    (let ((magit-called nil)
+          (dash-called nil))
+      (cl-letf (((symbol-function 'magit-status)
+                 (lambda (&rest _) (setq magit-called t)))
+                ((symbol-function 'claude-repl--remove-doom-dashboard)
+                 (lambda () (setq dash-called t))))
+        (claude-repl--drain-pending-magit "test-ws")
+        (should-not magit-called)
+        (should-not dash-called)))))
+
+(ert-deftest claude-repl-test-panels-drain-pending-magit-only-once ()
+  "drain-pending-magit is one-shot: a second activation does not reopen magit."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :pending-magit t)
+    (claude-repl--ws-put "test-ws" :project-dir "/tmp/my-worktree")
+    (let ((magit-call-count 0))
+      (cl-letf (((symbol-function 'magit-status)
+                 (lambda (&rest _) (cl-incf magit-call-count)))
+                ((symbol-function 'claude-repl--remove-doom-dashboard) #'ignore))
+        (claude-repl--drain-pending-magit "test-ws")
+        (claude-repl--drain-pending-magit "test-ws")
+        (should (equal magit-call-count 1))))))
+
+(ert-deftest claude-repl-test-panels-drain-pending-magit-no-project-dir ()
+  "drain-pending-magit clears the flag but skips magit-status when :project-dir is missing.
+Defensive: :project-dir is always written by setup-worktree-session before
+finalize returns, so this path shouldn't occur in practice — but a missing
+path must not error."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :pending-magit t)
+    (let ((magit-called nil))
+      (cl-letf (((symbol-function 'magit-status)
+                 (lambda (&rest _) (setq magit-called t)))
+                ((symbol-function 'claude-repl--remove-doom-dashboard) #'ignore))
+        (claude-repl--drain-pending-magit "test-ws")
+        (should-not magit-called)
+        (should-not (claude-repl--ws-get "test-ws" :pending-magit))))))
+
 ;;;; ---- Tests: close-buffer-window ----
 
 (ert-deftest claude-repl-test-panels-close-buffer-window-no-window ()
@@ -978,6 +1038,7 @@ so that window management operations cannot shrink it."
               ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil))
               ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
               ((symbol-function 'claude-repl--reset-vterm-cursors) (lambda () nil))
+              ((symbol-function 'claude-repl--drain-pending-magit) (lambda (_ws) nil))
               ((symbol-function 'claude-repl--drain-pending-show-panels) (lambda (_ws) nil))
               ((symbol-function 'claude-repl--maybe-autoselect-input) (lambda (_ws) nil)))
       ;; Should not error -- the when guard skips mark-viewed

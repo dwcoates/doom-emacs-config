@@ -216,6 +216,19 @@ Clears the flag and calls `claude-repl' to display the panels."
         (claude-repl))
     (claude-repl--log-verbose ws "drain-pending-show-panels: ws=%s branch=no-pending no-op" ws)))
 
+(defun claude-repl--drain-pending-magit (ws)
+  "Open `magit-status' for WS if it was created with `:pending-magit' set.
+Reads the worktree path from `:project-dir', clears the flag, and removes
+the Doom dashboard so magit is the sole main buffer in the new workspace."
+  (if (claude-repl--ws-get ws :pending-magit)
+      (let ((path (claude-repl--ws-get ws :project-dir)))
+        (claude-repl--log ws "drain-pending-magit: ws=%s branch=had-pending path=%s draining" ws path)
+        (claude-repl--ws-put ws :pending-magit nil)
+        (when path
+          (magit-status path)
+          (claude-repl--remove-doom-dashboard)))
+    (claude-repl--log-verbose ws "drain-pending-magit: ws=%s branch=no-pending no-op" ws)))
+
 ;; Refresh vterm on workspace switch
 (defun claude-repl--maybe-autoselect-input (ws)
   "Select the Claude input window for WS if visible and autoselect is enabled.
@@ -242,6 +255,7 @@ viewed the workspace.\""
     (claude-repl--update-all-workspace-states)
     (claude-repl--refresh-vterm)
     (claude-repl--reset-vterm-cursors)
+    (claude-repl--drain-pending-magit ws)
     (claude-repl--drain-pending-show-panels ws)
     (claude-repl--maybe-autoselect-input ws)))
 

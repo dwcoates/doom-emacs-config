@@ -265,8 +265,9 @@ Registers the project with projectile, creates a Doom workspace, applies
 optional PREEMPTIVE-PROMPT, PRIORITY, and FORK-SESSION-ID settings, starts
 the Claude session (with FORCE-SANDBOX controlling the environment),
 and invokes CALLBACK with (PATH DIRNAME) when done.
-Always opens `magit-status' in the new workspace and removes the Doom
-dashboard so that magit is the sole main buffer."
+Sets `:pending-magit' on the new workspace so `magit-status' opens in
+its own window layout the first time the user activates it, rather than
+splitting the caller's window."
   (claude-repl--log dirname "finalize-worktree-workspace: path=%s dirname=%s priority=%s fork-session-id=%s force-sandbox=%s"
                     path dirname priority fork-session-id force-sandbox)
   (claude-repl--register-projectile-project path dirname)
@@ -275,8 +276,7 @@ dashboard so that magit is the sole main buffer."
          (ws dirname))
     (claude-repl--log ws "worktree creating workspace %s" ws)
     (+workspace-new ws)
-    (magit-status path)
-    (claude-repl--remove-doom-dashboard)
+    (claude-repl--ws-put ws :pending-magit t)
     (claude-repl--open-initial-buffers ws path)
     (claude-repl--enqueue-preemptive-prompt ws preemptive-prompt)
     (claude-repl--apply-workspace-properties ws
