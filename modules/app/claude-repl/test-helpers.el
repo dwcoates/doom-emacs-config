@@ -126,6 +126,45 @@
   (defun magit-section-match (_type) "Stub." nil))
 (unless (fboundp 'magit-status)
   (defun magit-status (&rest _args) "Stub." nil))
+(unless (fboundp 'magit-visit-thing)
+  (defun magit-visit-thing (&rest _args) "Stub." nil))
+(unless (fboundp 'magit-diff-visit-file)
+  (defun magit-diff-visit-file (&rest _args) "Stub." nil))
+(unless (fboundp 'magit-diff-visit-worktree-file)
+  (defun magit-diff-visit-worktree-file (&rest _args) "Stub." nil))
+(unless (fboundp 'magit-diff-visit-file-other-window)
+  (defun magit-diff-visit-file-other-window (&rest _args) "Stub." nil))
+
+;; magit variable stubs — `after!' is a no-op shim in tests, so the
+;; `(after! magit ...)' body in magit.el executes and would reference
+;; these at load time without them.
+(unless (boundp 'magit-no-confirm)
+  (defvar magit-no-confirm nil "Stub."))
+(unless (boundp 'magit-diff-visit-previous-blob)
+  (defvar magit-diff-visit-previous-blob nil "Stub."))
+(unless (boundp 'magit-section-initial-visibility-alist)
+  (defvar magit-section-initial-visibility-alist nil "Stub."))
+
+;; magit keymap stubs — `define-key' in `(after! magit-diff ...)'
+;; executes eagerly under the test shim, so these must exist.
+(unless (boundp 'magit-unstaged-section-map)
+  (defvar magit-unstaged-section-map (make-sparse-keymap) "Stub."))
+(unless (boundp 'magit-staged-section-map)
+  (defvar magit-staged-section-map (make-sparse-keymap) "Stub."))
+(unless (boundp 'magit-untracked-section-map)
+  (defvar magit-untracked-section-map (make-sparse-keymap) "Stub."))
+(unless (boundp 'magit-mode-map)
+  (defvar magit-mode-map (make-sparse-keymap) "Stub."))
+(unless (boundp 'magit-file-section-map)
+  (defvar magit-file-section-map (make-sparse-keymap) "Stub."))
+(unless (boundp 'magit-hunk-section-map)
+  (defvar magit-hunk-section-map (make-sparse-keymap) "Stub."))
+(unless (boundp 'magit-status-mode-map)
+  (defvar magit-status-mode-map (make-sparse-keymap) "Stub."))
+(unless (boundp 'magit-diff-section-base-map)
+  (defvar magit-diff-section-base-map (make-sparse-keymap) "Stub."))
+(unless (boundp 'magit-diff-section-map)
+  (defvar magit-diff-section-map (make-sparse-keymap) "Stub."))
 
 ;; eieio stubs — the source uses eieio-oref (the runtime function
 ;; underlying the `oref' macro) so it can be stubbed in tests.

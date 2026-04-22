@@ -122,6 +122,41 @@ revert the buffer in place instead of opening a fresh one."
                           (claude-repl--ws-dir (+workspace-current-name))))
       (magit-status (claude-repl--ws-dir (+workspace-current-name))))))
 
+;;;; --- Hide Claude panels before magit-status RET actions -----------------
+
+(defcustom claude-repl-magit-hide-panels-advised-fns
+  '(magit-visit-thing
+    magit-diff-visit-file
+    magit-diff-visit-worktree-file
+    magit-show-commit
+    magit-show-refs
+    magit-show-refs-current
+    magit-show-refs-head
+    magit-show-refs-other
+    magit-stash-show
+    magit-visit-work)
+  "Magit commands that should hide Claude panels before running.
+The advice only fires when the command is invoked from a buffer whose
+`major-mode' is `magit-status-mode', so triggering the same commands
+from a magit-diff/log buffer does not disturb panels."
+  :type '(repeat symbol)
+  :group 'claude-repl)
+
+(defun claude-repl--magit-hide-panels-before-action (&rest _)
+  "Hide Claude REPL panels before a magit-status RET action opens a new buffer.
+No-op unless the caller's buffer is in `magit-status-mode' and both
+panels are currently visible.  Routes through `claude-repl--hide-panels'
+so `:repl-state'/`:claude-state' are left untouched — the panels simply
+become hidden, matching the behavior of other non-user-initiated close
+paths (see `claude-repl--on-close' for the user-initiated path that
+transitions `:repl-state' to :inactive)."
+  (when (and (eq major-mode 'magit-status-mode)
+             (claude-repl--panels-visible-p))
+    (claude-repl--hide-panels)))
+
+(dolist (fn claude-repl-magit-hide-panels-advised-fns)
+  (advice-add fn :before #'claude-repl--magit-hide-panels-before-action))
+
 ;;;; --- Keybindings --------------------------------------------------------
 
 (map! :leader
