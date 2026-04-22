@@ -252,10 +252,7 @@ A no-op if a check is already in progress for WS."
 ;;   :label      — optional bracket content override (e.g. the permission
 ;;                 glyph).
 ;;   :unselected — plist describing unselected appearance.
-;;   :selected   — plist describing selected appearance.  May include
-;;                 :face-override to replace the NAME face in selected
-;;                 form (used by :permission to keep its green badge
-;;                 visible on the selected tab).
+;;   :selected   — plist describing selected appearance.
 ;;
 ;; Spec plist keys:
 ;;   :bg          — bracket (and separator) background.
@@ -368,8 +365,7 @@ process has died.")
                   :fg ,claude-repl--color-dark
                   :bracket-bg ,claude-repl--color-done-green
                   :bracket-fg ,claude-repl--color-light
-                  :weight ,claude-repl--tab-weight
-                  :face-override claude-repl-tab-permission))
+                  :weight ,claude-repl--tab-weight))
     (:idle
      :face       claude-repl-tab-idle
      :unselected (:bg ,claude-repl--color-idle-orange
@@ -392,8 +388,7 @@ only).")
 (defun claude-repl--tab-spec (state selected)
   "Return the appearance spec (plist) for STATE with SELECTED flag.
 Falls back to `claude-repl--tab-default' when STATE has no palette entry.
-Keys in the returned plist: :bg :fg :bracket-fg :bracket-bg :weight
-and optionally :face-override."
+Keys in the returned plist: :bg :fg :bracket-fg :bracket-bg :weight."
   (let* ((row (alist-get state claude-repl--tab-palette))
          (key (if selected :selected :unselected)))
     (or (plist-get row key)
@@ -467,15 +462,12 @@ When the palette defines a `:label' for STATE (e.g. \"❓\" for permission,
 (defun claude-repl--tab-face (state selected)
   "Return the face symbol for the NAME portion of a tab.
 For unselected tabs, uses the palette row's `:face' or falls back to
-`+workspace-tab-face'.  For selected tabs, uses the state's
-`:selected :face-override' when present (e.g. `:permission' keeps its
-green badge visible), or falls back to `+workspace-tab-selected-face'."
-  (let ((row (alist-get state claude-repl--tab-palette)))
-    (if selected
-        (or (plist-get (plist-get row :selected) :face-override)
-            '+workspace-tab-selected-face)
-      (or (plist-get row :face)
-          '+workspace-tab-face))))
+`+workspace-tab-face'.  For selected tabs, always uses
+`+workspace-tab-selected-face' so selection dims the state color."
+  (if selected
+      '+workspace-tab-selected-face
+    (or (plist-get (alist-get state claude-repl--tab-palette) :face)
+        '+workspace-tab-face)))
 
 (defun claude-repl--tab-priority-image-str (name)
   "Return a propertized image string for workspace NAME's priority, or nil."

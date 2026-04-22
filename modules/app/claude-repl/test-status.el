@@ -347,8 +347,9 @@ to be reverted to should-error once the leaking writer is found)."
           (should (eq (get-text-property pos 'face result)
                       '+workspace-tab-selected-face)))))))
 
-(ert-deftest claude-repl-test-tabline-selected-shows-permission ()
-  "The SELECTED tab with :permission SHOULD still get the permission face."
+(ert-deftest claude-repl-test-tabline-selected-permission-uses-selected-face ()
+  "The SELECTED tab with :permission uses the normal selected face.
+The ❓ glyph in the bracket (not the name background) signals permission."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "sel-ws" :permission)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "sel-ws")))
@@ -356,7 +357,7 @@ to be reverted to should-error once the leaking writer is found)."
         (let ((pos (string-match "sel-ws" result)))
           (should pos)
           (should (eq (get-text-property pos 'face result)
-                      'claude-repl-tab-permission)))))))
+                      '+workspace-tab-selected-face)))))))
 
 ;;;; ---- Tests: ws-state edge cases ----
 
@@ -623,10 +624,11 @@ to be reverted to should-error once the leaking writer is found)."
   (should (equal (plist-get (claude-repl--tab-spec nil nil) :bracket-fg)
                  "white")))
 
-(ert-deftest claude-repl-test-tab-spec-permission-has-face-override ()
-  "The :permission :selected spec carries :face-override = the permission face."
+(ert-deftest claude-repl-test-tab-spec-permission-selected-no-face-override ()
+  "The :permission :selected spec carries no :face-override so the
+selected tab dims to the normal selected face like other states."
   (let ((spec (claude-repl--tab-spec :permission t)))
-    (should (eq (plist-get spec :face-override) 'claude-repl-tab-permission))))
+    (should-not (plist-get spec :face-override))))
 
 (ert-deftest claude-repl-test-tab-spec-dead-falls-back-to-default ()
   "The :dead state has no appearance spec; tab-spec returns the default."
