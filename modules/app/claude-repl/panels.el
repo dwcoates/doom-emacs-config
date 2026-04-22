@@ -229,6 +229,20 @@ the Doom dashboard so magit is the sole main buffer in the new workspace."
           (claude-repl--remove-doom-dashboard)))
     (claude-repl--log-verbose ws "drain-pending-magit: ws=%s branch=no-pending no-op" ws)))
 
+(defun claude-repl--drain-pending-initial-buffers (ws)
+  "Open configured initial buffers for WS if `:pending-initial-buffers' is set.
+Reads the worktree path from `:project-dir' and clears the flag.  Deferred
+from `finalize-worktree-workspace' so `find-file-noselect' runs while WS is
+the current perspective, preventing the opened buffers from leaking into
+the caller's workspace."
+  (if (claude-repl--ws-get ws :pending-initial-buffers)
+      (let ((path (claude-repl--ws-get ws :project-dir)))
+        (claude-repl--log ws "drain-pending-initial-buffers: ws=%s branch=had-pending path=%s draining" ws path)
+        (claude-repl--ws-put ws :pending-initial-buffers nil)
+        (when path
+          (claude-repl--open-initial-buffers ws path)))
+    (claude-repl--log-verbose ws "drain-pending-initial-buffers: ws=%s branch=no-pending no-op" ws)))
+
 ;; Refresh vterm on workspace switch
 (defun claude-repl--maybe-autoselect-input (ws)
   "Select the Claude input window for WS if visible and autoselect is enabled.
@@ -256,6 +270,7 @@ viewed the workspace.\""
     (claude-repl--refresh-vterm)
     (claude-repl--reset-vterm-cursors)
     (claude-repl--drain-pending-magit ws)
+    (claude-repl--drain-pending-initial-buffers ws)
     (claude-repl--drain-pending-show-panels ws)
     (claude-repl--maybe-autoselect-input ws)))
 

@@ -250,6 +250,56 @@ path must not error."
         (should-not magit-called)
         (should-not (claude-repl--ws-get "test-ws" :pending-magit))))))
 
+;;;; ---- Tests: drain-pending-initial-buffers ----
+
+(ert-deftest claude-repl-test-panels-drain-pending-initial-buffers-when-set ()
+  "drain-pending-initial-buffers calls open-initial-buffers with WS and :project-dir, clears the flag."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :pending-initial-buffers t)
+    (claude-repl--ws-put "test-ws" :project-dir "/tmp/my-worktree")
+    (let ((call-args nil))
+      (cl-letf (((symbol-function 'claude-repl--open-initial-buffers)
+                 (lambda (ws path) (setq call-args (list ws path)))))
+        (claude-repl--drain-pending-initial-buffers "test-ws")
+        (should (equal call-args '("test-ws" "/tmp/my-worktree")))
+        (should-not (claude-repl--ws-get "test-ws" :pending-initial-buffers))))))
+
+(ert-deftest claude-repl-test-panels-drain-pending-initial-buffers-when-not-set ()
+  "drain-pending-initial-buffers does nothing when :pending-initial-buffers is nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :project-dir "/tmp/my-worktree")
+    (let ((open-called nil))
+      (cl-letf (((symbol-function 'claude-repl--open-initial-buffers)
+                 (lambda (&rest _) (setq open-called t))))
+        (claude-repl--drain-pending-initial-buffers "test-ws")
+        (should-not open-called)))))
+
+(ert-deftest claude-repl-test-panels-drain-pending-initial-buffers-only-once ()
+  "drain-pending-initial-buffers is one-shot: a second activation does not re-open."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :pending-initial-buffers t)
+    (claude-repl--ws-put "test-ws" :project-dir "/tmp/my-worktree")
+    (let ((call-count 0))
+      (cl-letf (((symbol-function 'claude-repl--open-initial-buffers)
+                 (lambda (&rest _) (cl-incf call-count))))
+        (claude-repl--drain-pending-initial-buffers "test-ws")
+        (claude-repl--drain-pending-initial-buffers "test-ws")
+        (should (equal call-count 1))))))
+
+(ert-deftest claude-repl-test-panels-drain-pending-initial-buffers-no-project-dir ()
+  "drain-pending-initial-buffers clears the flag but skips the call when :project-dir is missing.
+Defensive: :project-dir is always written by setup-worktree-session before
+finalize returns, so this path shouldn't occur in practice — but a missing
+path must not error."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :pending-initial-buffers t)
+    (let ((open-called nil))
+      (cl-letf (((symbol-function 'claude-repl--open-initial-buffers)
+                 (lambda (&rest _) (setq open-called t))))
+        (claude-repl--drain-pending-initial-buffers "test-ws")
+        (should-not open-called)
+        (should-not (claude-repl--ws-get "test-ws" :pending-initial-buffers))))))
+
 ;;;; ---- Tests: close-buffer-window ----
 
 (ert-deftest claude-repl-test-panels-close-buffer-window-no-window ()
@@ -1039,6 +1089,7 @@ so that window management operations cannot shrink it."
               ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
               ((symbol-function 'claude-repl--reset-vterm-cursors) (lambda () nil))
               ((symbol-function 'claude-repl--drain-pending-magit) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--drain-pending-initial-buffers) (lambda (_ws) nil))
               ((symbol-function 'claude-repl--drain-pending-show-panels) (lambda (_ws) nil))
               ((symbol-function 'claude-repl--maybe-autoselect-input) (lambda (_ws) nil)))
       ;; Should not error -- the when guard skips mark-viewed

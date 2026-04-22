@@ -1850,4 +1850,29 @@ here would open it in the caller's workspace layout, not the new one."
        "/tmp/fake" "test-ws" "do something" nil nil nil nil)
       (should (claude-repl--ws-get "test-ws" :pending-magit)))))
 
+;;;; ---- Tests: finalize-worktree-workspace defers initial buffers ----
+
+(ert-deftest claude-repl-test-finalize-sets-pending-initial-buffers ()
+  "finalize-worktree-workspace sets :pending-initial-buffers and does not call open-initial-buffers.
+The drain happens on workspace activation; calling open-initial-buffers
+synchronously here uses `find-file-noselect' in the caller's perspective,
+leaking the opened buffers into the wrong workspace."
+  (let ((open-called nil))
+    (claude-repl-test--with-clean-state
+      (cl-letf (((symbol-function 'claude-repl--register-projectile-project) #'ignore)
+                ((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function '+workspace-new) #'ignore)
+                ((symbol-function 'magit-status) #'ignore)
+                ((symbol-function 'claude-repl--remove-doom-dashboard) #'ignore)
+                ((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--open-initial-buffers)
+                 (lambda (&rest _) (setq open-called t)))
+                ((symbol-function 'claude-repl--enqueue-preemptive-prompt) #'ignore)
+                ((symbol-function 'claude-repl--apply-workspace-properties) #'ignore)
+                ((symbol-function 'claude-repl--setup-worktree-session) #'ignore))
+        (claude-repl--finalize-worktree-workspace
+         "/tmp/fake" "test-ws" nil nil nil nil nil)
+        (should (claude-repl--ws-get "test-ws" :pending-initial-buffers))
+        (should-not open-called)))))
+
 ;;; test-worktree.el ends here
