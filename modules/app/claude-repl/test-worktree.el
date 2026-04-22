@@ -1318,8 +1318,22 @@ Returns the full SHA of the new commit."
 
 ;;;; ---- Tests: create-worktree-workspace (interactive) ----
 
-(ert-deftest claude-repl-test-create-worktree-workspace-default-base-is-head ()
-  "`SPC TAB n' with no prefix arg branches off HEAD (the current worktree)."
+(ert-deftest claude-repl-test-resolve-worktree-base-head ()
+  "`head' resolves to HEAD."
+  (should (equal (claude-repl--resolve-worktree-base 'head) "HEAD")))
+
+(ert-deftest claude-repl-test-resolve-worktree-base-master ()
+  "`master' resolves to origin/master."
+  (should (equal (claude-repl--resolve-worktree-base 'master) "origin/master")))
+
+(ert-deftest claude-repl-test-resolve-worktree-base-unknown-errors ()
+  "An unknown base symbol signals a `user-error' rather than silently
+passing through."
+  (should-error (claude-repl--resolve-worktree-base 'bogus)
+                :type 'user-error))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-head-base ()
+  "BASE = `head' branches off HEAD (the current worktree)."
   (claude-repl-test--with-clean-state
     (let ((captured-base nil))
       (cl-letf (((symbol-function 'read-string)
@@ -1328,11 +1342,11 @@ Returns the full SHA of the new commit."
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
                  (lambda (_name _bare _fork _prompt _cb _priority base)
                    (setq captured-base base))))
-        (claude-repl-create-worktree-workspace nil)
+        (claude-repl-create-worktree-workspace 'head)
         (should (equal captured-base "HEAD"))))))
 
-(ert-deftest claude-repl-test-create-worktree-workspace-c-u-base-is-origin-master ()
-  "`SPC TAB N' (C-u prefix) branches off origin/master."
+(ert-deftest claude-repl-test-create-worktree-workspace-master-base ()
+  "BASE = `master' branches off origin/master."
   (claude-repl-test--with-clean-state
     (let ((captured-base nil))
       (cl-letf (((symbol-function 'read-string)
@@ -1341,17 +1355,16 @@ Returns the full SHA of the new commit."
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
                  (lambda (_name _bare _fork _prompt _cb _priority base)
                    (setq captured-base base))))
-        (claude-repl-create-worktree-workspace '(4))
+        (claude-repl-create-worktree-workspace 'master)
         (should (equal captured-base "origin/master"))))))
 
-(ert-deftest claude-repl-test-create-worktree-workspace-from-origin-master-delegates-with-prefix ()
-  "`SPC TAB N' wrapper delegates to the main command with a `(4)' prefix arg
-so the underlying command selects the origin/master base."
+(ert-deftest claude-repl-test-create-worktree-workspace-from-origin-master-delegates-with-master-symbol ()
+  "`SPC TAB N' wrapper delegates to the main command with BASE = `master'."
   (let ((captured-arg :unset))
     (cl-letf (((symbol-function 'claude-repl-create-worktree-workspace)
-               (lambda (arg) (setq captured-arg arg))))
+               (lambda (base) (setq captured-arg base))))
       (claude-repl-create-worktree-workspace-from-origin-master)
-      (should (equal captured-arg '(4))))))
+      (should (eq captured-arg 'master)))))
 
 (ert-deftest claude-repl-test-create-worktree-workspace-prefixes-preemptive-prompt ()
   "When a preemptive prompt is given, it is prefixed with the autonomous instruction."
@@ -1364,7 +1377,7 @@ so the underlying command selects the origin/master base."
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
                  (lambda (_name _bare _fork prompt &rest _)
                    (setq captured-prompt prompt))))
-        (claude-repl-create-worktree-workspace nil)
+        (claude-repl-create-worktree-workspace 'head)
         (should (string-prefix-p claude-repl--autonomous-prompt-prefix captured-prompt))
         (should (string-suffix-p "do the thing" captured-prompt))))))
 
@@ -1378,7 +1391,7 @@ so the underlying command selects the origin/master base."
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
                  (lambda (_name _bare _fork prompt &rest _)
                    (setq captured-prompt prompt))))
-        (claude-repl-create-worktree-workspace nil)
+        (claude-repl-create-worktree-workspace 'head)
         (should (null captured-prompt))))))
 
 (ert-deftest claude-repl-test-fork-worktree-workspace-prefixes-preemptive-prompt ()

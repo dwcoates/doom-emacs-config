@@ -411,7 +411,23 @@ Magit-status is already opened by `finalize-worktree-workspace'."
                     path dirname (fboundp '+workspace-switch-to) (+workspace-current-name) dirname)
   (claude-repl--switch-to-workspace dirname))
 
-(defun claude-repl-create-worktree-workspace (arg)
+(defconst claude-repl--worktree-base-commits
+  '((head   . "HEAD")
+    (master . "origin/master"))
+  "Map of base-symbol to git ref for `claude-repl-create-worktree-workspace'.
+Keys are the symbols callers pass as the BASE argument; values are the
+git refs forwarded to `claude-repl--do-create-worktree-workspace'.")
+
+(defun claude-repl--resolve-worktree-base (base)
+  "Return the git ref corresponding to BASE.
+BASE is a symbol key in `claude-repl--worktree-base-commits'.  Signals
+`user-error' for unknown symbols so callers can't silently pass through
+bad values."
+  (or (cdr (assq base claude-repl--worktree-base-commits))
+      (user-error "Unknown worktree base %S (expected one of %S)"
+                  base (mapcar #'car claude-repl--worktree-base-commits))))
+
+(defun claude-repl-create-worktree-workspace (base)
   "Create a new git worktree and switch to it as a project workspace.
 Prompts for a name (may use branch-style slashes like DC/CV-100/cool-branch).
 The worktree directory uses only the last path component; the full name becomes
@@ -420,10 +436,12 @@ the branch name.
 If called from a worktree, the new worktree is created as a sibling (../<dirname>).
 If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirname>.
 
-Without a prefix argument, the new branch is created off the current
-worktree's HEAD — so edits in-flight here naturally carry over.  With
-\\[universal-argument], the new branch is created off `origin/master'
-instead (and `origin/master' is fetched first).
+BASE selects the git ref the new branch is created from.  It is a
+symbol key in `claude-repl--worktree-base-commits':
+  `head'   — branch off the current worktree's HEAD (default; edits
+             in-flight here carry over).
+  `master' — branch off `origin/master' (fetched first).
+Interactively, `\\[universal-argument]' selects `master'; no prefix selects `head'.
 
 Optionally prompts for a preemptive prompt.  If provided, the new workspace is
 created in the background (no switch) and the prompt is sent to Claude the moment
@@ -431,15 +449,15 @@ its session becomes ready.  If left blank, behavior is the same as before: switc
 to the new workspace immediately.
 
 Git operations (fetch, worktree add) run asynchronously so Emacs is not blocked."
-  (interactive "P")
-  (let* ((base-commit (if arg "origin/master" "HEAD"))
+  (interactive (list (if current-prefix-arg 'master 'head)))
+  (let* ((base-commit (claude-repl--resolve-worktree-base base))
          (name (read-string "Worktree name: "))
          (raw-prompt (read-string "Preemptive prompt (blank to switch there normally): "))
          (has-preemptive (and raw-prompt (not (string-empty-p raw-prompt))))
          (preemptive-prompt (when has-preemptive
                               (concat claude-repl--autonomous-prompt-prefix raw-prompt))))
-    (claude-repl--log name "create-worktree-workspace: name=%s base-commit=%s has-preemptive=%s"
-                      name base-commit has-preemptive)
+    (claude-repl--log name "create-worktree-workspace: name=%s base=%s base-commit=%s has-preemptive=%s"
+                      name base base-commit has-preemptive)
     (claude-repl--do-create-worktree-workspace
      name nil nil preemptive-prompt
      (unless has-preemptive #'claude-repl--worktree-creation-switch-callback)
@@ -448,10 +466,9 @@ Git operations (fetch, worktree add) run asynchronously so Emacs is not blocked.
 (defun claude-repl-create-worktree-workspace-from-origin-master ()
   "Create a new worktree workspace branched from `origin/master'.
 Thin wrapper around `claude-repl-create-worktree-workspace' that
-forces the origin/master base so a keybinding can invoke it directly
-without synthesizing a prefix argument."
+passes BASE = `master' so a keybinding can invoke it directly."
   (interactive)
-  (claude-repl-create-worktree-workspace '(4)))
+  (claude-repl-create-worktree-workspace 'master))
 
 (defun claude-repl-fork-worktree-workspace (arg)
   "Fork the current Claude session into a new worktree workspace.
