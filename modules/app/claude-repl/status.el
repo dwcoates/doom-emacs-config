@@ -525,10 +525,18 @@ Rule:
 
 (defun claude-repl--ws-display-state (ws)
   "Return the palette display key for WS.
-Reads `:claude-state' (the source of truth for tab color)."
-  (claude-repl--composed-state (claude-repl--ws-claude-state ws)
-                               (claude-repl--ws-repl-state ws)
-                               ws))
+Reads `:claude-state' as the source of truth for tab color.  When the
+composed state is `:idle' AND no Claude panel is present in WS's
+live-or-saved window layout, returns nil instead of `:idle' — this
+suppresses the orange background for idle sessions whose panels the
+user has dismissed, leaving only the plain numeric index."
+  (let ((state (claude-repl--composed-state (claude-repl--ws-claude-state ws)
+                                            (claude-repl--ws-repl-state ws)
+                                            ws)))
+    (if (and (eq state :idle)
+             (not (claude-repl--ws-claude-open-p ws)))
+        nil
+      state)))
 
 (defun claude-repl--render-tab-entry (name current-name index)
   "Render a single tab entry for workspace NAME.

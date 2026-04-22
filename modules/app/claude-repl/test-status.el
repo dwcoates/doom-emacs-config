@@ -182,6 +182,22 @@ to be reverted to should-error once the leaking writer is found)."
     (claude-repl--ws-set-repl-state "ws1" :dead)
     (should (eq :dead (claude-repl--ws-display-state "ws1")))))
 
+(ert-deftest claude-repl-test-display-state-idle-panels-open-renders-idle ()
+  ":idle with Claude panel present in layout renders :idle (orange)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :idle)
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
+               (lambda (_ws) t)))
+      (should (eq :idle (claude-repl--ws-display-state "ws1"))))))
+
+(ert-deftest claude-repl-test-display-state-idle-panels-hidden-renders-nil ()
+  ":idle with no Claude panel in layout renders nil (no background, no badge)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :idle)
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
+               (lambda (_ws) nil)))
+      (should-not (claude-repl--ws-display-state "ws1")))))
+
 ;;;; ---- Tests: Legacy wrappers still populate both axes ----
 
 (ert-deftest claude-repl-test-legacy-ws-set-writes-claude-state ()
