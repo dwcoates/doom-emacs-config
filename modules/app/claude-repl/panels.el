@@ -2,12 +2,12 @@
 
 ;;; Code:
 
-(defcustom claude-repl-vterm-width-fraction 0.6
+(defcustom claude-repl-vterm-width-fraction 0.43
   "Fraction of the work window's width allocated to the vterm panel."
   :type 'number
   :group 'claude-repl)
 
-(defcustom claude-repl-input-height-fraction 0.15
+(defcustom claude-repl-input-height-fraction 0.23
   "Fraction of the vterm window's height allocated to the input panel."
   :type 'number
   :group 'claude-repl)
