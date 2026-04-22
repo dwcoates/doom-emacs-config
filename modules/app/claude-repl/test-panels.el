@@ -954,6 +954,33 @@ so that window management operations cannot shrink it."
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
         (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
 
+(ert-deftest claude-repl-test-panels-show-panels-preserves-input-height ()
+  "show-panels calls `window-preserve-size' on the input window so a
+multi-line minibuffer cannot shrink it.  `window-size-fixed' alone is
+bypassed by `window--resize-mini-window' (ignore=t), so the stronger
+`window-preserved-size' parameter is required."
+  (claude-repl-test--with-clean-state
+    (let ((vterm-buf (get-buffer-create "*show-preserve-vterm*"))
+          (input-buf (get-buffer-create "*show-preserve-input*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
+                    ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil)))
+            (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (delete-other-windows)
+            (claude-repl--show-panels)
+            (let* ((input-win (get-buffer-window input-buf))
+                   (param (window-parameter input-win 'window-preserved-size)))
+              (should param)
+              (should (eq (nth 0 param) input-buf))
+              ;; Height is preserved (3rd element non-nil), width is not.
+              (should (numberp (nth 2 param)))))
+        ;; Clean up
+        (delete-other-windows)
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
 ;;;; ---- Tests: focus-input-panel edge cases ----
 
 (ert-deftest claude-repl-test-panels-focus-input-panel-nil-buffer ()

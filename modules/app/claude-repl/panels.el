@@ -120,7 +120,12 @@ are not split from a bottom popup (e.g. a regular vterm)."
       (claude-repl--configure-vterm-window vterm-win)
       (set-window-dedicated-p input-win t)
       (set-window-parameter input-win 'window-size-fixed 'height)
-      (set-window-parameter input-win 'no-delete-other-windows t)))
+      (set-window-parameter input-win 'no-delete-other-windows t)
+      ;; `window-size-fixed' alone is bypassed by `window--resize-mini-window'
+      ;; (ignore=t), so a multi-line echo area shrinks the input.  The
+      ;; preserved-size parameter is only bypassed by ignore='preserved', so
+      ;; preserving here steers mini-window shrink onto vterm/work-win instead.
+      (window-preserve-size input-win nil t)))
   (claude-repl--update-all-workspace-states))
 
 (defun claude-repl--focus-input-panel ()
