@@ -427,7 +427,15 @@ bad values."
       (user-error "Unknown worktree base %S (expected one of %S)"
                   base (mapcar #'car claude-repl--worktree-base-commits))))
 
-(defun claude-repl-create-worktree-workspace (base)
+(defun claude-repl--read-source-workspace-maybe ()
+  "Return a source workspace name when prefix-arg is active, else nil.
+Prompts from `(+workspace-list-names)' with the current workspace as default.
+Intended for `(interactive (list ...))' forms so `C-u' routes the new
+worktree to a different repository than the ambient workspace's."
+  (when current-prefix-arg
+    (claude-repl--read-workspace-with-default "Source workspace: ")))
+
+(defun claude-repl-create-worktree-workspace (base &optional source-ws)
   "Create a new git worktree and switch to it as a project workspace.
 Prompts for a name (may use branch-style slashes like DC/CV-100/cool-branch).
 The worktree directory uses only the last path component; the full name becomes
@@ -441,7 +449,10 @@ symbol key in `claude-repl--worktree-base-commits':
   `head'   — branch off the current worktree's HEAD (default; edits
              in-flight here carry over).
   `master' — branch off `origin/master' (fetched first).
-Interactively, `\\[universal-argument]' selects `master'; no prefix selects `head'.
+
+SOURCE-WS, when non-nil, names the workspace whose repository the new
+worktree is rooted in (instead of the ambient workspace).  Interactively,
+`\\[universal-argument]' prompts for SOURCE-WS from the persp workspace list.
 
 Optionally prompts for a preemptive prompt.  If provided, the new workspace is
 created in the background (no switch) and the prompt is sent to Claude the moment
@@ -449,33 +460,41 @@ its session becomes ready.  If left blank, behavior is the same as before: switc
 to the new workspace immediately.
 
 Git operations (fetch, worktree add) run asynchronously so Emacs is not blocked."
-  (interactive (list (if current-prefix-arg 'master 'head)))
+  (interactive (list 'head (claude-repl--read-source-workspace-maybe)))
   (let* ((base-commit (claude-repl--resolve-worktree-base base))
+         (source-git-root (when source-ws (claude-repl--ws-dir source-ws)))
          (name (read-string "Worktree name: "))
          (raw-prompt (read-string "Preemptive prompt (blank to switch there normally): "))
          (has-preemptive (and raw-prompt (not (string-empty-p raw-prompt))))
          (preemptive-prompt (when has-preemptive
                               (concat claude-repl--autonomous-prompt-prefix raw-prompt))))
-    (claude-repl--log name "create-worktree-workspace: name=%s base=%s base-commit=%s has-preemptive=%s"
-                      name base base-commit has-preemptive)
+    (claude-repl--log name "create-worktree-workspace: name=%s base=%s base-commit=%s source-ws=%s source-git-root=%s has-preemptive=%s"
+                      name base base-commit (or source-ws "nil") (or source-git-root "nil") has-preemptive)
     (claude-repl--do-create-worktree-workspace
      name nil nil preemptive-prompt
      (unless has-preemptive #'claude-repl--worktree-creation-switch-callback)
-     nil base-commit)))
+     nil base-commit source-git-root)))
 
-(defun claude-repl-create-worktree-workspace-from-origin-master ()
+(defun claude-repl-create-worktree-workspace-from-origin-master (&optional source-ws)
   "Create a new worktree workspace branched from `origin/master'.
 Thin wrapper around `claude-repl-create-worktree-workspace' that
-passes BASE = `master' so a keybinding can invoke it directly."
-  (interactive)
-  (claude-repl-create-worktree-workspace 'master))
+passes BASE = `master' so a keybinding can invoke it directly.
+SOURCE-WS, when non-nil, names the workspace whose repository the new
+worktree is rooted in.  Interactively, `\\[universal-argument]' prompts
+for it from the persp workspace list."
+  (interactive (list (claude-repl--read-source-workspace-maybe)))
+  (claude-repl-create-worktree-workspace 'master source-ws))
 
-(defun claude-repl-fork-worktree-workspace (arg)
-  "Fork the current Claude session into a new worktree workspace.
+(defun claude-repl-fork-worktree-workspace (&optional source-ws)
+  "Fork a Claude session into a new worktree workspace.
 Like `claude-repl-create-worktree-workspace', but branches from HEAD (not
-origin/master) and resumes the current Claude session with --fork-session.
+origin/master) and resumes the source workspace's Claude session with
+--fork-session.
 
-With \\[universal-argument], force sandbox (use Docker sandbox instead of bare-metal).
+SOURCE-WS, when non-nil, names the workspace whose Claude session is
+forked AND whose repository roots the new worktree (instead of the
+ambient workspace).  Interactively, `\\[universal-argument]' prompts for
+SOURCE-WS from the persp workspace list.
 
 Optionally prompts for a preemptive prompt.  If provided, the new workspace is
 created in the background (no switch) and the prompt is sent to Claude the moment
@@ -483,25 +502,27 @@ its session becomes ready.  If left blank, behavior is the same as before: switc
 to the new workspace immediately.
 
 Git operations (fetch, worktree add) run asynchronously so Emacs is not blocked."
-  (interactive "P")
-  (let* ((force-sandbox (and arg t))
+  (interactive (list (claude-repl--read-source-workspace-maybe)))
+  (let* ((fork-ws (or source-ws (+workspace-current-name)))
+         (source-git-root (when source-ws (claude-repl--ws-dir source-ws)))
          (fork-session-id
           (let ((sid (claude-repl-instantiation-session-id
-                      (claude-repl--active-inst (+workspace-current-name)))))
+                      (claude-repl--active-inst fork-ws))))
             (unless sid
-              (user-error "No session ID for current workspace — cannot fork"))
-            (claude-repl--log (+workspace-current-name) "fork-worktree-workspace: fork requested, sid=%s" sid)
+              (user-error "No session ID for workspace '%s' — cannot fork" fork-ws))
+            (claude-repl--log fork-ws "fork-worktree-workspace: fork requested, sid=%s" sid)
             sid))
          (name (read-string "Worktree name: "))
          (raw-prompt (read-string "Preemptive prompt (blank to switch there normally): "))
          (has-preemptive (and raw-prompt (not (string-empty-p raw-prompt))))
          (preemptive-prompt (when has-preemptive
                               (concat claude-repl--autonomous-prompt-prefix raw-prompt))))
-    (claude-repl--log name "fork-worktree-workspace: name=%s force-sandbox=%s fork-session-id=%s has-preemptive=%s"
-                      name force-sandbox fork-session-id has-preemptive)
+    (claude-repl--log name "fork-worktree-workspace: name=%s fork-ws=%s source-git-root=%s fork-session-id=%s has-preemptive=%s"
+                      name fork-ws (or source-git-root "nil") fork-session-id has-preemptive)
     (claude-repl--do-create-worktree-workspace
-     name force-sandbox fork-session-id preemptive-prompt
-     (unless has-preemptive #'claude-repl--worktree-creation-switch-callback))))
+     name nil fork-session-id preemptive-prompt
+     (unless has-preemptive #'claude-repl--worktree-creation-switch-callback)
+     nil nil source-git-root)))
 
 (defun claude-repl--new-workspace ()
   "Create a new workspace and open magit-status in it, mirroring

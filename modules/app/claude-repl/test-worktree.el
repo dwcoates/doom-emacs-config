@@ -904,24 +904,74 @@ Returns the full SHA of the new commit."
         (claude-repl-fork-worktree-workspace nil)
         (should (equal captured-fork-sid "sess-abc-123"))))))
 
-(ert-deftest claude-repl-test-fork-worktree-workspace-force-sandbox ()
-  "With prefix arg, fork passes force-sandbox as t."
+(ert-deftest claude-repl-test-fork-worktree-workspace-source-ws-forks-its-session ()
+  "When SOURCE-WS is given, fork uses that workspace's session ID, not the current one's."
   (claude-repl-test--with-clean-state
-    (let ((inst (make-claude-repl-instantiation :session-id "sess-xyz"))
-          (captured-sandbox nil))
+    (let ((source-inst (make-claude-repl-instantiation :session-id "sess-source"))
+          (current-inst (make-claude-repl-instantiation :session-id "sess-current"))
+          (captured-fork-sid nil))
       (cl-letf (((symbol-function 'claude-repl--active-inst)
-                 (lambda (_ws) inst))
+                 (lambda (ws)
+                   (cond ((equal ws "source-ws") source-inst)
+                         ((equal ws "test-ws") current-inst)
+                         (t (error "unexpected ws: %s" ws)))))
+                ((symbol-function '+workspace-current-name)
+                 (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--ws-dir)
+                 (lambda (_ws) "/tmp/source-repo/"))
+                ((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (if (string-match-p "name" prompt) "my-fork" "")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare fork-sid &rest _)
+                   (setq captured-fork-sid fork-sid))))
+        (claude-repl-fork-worktree-workspace "source-ws")
+        (should (equal captured-fork-sid "sess-source"))))))
+
+(ert-deftest claude-repl-test-fork-worktree-workspace-source-ws-passes-git-root ()
+  "When SOURCE-WS is given, its project-dir is threaded through as git-root."
+  (claude-repl-test--with-clean-state
+    (let ((source-inst (make-claude-repl-instantiation :session-id "sess-source"))
+          (captured-git-root :unset))
+      (cl-letf (((symbol-function 'claude-repl--active-inst)
+                 (lambda (_ws) source-inst))
+                ((symbol-function '+workspace-current-name)
+                 (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--ws-dir)
+                 (lambda (ws)
+                   (if (equal ws "source-ws") "/tmp/source-repo/"
+                     (error "unexpected ws: %s" ws))))
+                ((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (if (string-match-p "name" prompt) "my-fork" "")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork-sid _prompt _cb _priority _base git-root)
+                   (setq captured-git-root git-root))))
+        (claude-repl-fork-worktree-workspace "source-ws")
+        (should (equal captured-git-root "/tmp/source-repo/"))))))
+
+(ert-deftest claude-repl-test-fork-worktree-workspace-no-source-ws-uses-current ()
+  "With no SOURCE-WS, fork resolves session ID from the current workspace and passes no git-root."
+  (claude-repl-test--with-clean-state
+    (let ((current-inst (make-claude-repl-instantiation :session-id "sess-current"))
+          (captured-fork-sid nil)
+          (captured-git-root :unset))
+      (cl-letf (((symbol-function 'claude-repl--active-inst)
+                 (lambda (ws)
+                   (if (equal ws "test-ws") current-inst
+                     (error "unexpected ws: %s" ws))))
                 ((symbol-function '+workspace-current-name)
                  (lambda () "test-ws"))
                 ((symbol-function 'read-string)
                  (lambda (prompt &rest _)
-                   (if (string-match-p "name" prompt) "my-fork"
-                     "")))
+                   (if (string-match-p "name" prompt) "my-fork" "")))
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
-                 (lambda (_name sandbox _fork-sid &rest _)
-                   (setq captured-sandbox sandbox))))
-        (claude-repl-fork-worktree-workspace '(4))
-        (should (eq captured-sandbox t))))))
+                 (lambda (_name _bare fork-sid _prompt _cb _priority _base git-root)
+                   (setq captured-fork-sid fork-sid)
+                   (setq captured-git-root git-root))))
+        (claude-repl-fork-worktree-workspace nil)
+        (should (equal captured-fork-sid "sess-current"))
+        (should (null captured-git-root))))))
 
 ;;;; ---- Tests: setup-worktree-session ----
 
@@ -1340,7 +1390,7 @@ passing through."
                  (lambda (prompt &rest _)
                    (if (string-match-p "name" prompt) "my-ws" "")))
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority base)
+                 (lambda (_name _bare _fork _prompt _cb _priority base &rest _)
                    (setq captured-base base))))
         (claude-repl-create-worktree-workspace 'head)
         (should (equal captured-base "HEAD"))))))
@@ -1353,18 +1403,61 @@ passing through."
                  (lambda (prompt &rest _)
                    (if (string-match-p "name" prompt) "my-ws" "")))
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority base)
+                 (lambda (_name _bare _fork _prompt _cb _priority base &rest _)
                    (setq captured-base base))))
         (claude-repl-create-worktree-workspace 'master)
         (should (equal captured-base "origin/master"))))))
 
 (ert-deftest claude-repl-test-create-worktree-workspace-from-origin-master-delegates-with-master-symbol ()
   "`SPC TAB N' wrapper delegates to the main command with BASE = `master'."
-  (let ((captured-arg :unset))
+  (let ((captured-base :unset)
+        (captured-source :unset))
     (cl-letf (((symbol-function 'claude-repl-create-worktree-workspace)
-               (lambda (base) (setq captured-arg base))))
+               (lambda (base &optional source-ws)
+                 (setq captured-base base)
+                 (setq captured-source source-ws))))
       (claude-repl-create-worktree-workspace-from-origin-master)
-      (should (eq captured-arg 'master)))))
+      (should (eq captured-base 'master))
+      (should (null captured-source)))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-from-origin-master-forwards-source-ws ()
+  "`SPC TAB N' wrapper forwards SOURCE-WS to the main command."
+  (let ((captured-source :unset))
+    (cl-letf (((symbol-function 'claude-repl-create-worktree-workspace)
+               (lambda (_base &optional source-ws)
+                 (setq captured-source source-ws))))
+      (claude-repl-create-worktree-workspace-from-origin-master "other-ws")
+      (should (equal captured-source "other-ws")))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-source-ws-passes-git-root ()
+  "When SOURCE-WS is given, its :project-dir is threaded through as git-root."
+  (claude-repl-test--with-clean-state
+    (let ((captured-git-root :unset))
+      (cl-letf (((symbol-function 'claude-repl--ws-dir)
+                 (lambda (ws)
+                   (if (equal ws "source-ws") "/tmp/source-repo/"
+                     (error "unexpected ws: %s" ws))))
+                ((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (if (string-match-p "name" prompt) "my-ws" "")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base &optional git-root)
+                   (setq captured-git-root git-root))))
+        (claude-repl-create-worktree-workspace 'head "source-ws")
+        (should (equal captured-git-root "/tmp/source-repo/"))))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-no-source-ws-passes-nil-git-root ()
+  "When SOURCE-WS is nil, git-root is nil — `do-create' resolves it from context."
+  (claude-repl-test--with-clean-state
+    (let ((captured-git-root :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (if (string-match-p "name" prompt) "my-ws" "")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base &optional git-root)
+                   (setq captured-git-root git-root))))
+        (claude-repl-create-worktree-workspace 'head nil)
+        (should (null captured-git-root))))))
 
 (ert-deftest claude-repl-test-create-worktree-workspace-prefixes-preemptive-prompt ()
   "When a preemptive prompt is given, it is prefixed with the autonomous instruction."
