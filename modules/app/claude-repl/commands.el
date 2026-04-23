@@ -483,7 +483,15 @@ never visited — included so unvisited workspaces aren't dropped)."
     (let (snapshot)
       (maphash (lambda (ws plist) (push (cons ws plist) snapshot))
                entries)
-      (claude-repl--write-sexp-file claude-repl-workspace-snapshot-file snapshot)
+      (claude-repl--log nil "write-sexp-file: file=%s" claude-repl-workspace-snapshot-file)
+      (with-temp-file claude-repl-workspace-snapshot-file
+        (insert "(")
+        (let ((first t))
+          (dolist (entry snapshot)
+            (unless first (insert "\n "))
+            (setq first nil)
+            (prin1 entry (current-buffer))))
+        (insert ")"))
       (message "Saved %d workspace(s) to %s"
                (length snapshot) claude-repl-workspace-snapshot-file))))
 

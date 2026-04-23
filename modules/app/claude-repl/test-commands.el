@@ -958,6 +958,30 @@ live hash value is written (user visited it — pending data is stale)."
               (should (equal (plist-get (cdr entry) :priority) "p1"))))
         (delete-file snapshot-file)))))
 
+(ert-deftest claude-repl-cmd-test-save-workspace-snapshot/one-entry-per-line ()
+  "Save writes each workspace entry on its own line for human-readable diffs."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-")))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+            (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+            (claude-repl--ws-put "ws3" :project-dir "/tmp/ws3")
+            (claude-repl-save-workspace-snapshot)
+            (let* ((raw (with-temp-buffer
+                          (insert-file-contents snapshot-file)
+                          (buffer-string)))
+                   (lines (split-string raw "\n")))
+              ;; 3 entries => 3 lines (first line opens with "(", subsequent
+              ;; lines start with " " and each carries exactly one entry).
+              (should (= 3 (length lines)))
+              (should (string-prefix-p "((" (nth 0 lines)))
+              (should (string-prefix-p " (" (nth 1 lines)))
+              (should (string-prefix-p " (" (nth 2 lines)))
+              ;; Still a valid sexp round-trip.
+              (should (= 3 (length (claude-repl--read-sexp-file snapshot-file))))))
+        (delete-file snapshot-file)))))
+
 ;;;; ---- Tests: load-workspace-snapshot (back-compat + hydration + pending) ----
 
 (ert-deftest claude-repl-cmd-test-load-workspace-snapshot/reads-legacy-format ()
