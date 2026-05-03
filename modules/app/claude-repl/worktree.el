@@ -329,14 +329,20 @@ Logs OUTPUT and then calls ADD-FN to proceed with the worktree-add step."
 
 (defun claude-repl--validate-worktree-creation (name git-root dirname branch-name path)
   "Validate that a worktree can be created for NAME.
-Checks that NAME is non-empty, PATH does not already exist as a project,
-and BRANCH-NAME does not already exist in GIT-ROOT.  DIRNAME is used for
-error messages.  Signals `user-error' on any failure."
+Checks that NAME is non-empty, PATH does not already exist on disk, and
+BRANCH-NAME does not already exist in GIT-ROOT.  DIRNAME is used for
+error messages.  Signals `user-error' on any failure.
+
+PATH existence is checked with `file-directory-p' rather than
+`projectile-project-p' because the latter walks up the path looking for
+project markers — for a non-existent worktree dir nested under another
+repo (e.g. a `*-worktrees/' parent inside a repo), it would incorrectly
+report the new path as an existing project."
   (claude-repl--log name "validate-worktree-creation: name=%s git-root=%s dirname=%s branch-name=%s path=%s"
                     name git-root dirname branch-name path)
   (when (string-empty-p name)
     (user-error "Name cannot be empty"))
-  (when (projectile-project-p path)
+  (when (file-directory-p path)
     (user-error "Worktree '%s' already exists — use SPC p p to switch to it" dirname))
   (when (claude-repl--git-branch-exists-p git-root branch-name)
     (claude-repl--log name "ERROR: branch '%s' already exists — cannot create worktree" branch-name)

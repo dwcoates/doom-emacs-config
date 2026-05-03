@@ -402,10 +402,12 @@ Returns the full SHA of the new commit."
   (should-error (claude-repl--validate-worktree-creation "" "/root" "dir" "branch" "/path")
                 :type 'user-error))
 
-(ert-deftest claude-repl-test-validate-worktree-creation-existing-project ()
-  "Existing projectile project signals user-error."
-  (cl-letf (((symbol-function 'projectile-project-p) (lambda (_path) t)))
-    (should-error (claude-repl--validate-worktree-creation "name" "/root" "dir" "branch" "/path")
+(ert-deftest claude-repl-test-validate-worktree-creation-existing-path ()
+  "An existing directory at PATH signals user-error."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (should-error (claude-repl--validate-worktree-creation
+                   "name" repo "dir" "branch" repo)
                   :type 'user-error)))
 
 (ert-deftest claude-repl-test-validate-worktree-creation-existing-branch ()
@@ -414,19 +416,35 @@ Returns the full SHA of the new commit."
     (claude-repl-test--git-commit repo "initial" "content")
     (claude-repl-test--git-checkout repo "feature" t)
     (claude-repl-test--git-checkout repo "master")
-    (cl-letf (((symbol-function 'projectile-project-p) (lambda (_path) nil)))
-      (should-error (claude-repl--validate-worktree-creation
-                     "feature" repo "feature" "feature" "/nonexistent")
-                    :type 'user-error))))
+    (should-error (claude-repl--validate-worktree-creation
+                   "feature" repo "feature" "feature" "/nonexistent")
+                  :type 'user-error)))
 
 (ert-deftest claude-repl-test-validate-worktree-creation-passes ()
   "Valid inputs do not signal."
   (claude-repl-test--with-temp-git-repo repo
     (claude-repl-test--git-commit repo "initial" "content")
-    (cl-letf (((symbol-function 'projectile-project-p) (lambda (_path) nil)))
+    ;; Should not error
+    (claude-repl--validate-worktree-creation
+     "new-feature" repo "new-feature" "new-feature" "/nonexistent")))
+
+(ert-deftest claude-repl-test-validate-worktree-creation-nested-under-repo ()
+  "Validation passes for a non-existent path nested under another git repo.
+Regression: previously used `projectile-project-p', which walks UP from
+PATH and would find an ancestor `.git' (e.g. when the worktree-parent
+sits inside a separate repo), incorrectly flagging the new path as an
+existing worktree."
+  (claude-repl-test--with-temp-git-repo outer-repo
+    (claude-repl-test--git-commit outer-repo "initial" "content")
+    ;; outer-repo/inner is not itself a repo; outer-repo/inner/new-wt does
+    ;; not exist. With projectile-project-p this would have thrown because
+    ;; outer-repo has a .git ancestor; with file-directory-p it passes.
+    (let* ((inner (expand-file-name "inner" outer-repo))
+           (path (expand-file-name "new-wt" inner)))
+      (make-directory inner t)
       ;; Should not error
       (claude-repl--validate-worktree-creation
-       "new-feature" repo "new-feature" "new-feature" "/nonexistent"))))
+       "new-wt" outer-repo "new-wt" "new-wt" path))))
 
 ;;;; ---- Tests: merge-fork (cherry-pick-base) ----
 ;; These tests exercise claude-repl--cherry-pick-base (aliased as
