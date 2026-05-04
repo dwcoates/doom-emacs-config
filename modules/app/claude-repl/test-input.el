@@ -1999,7 +1999,7 @@ and surfaces a user-visible error."
     (should-not (claude-repl--slash-workspace-command-p))))
 
 (ert-deftest claude-repl-test-slash-return-injects-source-ws ()
-  "Slash return should inject [source-ws:NAME] for /wor commands."
+  "Slash return should inject [source-ws:NAME path:DIR] for /wor commands."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-temp-buffer " *test-slash-inject*"
       (setq-local claude-repl--slash-stack
@@ -2009,6 +2009,7 @@ and surfaces a user-visible error."
             (return-called nil))
         (claude-repl-test--with-temp-buffer "*claude-panel-slash-inject-vterm*"
           (claude-repl--ws-put "my-ws" :vterm-buffer (current-buffer))
+          (claude-repl--ws-put "my-ws" :project-dir "/test/project")
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                     ((symbol-function 'vterm-send-string)
@@ -2018,8 +2019,8 @@ and surfaces a user-visible error."
             (with-current-buffer " *test-slash-inject*"
               (claude-repl--slash-return)
               (should return-called)
-              ;; The injected string should contain the source workspace tag.
-              (should (cl-some (lambda (s) (string-match-p "\\[source-ws:my-ws\\]" s))
+              ;; The injected string should contain both the workspace name and path.
+              (should (cl-some (lambda (s) (string-match-p "\\[source-ws:my-ws path:/test/project\\]" s))
                                sent-strings)))))))))
 
 (ert-deftest claude-repl-test-slash-return-no-inject-for-non-wor ()

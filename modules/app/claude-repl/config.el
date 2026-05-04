@@ -21,7 +21,7 @@
   "List of (FILE . ERROR) pairs for sub-files that failed to load.")
 
 (defmacro claude-repl--load-module (file)
-  "Load FILE via `load!', catching and recording any error."
+  "Load FILE via `load!', recording any error for collective reporting."
   `(condition-case err
        (progn
          (load! ,file)
@@ -52,11 +52,8 @@
       (message "[claude-repl] Loaded with %d ERROR(S):" (length claude-repl--load-errors))
       (dolist (pair (nreverse claude-repl--load-errors))
         (message "[claude-repl]   %s.el: %S" (car pair) (cdr pair)))
-      ;; core.el is required for the module to function at all.
-      ;; Other modules can fail (degraded mode), but without core
-      ;; the entire package is non-functional.
-      (when (assoc "core" claude-repl--load-errors)
-        (error "[claude-repl] FATAL: core.el failed to load — module is non-functional")))
+      (error "[claude-repl] FATAL: %d module(s) failed to load — see messages above"
+             (length claude-repl--load-errors)))
   (message "[claude-repl] Loaded Claude-Repl package."))
 
 ;; Workspace snapshot save (quit) and lazy claude start (on first visit to

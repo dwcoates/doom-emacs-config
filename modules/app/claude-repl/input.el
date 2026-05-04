@@ -748,13 +748,17 @@ the source workspace identity can be injected."
 
 (defun claude-repl--slash-maybe-inject-source-ws ()
   "If the slash command starts with /wor, send the source workspace tag to vterm.
-Appends \" [source-ws:<ws-name>]\" so the skill can identify which workspace
-initiated the generation.  Does not push to the slash stack (this is
-injected text, not user keystrokes)."
+Appends \" [source-ws:<ws-name> path:<project-dir>]\" so the skill knows both
+which workspace initiated the generation and the repo root for worktree creation.
+Does not push to the slash stack (this is injected text, not user keystrokes).
+Signals an error if the current workspace has no :project-dir — the skill
+cannot produce a valid git_root without it."
   (when (claude-repl--slash-workspace-command-p)
-    (let ((ws (+workspace-current-name)))
-      (claude-repl--log (+workspace-current-name) "slash-maybe-inject-source-ws: injecting source-ws=%s" ws)
-      (claude-repl--slash-vterm-send (format " [source-ws:%s]" ws)))))
+    (let* ((ws (+workspace-current-name))
+           (dir (or (claude-repl--ws-get ws :project-dir)
+                    (error "claude-repl--slash-maybe-inject-source-ws: no :project-dir for workspace %s — cannot inject path" ws))))
+      (claude-repl--log ws "slash-maybe-inject-source-ws: injecting source-ws=%s path=%s" ws dir)
+      (claude-repl--slash-vterm-send (format " [source-ws:%s path:%s]" ws dir)))))
 
 (defun claude-repl--slash-return ()
   "Send return to vterm and exit slash mode.
