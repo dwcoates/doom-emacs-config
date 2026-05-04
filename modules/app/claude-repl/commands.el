@@ -566,3 +566,38 @@ failure never blocks quit."
     (condition-case err
         (claude-repl-save-workspace-snapshot)
       (error (message "[claude-repl] snapshot save failed: %S" err)))))
+
+;;;; Project-switch wrapper
+
+(defun claude-repl--hydrate-priority-from-state (project-root)
+  "Hydrate :priority for the current workspace from PROJECT-ROOT's state file.
+Reads `<PROJECT-ROOT>/.claude-repl-state' and, if it carries a
+`:priority', records it on the current workspace's plist so the tabline
+badge renders without waiting for `claude-repl--initialize-ws-env'
+\(which only runs when Claude actually starts).  No-op when the state
+file is missing, malformed, or carries no `:priority'."
+  (when-let* ((ws (ignore-errors (+workspace-current-name)))
+              (state-file (claude-repl--state-file project-root))
+              (saved (condition-case err
+                         (claude-repl--read-sexp-file-if-exists state-file)
+                       (error
+                        (claude-repl--log ws "hydrate-priority: read error file=%s err=%S"
+                                          state-file err)
+                        nil)))
+              (priority (plist-get saved :priority)))
+    (claude-repl--log ws "hydrate-priority: ws=%s priority=%s" ws priority)
+    (claude-repl--ws-put ws :priority priority)
+    (force-mode-line-update t)))
+
+(defun claude-repl-switch-to-project (&optional project)
+  "Switch to PROJECT and hydrate the workspace's priority badge.
+Thin wrapper around `+dwc/switch-to-project' that, after switching,
+reads `.claude-repl-state' from the project root and applies any saved
+`:priority' to the new workspace, so the tabline badge appears
+immediately on `SPC p p' instead of only after Claude starts."
+  (interactive)
+  (let ((project (or project
+                     (projectile-completing-read "Switch to project: "
+                                                 (projectile-relevant-known-projects)))))
+    (+dwc/switch-to-project project)
+    (claude-repl--hydrate-priority-from-state project)))

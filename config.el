@@ -834,7 +834,6 @@ otherwise prompt via `projectile-completing-read'."
 
 (map! :leader
       (:prefix "p"
-       :desc "Switch to project" "p" #'+dwc/switch-to-project
        :desc "Switch to project with file" "P" #'+dwc/switch-to-project-with-file
        :desc "Switch to project buffer" "b" #'+dwc/switch-to-project-buffer))
 

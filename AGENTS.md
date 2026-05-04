@@ -13,6 +13,7 @@ When adding a new concern:
 1. Pick the right sub-file (`core.el`, `panels.el`, `status.el`, `session.el`, `sentinel.el`, `worktree.el`, `input.el`, `keybindings.el`, `magit.el`, etc.) or create a new one.
 2. If creating a new file, register it in `modules/app/claude-repl/config.el` via `(claude-repl--load-module "NAME")`.
 3. If the feature bridges claude-repl with another package (e.g. magit), put it in a dedicated integration file like `magit.el` rather than in the doomdir `config.el` under `(after! PACKAGE ...)`.
+4. Leader-key bindings that reference a `claude-repl-*` symbol (e.g. overriding `SPC p p` to `claude-repl-switch-to-project`) belong in `keybindings.el`, not in the doomdir `config.el` — even when they shadow a pre-existing `+dwc/` binding there.
 
 Naming: internals use `claude-repl--` prefix, public entry points use `claude-repl-` prefix. User-facing commands triggered by leader keybindings may keep the `+dwc/` prefix when they were moved out of the doomdir `config.el` and remain user-scope entry points.
 

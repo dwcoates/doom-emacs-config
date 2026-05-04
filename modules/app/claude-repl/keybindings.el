@@ -403,6 +403,7 @@ Reports comprehensive diagnostics."
 
 (map! :leader
       (:prefix "p"
+       :desc "Switch to project" "p" #'claude-repl-switch-to-project
        :desc "Create worktree workspace" "w" #'claude-repl-create-worktree-workspace))
 
 (map! :leader

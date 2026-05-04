@@ -1102,6 +1102,73 @@ so the lazy-start hook skips firing for each restored workspace."
         (should-not started)
         (should-not (gethash "test-ws" claude-repl--pending-snapshot-workspaces))))))
 
+;;;; ---- claude-repl--hydrate-priority-from-state ----
+
+(ert-deftest claude-repl-cmd-test-hydrate-priority/sets-priority-from-state-file ()
+  "hydrate-priority reads :priority from .claude-repl-state and applies it."
+  (claude-repl-test--with-clean-state
+    (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-hydrate-" t))))
+      (unwind-protect
+          (progn
+            (with-temp-file (expand-file-name ".claude-repl-state" tmp-dir)
+              (prin1 '(:project-dir "/some/dir" :active-env :bare-metal :priority "p1")
+                     (current-buffer)))
+            (cl-letf (((symbol-function '+workspace-current-name)
+                       (lambda () "test-ws"))
+                      ((symbol-function 'force-mode-line-update)
+                       (lambda (&optional _all) nil)))
+              (claude-repl--hydrate-priority-from-state tmp-dir)
+              (should (equal (claude-repl--ws-get "test-ws" :priority) "p1"))))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-hydrate-priority/no-state-file-noop ()
+  "hydrate-priority is a no-op when the state file is missing."
+  (claude-repl-test--with-clean-state
+    (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-hydrate-" t))))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name)
+                     (lambda () "test-ws")))
+            (claude-repl--hydrate-priority-from-state tmp-dir)
+            (should-not (claude-repl--ws-get "test-ws" :priority)))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-hydrate-priority/state-without-priority-noop ()
+  "hydrate-priority is a no-op when state file has no :priority entry."
+  (claude-repl-test--with-clean-state
+    (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-hydrate-" t))))
+      (unwind-protect
+          (progn
+            (with-temp-file (expand-file-name ".claude-repl-state" tmp-dir)
+              (prin1 '(:project-dir "/some/dir" :active-env :bare-metal)
+                     (current-buffer)))
+            (cl-letf (((symbol-function '+workspace-current-name)
+                       (lambda () "test-ws")))
+              (claude-repl--hydrate-priority-from-state tmp-dir)
+              (should-not (claude-repl--ws-get "test-ws" :priority))))
+        (delete-directory tmp-dir t)))))
+
+;;;; ---- claude-repl-switch-to-project ----
+
+(ert-deftest claude-repl-cmd-test-switch-to-project/switches-then-hydrates ()
+  "switch-to-project calls +dwc/switch-to-project, then hydrates priority."
+  (claude-repl-test--with-clean-state
+    (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-switch-" t)))
+          switched-with)
+      (unwind-protect
+          (progn
+            (with-temp-file (expand-file-name ".claude-repl-state" tmp-dir)
+              (prin1 '(:priority "p2") (current-buffer)))
+            (cl-letf (((symbol-function '+dwc/switch-to-project)
+                       (lambda (project) (setq switched-with project)))
+                      ((symbol-function '+workspace-current-name)
+                       (lambda () "switched-ws"))
+                      ((symbol-function 'force-mode-line-update)
+                       (lambda (&optional _all) nil)))
+              (claude-repl-switch-to-project tmp-dir)
+              (should (equal switched-with tmp-dir))
+              (should (equal (claude-repl--ws-get "switched-ws" :priority) "p2"))))
+        (delete-directory tmp-dir t)))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here
