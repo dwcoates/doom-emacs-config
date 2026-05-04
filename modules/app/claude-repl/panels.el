@@ -857,17 +857,21 @@ Claude panels to fill the frame.  Calling again restores the layout."
 
 (defun claude-repl-fullscreen-and-focus ()
   "Toggle fullscreen for Claude panels and focus the input window.
-When going fullscreen, maximizes both Claude windows and moves point
-to the input buffer.  When restoring, just restores the layout."
+When in a Claude panel buffer, maximizes both Claude windows and moves
+point to the input buffer, or restores the layout.
+When not in a Claude panel buffer, maximizes the current window."
   (interactive)
-  (claude-repl-toggle-fullscreen)
-  (let* ((ws (+workspace-current-name))
-         (input-buf (claude-repl--ws-get ws :input-buffer))
-         (input-win (and input-buf (get-buffer-window input-buf))))
-    (when input-win
-      (select-window input-win)
-      (when (bound-and-true-p evil-mode)
-        (evil-insert-state)))))
+  (if (claude-repl--claude-panel-buffer-p)
+      (progn
+        (claude-repl-toggle-fullscreen)
+        (let* ((ws (+workspace-current-name))
+               (input-buf (claude-repl--ws-get ws :input-buffer))
+               (input-win (and input-buf (get-buffer-window input-buf))))
+          (when input-win
+            (select-window input-win)
+            (when (bound-and-true-p evil-mode)
+              (evil-insert-state)))))
+    (delete-other-windows)))
 
 (defun claude-repl-cycle ()
   "Send backtab to Claude vterm to cycle through options."
