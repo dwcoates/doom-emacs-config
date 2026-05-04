@@ -2091,15 +2091,34 @@ initialize-ws-env.  Models the worktree-creation / new-workspace paths."
         (when (buffer-live-p claude-buf) (kill-buffer claude-buf))))))
 
 (ert-deftest claude-repl-test-panels-fullscreen-and-focus-non-claude-maximizes ()
-  "fullscreen-and-focus calls delete-other-windows when not in a Claude buffer."
+  "fullscreen-and-focus saves config and calls delete-other-windows when not in a Claude buffer."
   (claude-repl-test--with-clean-state
-    (let ((maximize-called nil))
+    (let ((maximize-called nil)
+          (claude-repl--window-fullscreen-config nil))
       (switch-to-buffer (get-buffer-create "*other*"))
       (unwind-protect
           (cl-letf (((symbol-function 'delete-other-windows)
                      (lambda () (setq maximize-called t))))
             (claude-repl-fullscreen-and-focus)
-            (should maximize-called))
+            (should maximize-called)
+            (should claude-repl--window-fullscreen-config))
+        (setq claude-repl--window-fullscreen-config nil)
+        (when (get-buffer "*other*") (kill-buffer "*other*"))))))
+
+(ert-deftest claude-repl-test-panels-fullscreen-and-focus-non-claude-restores ()
+  "fullscreen-and-focus restores saved config on second press when not in a Claude buffer."
+  (claude-repl-test--with-clean-state
+    (let* ((restore-called nil)
+           (fake-config (list 'fake-window-config))
+           (claude-repl--window-fullscreen-config fake-config))
+      (switch-to-buffer (get-buffer-create "*other*"))
+      (unwind-protect
+          (cl-letf (((symbol-function 'set-window-configuration)
+                     (lambda (cfg) (when (eq cfg fake-config) (setq restore-called t)))))
+            (claude-repl-fullscreen-and-focus)
+            (should restore-called)
+            (should-not claude-repl--window-fullscreen-config))
+        (setq claude-repl--window-fullscreen-config nil)
         (when (get-buffer "*other*") (kill-buffer "*other*"))))))
 
 ;;; test-panels.el ends here

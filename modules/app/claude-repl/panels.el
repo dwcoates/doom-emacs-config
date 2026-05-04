@@ -855,11 +855,17 @@ Claude panels to fill the frame.  Calling again restores the layout."
         (claude-repl--delete-non-panel-windows vterm-buf input-buf)))
      (t (message "No Claude vterm buffer for this workspace.")))))
 
+(defvar claude-repl--window-fullscreen-config nil
+  "Saved window configuration for non-Claude fullscreen toggle.
+Set when `claude-repl-fullscreen-and-focus' maximizes a non-Claude window,
+cleared on restore.")
+
 (defun claude-repl-fullscreen-and-focus ()
   "Toggle fullscreen for Claude panels and focus the input window.
 When in a Claude panel buffer, maximizes both Claude windows and moves
 point to the input buffer, or restores the layout.
-When not in a Claude panel buffer, maximizes the current window."
+When not in a Claude panel buffer, maximizes the current window and
+saves the layout; calling again restores it."
   (interactive)
   (if (claude-repl--claude-panel-buffer-p)
       (progn
@@ -871,7 +877,12 @@ When not in a Claude panel buffer, maximizes the current window."
             (select-window input-win)
             (when (bound-and-true-p evil-mode)
               (evil-insert-state)))))
-    (delete-other-windows)))
+    (if claude-repl--window-fullscreen-config
+        (progn
+          (set-window-configuration claude-repl--window-fullscreen-config)
+          (setq claude-repl--window-fullscreen-config nil))
+      (setq claude-repl--window-fullscreen-config (current-window-configuration))
+      (delete-other-windows))))
 
 (defun claude-repl-cycle ()
   "Send backtab to Claude vterm to cycle through options."
