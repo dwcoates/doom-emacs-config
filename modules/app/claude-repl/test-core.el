@@ -81,6 +81,12 @@ signals `user-error' rather than silently returning a bogus path."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
     (should-error (claude-repl--buffer-name) :type 'error)))
 
+(ert-deftest claude-repl-test-buffer-name-empty-ws ()
+  "Buffer name signals an error when the resolved workspace name is empty."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "")))
+    (should-error (claude-repl--buffer-name) :type 'error))
+  (should-error (claude-repl--buffer-name nil "") :type 'error))
+
 (ert-deftest claude-repl-test-buffer-name-uses-explicit-ws ()
   "Buffer name should prefer the explicit WS argument over the current workspace."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))

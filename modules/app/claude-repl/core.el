@@ -413,13 +413,17 @@ Keeps alphanumerics, hyphens, and underscores.  Returns nil for nil NAME."
   "Return a workspace-specific buffer name like *claude-panel-WS* or *claude-panel-input-WS*.
 SUFFIX, if provided, is inserted before the workspace name (e.g. \"-input\").
 WS, if provided, is the workspace name; otherwise uses the current workspace.
-Signals an error when no workspace name can be determined."
+Signals an error when the resolved workspace name is nil or empty — an
+empty id produces buffer names like *claude-panel-*, which the
+`claude-repl--vterm-buffer-re' / `claude-repl--input-buffer-re' regexes
+mis-classify (input names match the vterm regex with id=\"input-\"),
+causing `claude-repl--sync-panels' to delete the input panel as orphaned."
   (let* ((ws-name (or ws (and (fboundp '+workspace-current-name)
                               (+workspace-current-name))))
          (safe (claude-repl--sanitize-ws-name ws-name)))
-    (unless safe
-      (error "claude-repl--buffer-name: no workspace name available (ws=%s, +workspace-current-name=%s)"
-             ws (and (fboundp '+workspace-current-name) (+workspace-current-name))))
+    (when (or (null safe) (string-empty-p safe))
+      (error "claude-repl--buffer-name: empty workspace name (ws=%S, +workspace-current-name=%S, sanitized=%S)"
+             ws (and (fboundp '+workspace-current-name) (+workspace-current-name)) safe))
     (let ((name (format claude-repl-panel-buffer-name-format (or suffix "") safe)))
       (claude-repl--log-verbose nil "buffer-name: suffix=%s ws=%s name=%s" suffix ws-name name)
       name)))
