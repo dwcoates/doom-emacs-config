@@ -28,16 +28,12 @@
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-create-or-update-pr-prompt
-  "/create-or-update-pr --patch --self-certified --add-to-merge-queue --skip-tests"
-  "Slash command sent to Claude by `claude-repl-create-or-update-pr'."
-  :type 'string
-  :group 'claude-repl)
-
-(defcustom claude-repl-create-or-update-pr-no-self-certified-prompt
-  "/create-or-update-pr --patch --add-to-merge-queue --skip-tests"
-  "Slash command sent to Claude by `claude-repl-create-or-update-pr-no-self-certified'."
-  :type 'string
+(defcustom claude-repl-create-or-update-pr-base-flags
+  '("commit" "--patch" "--self-certified" "--add-to-merge-queue" "--skip-tests")
+  "Default flag list for the /create-or-update-pr slash command.
+`claude-repl-create-or-update-pr' joins these into the prompt, dropping
+any flag whose exclusion symbol appears in its EXCLUDED argument."
+  :type '(repeat string)
   :group 'claude-repl)
 
 (defcustom claude-repl-run-tests-prompt
@@ -332,17 +328,45 @@ sends \"i\" after 0.25s to return to insert mode."
   (claude-repl--log (+workspace-current-name) "update-pr: sending update-pr prompt")
   (claude-repl--send-to-claude claude-repl-update-pr-prompt))
 
-(defun claude-repl-create-or-update-pr ()
-  "Send the create-or-update-pr slash command to Claude."
+(defun claude-repl--exclusion-symbol-to-flag (sym)
+  "Convert exclusion SYM (e.g. \\='no-self-certified) to flag (e.g. \"--self-certified\")."
+  (let ((name (symbol-name sym)))
+    (unless (string-prefix-p "no-" name)
+      (error "claude-repl: exclusion symbol must start with `no-': %S" sym))
+    (concat "--" (substring name 3))))
+
+(defun claude-repl--build-create-or-update-pr-prompt (excluded)
+  "Build the /create-or-update-pr prompt, omitting flags for EXCLUDED.
+EXCLUDED is a list of `no-FLAG' symbols (e.g. \\='no-self-certified).  Each
+must correspond to a flag in `claude-repl-create-or-update-pr-base-flags'
+or an error is signalled."
+  (let ((excluded-flags
+         (mapcar (lambda (sym)
+                   (let ((flag (claude-repl--exclusion-symbol-to-flag sym)))
+                     (unless (member flag claude-repl-create-or-update-pr-base-flags)
+                       (error "claude-repl: %S excludes %s, not in base flags" sym flag))
+                     flag))
+                 excluded)))
+    (string-join
+     (cons "/create-or-update-pr"
+           (cl-remove-if (lambda (f) (member f excluded-flags))
+                         claude-repl-create-or-update-pr-base-flags))
+     " ")))
+
+(defun claude-repl-create-or-update-pr (&optional excluded)
+  "Send /create-or-update-pr to Claude with optional EXCLUDED flags dropped.
+EXCLUDED is a list of `no-FLAG' symbols (e.g. \\='(no-self-certified)) — each
+named flag is removed from `claude-repl-create-or-update-pr-base-flags'
+before the prompt is sent."
   (interactive)
-  (claude-repl--log (+workspace-current-name) "create-or-update-pr: sending slash command")
-  (claude-repl--send-to-claude claude-repl-create-or-update-pr-prompt))
+  (let ((prompt (claude-repl--build-create-or-update-pr-prompt excluded)))
+    (claude-repl--log (+workspace-current-name) "create-or-update-pr: %s" prompt)
+    (claude-repl--send-to-claude prompt)))
 
 (defun claude-repl-create-or-update-pr-no-self-certified ()
-  "Send the create-or-update-pr slash command to Claude without --self-certified."
+  "Send /create-or-update-pr to Claude without --self-certified."
   (interactive)
-  (claude-repl--log (+workspace-current-name) "create-or-update-pr-no-self-certified: sending slash command")
-  (claude-repl--send-to-claude claude-repl-create-or-update-pr-no-self-certified-prompt))
+  (claude-repl-create-or-update-pr '(no-self-certified)))
 
 (defun claude-repl--nuke-one-workspace (ws)
   "Tear down a single claude-repl workspace WS without prompting.

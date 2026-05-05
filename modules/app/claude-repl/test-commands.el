@@ -423,28 +423,79 @@
       (claude-repl-update-pr)
       (should (equal sent-text claude-repl-update-pr-prompt)))))
 
+;;;; ---- claude-repl--exclusion-symbol-to-flag ----
+
+(ert-deftest claude-repl-cmd-test-exclusion-symbol-to-flag/single-word ()
+  "no-self-certified maps to --self-certified."
+  (should (equal (claude-repl--exclusion-symbol-to-flag 'no-self-certified)
+                 "--self-certified")))
+
+(ert-deftest claude-repl-cmd-test-exclusion-symbol-to-flag/multi-word ()
+  "Dashes inside the flag name are preserved."
+  (should (equal (claude-repl--exclusion-symbol-to-flag 'no-add-to-merge-queue)
+                 "--add-to-merge-queue")))
+
+(ert-deftest claude-repl-cmd-test-exclusion-symbol-to-flag/missing-prefix-errors ()
+  "Symbol without the `no-' prefix raises an error."
+  (should-error (claude-repl--exclusion-symbol-to-flag 'self-certified)))
+
+;;;; ---- claude-repl--build-create-or-update-pr-prompt ----
+
+(ert-deftest claude-repl-cmd-test-build-coup-prompt/no-exclusions-keeps-all-flags ()
+  "With nil EXCLUDED, the prompt contains every base flag."
+  (let ((claude-repl-create-or-update-pr-base-flags
+         '("--patch" "--self-certified" "--add-to-merge-queue" "--skip-tests")))
+    (should (equal (claude-repl--build-create-or-update-pr-prompt nil)
+                   "/create-or-update-pr --patch --self-certified --add-to-merge-queue --skip-tests"))))
+
+(ert-deftest claude-repl-cmd-test-build-coup-prompt/single-exclusion ()
+  "A single exclusion drops just that flag."
+  (let ((claude-repl-create-or-update-pr-base-flags
+         '("--patch" "--self-certified" "--add-to-merge-queue" "--skip-tests")))
+    (should (equal (claude-repl--build-create-or-update-pr-prompt '(no-self-certified))
+                   "/create-or-update-pr --patch --add-to-merge-queue --skip-tests"))))
+
+(ert-deftest claude-repl-cmd-test-build-coup-prompt/multiple-exclusions ()
+  "Multiple exclusions drop each named flag."
+  (let ((claude-repl-create-or-update-pr-base-flags
+         '("--patch" "--self-certified" "--add-to-merge-queue" "--skip-tests")))
+    (should (equal (claude-repl--build-create-or-update-pr-prompt
+                    '(no-self-certified no-add-to-merge-queue))
+                   "/create-or-update-pr --patch --skip-tests"))))
+
+(ert-deftest claude-repl-cmd-test-build-coup-prompt/unknown-exclusion-errors ()
+  "Excluding a flag not present in the base list signals an error."
+  (let ((claude-repl-create-or-update-pr-base-flags '("--patch" "--self-certified")))
+    (should-error (claude-repl--build-create-or-update-pr-prompt '(no-add-to-merge-queue)))))
+
 ;;;; ---- claude-repl-create-or-update-pr ----
 
-(ert-deftest claude-repl-cmd-test-create-or-update-pr/sends-prompt ()
-  "create-or-update-pr sends the configured slash command to claude."
+(ert-deftest claude-repl-cmd-test-create-or-update-pr/no-args-sends-default ()
+  "create-or-update-pr with no args sends the prompt built from base flags."
   (let (sent-text)
     (cl-letf (((symbol-function 'claude-repl--send-to-claude)
                (lambda (text) (setq sent-text text))))
       (claude-repl-create-or-update-pr)
-      (should (equal sent-text claude-repl-create-or-update-pr-prompt)))))
+      (should (equal sent-text
+                     (claude-repl--build-create-or-update-pr-prompt nil))))))
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr/excluded-arg-omits-flag ()
+  "create-or-update-pr called with EXCLUDED list drops those flags."
+  (let (sent-text)
+    (cl-letf (((symbol-function 'claude-repl--send-to-claude)
+               (lambda (text) (setq sent-text text))))
+      (claude-repl-create-or-update-pr '(no-self-certified))
+      (should-not (string-match-p "--self-certified" sent-text)))))
+
+;;;; ---- claude-repl-create-or-update-pr-no-self-certified ----
 
 (ert-deftest claude-repl-cmd-test-create-or-update-pr-no-self-certified/sends-prompt ()
-  "create-or-update-pr-no-self-certified sends the configured slash command to claude."
+  "no-self-certified wrapper sends a prompt that omits --self-certified."
   (let (sent-text)
     (cl-letf (((symbol-function 'claude-repl--send-to-claude)
                (lambda (text) (setq sent-text text))))
       (claude-repl-create-or-update-pr-no-self-certified)
-      (should (equal sent-text claude-repl-create-or-update-pr-no-self-certified-prompt)))))
-
-(ert-deftest claude-repl-cmd-test-create-or-update-pr-no-self-certified/prompt-omits-self-certified ()
-  "Default no-self-certified prompt does not contain --self-certified."
-  (should-not (string-match-p "--self-certified"
-                              claude-repl-create-or-update-pr-no-self-certified-prompt)))
+      (should-not (string-match-p "--self-certified" sent-text)))))
 
 ;;;; ---- claude-repl-copy-reference ----
 
@@ -508,8 +559,6 @@
                  claude-repl-explain-diff-prompt
                  claude-repl-update-pr-diff-prompt
                  claude-repl-update-pr-prompt
-                 claude-repl-create-or-update-pr-prompt
-                 claude-repl-create-or-update-pr-no-self-certified-prompt
                  claude-repl-run-tests-prompt
                  claude-repl-run-lint-prompt
                  claude-repl-run-all-prompt
@@ -517,6 +566,12 @@
                  claude-repl-test-coverage-prompt))
     (should (stringp (symbol-value var)))
     (should (> (length (symbol-value var)) 0))))
+
+(ert-deftest claude-repl-cmd-test-base-flags-default ()
+  "Default base flags are a non-empty list of strings."
+  (should (listp claude-repl-create-or-update-pr-base-flags))
+  (should (> (length claude-repl-create-or-update-pr-base-flags) 0))
+  (should (cl-every #'stringp claude-repl-create-or-update-pr-base-flags)))
 
 ;;;; ---- claude-repl-nuke-workspace ----
 
