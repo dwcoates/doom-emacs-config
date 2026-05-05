@@ -464,18 +464,18 @@ Returns the full SHA of the new commit."
     (cl-letf (((symbol-function 'claude-repl--finalize-worktree-workspace)
                (lambda (&rest _args) (setq finalized t))))
       (claude-repl--worktree-add-callback
-       "/tmp/path" "dirname" nil nil nil nil nil nil "git error output")
+       "/tmp/path" "dirname" nil nil nil nil nil nil nil "git error output")
       (should-not finalized))))
 
 (ert-deftest claude-repl-test-worktree-add-callback-success ()
   "When git worktree add succeeds, finalize is called."
   (let ((finalized nil))
     (cl-letf (((symbol-function 'claude-repl--finalize-worktree-workspace)
-               (lambda (path dirname prompt priority fork-id bare-metal cb)
-                 (setq finalized (list path dirname prompt priority fork-id bare-metal)))))
+               (lambda (path dirname prompt priority fork-id bare-metal _cb &optional source-dir)
+                 (setq finalized (list path dirname prompt priority fork-id bare-metal source-dir)))))
       (claude-repl--worktree-add-callback
-       "/tmp/path" "dirname" "prompt" 5 "fork-123" nil nil t "ok")
-      (should (equal finalized '("/tmp/path" "dirname" "prompt" 5 "fork-123" nil))))))
+       "/tmp/path" "dirname" "prompt" 5 "fork-123" nil nil "/src/dir" t "ok")
+      (should (equal finalized '("/tmp/path" "dirname" "prompt" 5 "fork-123" nil "/src/dir"))))))
 
 ;;;; ---- Tests: worktree-fetch-callback ----
 
@@ -1059,7 +1059,7 @@ existing worktree."
                  (lambda (prompt &rest _)
                    (if (string-match-p "name" prompt) "my-fork" "")))
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork-sid _prompt _cb _priority _base git-root)
+                 (lambda (_name _bare _fork-sid _prompt _cb _priority _base git-root &optional _source-dir)
                    (setq captured-git-root git-root))))
         (claude-repl-fork-worktree-workspace "source-ws")
         (should (equal captured-git-root "/tmp/source-repo/"))))))
@@ -1080,12 +1080,107 @@ existing worktree."
                  (lambda (prompt &rest _)
                    (if (string-match-p "name" prompt) "my-fork" "")))
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare fork-sid _prompt _cb _priority _base git-root)
+                 (lambda (_name _bare fork-sid _prompt _cb _priority _base git-root &optional _source-dir)
                    (setq captured-fork-sid fork-sid)
                    (setq captured-git-root git-root))))
         (claude-repl-fork-worktree-workspace nil)
         (should (equal captured-fork-sid "sess-current"))
         (should (null captured-git-root))))))
+
+;;;; ---- Tests: source-ws-dir threading ----
+
+(ert-deftest claude-repl-test-create-worktree-workspace-records-source-dir-from-current-ws ()
+  "Without explicit SOURCE-WS, source-dir defaults to the current workspace's :project-dir."
+  (claude-repl-test--with-clean-state
+    (let ((captured-source-dir :unset))
+      (cl-letf (((symbol-function '+workspace-current-name)
+                 (lambda () "ambient-ws"))
+                ((symbol-function 'claude-repl--ws-dir)
+                 (lambda (ws)
+                   (if (equal ws "ambient-ws") "/tmp/ambient-repo/"
+                     (error "unexpected ws: %s" ws))))
+                ((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (if (string-match-p "name" prompt) "my-ws" "")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base &optional _git-root source-dir)
+                   (setq captured-source-dir source-dir))))
+        (claude-repl-create-worktree-workspace 'head)
+        (should (equal captured-source-dir "/tmp/ambient-repo/"))))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-records-source-dir-from-explicit-source-ws ()
+  "With explicit SOURCE-WS, source-dir is that workspace's :project-dir."
+  (claude-repl-test--with-clean-state
+    (let ((captured-source-dir :unset))
+      (cl-letf (((symbol-function 'claude-repl--ws-dir)
+                 (lambda (ws)
+                   (if (equal ws "explicit-ws") "/tmp/explicit-repo/"
+                     (error "unexpected ws: %s" ws))))
+                ((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (if (string-match-p "name" prompt) "my-ws" "")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base &optional _git-root source-dir)
+                   (setq captured-source-dir source-dir))))
+        (claude-repl-create-worktree-workspace 'head "explicit-ws")
+        (should (equal captured-source-dir "/tmp/explicit-repo/"))))))
+
+(ert-deftest claude-repl-test-fork-worktree-workspace-records-source-dir-from-fork-ws ()
+  "Fork records the fork-ws's :project-dir as source-dir."
+  (claude-repl-test--with-clean-state
+    (let ((source-inst (make-claude-repl-instantiation :session-id "sess-source"))
+          (captured-source-dir :unset))
+      (cl-letf (((symbol-function 'claude-repl--active-inst)
+                 (lambda (_ws) source-inst))
+                ((symbol-function 'claude-repl--ws-dir)
+                 (lambda (ws)
+                   (if (equal ws "fork-source") "/tmp/fork-source-repo/"
+                     (error "unexpected ws: %s" ws))))
+                ((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (if (string-match-p "name" prompt) "my-fork" "")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base &optional _git-root source-dir)
+                   (setq captured-source-dir source-dir))))
+        (claude-repl-fork-worktree-workspace "fork-source")
+        (should (equal captured-source-dir "/tmp/fork-source-repo/"))))))
+
+(ert-deftest claude-repl-test-create-worktree-from-command-records-git-root-as-source-dir ()
+  "The commands flow records GIT-ROOT as source-dir on the new ws."
+  (claude-repl-test--with-clean-state
+    (let ((captured-source-dir :unset))
+      (cl-letf (((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base &optional _git-root source-dir)
+                   (setq captured-source-dir source-dir))))
+        (claude-repl--create-worktree-from-command "/tmp/cmd-repo/" "name" "prompt" 5)
+        (should (equal captured-source-dir "/tmp/cmd-repo/"))))))
+
+(ert-deftest claude-repl-test-finalize-worktree-workspace-stores-source-ws-dir ()
+  "Finalize persists :source-ws-dir on the new workspace's plist."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+               (lambda (&rest _) nil))
+              ((symbol-function '+workspace-new) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--setup-worktree-session)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--path-canonical) #'identity))
+      (claude-repl--finalize-worktree-workspace
+       "/tmp/new-wt" "new-ws" nil nil nil nil nil "/tmp/source-repo/")
+      (should (equal (claude-repl--ws-get "new-ws" :source-ws-dir)
+                     "/tmp/source-repo/")))))
+
+(ert-deftest claude-repl-test-finalize-worktree-workspace-omits-source-ws-dir-when-nil ()
+  "When source-dir is nil, :source-ws-dir is not stored (apply-workspace-properties skips nil)."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+               (lambda (&rest _) nil))
+              ((symbol-function '+workspace-new) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--setup-worktree-session)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--path-canonical) #'identity))
+      (claude-repl--finalize-worktree-workspace
+       "/tmp/new-wt" "new-ws" nil nil nil nil nil nil)
+      (should (null (claude-repl--ws-get "new-ws" :source-ws-dir))))))
 
 ;;;; ---- Tests: setup-worktree-session ----
 
@@ -1555,7 +1650,7 @@ passing through."
                  (lambda (prompt &rest _)
                    (if (string-match-p "name" prompt) "my-ws" "")))
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base &optional git-root)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base &optional git-root _source-dir)
                    (setq captured-git-root git-root))))
         (claude-repl-create-worktree-workspace 'head "source-ws")
         (should (equal captured-git-root "/tmp/source-repo/"))))))
@@ -1568,7 +1663,7 @@ passing through."
                  (lambda (prompt &rest _)
                    (if (string-match-p "name" prompt) "my-ws" "")))
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base &optional git-root)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base &optional git-root _source-dir)
                    (setq captured-git-root git-root))))
         (claude-repl-create-worktree-workspace 'head nil)
         (should (null captured-git-root))))))
