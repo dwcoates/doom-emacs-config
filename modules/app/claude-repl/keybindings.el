@@ -412,7 +412,7 @@ Reports comprehensive diagnostics."
        :desc "New worktree ws (from origin/master)" "N" #'claude-repl-create-worktree-workspace-from-origin-master
        :desc "Fork worktree ws + fork Claude session" "f" #'claude-repl-fork-worktree-workspace
        :desc "Merge workspace into current" "m" #'+dwc/workspace-merge
-       :desc "Merge current workspace into master" "M" #'+dwc/workspace-merge-current-into-master
+       :desc "Merge current workspace into source" "M" #'+dwc/workspace-merge-current-into-source
        :desc "Push workspace to second-to-last" "p" #'+dwc/workspace-push-to-back
        :desc "Pull workspace to second" "P" #'+dwc/workspace-pull-to-front
        :desc "Open most recent workspace" "R" #'+dwc/open-most-recent-workspace))

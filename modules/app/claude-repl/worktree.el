@@ -40,11 +40,6 @@ do not abort workspace creation."
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-master-workspace-name "master"
-  "Name of the master workspace used as merge target."
-  :type 'string
-  :group 'claude-repl)
-
 (defcustom claude-repl-master-branch-name "master"
   "Branch name treated as the trunk worktree.
 Used by `claude-repl--master-worktree-path' as the fallback merge target
@@ -932,26 +927,37 @@ Prompts for which workspace to merge in."
 
 (defalias '+dwc/workspace-merge #'claude-repl-workspace-merge)
 
-(defun claude-repl-workspace-merge-current-into-master ()
-  "Merge the current workspace's branch into the master workspace.
-Switches to master, then cherry-picks commits from the current workspace."
+(defun claude-repl-workspace-merge-current-into-source ()
+  "Merge the current workspace's commits into its source workspace.
+The source workspace is the one `SPC TAB n' was called from when this
+worktree was created (recorded as `:source-ws-dir').  When that
+directory no longer exists or no source was recorded, falls back to the
+worktree on `claude-repl-master-branch-name'.
+
+Switches to the target workspace via `claude-repl-switch-to-project'
+\(which creates a perspective for the project if none is open) and
+cherry-picks this workspace's commits onto its branch."
   (interactive)
   (let* ((source-ws (+workspace-current-name))
-         (master-ws claude-repl-master-workspace-name))
-    (claude-repl--log source-ws "workspace-merge-current-into-master: source-ws=%s master-ws=%s" source-ws master-ws)
-    (unless (member master-ws (+workspace-list-names))
-      (user-error "No workspace named 'master' found"))
-    (when (string= source-ws master-ws)
-      (user-error "Already on the master workspace"))
+         (source-dir (claude-repl--ws-dir source-ws))
+         (recorded (claude-repl--ws-get source-ws :source-ws-dir))
+         (target-dir (or (and recorded (file-directory-p recorded) recorded)
+                         (claude-repl--master-worktree-path source-dir))))
+    (claude-repl--log source-ws
+                      "workspace-merge-current-into-source: source-ws=%s source-dir=%s recorded=%s target-dir=%s"
+                      source-ws source-dir (or recorded "nil") (or target-dir "nil"))
+    (unless target-dir
+      (user-error "Cannot determine merge target for '%s': no recorded source and no '%s' worktree found"
+                  source-ws claude-repl-master-branch-name))
+    (when (string= (claude-repl--path-canonical target-dir)
+                   (claude-repl--path-canonical source-dir))
+      (user-error "Already on the source workspace — nothing to merge"))
     ;; Guard: uncommitted changes would interfere with cherry-pick.
-    (claude-repl--assert-clean-worktree
-     source-ws (claude-repl--ws-dir source-ws))
-    (claude-repl--switch-to-workspace master-ws)
-    ;; After switching, default-directory still points to the source workspace.
-    ;; Bind it to master's directory so projectile-project-root resolves correctly.
-    (let* ((master-dir (or (claude-repl--ws-get master-ws :project-dir)
-                           (user-error "Cannot determine master workspace directory")))
-           (default-directory (file-name-as-directory master-dir)))
+    (claude-repl--assert-clean-worktree source-ws source-dir)
+    (claude-repl-switch-to-project target-dir)
+    ;; After switching, default-directory may still point at the source ws —
+    ;; bind it to the target so cherry-pick paths resolve there.
+    (let ((default-directory (file-name-as-directory target-dir)))
       (claude-repl--workspace-merge-do source-ws))))
 
-(defalias '+dwc/workspace-merge-current-into-master #'claude-repl-workspace-merge-current-into-master)
+(defalias '+dwc/workspace-merge-current-into-source #'claude-repl-workspace-merge-current-into-source)

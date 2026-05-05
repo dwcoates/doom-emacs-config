@@ -2062,6 +2062,86 @@ Covers the full call the interactive `SPC TAB n' path builds up."
       (claude-repl--workspace-merge-do "other-ws")
       (should (equal magit-dir "/tmp/fake")))))
 
+;;;; ---- Tests: workspace-merge-current-into-source ----
+
+(ert-deftest claude-repl-test-merge-into-source-routes-to-recorded-source-dir ()
+  "When :source-ws-dir points at an existing dir, switch-to-project is called with it."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-merge-src-" t))
+          (target-arg :unset)
+          (merge-do-arg :unset))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
+            (claude-repl--ws-put "wt-ws" :source-ws-dir tmpdir)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
+                      ((symbol-function 'claude-repl--assert-clean-worktree)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'claude-repl-switch-to-project)
+                       (lambda (target) (setq target-arg target)))
+                      ((symbol-function 'claude-repl--workspace-merge-do)
+                       (lambda (ws) (setq merge-do-arg ws))))
+              (claude-repl-workspace-merge-current-into-source)
+              (should (equal target-arg tmpdir))
+              (should (equal merge-do-arg "wt-ws"))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-merge-into-source-falls-back-to-master-when-recorded-dir-gone ()
+  "If :source-ws-dir refers to a missing directory, fall back to master worktree path."
+  (claude-repl-test--with-clean-state
+    (let ((target-arg :unset))
+      (claude-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
+      (claude-repl--ws-put "wt-ws" :source-ws-dir "/no/such/dir/")
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_root) "/tmp/master-fallback/"))
+                ((symbol-function 'claude-repl--assert-clean-worktree)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl-switch-to-project)
+                 (lambda (target) (setq target-arg target)))
+                ((symbol-function 'claude-repl--workspace-merge-do) #'ignore))
+        (claude-repl-workspace-merge-current-into-source)
+        (should (equal target-arg "/tmp/master-fallback/"))))))
+
+(ert-deftest claude-repl-test-merge-into-source-falls-back-to-master-when-no-recorded-source ()
+  "Legacy workspace with no :source-ws-dir falls back to master worktree path."
+  (claude-repl-test--with-clean-state
+    (let ((target-arg :unset))
+      (claude-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_root) "/tmp/master-fallback/"))
+                ((symbol-function 'claude-repl--assert-clean-worktree)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl-switch-to-project)
+                 (lambda (target) (setq target-arg target)))
+                ((symbol-function 'claude-repl--workspace-merge-do) #'ignore))
+        (claude-repl-workspace-merge-current-into-source)
+        (should (equal target-arg "/tmp/master-fallback/"))))))
+
+(ert-deftest claude-repl-test-merge-into-source-errors-when-no-source-and-no-master ()
+  "user-errors when neither a recorded source nor a master worktree can be found."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
+              ((symbol-function 'claude-repl--master-worktree-path)
+               (lambda (_root) nil)))
+      (should-error (claude-repl-workspace-merge-current-into-source)
+                    :type 'user-error))))
+
+(ert-deftest claude-repl-test-merge-into-source-errors-when-already-on-source ()
+  "user-errors when the resolved target equals the current workspace's dir."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-merge-self-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "self-ws" :project-dir tmpdir)
+            (claude-repl--ws-put "self-ws" :source-ws-dir tmpdir)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "self-ws")))
+              (should-error (claude-repl-workspace-merge-current-into-source)
+                            :type 'user-error)))
+        (delete-directory tmpdir t)))))
+
 ;;;; ---- Tests: remove-doom-dashboard ----
 
 (ert-deftest claude-repl-test-remove-doom-dashboard-removes-existing-buffer ()
