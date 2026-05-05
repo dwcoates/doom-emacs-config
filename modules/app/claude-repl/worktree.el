@@ -45,6 +45,13 @@ do not abort workspace creation."
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-master-branch-name "master"
+  "Branch name treated as the trunk worktree.
+Used by `claude-repl--master-worktree-path' as the fallback merge target
+when a workspace has no recorded `:source-ws-dir'."
+  :type 'string
+  :group 'claude-repl)
+
 (defun claude-repl--open-initial-buffers (ws path)
   "Open configured initial buffers for workspace WS rooted at PATH.
 Checks `claude-repl-workspace-initial-buffers' for entries whose PATTERN
@@ -111,6 +118,31 @@ Tears down any existing watch first to avoid duplicates on re-eval."
   (let ((result (= 0 (claude-repl--git-exit-code root "rev-parse" "--verify" branch))))
     (claude-repl--log nil "git-branch-exists-p: root=%s branch=%s result=%s" root branch result)
     result))
+
+(defun claude-repl--parse-worktree-porcelain (text target-ref)
+  "Return the worktree path in TEXT whose branch matches TARGET-REF.
+TEXT is the output of `git worktree list --porcelain'.  TARGET-REF is a
+fully-qualified ref like \"refs/heads/master\".  Returns nil if no entry
+matches, or for entries with detached HEAD (no `branch' line)."
+  (let ((current-path nil)
+        (result nil))
+    (dolist (line (split-string text "\n"))
+      (cond
+       ((string-prefix-p "worktree " line)
+        (setq current-path (substring line (length "worktree "))))
+       ((string= line (concat "branch " target-ref))
+        (setq result current-path))))
+    result))
+
+(defun claude-repl--master-worktree-path (root)
+  "Return absolute path of the worktree on `claude-repl-master-branch-name'.
+ROOT is any directory inside the repo.  Runs `git -C ROOT worktree list
+--porcelain' and parses for the master branch.  Returns nil if no
+worktree is on master or if git fails."
+  (let* ((target-ref (concat "refs/heads/" claude-repl-master-branch-name))
+         (output (claude-repl--git-string-quiet "-C" root "worktree" "list" "--porcelain")))
+    (when (and output (not (string-empty-p output)))
+      (claude-repl--parse-worktree-porcelain output target-ref))))
 
 (defun claude-repl--bare-workspace-name (ws)
   "Extract bare workspace name from WS (e.g. \"DWC/foo\" -> \"foo\")."

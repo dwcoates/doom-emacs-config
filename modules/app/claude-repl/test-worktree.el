@@ -158,6 +158,102 @@ Returns the full SHA of the new commit."
     (claude-repl-test--git-commit repo "initial" "content")
     (should-not (claude-repl--git-branch-exists-p repo "nonexistent"))))
 
+;;;; ---- Tests: parse-worktree-porcelain ----
+
+(ert-deftest claude-repl-test-parse-worktree-porcelain-finds-master ()
+  "Finds the worktree path whose branch matches the target ref."
+  (let ((text (concat "worktree /repo/main\n"
+                      "HEAD abc123\n"
+                      "branch refs/heads/master\n"
+                      "\n"
+                      "worktree /repo/feature-x\n"
+                      "HEAD def456\n"
+                      "branch refs/heads/feature-x\n")))
+    (should (equal (claude-repl--parse-worktree-porcelain text "refs/heads/master")
+                   "/repo/main"))))
+
+(ert-deftest claude-repl-test-parse-worktree-porcelain-finds-non-first-entry ()
+  "Finds master even when it's not the first worktree listed."
+  (let ((text (concat "worktree /repo/feature-x\n"
+                      "HEAD def456\n"
+                      "branch refs/heads/feature-x\n"
+                      "\n"
+                      "worktree /repo/main\n"
+                      "HEAD abc123\n"
+                      "branch refs/heads/master\n")))
+    (should (equal (claude-repl--parse-worktree-porcelain text "refs/heads/master")
+                   "/repo/main"))))
+
+(ert-deftest claude-repl-test-parse-worktree-porcelain-no-match ()
+  "Returns nil when no entry matches the target ref."
+  (let ((text (concat "worktree /repo/feature-x\n"
+                      "HEAD def456\n"
+                      "branch refs/heads/feature-x\n")))
+    (should (null (claude-repl--parse-worktree-porcelain text "refs/heads/master")))))
+
+(ert-deftest claude-repl-test-parse-worktree-porcelain-ignores-detached-head ()
+  "Worktrees with detached HEAD (no `branch' line) are not matched."
+  (let ((text (concat "worktree /repo/detached\n"
+                      "HEAD abc123\n"
+                      "detached\n"
+                      "\n"
+                      "worktree /repo/main\n"
+                      "HEAD def456\n"
+                      "branch refs/heads/master\n")))
+    (should (equal (claude-repl--parse-worktree-porcelain text "refs/heads/master")
+                   "/repo/main"))))
+
+(ert-deftest claude-repl-test-parse-worktree-porcelain-empty ()
+  "Empty input returns nil."
+  (should (null (claude-repl--parse-worktree-porcelain "" "refs/heads/master"))))
+
+;;;; ---- Tests: master-worktree-path ----
+
+(ert-deftest claude-repl-test-master-worktree-path-single-worktree ()
+  "In a single-worktree repo on master, returns that worktree's path."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (call-process "git" nil nil nil "-C" repo "branch" "-M" "master")
+    (let ((claude-repl-master-branch-name "master"))
+      (should (equal (file-truename (claude-repl--master-worktree-path repo))
+                     (file-truename repo))))))
+
+(ert-deftest claude-repl-test-master-worktree-path-with-secondary ()
+  "In a repo with main + secondary worktree, returns the main path."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (call-process "git" nil nil nil "-C" repo "branch" "-M" "master")
+    (let ((wt-dir (make-temp-file "claude-repl-test-wt-" t)))
+      (unwind-protect
+          (progn
+            (delete-directory wt-dir)
+            (call-process "git" nil nil nil "-C" repo "worktree" "add" "-b" "feature-x" wt-dir)
+            (let ((claude-repl-master-branch-name "master"))
+              (should (equal (file-truename (claude-repl--master-worktree-path repo))
+                             (file-truename repo)))
+              ;; Even when called from the secondary worktree, returns master path.
+              (should (equal (file-truename (claude-repl--master-worktree-path wt-dir))
+                             (file-truename repo)))))
+        (when (file-directory-p wt-dir)
+          (delete-directory wt-dir t))))))
+
+(ert-deftest claude-repl-test-master-worktree-path-no-master ()
+  "When no worktree is on the master branch, returns nil."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (call-process "git" nil nil nil "-C" repo "branch" "-M" "feature-only")
+    (let ((claude-repl-master-branch-name "master"))
+      (should (null (claude-repl--master-worktree-path repo))))))
+
+(ert-deftest claude-repl-test-master-worktree-path-honors-defcustom ()
+  "Uses `claude-repl-master-branch-name' as the trunk branch name."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (call-process "git" nil nil nil "-C" repo "branch" "-M" "trunk")
+    (let ((claude-repl-master-branch-name "trunk"))
+      (should (equal (file-truename (claude-repl--master-worktree-path repo))
+                     (file-truename repo))))))
+
 ;;;; ---- Tests: apply-workspace-properties ----
 
 (ert-deftest claude-repl-test-apply-workspace-properties-nil-values-skipped ()
