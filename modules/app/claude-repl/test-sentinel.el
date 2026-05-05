@@ -223,14 +223,43 @@ re-dispatched by the poll fallback observing a still-present file."
 
 ;;;; ---- Tests: on-stop-event handler ----
 
-(ert-deftest claude-repl-test-on-stop-event-calls-finished ()
-  "on-stop-event should delegate unconditionally to handle-claude-finished."
+(ert-deftest claude-repl-test-on-stop-event-calls-finished-when-no-subagents ()
+  "on-stop-event with no pending subagents finalizes immediately."
   (claude-repl-test--with-clean-state
     (let ((finished-ws nil))
       (cl-letf (((symbol-function 'claude-repl--handle-claude-finished)
                  (lambda (ws) (setq finished-ws ws))))
         (claude-repl--on-stop-event "ws1" "/some/dir")
         (should (equal finished-ws "ws1"))))))
+
+(ert-deftest claude-repl-test-on-stop-event-defers-when-subagents-pending ()
+  "on-stop-event with pending subagents records stop-received but does NOT finalize."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (let ((finished-called nil))
+      (cl-letf (((symbol-function 'claude-repl--handle-claude-finished)
+                 (lambda (_ws) (setq finished-called t))))
+        (claude-repl--on-stop-event "ws1" "/some/dir")
+        (should-not finished-called)
+        (should (claude-repl--ws-stop-received-p "ws1"))))))
+
+(ert-deftest claude-repl-test-on-stop-event-sets-stop-received ()
+  "on-stop-event always records that Stop fired (independent of finalization)."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--handle-claude-finished) #'ignore))
+      (claude-repl--on-stop-event "ws1" "/some/dir")
+      ;; After a successful finalize, clear-stop-tracking resets it.
+      ;; This confirms set-stop-received fired before clear ran.
+      (should-not (claude-repl--ws-stop-received-p "ws1")))))
+
+(ert-deftest claude-repl-test-on-stop-event-clears-tracking-after-finalize ()
+  "on-stop-event clears tracking after successful finalize so the next
+turn starts from a clean slate."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--handle-claude-finished) #'ignore))
+      (claude-repl--on-stop-event "ws1" "/some/dir")
+      (should-not (claude-repl--ws-stop-received-p "ws1"))
+      (should (zerop (claude-repl--ws-pending-subagents "ws1"))))))
 
 (ert-deftest claude-repl-test-on-stop-event-tolerates-nil-workspace ()
   "on-stop-event via process-sentinel-file should not error when ws-for-dir returns nil."
@@ -247,6 +276,129 @@ re-dispatched by the poll fallback observing a still-present file."
          "/tmp/stop_456"
          (cdr (assoc "stop_" claude-repl--sentinel-dispatch-alist)))
         (should-not finished-called)))))
+
+;;;; ---- Tests: on-subagent-start-event handler ----
+
+(ert-deftest claude-repl-test-on-subagent-start-event-increments-counter ()
+  "on-subagent-start-event bumps the pending-subagent counter by 1."
+  (claude-repl-test--with-clean-state
+    (claude-repl--on-subagent-start-event "ws1" "/some/dir")
+    (should (= 1 (claude-repl--ws-pending-subagents "ws1")))
+    (claude-repl--on-subagent-start-event "ws1" "/some/dir")
+    (should (= 2 (claude-repl--ws-pending-subagents "ws1")))))
+
+;;;; ---- Tests: on-subagent-stop-event handler ----
+
+(ert-deftest claude-repl-test-on-subagent-stop-event-decrements-counter ()
+  "on-subagent-stop-event decrements the counter."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (claude-repl--on-subagent-stop-event "ws1" "/some/dir")
+    (should (= 1 (claude-repl--ws-pending-subagents "ws1")))))
+
+(ert-deftest claude-repl-test-on-subagent-stop-event-no-finalize-without-stop ()
+  "Counter draining to zero without Stop having fired must NOT finalize."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (let ((finished-called nil))
+      (cl-letf (((symbol-function 'claude-repl--handle-claude-finished)
+                 (lambda (_ws) (setq finished-called t))))
+        (claude-repl--on-subagent-stop-event "ws1" "/some/dir")
+        (should-not finished-called)))))
+
+(ert-deftest claude-repl-test-on-subagent-stop-event-finalizes-when-last-with-stop ()
+  "Last SubagentStop after Stop already fired drives the deferred finalize."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (claude-repl--ws-set-stop-received "ws1" t)
+    (let ((finished-ws nil))
+      (cl-letf (((symbol-function 'claude-repl--handle-claude-finished)
+                 (lambda (ws) (setq finished-ws ws))))
+        (claude-repl--on-subagent-stop-event "ws1" "/some/dir")
+        (should (equal finished-ws "ws1"))))))
+
+(ert-deftest claude-repl-test-on-subagent-stop-event-no-finalize-when-others-pending ()
+  "SubagentStop while other subagents still pending must NOT finalize."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (claude-repl--ws-set-stop-received "ws1" t)
+    (let ((finished-called nil))
+      (cl-letf (((symbol-function 'claude-repl--handle-claude-finished)
+                 (lambda (_ws) (setq finished-called t))))
+        (claude-repl--on-subagent-stop-event "ws1" "/some/dir")
+        (should-not finished-called)
+        (should (= 1 (claude-repl--ws-pending-subagents "ws1")))
+        ;; Still waiting on the next subagent — stop-received not cleared.
+        (should (claude-repl--ws-stop-received-p "ws1"))))))
+
+;;;; ---- Tests: on-stop-failure-event handler ----
+
+(ert-deftest claude-repl-test-on-stop-failure-event-sets-stop-failed ()
+  "on-stop-failure-event writes :claude-state :stop-failed."
+  (claude-repl-test--with-clean-state
+    (claude-repl--on-stop-failure-event "ws1" "/some/dir")
+    (should (eq :stop-failed (claude-repl--ws-claude-state "ws1")))))
+
+(ert-deftest claude-repl-test-on-stop-failure-event-clears-stop-tracking ()
+  "on-stop-failure-event clears any in-flight Stop / SubagentStop bookkeeping
+so a subsequent successful turn isn't gated on a stale counter."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-stop-received "ws1" t)
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (claude-repl--on-stop-failure-event "ws1" "/some/dir")
+    (should-not (claude-repl--ws-stop-received-p "ws1"))
+    (should (zerop (claude-repl--ws-pending-subagents "ws1")))))
+
+;;;; ---- Tests: dispatch-alist routes new prefixes ----
+
+(ert-deftest claude-repl-test-sentinel-dispatches-subagent-start ()
+  "A file named subagent_start_NNN dispatches to the subagent-start handler."
+  (claude-repl-test--with-clean-state
+    (let ((dispatched-handler nil))
+      (cl-letf (((symbol-function 'claude-repl--process-sentinel-file)
+                 (lambda (_file handler) (setq dispatched-handler handler))))
+        (claude-repl--dispatch-sentinel-file "/dir/subagent_start_123")
+        (should dispatched-handler)
+        (should (eq (plist-get dispatched-handler :callback)
+                    'claude-repl--on-subagent-start-event))))))
+
+(ert-deftest claude-repl-test-sentinel-dispatches-subagent-stop ()
+  "A file named subagent_stop_NNN dispatches to the subagent-stop handler."
+  (claude-repl-test--with-clean-state
+    (let ((dispatched-handler nil))
+      (cl-letf (((symbol-function 'claude-repl--process-sentinel-file)
+                 (lambda (_file handler) (setq dispatched-handler handler))))
+        (claude-repl--dispatch-sentinel-file "/dir/subagent_stop_456")
+        (should dispatched-handler)
+        (should (eq (plist-get dispatched-handler :callback)
+                    'claude-repl--on-subagent-stop-event))))))
+
+(ert-deftest claude-repl-test-sentinel-dispatches-stop-failure ()
+  "A file named stop_failure_NNN dispatches to the stop-failure handler.
+The bare `stop_' prefix is also a prefix of `stop_failure_', so the
+ordering of the dispatch alist matters: stop_failure_ must be tried
+first.  This test pins that ordering."
+  (claude-repl-test--with-clean-state
+    (let ((dispatched-handler nil))
+      (cl-letf (((symbol-function 'claude-repl--process-sentinel-file)
+                 (lambda (_file handler) (setq dispatched-handler handler))))
+        (claude-repl--dispatch-sentinel-file "/dir/stop_failure_789")
+        (should dispatched-handler)
+        (should (eq (plist-get dispatched-handler :callback)
+                    'claude-repl--on-stop-failure-event))))))
+
+(ert-deftest claude-repl-test-sentinel-stop-failure-not-confused-with-stop ()
+  "Order regression: stop_failure_NNN must NOT dispatch to the stop handler."
+  (claude-repl-test--with-clean-state
+    (let ((dispatched-handler nil))
+      (cl-letf (((symbol-function 'claude-repl--process-sentinel-file)
+                 (lambda (_file handler) (setq dispatched-handler handler))))
+        (claude-repl--dispatch-sentinel-file "/dir/stop_failure_001")
+        (should-not (eq (plist-get dispatched-handler :callback)
+                        'claude-repl--on-stop-event))))))
 
 ;;;; ---- Tests: on-prompt-submit-event handler ----
 
@@ -617,7 +769,9 @@ re-dispatched by the poll fallback observing a still-present file."
         (should (equal set-args '("test-ws" :permission)))))))
 
 (ert-deftest claude-repl-test-end-to-end-stop-dispatch ()
-  "Full dispatch: stop_* file -> on-stop-event -> handle-finished."
+  "Full dispatch: stop_* file -> on-stop-event -> handle-finished.
+With no pending subagents, on-stop-event finalizes immediately on the
+single Stop fire."
   (claude-repl-test--with-clean-state
     (let ((finished nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
@@ -628,8 +782,6 @@ re-dispatched by the poll fallback observing a still-present file."
                  #'ignore)
                 ((symbol-function 'claude-repl--handle-claude-finished)
                  (lambda (ws) (setq finished ws)))
-                ((symbol-function 'claude-repl--ws-get)
-                 (lambda (_ws _key) nil))
                 ((symbol-function 'delete-file) #'ignore))
         (claude-repl--dispatch-sentinel-file "/dir/stop_123")
         (should (equal finished "test-ws"))))))

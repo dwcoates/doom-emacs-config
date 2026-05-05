@@ -47,6 +47,9 @@ HOOK_SCRIPTS_SRC="$SCRIPT_DIR/../modules/app/claude-repl/hooks"
 # MATCHER is optional (only used for Notification hooks).
 HOOKS=(
   "Stop|stop-notify.sh|"
+  "StopFailure|stop-failure-notify.sh|"
+  "SubagentStart|subagent-start-notify.sh|"
+  "SubagentStop|subagent-stop-notify.sh|"
   "UserPromptSubmit|prompt-submit-notify.sh|"
   "SessionStart|session-start-notify.sh|"
   "Notification|permission-notify.sh|permission_prompt"

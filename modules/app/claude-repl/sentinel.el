@@ -229,10 +229,52 @@ Callback for the permission_prompt sentinel handler."
     (claude-repl--ws-set-claude-state ws :permission)
     (claude-repl--log-verbose ws "on-permission-event: ws=%s status-AFTER=%s" ws (claude-repl--ws-get ws :claude-state))))
 
+(defun claude-repl--maybe-finalize-stop (ws)
+  "If WS is fully stopped (Stop fired AND no pending subagents), finalize it.
+Drives the `:thinking → :done' transition via
+`claude-repl--handle-claude-finished' and clears the Stop / SubagentStop
+tracking so the next turn starts fresh.  No-op when not fully stopped."
+  (when (claude-repl--fully-stopped-p ws)
+    (claude-repl--log ws "maybe-finalize-stop: ws=%s fully stopped, finalizing" ws)
+    (claude-repl--ws-clear-stop-tracking ws)
+    (claude-repl--handle-claude-finished ws)))
+
 (defun claude-repl--on-stop-event (ws dir)
-  "Handle a stop event for workspace WS with directory DIR."
-  (claude-repl--log ws "on-stop-event: ws=%s dir=%S" ws dir)
-  (claude-repl--handle-claude-finished ws))
+  "Handle a Stop event for workspace WS with directory DIR.
+Records that Stop has fired and finalizes the turn iff no subagents
+are pending.  When subagents are still in flight, the finalization is
+deferred to whichever SubagentStop arrives last (see
+`claude-repl--maybe-finalize-stop')."
+  (claude-repl--log ws "on-stop-event: ws=%s dir=%S pending-subagents=%d"
+                    ws dir (claude-repl--ws-pending-subagents ws))
+  (claude-repl--ws-set-stop-received ws t)
+  (claude-repl--maybe-finalize-stop ws))
+
+(defun claude-repl--on-subagent-start-event (ws dir)
+  "Handle a SubagentStart event for workspace WS with directory DIR.
+Increments the pending-subagent counter so the workspace stays in
+`:thinking' until every spawned subagent reports back via SubagentStop."
+  (claude-repl--log ws "on-subagent-start-event: ws=%s dir=%S" ws dir)
+  (claude-repl--ws-incf-pending-subagents ws))
+
+(defun claude-repl--on-subagent-stop-event (ws dir)
+  "Handle a SubagentStop event for workspace WS with directory DIR.
+Decrements the pending-subagent counter.  If this was the last
+outstanding subagent and the Stop hook has already fired, finalize
+the turn."
+  (claude-repl--log ws "on-subagent-stop-event: ws=%s dir=%S" ws dir)
+  (claude-repl--ws-decf-pending-subagents ws)
+  (claude-repl--maybe-finalize-stop ws))
+
+(defun claude-repl--on-stop-failure-event (ws dir)
+  "Handle a StopFailure event for workspace WS with directory DIR.
+Sets `:claude-state' to `:stop-failed' (visually distinct from `:dead'
+since the vterm session is still alive and re-promptable) and clears
+the Stop / SubagentStop tracking so a subsequent successful turn isn't
+gated on a stale pending-subagent counter from this aborted turn."
+  (claude-repl--log ws "on-stop-failure-event: ws=%s dir=%S" ws dir)
+  (claude-repl--ws-clear-stop-tracking ws)
+  (claude-repl--ws-set-claude-state ws :stop-failed))
 
 (defun claude-repl--on-prompt-submit-event (ws _dir)
   "Mark workspace WS as thinking after a prompt submission."
@@ -279,23 +321,43 @@ Idempotent on repeated fires for the same workspace."
 ;;; Event dispatch
 
 (defconst claude-repl--sentinel-dispatch-alist
-  '(("permission_prompt" . (:callback claude-repl--on-permission-event
-                            :warning  "[claude-repl] WARNING: permission dir=%s matched no workspace"
-                            :name     "handle-permission"))
-    ("stop_"             . (:callback claude-repl--on-stop-event
-                            :warning  "[claude-repl] WARNING: stop sentinel dir=%s matched no workspace (tab may be stuck red)"
-                            :name     "handle-stop"))
-    ("prompt_submit_"    . (:callback claude-repl--on-prompt-submit-event
-                            :warning  "[claude-repl] WARNING: prompt-submit dir=%s matched no workspace"
-                            :name     "handle-prompt-submit"))
-    ("session_start_"    . (:callback claude-repl--on-session-start-event
-                            :warning  "[claude-repl] WARNING: session-start dir=%s matched no workspace"
-                            :name     "handle-session-start")))
+  ;; ORDER MATTERS: prefixes are matched via `string-prefix-p' in the
+  ;; order they appear here, so a longer entry must come before a shorter
+  ;; one whenever the longer is itself prefixed by the shorter.  Concretely:
+  ;; `stop_failure_*' filenames are also prefixed by `stop_', so the
+  ;; `stop_failure_' entry must appear before the bare `stop_' entry —
+  ;; otherwise stop-failure files would dispatch to the regular Stop
+  ;; handler.  (`subagent_start_' / `subagent_stop_' do not collide with
+  ;; `stop_' since their filenames start with `subagent_'.)
+  '(("permission_prompt"  . (:callback claude-repl--on-permission-event
+                             :warning  "[claude-repl] WARNING: permission dir=%s matched no workspace"
+                             :name     "handle-permission"))
+    ("subagent_start_"    . (:callback claude-repl--on-subagent-start-event
+                             :warning  "[claude-repl] WARNING: subagent-start sentinel dir=%s matched no workspace"
+                             :name     "handle-subagent-start"))
+    ("subagent_stop_"     . (:callback claude-repl--on-subagent-stop-event
+                             :warning  "[claude-repl] WARNING: subagent-stop sentinel dir=%s matched no workspace"
+                             :name     "handle-subagent-stop"))
+    ("stop_failure_"      . (:callback claude-repl--on-stop-failure-event
+                             :warning  "[claude-repl] WARNING: stop-failure sentinel dir=%s matched no workspace"
+                             :name     "handle-stop-failure"))
+    ("stop_"              . (:callback claude-repl--on-stop-event
+                             :warning  "[claude-repl] WARNING: stop sentinel dir=%s matched no workspace (tab may be stuck red)"
+                             :name     "handle-stop"))
+    ("prompt_submit_"     . (:callback claude-repl--on-prompt-submit-event
+                             :warning  "[claude-repl] WARNING: prompt-submit dir=%s matched no workspace"
+                             :name     "handle-prompt-submit"))
+    ("session_start_"     . (:callback claude-repl--on-session-start-event
+                             :warning  "[claude-repl] WARNING: session-start dir=%s matched no workspace"
+                             :name     "handle-session-start")))
   "Alist mapping filename prefixes to handler plists.
 Each entry is (PREFIX . PLIST) where PLIST has keys:
   :callback  - function called with (WS DIR) on match
   :warning   - format string logged when no workspace matches (interpolates DIR via %s)
-  :name      - handler name for debug logging")
+  :name      - handler name for debug logging
+
+Order matters: see the leading comment in the source for the prefix
+overlap between `stop_' and `stop_failure_'.")
 
 (defun claude-repl--dispatch-sentinel-file (file)
   "Dispatch FILE to the appropriate sentinel handler.

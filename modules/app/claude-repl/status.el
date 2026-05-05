@@ -145,6 +145,113 @@ Compare-and-clear: no-op if the current value is not STATE."
                               "claude-state-clear-if ws=%s state=%s no-op (current=%s)"
                               ws state (claude-repl--ws-get ws :claude-state))))
 
+;; --- Stop / SubagentStop coordination ---
+;;
+;; The Stop hook fires when Claude finishes its main response.  When
+;; Claude has spawned background subagents (Task tool with
+;; run_in_background: true), Stop can fire while those subagents are
+;; still running — so transitioning the workspace to :done on Stop alone
+;; would falsely advertise "ready for review" while work is still in
+;; flight.
+;;
+;; To gate the transition correctly we track two pieces of state:
+;;
+;;   :stop-received      - boolean, set by the Stop hook callback.
+;;   :pending-subagents  - integer counter, incremented by SubagentStart
+;;                         and decremented by SubagentStop.
+;;
+;; The transition to :done happens when both conditions are true:
+;; Stop has fired AND the counter is zero.  Whichever event resolves
+;; that conjunction (Stop arriving last, or the final SubagentStop
+;; arriving last) triggers `claude-repl--handle-claude-finished'.
+;;
+;; Empirical hook asymmetry (verified 2026-05-05):
+;;
+;; Claude Code fires SubagentStop *every turn*, not just per real
+;; subagent — even on a turn that invokes zero Task/Agent tools we see
+;; an unpaired SubagentStop arrive ~1–2s after Stop.  Best guess: the
+;; main agent's own end-of-turn fires both Stop (outer) and SubagentStop
+;; (inner), making the hooks asymmetric (N starts → N+1 stops per turn).
+;;
+;; This means the floor-at-zero in `decf-pending-subagents' is
+;; LOAD-BEARING ON EVERY TURN, not a defensive guard for rare edge
+;; cases.  Without it, the counter would drift toward -infinity over
+;; a long session.
+;;
+;; Why this still works correctly:
+;;   - clear-stop-tracking inside maybe-finalize-stop resets the counter
+;;     to 0 *before* the phantom arrives (the phantom lands ~1–2s after
+;;     Stop processing completes).
+;;   - The phantom hits decf with current=0; floor-at-zero clamps it to
+;;     0; net effect is a no-op.
+;;   - Steady state between turns: counter=0.
+;;
+;; Known narrow risk: cross-turn race.  If the user submits a new prompt
+;; very fast (within the ~2s phantom-arrival window) AND the new turn
+;; spawns multiple background subagents, the lingering phantom can
+;; cancel out one real SubagentStop and Stop may then false-finalize
+;; while a real subagent is still running.  Mitigation if this becomes
+;; observable: reset the counter on prompt-submit (treat each new turn
+;; as a fresh tracking window).  Not implemented today.
+
+(defun claude-repl--ws-stop-received-p (ws)
+  "Return non-nil if the Stop hook has fired for workspace WS without
+having yet been resolved into a `:done' transition."
+  (claude-repl--ws-get ws :stop-received))
+
+(defun claude-repl--ws-set-stop-received (ws val)
+  "Set workspace WS's :stop-received flag to VAL (a boolean)."
+  (unless ws (error "claude-repl--ws-set-stop-received: ws is nil"))
+  (claude-repl--log ws "stop-received %s -> %s" ws val)
+  (claude-repl--ws-put ws :stop-received val))
+
+(defun claude-repl--ws-pending-subagents (ws)
+  "Return WS's pending-subagent count (0 when unset)."
+  (or (claude-repl--ws-get ws :pending-subagents) 0))
+
+(defun claude-repl--ws-incf-pending-subagents (ws)
+  "Increment WS's pending-subagent counter and return the new value."
+  (unless ws (error "claude-repl--ws-incf-pending-subagents: ws is nil"))
+  (let ((new (1+ (claude-repl--ws-pending-subagents ws))))
+    (claude-repl--log ws "pending-subagents %s -> %d (incf)" ws new)
+    (claude-repl--ws-put ws :pending-subagents new)
+    new))
+
+(defun claude-repl--ws-decf-pending-subagents (ws)
+  "Decrement WS's pending-subagent counter and return the new value.
+
+Floors at 0.  This is LOAD-BEARING ON EVERY TURN, not a defensive
+edge-case guard: Claude Code empirically fires one unpaired
+SubagentStop per turn (see the block comment above for the
+N-starts/N+1-stops asymmetry).  Without the floor, the counter would
+drift toward -infinity across a session and the gating predicate
+`(zerop ...)' would silently start mis-classifying \"still running\"
+as \"all done\"."
+  (unless ws (error "claude-repl--ws-decf-pending-subagents: ws is nil"))
+  (let* ((cur (claude-repl--ws-pending-subagents ws))
+         (new (max 0 (1- cur))))
+    (claude-repl--log ws "pending-subagents %s -> %d (decf, was %d)" ws new cur)
+    (claude-repl--ws-put ws :pending-subagents new)
+    new))
+
+(defun claude-repl--fully-stopped-p (ws)
+  "Return non-nil when WS is fully stopped — Stop fired and no pending subagents.
+Used by Stop and SubagentStop callbacks to decide whether to drive the
+`:thinking → :done' transition.  See the block comment above for the
+coordination model."
+  (and (claude-repl--ws-stop-received-p ws)
+       (zerop (claude-repl--ws-pending-subagents ws))))
+
+(defun claude-repl--ws-clear-stop-tracking (ws)
+  "Reset the Stop / SubagentStop tracking fields on WS.
+Called when the workspace transitions out of `:thinking' so the next
+turn starts from a clean slate.  Resets `:stop-received' to nil and
+`:pending-subagents' to 0."
+  (unless ws (error "claude-repl--ws-clear-stop-tracking: ws is nil"))
+  (claude-repl--log ws "clear-stop-tracking %s" ws)
+  (claude-repl--ws-put ws :stop-received nil)
+  (claude-repl--ws-put ws :pending-subagents 0))
+
 ;; Legacy APIs below delegate into the typed setters.  Call sites migrate
 ;; to the typed names in a later commit; retained here for the duration
 ;; of the migration so every existing caller keeps working.
@@ -280,6 +387,15 @@ A no-op if a check is already in progress for WS."
 explicit palette entry (not a fallback) so idle workspaces are
 visually distinct from states that have no palette mapping.")
 
+(defconst claude-repl--color-stop-failed-magenta "#8b1f8b"
+  "Magenta used for the :stop-failed claude-state tab background.
+:stop-failed means the StopFailure hook fired — Claude's turn ended
+due to an API error (rate limit, auth failure, billing, etc.).  The
+vterm session is still alive and re-promptable; :dead (the plain ❌
+badge) is reserved for vterm process death.  A distinct color signals
+\"needs your attention, but not the same kind of attention as :thinking
+or :dead\".")
+
 (defconst claude-repl--color-done-green-bright "#2a8c2a"
   "Brighter green used for :done / :permission bracket-fg on selected
 tabs; readable against `claude-repl--color-selected-bg'.")
@@ -303,6 +419,11 @@ asking for a permission decision.")
 (defconst claude-repl--label-dead             "❌"
   "Bracket label shown adjacent to the numeric index when the vterm
 process has died.")
+
+(defconst claude-repl--label-stop-failed      "⚠"
+  "Bracket label shown adjacent to the numeric index when the
+StopFailure hook fired (turn ended on an API error, but the vterm
+session is still alive and re-promptable).")
 
 (defconst claude-repl--tab-weight             'bold
   "Font weight applied to every tab face.")
@@ -377,6 +498,18 @@ process has died.")
                   :bracket-bg ,claude-repl--color-idle-orange
                   :bracket-fg ,claude-repl--color-light
                   :weight ,claude-repl--tab-weight))
+    (:stop-failed
+     :face       claude-repl-tab-stop-failed
+     :label      ,claude-repl--label-stop-failed
+     :unselected (:bg ,claude-repl--color-stop-failed-magenta
+                  :fg ,claude-repl--color-light
+                  :bracket-fg ,claude-repl--color-default-bracket
+                  :weight ,claude-repl--tab-weight)
+     :selected   (:bg ,claude-repl--color-selected-bg
+                  :fg ,claude-repl--color-dark
+                  :bracket-bg ,claude-repl--color-stop-failed-magenta
+                  :bracket-fg ,claude-repl--color-light
+                  :weight ,claude-repl--tab-weight))
     (:dead
      :label      ,claude-repl--label-dead))
   "Per-state tab-appearance palette.
@@ -428,6 +561,13 @@ Keys in the returned plist: :bg :fg :bracket-fg :bracket-bg :weight."
        :foreground ,claude-repl--color-dark
        :weight ,claude-repl--tab-weight))
   "Face for workspace tabs where Claude is idle (orange).")
+
+(defface claude-repl-tab-stop-failed
+  `((t :background ,claude-repl--color-stop-failed-magenta
+       :foreground ,claude-repl--color-light
+       :weight ,claude-repl--tab-weight))
+  "Face for workspace tabs where the last turn failed via the
+StopFailure hook (magenta + ⚠).")
 
 (defun claude-repl--render-tab (name spec label name-face img-str)
   "Render a tab string for workspace NAME from SPEC.
@@ -489,19 +629,21 @@ Every known claude-state is mapped explicitly.  Unknown states error
 hard — no silent fallback.
 
 Rule:
-  :thinking   → :thinking                (red)
-  :permission → :permission               (green + ❓)
-  :init       → :init                     (blue — Claude starting)
-  :done       → :done                     (green — unacknowledged work)
-  :idle       → :idle                     (orange)
-  nil + :dead → :dead                     (default + ❌)
-  nil         → nil                       (no session / unborn)"
+  :thinking    → :thinking                (red)
+  :permission  → :permission               (green + ❓)
+  :init        → :init                     (blue — Claude starting)
+  :done        → :done                     (green — unacknowledged work)
+  :idle        → :idle                     (orange)
+  :stop-failed → :stop-failed              (magenta + ⚠ — turn errored)
+  nil + :dead  → :dead                     (default + ❌)
+  nil          → nil                       (no session / unborn)"
   (cond
-   ((eq claude :thinking)   :thinking)
-   ((eq claude :permission) :permission)
-   ((eq claude :init)       :init)
-   ((eq claude :done)       :done)
-   ((eq claude :idle)       :idle)
+   ((eq claude :thinking)    :thinking)
+   ((eq claude :permission)  :permission)
+   ((eq claude :init)        :init)
+   ((eq claude :done)        :done)
+   ((eq claude :idle)        :idle)
+   ((eq claude :stop-failed) :stop-failed)
    ((and (null claude) (eq repl :dead)) :dead)
    ((null claude)           nil)
    (t

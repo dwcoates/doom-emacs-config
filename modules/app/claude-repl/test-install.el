@@ -23,10 +23,16 @@
 ;;;; ---- Fixtures ----
 
 (defun test-install--json-with-all-hooks ()
-  "Return parsed JSON shape with all four managed hooks registered."
+  "Return parsed JSON shape with all managed hooks registered."
   '((hooks
      (Stop . (((hooks . (((type . "command")
                           (command . "~/.claude/hooks/stop-notify.sh")))))))
+     (StopFailure . (((hooks . (((type . "command")
+                                 (command . "~/.claude/hooks/stop-failure-notify.sh")))))))
+     (SubagentStart . (((hooks . (((type . "command")
+                                   (command . "~/.claude/hooks/subagent-start-notify.sh")))))))
+     (SubagentStop . (((hooks . (((type . "command")
+                                  (command . "~/.claude/hooks/subagent-stop-notify.sh")))))))
      (UserPromptSubmit . (((hooks . (((type . "command")
                                       (command . "~/.claude/hooks/prompt-submit-notify.sh")))))))
      (SessionStart . (((hooks . (((type . "command")
@@ -308,6 +314,46 @@
       (should (eq 'warn
                   (car (test-install--doctor-find issues "Notification")))))))
 
+(ert-deftest claude-repl-test-doctor-missing-stop-failure-warns ()
+  "Missing StopFailure is warn-level (the :stop-failed state never appears,
+but the core REPL loop still works)."
+  (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+            ((symbol-function 'claude-repl--settings-json)
+             (lambda () (test-install--json-missing-one 'StopFailure)))
+            ((symbol-function 'claude-repl--check-script-files)
+             (lambda (_issues) nil)))
+    (let ((issues (claude-repl--doctor-issues)))
+      (should (test-install--doctor-find issues "StopFailure"))
+      (should (eq 'warn
+                  (car (test-install--doctor-find issues "StopFailure")))))))
+
+(ert-deftest claude-repl-test-doctor-missing-subagent-start-warns ()
+  "Missing SubagentStart is warn-level (Stop gating reduces to legacy
+behavior — Stop transitions immediately even with subagents in flight)."
+  (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+            ((symbol-function 'claude-repl--settings-json)
+             (lambda () (test-install--json-missing-one 'SubagentStart)))
+            ((symbol-function 'claude-repl--check-script-files)
+             (lambda (_issues) nil)))
+    (let ((issues (claude-repl--doctor-issues)))
+      (should (test-install--doctor-find issues "SubagentStart"))
+      (should (eq 'warn
+                  (car (test-install--doctor-find issues "SubagentStart")))))))
+
+(ert-deftest claude-repl-test-doctor-missing-subagent-stop-warns ()
+  "Missing SubagentStop is warn-level (counter would never decrement, so
+in practice Stop would still drive transitions correctly when there are
+no SubagentStart fires either; degraded but not broken)."
+  (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+            ((symbol-function 'claude-repl--settings-json)
+             (lambda () (test-install--json-missing-one 'SubagentStop)))
+            ((symbol-function 'claude-repl--check-script-files)
+             (lambda (_issues) nil)))
+    (let ((issues (claude-repl--doctor-issues)))
+      (should (test-install--doctor-find issues "SubagentStop"))
+      (should (eq 'warn
+                  (car (test-install--doctor-find issues "SubagentStop")))))))
+
 (ert-deftest claude-repl-test-doctor-settings-skip-short-circuits-script-checks ()
   "When settings.json is missing, script-file checks are not performed."
   (let ((script-checks-called nil))
@@ -348,6 +394,9 @@ SCRIPT-NAME with `:missing' means leave that script absent."
   "A missing installed script emits an error-level issue."
   (test-install--with-fake-hooks-dir
    `(("stop-notify.sh" . :missing)
+     ("stop-failure-notify.sh" . (#o755 . "x"))
+     ("subagent-start-notify.sh" . (#o755 . "x"))
+     ("subagent-stop-notify.sh" . (#o755 . "x"))
      ("prompt-submit-notify.sh" . (#o755 . "x"))
      ("session-start-notify.sh" . (#o755 . "x"))
      ("permission-notify.sh" . (#o755 . "x")))
@@ -367,6 +416,9 @@ SCRIPT-NAME with `:missing' means leave that script absent."
   "A non-executable installed script emits an error-level issue."
   (test-install--with-fake-hooks-dir
    `(("stop-notify.sh" . (#o644 . "x"))
+     ("stop-failure-notify.sh" . (#o755 . "x"))
+     ("subagent-start-notify.sh" . (#o755 . "x"))
+     ("subagent-stop-notify.sh" . (#o755 . "x"))
      ("prompt-submit-notify.sh" . (#o755 . "x"))
      ("session-start-notify.sh" . (#o755 . "x"))
      ("permission-notify.sh" . (#o755 . "x")))
@@ -385,6 +437,9 @@ SCRIPT-NAME with `:missing' means leave that script absent."
   "A drifted installed script emits a warn-level issue."
   (test-install--with-fake-hooks-dir
    `(("stop-notify.sh" . (#o755 . "x"))
+     ("stop-failure-notify.sh" . (#o755 . "x"))
+     ("subagent-start-notify.sh" . (#o755 . "x"))
+     ("subagent-stop-notify.sh" . (#o755 . "x"))
      ("prompt-submit-notify.sh" . (#o755 . "x"))
      ("session-start-notify.sh" . (#o755 . "x"))
      ("permission-notify.sh" . (#o755 . "x")))
@@ -500,7 +555,7 @@ Returns a cons (EXIT-CODE . OUTPUT)."
 ;; --- Fresh install ------------------------------------------------------
 
 (ert-deftest claude-repl-test-bash-install-fresh ()
-  "Fresh install creates settings.json with all four events registered."
+  "Fresh install creates settings.json with every managed event registered."
   (skip-unless (test-install-bash--deps-available-p))
   (let ((tmphome (test-install-bash--make-tmphome)))
     (unwind-protect
@@ -510,6 +565,15 @@ Returns a cons (EXIT-CODE . OUTPUT)."
           (should json)
           (should (test-install-bash--cmd-in-event-p
                    json 'Stop "~/.claude/hooks/stop-notify.sh"))
+          (should (test-install-bash--cmd-in-event-p
+                   json 'StopFailure
+                   "~/.claude/hooks/stop-failure-notify.sh"))
+          (should (test-install-bash--cmd-in-event-p
+                   json 'SubagentStart
+                   "~/.claude/hooks/subagent-start-notify.sh"))
+          (should (test-install-bash--cmd-in-event-p
+                   json 'SubagentStop
+                   "~/.claude/hooks/subagent-stop-notify.sh"))
           (should (test-install-bash--cmd-in-event-p
                    json 'UserPromptSubmit
                    "~/.claude/hooks/prompt-submit-notify.sh"))
@@ -545,6 +609,11 @@ Returns a cons (EXIT-CODE . OUTPUT)."
           (test-install-bash--run tmphome "install")
           (let ((json (test-install-bash--read-settings tmphome)))
             (should (= 1 (test-install-bash--event-entry-count json 'Stop)))
+            (should (= 1 (test-install-bash--event-entry-count json 'StopFailure)))
+            (should (= 1 (test-install-bash--event-entry-count
+                          json 'SubagentStart)))
+            (should (= 1 (test-install-bash--event-entry-count
+                          json 'SubagentStop)))
             (should (= 1 (test-install-bash--event-entry-count
                           json 'UserPromptSubmit)))
             (should (= 1 (test-install-bash--event-entry-count
@@ -665,7 +734,10 @@ Returns a cons (EXIT-CODE . OUTPUT)."
             (should-not (assq 'UserPromptSubmit hooks))
             (should-not (assq 'SessionStart hooks))
             (should-not (assq 'Notification hooks))
-            (should-not (assq 'Stop hooks))))
+            (should-not (assq 'Stop hooks))
+            (should-not (assq 'StopFailure hooks))
+            (should-not (assq 'SubagentStart hooks))
+            (should-not (assq 'SubagentStop hooks))))
       (test-install-bash--cleanup tmphome))))
 
 (ert-deftest claude-repl-test-bash-uninstall-deletes-scripts ()
@@ -679,6 +751,12 @@ Returns a cons (EXIT-CODE . OUTPUT)."
           (let ((hooks-dir (expand-file-name ".claude/hooks" tmphome)))
             (should-not (file-exists-p
                          (expand-file-name "stop-notify.sh" hooks-dir)))
+            (should-not (file-exists-p
+                         (expand-file-name "stop-failure-notify.sh" hooks-dir)))
+            (should-not (file-exists-p
+                         (expand-file-name "subagent-start-notify.sh" hooks-dir)))
+            (should-not (file-exists-p
+                         (expand-file-name "subagent-stop-notify.sh" hooks-dir)))
             (should-not (file-exists-p
                          (expand-file-name "prompt-submit-notify.sh" hooks-dir)))
             (should-not (file-exists-p

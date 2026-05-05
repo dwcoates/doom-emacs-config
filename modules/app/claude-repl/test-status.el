@@ -1368,6 +1368,151 @@ this clobbered :init with :dead.  The :init guard prevents that."
               (should (= (length claude-repl--priority-images) 1)))))
       (delete-directory tmpdir t))))
 
+;;;; ---- Tests: Stop / SubagentStop tracking helpers ----
+
+(ert-deftest claude-repl-test-pending-subagents-default-zero ()
+  "ws-pending-subagents returns 0 when never written."
+  (claude-repl-test--with-clean-state
+    (should (zerop (claude-repl--ws-pending-subagents "ws1")))))
+
+(ert-deftest claude-repl-test-incf-pending-subagents-from-zero ()
+  "incf-pending-subagents goes 0 -> 1."
+  (claude-repl-test--with-clean-state
+    (should (= 1 (claude-repl--ws-incf-pending-subagents "ws1")))
+    (should (= 1 (claude-repl--ws-pending-subagents "ws1")))))
+
+(ert-deftest claude-repl-test-incf-pending-subagents-multiple ()
+  "incf-pending-subagents three times -> 3."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (should (= 3 (claude-repl--ws-pending-subagents "ws1")))))
+
+(ert-deftest claude-repl-test-decf-pending-subagents-floors-at-zero ()
+  "decf-pending-subagents on zero count stays at 0 (does not go negative)."
+  (claude-repl-test--with-clean-state
+    (should (zerop (claude-repl--ws-decf-pending-subagents "ws1")))
+    (should (zerop (claude-repl--ws-pending-subagents "ws1")))))
+
+(ert-deftest claude-repl-test-decf-pending-subagents-decrements ()
+  "decf-pending-subagents on count=2 -> 1."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (should (= 1 (claude-repl--ws-decf-pending-subagents "ws1")))))
+
+(ert-deftest claude-repl-test-incf-pending-subagents-nil-ws-errors ()
+  "incf with nil ws signals error."
+  (should-error (claude-repl--ws-incf-pending-subagents nil) :type 'error))
+
+(ert-deftest claude-repl-test-decf-pending-subagents-nil-ws-errors ()
+  "decf with nil ws signals error."
+  (should-error (claude-repl--ws-decf-pending-subagents nil) :type 'error))
+
+(ert-deftest claude-repl-test-stop-received-default-nil ()
+  "ws-stop-received-p returns nil when never set."
+  (claude-repl-test--with-clean-state
+    (should-not (claude-repl--ws-stop-received-p "ws1"))))
+
+(ert-deftest claude-repl-test-set-stop-received-true ()
+  "set-stop-received t -> stop-received-p returns t."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-stop-received "ws1" t)
+    (should (claude-repl--ws-stop-received-p "ws1"))))
+
+(ert-deftest claude-repl-test-set-stop-received-nil-ws-errors ()
+  "set-stop-received with nil ws signals error."
+  (should-error (claude-repl--ws-set-stop-received nil t) :type 'error))
+
+;;;; ---- Tests: fully-stopped-p truth table ----
+;;
+;; Only one of four cells in (stop-received? × pending=0?) yields t:
+;; both must hold simultaneously.
+
+(ert-deftest claude-repl-test-fully-stopped-p-neither ()
+  "Neither Stop fired nor counter zero (i.e. counter > 0): not fully stopped."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (should-not (claude-repl--fully-stopped-p "ws1"))))
+
+(ert-deftest claude-repl-test-fully-stopped-p-stop-only ()
+  "Stop fired but subagents still pending: not fully stopped."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-stop-received "ws1" t)
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (should-not (claude-repl--fully-stopped-p "ws1"))))
+
+(ert-deftest claude-repl-test-fully-stopped-p-pending-zero-only ()
+  "Counter zero but Stop never fired: not fully stopped."
+  (claude-repl-test--with-clean-state
+    (should-not (claude-repl--fully-stopped-p "ws1"))))
+
+(ert-deftest claude-repl-test-fully-stopped-p-both ()
+  "Stop fired AND counter zero: fully stopped."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-stop-received "ws1" t)
+    (should (claude-repl--fully-stopped-p "ws1"))))
+
+(ert-deftest claude-repl-test-fully-stopped-p-after-decf-to-zero ()
+  "Stop fired, counter goes 2 -> 1 (not yet) -> 0 (fully stopped now)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (claude-repl--ws-set-stop-received "ws1" t)
+    (claude-repl--ws-decf-pending-subagents "ws1")
+    (should-not (claude-repl--fully-stopped-p "ws1"))
+    (claude-repl--ws-decf-pending-subagents "ws1")
+    (should (claude-repl--fully-stopped-p "ws1"))))
+
+(ert-deftest claude-repl-test-clear-stop-tracking-resets-both ()
+  "clear-stop-tracking resets :stop-received and :pending-subagents."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-stop-received "ws1" t)
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (claude-repl--ws-incf-pending-subagents "ws1")
+    (claude-repl--ws-clear-stop-tracking "ws1")
+    (should-not (claude-repl--ws-stop-received-p "ws1"))
+    (should (zerop (claude-repl--ws-pending-subagents "ws1")))))
+
+(ert-deftest claude-repl-test-clear-stop-tracking-nil-ws-errors ()
+  "clear-stop-tracking with nil ws signals error."
+  (should-error (claude-repl--ws-clear-stop-tracking nil) :type 'error))
+
+;;;; ---- Tests: :stop-failed composed-state mapping ----
+
+(ert-deftest claude-repl-test-composed-stop-failed ()
+  "Composed (:stop-failed, any) -> :stop-failed."
+  (should (eq :stop-failed (claude-repl--composed-state :stop-failed nil)))
+  (should (eq :stop-failed (claude-repl--composed-state :stop-failed :inactive)))
+  (should (eq :stop-failed (claude-repl--composed-state :stop-failed :dead))))
+
+(ert-deftest claude-repl-test-display-state-stop-failed ()
+  "ws-display-state returns :stop-failed when claude-state is :stop-failed."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :stop-failed)
+    (should (eq :stop-failed (claude-repl--ws-display-state "ws1")))))
+
+;;;; ---- Tests: :stop-failed palette resolution ----
+
+(ert-deftest claude-repl-test-tab-spec-stop-failed-unselected ()
+  "tab-spec for :stop-failed unselected returns the magenta plist."
+  (let ((spec (claude-repl--tab-spec :stop-failed nil)))
+    (should (equal (plist-get spec :bg) claude-repl--color-stop-failed-magenta))
+    (should (equal (plist-get spec :fg) claude-repl--color-light))))
+
+(ert-deftest claude-repl-test-tab-spec-stop-failed-selected ()
+  "tab-spec for :stop-failed selected returns selected-bg with stop-failed bracket-bg."
+  (let ((spec (claude-repl--tab-spec :stop-failed t)))
+    (should (equal (plist-get spec :bg) claude-repl--color-selected-bg))
+    (should (equal (plist-get spec :bracket-bg)
+                   claude-repl--color-stop-failed-magenta))))
+
+(ert-deftest claude-repl-test-tab-label-stop-failed-includes-warn-glyph ()
+  "tab-label for :stop-failed appends the ⚠ glyph after the index."
+  (let ((label (claude-repl--tab-label :stop-failed 3)))
+    (should (string= label (concat "3" claude-repl--label-stop-failed)))))
+
 (provide 'test-status)
 
 ;;; test-status.el ends here

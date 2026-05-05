@@ -42,6 +42,9 @@
 
 (defconst claude-repl--managed-hooks
   '((Stop             . "~/.claude/hooks/stop-notify.sh")
+    (StopFailure      . "~/.claude/hooks/stop-failure-notify.sh")
+    (SubagentStart    . "~/.claude/hooks/subagent-start-notify.sh")
+    (SubagentStop     . "~/.claude/hooks/subagent-stop-notify.sh")
     (UserPromptSubmit . "~/.claude/hooks/prompt-submit-notify.sh")
     (SessionStart     . "~/.claude/hooks/session-start-notify.sh")
     (Notification     . "~/.claude/hooks/permission-notify.sh"))
@@ -239,7 +242,16 @@ load so hooks are registered before later claude-repl sub-modules
   '((Stop             . error)
     (SessionStart     . error)
     (UserPromptSubmit . warn)
-    (Notification     . warn))
+    (Notification     . warn)
+    ;; New (2026-05) Stop-coordination hooks.  Treated as warn rather than
+    ;; error: their absence does not break the core REPL loop, only the
+    ;; correctness of the `:done' transition gating (Stop will resolve
+    ;; immediately) and the `:stop-failed' state (turns ending on API
+    ;; errors will appear stuck in `:thinking').  Promote to `error' if
+    ;; we ever rely on them as load-bearing.
+    (StopFailure      . warn)
+    (SubagentStart    . warn)
+    (SubagentStop     . warn))
   "Severity of a missing managed hook.
 `error' means the module is non-functional without it; `warn' means a
 degraded UX but still usable.  Script-file problems for any hook are
