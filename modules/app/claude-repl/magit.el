@@ -92,6 +92,41 @@ First %s is the repo name, second %s is the commit SHA."
     (kill-new github-url)
     (message "GitHub commit link copied to clipboard: %s" github-url)))
 
+;;;; --- GitHub PR resolution via gh CLI ------------------------------------
+
+(defun claude-repl--gh-pr-url-for-branch (project-dir branch)
+  "Return the GitHub PR URL for BRANCH in PROJECT-DIR, or nil if none.
+Resolves via `gh pr view BRANCH --json url --jq .url' run from
+PROJECT-DIR.  Returns nil when no PR is associated with BRANCH or when
+`gh' fails for any reason (stderr is suppressed).  Branch names are
+shell-quoted, so callers can pass any branch string safely."
+  (let* ((default-directory (file-name-as-directory project-dir))
+         (cmd (concat (mapconcat #'shell-quote-argument
+                                 (list "gh" "pr" "view" branch
+                                       "--json" "url" "--jq" ".url")
+                                 " ")
+                      " 2>/dev/null"))
+         (output (string-trim (shell-command-to-string cmd))))
+    (and (string-prefix-p "http" output) output)))
+
+(defun +dwc/open-workspace-pr-in-browser ()
+  "Open the GitHub PR for the current workspace's branch in the browser.
+Resolves the PR URL via `gh' against the workspace's project directory
+\(see `claude-repl--ws-dir'), not the buffer's `magit-toplevel' — so this
+works correctly from any buffer in the workspace.  Errors when no PR is
+associated with the current branch."
+  (interactive)
+  (let* ((ws (+workspace-current-name))
+         (project-dir (claude-repl--ws-dir ws))
+         (default-directory (file-name-as-directory project-dir))
+         (branch (string-trim
+                  (shell-command-to-string "git rev-parse --abbrev-ref HEAD")))
+         (pr-url (claude-repl--gh-pr-url-for-branch project-dir branch)))
+    (unless pr-url
+      (user-error "No PR found for branch '%s' in workspace '%s'" branch ws))
+    (browse-url pr-url)
+    (message "Opened PR: %s" pr-url)))
+
 ;;;; --- magit-status-workspace ---------------------------------------------
 
 (defun +dwc/magit-status-workspace ()
@@ -163,6 +198,10 @@ transitions `:repl-state' to :inactive)."
       :desc "Magit status for workspace" "g g" #'+dwc/magit-status-workspace
       :desc "Magit status"               "g G" #'magit-status
       :desc "Open commit in GitHub"      "g O" #'+dwc/magit-open-commit-in-github)
+
+(map! :leader
+      (:prefix "j"
+       :desc "Open workspace PR in browser" "P" #'+dwc/open-workspace-pr-in-browser))
 
 (map! :map magit-status-mode-map
       "g c" #'+dwc/magit-copy-commit-link
