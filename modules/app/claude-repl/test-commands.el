@@ -487,6 +487,103 @@
       (claude-repl-create-or-update-pr '(no-self-certified))
       (should-not (string-match-p "--self-certified" sent-text)))))
 
+(ert-deftest claude-repl-cmd-test-create-or-update-pr/prefixes-input-buffer-contents ()
+  "Non-empty input buffer contents are prepended to the prompt."
+  (claude-repl-test--with-clean-state
+    (let (sent-text)
+      (claude-repl-test--with-temp-buffer " *test-coup-input*"
+        (insert "do a thing")
+        (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--send-to-claude)
+                   (lambda (text) (setq sent-text text)))
+                  ((symbol-function 'claude-repl--commit-input-buffer)
+                   (lambda (&rest _) nil)))
+          (claude-repl-create-or-update-pr)
+          (should (equal sent-text
+                         (concat "do a thing "
+                                 (claude-repl--build-create-or-update-pr-prompt nil)))))))))
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr/empty-buffer-sends-bare-prompt ()
+  "Empty input buffer leaves the base prompt unprefixed (no leading space)."
+  (claude-repl-test--with-clean-state
+    (let (sent-text)
+      (claude-repl-test--with-temp-buffer " *test-coup-input*"
+        (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--send-to-claude)
+                   (lambda (text) (setq sent-text text))))
+          (claude-repl-create-or-update-pr)
+          (should (equal sent-text
+                         (claude-repl--build-create-or-update-pr-prompt nil))))))))
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr/trims-trailing-whitespace-on-prefix ()
+  "Trailing whitespace/newlines in the input buffer are trimmed before joining."
+  (claude-repl-test--with-clean-state
+    (let (sent-text)
+      (claude-repl-test--with-temp-buffer " *test-coup-input*"
+        (insert "do a thing  \n")
+        (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--send-to-claude)
+                   (lambda (text) (setq sent-text text)))
+                  ((symbol-function 'claude-repl--commit-input-buffer)
+                   (lambda (&rest _) nil)))
+          (claude-repl-create-or-update-pr)
+          (should (equal sent-text
+                         (concat "do a thing "
+                                 (claude-repl--build-create-or-update-pr-prompt nil)))))))))
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr/whitespace-only-buffer-treated-as-empty ()
+  "An input buffer of only whitespace is treated as empty (no prefix, no commit)."
+  (claude-repl-test--with-clean-state
+    (let (sent-text commit-called)
+      (claude-repl-test--with-temp-buffer " *test-coup-input*"
+        (insert "   \n  ")
+        (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--send-to-claude)
+                   (lambda (text) (setq sent-text text)))
+                  ((symbol-function 'claude-repl--commit-input-buffer)
+                   (lambda (&rest _) (setq commit-called t))))
+          (claude-repl-create-or-update-pr)
+          (should (equal sent-text
+                         (claude-repl--build-create-or-update-pr-prompt nil)))
+          (should-not commit-called))))))
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr/commits-input-buffer-when-prefixed ()
+  "When a prefix was used, the input buffer is committed (history + clear)."
+  (claude-repl-test--with-clean-state
+    (let (commit-args)
+      (claude-repl-test--with-temp-buffer " *test-coup-input*"
+        (insert "ship it")
+        (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--send-to-claude) (lambda (_) nil))
+                  ((symbol-function 'claude-repl--commit-input-buffer)
+                   (lambda (ws buf raw clear-p)
+                     (setq commit-args (list ws buf raw clear-p)))))
+          (claude-repl-create-or-update-pr)
+          (should commit-args)
+          (should (equal (nth 0 commit-args) "test-ws"))
+          (should (eq (nth 3 commit-args) t)))))))
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr/excluded-with-prefix-still-drops-flag ()
+  "EXCLUDED flags are dropped even when an input buffer prefix is present."
+  (claude-repl-test--with-clean-state
+    (let (sent-text)
+      (claude-repl-test--with-temp-buffer " *test-coup-input*"
+        (insert "do a thing")
+        (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--send-to-claude)
+                   (lambda (text) (setq sent-text text)))
+                  ((symbol-function 'claude-repl--commit-input-buffer)
+                   (lambda (&rest _) nil)))
+          (claude-repl-create-or-update-pr '(no-self-certified))
+          (should (string-prefix-p "do a thing " sent-text))
+          (should-not (string-match-p "--self-certified" sent-text)))))))
+
 ;;;; ---- claude-repl-create-or-update-pr-no-self-certified ----
 
 (ert-deftest claude-repl-cmd-test-create-or-update-pr-no-self-certified/sends-prompt ()

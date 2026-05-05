@@ -355,13 +355,25 @@ or an error is signalled."
 
 (defun claude-repl-create-or-update-pr (&optional excluded)
   "Send /create-or-update-pr to Claude with optional EXCLUDED flags dropped.
+The current input buffer contents (right-trimmed, if non-empty) are
+prepended as a prefix separated by a single space; the input buffer is
+then cleared and its prior contents pushed to history.
 EXCLUDED is a list of `no-FLAG' symbols (e.g. \\='(no-self-certified)) — each
 named flag is removed from `claude-repl-create-or-update-pr-base-flags'
 before the prompt is sent."
   (interactive)
-  (let ((prompt (claude-repl--build-create-or-update-pr-prompt excluded)))
-    (claude-repl--log (+workspace-current-name) "create-or-update-pr: %s" prompt)
-    (claude-repl--send-to-claude prompt)))
+  (let* ((ws (+workspace-current-name))
+         (base (claude-repl--build-create-or-update-pr-prompt excluded))
+         (input-buf (claude-repl--ws-get ws :input-buffer))
+         (raw-prefix (claude-repl--read-input-buffer ws))
+         (prefix (and raw-prefix (string-trim-right raw-prefix)))
+         (has-prefix (and prefix (not (string-empty-p prefix))))
+         (prompt (if has-prefix (concat prefix " " base) base)))
+    (claude-repl--log ws "create-or-update-pr: prefix-len=%d prompt=%s"
+                      (length (or prefix "")) prompt)
+    (claude-repl--send-to-claude prompt)
+    (when (and has-prefix input-buf (buffer-live-p input-buf))
+      (claude-repl--commit-input-buffer ws input-buf raw-prefix t))))
 
 (defun claude-repl-create-or-update-pr-no-self-certified ()
   "Send /create-or-update-pr to Claude without --self-certified."
