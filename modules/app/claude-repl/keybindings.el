@@ -455,7 +455,8 @@ Reports comprehensive diagnostics."
         :desc "HEAD"        "h" #'claude-repl-update-pr-diff-head
         :desc "branch"      "b" #'claude-repl-update-pr-diff-branch)
        (:prefix ("s" "Send predefined input to Claude")
-        :desc "create PR"  "p"  #'claude-repl-create-or-update-pr)
+        :desc "create PR (no --self-certified)" "p" #'claude-repl-create-or-update-pr-no-self-certified
+        :desc "create PR"                       "P" #'claude-repl-create-or-update-pr)
        (:prefix ("t" . "tests")
         (:prefix ("r" . "run")
          (:prefix ("t" . "tests")

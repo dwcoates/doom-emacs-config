@@ -433,6 +433,19 @@
       (claude-repl-create-or-update-pr)
       (should (equal sent-text claude-repl-create-or-update-pr-prompt)))))
 
+(ert-deftest claude-repl-cmd-test-create-or-update-pr-no-self-certified/sends-prompt ()
+  "create-or-update-pr-no-self-certified sends the configured slash command to claude."
+  (let (sent-text)
+    (cl-letf (((symbol-function 'claude-repl--send-to-claude)
+               (lambda (text) (setq sent-text text))))
+      (claude-repl-create-or-update-pr-no-self-certified)
+      (should (equal sent-text claude-repl-create-or-update-pr-no-self-certified-prompt)))))
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr-no-self-certified/prompt-omits-self-certified ()
+  "Default no-self-certified prompt does not contain --self-certified."
+  (should-not (string-match-p "--self-certified"
+                              claude-repl-create-or-update-pr-no-self-certified-prompt)))
+
 ;;;; ---- claude-repl-copy-reference ----
 
 (ert-deftest claude-repl-cmd-test-copy-reference/copies-to-kill-ring ()
@@ -496,6 +509,7 @@
                  claude-repl-update-pr-diff-prompt
                  claude-repl-update-pr-prompt
                  claude-repl-create-or-update-pr-prompt
+                 claude-repl-create-or-update-pr-no-self-certified-prompt
                  claude-repl-run-tests-prompt
                  claude-repl-run-lint-prompt
                  claude-repl-run-all-prompt

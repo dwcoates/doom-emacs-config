@@ -34,6 +34,12 @@
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-create-or-update-pr-no-self-certified-prompt
+  "/create-or-update-pr --patch --add-to-merge-queue --skip-tests"
+  "Slash command sent to Claude by `claude-repl-create-or-update-pr-no-self-certified'."
+  :type 'string
+  :group 'claude-repl)
+
 (defcustom claude-repl-run-tests-prompt
   "please run tests, and summarize the issues found and probable causes"
   "Prompt sent to Claude by run-tests commands."
@@ -331,6 +337,12 @@ sends \"i\" after 0.25s to return to insert mode."
   (interactive)
   (claude-repl--log (+workspace-current-name) "create-or-update-pr: sending slash command")
   (claude-repl--send-to-claude claude-repl-create-or-update-pr-prompt))
+
+(defun claude-repl-create-or-update-pr-no-self-certified ()
+  "Send the create-or-update-pr slash command to Claude without --self-certified."
+  (interactive)
+  (claude-repl--log (+workspace-current-name) "create-or-update-pr-no-self-certified: sending slash command")
+  (claude-repl--send-to-claude claude-repl-create-or-update-pr-no-self-certified-prompt))
 
 (defun claude-repl--nuke-one-workspace (ws)
   "Tear down a single claude-repl workspace WS without prompting.
