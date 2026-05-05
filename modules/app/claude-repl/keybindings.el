@@ -454,6 +454,8 @@ Reports comprehensive diagnostics."
         :desc "uncommitted" "u" #'claude-repl-update-pr-diff-uncommitted
         :desc "HEAD"        "h" #'claude-repl-update-pr-diff-head
         :desc "branch"      "b" #'claude-repl-update-pr-diff-branch)
+       (:prefix ("s" "Send predefined input to Claude")
+        :desc "create PR"  "p"  #'claude-repl-create-or-update-pr)
        (:prefix ("t" . "tests")
         (:prefix ("r" . "run")
          (:prefix ("t" . "tests")

@@ -259,7 +259,6 @@ SCROLL-FN is called with a line count (e.g. `scroll-up' or `scroll-down')."
       :ni "C-c q"     #'claude-repl-kill
       :ni "C-S-m"     #'claude-repl-cycle
       :ni "C-h"       #'evil-window-left
-      :ni "C-j"       #'evil-window-down
       :n  "C-n"       #'claude-repl--send-vterm-down
       :n  "C-p"       #'claude-repl--send-vterm-up
       :ni "C-v"       #'claude-repl-paste-to-vterm
