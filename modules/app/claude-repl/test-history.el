@@ -461,6 +461,39 @@
               (should (null (plist-get data :priority)))))
         (delete-directory tmpdir t)))))
 
+(ert-deftest claude-repl-test-state-save-includes-source-ws-dir ()
+  "state-save serializes `:source-ws-dir' so the merge target survives restarts."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :source-ws-dir "/tmp/source-repo/")
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (equal (plist-get data :source-ws-dir) "/tmp/source-repo/"))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-state-save-nil-source-ws-dir ()
+  "state-save writes `:source-ws-dir' nil when no source is recorded."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (null (plist-get data :source-ws-dir)))))
+        (delete-directory tmpdir t)))))
+
 ;;;; ---- Tests: validate-ws-env ----
 
 (ert-deftest claude-repl-test-validate-ws-env-valid ()
@@ -577,6 +610,62 @@
             (should (equal (claude-repl-instantiation-session-id
                             (claude-repl--ws-get "ws" :sandbox))
                            "sb1")))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-initialize-ws-env-restores-source-ws-dir ()
+  "initialize-ws-env restores `:source-ws-dir' from the saved state file."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-src-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (expand-file-name ".claude-repl-state" tmpdir)
+             '(:project-dir "/restored/root"
+               :active-env :bare-metal
+               :source-ws-dir "/tmp/recorded-source/"
+               :bare-metal (:session-id nil)
+               :sandbox (:session-id nil)))
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--initialize-ws-env "ws")
+            (should (equal (claude-repl--ws-get "ws" :source-ws-dir)
+                           "/tmp/recorded-source/")))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-initialize-ws-env-old-state-file-no-source-ws-dir ()
+  "Old state files (no `:source-ws-dir' key) leave the value as nil — no error."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-old-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (expand-file-name ".claude-repl-state" tmpdir)
+             '(:project-dir "/restored/root"
+               :active-env :bare-metal
+               :bare-metal (:session-id nil)
+               :sandbox (:session-id nil)))
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--initialize-ws-env "ws")
+            (should (null (claude-repl--ws-get "ws" :source-ws-dir))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-initialize-ws-env-source-ws-dir-round-trip ()
+  "state-save followed by initialize-ws-env restores `:source-ws-dir' across restart."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-src-rt-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :source-ws-dir "/tmp/source-roundtrip/")
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            ;; Simulate restart
+            (clrhash claude-repl--workspaces)
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--initialize-ws-env "ws")
+            (should (equal (claude-repl--ws-get "ws" :source-ws-dir)
+                           "/tmp/source-roundtrip/")))
         (delete-directory tmpdir t)))))
 
 ;;;; ---- Tests: history-save / history-restore round-trip ----

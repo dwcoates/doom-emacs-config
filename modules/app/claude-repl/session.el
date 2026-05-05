@@ -197,6 +197,12 @@ state-save.  Callers already guard on `claude-repl--claude-running-p'."
     (claude-repl--ws-put ws :priority
                          (or (and saved (plist-get saved :priority))
                              (claude-repl--ws-get ws :priority)))
+    ;; Source workspace dir: prefer the saved value, fall back to whatever is
+    ;; already in the plist (e.g., set by `--finalize-worktree-workspace'
+    ;; before any state-save happened for this workspace).
+    (claude-repl--ws-put ws :source-ws-dir
+                         (or (and saved (plist-get saved :source-ws-dir))
+                             (claude-repl--ws-get ws :source-ws-dir)))
     (dolist (key claude-repl--environment-keys)
       (claude-repl--ws-put ws key
                            (claude-repl--make-instantiation-from-plist
