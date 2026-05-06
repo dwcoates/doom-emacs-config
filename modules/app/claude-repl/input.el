@@ -16,19 +16,16 @@ The prefix is sent on the first prompt and every Nth prompt thereafter."
   :group 'claude-repl)
 
 (defcustom claude-repl-command-prefix
-  (concat "ALLOWED & ENCOURAGED: create new commits freely for atomic, well-scoped units of work — "
-          "do not ask first; ensure applicable tests run and pass before each commit. ALLOWED: Git pushes "
+  (concat "\n\nALLOWED & ENCOURAGED: create new commits freely for atomic, well-scoped units of work — "
+          "do not ask first; ensure applicable tests run and pass before each commit. \n\nALLOWED: Git pushes "
           "are allowed when necessary and needed, but should not be done without a good reason "
           "(e.g., to provoke CICD while iterating on Action workflows, or as "
-          "part of PR creation process). NOT ALLOWED without my "
+          "part of PR creation process). Adding to GH merge queue is allowed when appropriate. \n\nNOT ALLOWED without my "
           "EXPLICIT, per-use permission: other mutating git commands (rebase, pull, merge, reset, "
           "checkout that discards work, force-push, branch deletion, github comments); installing "
           "or uninstalling packages/tools; operating on files outside the current project. OTHER: "
           "I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y "
-          "broken?' do not infer that I want a fix; just answer. Take action only when explicitly "
-          "requested. Other than the standing commit authorization, take only actions that "
-          "follow directly from what I explicitly request in this prompt, or within some "
-          "skill execution of this prompt.")
+          "broken?' do not infer that I want a fix; just answer.")
   "Safety instructions embedded in the metaprompt prefix.
 This text is wrapped in the `claude-repl--command-prefix' template at load time
 and periodically prepended to user input (see `claude-repl-prefix-period')."
@@ -36,13 +33,12 @@ and periodically prepended to user input (see `claude-repl-prefix-period')."
   :group 'claude-repl)
 
 (defcustom claude-repl-command-prefix-template
-  (concat "<<*this is a metaprompt. "
+  (concat "<<*start of metaprompt.\n\n"
           "I will periodically prefix my prompts with this "
           "to remind you of our restrictions for freely making changes. "
           "Do not be alarmed, this is merely a periodic reminder*: "
-          "%s "
-          "*metaprompt over* "
-          "(rest is actual user request that you should respond to directly)>>\n\n")
+          "%s"
+          "\n\n*metaprompt over - rest is actual user request that you should respond to directly*>>\n\n")
   "Template wrapping the metaprompt prefix.
 Must contain a single %s placeholder for `claude-repl-command-prefix'."
   :type 'string
