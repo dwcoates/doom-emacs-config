@@ -131,31 +131,46 @@ associated with the current branch."
 
 (defun +dwc/magit-status-workspace ()
   "Open magit-status for the current workspace's project root.
-If a magit-status buffer is already visible, switch to that window and
-revert the buffer in place instead of opening a fresh one."
+If claude-repl is currently fullscreened (i.e. `:fullscreen-config' is
+set for the workspace), magit replaces the panels and is itself made
+fullscreen — the saved fullscreen config is cleared since claude is no
+longer in fullscreen mode.  Otherwise: if a magit-status buffer is
+already visible, switch to that window and revert the buffer in place;
+else open fresh."
   (interactive)
-  (let ((magit-win (cl-loop for win in (window-list)
-                            when (with-current-buffer (window-buffer win)
-                                   (derived-mode-p 'magit-status-mode))
-                            return win)))
+  (let* ((ws (+workspace-current-name))
+         (claude-fs (claude-repl--ws-get ws :fullscreen-config))
+         (magit-win (cl-loop for win in (window-list)
+                             when (with-current-buffer (window-buffer win)
+                                    (derived-mode-p 'magit-status-mode))
+                             return win)))
     (when (fboundp 'claude-repl--log)
-      (claude-repl--log (+workspace-current-name)
-                        "magit-status-workspace: ENTER windows=%d magit-win=%s magit-buf=%s"
+      (claude-repl--log ws
+                        "magit-status-workspace: ENTER windows=%d magit-win=%s magit-buf=%s claude-fs=%s"
                         (length (window-list))
                         (if magit-win "found" "nil")
-                        (if magit-win (buffer-name (window-buffer magit-win)) "-")))
-    (if magit-win
-        (progn
-          (when (fboundp 'claude-repl--log)
-            (claude-repl--log (+workspace-current-name) "magit-status-workspace: BRANCH=reuse toplevel=%s"
-                              (with-current-buffer (window-buffer magit-win)
-                                (ignore-errors (magit-toplevel)))))
-          (select-window magit-win)
-          (revert-buffer nil t))
+                        (if magit-win (buffer-name (window-buffer magit-win)) "-")
+                        (if claude-fs "yes" "no")))
+    (cond
+     (claude-fs
       (when (fboundp 'claude-repl--log)
-        (claude-repl--log (+workspace-current-name) "magit-status-workspace: BRANCH=fresh-open dir=%s"
-                          (claude-repl--ws-dir (+workspace-current-name))))
-      (magit-status (claude-repl--ws-dir (+workspace-current-name))))))
+        (claude-repl--log ws "magit-status-workspace: BRANCH=fullscreen-takeover dir=%s"
+                          (claude-repl--ws-dir ws)))
+      (claude-repl--ws-put ws :fullscreen-config nil)
+      (magit-status (claude-repl--ws-dir ws))
+      (delete-other-windows))
+     (magit-win
+      (when (fboundp 'claude-repl--log)
+        (claude-repl--log ws "magit-status-workspace: BRANCH=reuse toplevel=%s"
+                          (with-current-buffer (window-buffer magit-win)
+                            (ignore-errors (magit-toplevel)))))
+      (select-window magit-win)
+      (revert-buffer nil t))
+     (t
+      (when (fboundp 'claude-repl--log)
+        (claude-repl--log ws "magit-status-workspace: BRANCH=fresh-open dir=%s"
+                          (claude-repl--ws-dir ws)))
+      (magit-status (claude-repl--ws-dir ws))))))
 
 ;;;; --- Hide Claude panels before magit-status RET actions -----------------
 

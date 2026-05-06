@@ -165,5 +165,67 @@
                (lambda (_url) (error "browse-url should not be called"))))
       (should-error (+dwc/open-workspace-pr-in-browser) :type 'user-error))))
 
+;;;; ---- Tests: +dwc/magit-status-workspace fullscreen-takeover ----
+
+(ert-deftest claude-repl-test-magit-status-workspace-fullscreen-calls-magit-status ()
+  "When claude is fullscreen, calls `magit-status' with the workspace dir."
+  (claude-repl-test--with-clean-state
+    (let ((magit-status-args nil))
+      (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+                ((symbol-function 'magit-status)
+                 (lambda (&rest args) (setq magit-status-args args)))
+                ((symbol-function 'delete-other-windows) #'ignore))
+        (+dwc/magit-status-workspace)
+        (should (equal magit-status-args '("/tmp/proj")))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-fullscreen-deletes-other-windows ()
+  "When claude is fullscreen, calls `delete-other-windows' to make magit fullscreen."
+  (claude-repl-test--with-clean-state
+    (let ((delete-calls 0))
+      (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+                ((symbol-function 'magit-status) #'ignore)
+                ((symbol-function 'delete-other-windows)
+                 (lambda () (cl-incf delete-calls))))
+        (+dwc/magit-status-workspace)
+        (should (= delete-calls 1))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-fullscreen-clears-saved-config ()
+  "When claude is fullscreen, the saved `:fullscreen-config' is cleared."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+              ((symbol-function 'magit-status) #'ignore)
+              ((symbol-function 'delete-other-windows) #'ignore))
+      (+dwc/magit-status-workspace)
+      (should (null (claude-repl--ws-get "test-ws" :fullscreen-config))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-not-fullscreen-no-delete ()
+  "When claude is not fullscreen and no magit-win, does NOT call `delete-other-windows'."
+  (claude-repl-test--with-clean-state
+    (let ((delete-calls 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+                ((symbol-function 'magit-status) #'ignore)
+                ((symbol-function 'delete-other-windows)
+                 (lambda () (cl-incf delete-calls))))
+        (+dwc/magit-status-workspace)
+        (should (= delete-calls 0))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-not-fullscreen-no-magit-opens-fresh ()
+  "When not fullscreen and no magit window visible, calls `magit-status' with workspace dir."
+  (claude-repl-test--with-clean-state
+    (let ((magit-status-args nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+                ((symbol-function 'magit-status)
+                 (lambda (&rest args) (setq magit-status-args args))))
+        (+dwc/magit-status-workspace)
+        (should (equal magit-status-args '("/tmp/proj")))))))
+
 (provide 'test-magit)
 ;;; test-magit.el ends here
