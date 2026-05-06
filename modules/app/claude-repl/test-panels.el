@@ -444,6 +444,39 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
       (should (eq (claude-repl--ws-claude-state "test-ws") :thinking))
       (should (eq (claude-repl--ws-get "test-ws" :repl-state) :inactive)))))
 
+(ert-deftest claude-repl-test-panels-on-close-pushes-current-ws-to-back ()
+  "on-close calls `+dwc/workspace-push-to-back' when WS is the current workspace."
+  (claude-repl-test--with-clean-state
+    (let ((push-called 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
+                ((symbol-function '+dwc/workspace-push-to-back)
+                 (lambda () (cl-incf push-called))))
+        (claude-repl--on-close)
+        (should (= push-called 1))))))
+
+(ert-deftest claude-repl-test-panels-on-close-skips-push-when-explicit-ws-not-current ()
+  "on-close does not push to back when an explicit WS is not the current workspace."
+  (claude-repl-test--with-clean-state
+    (let ((push-called 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+                ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
+                ((symbol-function '+dwc/workspace-push-to-back)
+                 (lambda () (cl-incf push-called))))
+        (claude-repl--on-close "other-ws")
+        (should (= push-called 0))))))
+
+(ert-deftest claude-repl-test-panels-on-close-skips-push-when-no-workspace ()
+  "on-close does not push to back when no workspace is active."
+  (claude-repl-test--with-clean-state
+    (let ((push-called 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
+                ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
+                ((symbol-function '+dwc/workspace-push-to-back)
+                 (lambda () (cl-incf push-called))))
+        (claude-repl--on-close)
+        (should (= push-called 0))))))
+
 ;;;; ---- Tests: hide-and-preserve-status ----
 
 (ert-deftest claude-repl-test-panels-hide-and-preserve-marks-inactive ()

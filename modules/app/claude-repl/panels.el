@@ -340,8 +340,14 @@ item #1).  `:claude-state' is intentionally left untouched so that
 closing during a :thinking or :permission turn preserves the in-flight
 signal (the renderer shows red/❓ through the closed-panel state).
 
+When WS is the current workspace, also pushes it to the second-to-last
+position in the tab-bar via `+dwc/workspace-push-to-back' so dormant
+workspaces sink out of the user's primary navigation range.  Guarded by
+`fboundp' so the module remains usable when the helper is not loaded
+(e.g. during isolated unit tests).
+
 WS defaults to the current workspace; when WS is nil the function still
-hides panels but skips the bookkeeping write."
+hides panels but skips the bookkeeping write and the tab shuffle."
   (let ((ws (or ws (+workspace-current-name))))
     (claude-repl--log ws "on-close: CALLED this-command=%s last-command=%s"
                       this-command last-command)
@@ -349,7 +355,12 @@ hides panels but skips the bookkeeping write."
       (claude-repl--log ws "on-close ws=%s claude-state=%s -> repl-state=:inactive"
                         ws (claude-repl--ws-claude-state ws))
       (claude-repl--ws-set-repl-state ws :inactive))
-    (claude-repl--hide-panels)))
+    (claude-repl--hide-panels)
+    (when (and ws
+               (equal ws (+workspace-current-name))
+               (fboundp '+dwc/workspace-push-to-back))
+      (claude-repl--log ws "on-close: pushing ws=%s to second-to-last" ws)
+      (+dwc/workspace-push-to-back))))
 
 ;;;; Window synchronization
 
