@@ -15,7 +15,20 @@ The prefix is sent on the first prompt and every Nth prompt thereafter."
   :type 'integer
   :group 'claude-repl)
 
-(defcustom claude-repl-command-prefix "ALLOWED & ENCOURAGED: create new commits freely for atomic, well-scoped units of work — do not ask first; ensure applicable tests run and pass before each commit. Git pushes are allowed when necessary and needed, but should not be done without a good reason (e.g., to provoke CICD while iterating on Action workflows). NOT ALLOWED without my EXPLICIT, per-use permission: other mutating git commands (rebase, pull, merge, reset, checkout that discards work, force-push, branch deletion, github comments); installing or uninstalling packages/tools; operating on files outside the current project. OTHER: I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y broken?' do not infer that I want a fix; just answer. Take action only when explicitly requested. Other than the standing commit authorization, take only actions that follow directly from what I explicitly request in this prompt, or within some skill execution of this prompt."
+(defcustom claude-repl-command-prefix
+  (concat "ALLOWED & ENCOURAGED: create new commits freely for atomic, well-scoped units of work — "
+          "do not ask first; ensure applicable tests run and pass before each commit. ALLOWED: Git pushes "
+          "are allowed when necessary and needed, but should not be done without a good reason "
+          "(e.g., to provoke CICD while iterating on Action workflows, or as "
+          "part of PR creation process). NOT ALLOWED without my "
+          "EXPLICIT, per-use permission: other mutating git commands (rebase, pull, merge, reset, "
+          "checkout that discards work, force-push, branch deletion, github comments); installing "
+          "or uninstalling packages/tools; operating on files outside the current project. OTHER: "
+          "I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y "
+          "broken?' do not infer that I want a fix; just answer. Take action only when explicitly "
+          "requested. Other than the standing commit authorization, take only actions that "
+          "follow directly from what I explicitly request in this prompt, or within some "
+          "skill execution of this prompt.")
   "Safety instructions embedded in the metaprompt prefix.
 This text is wrapped in the `claude-repl--command-prefix' template at load time
 and periodically prepended to user input (see `claude-repl-prefix-period')."
