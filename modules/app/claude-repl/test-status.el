@@ -892,6 +892,44 @@ selected tab dims to the normal selected face like other states."
         ;; 2*4 timers (toggles 1..7 + cleanup at 8) = 8
         (should (= 8 scheduled))))))
 
+(ert-deftest claude-repl-test-flash-tab-redraws-tab-bar-synchronously ()
+  "claude-repl-flash-tab triggers a tab-bar redraw on the synchronous initial toggle."
+  (claude-repl-test--with-clean-state
+    (let ((redraw-calls 0))
+      (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--force-tab-bar-redraw)
+                 (lambda () (cl-incf redraw-calls))))
+        (claude-repl-flash-tab "ws1" 3 1.0)
+        (should (= 1 redraw-calls))))))
+
+(ert-deftest claude-repl-test-flash-tab-timer-callbacks-call-redraw-helper ()
+  "Each scheduled timer callback invokes `claude-repl--force-tab-bar-redraw'."
+  (claude-repl-test--with-clean-state
+    (let ((callbacks nil)
+          (redraw-calls 0))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat fn &rest _args)
+                   (push fn callbacks)))
+                ((symbol-function 'claude-repl--force-tab-bar-redraw)
+                 (lambda () (cl-incf redraw-calls))))
+        (claude-repl-flash-tab "ws1" 3 1.0)
+        ;; Synchronous redraw bumped the counter to 1; each captured timer
+        ;; callback should bump it further when invoked.
+        (should (= 1 redraw-calls))
+        (dolist (cb callbacks)
+          (funcall cb))
+        ;; 1 sync + 6 timers (5 toggles + 1 cleanup) = 7
+        (should (= 7 redraw-calls))))))
+
+(ert-deftest claude-repl-test-force-tab-bar-redraw-flips-space-toggle ()
+  "force-tab-bar-redraw flips `claude-repl--tabline-space-toggle' to defeat the cache."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--tabline-space-toggle nil))
+      (claude-repl--force-tab-bar-redraw)
+      (should claude-repl--tabline-space-toggle)
+      (claude-repl--force-tab-bar-redraw)
+      (should-not claude-repl--tabline-space-toggle))))
+
 (ert-deftest claude-repl-test-render-tab-entry-flash-uses-flash-face ()
   "render-tab-entry paints with `claude-repl-tab-flash' when :flashing is set."
   (claude-repl-test--with-clean-state

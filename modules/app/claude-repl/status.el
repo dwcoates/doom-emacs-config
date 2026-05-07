@@ -473,8 +473,10 @@ session is still alive and re-promptable).")
 (defconst claude-repl--tab-weight             'bold
   "Font weight applied to every tab face.")
 
-(defconst claude-repl--color-flash-bg         "white"
-  "Background used for the transient flash face — see `claude-repl-flash-tab'.")
+(defconst claude-repl--color-flash-bg         "#3b82f6"
+  "Saturated blue used for the transient flash face — see `claude-repl-flash-tab'.
+Distinct from `claude-repl--color-init-blue' so a flash is not confused
+with the :init claude-state at a glance.")
 
 (defcustom claude-repl-flash-count 3
   "Number of on/off cycles when `claude-repl-flash-tab' pulses a tab."
@@ -630,10 +632,10 @@ StopFailure hook (magenta + ⚠).")
 
 (defface claude-repl-tab-flash
   `((t :background ,claude-repl--color-flash-bg
-       :foreground ,claude-repl--color-dark
+       :foreground ,claude-repl--color-light
        :weight ,claude-repl--tab-weight))
   "Transient face applied while a workspace is in a `claude-repl-flash-tab'
-pulse — solid white background regardless of the underlying state.")
+pulse — solid blue background regardless of the underlying state.")
 
 (defun claude-repl--ws-flashing-p (ws)
   "Return non-nil if workspace WS is currently in a flash pulse."
@@ -648,12 +650,28 @@ the flash face/spec on the next refresh."
 (defun claude-repl--flash-spec ()
   "Return the appearance spec plist used for a flashing tab.
 Mirrors a normal palette row (see `claude-repl--tab-palette' docstring)
-but paints both the bracket and the name region in a uniform white."
+but paints both the bracket and the name region in a uniform blue."
   `(:bg ,claude-repl--color-flash-bg
-    :fg ,claude-repl--color-dark
+    :fg ,claude-repl--color-light
     :bracket-bg ,claude-repl--color-flash-bg
-    :bracket-fg ,claude-repl--color-dark
+    :bracket-fg ,claude-repl--color-light
     :weight ,claude-repl--tab-weight))
+
+(defun claude-repl--force-tab-bar-redraw ()
+  "Force the tab-bar to repaint NOW, bypassing its string-equality cache.
+Tab-bar rendering caches by string equality, and `equal' on propertized
+strings ignores text properties — so changes that only differ in face
+\(e.g. a `:flashing' toggle\) won't trigger a repaint via
+`force-mode-line-update' alone.  This helper flips the load-bearing
+`claude-repl--tabline-space-toggle' so the next tabline render produces
+a different string, then drives the tab-bar update primitives.  See the
+block comment above the toggle's defvar for the rationale."
+  (setq claude-repl--tabline-space-toggle (not claude-repl--tabline-space-toggle))
+  (when (fboundp 'tab-bar-tabs-set)
+    (tab-bar-tabs-set (tab-bar-tabs)))
+  (when (fboundp 'tab-bar--update-tab-bar-lines)
+    (tab-bar--update-tab-bar-lines t))
+  (force-mode-line-update t))
 
 (defun claude-repl-flash-tab (ws &optional count duration)
   "Pulse the tab for workspace WS COUNT times across DURATION seconds.
@@ -664,26 +682,28 @@ push-to-back), so the eye can track it to its new home.
 
 Sets the workspace's `:flashing' flag synchronously to t before
 returning, then schedules a sequence of timers that toggle it every
-DURATION/(2·COUNT) seconds and finally clear it at DURATION.  The
-synchronous-first toggle keeps the function unit-testable without
-needing the timer queue to run."
+DURATION/(2·COUNT) seconds and finally clear it at DURATION.  Each
+toggle drives `claude-repl--force-tab-bar-redraw' so the tab actually
+repaints at flash speed instead of waiting for the 1-Hz poll's
+trailing-space-toggle tick.  The synchronous-first toggle keeps the
+function unit-testable without needing the timer queue to run."
   (let* ((count (or count claude-repl-flash-count))
          (duration (or duration claude-repl-flash-duration))
          (interval (/ duration (* 2.0 count)))
          (toggles (* 2 count)))
     (claude-repl--log ws "flash-tab ws=%s count=%d duration=%s" ws count duration)
     (claude-repl--ws-set-flashing ws t)
-    (force-mode-line-update t)
+    (claude-repl--force-tab-bar-redraw)
     (cl-loop for i from 1 below toggles
              for on = (cl-evenp i)
              do (run-at-time (* i interval) nil
                              (lambda ()
                                (claude-repl--ws-set-flashing ws on)
-                               (force-mode-line-update t))))
+                               (claude-repl--force-tab-bar-redraw))))
     (run-at-time (* toggles interval) nil
                  (lambda ()
                    (claude-repl--ws-set-flashing ws nil)
-                   (force-mode-line-update t)))))
+                   (claude-repl--force-tab-bar-redraw)))))
 
 (defun claude-repl--render-tab (name spec label name-face img-str)
   "Render a tab string for workspace NAME from SPEC.
