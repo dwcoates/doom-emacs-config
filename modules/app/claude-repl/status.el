@@ -478,7 +478,7 @@ session is still alive and re-promptable).")
 Distinct from `claude-repl--color-init-blue' so a flash is not confused
 with the :init claude-state at a glance.")
 
-(defcustom claude-repl-flash-count 3
+(defcustom claude-repl-flash-count 2
   "Number of on/off cycles when `claude-repl-flash-tab' pulses a tab."
   :type 'integer
   :group 'claude-repl)
