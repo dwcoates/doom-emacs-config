@@ -136,7 +136,7 @@ Runs as a buffer-local `pre-command-hook'."
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
   (setq-local header-line-format
-              "RET: send | C-RET: send+postfix | C-c C-c: clear+save (empty→C-c) | C-c C-k: interrupt | <up>/<down>: history")
+              (concat "C-c C-c: clear+save | C-c C-k: interrupt | (cmd) <up>/<down>: history | (ins) <slash>/<digit>/<up>/<down>: direct send"))
   (face-remap-add-relative 'header-line 'claude-repl-header-line)
   (claude-repl--set-buffer-background claude-repl-input-background-shade)
   (visual-line-mode 1)
