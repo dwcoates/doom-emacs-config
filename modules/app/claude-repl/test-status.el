@@ -865,35 +865,45 @@ selected tab dims to the normal selected face like other states."
       (claude-repl-flash-tab "ws1" 3 1.0)
       (should (claude-repl--ws-flashing-p "ws1")))))
 
-(ert-deftest claude-repl-test-flash-tab-schedules-timers-for-toggles-and-cleanup ()
-  "claude-repl-flash-tab schedules 2*COUNT toggle timers plus a final cleanup timer."
+(ert-deftest claude-repl-test-flash-tab-schedules-exactly-one-timer-per-call ()
+  "claude-repl-flash-tab itself schedules a single timer (the rest are chained)."
   (claude-repl-test--with-clean-state
     (let ((scheduled-delays nil))
       (cl-letf (((symbol-function 'run-at-time)
                  (lambda (delay _repeat _fn &rest _args)
                    (push delay scheduled-delays))))
         (claude-repl-flash-tab "ws1" 3 1.0)
-        ;; 2*count - 1 toggle timers (i=1..5) + 1 cleanup timer (i=6) = 6 total
-        (should (= 6 (length scheduled-delays)))
-        ;; Cleanup timer fires at full duration
-        (should (= 1.0 (apply #'max scheduled-delays)))
-        ;; First scheduled toggle is at one interval (1/(2*3) = ~0.166s)
-        (should (< (- (apply #'min scheduled-delays) (/ 1.0 6.0)) 0.001))))))
+        (should (= 1 (length scheduled-delays)))
+        ;; The single scheduled timer is the next step at one interval.
+        (should (< (abs (- (car scheduled-delays) (/ 1.0 6.0))) 0.001))))))
 
-(ert-deftest claude-repl-test-flash-tab-defaults-to-defcustom-values ()
-  "Flash count and duration default to the defcustoms when omitted."
+(ert-deftest claude-repl-test-flash-step-terminal-clears-and-does-not-chain ()
+  "The terminal flash step clears :flashing and schedules no successor."
   (claude-repl-test--with-clean-state
-    (let ((claude-repl-flash-count 4)
-          (claude-repl-flash-duration 2.0)
-          (scheduled 0))
+    (claude-repl--ws-set-flashing "ws1" t)
+    (let ((scheduled 0))
+      (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) (cl-incf scheduled)))
+                ((symbol-function 'claude-repl--force-tab-bar-redraw) #'ignore))
+        ;; total-steps=5, terminal step is step=4.
+        (claude-repl--flash-step "ws1" 4 5 0.25)
+        (should (= 0 scheduled))
+        (should-not (claude-repl--ws-flashing-p "ws1"))))))
+
+(ert-deftest claude-repl-test-flash-step-non-terminal-chains-with-incremented-step ()
+  "A non-terminal flash step chains the next step with STEP+1, same TOTAL/INTERVAL."
+  (claude-repl-test--with-clean-state
+    (let ((captured nil))
       (cl-letf (((symbol-function 'run-at-time)
-                 (lambda (&rest _) (cl-incf scheduled))))
-        (claude-repl-flash-tab "ws1")
-        ;; 2*4 timers (toggles 1..7 + cleanup at 8) = 8
-        (should (= 8 scheduled))))))
+                 (lambda (delay _repeat fn &rest args)
+                   (setq captured (list :delay delay :fn fn :args args))))
+                ((symbol-function 'claude-repl--force-tab-bar-redraw) #'ignore))
+        (claude-repl--flash-step "ws1" 1 5 0.25)
+        (should (eq (plist-get captured :fn) #'claude-repl--flash-step))
+        (should (= 0.25 (plist-get captured :delay)))
+        (should (equal (plist-get captured :args) '("ws1" 2 5 0.25)))))))
 
 (ert-deftest claude-repl-test-flash-tab-redraws-tab-bar-synchronously ()
-  "claude-repl-flash-tab triggers a tab-bar redraw on the synchronous initial toggle."
+  "claude-repl-flash-tab triggers a tab-bar redraw on the synchronous initial step."
   (claude-repl-test--with-clean-state
     (let ((redraw-calls 0))
       (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) nil))
@@ -902,23 +912,23 @@ selected tab dims to the normal selected face like other states."
         (claude-repl-flash-tab "ws1" 3 1.0)
         (should (= 1 redraw-calls))))))
 
-(ert-deftest claude-repl-test-flash-tab-timer-callbacks-call-redraw-helper ()
-  "Each scheduled timer callback invokes `claude-repl--force-tab-bar-redraw'."
+(ert-deftest claude-repl-test-flash-tab-chain-redraws-once-per-step ()
+  "Draining the chain produces one redraw per step (including terminal)."
   (claude-repl-test--with-clean-state
-    (let ((callbacks nil)
+    (let ((pending nil)
           (redraw-calls 0))
       (cl-letf (((symbol-function 'run-at-time)
-                 (lambda (_delay _repeat fn &rest _args)
-                   (push fn callbacks)))
+                 (lambda (_delay _repeat fn &rest args)
+                   (setq pending (cons fn args))))
                 ((symbol-function 'claude-repl--force-tab-bar-redraw)
                  (lambda () (cl-incf redraw-calls))))
         (claude-repl-flash-tab "ws1" 3 1.0)
-        ;; Synchronous redraw bumped the counter to 1; each captured timer
-        ;; callback should bump it further when invoked.
-        (should (= 1 redraw-calls))
-        (dolist (cb callbacks)
-          (funcall cb))
-        ;; 1 sync + 6 timers (5 toggles + 1 cleanup) = 7
+        ;; Drive the chain: each call schedules the next via PENDING.
+        (while pending
+          (let ((next pending))
+            (setq pending nil)
+            (apply (car next) (cdr next))))
+        ;; total-steps = 1 + 2*3 = 7; one redraw per step.
         (should (= 7 redraw-calls))))))
 
 (ert-deftest claude-repl-test-force-tab-bar-redraw-flips-space-toggle ()
@@ -931,29 +941,24 @@ selected tab dims to the normal selected face like other states."
       (should-not claude-repl--tabline-space-toggle))))
 
 (ert-deftest claude-repl-test-flash-tab-toggles-flashing-t-nil-alternately ()
-  "Each scheduled toggle callback drives :flashing alternately t, nil — not all nil.
-Regression: cl-loop's `for X = ...' assigns to one shared variable, so
-without a per-iteration `let' the lambdas would all close over the same
-binding and observe its final value (nil), leaving the flash stuck off
-after the first sync toggle."
+  "Draining the chain drives :flashing alternately t, nil, ending in nil cleanup."
   (claude-repl-test--with-clean-state
-    (let ((callbacks nil))
+    (let ((pending nil)
+          (observed nil))
       (cl-letf (((symbol-function 'run-at-time)
-                 (lambda (_delay _repeat fn &rest _args)
-                   ;; Preserve scheduling order: append, don't push.
-                   (setq callbacks (append callbacks (list fn)))))
+                 (lambda (_delay _repeat fn &rest args)
+                   (setq pending (cons fn args))))
                 ((symbol-function 'claude-repl--force-tab-bar-redraw) #'ignore))
         (claude-repl-flash-tab "ws1" 3 1.0)
-        ;; After sync set, :flashing is t.
-        (should (eq t (claude-repl--ws-flashing-p "ws1")))
-        ;; Toggle callbacks (i=1..5): expected on = nil, t, nil, t, nil.
-        ;; Cleanup callback (i=6): nil.
-        (let ((expected '(nil t nil t nil nil))
-              (observed nil))
-          (dolist (cb callbacks)
-            (funcall cb)
-            (push (claude-repl--ws-flashing-p "ws1") observed))
-          (should (equal expected (nreverse observed))))))))
+        ;; After sync step 0, :flashing is t.
+        (push (claude-repl--ws-flashing-p "ws1") observed)
+        (while pending
+          (let ((next pending))
+            (setq pending nil)
+            (apply (car next) (cdr next))
+            (push (claude-repl--ws-flashing-p "ws1") observed)))
+        ;; Steps 0..5 alternate t/nil; step 6 is the cleanup (nil).
+        (should (equal '(t nil t nil t nil nil) (nreverse observed)))))))
 
 (ert-deftest claude-repl-test-render-tab-entry-flash-uses-flash-face ()
   "render-tab-entry paints with `claude-repl-tab-flash' when :flashing is set."

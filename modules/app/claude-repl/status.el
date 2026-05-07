@@ -673,6 +673,23 @@ block comment above the toggle's defvar for the rationale."
     (tab-bar--update-tab-bar-lines t))
   (force-mode-line-update t))
 
+(defun claude-repl--flash-step (ws step total-steps interval)
+  "Drive step STEP of WS's flash, then chain the next step via `run-at-time'.
+STEP is 0-based.  TOTAL-STEPS is `(1+ (* 2 COUNT))' — one entry for
+each on/off toggle plus a final cleanup.  Even STEPs paint the flash
+on, odd STEPs paint it off.  The terminal step (STEP == TOTAL-STEPS-1)
+clears `:flashing' and stops the chain — it does NOT schedule a
+successor.  Every step calls `claude-repl--force-tab-bar-redraw' so
+the tab repaints at flash speed instead of waiting for the 1-Hz poll."
+  (if (>= step (1- total-steps))
+      (progn
+        (claude-repl--ws-set-flashing ws nil)
+        (claude-repl--force-tab-bar-redraw))
+    (claude-repl--ws-set-flashing ws (cl-evenp step))
+    (claude-repl--force-tab-bar-redraw)
+    (run-at-time interval nil
+                 #'claude-repl--flash-step ws (1+ step) total-steps interval)))
+
 (defun claude-repl-flash-tab (ws &optional count duration)
   "Pulse the tab for workspace WS COUNT times across DURATION seconds.
 COUNT defaults to `claude-repl-flash-count'; DURATION defaults to
@@ -680,35 +697,19 @@ COUNT defaults to `claude-repl-flash-count'; DURATION defaults to
 workspace whose tab-bar position just changed (e.g., after a deprio
 push-to-back), so the eye can track it to its new home.
 
-Sets the workspace's `:flashing' flag synchronously to t before
-returning, then schedules a sequence of timers that toggle it every
-DURATION/(2·COUNT) seconds and finally clear it at DURATION.  Each
-toggle drives `claude-repl--force-tab-bar-redraw' so the tab actually
-repaints at flash speed instead of waiting for the 1-Hz poll's
-trailing-space-toggle tick.  The synchronous-first toggle keeps the
-function unit-testable without needing the timer queue to run."
+Drives the sequence via `claude-repl--flash-step', which runs the
+first step synchronously and then chains each subsequent step from
+the previous one via `run-at-time'.  Versus scheduling every toggle
+up-front, the chain gives uniform real-time spacing when Emacs is
+busy, makes mid-sequence cancellation easy (only one timer is ever
+pending), and avoids the closure-capture pitfalls of shared loop
+variables."
   (let* ((count (or count claude-repl-flash-count))
          (duration (or duration claude-repl-flash-duration))
          (interval (/ duration (* 2.0 count)))
-         (toggles (* 2 count)))
+         (total-steps (1+ (* 2 count))))
     (claude-repl--log ws "flash-tab ws=%s count=%d duration=%s" ws count duration)
-    (claude-repl--ws-set-flashing ws t)
-    (claude-repl--force-tab-bar-redraw)
-    ;; `let'-around-the-lambda creates a fresh `on' binding per iteration
-    ;; so each scheduled callback captures its own value.  cl-loop's
-    ;; `for ON = ...' clause assigns to one shared variable, which would
-    ;; cause every callback to read the FINAL loop value (nil) — the
-    ;; flash would blink once and stay off.
-    (cl-loop for i from 1 below toggles
-             do (let ((on (cl-evenp i)))
-                  (run-at-time (* i interval) nil
-                               (lambda ()
-                                 (claude-repl--ws-set-flashing ws on)
-                                 (claude-repl--force-tab-bar-redraw)))))
-    (run-at-time (* toggles interval) nil
-                 (lambda ()
-                   (claude-repl--ws-set-flashing ws nil)
-                   (claude-repl--force-tab-bar-redraw)))))
+    (claude-repl--flash-step ws 0 total-steps interval)))
 
 (defun claude-repl--render-tab (name spec label name-face img-str)
   "Render a tab string for workspace NAME from SPEC.
