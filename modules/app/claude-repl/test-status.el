@@ -930,6 +930,31 @@ selected tab dims to the normal selected face like other states."
       (claude-repl--force-tab-bar-redraw)
       (should-not claude-repl--tabline-space-toggle))))
 
+(ert-deftest claude-repl-test-flash-tab-toggles-flashing-t-nil-alternately ()
+  "Each scheduled toggle callback drives :flashing alternately t, nil — not all nil.
+Regression: cl-loop's `for X = ...' assigns to one shared variable, so
+without a per-iteration `let' the lambdas would all close over the same
+binding and observe its final value (nil), leaving the flash stuck off
+after the first sync toggle."
+  (claude-repl-test--with-clean-state
+    (let ((callbacks nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat fn &rest _args)
+                   ;; Preserve scheduling order: append, don't push.
+                   (setq callbacks (append callbacks (list fn)))))
+                ((symbol-function 'claude-repl--force-tab-bar-redraw) #'ignore))
+        (claude-repl-flash-tab "ws1" 3 1.0)
+        ;; After sync set, :flashing is t.
+        (should (eq t (claude-repl--ws-flashing-p "ws1")))
+        ;; Toggle callbacks (i=1..5): expected on = nil, t, nil, t, nil.
+        ;; Cleanup callback (i=6): nil.
+        (let ((expected '(nil t nil t nil nil))
+              (observed nil))
+          (dolist (cb callbacks)
+            (funcall cb)
+            (push (claude-repl--ws-flashing-p "ws1") observed))
+          (should (equal expected (nreverse observed))))))))
+
 (ert-deftest claude-repl-test-render-tab-entry-flash-uses-flash-face ()
   "render-tab-entry paints with `claude-repl-tab-flash' when :flashing is set."
   (claude-repl-test--with-clean-state

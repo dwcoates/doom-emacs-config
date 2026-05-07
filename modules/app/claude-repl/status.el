@@ -694,12 +694,17 @@ function unit-testable without needing the timer queue to run."
     (claude-repl--log ws "flash-tab ws=%s count=%d duration=%s" ws count duration)
     (claude-repl--ws-set-flashing ws t)
     (claude-repl--force-tab-bar-redraw)
+    ;; `let'-around-the-lambda creates a fresh `on' binding per iteration
+    ;; so each scheduled callback captures its own value.  cl-loop's
+    ;; `for ON = ...' clause assigns to one shared variable, which would
+    ;; cause every callback to read the FINAL loop value (nil) — the
+    ;; flash would blink once and stay off.
     (cl-loop for i from 1 below toggles
-             for on = (cl-evenp i)
-             do (run-at-time (* i interval) nil
-                             (lambda ()
-                               (claude-repl--ws-set-flashing ws on)
-                               (claude-repl--force-tab-bar-redraw))))
+             do (let ((on (cl-evenp i)))
+                  (run-at-time (* i interval) nil
+                               (lambda ()
+                                 (claude-repl--ws-set-flashing ws on)
+                                 (claude-repl--force-tab-bar-redraw)))))
     (run-at-time (* toggles interval) nil
                  (lambda ()
                    (claude-repl--ws-set-flashing ws nil)
