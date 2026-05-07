@@ -1182,6 +1182,26 @@ existing worktree."
        "/tmp/new-wt" "new-ws" nil nil nil nil nil nil)
       (should (null (claude-repl--ws-get "new-ws" :source-ws-dir))))))
 
+(ert-deftest claude-repl-test-finalize-worktree-workspace-calls-reorder-by-priority ()
+  "Finalize invokes reorder-workspace-by-priority after applying properties.
+Reorder must run after `apply-workspace-properties' so the new workspace's
+`:priority' is already on the plist when the cache is rewritten."
+  (claude-repl-test--with-clean-state
+    (let ((reorder-called-with :unset))
+      (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+                 (lambda (&rest _) nil))
+                ((symbol-function '+workspace-new) (lambda (_ws) nil))
+                ((symbol-function 'claude-repl--setup-worktree-session)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+                 (lambda (ws)
+                   (setq reorder-called-with
+                         (cons ws (claude-repl--ws-get ws :priority))))))
+        (claude-repl--finalize-worktree-workspace
+         "/tmp/new-wt" "new-ws" nil "p1" nil nil nil nil)
+        (should (equal reorder-called-with '("new-ws" . "p1")))))))
+
 ;;;; ---- Tests: setup-worktree-session ----
 
 (ert-deftest claude-repl-test-setup-worktree-session-passes-sandbox-hint-when-forced ()

@@ -76,6 +76,51 @@ Populates `claude-repl--priority-images' with display-ready image specs."
   "Return the Emacs image spec for PRIORITY string, or nil."
   (cdr (assoc priority claude-repl--priority-images)))
 
+(defun claude-repl--priority-rank (priority)
+  "Return the sort rank for PRIORITY string; lower means higher precedence.
+Ranks come from the position of PRIORITY in `claude-repl-priority-levels',
+so adding levels there propagates without code changes here.  Returns
+`most-positive-fixnum' for nil or unrecognized values so they sort after
+every recognized priority."
+  (or (and priority (cl-position priority claude-repl-priority-levels :test #'equal))
+      most-positive-fixnum))
+
+(defun claude-repl--reorder-workspace-by-priority (ws)
+  "Reorder workspace WS in `persp-names-cache' by its `:priority'.
+Order: p05 < p1 < p2 < p3 < unprioritized.  WS is placed after every
+existing workspace of equal-or-higher priority and before every
+lower-priority one, so a new entry never displaces an existing peer or
+higher-priority sibling.  No-op when WS has no `:priority', when the
+cache does not contain WS, or when persp-mode is not loaded — those
+fall back to the persp-mode default of appending at the end."
+  (when-let ((priority (claude-repl--ws-get ws :priority)))
+    (when (and (boundp 'persp-names-cache)
+               (member ws persp-names-cache))
+      (let* ((nil-name (and (boundp 'persp-nil-name) persp-nil-name))
+             (rank (claude-repl--priority-rank priority))
+             (without-ws (cl-remove ws persp-names-cache :test #'equal :count 1))
+             (visible (if nil-name
+                          (cl-remove nil-name without-ws :test #'equal :count 1)
+                        without-ws))
+             (insert-at (cl-position-if
+                         (lambda (n)
+                           (> (claude-repl--priority-rank
+                               (claude-repl--ws-get n :priority))
+                              rank))
+                         visible))
+             (new-visible (if insert-at
+                              (append (cl-subseq visible 0 insert-at)
+                                      (list ws)
+                                      (cl-subseq visible insert-at))
+                            (append visible (list ws))))
+             (new-cache (if (and nil-name (member nil-name persp-names-cache))
+                            (cons nil-name new-visible)
+                          new-visible)))
+        (claude-repl--log ws "reorder-workspace-by-priority: ws=%s priority=%s rank=%s position=%s"
+                          ws priority rank (or insert-at "end"))
+        (when (fboundp 'persp-update-names-cache)
+          (persp-update-names-cache new-cache))))))
+
 ;;; Workspace state accessors ------------------------------------------------
 
 ;; --- Two-axis state model (analysis #8) ---

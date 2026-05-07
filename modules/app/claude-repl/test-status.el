@@ -1295,6 +1295,136 @@ this clobbered :init with :dead.  The :init guard prevents that."
   (let ((claude-repl--priority-images nil))
     (should-not (claude-repl--priority-image "p1"))))
 
+;;;; ---- Tests: priority-rank ----
+
+(ert-deftest claude-repl-test-priority-rank-p05-is-zero ()
+  "priority-rank returns 0 for p05 (highest priority)."
+  (let ((claude-repl-priority-levels '("p05" "p1" "p2" "p3")))
+    (should (= (claude-repl--priority-rank "p05") 0))))
+
+(ert-deftest claude-repl-test-priority-rank-p1-is-one ()
+  "priority-rank returns 1 for p1."
+  (let ((claude-repl-priority-levels '("p05" "p1" "p2" "p3")))
+    (should (= (claude-repl--priority-rank "p1") 1))))
+
+(ert-deftest claude-repl-test-priority-rank-p3-is-three ()
+  "priority-rank returns 3 for p3 (lowest recognized priority)."
+  (let ((claude-repl-priority-levels '("p05" "p1" "p2" "p3")))
+    (should (= (claude-repl--priority-rank "p3") 3))))
+
+(ert-deftest claude-repl-test-priority-rank-nil-sorts-last ()
+  "priority-rank returns most-positive-fixnum for nil priority."
+  (should (= (claude-repl--priority-rank nil) most-positive-fixnum)))
+
+(ert-deftest claude-repl-test-priority-rank-unknown-sorts-last ()
+  "priority-rank returns most-positive-fixnum for unrecognized priority."
+  (let ((claude-repl-priority-levels '("p05" "p1" "p2" "p3")))
+    (should (= (claude-repl--priority-rank "p99") most-positive-fixnum))))
+
+;;;; ---- Tests: reorder-workspace-by-priority ----
+
+(ert-deftest claude-repl-test-reorder-priority-noop-when-priority-nil ()
+  "reorder-workspace-by-priority leaves cache untouched when ws has no priority."
+  (claude-repl-test--with-clean-state
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "ws-a" "new-ws"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (claude-repl--reorder-workspace-by-priority "new-ws")
+        (should-not captured)))))
+
+(ert-deftest claude-repl-test-reorder-priority-noop-when-not-in-cache ()
+  "reorder-workspace-by-priority no-ops when ws is not registered in cache."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "missing-ws" :priority "p1")
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "ws-a"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (claude-repl--reorder-workspace-by-priority "missing-ws")
+        (should-not captured)))))
+
+(ert-deftest claude-repl-test-reorder-priority-p1-moves-before-unprioritized ()
+  "A new p1 workspace is moved ahead of unprioritized workspaces."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "new-p1" :priority "p1")
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "ws-a" "ws-b" "new-p1"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (claude-repl--reorder-workspace-by-priority "new-p1")
+        (should (equal captured '("main" "new-p1" "ws-a" "ws-b")))))))
+
+(ert-deftest claude-repl-test-reorder-priority-p2-after-existing-p1 ()
+  "A new p2 workspace lands after an existing p1 but before unprioritized."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-p1" :priority "p1")
+    (claude-repl--ws-put "new-p2" :priority "p2")
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "ws-p1" "ws-a" "new-p2"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (claude-repl--reorder-workspace-by-priority "new-p2")
+        (should (equal captured '("main" "ws-p1" "new-p2" "ws-a")))))))
+
+(ert-deftest claude-repl-test-reorder-priority-equal-priority-after-existing ()
+  "A new p1 workspace lands after an existing p1 (does not displace peers)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-p1-old" :priority "p1")
+    (claude-repl--ws-put "new-p1" :priority "p1")
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "ws-p1-old" "ws-a" "new-p1"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (claude-repl--reorder-workspace-by-priority "new-p1")
+        (should (equal captured '("main" "ws-p1-old" "new-p1" "ws-a")))))))
+
+(ert-deftest claude-repl-test-reorder-priority-p05-goes-to-very-front ()
+  "A new p05 workspace lands ahead of every other priority and unprioritized."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-p1" :priority "p1")
+    (claude-repl--ws-put "ws-p2" :priority "p2")
+    (claude-repl--ws-put "new-p05" :priority "p05")
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "ws-p1" "ws-p2" "ws-a" "new-p05"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (claude-repl--reorder-workspace-by-priority "new-p05")
+        (should (equal captured '("main" "new-p05" "ws-p1" "ws-p2" "ws-a")))))))
+
+(ert-deftest claude-repl-test-reorder-priority-p3-after-all-priorities ()
+  "A new p3 workspace lands after p05/p1/p2 and before unprioritized."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-p05" :priority "p05")
+    (claude-repl--ws-put "ws-p1" :priority "p1")
+    (claude-repl--ws-put "ws-p2" :priority "p2")
+    (claude-repl--ws-put "new-p3" :priority "p3")
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "ws-p05" "ws-p1" "ws-p2" "ws-a" "new-p3"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (claude-repl--reorder-workspace-by-priority "new-p3")
+        (should (equal captured '("main" "ws-p05" "ws-p1" "ws-p2" "new-p3" "ws-a")))))))
+
+(ert-deftest claude-repl-test-reorder-priority-preserves-nil-persp-position ()
+  "reorder-workspace-by-priority keeps persp-nil-name at the head of the cache."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "new-p1" :priority "p1")
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "ws-a" "new-p1"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (claude-repl--reorder-workspace-by-priority "new-p1")
+        (should (equal (car captured) "main"))))))
+
 ;;;; ---- Tests: load-priority-images (moved from core.el) ----
 
 (ert-deftest claude-repl-test-load-priority-images-all-present ()

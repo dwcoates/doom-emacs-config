@@ -176,6 +176,10 @@
 ;; persp-mode stubs
 (unless (boundp 'persp-mode)
   (defvar persp-mode nil "Stub."))
+(unless (boundp 'persp-names-cache)
+  (defvar persp-names-cache nil "Stub: simulated persp-mode names cache."))
+(unless (boundp 'persp-nil-name)
+  (defvar persp-nil-name "main" "Stub: simulated persp-mode nil-persp name."))
 (unless (fboundp 'persp-persps)
   (defun persp-persps () "Stub." nil))
 (unless (fboundp 'persp-contain-buffer-p)

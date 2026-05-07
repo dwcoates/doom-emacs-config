@@ -315,6 +315,7 @@ perspective rather than the caller's."
       :priority priority
       :fork-session-id fork-session-id
       :source-ws-dir source-dir)
+    (claude-repl--reorder-workspace-by-priority ws)
     (claude-repl--setup-worktree-session ws-id path ws force-sandbox)
     (message "Worktree '%s' ready." dirname)
     (when callback (funcall callback path dirname))))
