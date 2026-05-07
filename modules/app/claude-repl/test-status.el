@@ -147,40 +147,101 @@ to be reverted to should-error once the leaking writer is found)."
 (ert-deftest claude-repl-test-display-state-passes-ws-to-composed ()
   "ws-display-state forwards its ws into composed-state so diagnostics carry context."
   (let ((received-ws 'unset))
-    (cl-letf (((symbol-function 'claude-repl--composed-state)
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) t))
+              ((symbol-function 'claude-repl--composed-state)
                (lambda (_c _r &optional ws) (setq received-ws ws) nil)))
       (claude-repl--ws-display-state "diag-ws")
       (should (equal received-ws "diag-ws")))))
 
-;;;; ---- Tests: ws-display-state reads both axes ----
+;;;; ---- Tests: ws-display-state suppresses all coloring when panels closed ----
 
-(ert-deftest claude-repl-test-display-state-repl-inactive-does-not-change-color ()
-  "A :done workspace with :repl-state :inactive still renders :done (green)."
+(ert-deftest claude-repl-test-display-state-done-panels-closed-renders-nil ()
+  ":done with no Claude panel in layout renders nil (suppressed on close)."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :done)
     (claude-repl--ws-set-repl-state "ws1" :inactive)
-    (should (eq :done (claude-repl--ws-display-state "ws1")))))
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
+               (lambda (_ws) nil)))
+      (should-not (claude-repl--ws-display-state "ws1")))))
 
-(ert-deftest claude-repl-test-display-state-thinking-overrides-closed-panels ()
-  "Panels closed during a :thinking turn still renders red."
+(ert-deftest claude-repl-test-display-state-done-panels-open-renders-done ()
+  ":done with panels visible renders :done (green)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :done)
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
+               (lambda (_ws) t)))
+      (should (eq :done (claude-repl--ws-display-state "ws1"))))))
+
+(ert-deftest claude-repl-test-display-state-thinking-panels-closed-renders-nil ()
+  "Panels closed during :thinking suppresses red — :claude-state is preserved."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :thinking)
     (claude-repl--ws-set-repl-state "ws1" :inactive)
-    (should (eq :thinking (claude-repl--ws-display-state "ws1")))))
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
+               (lambda (_ws) nil)))
+      (should-not (claude-repl--ws-display-state "ws1"))
+      ;; :claude-state must stay so reopen restores the in-flight color.
+      (should (eq :thinking (claude-repl--ws-claude-state "ws1"))))))
 
-(ert-deftest claude-repl-test-display-state-permission-closed-panels ()
-  "Panels closed during :permission still shows ❓ green (user must decide)."
+(ert-deftest claude-repl-test-display-state-thinking-panels-open-renders-thinking ()
+  ":thinking with panels visible renders :thinking (red)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :thinking)
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
+               (lambda (_ws) t)))
+      (should (eq :thinking (claude-repl--ws-display-state "ws1"))))))
+
+(ert-deftest claude-repl-test-display-state-permission-panels-closed-renders-nil ()
+  "Panels closed during :permission suppresses the ❓ badge — state preserved."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :permission)
     (claude-repl--ws-set-repl-state "ws1" :inactive)
-    (should (eq :permission (claude-repl--ws-display-state "ws1")))))
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
+               (lambda (_ws) nil)))
+      (should-not (claude-repl--ws-display-state "ws1"))
+      (should (eq :permission (claude-repl--ws-claude-state "ws1"))))))
 
-(ert-deftest claude-repl-test-display-state-dead-vterm ()
-  "A workspace with :repl-state :dead and nil :claude-state renders :dead."
+(ert-deftest claude-repl-test-display-state-permission-panels-open-renders-permission ()
+  ":permission with panels visible renders :permission (green + ❓)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :permission)
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
+               (lambda (_ws) t)))
+      (should (eq :permission (claude-repl--ws-display-state "ws1"))))))
+
+(ert-deftest claude-repl-test-display-state-init-panels-closed-renders-nil ()
+  ":init with panels closed suppresses the blue badge."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :init)
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
+               (lambda (_ws) nil)))
+      (should-not (claude-repl--ws-display-state "ws1")))))
+
+(ert-deftest claude-repl-test-display-state-stop-failed-panels-closed-renders-nil ()
+  ":stop-failed with panels closed suppresses the magenta ⚠ badge."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :stop-failed)
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
+               (lambda (_ws) nil)))
+      (should-not (claude-repl--ws-display-state "ws1")))))
+
+(ert-deftest claude-repl-test-display-state-dead-panels-open-renders-dead ()
+  "A workspace with :repl-state :dead and nil :claude-state renders :dead when visible."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :claude-state nil)
     (claude-repl--ws-set-repl-state "ws1" :dead)
-    (should (eq :dead (claude-repl--ws-display-state "ws1")))))
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
+               (lambda (_ws) t)))
+      (should (eq :dead (claude-repl--ws-display-state "ws1"))))))
+
+(ert-deftest claude-repl-test-display-state-dead-panels-closed-renders-nil ()
+  ":dead with panels closed also suppresses the ❌ badge — uniform rule."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :claude-state nil)
+    (claude-repl--ws-set-repl-state "ws1" :dead)
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
+               (lambda (_ws) nil)))
+      (should-not (claude-repl--ws-display-state "ws1")))))
 
 (ert-deftest claude-repl-test-display-state-idle-panels-open-renders-idle ()
   ":idle with Claude panel present in layout renders :idle (orange)."
@@ -296,39 +357,43 @@ to be reverted to should-error once the leaking writer is found)."
 ;;;; ---- Tests: Tabline rendering ----
 
 (ert-deftest claude-repl-test-tabline-thinking-face ()
-  "Tabline should apply thinking face for background thinking tabs."
+  "Tabline should apply thinking face for background thinking tabs (panels visible)."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "other-ws" :thinking)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function '+workspace-list-names) (lambda () '("test-ws" "other-ws"))))
+              ((symbol-function '+workspace-list-names) (lambda () '("test-ws" "other-ws")))
+              ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) t)))
       (let ((result (claude-repl--tabline-advice '("test-ws" "other-ws"))))
         ;; other-ws should have thinking face
         (should (string-match-p "other-ws" result))))))
 
 (ert-deftest claude-repl-test-tabline-permission-label ()
-  "Tabline should show index and ❓ for permission state."
+  "Tabline should show index and ❓ for permission state (panels visible)."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "test-ws" :permission)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function '+workspace-list-names) (lambda () '("test-ws"))))
+              ((symbol-function '+workspace-list-names) (lambda () '("test-ws")))
+              ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) t)))
       (let ((result (claude-repl--tabline-advice '("test-ws"))))
         (should (string-match-p "1❓" result))))))
 
 (ert-deftest claude-repl-test-tabline-dead-label ()
-  "Tabline should show index and ❌ for dead session."
+  "Tabline should show index and ❌ for dead session (panels visible)."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "test-ws" :claude-state nil)
     (claude-repl--ws-set-repl-state "test-ws" :dead)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
-              ((symbol-function '+workspace-list-names) (lambda () '("test-ws"))))
+              ((symbol-function '+workspace-list-names) (lambda () '("test-ws")))
+              ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) t)))
       (let ((result (claude-repl--tabline-advice '("test-ws"))))
         (should (string-match-p "1❌" result))))))
 
 (ert-deftest claude-repl-test-tabline-done-face ()
-  "A background tab with :done should use `claude-repl-tab-done' face."
+  "A background tab with :done should use `claude-repl-tab-done' face (panels visible)."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "bg-ws" :done)
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+              ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) t)))
       (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
         ;; Find the "bg-ws" segment and check its face
         (let ((pos (string-match "bg-ws" result)))
@@ -1135,11 +1200,13 @@ trees; under the revised model only the Stop hook writes :done."
     (should (eq (claude-repl--ws-claude-state "ws1") :done))))
 
 (ert-deftest claude-repl-test-mark-dead-vterm-display-state ()
-  "mark-dead-vterm results in :dead display state (❌ badge visible)."
+  "mark-dead-vterm results in :dead display state (❌ badge) when panels visible."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :done)
     (claude-repl--mark-dead-vterm "ws1")
-    (should (eq :dead (claude-repl--ws-display-state "ws1")))))
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
+               (lambda (_ws) t)))
+      (should (eq :dead (claude-repl--ws-display-state "ws1"))))))
 
 (ert-deftest claude-repl-test-mark-dead-vterm-preserves-init ()
   "mark-dead-vterm is a no-op when :claude-state is :init.
@@ -1618,10 +1685,12 @@ this clobbered :init with :dead.  The :init guard prevents that."
   (should (eq :stop-failed (claude-repl--composed-state :stop-failed :dead))))
 
 (ert-deftest claude-repl-test-display-state-stop-failed ()
-  "ws-display-state returns :stop-failed when claude-state is :stop-failed."
+  "ws-display-state returns :stop-failed when claude-state is :stop-failed and panels visible."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :stop-failed)
-    (should (eq :stop-failed (claude-repl--ws-display-state "ws1")))))
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
+               (lambda (_ws) t)))
+      (should (eq :stop-failed (claude-repl--ws-display-state "ws1"))))))
 
 ;;;; ---- Tests: :stop-failed palette resolution ----
 

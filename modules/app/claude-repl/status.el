@@ -704,16 +704,20 @@ Rule:
 
 (defun claude-repl--ws-display-state (ws)
   "Return the palette display key for WS.
-Reads `:claude-state' as the source of truth for tab color.  When the
-composed state is `:idle' AND no Claude panel is present in WS's
-live-or-saved window layout, returns nil instead of `:idle' — this
-suppresses the orange background for idle sessions whose panels the
-user has dismissed, leaving only the plain numeric index."
+Reads `:claude-state' as the source of truth for tab color when the
+panels are visible.  When the composed state is non-nil AND no Claude
+panel is present in WS's live-or-saved window layout, returns nil
+regardless of state — this suppresses ALL tab coloring (including
+:thinking, :permission, :done, :idle, :stop-failed, :dead) for
+workspaces whose panels the user has dismissed, leaving only the plain
+numeric index.  `:claude-state' is preserved on the plist so the
+original color reappears the next time the user reopens panels.  The
+nil-state shortcut avoids calling `claude-repl--ws-claude-open-p' on
+workspaces that have no state to suppress in the first place."
   (let ((state (claude-repl--composed-state (claude-repl--ws-claude-state ws)
                                             (claude-repl--ws-repl-state ws)
                                             ws)))
-    (if (and (eq state :idle)
-             (not (claude-repl--ws-claude-open-p ws)))
+    (if (and state (not (claude-repl--ws-claude-open-p ws)))
         nil
       state)))
 
