@@ -460,11 +460,15 @@ force the right-aligned segment to repaint too."
       (tab-bar-tabs-set (tab-bar-tabs))
       (tab-bar--update-tab-bar-lines t)))
 
-  (defun +dwc/workspace-push-to-back ()
+  (defun +dwc/workspace-push-to-back (&optional keep-focus)
     "Push the current workspace to the second-to-last position in the tab-bar.
-Switch focus to the workspace that now occupies the old position.  If
-`claude-repl-flash-tab' is available, pulse the moved tab so the user
-can visually track it to its new home."
+By default switches focus to the workspace that now occupies the old
+slot — the SPC TAB p UX, where the user keeps navigating the slot they
+were sitting on.  When KEEP-FOCUS is non-nil, focus stays on the moved
+workspace; this is what the on-close auto-deprio path wants, since the
+user just closed claude in this workspace and shouldn't get yanked
+away from it.  If `claude-repl-flash-tab' is available, pulse the
+moved tab so the user can visually track it to its new home."
     (interactive)
     (let* ((current (+workspace-current-name))
            (names (persp-names-current-frame-fast-ordered))
@@ -474,11 +478,14 @@ can visually track it to its new home."
            (next-name (nth (min old-index (1- (length without-current))) without-current)))
       (persp-update-names-cache reordered)
       (+dwc/refresh-tab-bar)
-      (when next-name
+      (when (and next-name (not keep-focus))
         (+workspace/switch-to next-name))
       (when (fboundp 'claude-repl-flash-tab)
         (claude-repl-flash-tab current))
-      (message "Pushed '%s' to second-to-last; switched to '%s'." current (or next-name current))))
+      (if keep-focus
+          (message "Pushed '%s' to second-to-last." current)
+        (message "Pushed '%s' to second-to-last; switched to '%s'."
+                 current (or next-name current)))))
 
   (defun +dwc/workspace-pull-to-front ()
     "Pull the current workspace to the second position in the tab-bar.

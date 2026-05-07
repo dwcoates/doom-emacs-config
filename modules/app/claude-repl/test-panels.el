@@ -451,9 +451,20 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
                 ((symbol-function '+dwc/workspace-push-to-back)
-                 (lambda () (cl-incf push-called))))
+                 (lambda (&optional _keep) (cl-incf push-called))))
         (claude-repl--on-close)
         (should (= push-called 1))))))
+
+(ert-deftest claude-repl-test-panels-on-close-passes-keep-focus-to-push ()
+  "on-close passes KEEP-FOCUS=t so the user stays on the workspace they just closed."
+  (claude-repl-test--with-clean-state
+    (let ((received-arg 'unset))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
+                ((symbol-function '+dwc/workspace-push-to-back)
+                 (lambda (&optional keep) (setq received-arg keep))))
+        (claude-repl--on-close)
+        (should (eq received-arg t))))))
 
 (ert-deftest claude-repl-test-panels-on-close-skips-push-when-explicit-ws-not-current ()
   "on-close does not push to back when an explicit WS is not the current workspace."
@@ -462,7 +473,7 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
                 ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
                 ((symbol-function '+dwc/workspace-push-to-back)
-                 (lambda () (cl-incf push-called))))
+                 (lambda (&optional _keep) (cl-incf push-called))))
         (claude-repl--on-close "other-ws")
         (should (= push-called 0))))))
 
@@ -473,7 +484,7 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
                 ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
                 ((symbol-function '+dwc/workspace-push-to-back)
-                 (lambda () (cl-incf push-called))))
+                 (lambda (&optional _keep) (cl-incf push-called))))
         (claude-repl--on-close)
         (should (= push-called 0))))))
 
@@ -486,7 +497,7 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
                 ((symbol-function 'claude-repl--save-tab-index)
                  (lambda (_ws) (push 'save calls)))
                 ((symbol-function '+dwc/workspace-push-to-back)
-                 (lambda () (push 'push calls))))
+                 (lambda (&optional _keep) (push 'push calls))))
         (claude-repl--on-close)
         (should (equal (reverse calls) '(save push)))))))
 

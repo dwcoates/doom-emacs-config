@@ -377,10 +377,11 @@ signal (the renderer shows red/❓ through the closed-panel state).
 When WS is the current workspace, snapshots its tab-bar index via
 `claude-repl--save-tab-index' (read by `claude-repl--restore-tab-index'
 on the next reopen) and pushes it to the second-to-last position via
-`+dwc/workspace-push-to-back' so dormant workspaces sink out of the
-user's primary navigation range.  Guarded by `fboundp' so the module
-remains usable when the helper is not loaded (e.g. during isolated
-unit tests).
+`+dwc/workspace-push-to-back' (with KEEP-FOCUS t) so dormant workspaces
+sink out of the user's primary navigation range without yanking focus
+away from the workspace they just closed.  Guarded by `fboundp' so the
+module remains usable when the helper is not loaded (e.g. during
+isolated unit tests).
 
 WS defaults to the current workspace; when WS is nil the function still
 hides panels but skips the bookkeeping write and the tab shuffle."
@@ -396,8 +397,8 @@ hides panels but skips the bookkeeping write and the tab shuffle."
                (equal ws (+workspace-current-name))
                (fboundp '+dwc/workspace-push-to-back))
       (claude-repl--save-tab-index ws)
-      (claude-repl--log ws "on-close: pushing ws=%s to second-to-last" ws)
-      (+dwc/workspace-push-to-back))))
+      (claude-repl--log ws "on-close: pushing ws=%s to second-to-last (keep-focus)" ws)
+      (+dwc/workspace-push-to-back t))))
 
 ;;;; Window synchronization
 
