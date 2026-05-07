@@ -328,6 +328,40 @@ Redirects away from Claude buffers and saves frame state."
     (claude-repl--log ws "hide-panels")
     (claude-repl--close-buffer-windows input-buf vterm-buf)))
 
+(defun claude-repl--save-tab-index (ws)
+  "Persist WS's current tab-bar index to its plist as `:saved-tab-index'.
+Read on reopen by `claude-repl--restore-tab-index' so the workspace
+returns to its prior slot in the tab-bar after a close-deprio cycle.
+Reads positions from `persp-names-current-frame-fast-ordered'; no-op
+when that helper is unavailable (e.g. test envs without persp-mode)."
+  (when (fboundp 'persp-names-current-frame-fast-ordered)
+    (when-let ((idx (cl-position ws (persp-names-current-frame-fast-ordered)
+                                 :test #'string=)))
+      (claude-repl--log ws "save-tab-index ws=%s index=%d" ws idx)
+      (claude-repl--ws-put ws :saved-tab-index idx))))
+
+(defun claude-repl--restore-tab-index (ws)
+  "Move WS back to its persisted `:saved-tab-index' slot, if any.
+Clears `:saved-tab-index' after restoring so each close-deprio cycle
+captures a fresh baseline.  No-op when no index is saved or when persp
+helpers are unavailable.  Index is clamped to the current names list
+length so a saved index past the new tail is handled gracefully."
+  (when-let ((idx (claude-repl--ws-get ws :saved-tab-index)))
+    (when (and (fboundp 'persp-names-current-frame-fast-ordered)
+               (fboundp 'persp-update-names-cache))
+      (let* ((names (persp-names-current-frame-fast-ordered))
+             (without-ws (remove ws names))
+             (clamped (min idx (length without-ws)))
+             (head (cl-subseq without-ws 0 clamped))
+             (tail (cl-subseq without-ws clamped))
+             (reordered (append head (list ws) tail)))
+        (claude-repl--log ws "restore-tab-index ws=%s saved-idx=%d clamped=%d"
+                          ws idx clamped)
+        (persp-update-names-cache reordered)
+        (claude-repl--ws-put ws :saved-tab-index nil)
+        (when (fboundp '+dwc/refresh-tab-bar)
+          (+dwc/refresh-tab-bar))))))
+
 (defun claude-repl--on-close (&optional ws)
   "Single audit point for user-initiated panel close.
 Hides the panel windows without tearing down the session.  All
@@ -340,11 +374,13 @@ item #1).  `:claude-state' is intentionally left untouched so that
 closing during a :thinking or :permission turn preserves the in-flight
 signal (the renderer shows red/❓ through the closed-panel state).
 
-When WS is the current workspace, also pushes it to the second-to-last
-position in the tab-bar via `+dwc/workspace-push-to-back' so dormant
-workspaces sink out of the user's primary navigation range.  Guarded by
-`fboundp' so the module remains usable when the helper is not loaded
-(e.g. during isolated unit tests).
+When WS is the current workspace, snapshots its tab-bar index via
+`claude-repl--save-tab-index' (read by `claude-repl--restore-tab-index'
+on the next reopen) and pushes it to the second-to-last position via
+`+dwc/workspace-push-to-back' so dormant workspaces sink out of the
+user's primary navigation range.  Guarded by `fboundp' so the module
+remains usable when the helper is not loaded (e.g. during isolated
+unit tests).
 
 WS defaults to the current workspace; when WS is nil the function still
 hides panels but skips the bookkeeping write and the tab shuffle."
@@ -359,6 +395,7 @@ hides panels but skips the bookkeeping write and the tab shuffle."
     (when (and ws
                (equal ws (+workspace-current-name))
                (fboundp '+dwc/workspace-push-to-back))
+      (claude-repl--save-tab-index ws)
       (claude-repl--log ws "on-close: pushing ws=%s to second-to-last" ws)
       (+dwc/workspace-push-to-back))))
 
@@ -617,7 +654,9 @@ echo-area message below."
   "Show panels for an already-running Claude session.
 Demotes indicators, refreshes display, and restores panel layout.
 Sets `:repl-state :active' now that panels are visible and the
-session is in use."
+session is in use.  If a `:saved-tab-index' was recorded by an earlier
+close-deprio cycle, restores the workspace to that slot in the tab-bar
+so reopen reverses the deprio."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "show-existing-panels")
     (unless ws (error "claude-repl--show-existing-panels: no active workspace"))
@@ -625,7 +664,8 @@ session is in use."
     (claude-repl--refresh-vterm)
     (delete-other-windows)
     (claude-repl--show-panels-and-focus)
-    (claude-repl--update-hide-overlay)))
+    (claude-repl--update-hide-overlay)
+    (claude-repl--restore-tab-index ws)))
 
 (defun claude-repl--show-hidden-panels ()
   "Restore hidden panels.  `show-existing-panels' writes :repl-state :active.

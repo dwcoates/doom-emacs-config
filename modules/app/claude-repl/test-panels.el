@@ -477,6 +477,93 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
         (claude-repl--on-close)
         (should (= push-called 0))))))
 
+(ert-deftest claude-repl-test-panels-on-close-saves-tab-index-before-pushing ()
+  "on-close calls save-tab-index before push so the captured index is the original."
+  (claude-repl-test--with-clean-state
+    (let ((calls nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
+                ((symbol-function 'claude-repl--save-tab-index)
+                 (lambda (_ws) (push 'save calls)))
+                ((symbol-function '+dwc/workspace-push-to-back)
+                 (lambda () (push 'push calls))))
+        (claude-repl--on-close)
+        (should (equal (reverse calls) '(save push)))))))
+
+;;;; ---- Tests: save-tab-index ----
+
+(ert-deftest claude-repl-test-panels-save-tab-index-writes-position ()
+  "save-tab-index records the workspace's persp index as :saved-tab-index."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-names-current-frame-fast-ordered)
+               (lambda () '("a" "b" "test-ws" "c"))))
+      (claude-repl--save-tab-index "test-ws")
+      (should (= 2 (claude-repl--ws-get "test-ws" :saved-tab-index))))))
+
+(ert-deftest claude-repl-test-panels-save-tab-index-skips-when-not-in-list ()
+  "save-tab-index is a no-op when the workspace name isn't in the persp list."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-names-current-frame-fast-ordered)
+               (lambda () '("a" "b"))))
+      (claude-repl--save-tab-index "missing-ws")
+      (should-not (claude-repl--ws-get "missing-ws" :saved-tab-index)))))
+
+(ert-deftest claude-repl-test-panels-save-tab-index-skips-when-persp-unavailable ()
+  "save-tab-index is a no-op when persp helper is not bound."
+  (claude-repl-test--with-clean-state
+    (when (fboundp 'persp-names-current-frame-fast-ordered)
+      (fmakunbound 'persp-names-current-frame-fast-ordered))
+    (claude-repl--save-tab-index "test-ws")
+    (should-not (claude-repl--ws-get "test-ws" :saved-tab-index))))
+
+;;;; ---- Tests: restore-tab-index ----
+
+(ert-deftest claude-repl-test-panels-restore-tab-index-moves-ws-to-saved-slot ()
+  "restore-tab-index reorders names so WS is at its saved index."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-c" :saved-tab-index 1)
+    (let ((reordered nil))
+      (cl-letf (((symbol-function 'persp-names-current-frame-fast-ordered)
+                 (lambda () '("ws-a" "ws-b" "ws-c")))  ; ws-c is at end
+                ((symbol-function 'persp-update-names-cache)
+                 (lambda (names) (setq reordered names))))
+        (claude-repl--restore-tab-index "ws-c")
+        (should (equal reordered '("ws-a" "ws-c" "ws-b")))))))
+
+(ert-deftest claude-repl-test-panels-restore-tab-index-clears-saved-index ()
+  "restore-tab-index clears :saved-tab-index after a successful restore."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-c" :saved-tab-index 0)
+    (cl-letf (((symbol-function 'persp-names-current-frame-fast-ordered)
+               (lambda () '("ws-a" "ws-b" "ws-c")))
+              ((symbol-function 'persp-update-names-cache) (lambda (_) nil)))
+      (claude-repl--restore-tab-index "ws-c")
+      (should-not (claude-repl--ws-get "ws-c" :saved-tab-index)))))
+
+(ert-deftest claude-repl-test-panels-restore-tab-index-clamps-past-tail ()
+  "restore-tab-index clamps a saved index larger than the new list length."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-c" :saved-tab-index 99)
+    (let ((reordered nil))
+      (cl-letf (((symbol-function 'persp-names-current-frame-fast-ordered)
+                 (lambda () '("ws-a" "ws-b" "ws-c")))
+                ((symbol-function 'persp-update-names-cache)
+                 (lambda (names) (setq reordered names))))
+        (claude-repl--restore-tab-index "ws-c")
+        ;; Clamped: ws-c lands at the tail of the without-ws list.
+        (should (equal reordered '("ws-a" "ws-b" "ws-c")))))))
+
+(ert-deftest claude-repl-test-panels-restore-tab-index-noop-when-no-saved-index ()
+  "restore-tab-index does nothing when no :saved-tab-index is set."
+  (claude-repl-test--with-clean-state
+    (let ((called 0))
+      (cl-letf (((symbol-function 'persp-names-current-frame-fast-ordered)
+                 (lambda () '("a")))
+                ((symbol-function 'persp-update-names-cache)
+                 (lambda (_) (cl-incf called))))
+        (claude-repl--restore-tab-index "no-saved-ws")
+        (should (= 0 called))))))
+
 ;;;; ---- Tests: hide-and-preserve-status ----
 
 (ert-deftest claude-repl-test-panels-hide-and-preserve-marks-inactive ()
@@ -538,6 +625,20 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
               ((symbol-function 'claude-repl--update-hide-overlay) #'ignore))
       (claude-repl--show-existing-panels)
       (should (eq (claude-repl--ws-get "test-ws" :repl-state) :active)))))
+
+(ert-deftest claude-repl-test-panels-show-existing-restores-tab-index ()
+  "show-existing-panels calls restore-tab-index for the current workspace."
+  (claude-repl-test--with-clean-state
+    (let ((restored-ws nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+                ((symbol-function 'delete-other-windows) #'ignore)
+                ((symbol-function 'claude-repl--show-panels-and-focus) #'ignore)
+                ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
+                ((symbol-function 'claude-repl--restore-tab-index)
+                 (lambda (ws) (setq restored-ws ws))))
+        (claude-repl--show-existing-panels)
+        (should (equal restored-ws "test-ws"))))))
 
 ;;;; ---- Tests: deferred macro ----
 
