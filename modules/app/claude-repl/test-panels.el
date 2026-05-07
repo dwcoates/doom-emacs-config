@@ -455,16 +455,16 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
         (claude-repl--on-close)
         (should (= push-called 1))))))
 
-(ert-deftest claude-repl-test-panels-on-close-passes-keep-focus-to-push ()
-  "on-close passes KEEP-FOCUS=t so the user stays on the workspace they just closed."
+(ert-deftest claude-repl-test-panels-on-close-does-not-keep-focus ()
+  "on-close calls push-to-back without KEEP-FOCUS so focus moves to a fresh workspace."
   (claude-repl-test--with-clean-state
-    (let ((received-arg 'unset))
+    (let ((received-args 'unset))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
                 ((symbol-function '+dwc/workspace-push-to-back)
-                 (lambda (&optional keep) (setq received-arg keep))))
+                 (lambda (&rest args) (setq received-args args))))
         (claude-repl--on-close)
-        (should (eq received-arg t))))))
+        (should (equal received-args nil))))))
 
 (ert-deftest claude-repl-test-panels-on-close-skips-push-when-explicit-ws-not-current ()
   "on-close does not push to back when an explicit WS is not the current workspace."
