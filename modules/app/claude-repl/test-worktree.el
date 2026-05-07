@@ -2198,21 +2198,23 @@ Covers the full call the interactive `SPC TAB n' path builds up."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-merge-src-" t))
           (target-arg :unset)
-          (merge-do-arg :unset))
+          (merge-do-args :unset))
       (unwind-protect
           (progn
             (claude-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
             (claude-repl--ws-put "wt-ws" :source-ws-dir tmpdir)
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
+                      ((symbol-function 'claude-repl--master-worktree-path)
+                       (lambda (_root) nil))
                       ((symbol-function 'claude-repl--assert-clean-worktree)
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project)
                        (lambda (target) (setq target-arg target)))
                       ((symbol-function 'claude-repl--workspace-merge-do)
-                       (lambda (ws) (setq merge-do-arg ws))))
+                       (lambda (&rest args) (setq merge-do-args args))))
               (claude-repl-workspace-merge-current-into-source)
               (should (equal target-arg tmpdir))
-              (should (equal merge-do-arg "wt-ws"))))
+              (should (equal merge-do-args (list "wt-ws" tmpdir)))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-test-merge-into-source-falls-back-to-master-when-recorded-dir-gone ()
@@ -2266,10 +2268,166 @@ Covers the full call the interactive `SPC TAB n' path builds up."
           (progn
             (claude-repl--ws-put "self-ws" :project-dir tmpdir)
             (claude-repl--ws-put "self-ws" :source-ws-dir tmpdir)
-            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "self-ws")))
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "self-ws"))
+                      ((symbol-function 'claude-repl--master-worktree-path)
+                       (lambda (_root) nil)))
               (should-error (claude-repl-workspace-merge-current-into-source)
                             :type 'user-error)))
         (delete-directory tmpdir t)))))
+
+;;;; ---- Tests: resolve-merge-into-source-target ----
+
+(ert-deftest claude-repl-test-resolve-merge-target-nil-parent ()
+  "Returns nil when parent-dir is nil."
+  (should (null (claude-repl--resolve-merge-into-source-target nil "/m/"))))
+
+(ert-deftest claude-repl-test-resolve-merge-target-nil-master ()
+  "Returns parent unchanged when master-dir is nil."
+  (should (equal (claude-repl--resolve-merge-into-source-target "/p/" nil)
+                 "/p/")))
+
+(ert-deftest claude-repl-test-resolve-merge-target-parent-is-master ()
+  "Returns parent unchanged when parent-dir == master-dir."
+  (let ((tmp (make-temp-file "test-resolve-master-" t)))
+    (unwind-protect
+        (should (equal (claude-repl--resolve-merge-into-source-target tmp tmp)
+                       tmp))
+      (delete-directory tmp t))))
+
+(ert-deftest claude-repl-test-resolve-merge-target-parent-already-merged ()
+  "Returns master-dir when parent != master and parent's branch is in master."
+  (cl-letf (((symbol-function 'claude-repl--branch-merged-into-master-p)
+             (lambda (_p _m) t)))
+    (should (equal (claude-repl--resolve-merge-into-source-target "/p/" "/m/")
+                   "/m/"))))
+
+(ert-deftest claude-repl-test-resolve-merge-target-parent-not-merged ()
+  "Returns parent-dir when parent's branch is not yet in master."
+  (cl-letf (((symbol-function 'claude-repl--branch-merged-into-master-p)
+             (lambda (_p _m) nil)))
+    (should (equal (claude-repl--resolve-merge-into-source-target "/p/" "/m/")
+                   "/p/"))))
+
+;;;; ---- Tests: branch-merged-into-master-p ----
+
+(ert-deftest claude-repl-test-branch-merged-nil-args ()
+  "Returns nil when worktree-dir or master-dir is nil."
+  (should (null (claude-repl--branch-merged-into-master-p nil "/m/")))
+  (should (null (claude-repl--branch-merged-into-master-p "/p/" nil))))
+
+(ert-deftest claude-repl-test-branch-merged-true-when-ancestor ()
+  "Returns t when parent branch's tip is an ancestor of master's tip.
+Setup: parent-branch is at M; master then advances to M->X. parent's tip
+is reachable from master (it's just M), so the helper reports merged."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-master-branch-name "master"))
+      (claude-repl-test--git-commit repo "M" "base")
+      ;; Branch parent-branch off master at M and stay at M.
+      (claude-repl-test--git-checkout repo "parent-branch" t)
+      ;; Advance master with X (parent-branch stays at M).
+      (claude-repl-test--git-checkout repo "master")
+      (claude-repl-test--git-commit repo "X" "x")
+      ;; HEAD is currently master; flip to parent-branch so the helper
+      ;; reads parent-branch as the "current" branch at worktree-dir.
+      (claude-repl-test--git-checkout repo "parent-branch")
+      ;; parent-branch tip (M) is an ancestor of master (M->X) -> merged.
+      (should (claude-repl--branch-merged-into-master-p repo repo)))))
+
+(ert-deftest claude-repl-test-branch-merged-false-when-divergent ()
+  "Returns nil when parent has commits master doesn't have."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-master-branch-name "master"))
+      (claude-repl-test--git-commit repo "M" "base")
+      (claude-repl-test--git-checkout repo "parent-branch" t)
+      (claude-repl-test--git-commit repo "P1" "p1")
+      ;; master is at M, parent at M->P1. parent NOT in master.
+      (should-not (claude-repl--branch-merged-into-master-p repo repo)))))
+
+(ert-deftest claude-repl-test-branch-merged-false-when-on-master ()
+  "Returns nil when worktree-dir's HEAD is the master branch itself."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-master-branch-name "master"))
+      (claude-repl-test--git-commit repo "M" "base")
+      ;; HEAD is master; helper must short-circuit to nil.
+      (should-not (claude-repl--branch-merged-into-master-p repo repo)))))
+
+;;;; ---- Tests: merge-into-source re-routes when parent merged into master ----
+
+(ert-deftest claude-repl-test-merge-into-source-reroutes-to-master-when-parent-already-merged ()
+  "When parent worktree's branch is already in master, switch-to-project gets master-dir."
+  (claude-repl-test--with-clean-state
+    (let ((parent-dir (make-temp-file "test-reroute-parent-" t))
+          (master-dir (make-temp-file "test-reroute-master-" t))
+          (target-arg :unset)
+          (merge-do-args :unset))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
+            (claude-repl--ws-put "wt-ws" :source-ws-dir parent-dir)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
+                      ((symbol-function 'claude-repl--master-worktree-path)
+                       (lambda (_root) master-dir))
+                      ((symbol-function 'claude-repl--branch-merged-into-master-p)
+                       (lambda (_p _m) t))
+                      ((symbol-function 'claude-repl--assert-clean-worktree)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'claude-repl-switch-to-project)
+                       (lambda (target) (setq target-arg target)))
+                      ((symbol-function 'claude-repl--workspace-merge-do)
+                       (lambda (&rest args) (setq merge-do-args args))))
+              (claude-repl-workspace-merge-current-into-source)
+              (should (equal target-arg master-dir))
+              (should (equal merge-do-args (list "wt-ws" master-dir)))))
+        (delete-directory parent-dir t)
+        (delete-directory master-dir t)))))
+
+(ert-deftest claude-repl-test-merge-into-source-stays-on-parent-when-not-yet-merged ()
+  "When parent worktree's branch has unmerged commits, keep parent as the target."
+  (claude-repl-test--with-clean-state
+    (let ((parent-dir (make-temp-file "test-stay-parent-" t))
+          (master-dir (make-temp-file "test-stay-master-" t))
+          (target-arg :unset)
+          (merge-do-args :unset))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
+            (claude-repl--ws-put "wt-ws" :source-ws-dir parent-dir)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
+                      ((symbol-function 'claude-repl--master-worktree-path)
+                       (lambda (_root) master-dir))
+                      ((symbol-function 'claude-repl--branch-merged-into-master-p)
+                       (lambda (_p _m) nil))
+                      ((symbol-function 'claude-repl--assert-clean-worktree)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'claude-repl-switch-to-project)
+                       (lambda (target) (setq target-arg target)))
+                      ((symbol-function 'claude-repl--workspace-merge-do)
+                       (lambda (&rest args) (setq merge-do-args args))))
+              (claude-repl-workspace-merge-current-into-source)
+              (should (equal target-arg parent-dir))
+              (should (equal merge-do-args (list "wt-ws" parent-dir)))))
+        (delete-directory parent-dir t)
+        (delete-directory master-dir t)))))
+
+;;;; ---- Tests: workspace-merge-do project-root override ----
+
+(ert-deftest claude-repl-test-workspace-merge-do-uses-project-root-override ()
+  "When PROJECT-ROOT-OVERRIDE is non-nil, cherry-pick lands there (not at current ws's dir)."
+  (let ((cherry-pick-dir nil)
+        (magit-dir nil))
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/should/not/be/used/"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits)
+                (lambda (dir _ws _base _br) (setq cherry-pick-dir dir)))
+               ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
+               ((symbol-function 'load-file) #'ignore)
+               ((symbol-function 'magit-status) (lambda (dir) (setq magit-dir dir))))
+      (claude-repl--workspace-merge-do "other-ws" "/explicit/target/")
+      (should (equal cherry-pick-dir "/explicit/target/"))
+      (should (equal magit-dir "/explicit/target/")))))
 
 ;;;; ---- Tests: remove-doom-dashboard ----
 

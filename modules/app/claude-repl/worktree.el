@@ -937,17 +937,24 @@ mentioning TARGET-WS."
         (magit-status)
         (user-error "Conflict cherry-picking %s from '%s' — resolve in magit" conflicting-commit target-ws)))))
 
-(defun claude-repl--workspace-merge-do (target-ws)
+(defun claude-repl--workspace-merge-do (target-ws &optional project-root-override)
   "Cherry-pick TARGET-WS's branch commits onto the current branch.
 Replays each commit from the target branch (since it diverged from master)
-individually. Aborts cleanly if any commit conflicts."
+individually. Aborts cleanly if any commit conflicts.
+PROJECT-ROOT-OVERRIDE, when non-nil, is the cherry-pick destination
+directory; otherwise the destination is resolved from the current
+workspace's `:project-dir'.  The override is used by
+`claude-repl-workspace-merge-current-into-source' so the cherry-pick
+lands in the parent worktree (or master, when re-routed) regardless of
+how Doom resolved the post-switch workspace name."
   (let* ((current-ws (+workspace-current-name))
          (target-branch (claude-repl--workspace-branch target-ws)))
-    (claude-repl--log current-ws "workspace-merge-do current-ws=%s target-ws=%s target-branch=%s"
-                      current-ws target-ws target-branch)
+    (claude-repl--log current-ws "workspace-merge-do current-ws=%s target-ws=%s target-branch=%s project-root-override=%s"
+                      current-ws target-ws target-branch (or project-root-override "nil"))
     (unless target-branch
       (user-error "Cannot resolve branch for workspace '%s'" target-ws))
-    (let* ((project-root (claude-repl--ws-dir current-ws)))
+    (let* ((project-root (or project-root-override
+                             (claude-repl--ws-dir current-ws))))
       (claude-repl--log current-ws "workspace-merge-do project-root=%s (for ws=%s)" project-root current-ws)
       (unless (claude-repl--git-branch-exists-p project-root target-branch)
         (user-error "Branch '%s' not found in repo %s" target-branch project-root))
@@ -987,6 +994,49 @@ Prompts for which workspace to merge in."
 
 (defalias '+dwc/workspace-merge #'claude-repl-workspace-merge)
 
+(defun claude-repl--branch-merged-into-master-p (worktree-dir master-dir)
+  "Return non-nil if the branch checked out at WORKTREE-DIR is fully
+incorporated into the master branch checked out at MASTER-DIR.
+Tests whether WORKTREE-DIR's HEAD ref is an ancestor of master via
+`git merge-base --is-ancestor': true means every commit on the parent
+is already reachable from master, so a future cherry-pick has nothing
+new to send to the parent and can be routed straight to master.
+Returns nil when either argument is nil, when the worktree's branch
+cannot be resolved, when it equals `claude-repl-master-branch-name',
+or when the ancestor check fails."
+  (and worktree-dir master-dir
+       (let ((parent-branch (claude-repl--git-string
+                             "-C" worktree-dir "rev-parse" "--abbrev-ref" "HEAD")))
+         (and parent-branch
+              (not (string-empty-p parent-branch))
+              (not (string-prefix-p "fatal" parent-branch))
+              (not (string= parent-branch claude-repl-master-branch-name))
+              (= 0 (claude-repl--git-exit-code
+                    worktree-dir
+                    "merge-base" "--is-ancestor"
+                    parent-branch claude-repl-master-branch-name))))))
+
+(defun claude-repl--resolve-merge-into-source-target (parent-dir master-dir)
+  "Pick the cherry-pick destination for `merge-current-into-source'.
+PARENT-DIR is the originally-recorded source worktree (or the master
+worktree when no source was recorded).  MASTER-DIR is the worktree
+checked out on `claude-repl-master-branch-name'.
+
+Returns PARENT-DIR by default, but switches to MASTER-DIR when
+PARENT-DIR is a non-master worktree whose branch is already fully
+merged into master — there is nothing to send to the parent, so the
+merge should land in master directly.  Returns PARENT-DIR unchanged
+when MASTER-DIR is nil or when PARENT-DIR is master."
+  (cond
+   ((null parent-dir) nil)
+   ((null master-dir) parent-dir)
+   ((string= (claude-repl--path-canonical parent-dir)
+             (claude-repl--path-canonical master-dir))
+    parent-dir)
+   ((claude-repl--branch-merged-into-master-p parent-dir master-dir)
+    master-dir)
+   (t parent-dir)))
+
 (defun claude-repl-workspace-merge-current-into-source ()
   "Merge the current workspace's commits into its source workspace.
 The source workspace is the one `SPC TAB n' was called from when this
@@ -994,18 +1044,31 @@ worktree was created (recorded as `:source-ws-dir').  When that
 directory no longer exists or no source was recorded, falls back to the
 worktree on `claude-repl-master-branch-name'.
 
+When the recorded parent is itself a non-master worktree whose branch
+is already fully merged into master,
+`claude-repl--resolve-merge-into-source-target' redirects the merge to
+the master worktree — landing the changes directly in master and
+selecting the master workspace afterwards.
+
 Switches to the target workspace via `claude-repl-switch-to-project'
 \(which creates a perspective for the project if none is open) and
-cherry-picks this workspace's commits onto its branch."
+cherry-picks this workspace's commits onto its branch.  The resolved
+target directory is passed explicitly to `--workspace-merge-do' so
+cherry-picks always land in the directory we just switched to, even if
+Doom's project-name -> workspace mapping doesn't recover the original
+parent's `:project-dir' lookup."
   (interactive)
   (let* ((source-ws (+workspace-current-name))
          (source-dir (claude-repl--ws-dir source-ws))
          (recorded (claude-repl--ws-get source-ws :source-ws-dir))
-         (target-dir (or (and recorded (file-directory-p recorded) recorded)
-                         (claude-repl--master-worktree-path source-dir))))
+         (parent-dir (or (and recorded (file-directory-p recorded) recorded)
+                         (claude-repl--master-worktree-path source-dir)))
+         (master-dir (claude-repl--master-worktree-path source-dir))
+         (target-dir (claude-repl--resolve-merge-into-source-target parent-dir master-dir)))
     (claude-repl--log source-ws
-                      "workspace-merge-current-into-source: source-ws=%s source-dir=%s recorded=%s target-dir=%s"
-                      source-ws source-dir (or recorded "nil") (or target-dir "nil"))
+                      "workspace-merge-current-into-source: source-ws=%s source-dir=%s recorded=%s parent-dir=%s master-dir=%s target-dir=%s"
+                      source-ws source-dir (or recorded "nil")
+                      (or parent-dir "nil") (or master-dir "nil") (or target-dir "nil"))
     (unless target-dir
       (user-error "Cannot determine merge target for '%s': no recorded source and no '%s' worktree found"
                   source-ws claude-repl-master-branch-name))
@@ -1016,8 +1079,11 @@ cherry-picks this workspace's commits onto its branch."
     (claude-repl--assert-clean-worktree source-ws source-dir)
     (claude-repl-switch-to-project target-dir)
     ;; After switching, default-directory may still point at the source ws —
-    ;; bind it to the target so cherry-pick paths resolve there.
+    ;; bind it to the target so cherry-pick paths resolve there. Pass
+    ;; target-dir explicitly to --workspace-merge-do so the cherry-pick lands
+    ;; in the worktree we just selected, not in whatever :project-dir the
+    ;; post-switch current-ws happens to carry.
     (let ((default-directory (file-name-as-directory target-dir)))
-      (claude-repl--workspace-merge-do source-ws))))
+      (claude-repl--workspace-merge-do source-ws target-dir))))
 
 (defalias '+dwc/workspace-merge-current-into-source #'claude-repl-workspace-merge-current-into-source)
