@@ -465,9 +465,15 @@ current workspace is different."
 ;;;; Session ID management
 
 (defun claude-repl--set-session-id (ws id)
-  "Set the session ID for workspace WS to ID."
+  "Set the session ID for workspace WS to ID and persist to disk.
+Persisting on capture is what makes a hook-delivered SID durable
+through an Emacs crash — without this `state-save', the SID would
+only reach `.claude-repl-state' at graceful teardown, so a crash
+mid-session would drop the resume signal and the next launch would
+not pass `--continue'."
   (claude-repl--log ws "set-session-id: ws=%s id=%s" ws id)
-  (setf (claude-repl-instantiation-session-id (claude-repl--active-inst ws)) id))
+  (setf (claude-repl-instantiation-session-id (claude-repl--active-inst ws)) id)
+  (claude-repl--state-save ws))
 
 ;; Session ID capture is handled exclusively by Claude Code hooks.
 ;; Every hook event (session_start, stop, prompt_submit, permission_prompt)

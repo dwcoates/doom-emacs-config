@@ -1209,4 +1209,37 @@ where fresh-ws-env wrote :active-env without :project-dir."
             (when (buffer-live-p vterm-buf)
               (kill-buffer vterm-buf))))))))
 
+;;;; ---- Tests: set-session-id ----
+
+(ert-deftest claude-repl-test-set-session-id-persists-to-disk ()
+  "set-session-id mutates the active instantiation AND writes state to disk.
+Persistence-on-capture is what makes a hook-delivered SID durable
+through an Emacs crash — without it, the SID would only reach
+.claude-repl-state at graceful teardown."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-set-sid-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--set-session-id "ws" "captured-sid")
+            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (equal (plist-get (plist-get data :bare-metal) :session-id)
+                             "captured-sid"))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-set-session-id-no-project-dir-does-not-error ()
+  "set-session-id is safe when :project-dir is nil; state-save logs and skips."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :active-env :bare-metal)
+    (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+    (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+    (claude-repl--set-session-id "ws" "captured-sid")
+    (should (equal (claude-repl-instantiation-session-id
+                    (claude-repl--ws-get "ws" :bare-metal))
+                   "captured-sid"))))
+
 ;;; test-session.el ends here
