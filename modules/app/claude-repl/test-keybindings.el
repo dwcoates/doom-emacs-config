@@ -1048,4 +1048,55 @@ value and writes :repl-state :dead."
         (should (null (claude-repl--ws-get (+workspace-current-name) :priority)))
         (should (equal saved-ws (+workspace-current-name)))))))
 
+(ert-deftest claude-repl-test-set-priority-targets-explicit-ws ()
+  "set-priority writes to the WS argument, not the current workspace."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+              ((symbol-function 'claude-repl--state-save) (lambda (_) nil))
+              ((symbol-function 'claude-repl--reorder-workspace-by-priority) (lambda (_) nil))
+              ((symbol-function 'force-mode-line-update) (lambda (&rest _) nil))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (claude-repl-set-priority "p2" "other-ws")
+      (should (equal (claude-repl--ws-get "other-ws" :priority) "p2"))
+      (should-not (claude-repl--ws-get "current-ws" :priority)))))
+
+(ert-deftest claude-repl-test-set-priority-state-save-uses-target-ws ()
+  "set-priority persists state for the explicit WS target, not the current ws."
+  (claude-repl-test--with-clean-state
+    (let ((saved-ws nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+                ((symbol-function 'claude-repl--state-save)
+                 (lambda (ws) (setq saved-ws ws)))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority) (lambda (_) nil))
+                ((symbol-function 'force-mode-line-update) (lambda (&rest _) nil))
+                ((symbol-function 'message) (lambda (&rest _) nil)))
+        (claude-repl-set-priority "p1" "other-ws")
+        (should (equal saved-ws "other-ws"))))))
+
+(ert-deftest claude-repl-test-set-priority-reorders-tab-bar ()
+  "set-priority calls reorder-workspace-by-priority so the tab-bar reflects the new rank."
+  (claude-repl-test--with-clean-state
+    (let ((reordered-ws nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'claude-repl--state-save) (lambda (_) nil))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+                 (lambda (ws) (setq reordered-ws ws)))
+                ((symbol-function 'force-mode-line-update) (lambda (&rest _) nil))
+                ((symbol-function 'message) (lambda (&rest _) nil)))
+        (claude-repl-set-priority "p1")
+        (should (equal reordered-ws "ws1"))))))
+
+(ert-deftest claude-repl-test-set-priority-changes-existing-priority ()
+  "set-priority overwrites a previously set priority on the same workspace."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'claude-repl--state-save) (lambda (_) nil))
+              ((symbol-function 'claude-repl--reorder-workspace-by-priority) (lambda (_) nil))
+              ((symbol-function 'force-mode-line-update) (lambda (&rest _) nil))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (claude-repl-set-priority "p3")
+      (should (equal (claude-repl--ws-get "ws1" :priority) "p3"))
+      (claude-repl-set-priority "p1")
+      (should (equal (claude-repl--ws-get "ws1" :priority) "p1")))))
+
 ;;; test-keybindings.el ends here

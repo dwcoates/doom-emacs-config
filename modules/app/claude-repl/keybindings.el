@@ -113,16 +113,33 @@ This lets Claude CLI handle paste natively, including images."
 ;; TODO: claude-repl-set-priority has no keybinding anywhere; it belongs in
 ;; commands.el rather than keybindings.el.  Do not move yet -- other agents are
 ;; modifying that file.
-(defun claude-repl-set-priority (priority)
-  "Set the priority badge for the current workspace.
-PRIORITY is one of \"p05\", \"p1\", \"p2\", \"p3\", or \"\" to clear.
-Persists through `claude-repl--state-save' so the badge survives restarts."
+(defun claude-repl-set-priority (priority &optional ws)
+  "Set or change the priority badge for workspace WS.
+WS defaults to the current workspace.  PRIORITY is one of the strings
+in `claude-repl-priority-levels', or \"\" to clear.  Persists through
+`claude-repl--state-save' so the badge survives restarts, reorders the
+workspace in the tab-bar by its new priority, and forces a mode-line
+repaint so the glyph updates immediately.
+
+Interactively, prompts for the workspace (defaulting to the current
+one) and then for the priority (defaulting to the workspace's current
+priority, if any), so the same command both adds a priority and
+changes an existing one."
   (interactive
-   (list (completing-read "Priority: " (append claude-repl-priority-levels '("")) nil t)))
-  (let ((ws (+workspace-current-name)))
+   (let* ((target (claude-repl--read-workspace-with-default
+                   "Set priority for workspace: "))
+          (current (claude-repl--ws-get target :priority))
+          (prompt (format "Priority%s: "
+                          (if current (format " (current: %s)" current) "")))
+          (priority (completing-read prompt
+                                     (append claude-repl-priority-levels '(""))
+                                     nil t nil nil (or current ""))))
+     (list priority target)))
+  (let ((ws (or ws (+workspace-current-name))))
     (claude-repl--log ws "set-priority: ws=%s priority=%s" ws (if (string-empty-p priority) "(cleared)" priority))
     (claude-repl--ws-put ws :priority (if (string-empty-p priority) nil priority))
     (claude-repl--state-save ws)
+    (claude-repl--reorder-workspace-by-priority ws)
     (force-mode-line-update t)
     (message "Workspace '%s' priority: %s" ws (if (string-empty-p priority) "cleared" priority))))
 
