@@ -651,6 +651,21 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
         (claude-repl--show-existing-panels)
         (should (equal restored-ws "test-ws"))))))
 
+(ert-deftest claude-repl-test-panels-show-existing-flashes-tab ()
+  "show-existing-panels pulses the workspace tab so reopen is visually marked."
+  (claude-repl-test--with-clean-state
+    (let ((flashed-ws nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+                ((symbol-function 'delete-other-windows) #'ignore)
+                ((symbol-function 'claude-repl--show-panels-and-focus) #'ignore)
+                ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
+                ((symbol-function 'claude-repl--restore-tab-index) #'ignore)
+                ((symbol-function 'claude-repl-flash-tab)
+                 (lambda (ws &rest _) (setq flashed-ws ws))))
+        (claude-repl--show-existing-panels)
+        (should (equal flashed-ws "test-ws"))))))
+
 ;;;; ---- Tests: deferred macro ----
 
 (ert-deftest claude-repl-test-panels-deferred-debounces ()

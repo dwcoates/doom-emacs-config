@@ -657,7 +657,9 @@ Demotes indicators, refreshes display, and restores panel layout.
 Sets `:repl-state :active' now that panels are visible and the
 session is in use.  If a `:saved-tab-index' was recorded by an earlier
 close-deprio cycle, restores the workspace to that slot in the tab-bar
-so reopen reverses the deprio."
+so reopen reverses the deprio, then pulses the tab via
+`claude-repl-flash-tab' so the user can track its return to the
+prior slot — symmetric with the deprio-on-close flash."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "show-existing-panels")
     (unless ws (error "claude-repl--show-existing-panels: no active workspace"))
@@ -666,7 +668,9 @@ so reopen reverses the deprio."
     (delete-other-windows)
     (claude-repl--show-panels-and-focus)
     (claude-repl--update-hide-overlay)
-    (claude-repl--restore-tab-index ws)))
+    (claude-repl--restore-tab-index ws)
+    (when (fboundp 'claude-repl-flash-tab)
+      (claude-repl-flash-tab ws))))
 
 (defun claude-repl--show-hidden-panels ()
   "Restore hidden panels.  `show-existing-panels' writes :repl-state :active.
