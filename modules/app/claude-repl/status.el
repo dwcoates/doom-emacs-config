@@ -473,6 +473,20 @@ session is still alive and re-promptable).")
 (defconst claude-repl--tab-weight             'bold
   "Font weight applied to every tab face.")
 
+(defconst claude-repl--color-flash-bg         "white"
+  "Background used for the transient flash face — see `claude-repl-flash-tab'.")
+
+(defcustom claude-repl-flash-count 3
+  "Number of on/off cycles when `claude-repl-flash-tab' pulses a tab."
+  :type 'integer
+  :group 'claude-repl)
+
+(defcustom claude-repl-flash-duration 1.0
+  "Total duration of a `claude-repl-flash-tab' pulse, in seconds.
+Distributed evenly across `claude-repl-flash-count' on/off cycles."
+  :type 'number
+  :group 'claude-repl)
+
 ;; --- Appearance palette --- ;;
 
 (defconst claude-repl--tab-default
@@ -614,6 +628,63 @@ Keys in the returned plist: :bg :fg :bracket-fg :bracket-bg :weight."
   "Face for workspace tabs where the last turn failed via the
 StopFailure hook (magenta + ⚠).")
 
+(defface claude-repl-tab-flash
+  `((t :background ,claude-repl--color-flash-bg
+       :foreground ,claude-repl--color-dark
+       :weight ,claude-repl--tab-weight))
+  "Transient face applied while a workspace is in a `claude-repl-flash-tab'
+pulse — solid white background regardless of the underlying state.")
+
+(defun claude-repl--ws-flashing-p (ws)
+  "Return non-nil if workspace WS is currently in a flash pulse."
+  (claude-repl--ws-get ws :flashing))
+
+(defun claude-repl--ws-set-flashing (ws val)
+  "Set workspace WS's :flashing flag to VAL.
+The tab renderer treats non-nil as an instruction to paint the tab with
+the flash face/spec on the next refresh."
+  (claude-repl--ws-put ws :flashing val))
+
+(defun claude-repl--flash-spec ()
+  "Return the appearance spec plist used for a flashing tab.
+Mirrors a normal palette row (see `claude-repl--tab-palette' docstring)
+but paints both the bracket and the name region in a uniform white."
+  `(:bg ,claude-repl--color-flash-bg
+    :fg ,claude-repl--color-dark
+    :bracket-bg ,claude-repl--color-flash-bg
+    :bracket-fg ,claude-repl--color-dark
+    :weight ,claude-repl--tab-weight))
+
+(defun claude-repl-flash-tab (ws &optional count duration)
+  "Pulse the tab for workspace WS COUNT times across DURATION seconds.
+COUNT defaults to `claude-repl-flash-count'; DURATION defaults to
+`claude-repl-flash-duration'.  Used to draw the user's attention to a
+workspace whose tab-bar position just changed (e.g., after a deprio
+push-to-back), so the eye can track it to its new home.
+
+Sets the workspace's `:flashing' flag synchronously to t before
+returning, then schedules a sequence of timers that toggle it every
+DURATION/(2·COUNT) seconds and finally clear it at DURATION.  The
+synchronous-first toggle keeps the function unit-testable without
+needing the timer queue to run."
+  (let* ((count (or count claude-repl-flash-count))
+         (duration (or duration claude-repl-flash-duration))
+         (interval (/ duration (* 2.0 count)))
+         (toggles (* 2 count)))
+    (claude-repl--log ws "flash-tab ws=%s count=%d duration=%s" ws count duration)
+    (claude-repl--ws-set-flashing ws t)
+    (force-mode-line-update t)
+    (cl-loop for i from 1 below toggles
+             for on = (cl-evenp i)
+             do (run-at-time (* i interval) nil
+                             (lambda ()
+                               (claude-repl--ws-set-flashing ws on)
+                               (force-mode-line-update t))))
+    (run-at-time (* toggles interval) nil
+                 (lambda ()
+                   (claude-repl--ws-set-flashing ws nil)
+                   (force-mode-line-update t)))))
+
 (defun claude-repl--render-tab (name spec label name-face img-str)
   "Render a tab string for workspace NAME from SPEC.
 SPEC is a plist with keys :bg :fg :bracket-fg :weight (see
@@ -726,12 +797,19 @@ workspaces that have no state to suppress in the first place."
 CURRENT-NAME is the active workspace name.  INDEX is the 1-based
 tab position.  The display state is composed from the two per-axis
 keys via `claude-repl--ws-display-state'; the appearance spec is
-resolved via `claude-repl--tab-spec'."
+resolved via `claude-repl--tab-spec'.  When the workspace's `:flashing'
+flag is set (see `claude-repl-flash-tab'), the spec and name face are
+overridden to a uniform white pulse so the tab stands out."
   (let* ((selected (equal current-name name))
+         (flashing (claude-repl--ws-flashing-p name))
          (state    (claude-repl--ws-display-state name))
-         (spec     (claude-repl--tab-spec state selected))
+         (spec     (if flashing
+                       (claude-repl--flash-spec)
+                     (claude-repl--tab-spec state selected)))
          (label    (claude-repl--tab-label state index))
-         (face     (claude-repl--tab-face state selected))
+         (face     (if flashing
+                       'claude-repl-tab-flash
+                     (claude-repl--tab-face state selected)))
          (img-str  (claude-repl--tab-priority-image-str name)))
     (claude-repl--render-tab name spec label face img-str)))
 

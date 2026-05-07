@@ -856,6 +856,76 @@ selected tab dims to the normal selected face like other states."
         (let ((face (get-text-property bracket-pos 'face result)))
           (should (equal (plist-get face :foreground) "white")))))))
 
+;;;; ---- Tests: flash-tab ----
+
+(ert-deftest claude-repl-test-flash-tab-sets-flashing-immediately ()
+  "claude-repl-flash-tab sets :flashing t synchronously before returning."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) nil)))
+      (claude-repl-flash-tab "ws1" 3 1.0)
+      (should (claude-repl--ws-flashing-p "ws1")))))
+
+(ert-deftest claude-repl-test-flash-tab-schedules-timers-for-toggles-and-cleanup ()
+  "claude-repl-flash-tab schedules 2*COUNT toggle timers plus a final cleanup timer."
+  (claude-repl-test--with-clean-state
+    (let ((scheduled-delays nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (delay _repeat _fn &rest _args)
+                   (push delay scheduled-delays))))
+        (claude-repl-flash-tab "ws1" 3 1.0)
+        ;; 2*count - 1 toggle timers (i=1..5) + 1 cleanup timer (i=6) = 6 total
+        (should (= 6 (length scheduled-delays)))
+        ;; Cleanup timer fires at full duration
+        (should (= 1.0 (apply #'max scheduled-delays)))
+        ;; First scheduled toggle is at one interval (1/(2*3) = ~0.166s)
+        (should (< (- (apply #'min scheduled-delays) (/ 1.0 6.0)) 0.001))))))
+
+(ert-deftest claude-repl-test-flash-tab-defaults-to-defcustom-values ()
+  "Flash count and duration default to the defcustoms when omitted."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-flash-count 4)
+          (claude-repl-flash-duration 2.0)
+          (scheduled 0))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (&rest _) (cl-incf scheduled))))
+        (claude-repl-flash-tab "ws1")
+        ;; 2*4 timers (toggles 1..7 + cleanup at 8) = 8
+        (should (= 8 scheduled))))))
+
+(ert-deftest claude-repl-test-render-tab-entry-flash-uses-flash-face ()
+  "render-tab-entry paints with `claude-repl-tab-flash' when :flashing is set."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-flashing "ws1" t)
+    (let* ((result (claude-repl--render-tab-entry "ws1" "current-ws" 1))
+           (name-pos (string-match "ws1" result)))
+      (should name-pos)
+      (should (eq (get-text-property name-pos 'face result)
+                  'claude-repl-tab-flash)))))
+
+(ert-deftest claude-repl-test-render-tab-entry-flash-overrides-state-color ()
+  "Flash spec overrides the state-driven coloring while :flashing is set."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :thinking)
+    (claude-repl--ws-set-flashing "ws1" t)
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) t)))
+      (let* ((result (claude-repl--render-tab-entry "ws1" "current-ws" 1))
+             (bracket-pos (string-match "\\[" result))
+             (bracket-face (get-text-property bracket-pos 'face result)))
+        ;; Bracket bg is the flash white, NOT the thinking red.
+        (should (equal (plist-get bracket-face :background)
+                       claude-repl--color-flash-bg))))))
+
+(ert-deftest claude-repl-test-render-tab-entry-no-flash-uses-state-face ()
+  "Without :flashing, render-tab-entry uses the state-driven face."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :done)
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) t)))
+      (let* ((result (claude-repl--render-tab-entry "ws1" "current-ws" 1))
+             (name-pos (string-match "ws1" result)))
+        (should name-pos)
+        (should (eq (get-text-property name-pos 'face result)
+                    'claude-repl-tab-done))))))
+
 ;;;; ---- Tests: tabline-advice edge cases ----
 
 (ert-deftest claude-repl-test-tabline-advice-defaults-from-list-names ()

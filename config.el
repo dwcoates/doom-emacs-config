@@ -462,7 +462,9 @@ force the right-aligned segment to repaint too."
 
   (defun +dwc/workspace-push-to-back ()
     "Push the current workspace to the second-to-last position in the tab-bar.
-Switch focus to the workspace that now occupies the old position."
+Switch focus to the workspace that now occupies the old position.  If
+`claude-repl-flash-tab' is available, pulse the moved tab so the user
+can visually track it to its new home."
     (interactive)
     (let* ((current (+workspace-current-name))
            (names (persp-names-current-frame-fast-ordered))
@@ -474,6 +476,8 @@ Switch focus to the workspace that now occupies the old position."
       (+dwc/refresh-tab-bar)
       (when next-name
         (+workspace/switch-to next-name))
+      (when (fboundp 'claude-repl-flash-tab)
+        (claude-repl-flash-tab current))
       (message "Pushed '%s' to second-to-last; switched to '%s'." current (or next-name current))))
 
   (defun +dwc/workspace-pull-to-front ()
