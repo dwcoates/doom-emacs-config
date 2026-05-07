@@ -1340,10 +1340,29 @@ so the lazy-start hook skips firing for each restored workspace."
                       ((symbol-function '+workspace-current-name)
                        (lambda () "switched-ws"))
                       ((symbol-function 'force-mode-line-update)
-                       (lambda (&optional _all) nil)))
+                       (lambda (&optional _all) nil))
+                      ((symbol-function 'claude-repl-flash-tab)
+                       (lambda (&rest _) nil)))
               (claude-repl-switch-to-project tmp-dir)
               (should (equal switched-with tmp-dir))
               (should (equal (claude-repl--ws-get "switched-ws" :priority) "p2"))))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-project/flashes-activated-ws ()
+  "switch-to-project pulses the activated workspace tab via flash-tab."
+  (claude-repl-test--with-clean-state
+    (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-switch-" t)))
+          flashed-ws)
+      (unwind-protect
+          (cl-letf (((symbol-function '+dwc/switch-to-project) (lambda (_p) nil))
+                    ((symbol-function '+workspace-current-name)
+                     (lambda () "switched-ws"))
+                    ((symbol-function 'force-mode-line-update)
+                     (lambda (&optional _all) nil))
+                    ((symbol-function 'claude-repl-flash-tab)
+                     (lambda (ws &rest _) (setq flashed-ws ws))))
+            (claude-repl-switch-to-project tmp-dir)
+            (should (equal flashed-ws "switched-ws")))
         (delete-directory tmp-dir t)))))
 
 (provide 'test-commands)

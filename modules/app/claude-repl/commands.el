@@ -654,10 +654,16 @@ file is missing, malformed, or carries no `:priority'."
 Thin wrapper around `+dwc/switch-to-project' that, after switching,
 reads `.claude-repl-state' from the project root and applies any saved
 `:priority' to the new workspace, so the tabline badge appears
-immediately on `SPC p p' instead of only after Claude starts."
+immediately on `SPC p p' instead of only after Claude starts.  Also
+pulses the activated workspace's tab via `claude-repl-flash-tab' so
+the user can spot the slot they just landed in — same flash semantic
+as the close-deprio and reopen paths."
   (interactive)
   (let ((project (or project
                      (projectile-completing-read "Switch to project: "
                                                  (projectile-relevant-known-projects)))))
     (+dwc/switch-to-project project)
-    (claude-repl--hydrate-priority-from-state project)))
+    (claude-repl--hydrate-priority-from-state project)
+    (when (and (fboundp 'claude-repl-flash-tab)
+               (fboundp '+workspace-current-name))
+      (claude-repl-flash-tab (+workspace-current-name)))))
