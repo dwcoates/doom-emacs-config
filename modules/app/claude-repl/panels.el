@@ -367,37 +367,36 @@ string happens to compare equal under propertized-string semantics."
         (when (fboundp 'claude-repl--force-tab-bar-redraw)
           (claude-repl--force-tab-bar-redraw))))))
 
+(defun claude-repl--on-simple-close (&optional ws)
+  "Bookkeep + hide panels; do NOT touch tab-bar order.
+Sets `:repl-state :inactive' on WS (`:claude-state' untouched so an
+in-flight :thinking / :permission survives the close), then hides
+the panel windows.  No save-tab-index, no push-to-back, no flash —
+this is the simple-close audit point that `SPC o c' is bound to."
+  (let ((ws (or ws (+workspace-current-name))))
+    (claude-repl--log ws "on-simple-close: CALLED this-command=%s last-command=%s"
+                      this-command last-command)
+    (when ws
+      (claude-repl--log ws "on-simple-close ws=%s claude-state=%s -> repl-state=:inactive"
+                        ws (claude-repl--ws-claude-state ws))
+      (claude-repl--ws-set-repl-state ws :inactive))
+    (claude-repl--hide-panels)))
+
 (defun claude-repl--on-close (&optional ws)
-  "Single audit point for user-initiated panel close.
-Hides the panel windows without tearing down the session.  All
-user-initiated close paths route through here: `hide-and-preserve-status'
-(SPC o c) and `claude-repl-send-and-hide'.
-
-Invariably sets `:repl-state' to :inactive — this is the completion of
-the \"close always transitions to :inactive\" requirement (analysis/01,
-item #1).  `:claude-state' is intentionally left untouched so that
-closing during a :thinking or :permission turn preserves the in-flight
-signal (the renderer shows red/❓ through the closed-panel state).
-
-When WS is the current workspace, snapshots its tab-bar index via
+  "Full close: bookkeep + hide + deprio + save tab index.
+Wraps `claude-repl--on-simple-close' (the bookkeep+hide core) with the
+tab-bar deprio: snapshots WS's tab-bar index via
 `claude-repl--save-tab-index' (read by `claude-repl--restore-tab-index'
 on the next reopen) and pushes it to the second-to-last position via
-`+dwc/workspace-push-to-back' (default behavior: switches focus to the
-workspace that took the old slot, so the user lands on a fresh
-workspace instead of staring at the dormant one).  Guarded by `fboundp'
-so the module remains usable when the helper is not loaded (e.g.
-during isolated unit tests).
+`+dwc/workspace-push-to-back'.  Bound to `SPC o C' (the deprio toggle);
+also fires from `claude-repl-send-and-hide' since send-and-hide is
+semantically \"I'm done with this prompt, move on\".  Guarded by
+`fboundp' so the module remains usable when the helper is not loaded.
 
 WS defaults to the current workspace; when WS is nil the function still
 hides panels but skips the bookkeeping write and the tab shuffle."
   (let ((ws (or ws (+workspace-current-name))))
-    (claude-repl--log ws "on-close: CALLED this-command=%s last-command=%s"
-                      this-command last-command)
-    (when ws
-      (claude-repl--log ws "on-close ws=%s claude-state=%s -> repl-state=:inactive"
-                        ws (claude-repl--ws-claude-state ws))
-      (claude-repl--ws-set-repl-state ws :inactive))
-    (claude-repl--hide-panels)
+    (claude-repl--on-simple-close ws)
     (when (and ws
                (equal ws (+workspace-current-name))
                (fboundp '+dwc/workspace-push-to-back))
@@ -691,23 +690,30 @@ panels are visible or hidden."
   (claude-repl--show-existing-panels))
 
 (defun claude-repl--hide-and-preserve-status ()
-  "Hide Claude panels while preserving the current workspace status.
+  "Hide Claude panels with full deprio + tab-bar shuffle (the `SPC o C' path).
 Thin wrapper around `claude-repl--on-close' that enforces the invariant
-that a workspace is active (the `SPC o c' toggle path should never fire
-without one)."
+that a workspace is active.  See `claude-repl--simple-hide-and-preserve-status'
+for the no-tab-bar-update variant bound to `SPC o c'."
   (let ((ws (+workspace-current-name)))
     (unless ws (error "claude-repl--hide-and-preserve-status: no active workspace"))
     (claude-repl--on-close ws)))
 
+(defun claude-repl--simple-hide-and-preserve-status ()
+  "Hide Claude panels with NO tab-bar update (the `SPC o c' path).
+Thin wrapper around `claude-repl--on-simple-close' that enforces the
+invariant that a workspace is active.  See
+`claude-repl--hide-and-preserve-status' for the deprio + flash variant
+bound to `SPC o C'."
+  (let ((ws (+workspace-current-name)))
+    (unless ws (error "claude-repl--simple-hide-and-preserve-status: no active workspace"))
+    (claude-repl--on-simple-close ws)))
+
 ;;;; Entry point
 
-(defun claude-repl ()
-  "Toggle Claude REPL panels.
-If text is selected: send it directly to Claude.
-If not running: start Claude and show both panels.
-If panels visible: hide both panels.
-If panels hidden: show both panels."
-  (interactive)
+(defun claude-repl--toggle (close-fn)
+  "Generic toggle.  CLOSE-FN handles the visible-panels case.
+Open / start / send-selection paths are shared.  Used by both
+`claude-repl' (deprio close) and `claude-repl-simple' (plain close)."
   (let* ((ws (+workspace-current-name))
          (vterm-running (claude-repl--claude-running-p))
          (session-starting (claude-repl--session-starting-p))
@@ -717,22 +723,35 @@ If panels hidden: show both panels."
     (claude-repl--log ws "claude-repl running=%s starting=%s visible=%s selection=%s"
                       vterm-running session-starting panels-visible (if selection "yes" "no"))
     (cond
-     ;; Text selected - send directly to Claude
      (selection
       (deactivate-mark)
       (claude-repl--send-to-claude selection))
-     ;; Nothing running - start fresh with placeholder until Claude is ready
      ((not vterm-running)
       (claude-repl--initialize-claude))
-     ;; Vterm alive but Claude not yet ready - hold off, panels will open automatically
      (session-starting
       (message "Claude is loading…"))
-     ;; Panels visible - hide both, preserve status
      (panels-visible
-      (claude-repl--hide-and-preserve-status))
-     ;; Panels hidden - show both
+      (funcall close-fn))
      (t
       (claude-repl--show-hidden-panels)))))
+
+(defun claude-repl ()
+  "Toggle Claude REPL panels with deprio on close.
+If text is selected: send it directly to Claude.
+If not running: start Claude and show both panels.
+If panels visible: hide both panels AND deprio the workspace tab.
+If panels hidden: show both panels (restoring tab position if saved).
+Bound to `SPC o C'.  See `claude-repl-simple' for the no-tab-bar variant."
+  (interactive)
+  (claude-repl--toggle #'claude-repl--hide-and-preserve-status))
+
+(defun claude-repl-simple ()
+  "Toggle Claude REPL panels with a plain close (no tab-bar update).
+Same dispatch as `claude-repl' except the close branch only hides the
+panels and sets `:repl-state :inactive' — no save-tab-index, no
+push-to-back, no flash.  Bound to `SPC o c'."
+  (interactive)
+  (claude-repl--toggle #'claude-repl--simple-hide-and-preserve-status))
 
 ;;;; Session cleanup
 

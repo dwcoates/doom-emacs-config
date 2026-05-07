@@ -501,6 +501,104 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
         (claude-repl--on-close)
         (should (equal (reverse calls) '(save push)))))))
 
+;;;; ---- Tests: on-simple-close (no-deprio variant) ----
+
+(ert-deftest claude-repl-test-panels-on-simple-close-sets-inactive ()
+  "on-simple-close writes :repl-state :inactive."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
+      (claude-repl--on-simple-close)
+      (should (eq :inactive (claude-repl--ws-get "test-ws" :repl-state))))))
+
+(ert-deftest claude-repl-test-panels-on-simple-close-hides-panels ()
+  "on-simple-close calls hide-panels."
+  (claude-repl-test--with-clean-state
+    (let ((hide-called 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--hide-panels)
+                 (lambda () (cl-incf hide-called))))
+        (claude-repl--on-simple-close)
+        (should (= 1 hide-called))))))
+
+(ert-deftest claude-repl-test-panels-on-simple-close-does-not-save-tab-index ()
+  "on-simple-close does NOT call save-tab-index — that's the deprio path."
+  (claude-repl-test--with-clean-state
+    (let ((save-called 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
+                ((symbol-function 'claude-repl--save-tab-index)
+                 (lambda (_ws) (cl-incf save-called))))
+        (claude-repl--on-simple-close)
+        (should (= 0 save-called))))))
+
+(ert-deftest claude-repl-test-panels-on-simple-close-does-not-push-to-back ()
+  "on-simple-close does NOT call push-to-back — that's the deprio path."
+  (claude-repl-test--with-clean-state
+    (let ((push-called 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
+                ((symbol-function '+dwc/workspace-push-to-back)
+                 (lambda (&rest _) (cl-incf push-called))))
+        (claude-repl--on-simple-close)
+        (should (= 0 push-called))))))
+
+;;;; ---- Tests: simple-hide-and-preserve-status ----
+
+(ert-deftest claude-repl-test-panels-simple-hide-routes-through-on-simple-close ()
+  "simple-hide-and-preserve-status delegates to on-simple-close."
+  (claude-repl-test--with-clean-state
+    (let ((received-ws nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--on-simple-close)
+                 (lambda (&optional ws) (setq received-ws ws))))
+        (claude-repl--simple-hide-and-preserve-status)
+        (should (equal received-ws "test-ws"))))))
+
+(ert-deftest claude-repl-test-panels-simple-hide-no-workspace-errors ()
+  "simple-hide-and-preserve-status errors when no workspace is active."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
+      (should-error (claude-repl--simple-hide-and-preserve-status)))))
+
+;;;; ---- Tests: claude-repl-simple toggle ----
+
+(ert-deftest claude-repl-test-panels-claude-repl-simple-uses-simple-hide ()
+  "claude-repl-simple dispatches the visible-panels case to simple-hide."
+  (claude-repl-test--with-clean-state
+    (let ((simple-called 0)
+          (full-called 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
+                ((symbol-function 'claude-repl--session-starting-p) (lambda () nil))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
+                ((symbol-function 'use-region-p) (lambda () nil))
+                ((symbol-function 'claude-repl--simple-hide-and-preserve-status)
+                 (lambda () (cl-incf simple-called)))
+                ((symbol-function 'claude-repl--hide-and-preserve-status)
+                 (lambda () (cl-incf full-called))))
+        (claude-repl-simple)
+        (should (= 1 simple-called))
+        (should (= 0 full-called))))))
+
+(ert-deftest claude-repl-test-panels-claude-repl-uses-full-hide ()
+  "claude-repl (deprio variant) dispatches the visible-panels case to hide-and-preserve."
+  (claude-repl-test--with-clean-state
+    (let ((simple-called 0)
+          (full-called 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
+                ((symbol-function 'claude-repl--session-starting-p) (lambda () nil))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
+                ((symbol-function 'use-region-p) (lambda () nil))
+                ((symbol-function 'claude-repl--simple-hide-and-preserve-status)
+                 (lambda () (cl-incf simple-called)))
+                ((symbol-function 'claude-repl--hide-and-preserve-status)
+                 (lambda () (cl-incf full-called))))
+        (claude-repl)
+        (should (= 0 simple-called))
+        (should (= 1 full-called))))))
+
 ;;;; ---- Tests: save-tab-index ----
 
 (ert-deftest claude-repl-test-panels-save-tab-index-writes-position ()

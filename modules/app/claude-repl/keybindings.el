@@ -394,9 +394,10 @@ Reports comprehensive diagnostics."
 
 ;; SPC o -- Claude session control (open, focus, kill, interrupt, utilities)
 (map! :leader
-      :desc "Claude REPL" "o c" #'claude-repl
+      :desc "Claude REPL (simple)" "o c" #'claude-repl-simple
+      :desc "Claude REPL (deprio)" "o C" #'claude-repl
+      :desc "Kill Claude" "o C-c" #'claude-repl-kill
       :desc "Claude input" "o v" #'claude-repl-focus-input
-      :desc "Kill Claude" "o C" #'claude-repl-kill
       :desc "Claude interrupt" "o x" #'claude-repl-interrupt
       :desc "Copy file reference" "o r" #'claude-repl-copy-reference
       :desc "Switch sandbox/bare-metal" "o s" #'claude-repl-switch-environment)
