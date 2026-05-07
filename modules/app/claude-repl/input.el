@@ -176,13 +176,13 @@ input line.  On failure, logs and surfaces an error (no silent fallback)."
 (defun claude-repl-discard-or-send-interrupt ()
   "Clear Claude's prompt AND the local input buffer.
 Always sends a raw Ctrl-C to Claude (clearing its current input line) and,
-if the local input buffer isn't already empty, also discards its contents.
-Previously this only sent Ctrl-C when the local buffer was empty, which
-left users with a half-cleared state."
+if the local input buffer has any content (including whitespace-only),
+also discards its contents.  Previously used `string-blank-p' which left
+whitespace-only buffers uncleared after C-c C-c."
   (interactive)
   (claude-repl--log (+workspace-current-name) "discard-or-send-interrupt: clearing Claude prompt + local buffer (local-empty=%s)"
-                    (string-blank-p (buffer-string)))
-  (unless (string-blank-p (buffer-string))
+                    (zerop (buffer-size)))
+  (unless (zerop (buffer-size))
     (claude-repl-discard-input))
   (claude-repl--vterm-send-raw-ctrl-c))
 

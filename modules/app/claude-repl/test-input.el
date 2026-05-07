@@ -690,6 +690,32 @@ where the user pressed C-c C-c expecting a full reset."
             (should evil-called)
             (should (equal sent-bytes '((fake-proc . "\C-c"))))))))))
 
+(ert-deftest claude-repl-test-discard-or-send-interrupt-whitespace-only-clears-buffer ()
+  "When input buffer contains only whitespace, C-c C-c still clears it.
+Previously `string-blank-p' treated whitespace-only as empty and skipped
+`erase-buffer', leaving the user's whitespace stuck in the input."
+  (claude-repl-test--with-clean-state
+    (let ((sent-bytes nil)
+          (evil-called nil))
+      (claude-repl-test--with-temp-buffer "*claude-panel-discard-ws*"
+        (setq-local vterm--process 'fake-proc)
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (claude-repl-test--with-temp-buffer " *test-input-whitespace*"
+          (setq-local claude-repl--input-history nil)
+          (setq-local claude-repl--history-index 0)
+          (setq-local claude-repl--history-navigating nil)
+          (insert "   \n\t  \n")
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'evil-insert-state)
+                     (lambda () (setq evil-called t)))
+                    ((symbol-function 'claude-repl--history-save) #'ignore)
+                    ((symbol-function 'process-send-string)
+                     (lambda (proc bytes) (push (cons proc bytes) sent-bytes))))
+            (claude-repl-discard-or-send-interrupt)
+            (should (equal (buffer-string) ""))
+            (should evil-called)
+            (should (equal sent-bytes '((fake-proc . "\C-c"))))))))))
+
 ;;;; ---- Tests: send-vterm-key ----
 
 (ert-deftest claude-repl-test-send-vterm-key-forwards-key ()
@@ -1205,21 +1231,6 @@ must not accumulate phantom entries that trap the user in slash mode."
         (should evil-called)))))
 
 ;;; discard-or-send-interrupt with whitespace-only buffer
-
-(ert-deftest claude-repl-test-discard-or-send-interrupt-whitespace-sends-raw-etx ()
-  "Whitespace-only buffer is blank-p, so raw ETX is sent and local discard skipped."
-  (claude-repl-test--with-clean-state
-    (let ((sent-bytes nil))
-      (claude-repl-test--with-temp-buffer "*claude-panel-discard-ws-vterm*"
-        (setq-local vterm--process 'fake-proc)
-        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-        (claude-repl-test--with-temp-buffer " *test-discard-ws-input*"
-          (insert "   \n\t  ")
-          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                    ((symbol-function 'process-send-string)
-                     (lambda (proc bytes) (push (cons proc bytes) sent-bytes))))
-            (claude-repl-discard-or-send-interrupt)
-            (should (equal sent-bytes '((fake-proc . "\C-c"))))))))))
 
 ;;; send-vterm-key with dead vterm buffer
 
