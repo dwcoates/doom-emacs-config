@@ -47,6 +47,16 @@ when a workspace has no recorded `:source-ws-dir'."
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-worktree-tag-branch-suffix "-tag"
+  "Suffix appended to a worktree's branch name to form its companion tag branch.
+On worktree creation, a sibling branch named BRANCH+suffix is created at
+the same BASE-COMMIT, so `git diff <branch>-tag..<branch>' always shows
+the worktree's full divergence from its starting point — even after the
+original base branch (e.g. master) advances.  Set to nil or the empty
+string to disable tag branch creation."
+  :type '(choice (const :tag "Disabled" nil) string)
+  :group 'claude-repl)
+
 (defun claude-repl--open-initial-buffers (ws path)
   "Open configured initial buffers for workspace WS rooted at PATH.
 Checks `claude-repl-workspace-initial-buffers' for entries whose PATTERN
@@ -113,6 +123,27 @@ Tears down any existing watch first to avoid duplicates on re-eval."
   (let ((result (= 0 (claude-repl--git-exit-code root "rev-parse" "--verify" branch))))
     (claude-repl--log nil "git-branch-exists-p: root=%s branch=%s result=%s" root branch result)
     result))
+
+(defun claude-repl--tag-branch-name (branch-name)
+  "Return the companion tag branch name for BRANCH-NAME, or nil if disabled.
+Disabled when `claude-repl-worktree-tag-branch-suffix' is nil or empty."
+  (when (and claude-repl-worktree-tag-branch-suffix
+             (not (string-empty-p claude-repl-worktree-tag-branch-suffix)))
+    (concat branch-name claude-repl-worktree-tag-branch-suffix)))
+
+(defun claude-repl--create-tag-branch (git-root branch-name base-commit)
+  "Create a companion tag branch for BRANCH-NAME at BASE-COMMIT in GIT-ROOT.
+The tag branch name is BRANCH-NAME + `claude-repl-worktree-tag-branch-suffix'.
+No-op when the suffix is nil/empty.  Signals `error' on git failure: the tag
+branch is the durable diff anchor for `<branch>-tag..<branch>', so silent
+failure would leave the workspace without a working diff target."
+  (when-let ((tag-branch (claude-repl--tag-branch-name branch-name)))
+    (let ((exit-code (claude-repl--git-exit-code git-root "branch" tag-branch base-commit)))
+      (claude-repl--log branch-name "create-tag-branch: git-root=%s tag-branch=%s base-commit=%s exit-code=%s"
+                        git-root tag-branch base-commit exit-code)
+      (unless (zerop exit-code)
+        (error "Failed to create tag branch '%s' at %s in %s (exit %d)"
+               tag-branch base-commit git-root exit-code)))))
 
 (defun claude-repl--parse-worktree-porcelain (text target-ref)
   "Return the worktree path in TEXT whose branch matches TARGET-REF.
@@ -345,17 +376,24 @@ project-dir of the workspace this worktree was created from)."
                                               &optional source-dir)
   "Run `git worktree add' asynchronously for a new worktree.
 Creates the worktree at PATH on BRANCH-NAME off BASE-COMMIT in GIT-ROOT.
+On success, also creates the companion tag branch at BASE-COMMIT (see
+`claude-repl--create-tag-branch') so `<branch>-tag..<branch>' diffs
+remain stable as the upstream base branch advances.
 When the git command finishes, `claude-repl--worktree-add-callback'
 finalizes the workspace.  SOURCE-DIR is the project-dir of the workspace
 this worktree was created from; threaded through to be persisted as
 `:source-ws-dir' on the new workspace."
-  (let ((add-args (list "worktree" "add" "-b" branch-name path base-commit)))
+  (let* ((add-args (list "worktree" "add" "-b" branch-name path base-commit))
+         (after-add (lambda (ok output)
+                      (when ok
+                        (claude-repl--create-tag-branch
+                         git-root branch-name base-commit))
+                      (claude-repl--worktree-add-callback
+                       path dirname preemptive-prompt
+                       priority fork-session-id force-sandbox callback source-dir
+                       ok output))))
     (claude-repl--log dirname "worktree async git add: %S" add-args)
-    (claude-repl--async-git
-     "worktree-add" git-root add-args
-     (apply-partially #'claude-repl--worktree-add-callback
-                      path dirname preemptive-prompt
-                      priority fork-session-id force-sandbox callback source-dir))))
+    (claude-repl--async-git "worktree-add" git-root add-args after-add)))
 
 (defun claude-repl--worktree-fetch-callback (add-fn _ok output)
   "Handle the result of an async git-fetch for worktree creation.
@@ -382,7 +420,11 @@ report the new path as an existing project."
     (user-error "Worktree '%s' already exists — use SPC p p to switch to it" dirname))
   (when (claude-repl--git-branch-exists-p git-root branch-name)
     (claude-repl--log name "ERROR: branch '%s' already exists — cannot create worktree" branch-name)
-    (user-error "Branch '%s' already exists — delete it first or choose a different name" branch-name)))
+    (user-error "Branch '%s' already exists — delete it first or choose a different name" branch-name))
+  (when-let ((tag-branch (claude-repl--tag-branch-name branch-name)))
+    (when (claude-repl--git-branch-exists-p git-root tag-branch)
+      (claude-repl--log name "ERROR: tag branch '%s' already exists — cannot create worktree" tag-branch)
+      (user-error "Tag branch '%s' already exists — delete it first or choose a different name" tag-branch))))
 
 (defun claude-repl--do-create-worktree-workspace (name &optional force-sandbox fork-session-id preemptive-prompt callback priority base-commit git-root source-dir)
   "Create a git worktree and Doom workspace for NAME.

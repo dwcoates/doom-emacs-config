@@ -524,6 +524,29 @@ Returns the full SHA of the new commit."
     (claude-repl--validate-worktree-creation
      "new-feature" repo "new-feature" "new-feature" "/nonexistent")))
 
+(ert-deftest claude-repl-test-validate-worktree-creation-existing-tag-branch ()
+  "Existing tag-branch (BRANCH+suffix) signals user-error."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    ;; Pre-create the tag branch that validation should detect.
+    (claude-repl-test--git-checkout repo "feature-tag" t)
+    (claude-repl-test--git-checkout repo "master")
+    (let ((claude-repl-worktree-tag-branch-suffix "-tag"))
+      (should-error (claude-repl--validate-worktree-creation
+                     "feature" repo "feature" "feature" "/nonexistent")
+                    :type 'user-error))))
+
+(ert-deftest claude-repl-test-validate-worktree-creation-tag-branch-disabled ()
+  "When tag-branch suffix is nil, an existing 'feature-tag' branch does not block."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (claude-repl-test--git-checkout repo "feature-tag" t)
+    (claude-repl-test--git-checkout repo "master")
+    (let ((claude-repl-worktree-tag-branch-suffix nil))
+      ;; Should not error
+      (claude-repl--validate-worktree-creation
+       "feature" repo "feature" "feature" "/nonexistent"))))
+
 (ert-deftest claude-repl-test-validate-worktree-creation-nested-under-repo ()
   "Validation passes for a non-existent path nested under another git repo.
 Regression: previously used `projectile-project-p', which walks UP from
@@ -1953,6 +1976,92 @@ Covers the full call the interactive `SPC TAB n' path builds up."
        nil "dirname" nil nil nil nil)
       (should (equal captured-args
                      '("worktree" "add" "-b" "my-branch" "/path" "HEAD"))))))
+
+;;;; ---- Tests: tag-branch-name ----
+
+(ert-deftest claude-repl-test-tag-branch-name-default-suffix ()
+  "Default suffix `-tag' produces BRANCH+'-tag'."
+  (let ((claude-repl-worktree-tag-branch-suffix "-tag"))
+    (should (equal (claude-repl--tag-branch-name "DC/feature") "DC/feature-tag"))))
+
+(ert-deftest claude-repl-test-tag-branch-name-nil-suffix ()
+  "Nil suffix means tag branches are disabled — returns nil."
+  (let ((claude-repl-worktree-tag-branch-suffix nil))
+    (should (null (claude-repl--tag-branch-name "any")))))
+
+(ert-deftest claude-repl-test-tag-branch-name-empty-suffix ()
+  "Empty suffix is treated as disabled — returns nil."
+  (let ((claude-repl-worktree-tag-branch-suffix ""))
+    (should (null (claude-repl--tag-branch-name "any")))))
+
+;;;; ---- Tests: create-tag-branch ----
+
+(ert-deftest claude-repl-test-create-tag-branch-creates-at-base-commit ()
+  "create-tag-branch creates BRANCH+suffix pointing at BASE-COMMIT."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((sha (claude-repl-test--git-commit repo "initial" "content"))
+          (claude-repl-worktree-tag-branch-suffix "-tag"))
+      ;; Advance HEAD so we can verify the tag points at the OLD commit, not HEAD.
+      (claude-repl-test--git-commit repo "second" "more")
+      (claude-repl--create-tag-branch repo "feature" sha)
+      (should (claude-repl--git-branch-exists-p repo "feature-tag"))
+      (let ((tag-sha (string-trim
+                      (shell-command-to-string
+                       (format "git -C %s rev-parse feature-tag"
+                               (shell-quote-argument repo))))))
+        (should (equal tag-sha sha))))))
+
+(ert-deftest claude-repl-test-create-tag-branch-disabled-no-op ()
+  "When suffix is nil, no branch is created."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (let ((claude-repl-worktree-tag-branch-suffix nil))
+      (claude-repl--create-tag-branch repo "feature" "HEAD")
+      (should-not (claude-repl--git-branch-exists-p repo "feature-tag"))
+      (should-not (claude-repl--git-branch-exists-p repo "feature")))))
+
+(ert-deftest claude-repl-test-create-tag-branch-signals-on-failure ()
+  "create-tag-branch signals an error when git branch fails (e.g. branch exists)."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    ;; Pre-create the tag branch so the second `git branch' attempt fails.
+    (claude-repl-test--git-checkout repo "feature-tag" t)
+    (claude-repl-test--git-checkout repo "master")
+    (let ((claude-repl-worktree-tag-branch-suffix "-tag"))
+      (should-error (claude-repl--create-tag-branch repo "feature" "HEAD")))))
+
+;;;; ---- Tests: async-worktree-add tag-branch integration ----
+
+(ert-deftest claude-repl-test-async-worktree-add-creates-tag-branch-on-success ()
+  "After successful worktree add, the tag branch is created."
+  (let ((captured-tag-args nil))
+    (cl-letf (((symbol-function 'claude-repl--async-git)
+               ;; Simulate immediate success: invoke callback with ok=t.
+               (lambda (_label _root _args cb) (funcall cb t "ok")))
+              ((symbol-function 'claude-repl--worktree-add-callback)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'claude-repl--create-tag-branch)
+               (lambda (git-root branch-name base-commit)
+                 (setq captured-tag-args (list git-root branch-name base-commit)))))
+      (claude-repl--async-worktree-add
+       "/git-root" "my-branch" "/path" "HEAD"
+       nil "dirname" nil nil nil nil)
+      (should (equal captured-tag-args '("/git-root" "my-branch" "HEAD"))))))
+
+(ert-deftest claude-repl-test-async-worktree-add-skips-tag-branch-on-failure ()
+  "On worktree add failure, the tag branch is NOT created."
+  (let ((tag-called nil))
+    (cl-letf (((symbol-function 'claude-repl--async-git)
+               ;; Simulate failure: invoke callback with ok=nil.
+               (lambda (_label _root _args cb) (funcall cb nil "git error")))
+              ((symbol-function 'claude-repl--worktree-add-callback)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'claude-repl--create-tag-branch)
+               (lambda (&rest _args) (setq tag-called t))))
+      (claude-repl--async-worktree-add
+       "/git-root" "my-branch" "/path" "HEAD"
+       nil "dirname" nil nil nil nil)
+      (should-not tag-called))))
 
 ;;;; ---- Tests: workspace-merge default selection ----
 
