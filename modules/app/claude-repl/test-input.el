@@ -1490,8 +1490,8 @@ must not accumulate phantom entries that trap the user in slash mode."
           (claude-repl--command-prefix "PREFIX: "))
       (claude-repl--ws-put "ws1" :prefix-counter 0)
       ;; Empty string is not in exempt list and doesn't match numeral regex
-      ;; So it gets the prefix prepended
-      (should (equal (claude-repl--prepare-input "ws1" "") "PREFIX: ")))))
+      ;; So it gets the prefix prepended (with "\n\n" separator)
+      (should (equal (claude-repl--prepare-input "ws1" "") "PREFIX: \n\n")))))
 
 ;;; run-send-posthooks: multiple hooks matching same input
 

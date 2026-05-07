@@ -16,16 +16,37 @@ The prefix is sent on the first prompt and every Nth prompt thereafter."
   :group 'claude-repl)
 
 (defcustom claude-repl-command-prefix
-  (concat "\n\nALLOWED & ENCOURAGED: create new commits freely for atomic, well-scoped units of work — "
-          "do not ask first; ensure applicable tests run and pass before each commit. \n\nALLOWED: Git pushes "
+  (concat "\n"
+          "\n"
+          "ALLOWED & ENCOURAGED: create new commits freely for atomic, well-scoped units of work — "
+          "do not ask first; ensure applicable tests run and pass before each commit."
+          "\n"
+          "\n"
+          "ALLOWED: Git pushes "
           "are allowed when necessary and needed, but should not be done without a good reason "
           "(e.g., to provoke CICD while iterating on Action workflows, or as "
-          "part of PR creation process). Adding to GH merge queue is allowed when appropriate. \n\nNOT ALLOWED without my "
-          "EXPLICIT, per-use permission: other mutating git commands (rebase, pull, merge, reset, "
-          "checkout that discards work, force-push, branch deletion, github comments); installing "
-          "or uninstalling packages/tools; operating on files outside the current project. OTHER: "
-          "I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y "
-          "broken?' do not infer that I want a fix; just answer.")
+          "part of PR creation process). Adding to GH merge queue is allowed when appropriate."
+          "\n"
+          "\n"
+          "NOT ALLOWED without my EXPLICIT, per-use permission: "
+          "\n"
+          "* other mutating git commands (rebase, pull, merge, reset, checkout that discards work, force-push, branch deletion, github comments);"
+          "\n"
+          "* installing or uninstalling packages/tools;"
+          "\n"
+          "* operating on files outside the current project."
+          "\n"
+          "\n"
+          "OTHER: "
+          "* I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y broken?' do not infer that I want a fix; just answer."
+          "* Give very short, terse answers unless the user explicitly requests detailed answers -- the user "
+          "  does not have much time to respond to prompts, and needs them to be by default as short as is "
+          "  possible to convey the needed information. 1 sentence is best if information loss is reasonable, "
+          "  3-5 sentences is okay if necessary, and anything more needs strong justification (request for indepth analysis, "
+          "  enumeration of issues, etc)"
+          "* Focus only on the critical parts, and make heave use of enumerations/bullets/lists, and those enumerations should have only one "
+          "  sentence in them"
+          )
   "Safety instructions embedded in the metaprompt prefix.
 This text is wrapped in the `claude-repl--command-prefix' template at load time
 and periodically prepended to user input (see `claude-repl-prefix-period')."
@@ -33,12 +54,16 @@ and periodically prepended to user input (see `claude-repl-prefix-period')."
   :group 'claude-repl)
 
 (defcustom claude-repl-command-prefix-template
-  (concat "<<*start of metaprompt.\n\n"
+  (concat "<<*start of metaprompt*"
+          "\n"
+          "\n"
           "I will periodically prefix my prompts with this "
           "to remind you of our restrictions for freely making changes. "
           "Do not be alarmed, this is merely a periodic reminder*: "
           "%s"
-          "\n\n*metaprompt over - rest is actual user request that you should respond to directly*>>\n\n")
+          "\n"
+          "\n"
+          "*metaprompt over - rest is actual user request that you should respond to directly*>>")
   "Template wrapping the metaprompt prefix.
 Must contain a single %s placeholder for `claude-repl-command-prefix'."
   :type 'string
@@ -366,7 +391,7 @@ When FORCE-METAPROMPT is non-nil, always prepend (ignoring the counter)."
   (let ((counter (or (claude-repl--ws-get ws :prefix-counter) 0)))
     (claude-repl--log ws "prepare-input counter=%d period=%d" counter claude-repl-prefix-period)
     (if (claude-repl--should-prepend-metaprompt-p raw counter force-metaprompt)
-        (concat claude-repl--command-prefix raw)
+        (concat claude-repl--command-prefix "\n\n" raw)
       raw)))
 
 ;;; Send pipeline
