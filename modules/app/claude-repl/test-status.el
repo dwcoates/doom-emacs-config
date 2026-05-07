@@ -940,6 +940,24 @@ selected tab dims to the normal selected face like other states."
       (claude-repl--force-tab-bar-redraw)
       (should-not claude-repl--tabline-space-toggle))))
 
+(ert-deftest claude-repl-test-flash-tab-default-args-produce-exactly-two-pulses ()
+  "With default `claude-repl-flash-count', draining the chain yields exactly 2 ON pulses."
+  (claude-repl-test--with-clean-state
+    (let ((pending nil)
+          (on-count 0))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat fn &rest args)
+                   (setq pending (cons fn args))))
+                ((symbol-function 'claude-repl--force-tab-bar-redraw) #'ignore))
+        (claude-repl-flash-tab "ws1")
+        (when (claude-repl--ws-flashing-p "ws1") (cl-incf on-count))
+        (while pending
+          (let ((next pending))
+            (setq pending nil)
+            (apply (car next) (cdr next))
+            (when (claude-repl--ws-flashing-p "ws1") (cl-incf on-count))))
+        (should (= 2 on-count))))))
+
 (ert-deftest claude-repl-test-flash-tab-toggles-flashing-t-nil-alternately ()
   "Draining the chain drives :flashing alternately t, nil, ending in nil cleanup."
   (claude-repl-test--with-clean-state
