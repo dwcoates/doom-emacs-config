@@ -345,7 +345,12 @@ when that helper is unavailable (e.g. test envs without persp-mode)."
 Clears `:saved-tab-index' after restoring so each close-deprio cycle
 captures a fresh baseline.  No-op when no index is saved or when persp
 helpers are unavailable.  Index is clamped to the current names list
-length so a saved index past the new tail is handled gracefully."
+length so a saved index past the new tail is handled gracefully.
+
+Drives `claude-repl--force-tab-bar-redraw' (NOT `+dwc/refresh-tab-bar')
+so the trailing-space-toggle is flipped — the tab-bar's string-equality
+cache otherwise risks holding the pre-restore order if the new tabline
+string happens to compare equal under propertized-string semantics."
   (when-let ((idx (claude-repl--ws-get ws :saved-tab-index)))
     (when (and (fboundp 'persp-names-current-frame-fast-ordered)
                (fboundp 'persp-update-names-cache))
@@ -359,8 +364,8 @@ length so a saved index past the new tail is handled gracefully."
                           ws idx clamped)
         (persp-update-names-cache reordered)
         (claude-repl--ws-put ws :saved-tab-index nil)
-        (when (fboundp '+dwc/refresh-tab-bar)
-          (+dwc/refresh-tab-bar))))))
+        (when (fboundp 'claude-repl--force-tab-bar-redraw)
+          (claude-repl--force-tab-bar-redraw))))))
 
 (defun claude-repl--on-close (&optional ws)
   "Single audit point for user-initiated panel close.
@@ -655,20 +660,24 @@ echo-area message below."
   "Show panels for an already-running Claude session.
 Demotes indicators, refreshes display, and restores panel layout.
 Sets `:repl-state :active' now that panels are visible and the
-session is in use.  If a `:saved-tab-index' was recorded by an earlier
-close-deprio cycle, restores the workspace to that slot in the tab-bar
-so reopen reverses the deprio, then pulses the tab via
-`claude-repl-flash-tab' so the user can track its return to the
-prior slot — symmetric with the deprio-on-close flash."
+session is in use.
+
+Tab-bar bookkeeping happens FIRST (before any window manipulation) so
+the persp-names reorder is in place before `delete-other-windows' /
+`show-panels-and-focus' trigger redisplay — otherwise the intermediate
+paint can lock the pre-restore order into the tab-bar's cache.  After
+panels are up, pulses the tab via `claude-repl-flash-tab' so the user
+can track its return to the prior slot — symmetric with the
+deprio-on-close flash."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "show-existing-panels")
     (unless ws (error "claude-repl--show-existing-panels: no active workspace"))
     (claude-repl--ws-set-repl-state ws :active)
+    (claude-repl--restore-tab-index ws)
     (claude-repl--refresh-vterm)
     (delete-other-windows)
     (claude-repl--show-panels-and-focus)
     (claude-repl--update-hide-overlay)
-    (claude-repl--restore-tab-index ws)
     (when (fboundp 'claude-repl-flash-tab)
       (claude-repl-flash-tab ws))))
 
