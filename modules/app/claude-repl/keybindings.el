@@ -112,11 +112,15 @@ This lets Claude CLI handle paste natively, including images."
 
 ;; TODO: claude-repl-set-priority belongs in commands.el rather than
 ;; keybindings.el.  Do not move yet -- other agents are modifying that file.
-(defconst claude-repl--priority-clear-label "(clear)"
-  "Label shown in the priority completion list for the clear option.
+(defconst claude-repl--priority-remove-label "*remove*"
+  "Label shown in the priority completion list for the remove option.
 Maps to the empty-string priority value when chosen.  Used because
 the clear sentinel has no badge image and an empty string cannot
-carry a `display' text property in any usable way.")
+carry a `display' text property in any usable way.
+
+Only offered when the current workspace already has a priority — when
+there is nothing to remove, the entry is omitted from the candidate
+list to avoid presenting a no-op choice.")
 
 (defun claude-repl--decorate-priority-candidate (priority)
   "Return a completion candidate for PRIORITY whose `display' is the badge image.
@@ -140,20 +144,21 @@ collapses to nothing in that path — leaving the row appearing empty."
 (defun claude-repl--read-priority (prompt default)
   "Prompt for a priority level using PROMPT, defaulting to DEFAULT.
 Candidates are the entries in `claude-repl-priority-levels' rendered
-purely as their badge images (no accompanying text), plus a final
-`claude-repl--priority-clear-label' textual entry that returns the
-empty-string \"clear\" sentinel when chosen.  DEFAULT is mapped from
-the empty-string sentinel to the clear label so the default prompt
-selection stays consistent with what the user sees."
-  (let* ((candidates (append (mapcar #'claude-repl--decorate-priority-candidate
+purely as their badge images (no accompanying text).  When DEFAULT is
+a non-empty priority — meaning the workspace already has one set —
+the textual `claude-repl--priority-remove-label' entry is appended,
+mapping back to the empty-string \"clear\" sentinel when chosen.
+When DEFAULT is empty or nil, the remove entry is omitted because
+there is nothing to remove."
+  (let* ((has-current (and default (not (string-empty-p default))))
+         (candidates (append (mapcar #'claude-repl--decorate-priority-candidate
                                      claude-repl-priority-levels)
-                             (list claude-repl--priority-clear-label)))
-         (effective-default (if (and default (string-empty-p default))
-                                claude-repl--priority-clear-label
-                              default))
+                             (when has-current
+                               (list claude-repl--priority-remove-label))))
+         (effective-default (and has-current default))
          (raw (completing-read prompt candidates nil t nil nil effective-default))
          (chosen (substring-no-properties raw)))
-    (if (equal chosen claude-repl--priority-clear-label) "" chosen)))
+    (if (equal chosen claude-repl--priority-remove-label) "" chosen)))
 
 (defun claude-repl-set-priority (priority &optional ws)
   "Set or change the priority badge for workspace WS.

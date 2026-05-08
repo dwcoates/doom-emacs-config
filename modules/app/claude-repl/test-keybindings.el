@@ -1043,9 +1043,24 @@ is registered, so the prompt remains usable in image-less builds."
       (should (equal candidate "p1"))
       (should-not (get-text-property 0 'display candidate)))))
 
-(ert-deftest claude-repl-test-read-priority-presents-clear-label-not-empty ()
-  "read-priority offers the textual clear label as the last candidate,
-not the bare empty string (which cannot carry a `display' property)."
+(ert-deftest claude-repl-test-read-priority-presents-remove-label-when-current-priority ()
+  "read-priority appends the textual remove label as the last candidate
+when DEFAULT is a real priority — i.e. the workspace already has
+something to remove.  Bare empty string never appears in the
+collection (it can't carry a `display' property)."
+  (let ((captured-args nil))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest args)
+                 (setq captured-args args)
+                 "p2")))
+      (claude-repl--read-priority "Priority: " "p1")
+      (let ((collection (nth 1 captured-args)))
+        (should (member claude-repl--priority-remove-label collection))
+        (should-not (member "" collection))))))
+
+(ert-deftest claude-repl-test-read-priority-omits-remove-label-when-no-current-priority ()
+  "read-priority omits the remove label when DEFAULT is empty or nil —
+there is nothing to remove on a workspace that has no priority set."
   (let ((captured-args nil))
     (cl-letf (((symbol-function 'completing-read)
                (lambda (&rest args)
@@ -1053,26 +1068,48 @@ not the bare empty string (which cannot carry a `display' property)."
                  "p1")))
       (claude-repl--read-priority "Priority: " "")
       (let ((collection (nth 1 captured-args)))
-        (should (member claude-repl--priority-clear-label collection))
-        (should-not (member "" collection))))))
+        (should-not (member claude-repl--priority-remove-label collection))))))
 
-(ert-deftest claude-repl-test-read-priority-default-empty-becomes-clear-label ()
-  "When the caller passes \"\" as the default, read-priority swaps it for
-the clear label so the default selection stays consistent with the
-candidate list (which never contains the bare empty string)."
+(ert-deftest claude-repl-test-read-priority-omits-remove-label-when-default-nil ()
+  "read-priority omits the remove label when DEFAULT is nil — same
+reasoning as the empty-string case, just the alternate spelling
+callers may pass."
+  (let ((captured-args nil))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest args)
+                 (setq captured-args args)
+                 "p1")))
+      (claude-repl--read-priority "Priority: " nil)
+      (let ((collection (nth 1 captured-args)))
+        (should-not (member claude-repl--priority-remove-label collection))))))
+
+(ert-deftest claude-repl-test-read-priority-no-default-when-no-current-priority ()
+  "When DEFAULT is empty, no priority is preselected — the user is
+setting for the first time and there is no obvious default."
+  (let ((captured-default 'unset))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest args)
+                 (setq captured-default (nth 6 args))
+                 "p1")))
+      (claude-repl--read-priority "Priority: " "")
+      (should (null captured-default)))))
+
+(ert-deftest claude-repl-test-read-priority-default-passed-when-current-priority ()
+  "When DEFAULT is a non-empty priority, it is forwarded to
+completing-read so the existing priority is preselected."
   (let ((captured-default nil))
     (cl-letf (((symbol-function 'completing-read)
                (lambda (&rest args)
                  (setq captured-default (nth 6 args))
-                 claude-repl--priority-clear-label)))
-      (claude-repl--read-priority "Priority: " "")
-      (should (equal captured-default claude-repl--priority-clear-label)))))
+                 "p2")))
+      (claude-repl--read-priority "Priority: " "p1")
+      (should (equal captured-default "p1")))))
 
-(ert-deftest claude-repl-test-read-priority-clear-label-maps-to-empty ()
-  "Picking the clear label round-trips back to \"\" for the caller, so
+(ert-deftest claude-repl-test-read-priority-remove-label-maps-to-empty ()
+  "Picking the remove label round-trips back to \"\" for the caller, so
 downstream `string-empty-p' checks still detect the clear case."
   (cl-letf (((symbol-function 'completing-read)
-             (lambda (&rest _) claude-repl--priority-clear-label)))
+             (lambda (&rest _) claude-repl--priority-remove-label)))
     (should (equal (claude-repl--read-priority "Priority: " "p1") ""))))
 
 (ert-deftest claude-repl-test-read-priority-strips-text-properties ()
