@@ -2317,9 +2317,51 @@ Magit-status and dashboard removal are handled by finalize-worktree-workspace."
   (let ((call-order nil))
     (cl-letf (((symbol-function 'claude-repl--switch-to-workspace)
                (lambda (_ws) (push 'switch call-order)))
+              ((symbol-function 'claude-repl--flash-current-tab) #'ignore)
               ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
       (claude-repl--worktree-creation-switch-callback "/tmp/fake" "test-ws")
       (should (equal (reverse call-order) '(switch))))))
+
+(ert-deftest claude-repl-test-worktree-callback-flashes-destination-tab ()
+  "worktree-creation-switch-callback flashes the destination tab.
+Symmetric with the project-picker (`SPC p p') and reopen paths so every
+identity-based jump pulses uniformly."
+  (let ((flashed nil))
+    (cl-letf (((symbol-function 'claude-repl--switch-to-workspace) #'ignore)
+              ((symbol-function 'claude-repl--flash-current-tab)
+               (lambda () (setq flashed t)))
+              ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+      (claude-repl--worktree-creation-switch-callback "/tmp/fake" "test-ws")
+      (should flashed))))
+
+;;;; ---- Tests: claude-repl-jump-to-workspace ----
+
+(ert-deftest claude-repl-test-jump-to-workspace-delegates-to-switch ()
+  "claude-repl-jump-to-workspace forwards WS to the raw switch primitive."
+  (let ((switched-ws nil))
+    (cl-letf (((symbol-function 'claude-repl--switch-to-workspace)
+               (lambda (ws) (setq switched-ws ws)))
+              ((symbol-function 'claude-repl--flash-current-tab) #'ignore))
+      (claude-repl-jump-to-workspace "target-ws")
+      (should (equal switched-ws "target-ws")))))
+
+(ert-deftest claude-repl-test-jump-to-workspace-flashes-by-default ()
+  "Without NO-FLASH, the jumper pulses the destination tab — flash is inherent."
+  (let ((flashed nil))
+    (cl-letf (((symbol-function 'claude-repl--switch-to-workspace) #'ignore)
+              ((symbol-function 'claude-repl--flash-current-tab)
+               (lambda () (setq flashed t))))
+      (claude-repl-jump-to-workspace "target-ws")
+      (should flashed))))
+
+(ert-deftest claude-repl-test-jump-to-workspace-no-flash-suppresses-pulse ()
+  "Passing NO-FLASH non-nil skips the pulse — escape hatch for bulk callers."
+  (let ((flashed nil))
+    (cl-letf (((symbol-function 'claude-repl--switch-to-workspace) #'ignore)
+              ((symbol-function 'claude-repl--flash-current-tab)
+               (lambda () (setq flashed t))))
+      (claude-repl-jump-to-workspace "target-ws" t)
+      (should-not flashed))))
 
 (ert-deftest claude-repl-test-new-workspace-removes-dashboard ()
   "new-workspace calls remove-doom-dashboard after magit."

@@ -178,7 +178,10 @@ worktree is on master or if git fails."
   "Switch to workspace WS.
 Tries `+workspace-switch-to' first, then `+workspace/switch-to' on failure.
 Signals an error if both methods fail — downstream code assumes the switch
-succeeded, so silent failure would operate on the wrong workspace."
+succeeded, so silent failure would operate on the wrong workspace.
+
+This is the raw primitive — prefer `claude-repl-jump-to-workspace' for
+user-facing identity-based jumps so the destination tab flashes."
   (claude-repl--log ws "switch-to-workspace: ws=%s" ws)
   (condition-case err
       (progn
@@ -192,6 +195,16 @@ succeeded, so silent failure would operate on the wrong workspace."
        (error
         (error "claude-repl--switch-to-workspace: both switch methods failed for ws=%s — primary: %S, fallback: %S"
                ws err err2))))))
+
+(defun claude-repl-jump-to-workspace (ws &optional no-flash)
+  "Jump to workspace WS and pulse its tab via `claude-repl-flash-tab'.
+The flash is inherent — every identity-based jump that goes through this
+function draws the eye to the destination tab.  Pass NO-FLASH non-nil to
+suppress the pulse for bulk paths (e.g., snapshot restore) where a flash
+storm would be noise."
+  (claude-repl--switch-to-workspace ws)
+  (unless no-flash
+    (claude-repl--flash-current-tab)))
 
 (defun claude-repl--assert-clean-worktree (ws project-root)
   "Signal `user-error' if PROJECT-ROOT has uncommitted changes.
@@ -494,10 +507,14 @@ buffer list."
 (defun claude-repl--worktree-creation-switch-callback (path dirname)
   "Switch to the newly created worktree workspace.
 PATH is the worktree directory; DIRNAME is the workspace name.
-Magit-status is already opened by `finalize-worktree-workspace'."
+Magit-status is already opened by `finalize-worktree-workspace'.
+
+Routes through `claude-repl-jump-to-workspace' so the destination tab
+flashes — symmetric with the project-picker (`SPC p p') and reopen
+paths, so every identity-based jump pulses uniformly."
   (claude-repl--log dirname "worktree-creation-switch-callback: path=%s dirname=%s fboundp(+workspace-switch-to)=%s current-ws=%s target=%s"
                     path dirname (fboundp '+workspace-switch-to) (+workspace-current-name) dirname)
-  (claude-repl--switch-to-workspace dirname))
+  (claude-repl-jump-to-workspace dirname))
 
 (defconst claude-repl--worktree-base-commits
   '((head   . "HEAD")

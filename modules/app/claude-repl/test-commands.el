@@ -1091,6 +1091,31 @@ kill so the workspace can be re-opened with its identity intact."
         (delete-file snapshot-file)
         (delete-directory real-dir t)))))
 
+(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/does-not-flash ()
+  "load-workspace-snapshot does NOT pulse tabs during bulk restore.
+A flash storm during startup would be noise; the loader bypasses the
+inherent-flash jump path on purpose."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (dir-a (make-temp-file "claude-proj-a-" t))
+          (dir-b (make-temp-file "claude-proj-b-" t))
+          (flash-calls 0))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("ws-a" . ,dir-a)
+                                            ("ws-b" . ,dir-b)))
+            (cl-letf (((symbol-function '+dwc/switch-to-project) #'ignore)
+                      ((symbol-function 'claude-repl-flash-tab)
+                       (lambda (&rest _) (cl-incf flash-calls)))
+                      ((symbol-function 'claude-repl--flash-current-tab)
+                       (lambda () (cl-incf flash-calls))))
+              (claude-repl-load-workspace-snapshot)
+              (should (zerop flash-calls))))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)))))
+
 ;;;; ---- Tests: snapshot startup/quit wrappers ----
 
 (ert-deftest claude-repl-cmd-test-load-snapshot-on-startup/no-op-when-file-absent ()
