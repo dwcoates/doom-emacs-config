@@ -503,6 +503,13 @@ Reports comprehensive diagnostics."
       :desc "Switch to final workspace" "0" #'+workspace/switch-to-final)
 
 ;; SPC j -- Tell Claude to do a predefined thing
+
+;; Unbind any prior leaf bindings under the "j e" prefix so that a reload
+;; over a session that had `j e' bound directly to a command does not
+;; signal "Key sequence j e e starts with non-prefix key j e" when the
+;; (:prefix ("e" . "explain") ...) form below installs the sub-prefix.
+(map! :leader "j e" nil "j E" nil)
+
 (map! :leader
       (:prefix ("j" . "claude")
        :desc "Kill workspace"           "d" #'claude-repl-kill-workspace
