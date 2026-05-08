@@ -108,18 +108,25 @@
       (setq-local claude-repl--owning-workspace "ws1")
       (should (equal (claude-repl--prompt-summary-segment) "")))))
 
-(ert-deftest claude-repl-test-prompt-summary-segment-pending-shows-raw-and-label ()
-  "When pending, segment includes the raw prompt (truncated) and the pending label."
+(ert-deftest claude-repl-test-prompt-summary-segment-pending-shows-label-only ()
+  "Pending segment shows only the configured label — no raw prompt prefix."
   (claude-repl-test--with-clean-state
-    (let ((claude-repl-prompt-summary-pending-label "summarizing…")
+    (let ((claude-repl-prompt-summary-pending-label "prompt summarizing")
           (claude-repl-prompt-summary-max-length 60))
       (claude-repl--ws-put "ws1" :last-prompt-text "fix the auth bug")
       (claude-repl--ws-put "ws1" :last-prompt-summary-pending t)
       (with-temp-buffer
         (setq-local claude-repl--owning-workspace "ws1")
         (let ((seg (claude-repl--prompt-summary-segment)))
-          (should (string-match-p "fix the auth bug" seg))
-          (should (string-match-p "summarizing" seg)))))))
+          (should (string-match-p "prompt summarizing" seg))
+          (should-not (string-match-p "fix the auth bug" seg)))))))
+
+(ert-deftest claude-repl-test-prompt-summary-segment-empty-when-no-state ()
+  "Segment is empty (no fallback) when ws has neither summary nor pending."
+  (claude-repl-test--with-clean-state
+    (with-temp-buffer
+      (setq-local claude-repl--owning-workspace "ws1")
+      (should (equal (claude-repl--prompt-summary-segment) "")))))
 
 (ert-deftest claude-repl-test-prompt-summary-segment-resolved-shows-summary ()
   "When summary is set, segment contains the summary."

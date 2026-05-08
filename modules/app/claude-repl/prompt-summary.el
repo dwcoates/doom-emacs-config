@@ -58,7 +58,7 @@ First %s slot is the max-length integer, second is the raw prompt text."
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-prompt-summary-pending-label "summarizing…"
+(defcustom claude-repl-prompt-summary-pending-label "prompt summarizing"
   "Placeholder shown in the mode-line while the haiku call is in flight."
   :type 'string
   :group 'claude-repl)
@@ -76,8 +76,7 @@ state.  Returns the empty string when no prompt has been sent yet."
     (if (not ws)
         ""
       (let ((summary (claude-repl--ws-get ws :last-prompt-summary))
-            (pending (claude-repl--ws-get ws :last-prompt-summary-pending))
-            (raw     (claude-repl--ws-get ws :last-prompt-text)))
+            (pending (claude-repl--ws-get ws :last-prompt-summary-pending)))
         (cond
          ((and (stringp summary) (not (string-empty-p summary)))
           (concat "  "
@@ -85,13 +84,9 @@ state.  Returns the empty string when no prompt has been sent yet."
                               'face '(:foreground "deep sky blue" :weight normal))))
          (pending
           (concat "  "
-                  (propertize
-                   (concat (claude-repl--prompt-summary-truncate
-                            (or raw "") 'allow-empty)
-                           (when (and raw (not (string-empty-p (string-trim raw))))
-                             " ")
-                           claude-repl-prompt-summary-pending-label)
-                   'face '(:foreground "deep sky blue" :weight normal :slant italic))))
+                  (propertize claude-repl-prompt-summary-pending-label
+                              'face '(:foreground "deep sky blue"
+                                      :weight normal :slant italic))))
          (t ""))))))
 
 (defun claude-repl--prompt-summary-truncate (s &optional allow-empty)
