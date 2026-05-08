@@ -246,5 +246,46 @@ even if the user has switched perspectives by the time it resolves."
     (claude-repl--prompt-summary-redisplay ws)
     (claude-repl--prompt-summary-spawn ws raw)))
 
+;;;; Mode-line migration (for live buffers created before this file existed)
+
+(defconst claude-repl--prompt-summary-mode-line-spec
+  '(:eval (claude-repl--prompt-summary-segment))
+  "The trailing `:eval' mode-line segment that paints the summary.
+Captured as a constant so the migration helper can detect (via `equal')
+whether a buffer's mode-line already contains it.")
+
+(defun claude-repl--prompt-summary-attach-to-mode-line (buf)
+  "Append the prompt-summary segment to BUF's `mode-line-format' if missing.
+Idempotent — does nothing when the segment is already present, the
+buffer is dead, or the buffer's mode-line is not a list (other formats
+are left alone, since we don't know how to splice them safely)."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (when (and (listp mode-line-format)
+                 (not (member claude-repl--prompt-summary-mode-line-spec
+                              mode-line-format)))
+        (setq-local mode-line-format
+                    (append mode-line-format
+                            (list claude-repl--prompt-summary-mode-line-spec)))
+        (force-mode-line-update t)))))
+
+(defun claude-repl-prompt-summary-attach-all ()
+  "Attach the prompt-summary segment to every live workspace vterm buffer.
+Run automatically when this file loads so that reloading claude-repl
+upgrades pre-existing vterm buffers (whose `mode-line-format' was
+captured before this file existed).  Also exposed interactively for
+manual recovery."
+  (interactive)
+  (when (and (boundp 'claude-repl--workspaces)
+             (hash-table-p claude-repl--workspaces))
+    (maphash
+     (lambda (_ws plist)
+       (let ((buf (plist-get plist :vterm-buffer)))
+         (when (and buf (buffer-live-p buf))
+           (claude-repl--prompt-summary-attach-to-mode-line buf))))
+     claude-repl--workspaces)))
+
+(claude-repl-prompt-summary-attach-all)
+
 (provide 'claude-repl-prompt-summary)
 ;;; prompt-summary.el ends here

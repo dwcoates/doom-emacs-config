@@ -260,5 +260,62 @@ with the workspace and raw input."
           (claude-repl--do-send "ws1" "decorated-input" "raw-input"))
         (should (equal kickoff-args '("ws1" "raw-input")))))))
 
+;;;; ---- Tests: mode-line migration (attach-to-mode-line) ----
+
+(ert-deftest claude-repl-test-attach-to-mode-line-appends-when-missing ()
+  "attach-to-mode-line appends the :eval segment when not already present."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-attach-missing*"
+      (setq-local mode-line-format (list "BARE METAL: host"))
+      (claude-repl--prompt-summary-attach-to-mode-line (current-buffer))
+      (should (= (length mode-line-format) 2))
+      (should (equal (car (last mode-line-format))
+                     claude-repl--prompt-summary-mode-line-spec)))))
+
+(ert-deftest claude-repl-test-attach-to-mode-line-idempotent ()
+  "attach-to-mode-line does not double-append when called twice."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-attach-idempotent*"
+      (setq-local mode-line-format
+                  (list "BARE METAL: host"
+                        claude-repl--prompt-summary-mode-line-spec))
+      (claude-repl--prompt-summary-attach-to-mode-line (current-buffer))
+      (claude-repl--prompt-summary-attach-to-mode-line (current-buffer))
+      (should (= (length mode-line-format) 2)))))
+
+(ert-deftest claude-repl-test-attach-to-mode-line-skips-non-list ()
+  "attach-to-mode-line leaves string mode-line-formats alone."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-attach-string*"
+      (setq-local mode-line-format "literal-string")
+      (claude-repl--prompt-summary-attach-to-mode-line (current-buffer))
+      (should (equal mode-line-format "literal-string")))))
+
+(ert-deftest claude-repl-test-attach-all-walks-workspaces ()
+  "attach-all attaches the segment to every live workspace vterm buffer."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-attach-all-1*"
+      (setq-local mode-line-format (list "BARE METAL: a"))
+      (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+      (claude-repl-test--with-temp-buffer "*claude-panel-attach-all-2*"
+        (setq-local mode-line-format (list "DOCKER SANDBOX: img"))
+        (claude-repl--ws-put "ws2" :vterm-buffer (current-buffer))
+        (claude-repl-prompt-summary-attach-all)
+        (with-current-buffer "*claude-panel-attach-all-1*"
+          (should (member claude-repl--prompt-summary-mode-line-spec
+                          mode-line-format)))
+        (with-current-buffer "*claude-panel-attach-all-2*"
+          (should (member claude-repl--prompt-summary-mode-line-spec
+                          mode-line-format)))))))
+
+(ert-deftest claude-repl-test-attach-all-skips-dead-buffer ()
+  "attach-all tolerates dead vterm buffers in the workspace table."
+  (claude-repl-test--with-clean-state
+    (let ((dead-buf (generate-new-buffer "*claude-panel-attach-dead*")))
+      (kill-buffer dead-buf)
+      (claude-repl--ws-put "ws-dead" :vterm-buffer dead-buf)
+      ;; Should not signal.
+      (claude-repl-prompt-summary-attach-all))))
+
 (provide 'test-prompt-summary)
 ;;; test-prompt-summary.el ends here
