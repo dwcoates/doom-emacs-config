@@ -758,6 +758,16 @@ variables."
     (claude-repl--log ws "flash-tab ws=%s count=%d duration=%s" ws count duration)
     (claude-repl--flash-step ws 0 total-steps interval)))
 
+(defun claude-repl--flash-current-tab ()
+  "Pulse the current workspace's tab via `claude-repl-flash-tab'.
+Centralizes the post-jump flash so every identity-based workspace jump
+draws the eye to the destination tab uniformly.  No-op when
+`claude-repl-flash-tab' or `+workspace-current-name' is unbound — those
+come from optional layers that may not be loaded yet at startup."
+  (when (and (fboundp 'claude-repl-flash-tab)
+             (fboundp '+workspace-current-name))
+    (claude-repl-flash-tab (+workspace-current-name))))
+
 (defun claude-repl--render-tab (name spec label name-face img-str)
   "Render a tab string for workspace NAME from SPEC.
 SPEC is a plist with keys :bg :fg :bracket-fg :weight (see

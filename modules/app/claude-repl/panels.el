@@ -683,8 +683,7 @@ deprio-on-close flash."
     (delete-other-windows)
     (claude-repl--show-panels-and-focus)
     (claude-repl--update-hide-overlay)
-    (when (fboundp 'claude-repl-flash-tab)
-      (claude-repl-flash-tab ws))))
+    (claude-repl--flash-current-tab)))
 
 (defun claude-repl--show-hidden-panels ()
   "Restore hidden panels.  `show-existing-panels' writes :repl-state :active.

@@ -1070,6 +1070,25 @@ selected tab dims to the normal selected face like other states."
         ;; Steps 0..5 alternate t/nil; step 6 is the cleanup (nil).
         (should (equal '(t nil t nil t nil nil) (nreverse observed)))))))
 
+;;;; ---- Tests: flash-current-tab helper ----
+
+(ert-deftest claude-repl-test-flash-current-tab-pulses-current-workspace ()
+  "claude-repl--flash-current-tab calls flash-tab with `(+workspace-current-name)'."
+  (claude-repl-test--with-clean-state
+    (let ((flashed nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+                ((symbol-function 'claude-repl-flash-tab)
+                 (lambda (ws &rest _) (setq flashed ws))))
+        (claude-repl--flash-current-tab)
+        (should (equal flashed "current-ws"))))))
+
+(ert-deftest claude-repl-test-flash-current-tab-noop-when-flash-tab-unbound ()
+  "Helper is a no-op when `claude-repl-flash-tab' is unbound — guards startup race."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'fboundp)
+               (lambda (sym) (not (eq sym 'claude-repl-flash-tab)))))
+      (should-not (claude-repl--flash-current-tab)))))
+
 (ert-deftest claude-repl-test-render-tab-entry-flash-uses-flash-face ()
   "render-tab-entry paints with `claude-repl-tab-flash' when :flashing is set."
   (claude-repl-test--with-clean-state

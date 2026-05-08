@@ -700,6 +700,4 @@ as the close-deprio and reopen paths."
                                                  (projectile-relevant-known-projects)))))
     (+dwc/switch-to-project project)
     (claude-repl--hydrate-priority-from-state project)
-    (when (and (fboundp 'claude-repl-flash-tab)
-               (fboundp '+workspace-current-name))
-      (claude-repl-flash-tab (+workspace-current-name)))))
+    (claude-repl--flash-current-tab)))
