@@ -886,6 +886,29 @@ environments without notification tools (terminal-notifier or osascript)."
     (should-not (claude-repl--ws-get "ws1" :status))
     (should-not (claude-repl--ws-get "ws1" :priority))))
 
+(ert-deftest claude-repl-test-ws-del-logs-had-entry-true ()
+  "ws-del logs `had-entry=t' when the workspace was registered."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :status "ready")
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'claude-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (setq logged (apply #'format fmt args)))))
+        (claude-repl--ws-del "ws1")
+        (should (string-match-p "ws-del:" logged))
+        (should (string-match-p "had-entry=t" logged))))))
+
+(ert-deftest claude-repl-test-ws-del-logs-had-entry-nil ()
+  "ws-del logs `had-entry=nil' when the workspace was not registered."
+  (claude-repl-test--with-clean-state
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'claude-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (setq logged (apply #'format fmt args)))))
+        (claude-repl--ws-del "nonexistent")
+        (should (string-match-p "ws-del:" logged))
+        (should (string-match-p "had-entry=nil" logged))))))
+
 ;;;; ---- Tests: create-buffer ----
 
 (ert-deftest claude-repl-test-create-buffer-vterm-name ()

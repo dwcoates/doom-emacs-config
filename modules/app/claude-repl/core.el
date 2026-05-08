@@ -367,8 +367,13 @@ Internally uses plist-put (which returns a new list) threaded into puthash."
            claude-repl--workspaces))
 
 (defun claude-repl--ws-del (ws)
-  "Remove all state for workspace WS."
-  (remhash ws claude-repl--workspaces))
+  "Remove all state for workspace WS.
+Logs the deletion (and whether WS had a hash entry to remove) so nuke
+flows can be correlated with the precise moment per-workspace state
+disappears."
+  (let ((had-entry (not (null (gethash ws claude-repl--workspaces)))))
+    (claude-repl--log ws "ws-del: ws=%s had-entry=%s" ws (if had-entry "t" "nil"))
+    (remhash ws claude-repl--workspaces)))
 
 (defun claude-repl--active-inst (ws)
   "Return the active `claude-repl-instantiation' for workspace WS.

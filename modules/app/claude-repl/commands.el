@@ -401,7 +401,8 @@ errors partway through.  The persp kill is the very last step so all
 internal state is already cleaned up before the UI workspace
 disappears.  Callers can rely on the post-condition: after nuke
 returns \(or throws), WS is not in `claude-repl--workspaces'."
-  (claude-repl--log ws "nuke-one-workspace: ws=%s" ws)
+  (claude-repl--log ws "nuke-one-workspace: ENTRY ws=%s cache=%S"
+                    ws (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
   (let ((root (claude-repl--ws-get ws :project-dir)))
     (unwind-protect
         (progn
@@ -434,8 +435,11 @@ returns \(or throws), WS is not in `claude-repl--workspaces'."
       (condition-case err
           (when (and (bound-and-true-p persp-mode)
                      (persp-get-by-name ws))
-            (claude-repl--log ws "nuke-one-workspace: killing persp workspace")
-            (+workspace/kill ws))
+            (claude-repl--log ws "nuke-one-workspace: pre-persp-kill ws=%s cache=%S"
+                              ws persp-names-cache)
+            (+workspace/kill ws)
+            (claude-repl--log ws "nuke-one-workspace: post-persp-kill ws=%s in-cache=%s cache=%S"
+                              ws (if (member ws persp-names-cache) "t" "nil") persp-names-cache))
         (error (claude-repl--log ws "nuke-one-workspace: workspace-kill error: %S" err))))))
 
 (defun claude-repl-nuke-workspace ()

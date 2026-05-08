@@ -1086,6 +1086,55 @@ value and writes :repl-state :dead."
         (claude-repl-set-priority "p1")
         (should (equal reordered-ws "ws1"))))))
 
+(ert-deftest claude-repl-test-set-priority-logs-old-to-new-transition ()
+  "set-priority logs the old -> new priority transition."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :priority "p2")
+    (let ((logs nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'claude-repl--state-save) (lambda (_) nil))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority) (lambda (_) nil))
+                ((symbol-function 'force-mode-line-update) (lambda (&rest _) nil))
+                ((symbol-function 'message) (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logs))))
+        (claude-repl-set-priority "p1")
+        (should (cl-find-if (lambda (l)
+                              (and (string-match-p "set-priority:" l)
+                                   (string-match-p "p2 -> p1" l)))
+                            logs))))))
+
+(ert-deftest claude-repl-test-set-priority-logs-explicit-ws-flag ()
+  "set-priority logs ws-explicit=t when called with an explicit WS argument."
+  (claude-repl-test--with-clean-state
+    (let ((logs nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+                ((symbol-function 'claude-repl--state-save) (lambda (_) nil))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority) (lambda (_) nil))
+                ((symbol-function 'force-mode-line-update) (lambda (&rest _) nil))
+                ((symbol-function 'message) (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logs))))
+        (claude-repl-set-priority "p1" "other-ws")
+        (should (cl-find-if (lambda (l) (string-match-p "ws-explicit=t" l)) logs))))))
+
+(ert-deftest claude-repl-test-set-priority-logs-fallback-flag ()
+  "set-priority logs ws-explicit=nil when WS defaults to the current workspace."
+  (claude-repl-test--with-clean-state
+    (let ((logs nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+                ((symbol-function 'claude-repl--state-save) (lambda (_) nil))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority) (lambda (_) nil))
+                ((symbol-function 'force-mode-line-update) (lambda (&rest _) nil))
+                ((symbol-function 'message) (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logs))))
+        (claude-repl-set-priority "p1")
+        (should (cl-find-if (lambda (l) (string-match-p "ws-explicit=nil" l)) logs))))))
+
 (ert-deftest claude-repl-test-set-priority-changes-existing-priority ()
   "set-priority overwrites a previously set priority on the same workspace."
   (claude-repl-test--with-clean-state

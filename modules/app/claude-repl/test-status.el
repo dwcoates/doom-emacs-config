@@ -1569,6 +1569,51 @@ this clobbered :init with :dead.  The :init guard prevents that."
         (claude-repl--reorder-workspace-by-priority "missing-ws")
         (should-not captured)))))
 
+(ert-deftest claude-repl-test-reorder-priority-logs-bail-no-priority ()
+  "reorder-workspace-by-priority emits a BAIL/no-priority log line when ws has no :priority."
+  (claude-repl-test--with-clean-state
+    (let* ((persp-names-cache '("main" "ws-a" "new-ws"))
+           (logs nil))
+      (cl-letf (((symbol-function 'claude-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logs))))
+        (claude-repl--reorder-workspace-by-priority "new-ws")
+        (should (cl-find-if (lambda (l)
+                              (and (string-match-p "reorder-workspace-by-priority: BAIL" l)
+                                   (string-match-p "reason=no-priority" l)))
+                            logs))))))
+
+(ert-deftest claude-repl-test-reorder-priority-logs-bail-not-in-cache ()
+  "reorder-workspace-by-priority emits a BAIL/not-in-cache log line when ws is missing from the cache."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "missing-ws" :priority "p1")
+    (let* ((persp-names-cache '("main" "ws-a"))
+           (logs nil))
+      (cl-letf (((symbol-function 'claude-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logs))))
+        (claude-repl--reorder-workspace-by-priority "missing-ws")
+        (should (cl-find-if (lambda (l)
+                              (and (string-match-p "reorder-workspace-by-priority: BAIL" l)
+                                   (string-match-p "reason=not-in-cache" l)))
+                            logs))))))
+
+(ert-deftest claude-repl-test-reorder-priority-logs-apply-on-success ()
+  "reorder-workspace-by-priority emits an APPLY log line on the success path."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "new-p1" :priority "p1")
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "ws-a" "new-p1"))
+           (logs nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache) (lambda (_) nil))
+                ((symbol-function 'claude-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logs))))
+        (claude-repl--reorder-workspace-by-priority "new-p1")
+        (should (cl-find-if (lambda (l)
+                              (string-match-p "reorder-workspace-by-priority: APPLY" l))
+                            logs))))))
+
 (ert-deftest claude-repl-test-reorder-priority-p1-moves-before-unprioritized ()
   "A new p1 workspace is moved ahead of unprioritized workspaces."
   (claude-repl-test--with-clean-state

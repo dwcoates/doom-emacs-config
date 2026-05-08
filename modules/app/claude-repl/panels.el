@@ -301,8 +301,11 @@ Skips redirect if claude is the only window (fullscreen case)."
 
 (defun claude-repl--before-persp-deactivate (&rest _)
   "Save window state before perspective deactivation.
-Redirects away from Claude buffers and saves frame state."
-  (claude-repl--log (+workspace-current-name) "before-persp-deactivate: entry")
+Redirects away from Claude buffers and saves frame state.
+Logs `persp-names-cache' so cache mutations across persp lifecycle
+events (kill, switch, add) are traceable."
+  (claude-repl--log (+workspace-current-name) "before-persp-deactivate: entry cache=%S"
+                    (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
   (claude-repl--redirect-from-claude-before-save)
   (condition-case err
       (persp-frame-save-state)
@@ -310,8 +313,11 @@ Redirects away from Claude buffers and saves frame state."
            (claude-repl--log (+workspace-current-name) "before-persp-deactivate: persp-frame-save-state error: %S" err))))
 
 (defun claude-repl--after-persp-activated (&rest _)
-  "Handle perspective activation by scheduling a workspace switch."
-  (claude-repl--log (+workspace-current-name) "after-persp-activated: entry")
+  "Handle perspective activation by scheduling a workspace switch.
+Logs `persp-names-cache' so cache mutations across persp lifecycle
+events (kill, switch, add) are traceable."
+  (claude-repl--log (+workspace-current-name) "after-persp-activated: entry cache=%S"
+                    (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
   (run-at-time 0 nil #'claude-repl--on-workspace-switch))
 
 (when (modulep! :ui workspaces)

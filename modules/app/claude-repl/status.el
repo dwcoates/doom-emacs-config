@@ -92,10 +92,24 @@ existing workspace of equal-or-higher priority and before every
 lower-priority one, so a new entry never displaces an existing peer or
 higher-priority sibling.  No-op when WS has no `:priority', when the
 cache does not contain WS, or when persp-mode is not loaded — those
-fall back to the persp-mode default of appending at the end."
-  (when-let ((priority (claude-repl--ws-get ws :priority)))
-    (when (and (boundp 'persp-names-cache)
-               (member ws persp-names-cache))
+fall back to the persp-mode default of appending at the end.
+
+Each entry, every bail-out, and the post-mutation cache state are
+logged so the silent no-op paths are observable when reproducing
+ordering bugs."
+  (let ((priority (claude-repl--ws-get ws :priority))
+        (cache-snapshot (if (boundp 'persp-names-cache) persp-names-cache "(unbound)")))
+    (claude-repl--log ws "reorder-workspace-by-priority: ENTRY ws=%s priority=%s cache=%S"
+                      ws priority cache-snapshot)
+    (cond
+     ((null priority)
+      (claude-repl--log ws "reorder-workspace-by-priority: BAIL ws=%s reason=no-priority" ws))
+     ((not (boundp 'persp-names-cache))
+      (claude-repl--log ws "reorder-workspace-by-priority: BAIL ws=%s reason=cache-unbound" ws))
+     ((not (member ws persp-names-cache))
+      (claude-repl--log ws "reorder-workspace-by-priority: BAIL ws=%s reason=not-in-cache cache=%S"
+                        ws persp-names-cache))
+     (t
       (let* ((nil-name (and (boundp 'persp-nil-name) persp-nil-name))
              (rank (claude-repl--priority-rank priority))
              (without-ws (cl-remove ws persp-names-cache :test #'equal :count 1))
@@ -116,10 +130,12 @@ fall back to the persp-mode default of appending at the end."
              (new-cache (if (and nil-name (member nil-name persp-names-cache))
                             (cons nil-name new-visible)
                           new-visible)))
-        (claude-repl--log ws "reorder-workspace-by-priority: ws=%s priority=%s rank=%s position=%s"
-                          ws priority rank (or insert-at "end"))
-        (when (fboundp 'persp-update-names-cache)
-          (persp-update-names-cache new-cache))))))
+        (claude-repl--log ws "reorder-workspace-by-priority: APPLY ws=%s priority=%s rank=%s position=%s new-cache=%S"
+                          ws priority rank (or insert-at "end") new-cache)
+        (if (fboundp 'persp-update-names-cache)
+            (persp-update-names-cache new-cache)
+          (claude-repl--log ws "reorder-workspace-by-priority: SKIP-APPLY ws=%s reason=persp-update-names-cache-unbound"
+                            ws)))))))
 
 ;;; Workspace state accessors ------------------------------------------------
 
