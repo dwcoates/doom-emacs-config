@@ -20,6 +20,12 @@
 (defvar claude-repl--load-errors nil
   "List of (FILE . ERROR) pairs for sub-files that failed to load.")
 
+;; Reset the accumulator on every load — `defvar' only initializes once,
+;; so without this `M-x doom/reload' would re-report stale errors from a
+;; prior failed load even after the next load succeeded, masking actual
+;; status.
+(setq claude-repl--load-errors nil)
+
 (defmacro claude-repl--load-module (file)
   "Load FILE via `load!', recording any error for collective reporting."
   `(condition-case err
