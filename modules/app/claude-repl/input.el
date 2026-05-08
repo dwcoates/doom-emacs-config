@@ -542,7 +542,8 @@ permitted action — `:thinking' is the correct state."
     (claude-repl--send-input-to-vterm vterm-buf input on-settle)
     (when (eq (claude-repl--ws-claude-state ws) :permission)
       (claude-repl--mark-ws-thinking ws))
-    (claude-repl--run-send-posthooks ws raw)))
+    (claude-repl--run-send-posthooks ws raw)
+    (claude-repl--kickoff-prompt-summary ws raw)))
 
 (defun claude-repl--commit-input-buffer (ws input-buf raw &optional clear-p)
   "Record RAW input in history and optionally clear INPUT-BUF.

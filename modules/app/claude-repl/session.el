@@ -330,12 +330,16 @@ with everything the caller needs for logging and mode-line setup."
 
 (defun claude-repl--sandbox-mode-line (sandboxed-p docker-image)
   "Return a mode-line format list indicating the execution environment.
-SANDBOXED-P means Docker mode with DOCKER-IMAGE; otherwise bare metal."
+SANDBOXED-P means Docker mode with DOCKER-IMAGE; otherwise bare metal.
+Trailing `:eval' segment renders the last-prompt summary (see
+`claude-repl--prompt-summary-segment') and recomputes on every
+mode-line redisplay."
   (list (if sandboxed-p
             (propertize (format " DOCKER SANDBOX: %s" docker-image)
                         'face '(:foreground "green" :weight bold))
           (propertize (format " BARE METAL: %s" (system-name))
-                      'face '(:foreground "red" :weight bold)))))
+                      'face '(:foreground "red" :weight bold)))
+        '(:eval (claude-repl--prompt-summary-segment))))
 
 (defun claude-repl--log-session-start (ws start-info)
   "Log session startup details for workspace WS from START-INFO plist."
