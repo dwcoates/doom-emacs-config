@@ -523,15 +523,6 @@ Reports comprehensive diagnostics."
        :desc "Nuke ALL workspaces"      "X" #'claude-repl-nuke-all-workspaces
        :desc "Dump workspace state"     "p" #'claude-repl-debug/dump-workspace
        :desc "Toggle debug logging"    "D" #'claude-repl-debug/toggle-logging
-       (:prefix ("e" . "explain")
-        :desc "line/region/hunk (prompt)" "e" #'claude-repl-explain-prompt
-        :desc "line/region/hunk (canned)" "E" #'claude-repl-explain
-        (:prefix ("d" . "diff")
-         :desc "worktree"    "w" #'claude-repl-explain-diff-worktree
-         :desc "staged"      "s" #'claude-repl-explain-diff-staged
-         :desc "uncommitted" "u" #'claude-repl-explain-diff-uncommitted
-         :desc "HEAD"        "h" #'claude-repl-explain-diff-head
-         :desc "branch"      "b" #'claude-repl-explain-diff-branch))
        (:prefix ("R" . "update PR diff")
         :desc "worktree"    "w" #'claude-repl-update-pr-diff-worktree
         :desc "staged"      "s" #'claude-repl-update-pr-diff-staged
