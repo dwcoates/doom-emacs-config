@@ -1023,6 +1023,71 @@ value and writes :repl-state :dead."
       (claude-repl-debug/cancel-timers)
       (should (null claude-repl--timers)))))
 
+(ert-deftest claude-repl-test-priority-annotation-returns-image-spec ()
+  "priority-annotation returns a non-nil display string when an image is registered for the candidate."
+  (let ((claude-repl--priority-images '(("p1" . (image :type png :data "fake")))))
+    (let ((annotation (claude-repl--priority-annotation "p1")))
+      (should (stringp annotation))
+      (should (get-text-property
+               (1- (length annotation)) 'display annotation)))))
+
+(ert-deftest claude-repl-test-priority-annotation-nil-for-unknown ()
+  "priority-annotation returns nil for candidates with no registered image."
+  (let ((claude-repl--priority-images '(("p1" . (image :type png :data "fake")))))
+    (should-not (claude-repl--priority-annotation ""))
+    (should-not (claude-repl--priority-annotation "unknown"))))
+
+(ert-deftest claude-repl-test-read-priority-installs-annotation-function ()
+  "read-priority installs `claude-repl--priority-annotation' as the
+completing-read annotation-function via `completion-extra-properties'.
+Verifies the function visible to the completion UI is our annotator,
+not whatever the surrounding context happened to install."
+  (let ((captured-extra nil))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _)
+                 (setq captured-extra (copy-sequence completion-extra-properties))
+                 "p1")))
+      (claude-repl--read-priority "Priority: " "")
+      (should (eq (plist-get captured-extra :annotation-function)
+                  'claude-repl--priority-annotation)))))
+
+(ert-deftest claude-repl-test-read-priority-passes-default-and-candidates ()
+  "read-priority forwards DEFAULT to completing-read and offers all priority levels plus the empty clear sentinel."
+  (let ((captured-args nil))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest args)
+                 (setq captured-args args)
+                 "p2")))
+      (claude-repl--read-priority "Priority: " "p1")
+      (let ((collection (nth 1 captured-args))
+            (default (nth 6 captured-args)))
+        (should (equal default "p1"))
+        (should (member "" collection))
+        (dolist (p claude-repl-priority-levels)
+          (should (member p collection)))))))
+
+(ert-deftest claude-repl-test-set-priority-interactive-skips-ws-prompt ()
+  "Interactive set-priority should NOT prompt for a workspace; it must always
+target the current workspace.  Regression: an earlier iteration prompted
+for both ws and priority via two completing-read calls, which slowed the
+common case (`SPC j m p' on the focused ws).  This test mocks
+`completing-read' so any second invocation would be observable, then
+asserts only one happened."
+  (claude-repl-test--with-clean-state
+    (let ((completing-read-calls 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+                ((symbol-function 'claude-repl--state-save) (lambda (_) nil))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority) (lambda (_) nil))
+                ((symbol-function 'force-mode-line-update) (lambda (&rest _) nil))
+                ((symbol-function 'message) (lambda (&rest _) nil))
+                ((symbol-function 'completing-read)
+                 (lambda (&rest _)
+                   (cl-incf completing-read-calls)
+                   "p1")))
+        (call-interactively #'claude-repl-set-priority)
+        (should (= 1 completing-read-calls))
+        (should (equal (claude-repl--ws-get "current-ws" :priority) "p1"))))))
+
 (ert-deftest claude-repl-test-set-priority-persists-to-state ()
   "set-priority calls state-save so the badge survives restarts."
   (claude-repl-test--with-clean-state
