@@ -1025,13 +1025,15 @@ value and writes :repl-state :dead."
 
 (ert-deftest claude-repl-test-decorate-priority-candidate-uses-image-display ()
   "decorate-priority-candidate returns a string whose `display' property
-points at the badge image, so completing-read renders the glyph in
-place of the textual key."
-  (let ((claude-repl--priority-images '(("p1" . (image :type png :data "fake")))))
-    (let* ((candidate (claude-repl--decorate-priority-candidate "p1"))
-           (display (get-text-property 0 'display candidate)))
-      (should (equal candidate "p1"))
-      (should (stringp display)))))
+is the image spec itself (not a wrapper string), so completion
+frameworks render the glyph in place of the textual key."
+  (let* ((image-spec '(image :type png :data "fake"))
+         (claude-repl--priority-images `(("p1" . ,image-spec)))
+         (candidate (claude-repl--decorate-priority-candidate "p1"))
+         (display (get-text-property 0 'display candidate)))
+    (should (equal candidate "p1"))
+    (should (eq (car-safe display) 'image))
+    (should (eq display image-spec))))
 
 (ert-deftest claude-repl-test-decorate-priority-candidate-fallback-when-no-image ()
   "decorate-priority-candidate returns the input unchanged when no image

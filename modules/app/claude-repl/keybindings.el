@@ -124,11 +124,17 @@ The underlying string content remains PRIORITY, so completing-read's
 matcher and return value are unchanged — only the visual rendering in
 the minibuffer is replaced by the image.  When no image is registered
 for PRIORITY (e.g. running in a no-image build), returns PRIORITY
-unchanged so the prompt remains usable as plain text."
+unchanged so the prompt remains usable as plain text.
+
+The image spec is attached directly as the `display' value (rather
+than wrapped in a propertized space) because completion frameworks
+like vertico render candidates by inspecting the candidate's own
+text properties, and a nested `display' property on a wrapper string
+collapses to nothing in that path — leaving the row appearing empty."
   (let ((img (and (fboundp 'claude-repl--priority-image)
                   (claude-repl--priority-image priority))))
     (if img
-        (propertize priority 'display (propertize " " 'display img))
+        (propertize priority 'display img)
       priority)))
 
 (defun claude-repl--read-priority (prompt default)
