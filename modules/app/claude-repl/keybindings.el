@@ -112,25 +112,42 @@ This lets Claude CLI handle paste natively, including images."
 
 ;; TODO: claude-repl-set-priority belongs in commands.el rather than
 ;; keybindings.el.  Do not move yet -- other agents are modifying that file.
-(defun claude-repl--priority-annotation (cand)
-  "Annotation function for priority completions.
-Returns a string with the priority badge image padded to the right of
-CAND, or nil when CAND has no associated image (e.g. the empty
-\"clear\" sentinel)."
-  (when-let ((img (and (fboundp 'claude-repl--priority-image)
-                       (claude-repl--priority-image cand))))
-    (concat "  " (propertize " " 'display img))))
+(defconst claude-repl--priority-clear-label "(clear)"
+  "Label shown in the priority completion list for the clear option.
+Maps to the empty-string priority value when chosen.  Used because
+the clear sentinel has no badge image and an empty string cannot
+carry a `display' text property in any usable way.")
+
+(defun claude-repl--decorate-priority-candidate (priority)
+  "Return a completion candidate for PRIORITY whose `display' is the badge image.
+The underlying string content remains PRIORITY, so completing-read's
+matcher and return value are unchanged — only the visual rendering in
+the minibuffer is replaced by the image.  When no image is registered
+for PRIORITY (e.g. running in a no-image build), returns PRIORITY
+unchanged so the prompt remains usable as plain text."
+  (let ((img (and (fboundp 'claude-repl--priority-image)
+                  (claude-repl--priority-image priority))))
+    (if img
+        (propertize priority 'display (propertize " " 'display img))
+      priority)))
 
 (defun claude-repl--read-priority (prompt default)
   "Prompt for a priority level using PROMPT, defaulting to DEFAULT.
-Candidates are the entries in `claude-repl-priority-levels' plus
-\"\" for clear.  Each non-empty candidate is annotated with its
-priority badge image so the visual mapping is obvious in the
-minibuffer."
-  (let* ((candidates (append claude-repl-priority-levels '("")))
-         (completion-extra-properties
-          '(:annotation-function claude-repl--priority-annotation)))
-    (completing-read prompt candidates nil t nil nil default)))
+Candidates are the entries in `claude-repl-priority-levels' rendered
+purely as their badge images (no accompanying text), plus a final
+`claude-repl--priority-clear-label' textual entry that returns the
+empty-string \"clear\" sentinel when chosen.  DEFAULT is mapped from
+the empty-string sentinel to the clear label so the default prompt
+selection stays consistent with what the user sees."
+  (let* ((candidates (append (mapcar #'claude-repl--decorate-priority-candidate
+                                     claude-repl-priority-levels)
+                             (list claude-repl--priority-clear-label)))
+         (effective-default (if (and default (string-empty-p default))
+                                claude-repl--priority-clear-label
+                              default))
+         (raw (completing-read prompt candidates nil t nil nil effective-default))
+         (chosen (substring-no-properties raw)))
+    (if (equal chosen claude-repl--priority-clear-label) "" chosen)))
 
 (defun claude-repl-set-priority (priority &optional ws)
   "Set or change the priority badge for workspace WS.

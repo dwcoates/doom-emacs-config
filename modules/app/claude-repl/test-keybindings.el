@@ -1023,48 +1023,79 @@ value and writes :repl-state :dead."
       (claude-repl-debug/cancel-timers)
       (should (null claude-repl--timers)))))
 
-(ert-deftest claude-repl-test-priority-annotation-returns-image-spec ()
-  "priority-annotation returns a non-nil display string when an image is registered for the candidate."
+(ert-deftest claude-repl-test-decorate-priority-candidate-uses-image-display ()
+  "decorate-priority-candidate returns a string whose `display' property
+points at the badge image, so completing-read renders the glyph in
+place of the textual key."
   (let ((claude-repl--priority-images '(("p1" . (image :type png :data "fake")))))
-    (let ((annotation (claude-repl--priority-annotation "p1")))
-      (should (stringp annotation))
-      (should (get-text-property
-               (1- (length annotation)) 'display annotation)))))
+    (let* ((candidate (claude-repl--decorate-priority-candidate "p1"))
+           (display (get-text-property 0 'display candidate)))
+      (should (equal candidate "p1"))
+      (should (stringp display)))))
 
-(ert-deftest claude-repl-test-priority-annotation-nil-for-unknown ()
-  "priority-annotation returns nil for candidates with no registered image."
-  (let ((claude-repl--priority-images '(("p1" . (image :type png :data "fake")))))
-    (should-not (claude-repl--priority-annotation ""))
-    (should-not (claude-repl--priority-annotation "unknown"))))
+(ert-deftest claude-repl-test-decorate-priority-candidate-fallback-when-no-image ()
+  "decorate-priority-candidate returns the input unchanged when no image
+is registered, so the prompt remains usable in image-less builds."
+  (let ((claude-repl--priority-images nil))
+    (let ((candidate (claude-repl--decorate-priority-candidate "p1")))
+      (should (equal candidate "p1"))
+      (should-not (get-text-property 0 'display candidate)))))
 
-(ert-deftest claude-repl-test-read-priority-installs-annotation-function ()
-  "read-priority installs `claude-repl--priority-annotation' as the
-completing-read annotation-function via `completion-extra-properties'.
-Verifies the function visible to the completion UI is our annotator,
-not whatever the surrounding context happened to install."
-  (let ((captured-extra nil))
-    (cl-letf (((symbol-function 'completing-read)
-               (lambda (&rest _)
-                 (setq captured-extra (copy-sequence completion-extra-properties))
-                 "p1")))
-      (claude-repl--read-priority "Priority: " "")
-      (should (eq (plist-get captured-extra :annotation-function)
-                  'claude-repl--priority-annotation)))))
-
-(ert-deftest claude-repl-test-read-priority-passes-default-and-candidates ()
-  "read-priority forwards DEFAULT to completing-read and offers all priority levels plus the empty clear sentinel."
+(ert-deftest claude-repl-test-read-priority-presents-clear-label-not-empty ()
+  "read-priority offers the textual clear label as the last candidate,
+not the bare empty string (which cannot carry a `display' property)."
   (let ((captured-args nil))
     (cl-letf (((symbol-function 'completing-read)
                (lambda (&rest args)
                  (setq captured-args args)
-                 "p2")))
-      (claude-repl--read-priority "Priority: " "p1")
-      (let ((collection (nth 1 captured-args))
-            (default (nth 6 captured-args)))
-        (should (equal default "p1"))
-        (should (member "" collection))
-        (dolist (p claude-repl-priority-levels)
-          (should (member p collection)))))))
+                 "p1")))
+      (claude-repl--read-priority "Priority: " "")
+      (let ((collection (nth 1 captured-args)))
+        (should (member claude-repl--priority-clear-label collection))
+        (should-not (member "" collection))))))
+
+(ert-deftest claude-repl-test-read-priority-default-empty-becomes-clear-label ()
+  "When the caller passes \"\" as the default, read-priority swaps it for
+the clear label so the default selection stays consistent with the
+candidate list (which never contains the bare empty string)."
+  (let ((captured-default nil))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest args)
+                 (setq captured-default (nth 6 args))
+                 claude-repl--priority-clear-label)))
+      (claude-repl--read-priority "Priority: " "")
+      (should (equal captured-default claude-repl--priority-clear-label)))))
+
+(ert-deftest claude-repl-test-read-priority-clear-label-maps-to-empty ()
+  "Picking the clear label round-trips back to \"\" for the caller, so
+downstream `string-empty-p' checks still detect the clear case."
+  (cl-letf (((symbol-function 'completing-read)
+             (lambda (&rest _) claude-repl--priority-clear-label)))
+    (should (equal (claude-repl--read-priority "Priority: " "p1") ""))))
+
+(ert-deftest claude-repl-test-read-priority-strips-text-properties ()
+  "read-priority's return value is a plain string with no text properties
+so callers don't accidentally persist image-display metadata into the
+workspace plist."
+  (let ((decorated (propertize "p1" 'display "fake-image")))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) decorated)))
+      (let ((result (claude-repl--read-priority "Priority: " "")))
+        (should (equal result "p1"))
+        (should-not (text-properties-at 0 result))))))
+
+(ert-deftest claude-repl-test-read-priority-includes-all-priority-levels ()
+  "read-priority offers every entry in `claude-repl-priority-levels' as
+a candidate, with their original string content preserved (the image
+is added via `display' property, not via key substitution)."
+  (let ((captured-collection nil))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest args)
+                 (setq captured-collection (nth 1 args))
+                 "p1")))
+      (claude-repl--read-priority "Priority: " "")
+      (dolist (p claude-repl-priority-levels)
+        (should (cl-find p captured-collection :test #'equal))))))
 
 (ert-deftest claude-repl-test-set-priority-interactive-skips-ws-prompt ()
   "Interactive set-priority should NOT prompt for a workspace; it must always
