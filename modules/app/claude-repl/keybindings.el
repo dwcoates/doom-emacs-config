@@ -508,7 +508,12 @@ Reports comprehensive diagnostics."
 ;; over a session that had `j e' bound directly to a command does not
 ;; signal "Key sequence j e e starts with non-prefix key j e" when the
 ;; (:prefix ("e" . "explain") ...) form below installs the sub-prefix.
-(map! :leader "j e" nil "j E" nil)
+;; `map! :leader "j e" nil' is a no-op (it does not remove the existing
+;; leaf binding); use `define-key' directly so this works in pure Emacs
+;; with no general.el / Doom prerequisites.
+(when (boundp 'doom-leader-map)
+  (define-key doom-leader-map (kbd "j e") nil)
+  (define-key doom-leader-map (kbd "j E") nil))
 
 (map! :leader
       (:prefix ("j" . "claude")
