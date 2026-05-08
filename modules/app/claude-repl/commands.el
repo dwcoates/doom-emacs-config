@@ -380,29 +380,38 @@ before the prompt is sent."
   (interactive)
   (claude-repl-create-or-update-pr '(no-self-certified)))
 
-(defun claude-repl--nuke-one-workspace (ws)
+(cl-defun claude-repl--nuke-one-workspace (ws &key (purge-state t))
   "Tear down a single claude-repl workspace WS without prompting.
 Kills any in-flight git-diff process, tears down the vterm session
-and buffers, removes WS from `claude-repl--workspaces', purges the
-per-project state file (see `claude-repl--state-purge'), kills every
+and buffers, removes WS from `claude-repl--workspaces', kills every
 remaining buffer (and attached process) that belongs to the persp via
 `claude-repl--kill-workspace-buffers', and finally kills the persp
-workspace via `+workspace/kill'.  Designed to be reusable from both
-`claude-repl-nuke-workspace' (one-shot) and
-`claude-repl-nuke-all-workspaces' (loop).
+workspace via `+workspace/kill'.  Designed to be reusable from
+`claude-repl-nuke-workspace' (one-shot),
+`claude-repl-nuke-all-workspaces' (loop), and
+`claude-repl-kill-workspace' (no state purge).
+
+When PURGE-STATE is non-nil (the default — used by the nuke paths),
+the per-project state file is also unlinked via
+`claude-repl--state-purge'.  Pass :purge-state nil to keep the file so
+priority and per-environment session-id survive — used by
+`claude-repl-kill-workspace', which is intended to free in-memory
+resources without losing persisted workspace identity.
 
 The `:project-dir' is captured up front because `kill-session' runs
 `teardown-session-state' which nils out buffer refs — the path would
 be unreachable by the time we unlink the state files.
 
-The hashmap removal (`ws-del') and state-file purge run inside an
-`unwind-protect' cleanup so they always happen, even when kill-session
-errors partway through.  The persp kill is the very last step so all
-internal state is already cleaned up before the UI workspace
-disappears.  Callers can rely on the post-condition: after nuke
-returns \(or throws), WS is not in `claude-repl--workspaces'."
-  (claude-repl--log ws "nuke-one-workspace: ENTRY ws=%s cache=%S"
-                    ws (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
+The hashmap removal (`ws-del') and (when applicable) state-file purge
+run inside an `unwind-protect' cleanup so they always happen, even
+when kill-session errors partway through.  The persp kill is the very
+last step so all internal state is already cleaned up before the UI
+workspace disappears.  Callers can rely on the post-condition: after
+the call returns \(or throws), WS is not in
+`claude-repl--workspaces'."
+  (claude-repl--log ws "nuke-one-workspace: ENTRY ws=%s purge-state=%s cache=%S"
+                    ws purge-state
+                    (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
   (let ((root (claude-repl--ws-get ws :project-dir)))
     (unwind-protect
         (progn
@@ -415,12 +424,13 @@ returns \(or throws), WS is not in `claude-repl--workspaces'."
           (condition-case err
               (claude-repl--kill-session ws)
             (error (claude-repl--log ws "nuke-one-workspace: kill-session error: %S" err))))
-      ;; Cleanup: always remove the hashmap entry and purge persisted state,
-      ;; regardless of any error in the steps above.
+      ;; Cleanup: always remove the hashmap entry (and, for nukes, purge
+      ;; persisted state), regardless of any error in the steps above.
       (condition-case err
           (claude-repl--ws-del ws)
         (error (claude-repl--log ws "nuke-one-workspace: ws-del error: %S" err)))
-      (claude-repl--state-purge root)
+      (when purge-state
+        (claude-repl--state-purge root))
       ;; Kill every remaining buffer (and attached process) that belongs to
       ;; the persp before tearing down the persp itself.  `kill-session'
       ;; only handles the vterm/input panels it tracks in the hashmap;
@@ -472,6 +482,28 @@ Prompts once with the count before proceeding."
       (claude-repl--nuke-one-workspace ws))
     (force-mode-line-update t)
     (message "Nuked %d workspace(s)" count)))
+
+(defun claude-repl-kill-workspace ()
+  "Kill a claude-repl workspace without destroying its persisted state.
+Same teardown as `claude-repl-nuke-workspace' — kills the Claude
+process, vterm/input buffers, every other buffer attached to the
+persp, removes the workspace from `claude-repl--workspaces', and
+kills the persp itself — but leaves the on-disk
+`.claude-repl-state' untouched so priority and per-environment
+session-id survive.  Use this when you want to free in-memory
+resources but expect to re-open the workspace later and resume the
+same Claude session.
+
+Prompts to select from workspaces registered in
+`claude-repl--workspaces', defaulting to the current workspace
+when registered."
+  (interactive)
+  (let ((ws (claude-repl--read-known-workspace "Kill workspace: ")))
+    (unless (y-or-n-p (format "Kill workspace '%s'? This kills processes and buffers but preserves priority/session-id on disk. " ws))
+      (user-error "Aborted"))
+    (claude-repl--nuke-one-workspace ws :purge-state nil)
+    (force-mode-line-update t)
+    (message "Killed workspace: %s" ws)))
 
 (defun claude-repl-copy-reference ()
   "Copy the current file and line reference to the clipboard.

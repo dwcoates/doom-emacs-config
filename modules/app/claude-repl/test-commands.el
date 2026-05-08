@@ -916,6 +916,103 @@ Reversing the order would make the buffer sweep a no-op because
         (ignore-errors (claude-repl-nuke-all-workspaces))
         (should (string-match-p "ALL 2" seen-prompt))))))
 
+;;;; ---- claude-repl-kill-workspace ----
+
+(ert-deftest claude-repl-cmd-test-kill-workspace/no-workspaces ()
+  "kill-workspace signals user-error when hashmap is empty."
+  (claude-repl-test--with-clean-state
+    (should-error (claude-repl-kill-workspace) :type 'user-error)))
+
+(ert-deftest claude-repl-cmd-test-kill-workspace/aborts-on-deny ()
+  "kill-workspace does nothing when user answers no."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _coll &rest _) "doomed"))
+              ((symbol-function 'y-or-n-p) (lambda (_prompt) nil)))
+      (should-error (claude-repl-kill-workspace) :type 'user-error)
+      (should (gethash "doomed" claude-repl--workspaces)))))
+
+(ert-deftest claude-repl-cmd-test-kill-workspace/kills-session-and-removes-hashmap ()
+  "kill-workspace kills session, kills persp workspace, and removes hashmap entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
+    (claude-repl--ws-put "doomed" :status :done)
+    (let ((session-killed nil)
+          (persp-killed nil)
+          (persp-mode t))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "doomed"))
+                ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                ((symbol-function 'claude-repl--kill-session)
+                 (lambda (ws) (setq session-killed ws)))
+                ((symbol-function '+workspace-current-name) (lambda () "other-ws"))
+                ((symbol-function 'persp-get-by-name) (lambda (_n) t))
+                ((symbol-function '+workspace/kill)
+                 (lambda (ws) (setq persp-killed ws)))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-kill-workspace)
+        (should (equal session-killed "doomed"))
+        (should (equal persp-killed "doomed"))
+        (should-not (gethash "doomed" claude-repl--workspaces))))))
+
+(ert-deftest claude-repl-cmd-test-kill-workspace/preserves-state-file ()
+  "kill-workspace must NOT unlink the .claude-repl-state file.
+This is the whole point of the kill (vs nuke) split: priority and
+per-environment session-id live in that file and need to survive a
+kill so the workspace can be re-opened with its identity intact."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "claude-kill-" t)))
+      (unwind-protect
+          (let ((state-file (expand-file-name ".claude-repl-state" tmpdir)))
+            (with-temp-file state-file (insert "(:session-id \"keep-me\")"))
+            (claude-repl--ws-put "doomed" :project-dir tmpdir)
+            (cl-letf (((symbol-function 'completing-read)
+                       (lambda (_prompt _coll &rest _) "doomed"))
+                      ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                      ((symbol-function 'claude-repl--kill-session) #'ignore)
+                      ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
+                      ((symbol-function 'force-mode-line-update) #'ignore))
+              (claude-repl-kill-workspace)
+              (should (file-exists-p state-file))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-cmd-test-kill-workspace/kills-workspace-buffers ()
+  "kill-workspace invokes kill-workspace-buffers so every persp buffer is torn down."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
+    (let ((kwb-arg nil))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "doomed"))
+                ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                ((symbol-function 'claude-repl--kill-session) #'ignore)
+                ((symbol-function 'claude-repl--kill-workspace-buffers)
+                 (lambda (ws) (setq kwb-arg ws)))
+                ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-kill-workspace)
+        (should (equal kwb-arg "doomed"))))))
+
+(ert-deftest claude-repl-cmd-test-kill-workspace/kills-git-proc ()
+  "kill-workspace kills an in-flight git-diff process."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
+    (let ((proc-deleted nil)
+          (fake-proc (start-process "fake" nil "true")))
+      (claude-repl--ws-put "doomed" :git-proc fake-proc)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "doomed"))
+                ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                ((symbol-function 'claude-repl--kill-session) #'ignore)
+                ((symbol-function '+workspace-current-name) (lambda () "other"))
+                ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
+                ((symbol-function 'force-mode-line-update) #'ignore)
+                ((symbol-function 'process-live-p) (lambda (_p) t))
+                ((symbol-function 'delete-process)
+                 (lambda (p) (setq proc-deleted p))))
+        (claude-repl-kill-workspace)
+        (should proc-deleted)))))
+
 ;;;; ---- Tests: workspace snapshot save/load ----
 
 (ert-deftest claude-repl-cmd-test-save-workspace-snapshot/writes-entries ()
