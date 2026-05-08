@@ -110,9 +110,8 @@ This lets Claude CLI handle paste natively, including images."
           (vterm-send-key "v" nil nil t)))
     (user-error "No live Claude session — paste not forwarded")))
 
-;; TODO: claude-repl-set-priority has no keybinding anywhere; it belongs in
-;; commands.el rather than keybindings.el.  Do not move yet -- other agents are
-;; modifying that file.
+;; TODO: claude-repl-set-priority belongs in commands.el rather than
+;; keybindings.el.  Do not move yet -- other agents are modifying that file.
 (defun claude-repl-set-priority (priority &optional ws)
   "Set or change the priority badge for workspace WS.
 WS defaults to the current workspace.  PRIORITY is one of the strings
@@ -475,6 +474,8 @@ Reports comprehensive diagnostics."
        (:prefix ("s" "Send predefined input to Claude")
         :desc "create PR (no --self-certified)" "p" #'claude-repl-create-or-update-pr-no-self-certified
         :desc "create PR"                       "P" #'claude-repl-create-or-update-pr)
+       (:prefix ("m" . "modify workspace")
+        :desc "Set/change priority" "p" #'claude-repl-set-priority)
        (:prefix ("t" . "tests")
         (:prefix ("r" . "run")
          (:prefix ("t" . "tests")
