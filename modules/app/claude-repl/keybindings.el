@@ -503,18 +503,6 @@ Reports comprehensive diagnostics."
       :desc "Switch to final workspace" "0" #'+workspace/switch-to-final)
 
 ;; SPC j -- Tell Claude to do a predefined thing
-
-;; Unbind any prior leaf bindings under the "j e" prefix so that a reload
-;; over a session that had `j e' bound directly to a command does not
-;; signal "Key sequence j e e starts with non-prefix key j e" when the
-;; (:prefix ("e" . "explain") ...) form below installs the sub-prefix.
-;; `map! :leader "j e" nil' is a no-op (it does not remove the existing
-;; leaf binding); use `define-key' directly so this works in pure Emacs
-;; with no general.el / Doom prerequisites.
-(when (boundp 'doom-leader-map)
-  (define-key doom-leader-map (kbd "j e") nil)
-  (define-key doom-leader-map (kbd "j E") nil))
-
 (map! :leader
       (:prefix ("j" . "claude")
        :desc "Kill workspace"           "d" #'claude-repl-kill-workspace
@@ -523,6 +511,15 @@ Reports comprehensive diagnostics."
        :desc "Nuke ALL workspaces"      "X" #'claude-repl-nuke-all-workspaces
        :desc "Dump workspace state"     "p" #'claude-repl-debug/dump-workspace
        :desc "Toggle debug logging"    "D" #'claude-repl-debug/toggle-logging
+       (:prefix ("e" . "explain")
+        :desc "line/region/hunk (prompt)" "e" #'claude-repl-explain-prompt
+        :desc "line/region/hunk (canned)" "E" #'claude-repl-explain
+        (:prefix ("d" . "diff")
+         :desc "worktree"    "w" #'claude-repl-explain-diff-worktree
+         :desc "staged"      "s" #'claude-repl-explain-diff-staged
+         :desc "uncommitted" "u" #'claude-repl-explain-diff-uncommitted
+         :desc "HEAD"        "h" #'claude-repl-explain-diff-head
+         :desc "branch"      "b" #'claude-repl-explain-diff-branch))
        (:prefix ("R" . "update PR diff")
         :desc "worktree"    "w" #'claude-repl-update-pr-diff-worktree
         :desc "staged"      "s" #'claude-repl-update-pr-diff-staged
