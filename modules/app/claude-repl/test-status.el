@@ -424,6 +424,98 @@ The ❓ glyph in the bracket (not the name background) signals permission."
           (should (eq (get-text-property pos 'face result)
                       '+workspace-tab-selected-face)))))))
 
+;;;; ---- Tests: ws-bracket-state ignores panel visibility ----
+
+(ert-deftest claude-repl-test-bracket-state-thinking-panels-closed ()
+  "ws-bracket-state returns :thinking even when panels are closed."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :thinking)
+    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
+               (lambda (_ws) nil)))
+      (should (eq :thinking (claude-repl--ws-bracket-state "ws1"))))))
+
+(ert-deftest claude-repl-test-bracket-state-nil-when-no-state ()
+  "ws-bracket-state returns nil when WS has no claude/repl state."
+  (claude-repl-test--with-clean-state
+    (should-not (claude-repl--ws-bracket-state "untouched"))))
+
+;;;; ---- Tests: tab-spec-bracket-only ----
+
+(ert-deftest claude-repl-test-tab-spec-bracket-only-unselected-thinking ()
+  "Bracket-only spec for :thinking unselected: bg/fg unspecified, bracket gets thinking-red."
+  (let ((spec (claude-repl--tab-spec-bracket-only :thinking nil)))
+    (should (eq 'unspecified (plist-get spec :bg)))
+    (should (eq 'unspecified (plist-get spec :fg)))
+    (should (equal claude-repl--color-thinking-red (plist-get spec :bracket-bg)))
+    (should (equal claude-repl--color-default-bracket (plist-get spec :bracket-fg)))))
+
+(ert-deftest claude-repl-test-tab-spec-bracket-only-selected-thinking ()
+  "Bracket-only spec for :thinking selected pulls bracket-bg from selected row."
+  (let ((spec (claude-repl--tab-spec-bracket-only :thinking t)))
+    (should (eq 'unspecified (plist-get spec :bg)))
+    (should (eq 'unspecified (plist-get spec :fg)))
+    (should (equal claude-repl--color-thinking-red (plist-get spec :bracket-bg)))))
+
+;;;; ---- Tests: tabline renders bracket-only spec when panels closed ----
+
+(ert-deftest claude-repl-test-tabline-panels-closed-name-uses-default-face ()
+  "Panels closed for :thinking — name region should use the default workspace face."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "bg-ws" :thinking)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+              ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) nil)))
+      (let* ((result (claude-repl--tabline-advice '("current-ws" "bg-ws")))
+             (pos (string-match "bg-ws" result)))
+        (should pos)
+        (should (eq (get-text-property pos 'face result) '+workspace-tab-face))))))
+
+(ert-deftest claude-repl-test-tabline-panels-closed-bracket-keeps-state-color ()
+  "Panels closed for :thinking — [N] bracket should keep the thinking-red background."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "bg-ws" :thinking)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+              ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) nil)))
+      (let* ((result (claude-repl--tabline-advice '("current-ws" "bg-ws")))
+             (bracket-pos (string-match "\\[2\\]" result))
+             (bracket-face (and bracket-pos (get-text-property bracket-pos 'face result))))
+        (should bracket-pos)
+        (should (equal claude-repl--color-thinking-red
+                       (plist-get bracket-face :background)))))))
+
+(ert-deftest claude-repl-test-tabline-panels-closed-bracket-label-is-plain ()
+  "Panels closed for :permission — bracket label should be the plain index, not 'N❓'."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "bg-ws" :permission)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+              ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) nil)))
+      (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
+        (should (string-match-p "\\[2\\]" result))
+        (should-not (string-match-p "2❓" result))))))
+
+(ert-deftest claude-repl-test-tabline-panels-closed-permission-bracket-stays-green ()
+  "Panels closed for :permission — bracket bg should be the done-green."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "bg-ws" :permission)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+              ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) nil)))
+      (let* ((result (claude-repl--tabline-advice '("current-ws" "bg-ws")))
+             (bracket-pos (string-match "\\[2\\]" result))
+             (bracket-face (and bracket-pos (get-text-property bracket-pos 'face result))))
+        (should bracket-pos)
+        (should (equal claude-repl--color-done-green
+                       (plist-get bracket-face :background)))))))
+
+(ert-deftest claude-repl-test-tabline-panels-closed-no-state-leaves-bracket-uncolored ()
+  "No claude-state on a workspace — bracket bg stays unspecified even with panels closed."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+              ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) nil)))
+      (let* ((result (claude-repl--tabline-advice '("current-ws" "bg-ws")))
+             (bracket-pos (string-match "\\[2\\]" result))
+             (bracket-face (and bracket-pos (get-text-property bracket-pos 'face result))))
+        (should bracket-pos)
+        (should (eq 'unspecified (plist-get bracket-face :background)))))))
+
 ;;;; ---- Tests: ws-state edge cases ----
 
 (ert-deftest claude-repl-test-ws-state-untouched-workspace ()

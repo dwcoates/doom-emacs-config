@@ -618,6 +618,23 @@ Keys in the returned plist: :bg :fg :bracket-fg :bracket-bg :weight."
     (or (plist-get row key)
         (plist-get claude-repl--tab-default key))))
 
+(defun claude-repl--tab-spec-bracket-only (state selected)
+  "Return appearance spec applying STATE's color to the [N] bracket only.
+Pulls bracket-bg/bracket-fg/weight from STATE's palette row (per
+SELECTED) and leaves :bg/:fg unspecified so the separator and name
+region inherit defaults.  Used for workspaces whose Claude panels
+have been dismissed: the bracket retains the state's color so the
+workspace's claude-state stays visible while the rest of the tab
+falls back to the default appearance."
+  (let* ((full (claude-repl--tab-spec state selected))
+         (bracket-bg (or (plist-get full :bracket-bg)
+                         (plist-get full :bg))))
+    `(:bg unspecified
+      :fg unspecified
+      :bracket-bg ,bracket-bg
+      :bracket-fg ,(plist-get full :bracket-fg)
+      :weight ,(or (plist-get full :weight) claude-repl--tab-weight))))
+
 ;; --- defface forms referencing the named constants --- ;;
 ;; Each `:unselected' palette row has the same colors these forms read,
 ;; by construction.  Kept as explicit defface calls so Doom users can
@@ -834,13 +851,18 @@ Rule:
 Reads `:claude-state' as the source of truth for tab color when the
 panels are visible.  When the composed state is non-nil AND no Claude
 panel is present in WS's live-or-saved window layout, returns nil
-regardless of state — this suppresses ALL tab coloring (including
-:thinking, :permission, :done, :idle, :stop-failed, :dead) for
-workspaces whose panels the user has dismissed, leaving only the plain
-numeric index.  `:claude-state' is preserved on the plist so the
+regardless of state — this suppresses full-tab coloring (state-colored
+name and label badges like ❓/❌/⚠) for workspaces whose panels the
+user has dismissed.  `:claude-state' is preserved on the plist so the
 original color reappears the next time the user reopens panels.  The
 nil-state shortcut avoids calling `claude-repl--ws-claude-open-p' on
-workspaces that have no state to suppress in the first place."
+workspaces that have no state to suppress in the first place.
+
+NOTE: this function answers the question \"what state should drive the
+full tab appearance?\".  The orthogonal question \"what state should
+color the [N] bracket alone?\" is answered by
+`claude-repl--ws-bracket-state', which ignores panel visibility so the
+bracket keeps its color when panels are closed."
   (let ((state (claude-repl--composed-state (claude-repl--ws-claude-state ws)
                                             (claude-repl--ws-repl-state ws)
                                             ws)))
@@ -848,25 +870,44 @@ workspaces that have no state to suppress in the first place."
         nil
       state)))
 
+(defun claude-repl--ws-bracket-state (ws)
+  "Return WS's underlying composed state for [N]-bracket coloring.
+Unlike `claude-repl--ws-display-state', this does NOT suppress when
+panels are closed: the bracket should retain the state's color even
+for workspaces whose Claude panels have been dismissed, so the
+claude-state remains visible at a glance."
+  (claude-repl--composed-state (claude-repl--ws-claude-state ws)
+                               (claude-repl--ws-repl-state ws)
+                               ws))
+
 (defun claude-repl--render-tab-entry (name current-name index)
   "Render a single tab entry for workspace NAME.
 CURRENT-NAME is the active workspace name.  INDEX is the 1-based
-tab position.  The display state is composed from the two per-axis
-keys via `claude-repl--ws-display-state'; the appearance spec is
-resolved via `claude-repl--tab-spec'.  When the workspace's `:flashing'
-flag is set (see `claude-repl-flash-tab'), the spec and name face are
-overridden to a uniform white pulse so the tab stands out."
-  (let* ((selected (equal current-name name))
-         (flashing (claude-repl--ws-flashing-p name))
-         (state    (claude-repl--ws-display-state name))
-         (spec     (if flashing
-                       (claude-repl--flash-spec)
-                     (claude-repl--tab-spec state selected)))
-         (label    (claude-repl--tab-label state index))
-         (face     (if flashing
-                       'claude-repl-tab-flash
-                     (claude-repl--tab-face state selected)))
-         (img-str  (claude-repl--tab-priority-image-str name)))
+tab position.  The display state (from `claude-repl--ws-display-state')
+drives the label and name face.  The appearance spec is resolved via
+`claude-repl--tab-spec' when display-state is non-nil; when display-state
+is nil but `claude-repl--ws-bracket-state' returns a state (i.e., panels
+dismissed for a workspace that still has claude-state), the spec is
+built via `claude-repl--tab-spec-bracket-only' so only the [N] bracket
+keeps the state's color.  When the workspace's `:flashing' flag is set
+\(see `claude-repl-flash-tab'\), the spec and name face are overridden
+to a uniform pulse so the tab stands out."
+  (let* ((selected      (equal current-name name))
+         (flashing      (claude-repl--ws-flashing-p name))
+         (display-state (claude-repl--ws-display-state name))
+         (bracket-state (and (null display-state)
+                             (claude-repl--ws-bracket-state name)))
+         (spec          (cond
+                         (flashing      (claude-repl--flash-spec))
+                         (bracket-state (claude-repl--tab-spec-bracket-only
+                                         bracket-state selected))
+                         (t             (claude-repl--tab-spec
+                                         display-state selected))))
+         (label         (claude-repl--tab-label display-state index))
+         (face          (if flashing
+                            'claude-repl-tab-flash
+                          (claude-repl--tab-face display-state selected)))
+         (img-str       (claude-repl--tab-priority-image-str name)))
     (claude-repl--render-tab name spec label face img-str)))
 
 (cl-defun claude-repl--tabline-advice (&optional (names nil names-supplied-p))
