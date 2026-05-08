@@ -52,7 +52,7 @@ tokens."
   :group 'claude-repl)
 
 (defcustom claude-repl-prompt-summary-prompt-format
-  "Summarize the following user prompt as a brief, descriptive title in under %d characters. Output ONLY the title — no quotes, no preamble like \"Title:\", no trailing punctuation, no markdown. Just the bare title text on a single line.\n\nPROMPT:\n%s"
+  "You are writing a one-line reminder a user will glance at after a long context switch — its job is to refresh their memory about what they last asked. Capture both the MOTIVATION (the goal or why) and the CONTENT (what specifically they asked for) as concisely as possible, in under %d characters. No more than a single sentence. Output ONLY the reminder text — no quotes, no preamble like \"Title:\", no trailing punctuation, no markdown. Single line.\n\nPROMPT:\n%s"
   "Format string used to wrap the raw prompt before sending to the model.
 First %s slot is the max-length integer, second is the raw prompt text."
   :type 'string
