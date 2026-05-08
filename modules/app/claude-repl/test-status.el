@@ -1598,6 +1598,29 @@ this clobbered :init with :dead.  The :init guard prevents that."
                                    (string-match-p "reason=not-in-cache" l)))
                             logs))))))
 
+(ert-deftest claude-repl-test-reorder-priority-preserves-cache-string-identity ()
+  "After reorder, the WS slot in `persp-names-cache' is `eq' to the
+canonical string already in the cache, NOT to the (potentially fresh)
+WS argument.  Regression for the persp-kill failure where `cl-delete'
+with default `:test #'eql' could not match a content-equal but
+identity-distinct string injected by `claude-repl-set-priority' from
+`completing-read'.  See status.el for the full explanation."
+  (claude-repl-test--with-clean-state
+    (let* ((canonical (copy-sequence "new-p1"))
+           (fresh (copy-sequence "new-p1"))
+           (persp-nil-name "main")
+           (persp-names-cache (list "main" "ws-a" canonical))
+           (captured nil))
+      (should-not (eq canonical fresh))
+      (claude-repl--ws-put fresh :priority "p1")
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (claude-repl--reorder-workspace-by-priority fresh)
+        (let ((injected (car (member "new-p1" captured))))
+          (should injected)
+          (should (eq injected canonical))
+          (should-not (eq injected fresh)))))))
+
 (ert-deftest claude-repl-test-reorder-priority-logs-apply-on-success ()
   "reorder-workspace-by-priority emits an APPLY log line on the success path."
   (claude-repl-test--with-clean-state

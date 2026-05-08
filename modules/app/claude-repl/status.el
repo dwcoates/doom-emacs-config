@@ -110,9 +110,22 @@ ordering bugs."
       (claude-repl--log ws "reorder-workspace-by-priority: BAIL ws=%s reason=not-in-cache cache=%S"
                         ws persp-names-cache))
      (t
+      ;; Use the canonical string already in persp-names-cache as the
+      ;; identity we splice in.  persp-mode's `persp-remove-from-menu' calls
+      ;; `(cl-delete name cache :count 1)' with the default `:test #'eql' —
+      ;; for strings, eql is identity comparison.  If we substitute a fresh
+      ;; string here (e.g. one returned by `completing-read' in
+      ;; `claude-repl-set-priority'), the cache ends up holding a different
+      ;; object than the persp's stored name, and `persp-kill' silently
+      ;; fails to remove the workspace from the cache later.  The result
+      ;; is a tab-bar entry that survives nuke and re-duplicates on
+      ;; subsequent recreations.  Recovering the canonical string via
+      ;; `(car (member ws cache))' (which uses `equal') keeps identity
+      ;; aligned with the persp internal name.
       (let* ((nil-name (and (boundp 'persp-nil-name) persp-nil-name))
              (rank (claude-repl--priority-rank priority))
-             (without-ws (cl-remove ws persp-names-cache :test #'equal :count 1))
+             (canonical-ws (car (member ws persp-names-cache)))
+             (without-ws (cl-remove canonical-ws persp-names-cache :test #'eq :count 1))
              (visible (if nil-name
                           (cl-remove nil-name without-ws :test #'equal :count 1)
                         without-ws))
@@ -124,14 +137,15 @@ ordering bugs."
                          visible))
              (new-visible (if insert-at
                               (append (cl-subseq visible 0 insert-at)
-                                      (list ws)
+                                      (list canonical-ws)
                                       (cl-subseq visible insert-at))
-                            (append visible (list ws))))
+                            (append visible (list canonical-ws))))
              (new-cache (if (and nil-name (member nil-name persp-names-cache))
                             (cons nil-name new-visible)
                           new-visible)))
-        (claude-repl--log ws "reorder-workspace-by-priority: APPLY ws=%s priority=%s rank=%s position=%s new-cache=%S"
-                          ws priority rank (or insert-at "end") new-cache)
+        (claude-repl--log ws "reorder-workspace-by-priority: APPLY ws=%s canonical-eq-input=%s priority=%s rank=%s position=%s new-cache=%S"
+                          ws (if (eq canonical-ws ws) "t" "nil")
+                          priority rank (or insert-at "end") new-cache)
         (if (fboundp 'persp-update-names-cache)
             (persp-update-names-cache new-cache)
           (claude-repl--log ws "reorder-workspace-by-priority: SKIP-APPLY ws=%s reason=persp-update-names-cache-unbound"
