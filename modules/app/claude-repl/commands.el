@@ -561,14 +561,16 @@ Without region: copies file:line."
 
 ;;;; Workspace snapshot save/load
 
-(defcustom claude-repl-workspace-snapshot-file
+;; defconst (not defcustom) so reload always re-evaluates the path —
+;; defcustom would leave a stale path bound from before this var
+;; existed at this default.  Users wanting a custom path can `setq'
+;; after load.
+(defconst claude-repl-workspace-snapshot-file
   (expand-file-name "workspaces.el" "~/.claude/emacs/")
   "Path to the file where the workspace roster snapshot is persisted.
-Defaults to `~/.claude/emacs/workspaces.el' (symmetric with per-project
+Lives at `~/.claude/emacs/workspaces.el' (symmetric with per-project
 `<root>/.claude/emacs/state.el' and `history.el').  Auto-created on
-first save."
-  :type 'file
-  :group 'claude-repl)
+first save.")
 
 (defconst claude-repl--legacy-workspace-snapshot-file
   (expand-file-name ".workspace-snapshot.el"

@@ -8,24 +8,24 @@
   "List of per-workspace environment keys.
 Each workspace has one `claude-repl-instantiation' struct per environment.")
 
-(defcustom claude-repl-emacs-data-subdir ".claude/emacs"
+;; These are defconsts (not defcustoms) so they update on every load — a
+;; defcustom does NOT reset already-bound values, which leaves a running
+;; Emacs writing to stale paths after a path-rename refactor.  They're
+;; layout conventions, not user-tuning knobs; users wanting custom paths
+;; can `setq' after load.
+
+(defconst claude-repl-emacs-data-subdir ".claude/emacs"
   "Per-project subdirectory (relative to project root) for claude-repl data.
 Files inside use plain (non-hidden) names since the parent directory
-is already hidden via `.claude/'.  Auto-created on first write."
-  :type 'string
-  :group 'claude-repl)
+is already hidden via `.claude/'.  Auto-created on first write.")
 
-(defcustom claude-repl-history-filename "history.el"
+(defconst claude-repl-history-filename "history.el"
   "Name of the per-project input history file (under
-`claude-repl-emacs-data-subdir')."
-  :type 'string
-  :group 'claude-repl)
+`claude-repl-emacs-data-subdir').")
 
-(defcustom claude-repl-state-filename "state.el"
+(defconst claude-repl-state-filename "state.el"
   "Name of the per-project session state file (under
-`claude-repl-emacs-data-subdir')."
-  :type 'string
-  :group 'claude-repl)
+`claude-repl-emacs-data-subdir').")
 
 (defconst claude-repl--legacy-history-filename ".claude-repl-history"
   "Pre-relocation history filename at project root.
