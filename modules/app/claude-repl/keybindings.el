@@ -182,7 +182,10 @@ WS defaults to the current workspace.  PRIORITY is one of the strings
 in `claude-repl-priority-levels', or \"\" to clear.  Persists through
 `claude-repl--state-save' so the badge survives restarts, reorders the
 workspace in the tab-bar by its new priority, and forces a mode-line
-repaint so the glyph updates immediately.
+repaint so the glyph updates immediately.  Pulses the workspace's tab
+via `claude-repl-flash-tab' so the user can spot the slot whose
+priority just shifted (matches the `SPC p p' / worktree-jump flash
+semantic).
 
 Interactively, always targets the current workspace and prompts only
 for the priority (defaulting to the workspace's current priority, if
@@ -209,6 +212,8 @@ image so the visual mapping between key and glyph is obvious."
     (claude-repl--state-save ws)
     (claude-repl--reorder-workspace-by-priority ws)
     (force-mode-line-update t)
+    (when (fboundp 'claude-repl-flash-tab)
+      (claude-repl-flash-tab ws))
     (message "Workspace '%s' priority: %s" ws (if (string-empty-p priority) "cleared" priority))))
 
 ;; SPC b R -- revert buffer from disk then eval as Elisp (fast config reload)

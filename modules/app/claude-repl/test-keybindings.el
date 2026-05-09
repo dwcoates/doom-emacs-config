@@ -1239,6 +1239,35 @@ asserts only one happened."
         (claude-repl-set-priority "p1")
         (should (equal reordered-ws "ws1"))))))
 
+(ert-deftest claude-repl-test-set-priority-flashes-target-ws ()
+  "set-priority pulses the target workspace's tab via flash-tab so the
+user can spot the slot whose priority just shifted."
+  (claude-repl-test--with-clean-state
+    (let (flashed-ws)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'claude-repl--state-save) (lambda (_) nil))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority) (lambda (_) nil))
+                ((symbol-function 'force-mode-line-update) (lambda (&rest _) nil))
+                ((symbol-function 'message) (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl-flash-tab)
+                 (lambda (ws &rest _) (setq flashed-ws ws))))
+        (claude-repl-set-priority "p1")
+        (should (equal flashed-ws "ws1"))))))
+
+(ert-deftest claude-repl-test-set-priority-flashes-explicit-ws ()
+  "set-priority flashes the explicit WS target, not the current workspace."
+  (claude-repl-test--with-clean-state
+    (let (flashed-ws)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+                ((symbol-function 'claude-repl--state-save) (lambda (_) nil))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority) (lambda (_) nil))
+                ((symbol-function 'force-mode-line-update) (lambda (&rest _) nil))
+                ((symbol-function 'message) (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl-flash-tab)
+                 (lambda (ws &rest _) (setq flashed-ws ws))))
+        (claude-repl-set-priority "p2" "other-ws")
+        (should (equal flashed-ws "other-ws"))))))
+
 (ert-deftest claude-repl-test-set-priority-logs-old-to-new-transition ()
   "set-priority logs the old -> new priority transition."
   (claude-repl-test--with-clean-state
