@@ -562,14 +562,33 @@ Without region: copies file:line."
 ;;;; Workspace snapshot save/load
 
 (defcustom claude-repl-workspace-snapshot-file
+  (expand-file-name "workspaces.el" "~/.claude/emacs/")
+  "Path to the file where the workspace roster snapshot is persisted.
+Defaults to `~/.claude/emacs/workspaces.el' (symmetric with per-project
+`<root>/.claude/emacs/state.el' and `history.el').  Auto-created on
+first save."
+  :type 'file
+  :group 'claude-repl)
+
+(defconst claude-repl--legacy-workspace-snapshot-file
   (expand-file-name ".workspace-snapshot.el"
                     (file-name-directory (or load-file-name
                                               buffer-file-name
                                               default-directory)))
-  "Path to the hidden file where workspace snapshots are persisted.
-Defaults to `.workspace-snapshot.el' in the claude-repl module directory."
-  :type 'file
-  :group 'claude-repl)
+  "Pre-relocation snapshot file at the claude-repl module directory.
+Read-only fallback: when the configured file does not exist but this
+legacy file does, the loader uses it.  The writer never targets this
+path — first save naturally migrates to the configured location.")
+
+(defun claude-repl--workspace-snapshot-file-for-read ()
+  "Return the path to read the workspace snapshot from.
+Prefers `claude-repl-workspace-snapshot-file'; falls back to the
+legacy module-dir path when only the legacy file exists."
+  (cond ((file-exists-p claude-repl-workspace-snapshot-file)
+         claude-repl-workspace-snapshot-file)
+        ((file-exists-p claude-repl--legacy-workspace-snapshot-file)
+         claude-repl--legacy-workspace-snapshot-file)
+        (t claude-repl-workspace-snapshot-file)))
 
 (defvar claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal)
   "Workspaces restored from snapshot but not yet visited this session.
@@ -628,6 +647,9 @@ roster-piggyback save doesn't spam the echo area on every state mutation."
       (maphash (lambda (ws plist) (push (cons ws plist) snapshot))
                entries)
       (claude-repl--log nil "write-sexp-file: file=%s" claude-repl-workspace-snapshot-file)
+      (let ((dir (file-name-directory claude-repl-workspace-snapshot-file)))
+        (when (and dir (not (file-directory-p dir)))
+          (make-directory dir t)))
       (with-temp-file claude-repl-workspace-snapshot-file
         (insert "(")
         (let ((first t))
@@ -642,18 +664,20 @@ roster-piggyback save doesn't spam the echo area on every state mutation."
 
 (defun claude-repl-load-workspace-snapshot ()
   "Load workspaces from `claude-repl-workspace-snapshot-file'.
-For each entry, calls `+dwc/switch-to-project' to create/switch to the
-project's persp workspace and hydrates `:project-dir' and `:priority'
-into `claude-repl--workspaces' so the tabline paints the priority badge
+Reads `claude-repl-workspace-snapshot-file' (or its legacy module-dir
+fallback if the configured file is absent), then for each entry calls
+`+dwc/switch-to-project' to create/switch to the project's persp
+workspace and hydrates `:project-dir' and `:priority' into
+`claude-repl--workspaces' so the tabline paints the priority badge
 immediately.  Entries whose directory no longer exists are skipped.
 Claude itself is not started here — the workspace is added to
 `claude-repl--pending-snapshot-workspaces' and the lazy-start hook on
 `persp-activated-functions' starts claude on first visit."
   (interactive)
-  (let ((snapshot (claude-repl--read-sexp-file-if-exists
-                   claude-repl-workspace-snapshot-file)))
+  (let* ((file (claude-repl--workspace-snapshot-file-for-read))
+         (snapshot (claude-repl--read-sexp-file-if-exists file)))
     (unless snapshot
-      (user-error "No workspace snapshot at %s" claude-repl-workspace-snapshot-file))
+      (user-error "No workspace snapshot at %s" file))
     (let ((loaded 0)
           (skipped 0)
           (claude-repl--loading-snapshot-p t))
@@ -695,9 +719,10 @@ autoloads are in place."
 
 (defun claude-repl--load-workspace-snapshot-on-startup ()
   "Restore the workspace snapshot silently at Emacs startup.
-Does nothing if the snapshot file is absent.  Errors are logged but
-never propagated, so a corrupt snapshot can't block startup."
-  (when (file-exists-p claude-repl-workspace-snapshot-file)
+Does nothing if neither the configured snapshot file nor its legacy
+fallback is present.  Errors are logged but never propagated, so a
+corrupt snapshot can't block startup."
+  (when (file-exists-p (claude-repl--workspace-snapshot-file-for-read))
     (condition-case err
         (claude-repl-load-workspace-snapshot)
       (error (message "[claude-repl] snapshot load failed: %S" err)))))

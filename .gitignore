@@ -4,6 +4,7 @@
 .claude-code-emacs-mcp.log
 .claude-repl-history
 .claude-repl-state
+.workspace-snapshot.el
 .projectile
 **/.DS_Store
 .agents-sandbox/mounts

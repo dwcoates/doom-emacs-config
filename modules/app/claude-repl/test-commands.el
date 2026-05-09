@@ -1153,6 +1153,37 @@ inherent-flash jump path on purpose."
               (should t)))
         (delete-file snapshot-file)))))
 
+;;;; ---- Tests: workspace snapshot path resolver ----
+
+(ert-deftest claude-repl-cmd-test-workspace-snapshot-file-for-read-prefers-configured ()
+  "workspace-snapshot-file-for-read returns the configured path when it exists."
+  (let ((snapshot-file (make-temp-file "claude-snap-cur-")))
+    (unwind-protect
+        (let ((claude-repl-workspace-snapshot-file snapshot-file))
+          (should (equal (claude-repl--workspace-snapshot-file-for-read)
+                         snapshot-file)))
+      (delete-file snapshot-file))))
+
+(ert-deftest claude-repl-cmd-test-workspace-snapshot-file-for-read-falls-back-to-legacy ()
+  "workspace-snapshot-file-for-read falls back to the legacy module-dir
+path when the configured file is absent but the legacy file exists."
+  (let* ((legacy (make-temp-file "claude-snap-legacy-"))
+         (configured "/nonexistent/claude-snap.el"))
+    (unwind-protect
+        (let ((claude-repl-workspace-snapshot-file configured)
+              (claude-repl--legacy-workspace-snapshot-file legacy))
+          (should (equal (claude-repl--workspace-snapshot-file-for-read) legacy)))
+      (delete-file legacy))))
+
+(ert-deftest claude-repl-cmd-test-workspace-snapshot-file-for-read-defaults-to-configured ()
+  "When neither the configured nor the legacy file exists, the resolver
+returns the configured path so callers get a reasonable default
+(e.g. for `unless (file-exists-p ...)' guards on startup)."
+  (let ((claude-repl-workspace-snapshot-file "/nonexistent/configured.el")
+        (claude-repl--legacy-workspace-snapshot-file "/nonexistent/legacy.el"))
+    (should (equal (claude-repl--workspace-snapshot-file-for-read)
+                   "/nonexistent/configured.el"))))
+
 ;;;; ---- Tests: snapshot entry normalizer ----
 
 (ert-deftest claude-repl-cmd-test-snapshot-entry-normalize/legacy-shape ()
