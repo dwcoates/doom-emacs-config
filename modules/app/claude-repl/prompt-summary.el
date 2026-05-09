@@ -52,7 +52,33 @@ tokens."
   :group 'claude-repl)
 
 (defcustom claude-repl-prompt-summary-prompt-format
-  "You are writing a one-line reminder a user will glance at after a long context switch — its job is to refresh their memory about what they last asked. Capture both the MOTIVATION (the goal or why) and the CONTENT (what specifically they asked for) as concisely as possible, in under %d characters. No more than a single sentence. Output ONLY the reminder text — no quotes, no preamble like \"Title:\", no trailing punctuation, no markdown. Single line.\n\nPROMPT:\n%s"
+  (concat
+   "You are writing a one-line reminder a user will glance at after a"
+   " long context switch — its job is to refresh their memory about what"
+   " they last asked. Capture both the MOTIVATION (the goal or why) and"
+   " the CONTENT (what specifically they asked for) as concisely as"
+   " possible, in under %d characters. No more than a single sentence."
+   " If the prompt was extrmeely short, you can simply repeat it (with any)"
+   " missing punctuation/capitalization/spelling fixes needed."
+   "\n"
+   "\n"
+   "MOOD: Mirror the user's prompt's mood. If they asked a question, phrase the"
+   " reminder as a question (interrogative mood, ending with \"?\"). If"
+   " they gave a command/request, phrase it as a command (imperative"
+   " mood, starting with a verb like \"Add\", \"Fix\", \"Refactor\","
+   " \"Explain\"). Never use declarative mood (\"The user wants…\","
+   " \"Asking about…\", \"Working on…\"). Pick whichever mood matches"
+   " the prompt; if mixed, follow the prompt's primary intent."
+   "\n"
+   "\n"
+   "Output ONLY the reminder text — no quotes, no preamble like"
+   " \"Title:\", no markdown. Single line. Trailing \"?\" is allowed"
+   " (and required) for interrogative; otherwise no trailing punctuation."
+   "\n"
+   "\n"
+   "PROMPT:"
+   "\n"
+   "%s")
   "Format string used to wrap the raw prompt before sending to the model.
 First %s slot is the max-length integer, second is the raw prompt text."
   :type 'string
