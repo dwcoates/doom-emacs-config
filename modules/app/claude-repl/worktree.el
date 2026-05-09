@@ -937,6 +937,28 @@ mentioning TARGET-WS."
         (magit-status)
         (user-error "Conflict cherry-picking %s from '%s' — resolve in magit" conflicting-commit target-ws)))))
 
+(defun claude-repl--show-and-refresh-magit-status (project-root)
+  "Open magit-status for PROJECT-ROOT, select its window, and refresh it.
+Used at the end of `claude-repl--workspace-merge-do' to guarantee the
+post-merge window the user lands on is the magit-status buffer for the
+just-merged worktree, freshly refreshed.  `magit-status' alone usually
+selects the new window but the behavior depends on
+`magit-display-buffer-function'; this helper makes the window-selection
+and refresh explicit so the merge flow is independent of user-tunable
+magit display settings."
+  (magit-status project-root)
+  (let* ((canonical (claude-repl--path-canonical project-root))
+         (magit-win (cl-loop for win in (window-list)
+                             when (with-current-buffer (window-buffer win)
+                                    (and (derived-mode-p 'magit-status-mode)
+                                         (equal (claude-repl--path-canonical
+                                                 default-directory)
+                                                canonical)))
+                             return win)))
+    (when magit-win
+      (select-window magit-win)
+      (magit-refresh))))
+
 (defun claude-repl--workspace-merge-do (target-ws &optional project-root-override)
   "Cherry-pick TARGET-WS's branch commits onto the current branch.
 Replays each commit from the target branch (since it diverged from master)
@@ -963,7 +985,7 @@ how Doom resolved the post-switch workspace name."
       (claude-repl--finish-workspace target-ws)
       (message "Merged workspace '%s' -> '%s'." target-ws current-ws)
       (load-file claude-repl--config-file)
-      (magit-status project-root))))
+      (claude-repl--show-and-refresh-magit-status project-root))))
 
 (defalias '+dwc/workspace-merge--do #'claude-repl--workspace-merge-do)
 

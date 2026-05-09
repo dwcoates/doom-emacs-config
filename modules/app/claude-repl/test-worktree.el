@@ -2172,12 +2172,13 @@ Covers the full call the interactive `SPC TAB n' path builds up."
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
                ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
                ((symbol-function 'load-file) (lambda (_f) (push 'reload call-order)))
-               ((symbol-function 'magit-status) (lambda (_dir) (push 'magit call-order))))
+               ((symbol-function 'claude-repl--show-and-refresh-magit-status)
+                (lambda (_dir) (push 'magit call-order))))
       (claude-repl--workspace-merge-do "other-ws")
       (should (equal (nreverse call-order) '(reload magit))))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-magit-receives-project-dir ()
-  "workspace-merge-do passes the current workspace's project directory to magit-status."
+  "workspace-merge-do passes the current workspace's project directory to magit helper."
   (let ((magit-dir nil))
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
                ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
@@ -2187,9 +2188,124 @@ Covers the full call the interactive `SPC TAB n' path builds up."
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
                ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
                ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'magit-status) (lambda (dir) (setq magit-dir dir))))
+               ((symbol-function 'claude-repl--show-and-refresh-magit-status)
+                (lambda (dir) (setq magit-dir dir))))
       (claude-repl--workspace-merge-do "other-ws")
       (should (equal magit-dir "/tmp/fake")))))
+
+;;;; ---- Tests: show-and-refresh-magit-status ----
+
+(ert-deftest claude-repl-test-show-and-refresh-magit-opens-status-for-root ()
+  "show-and-refresh-magit-status calls magit-status with the project root."
+  (let ((magit-dir nil))
+    (cl-letf (((symbol-function 'magit-status)
+               (lambda (dir) (setq magit-dir dir)))
+              ((symbol-function 'window-list) (lambda (&rest _) nil))
+              ((symbol-function 'magit-refresh) #'ignore))
+      (claude-repl--show-and-refresh-magit-status "/tmp/repo")
+      (should (equal magit-dir "/tmp/repo")))))
+
+(ert-deftest claude-repl-test-show-and-refresh-magit-selects-matching-window ()
+  "When a magit-status window for the project exists, it is selected."
+  (let ((selected-win nil)
+        (fake-win 'fake-magit-window)
+        (fake-buf (generate-new-buffer "*fake-magit*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer fake-buf
+            (setq-local default-directory "/tmp/repo/")
+            (setq major-mode 'magit-status-mode))
+          (cl-letf (((symbol-function 'magit-status) #'ignore)
+                    ((symbol-function 'window-list)
+                     (lambda (&rest _) (list fake-win)))
+                    ((symbol-function 'window-buffer)
+                     (lambda (w) (when (eq w fake-win) fake-buf)))
+                    ((symbol-function 'select-window)
+                     (lambda (w) (setq selected-win w)))
+                    ((symbol-function 'magit-refresh) #'ignore)
+                    ((symbol-function 'claude-repl--path-canonical)
+                     (lambda (p) (directory-file-name (or p "")))))
+            (claude-repl--show-and-refresh-magit-status "/tmp/repo")
+            (should (eq selected-win fake-win))))
+      (kill-buffer fake-buf))))
+
+(ert-deftest claude-repl-test-show-and-refresh-magit-refreshes-selected-buffer ()
+  "After selecting the magit window, magit-refresh is called."
+  (let ((refreshed nil)
+        (fake-win 'fake-magit-window)
+        (fake-buf (generate-new-buffer "*fake-magit*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer fake-buf
+            (setq-local default-directory "/tmp/repo/")
+            (setq major-mode 'magit-status-mode))
+          (cl-letf (((symbol-function 'magit-status) #'ignore)
+                    ((symbol-function 'window-list)
+                     (lambda (&rest _) (list fake-win)))
+                    ((symbol-function 'window-buffer)
+                     (lambda (w) (when (eq w fake-win) fake-buf)))
+                    ((symbol-function 'select-window) #'ignore)
+                    ((symbol-function 'magit-refresh)
+                     (lambda () (setq refreshed t)))
+                    ((symbol-function 'claude-repl--path-canonical)
+                     (lambda (p) (directory-file-name (or p "")))))
+            (claude-repl--show-and-refresh-magit-status "/tmp/repo")
+            (should refreshed)))
+      (kill-buffer fake-buf))))
+
+(ert-deftest claude-repl-test-show-and-refresh-magit-skips-non-matching-windows ()
+  "Windows whose magit buffer points at a different repo are not selected."
+  (let ((selected-win nil)
+        (refreshed nil)
+        (fake-win 'fake-magit-window)
+        (fake-buf (generate-new-buffer "*fake-magit-other*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer fake-buf
+            (setq-local default-directory "/tmp/other-repo/")
+            (setq major-mode 'magit-status-mode))
+          (cl-letf (((symbol-function 'magit-status) #'ignore)
+                    ((symbol-function 'window-list)
+                     (lambda (&rest _) (list fake-win)))
+                    ((symbol-function 'window-buffer)
+                     (lambda (w) (when (eq w fake-win) fake-buf)))
+                    ((symbol-function 'select-window)
+                     (lambda (w) (setq selected-win w)))
+                    ((symbol-function 'magit-refresh)
+                     (lambda () (setq refreshed t)))
+                    ((symbol-function 'claude-repl--path-canonical)
+                     (lambda (p) (directory-file-name (or p "")))))
+            (claude-repl--show-and-refresh-magit-status "/tmp/repo")
+            (should (null selected-win))
+            (should (null refreshed))))
+      (kill-buffer fake-buf))))
+
+(ert-deftest claude-repl-test-show-and-refresh-magit-skips-non-magit-windows ()
+  "Windows whose buffer is not in magit-status-mode are skipped."
+  (let ((selected-win nil)
+        (refreshed nil)
+        (fake-win 'fake-window)
+        (fake-buf (generate-new-buffer "*not-magit*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer fake-buf
+            (setq-local default-directory "/tmp/repo/")
+            (setq major-mode 'fundamental-mode))
+          (cl-letf (((symbol-function 'magit-status) #'ignore)
+                    ((symbol-function 'window-list)
+                     (lambda (&rest _) (list fake-win)))
+                    ((symbol-function 'window-buffer)
+                     (lambda (w) (when (eq w fake-win) fake-buf)))
+                    ((symbol-function 'select-window)
+                     (lambda (w) (setq selected-win w)))
+                    ((symbol-function 'magit-refresh)
+                     (lambda () (setq refreshed t)))
+                    ((symbol-function 'claude-repl--path-canonical)
+                     (lambda (p) (directory-file-name (or p "")))))
+            (claude-repl--show-and-refresh-magit-status "/tmp/repo")
+            (should (null selected-win))
+            (should (null refreshed))))
+      (kill-buffer fake-buf))))
 
 ;;;; ---- Tests: workspace-merge-current-into-source ----
 
