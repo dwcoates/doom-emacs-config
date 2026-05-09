@@ -2193,6 +2193,78 @@ Covers the full call the interactive `SPC TAB n' path builds up."
       (claude-repl--workspace-merge-do "other-ws")
       (should (equal magit-dir "/tmp/fake")))))
 
+;;;; ---- Tests: tag-merge-completion ----
+
+(ert-deftest claude-repl-test-tag-merge-completion-creates-correct-tag ()
+  "tag-merge-completion runs `git tag -f merge/<source-ws> HEAD' in
+the project root."
+  (let ((captured-args nil))
+    (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+               (lambda (root &rest args)
+                 (setq captured-args (cons root args))
+                 0)))
+      (claude-repl--tag-merge-completion "/tmp/repo" "feat-foo")
+      (should (equal captured-args
+                     (list "/tmp/repo" "tag" "-f" "merge/feat-foo" "HEAD"))))))
+
+(ert-deftest claude-repl-test-tag-merge-completion-uses-force ()
+  "tag-merge-completion passes `-f' so re-running the merge for the
+same workspace updates an existing tag rather than erroring."
+  (let ((captured-args nil))
+    (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args) (setq captured-args args) 0)))
+      (claude-repl--tag-merge-completion "/tmp/repo" "feat-foo")
+      (should (member "-f" captured-args)))))
+
+(ert-deftest claude-repl-test-tag-merge-completion-does-not-propagate-error ()
+  "A non-zero git tag exit code must not propagate (the cherry-pick
+already succeeded; a tag-write failure shouldn't undo that)."
+  (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+             (lambda (_root &rest _args) 128)))
+    ;; Should not error.
+    (claude-repl--tag-merge-completion "/tmp/repo" "feat-foo")
+    (should t)))
+
+;;;; ---- Tests: workspace-merge-do tags after cherry-pick ----
+
+(ert-deftest claude-repl-test-workspace-merge-do-tags-after-cherry-pick ()
+  "workspace-merge-do calls tag-merge-completion after a successful
+cherry-pick, with the project-root and source workspace name."
+  (let ((tagged nil))
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
+               ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
+               ((symbol-function 'load-file) #'ignore)
+               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
+               ((symbol-function 'claude-repl--tag-merge-completion)
+                (lambda (root ws) (setq tagged (cons root ws)))))
+      (claude-repl--workspace-merge-do "other-ws")
+      (should (equal tagged (cons "/tmp/fake" "other-ws"))))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-skips-tag-on-cherry-pick-error ()
+  "When cherry-pick-commits signals user-error (e.g., conflict or
+all-incorporated), tag-merge-completion is NOT invoked."
+  (let ((tagged nil))
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits)
+                (lambda (_dir _ws _base _br)
+                  (user-error "All commits already incorporated")))
+               ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
+               ((symbol-function 'load-file) #'ignore)
+               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
+               ((symbol-function 'claude-repl--tag-merge-completion)
+                (lambda (_root _ws) (setq tagged t))))
+      (should-error (claude-repl--workspace-merge-do "other-ws") :type 'user-error)
+      (should-not tagged))))
+
 ;;;; ---- Tests: show-and-refresh-magit-status ----
 
 (ert-deftest claude-repl-test-show-and-refresh-magit-opens-status-for-root ()

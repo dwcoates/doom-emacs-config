@@ -959,6 +959,26 @@ magit display settings."
       (select-window magit-win)
       (magit-refresh))))
 
+(defun claude-repl--tag-merge-completion (project-root source-ws)
+  "Tag HEAD in PROJECT-ROOT as `merge/SOURCE-WS' after a successful merge.
+The tag marks the final cherry-picked commit so the merged workspace's
+contribution to history is recoverable by name (e.g. `git log
+merge/<ws>..HEAD' to see what landed afterward, or `git diff
+merge/<ws>~..merge/<ws>' to inspect the merged range).
+
+Uses `-f' so re-running the merge for the same workspace updates the
+tag rather than erroring on the existing one.  Failures are surfaced
+as a `message' but do not propagate — the cherry-pick already
+succeeded; a tag-write failure shouldn't undo that."
+  (let* ((tag (concat "merge/" source-ws))
+         (exit-code (claude-repl--git-exit-code
+                     project-root "tag" "-f" tag "HEAD")))
+    (claude-repl--log source-ws "tag-merge-completion: tag=%s exit=%s" tag exit-code)
+    (if (= 0 exit-code)
+        (message "Tagged merge completion: %s" tag)
+      (message "[claude-repl] WARNING: failed to create tag %s (exit %d)"
+               tag exit-code))))
+
 (defun claude-repl--workspace-merge-do (target-ws &optional project-root-override)
   "Cherry-pick TARGET-WS's branch commits onto the current branch.
 Replays each commit from the target branch (since it diverged from master)
@@ -968,7 +988,10 @@ directory; otherwise the destination is resolved from the current
 workspace's `:project-dir'.  The override is used by
 `claude-repl-workspace-merge-current-into-source' so the cherry-pick
 lands in the parent worktree (or master, when re-routed) regardless of
-how Doom resolved the post-switch workspace name."
+how Doom resolved the post-switch workspace name.
+
+After a successful cherry-pick, tags HEAD as `merge/TARGET-WS' so the
+final commit of the merged-in workspace is recoverable by name."
   (let* ((current-ws (+workspace-current-name))
          (target-branch (claude-repl--workspace-branch target-ws)))
     (claude-repl--log current-ws "workspace-merge-do current-ws=%s target-ws=%s target-branch=%s project-root-override=%s"
@@ -982,6 +1005,10 @@ how Doom resolved the post-switch workspace name."
         (user-error "Branch '%s' not found in repo %s" target-branch project-root))
       (let ((base (claude-repl--cherry-pick-base project-root target-branch)))
         (claude-repl--cherry-pick-commits project-root target-ws base target-branch))
+      ;; Cherry-pick succeeded (any conflict above would have signaled
+      ;; user-error and aborted before we got here); tag the final
+      ;; cherry-picked commit so the merged ws is recoverable by name.
+      (claude-repl--tag-merge-completion project-root target-ws)
       (claude-repl--finish-workspace target-ws)
       (message "Merged workspace '%s' -> '%s'." target-ws current-ws)
       (load-file claude-repl--config-file)
