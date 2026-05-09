@@ -247,30 +247,79 @@
       (goto-char (point-min))
       (should-error (claude-repl-drawer-visit) :type 'user-error))))
 
-;;;; ---- hl-line range ----
+;;;; ---- Current-entry overlay + cursor ----
 
-(ert-deftest claude-repl-drawer-test-hl-line-range-spans-block ()
-  "hl-line range covers both header and summary lines of the entry at point."
+(ert-deftest claude-repl-drawer-test-entry-bounds-spans-block ()
+  "`--entry-bounds-at-point' covers both header and summary lines."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "alpha" :priority "p1")
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
       (claude-repl-drawer--goto-first-workspace)
-      (let* ((range (claude-repl-drawer--hl-line-range))
-             (text  (buffer-substring-no-properties (car range) (cdr range))))
-        (should range)
+      (let* ((bounds (claude-repl-drawer--entry-bounds-at-point))
+             (text   (buffer-substring-no-properties (car bounds) (cdr bounds))))
+        (should bounds)
         (should (string-match-p "alpha" text))
-        ;; Block contains both lines: a newline must appear inside the range.
         (should (string-match-p "\n" text))))))
 
-(ert-deftest claude-repl-drawer-test-hl-line-range-nil-on-non-workspace-line ()
-  "hl-line range returns nil on section-header / separator / blank lines."
+(ert-deftest claude-repl-drawer-test-entry-bounds-nil-on-non-workspace-line ()
+  "`--entry-bounds-at-point' returns nil on section headers / blanks."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "alpha" :priority "p1")
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
-      (goto-char (point-min)) ;; on the MAIN section header
-      (should-not (claude-repl-drawer--hl-line-range)))))
+      (goto-char (point-min))
+      (should-not (claude-repl-drawer--entry-bounds-at-point)))))
+
+(ert-deftest claude-repl-drawer-test-update-current-entry-overlay-positions ()
+  "`--update-current-entry-overlay' creates an overlay at the entry's start."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--register "beta"  :priority "p2")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (should (claude-repl-drawer--goto-workspace-line "beta"))
+      (claude-repl-drawer--update-current-entry-overlay)
+      (let ((ov claude-repl-drawer--current-entry-overlay))
+        (should (overlayp ov))
+        (should (equal (get-text-property (overlay-start ov)
+                                          'claude-repl-drawer-workspace)
+                       "beta"))
+        (should (equal (overlay-end ov)
+                       (+ (overlay-start ov)
+                          (length claude-repl-drawer-gutter))))))))
+
+(ert-deftest claude-repl-drawer-test-update-current-entry-overlay-deletes-off-entry ()
+  "Overlay is removed when point lands on a non-workspace line."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (claude-repl-drawer--update-current-entry-overlay)
+      (should (overlayp claude-repl-drawer--current-entry-overlay))
+      (goto-char (point-min)) ;; section header
+      (claude-repl-drawer--update-current-entry-overlay)
+      (should-not (overlay-buffer claude-repl-drawer--current-entry-overlay)))))
+
+(ert-deftest claude-repl-drawer-test-cursor-hidden-at-col-0 ()
+  "`--update-cursor' sets cursor-type nil at column 0."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--with-buffer
+      (let ((inhibit-read-only t)) (insert "hello\n"))
+      (goto-char (point-min))
+      (claude-repl-drawer--update-cursor)
+      (should (null cursor-type)))))
+
+(ert-deftest claude-repl-drawer-test-cursor-visible-when-not-col-0 ()
+  "`--update-cursor' sets cursor-type to 'box at non-zero columns."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--with-buffer
+      (let ((inhibit-read-only t)) (insert "hello\n"))
+      (goto-char (point-min))
+      (forward-char 2)
+      (claude-repl-drawer--update-cursor)
+      (should (eq cursor-type 'box)))))
 
 ;;;; ---- Refresh-if-visible ----
 
@@ -362,39 +411,6 @@
                                        :repl-state :dead)
     (should (eq (claude-repl-drawer--name-face "ws")
                 'claude-repl-drawer-workspace-name))))
-
-;;;; ---- Current-workspace gutter ----
-
-(ert-deftest claude-repl-drawer-test-current-workspace-gets-arrow-gutter ()
-  "The currently selected workspace's header line is prefixed with the arrow gutter."
-  (claude-repl-test--with-clean-state
-    (claude-repl-drawer-test--register "active" :priority "p1")
-    (claude-repl-drawer-test--register "other"  :priority "p2")
-    (cl-letf (((symbol-function '+workspace-current-name)
-               (lambda () "active")))
-      (claude-repl-drawer-test--with-buffer
-        (claude-repl-drawer--render)
-        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
-          (should (string-match-p
-                   (concat (regexp-quote claude-repl-drawer-current-arrow)
-                           ".*active")
-                   text)))))))
-
-(ert-deftest claude-repl-drawer-test-non-current-workspace-uses-plain-gutter ()
-  "Non-current workspaces are prefixed with the plain (no-arrow) gutter."
-  (claude-repl-test--with-clean-state
-    (claude-repl-drawer-test--register "active" :priority "p1")
-    (claude-repl-drawer-test--register "other"  :priority "p2")
-    (cl-letf (((symbol-function '+workspace-current-name)
-               (lambda () "active")))
-      (claude-repl-drawer-test--with-buffer
-        (claude-repl-drawer--render)
-        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
-          ;; "other" is non-current — its line must not carry the arrow.
-          (should-not (string-match-p
-                       (concat (regexp-quote claude-repl-drawer-current-arrow)
-                               ".*other")
-                       text)))))))
 
 ;;;; ---- Layout: priority/name spacing ----
 

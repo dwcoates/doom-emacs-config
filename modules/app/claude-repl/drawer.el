@@ -78,15 +78,16 @@ Used for registered-but-not-yet-started workspaces (claude-state nil)."
   :group 'claude-repl)
 
 (defcustom claude-repl-drawer-current-arrow "▶ "
-  "Gutter prefix on the currently selected workspace's header line.
-Should match the visual width of `claude-repl-drawer-non-current-gutter'
-so MAIN/HIDDEN entries align in a single column."
+  "Gutter glyph displayed on the entry the cursor is currently on.
+Width must match the static `claude-repl-drawer-gutter' so the arrow
+overlay can replace the gutter region without shifting alignment."
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-drawer-non-current-gutter "  "
-  "Gutter prefix on non-current workspace header lines.
-Width must match `claude-repl-drawer-current-arrow' for alignment."
+(defcustom claude-repl-drawer-gutter "  "
+  "Static gutter prefix rendered at the start of every workspace block.
+The current-entry overlay covers this region with
+`claude-repl-drawer-current-arrow'; widths must match."
   :type 'string
   :group 'claude-repl)
 
@@ -131,25 +132,28 @@ Width must match `claude-repl-drawer-current-arrow' for alignment."
 
 (defvar claude-repl-drawer-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "n")     #'claude-repl-drawer-next)
-    (define-key map (kbd "j")     #'claude-repl-drawer-next)
-    (define-key map (kbd "<down>") #'claude-repl-drawer-next)
-    (define-key map (kbd "p")     #'claude-repl-drawer-prev)
-    (define-key map (kbd "k")     #'claude-repl-drawer-prev)
-    (define-key map (kbd "<up>")  #'claude-repl-drawer-prev)
-    (define-key map (kbd "RET")   #'claude-repl-drawer-visit)
-    (define-key map (kbd "g")     #'claude-repl-drawer-refresh)
-    (define-key map (kbd "q")     #'claude-repl-drawer-hide)
+    (define-key map (kbd "n")       #'claude-repl-drawer-next)
+    (define-key map (kbd "j")       #'claude-repl-drawer-next)
+    (define-key map (kbd "<down>")  #'claude-repl-drawer-next)
+    (define-key map (kbd "p")       #'claude-repl-drawer-prev)
+    (define-key map (kbd "k")       #'claude-repl-drawer-prev)
+    (define-key map (kbd "<up>")    #'claude-repl-drawer-prev)
+    (define-key map (kbd "RET")     #'claude-repl-drawer-visit)
+    (define-key map (kbd "g")       #'claude-repl-drawer-refresh)
+    (define-key map (kbd "q")       #'claude-repl-drawer-hide)
+    ;; Block horizontal char navigation — the entry is the unit of
+    ;; selection; in-line cursor placement is reserved for searches.
+    (define-key map (kbd "<left>")  #'ignore)
+    (define-key map (kbd "<right>") #'ignore)
     map)
   "Keymap for `claude-repl-drawer-mode'.")
 
-(defun claude-repl-drawer--hl-line-range ()
-  "Return (START . END) covering the full workspace block at point.
-Used as `hl-line-range-function' so the highlight spans both the
-header and summary lines of an entry — matching the unit that j/k
-navigates between.  Returns nil on lines without a workspace property
-(section headers, separators, blanks), letting hl-line fall back to
-its default per-line behavior there."
+(defvar-local claude-repl-drawer--current-entry-overlay nil
+  "Overlay that draws the current-entry arrow over the static gutter.
+Repositioned by `claude-repl-drawer--post-command' to follow point.")
+
+(defun claude-repl-drawer--entry-bounds-at-point ()
+  "Return (START . END) of the workspace block at point, or nil."
   (let ((ws (claude-repl-drawer--workspace-at-point)))
     (when ws
       (save-excursion
@@ -168,14 +172,50 @@ its default per-line behavior there."
           (setq end (point))
           (cons start end))))))
 
+(defun claude-repl-drawer--update-current-entry-overlay ()
+  "Move the current-entry arrow overlay onto the entry containing point.
+Covers the static gutter region (chars [START, START+gutter-width)) of
+the entry's first line with a `display' override that renders the
+arrow.  Removes the overlay when point is not on a workspace entry."
+  (let ((bounds (claude-repl-drawer--entry-bounds-at-point))
+        (gutter-len (length claude-repl-drawer-gutter)))
+    (cond
+     ((null bounds)
+      (when (overlayp claude-repl-drawer--current-entry-overlay)
+        (delete-overlay claude-repl-drawer--current-entry-overlay)))
+     (t
+      (let* ((start (car bounds))
+             (cover-end (min (cdr bounds) (+ start gutter-len))))
+        (if (overlayp claude-repl-drawer--current-entry-overlay)
+            (move-overlay claude-repl-drawer--current-entry-overlay
+                          start cover-end)
+          (setq claude-repl-drawer--current-entry-overlay
+                (make-overlay start cover-end)))
+        (overlay-put claude-repl-drawer--current-entry-overlay 'display
+                     (propertize claude-repl-drawer-current-arrow
+                                 'face 'claude-repl-drawer-current-arrow))
+        (overlay-put claude-repl-drawer--current-entry-overlay 'priority 100))))))
+
+(defun claude-repl-drawer--update-cursor ()
+  "Hide the cursor when point is at column 0 (covered by the arrow), show otherwise.
+Searches that pull point mid-line make the cursor reappear; j/k snap
+back to col 0 and re-hide it."
+  (setq-local cursor-type (if (zerop (current-column)) nil 'box)))
+
+(defun claude-repl-drawer--post-command ()
+  "Refresh the current-entry overlay and cursor visibility.
+Runs after every command in the drawer buffer."
+  (claude-repl-drawer--update-current-entry-overlay)
+  (claude-repl-drawer--update-cursor))
+
 (define-derived-mode claude-repl-drawer-mode special-mode "ClaudeDrawer"
   "Major mode for the claude-repl workspace drawer."
   (setq truncate-lines t
         buffer-read-only t
-        cursor-type 'box
         mode-line-format nil)
-  (setq-local hl-line-range-function #'claude-repl-drawer--hl-line-range)
-  (hl-line-mode 1))
+  (setq-local cursor-type nil)
+  (add-hook 'post-command-hook
+            #'claude-repl-drawer--post-command nil t))
 
 ;; Evil intercepts j/k/n/p in motion/normal state and routes them to
 ;; line-wise commands.  Bind our drawer commands explicitly in those
@@ -197,7 +237,13 @@ its default per-line behavior there."
   ;; insert state on i/a/o/etc.
   (dolist (key '("i" "I" "a" "A" "o" "O" "s" "S" "c" "C" "R"))
     (evil-define-key '(normal motion) claude-repl-drawer-mode-map
-      key #'ignore)))
+      key #'ignore))
+  ;; Block horizontal char navigation — entry is the navigational unit.
+  (evil-define-key '(normal motion) claude-repl-drawer-mode-map
+    "h"             #'ignore
+    "l"             #'ignore
+    (kbd "<left>")  #'ignore
+    (kbd "<right>") #'ignore))
 
 ;; Force motion-state on entry so the drawer never starts in normal
 ;; (where insert keys could trigger before our overrides apply).
@@ -300,16 +346,12 @@ the workspace is in the hidden section and should be dimmed."
   (let* ((priority  (claude-repl--ws-get ws :priority))
          (glyph     (claude-repl-drawer--state-glyph ws))
          (dirty     (eq (claude-repl--ws-get ws :git-clean) 'dirty))
-         (selected  (and current (equal ws current)))
          (start     (point))
          (prio-disp (claude-repl-drawer--priority-display priority))
          (sep       (if priority " " ""))
          (name-face (claude-repl-drawer--name-face ws))
-         (gutter    (if selected
-                        (propertize claude-repl-drawer-current-arrow
-                                    'face 'claude-repl-drawer-current-arrow)
-                      claude-repl-drawer-non-current-gutter))
-         (header    (concat gutter glyph "  " prio-disp sep
+         (header    (concat claude-repl-drawer-gutter glyph "  "
+                            prio-disp sep
                             (propertize ws 'face name-face)
                             (if dirty " ●" "")))
          (summary   (claude-repl-drawer--summary-text ws)))
