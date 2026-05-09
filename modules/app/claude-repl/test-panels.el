@@ -793,31 +793,40 @@ is on."
 
 ;;;; ---- Tests: Entry point (claude-repl) dispatch ----
 
-(ert-deftest claude-repl-test-panels-entry-point-not-running-initializes-claude ()
-  "claude-repl initializes a new Claude session when nothing is running."
+(ert-deftest claude-repl-test-panels-entry-point-not-running-hides ()
+  "claude-repl (SPC o C, always-close) hides the workspace even when no
+Claude session is running.  Skips the initialize-claude branch the
+plain `claude-repl-simple' (SPC o c) toggle would otherwise take."
   (claude-repl-test--with-clean-state
-    (let ((started nil))
+    (let ((started nil) (hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'claude-repl--claude-running-p) (lambda () nil))
                 ((symbol-function 'claude-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'use-region-p) (lambda () nil))
-                ((symbol-function 'claude-repl--initialize-claude) (lambda (&rest _) (setq started t))))
+                ((symbol-function 'claude-repl--initialize-claude) (lambda (&rest _) (setq started t)))
+                ((symbol-function 'claude-repl--hide-and-preserve-status)
+                 (lambda () (setq hidden t))))
         (claude-repl)
-        (should started)))))
+        (should hidden)
+        (should-not started)))))
 
-(ert-deftest claude-repl-test-panels-entry-point-session-starting-shows-message ()
-  "claude-repl shows loading message when session is starting."
+(ert-deftest claude-repl-test-panels-entry-point-session-starting-hides ()
+  "claude-repl hides the workspace mid-startup rather than showing a loading
+message — always-close skips the loading branch."
   (claude-repl-test--with-clean-state
-    (let ((messages nil))
+    (let ((messages nil) (hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
                 ((symbol-function 'claude-repl--session-starting-p) (lambda () t))
                 ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'use-region-p) (lambda () nil))
-                ((symbol-function 'message) (lambda (fmt &rest _) (push fmt messages))))
+                ((symbol-function 'message) (lambda (fmt &rest _) (push fmt messages)))
+                ((symbol-function 'claude-repl--hide-and-preserve-status)
+                 (lambda () (setq hidden t))))
         (claude-repl)
-        (should (cl-some (lambda (m) (string-match-p "loading" m)) messages))))))
+        (should hidden)
+        (should-not (cl-some (lambda (m) (and m (string-match-p "loading" m))) messages))))))
 
 (ert-deftest claude-repl-test-panels-entry-point-visible-hides ()
   "claude-repl hides panels when they are visible."
@@ -833,24 +842,30 @@ is on."
         (claude-repl)
         (should hidden)))))
 
-(ert-deftest claude-repl-test-panels-entry-point-hidden-shows ()
-  "claude-repl shows hidden panels when running but not visible."
+(ert-deftest claude-repl-test-panels-entry-point-hidden-still-hides ()
+  "claude-repl hides the workspace even when panels are already hidden — the
+always-close contract: pressing SPC o C on a hidden workspace re-asserts
+:hidden + push-to-back instead of re-showing the panels."
   (claude-repl-test--with-clean-state
-    (let ((shown nil))
+    (let ((shown nil) (hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
                 ((symbol-function 'claude-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'use-region-p) (lambda () nil))
                 ((symbol-function 'claude-repl--show-hidden-panels)
-                 (lambda () (setq shown t))))
+                 (lambda () (setq shown t)))
+                ((symbol-function 'claude-repl--hide-and-preserve-status)
+                 (lambda () (setq hidden t))))
         (claude-repl)
-        (should shown)))))
+        (should hidden)
+        (should-not shown)))))
 
 (ert-deftest claude-repl-test-panels-entry-point-selection-sends ()
-  "claude-repl sends selected text to Claude when region is active."
+  "claude-repl sends selected text to Claude when region is active.
+Selection-handling stays orthogonal to the always-close hide path."
   (claude-repl-test--with-clean-state
-    (let ((sent-text nil))
+    (let ((sent-text nil) (hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
                 ((symbol-function 'claude-repl--session-starting-p) (lambda () nil))
@@ -861,10 +876,44 @@ is on."
                 ((symbol-function 'buffer-substring-no-properties)
                  (lambda (_beg _end) "hello world"))
                 ((symbol-function 'deactivate-mark) (lambda () nil))
+                ((symbol-function 'claude-repl--hide-and-preserve-status)
+                 (lambda () (setq hidden t)))
                 ((symbol-function 'claude-repl--send-to-claude)
                  (lambda (text) (setq sent-text text))))
         (claude-repl)
-        (should (equal sent-text "hello world"))))))
+        (should (equal sent-text "hello world"))
+        (should-not hidden)))))
+
+(ert-deftest claude-repl-test-panels-entry-point-simple-not-running-initializes ()
+  "claude-repl-simple (SPC o c) keeps its non-always-close dispatch: when
+nothing is running, it initializes Claude (in contrast to SPC o C)."
+  (claude-repl-test--with-clean-state
+    (let ((started nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda () nil))
+                ((symbol-function 'claude-repl--session-starting-p) (lambda () nil))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'use-region-p) (lambda () nil))
+                ((symbol-function 'claude-repl--initialize-claude)
+                 (lambda (&rest _) (setq started t))))
+        (claude-repl-simple)
+        (should started)))))
+
+(ert-deftest claude-repl-test-panels-entry-point-simple-hidden-shows ()
+  "claude-repl-simple (SPC o c) keeps its non-always-close dispatch: when
+the session is running but panels are hidden, it re-shows them (in
+contrast to SPC o C, which hides further)."
+  (claude-repl-test--with-clean-state
+    (let ((shown nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
+                ((symbol-function 'claude-repl--session-starting-p) (lambda () nil))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'use-region-p) (lambda () nil))
+                ((symbol-function 'claude-repl--show-hidden-panels)
+                 (lambda () (setq shown t))))
+        (claude-repl-simple)
+        (should shown)))))
 
 ;;;; ---- Tests: validate-env-switch ----
 

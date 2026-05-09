@@ -731,22 +731,32 @@ bound to `SPC o C'."
 
 ;;;; Entry point
 
-(defun claude-repl--toggle (close-fn)
+(cl-defun claude-repl--toggle (close-fn &key always-close)
   "Generic toggle.  CLOSE-FN handles the visible-panels case.
 Open / start / send-selection paths are shared.  Used by both
-`claude-repl' (deprio close) and `claude-repl-simple' (plain close)."
+`claude-repl' (deprio close) and `claude-repl-simple' (plain close).
+
+When ALWAYS-CLOSE is non-nil, every non-selection branch routes to
+CLOSE-FN regardless of running / starting / panel-visibility state —
+the workspace is hidden even if Claude isn't visible (or isn't running
+at all).  This is the `SPC o C' contract: pressing it again on a
+workspace that is already hidden / never-started should still mark it
+`:hidden' and push it to the back, not re-show or launch Claude."
   (let* ((ws (+workspace-current-name))
          (vterm-running (claude-repl--claude-running-p))
          (session-starting (claude-repl--session-starting-p))
          (panels-visible (claude-repl--panels-visible-p))
          (selection (when (use-region-p)
                      (buffer-substring-no-properties (region-beginning) (region-end)))))
-    (claude-repl--log ws "claude-repl running=%s starting=%s visible=%s selection=%s"
-                      vterm-running session-starting panels-visible (if selection "yes" "no"))
+    (claude-repl--log ws "claude-repl running=%s starting=%s visible=%s selection=%s always-close=%s"
+                      vterm-running session-starting panels-visible
+                      (if selection "yes" "no") (if always-close "yes" "no"))
     (cond
      (selection
       (deactivate-mark)
       (claude-repl--send-to-claude selection))
+     (always-close
+      (funcall close-fn))
      ((not vterm-running)
       (claude-repl--initialize-claude))
      (session-starting
@@ -757,14 +767,16 @@ Open / start / send-selection paths are shared.  Used by both
       (claude-repl--show-hidden-panels)))))
 
 (defun claude-repl ()
-  "Toggle Claude REPL panels with deprio on close.
-If text is selected: send it directly to Claude.
-If not running: start Claude and show both panels.
-If panels visible: hide both panels AND deprio the workspace tab.
-If panels hidden: show both panels (restoring tab position if saved).
+  "Hide Claude REPL panels and deprio the workspace.
+If text is selected: send it directly to Claude (orthogonal to hide).
+Otherwise: mark the workspace `:repl-state :hidden', hide both panels
+\(no-op if already hidden), and push the workspace tab to the back.
+Always hides, regardless of whether Claude is running or panels are
+currently visible — if hide-mode is on, the next workspace switch will
+persp-kill the workspace via `claude-repl--sweep-hidden-workspaces'.
 Bound to `SPC o C'.  See `claude-repl-simple' for the no-tab-bar variant."
   (interactive)
-  (claude-repl--toggle #'claude-repl--hide-and-preserve-status))
+  (claude-repl--toggle #'claude-repl--hide-and-preserve-status :always-close t))
 
 (defun claude-repl-simple ()
   "Toggle Claude REPL panels with a plain close (no tab-bar update).
