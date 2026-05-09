@@ -34,21 +34,33 @@ stay open during work, not dominate the layout."
   :group 'claude-repl)
 
 (defcustom claude-repl-drawer-state-icons
-  '((:init       . "◔")
-    (:thinking   . "◍")
-    (:done       . "✓")
-    (:idle       . "·")
-    (:permission . "❓")
-    (:stop-failed . "⚠")
-    (:dead       . "❌"))
+  '((:init        . "⏳")
+    (:thinking    . "⌛")
+    (:done        . "✅")
+    (:idle        . "💤")
+    (:permission  . "❓")
+    (:stop-failed . "❗")
+    (:dead        . "❌"))
   "Alist mapping claude-state keyword to an indicator glyph.
 The :dead entry is used when `:repl-state' is `:dead' (overrides
-:claude-state).  Unrecognized values fall through to a single space."
+:claude-state).  Unrecognized values fall through to a single middot
+placeholder, used for workspaces registered but with no live session."
   :type '(alist :key-type symbol :value-type string)
   :group 'claude-repl)
 
-(defcustom claude-repl-drawer-hidden-separator "── hidden ──"
-  "Separator line between visible and hidden workspaces in the drawer."
+(defcustom claude-repl-drawer-state-icon-default "·"
+  "Glyph shown when a workspace has no recognized claude-state.
+Used for registered-but-not-yet-started workspaces (claude-state nil)."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-drawer-section-rule-width 12
+  "Number of `─' characters in section header rule lines."
+  :type 'integer
+  :group 'claude-repl)
+
+(defcustom claude-repl-drawer-empty-section-label "(none)"
+  "Placeholder shown under a section header when the section has no entries."
   :type 'string
   :group 'claude-repl)
 
@@ -74,9 +86,19 @@ The :dead entry is used when `:repl-state' is `:dead' (overrides
   "Face used to dim hidden workspaces."
   :group 'claude-repl)
 
-(defface claude-repl-drawer-separator
-  '((t :inherit shadow :weight bold))
-  "Face for the hidden-section separator line."
+(defface claude-repl-drawer-section-title
+  '((t :weight bold :inherit font-lock-keyword-face))
+  "Face for the MAIN/HIDDEN section title line."
+  :group 'claude-repl)
+
+(defface claude-repl-drawer-section-rule
+  '((t :inherit shadow))
+  "Face for the rule line beneath a section title."
+  :group 'claude-repl)
+
+(defface claude-repl-drawer-empty
+  '((t :inherit shadow :slant italic))
+  "Face for the placeholder shown under an empty section."
   :group 'claude-repl)
 
 ;;;; Mode -------------------------------------------------------------------
@@ -144,7 +166,7 @@ Lower keys come first.  Sort by `:priority' rank, then name."
     (or (and (eq repl-state :dead)
              (alist-get :dead claude-repl-drawer-state-icons))
         (alist-get claude-state claude-repl-drawer-state-icons)
-        " ")))
+        claude-repl-drawer-state-icon-default)))
 
 (defun claude-repl-drawer--priority-display (priority)
   "Return a display string for PRIORITY.
@@ -181,7 +203,7 @@ the workspace is in the hidden section and should be dimmed."
          (selected (and current (equal ws current)))
          (start    (point))
          (prio-disp (claude-repl-drawer--priority-display priority))
-         (header   (concat " " prio-disp " " glyph " " ws (if dirty " ●" "")))
+         (header   (concat "  " glyph " " prio-disp ws (if dirty " ●" "")))
          (summary  (claude-repl-drawer--summary-text ws)))
     (insert header "\n")
     (insert "    "
@@ -204,28 +226,42 @@ the workspace is in the hidden section and should be dimmed."
         (let ((header-end (save-excursion (goto-char start) (line-end-position))))
           (add-face-text-property start header-end 'claude-repl-drawer-workspace-name)))))))
 
+(defun claude-repl-drawer--insert-section-header (label)
+  "Insert a bold section header LABEL with a rule line beneath it."
+  (insert (propertize (format " %s\n" label)
+                      'face 'claude-repl-drawer-section-title))
+  (insert (propertize (concat " "
+                              (make-string claude-repl-drawer-section-rule-width
+                                           ?─)
+                              "\n")
+                      'face 'claude-repl-drawer-section-rule)))
+
+(defun claude-repl-drawer--insert-section (label workspaces current hidden)
+  "Render a section titled LABEL containing WORKSPACES.
+CURRENT highlights the active workspace.  HIDDEN dims the entries when
+they live in the hidden section."
+  (claude-repl-drawer--insert-section-header label)
+  (if (null workspaces)
+      (insert (propertize (format "  %s\n"
+                                  claude-repl-drawer-empty-section-label)
+                          'face 'claude-repl-drawer-empty))
+    (dolist (ws workspaces)
+      (claude-repl-drawer--render-workspace ws current hidden))))
+
 (defun claude-repl-drawer--render ()
   "Render the drawer contents from `claude-repl--workspaces' into the current buffer."
-  (let ((inhibit-read-only t)
-        (saved-line (line-number-at-pos))
-        (saved-col  (current-column))
-        (current    (claude-repl-drawer--current-ws))
-        (parts      (claude-repl-drawer--partition
-                     (hash-table-keys claude-repl--workspaces))))
+  (let* ((inhibit-read-only t)
+         (saved-line (line-number-at-pos))
+         (saved-col  (current-column))
+         (current    (claude-repl-drawer--current-ws))
+         (parts      (claude-repl-drawer--partition
+                      (hash-table-keys claude-repl--workspaces)))
+         (visible    (car parts))
+         (hidden     (cdr parts)))
     (erase-buffer)
-    (let ((visible (car parts))
-          (hidden  (cdr parts)))
-      (if (and (null visible) (null hidden))
-          (insert (propertize "  (no claude-repl workspaces)\n"
-                              'face 'claude-repl-drawer-summary))
-        (dolist (ws visible)
-          (claude-repl-drawer--render-workspace ws current nil))
-        (when hidden
-          (when visible (insert "\n"))
-          (insert (propertize (format "  %s\n" claude-repl-drawer-hidden-separator)
-                              'face 'claude-repl-drawer-separator))
-          (dolist (ws hidden)
-            (claude-repl-drawer--render-workspace ws current t)))))
+    (claude-repl-drawer--insert-section "MAIN" visible current nil)
+    (insert "\n")
+    (claude-repl-drawer--insert-section "HIDDEN" hidden current t)
     (goto-char (point-min))
     (forward-line (1- saved-line))
     (move-to-column saved-col)))
@@ -343,13 +379,24 @@ Computed as `claude-repl-drawer-width-fraction' of the frame width."
         (claude-repl-drawer-mode)))
     buf))
 
+(defun claude-repl-drawer--goto-first-workspace ()
+  "Move point to the first workspace line in the current buffer, if any."
+  (goto-char (point-min))
+  (let ((found nil))
+    (while (and (not found) (not (eobp)))
+      (if (claude-repl-drawer--workspace-at-point)
+          (setq found t)
+        (forward-line 1)))
+    found))
+
 (defun claude-repl-drawer-show ()
   "Show the workspace drawer in a left-side window."
   (interactive)
   (let* ((buf (claude-repl-drawer--get-or-create-buffer))
          (win (display-buffer buf claude-repl-drawer--display-action)))
     (with-current-buffer buf
-      (claude-repl-drawer--render))
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace))
     (when win
       (set-window-dedicated-p win t))
     win))

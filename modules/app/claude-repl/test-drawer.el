@@ -59,14 +59,16 @@
 
 ;;;; ---- Render ----
 
-(ert-deftest claude-repl-drawer-test-render-empty-shows-placeholder ()
-  "Empty workspace registry renders a placeholder line."
+(ert-deftest claude-repl-drawer-test-render-empty-shows-both-sections ()
+  "Empty registry still renders MAIN and HIDDEN headers with placeholders."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
-      (should (string-match-p "no claude-repl workspaces"
-                              (buffer-substring-no-properties
-                               (point-min) (point-max)))))))
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p "MAIN" text))
+        (should (string-match-p "HIDDEN" text))
+        (should (string-match-p (regexp-quote claude-repl-drawer-empty-section-label)
+                                text))))))
 
 (ert-deftest claude-repl-drawer-test-render-contains-name ()
   "Render includes the workspace name in its line."
@@ -102,26 +104,40 @@
                               (buffer-substring-no-properties
                                (point-min) (point-max)))))))
 
-(ert-deftest claude-repl-drawer-test-render-hidden-section-separator ()
-  "Render inserts the hidden separator only when hidden workspaces exist."
+(ert-deftest claude-repl-drawer-test-render-always-shows-both-section-headers ()
+  "Both MAIN and HIDDEN sections always render, regardless of contents."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "vis" :priority "p1")
-    (claude-repl-drawer-test--register "gone" :priority "p1" :repl-state :hidden)
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
-      (should (string-match-p (regexp-quote claude-repl-drawer-hidden-separator)
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p "MAIN" text))
+        (should (string-match-p "HIDDEN" text))))))
+
+(ert-deftest claude-repl-drawer-test-render-empty-hidden-shows-none-placeholder ()
+  "Empty HIDDEN section renders the (none) placeholder."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "vis" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (should (string-match-p (regexp-quote claude-repl-drawer-empty-section-label)
                               (buffer-substring-no-properties
                                (point-min) (point-max)))))))
 
-(ert-deftest claude-repl-drawer-test-render-no-separator-when-no-hidden ()
-  "When there are no hidden workspaces, the separator is omitted."
+(ert-deftest claude-repl-drawer-test-render-section-headers-styled ()
+  "Section headers carry the `claude-repl-drawer-section-title' face."
   (claude-repl-test--with-clean-state
-    (claude-repl-drawer-test--register "vis" :priority "p1")
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
-      (should-not (string-match-p (regexp-quote claude-repl-drawer-hidden-separator)
-                                  (buffer-substring-no-properties
-                                   (point-min) (point-max)))))))
+      (goto-char (point-min))
+      (let ((found nil))
+        (while (and (not found) (not (eobp)))
+          (when (memq 'claude-repl-drawer-section-title
+                      (let ((face (get-text-property (point) 'face)))
+                        (if (listp face) face (list face))))
+            (setq found t))
+          (forward-char 1))
+        (should found)))))
 
 (ert-deftest claude-repl-drawer-test-render-attaches-workspace-property ()
   "Each rendered workspace block carries a `claude-repl-drawer-workspace' text property."
@@ -142,17 +158,26 @@
 ;;;; ---- Navigation ----
 
 (ert-deftest claude-repl-drawer-test-next-moves-to-next-workspace ()
-  "`claude-repl-drawer-next' moves from the first workspace to the second."
+  "`claude-repl-drawer-next' walks past the MAIN header into successive workspaces."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "first" :priority "p1")
     (claude-repl-drawer-test--register "second" :priority "p2")
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
       (goto-char (point-min))
-      ;; point-min already lies inside the "first" workspace block.
+      (claude-repl-drawer-next)
       (should (equal (claude-repl-drawer--workspace-at-point) "first"))
       (claude-repl-drawer-next)
       (should (equal (claude-repl-drawer--workspace-at-point) "second")))))
+
+(ert-deftest claude-repl-drawer-test-show-positions-on-first-workspace ()
+  "`claude-repl-drawer--goto-first-workspace' lands on the first workspace line."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (should (equal (claude-repl-drawer--workspace-at-point) "alpha")))))
 
 (ert-deftest claude-repl-drawer-test-prev-moves-back ()
   "`claude-repl-drawer-prev' moves up to the previous workspace block."
@@ -162,6 +187,7 @@
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
       (goto-char (point-min))
+      (claude-repl-drawer-next)   ;; first
       (claude-repl-drawer-next)   ;; second
       (claude-repl-drawer-prev)   ;; back to first
       (should (equal (claude-repl-drawer--workspace-at-point) "first")))))
@@ -173,9 +199,10 @@
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
       (goto-char (point-min))
-      (claude-repl-drawer-next) ;; lands on only
+      (claude-repl-drawer-next)               ;; lands on "only"
+      (should (equal (claude-repl-drawer--workspace-at-point) "only"))
       (let ((before (point)))
-        (claude-repl-drawer-next)
+        (claude-repl-drawer-next)             ;; nothing further to go to
         (should (equal (claude-repl-drawer--workspace-at-point) "only"))
         (should (= (point) before))))))
 
@@ -187,8 +214,7 @@
     (claude-repl-drawer-test--register "target" :priority "p1")
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
-      (goto-char (point-min))
-      (claude-repl-drawer-next)
+      (claude-repl-drawer--goto-first-workspace)
       (let ((switched-to nil))
         (cl-letf (((symbol-function '+workspace-switch)
                    (lambda (ws &rest _) (setq switched-to ws))))
