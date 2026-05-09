@@ -33,6 +33,11 @@ stay open during work, not dominate the layout."
   :type 'float
   :group 'claude-repl)
 
+;; Force-apply on reload — defcustom only initializes for unbound
+;; symbols, so source tweaks otherwise need a full Emacs restart.
+(setq claude-repl-drawer-width-fraction
+      (eval (car (get 'claude-repl-drawer-width-fraction 'standard-value))))
+
 (defcustom claude-repl-drawer-state-icons
   '((:init        . "⏳")
     (:thinking    . "⌛")
@@ -146,7 +151,19 @@ Used for registered-but-not-yet-started workspaces (claude-state nil)."
     (kbd "<up>")   #'claude-repl-drawer-prev
     (kbd "RET")    #'claude-repl-drawer-visit
     "g"           #'claude-repl-drawer-refresh
-    "q"           #'claude-repl-drawer-hide))
+    "q"           #'claude-repl-drawer-hide)
+  ;; Block every insert-state entry point so the drawer is strictly
+  ;; navigational.  Buffer is already read-only via `special-mode',
+  ;; but evil would otherwise still flip the cursor and modeline into
+  ;; insert state on i/a/o/etc.
+  (dolist (key '("i" "I" "a" "A" "o" "O" "s" "S" "c" "C" "R"))
+    (evil-define-key '(normal motion) claude-repl-drawer-mode-map
+      key #'ignore)))
+
+;; Force motion-state on entry so the drawer never starts in normal
+;; (where insert keys could trigger before our overrides apply).
+(when (fboundp 'evil-set-initial-state)
+  (evil-set-initial-state 'claude-repl-drawer-mode 'motion))
 
 ;;;; Sorting + selection helpers --------------------------------------------
 
@@ -442,16 +459,18 @@ Computed as `claude-repl-drawer-width-fraction' of the frame width."
   "Resize WINDOW to the configured drawer width.
 Side-window action alists honor `window-width' only at window-creation
 time, so a re-shown drawer keeps its old width even when the fraction
-changed.  This forces the resize on every show.  Locally lowers
-`window-min-width' so fractions below the global default (10 cols) are
-honored, and unblocks `window-size-fixed' if some prior pass locked it."
+changed.  This forces the resize on every show.
+
+`window-resize' is called with HORIZONTAL=t and IGNORE=t so the resize
+bypasses `window-min-width' (default 10) and any `window-size-fixed'
+restriction, which silently clamp small fractions otherwise."
   (let* ((target (claude-repl-drawer--window-width window))
          (window-min-width 1))
     (with-selected-window window
-      (setq-local window-size-fixed nil)
-      (let ((delta (- target (window-total-width window))))
-        (unless (zerop delta)
-          (ignore-errors (window-resize window delta t)))))))
+      (setq-local window-size-fixed nil))
+    (let ((delta (- target (window-total-width window))))
+      (unless (zerop delta)
+        (ignore-errors (window-resize window delta t t))))))
 
 (defun claude-repl-drawer-show ()
   "Show the workspace drawer in a left-side window."
