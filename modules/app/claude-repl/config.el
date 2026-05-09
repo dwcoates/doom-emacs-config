@@ -63,16 +63,19 @@
              (length claude-repl--load-errors)))
   (message "[claude-repl] Loaded Claude-Repl package."))
 
-;; Workspace snapshot save (quit) and lazy claude start (on first visit to
-;; a restored workspace).  The restore side is NOT wired to
-;; `emacs-startup-hook' — calling `+dwc/switch-to-project' 10x at startup
-;; hits `magit-status' per project and can hang the UI / race
-;; persp-mode's initialization (causing void-function errors on
-;; `safe-persp-name').  Users run `M-x claude-repl-load-workspace-snapshot'
-;; manually once Emacs is fully up.  TODO: re-enable auto-restore behind a
-;; safer entry point (e.g. `doom-init-ui-hook' + idle timer, with a
-;; lighter persp-creation path that skips magit/recent-file openings).
-(add-hook 'kill-emacs-hook #'claude-repl--save-workspace-snapshot-on-quit)
+;; Lazy claude start on first visit to a restored workspace.  The restore
+;; side is NOT wired to `emacs-startup-hook' — calling
+;; `+dwc/switch-to-project' 10x at startup hits `magit-status' per project
+;; and can hang the UI / race persp-mode's initialization (causing
+;; void-function errors on `safe-persp-name').  Users run
+;; `M-x claude-repl-load-workspace-snapshot' manually once Emacs is fully
+;; up.  TODO: re-enable auto-restore behind a safer entry point (e.g.
+;; `doom-init-ui-hook' + idle timer, with a lighter persp-creation path
+;; that skips magit/recent-file openings).
+;;
+;; Snapshot save is paired with `claude-repl--state-save' (history.el) so
+;; the roster is updated on every workspace mutation rather than only at
+;; Emacs quit — that way a crash before quit doesn't lose the roster.
 (with-eval-after-load 'persp-mode
   (add-hook 'persp-activated-functions #'claude-repl--maybe-start-on-activate))
 

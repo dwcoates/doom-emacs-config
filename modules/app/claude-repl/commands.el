@@ -604,7 +604,11 @@ Writes a list of (NAME :project-dir DIR :priority PRI) entries.  Sources:
 workspaces registered in `claude-repl--workspaces' with a `:project-dir',
 merged with any entries still pending in
 `claude-repl--pending-snapshot-workspaces' (restored from snapshot but
-never visited — included so unvisited workspaces aren't dropped)."
+never visited — included so unvisited workspaces aren't dropped).
+
+Called interactively prints a confirmation; called from
+`claude-repl--state-save' (the common path) stays silent so the
+roster-piggyback save doesn't spam the echo area on every state mutation."
   (interactive)
   (let ((entries (make-hash-table :test 'equal)))
     ;; Visited workspaces — the live hash is the source of truth.
@@ -632,8 +636,9 @@ never visited — included so unvisited workspaces aren't dropped)."
             (setq first nil)
             (prin1 entry (current-buffer))))
         (insert ")"))
-      (message "Saved %d workspace(s) to %s"
-               (length snapshot) claude-repl-workspace-snapshot-file))))
+      (when (called-interactively-p 'interactive)
+        (message "Saved %d workspace(s) to %s"
+                 (length snapshot) claude-repl-workspace-snapshot-file)))))
 
 (defun claude-repl-load-workspace-snapshot ()
   "Load workspaces from `claude-repl-workspace-snapshot-file'.
@@ -696,16 +701,6 @@ never propagated, so a corrupt snapshot can't block startup."
     (condition-case err
         (claude-repl-load-workspace-snapshot)
       (error (message "[claude-repl] snapshot load failed: %S" err)))))
-
-(defun claude-repl--save-workspace-snapshot-on-quit ()
-  "Save the workspace snapshot when Emacs quits.
-Skipped in `noninteractive' (batch) sessions so ERT test runs don't
-clobber the user's real snapshot.  Errors are caught so a snapshot-write
-failure never blocks quit."
-  (unless noninteractive
-    (condition-case err
-        (claude-repl-save-workspace-snapshot)
-      (error (message "[claude-repl] snapshot save failed: %S" err)))))
 
 ;;;; Project-switch wrapper
 

@@ -494,6 +494,44 @@
               (should (null (plist-get data :source-ws-dir)))))
         (delete-directory tmpdir t)))))
 
+(ert-deftest claude-repl-test-state-save-piggybacks-snapshot ()
+  "state-save also rewrites the workspace snapshot file so the roster
+survives a crash that beats kill-emacs-hook."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t))
+          (snapshot-file (make-temp-file "claude-snap-")))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :priority "p3")
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let ((data (claude-repl--read-sexp-file snapshot-file)))
+              (should (equal (plist-get (cdr (assoc "ws" data)) :project-dir) tmpdir))
+              (should (equal (plist-get (cdr (assoc "ws" data)) :priority) "p3"))))
+        (delete-file snapshot-file)
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-state-save-snapshot-error-does-not-block-state ()
+  "A snapshot-save failure must not propagate out of state-save (state file
+write is the primary obligation; snapshot is the piggyback)."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'claude-repl-save-workspace-snapshot)
+                     (lambda () (error "boom"))))
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (equal (plist-get data :project-dir) tmpdir))))
+        (delete-directory tmpdir t)))))
+
 ;;;; ---- Tests: validate-ws-env ----
 
 (ert-deftest claude-repl-test-validate-ws-env-valid ()

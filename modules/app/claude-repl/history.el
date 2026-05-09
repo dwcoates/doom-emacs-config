@@ -166,7 +166,14 @@ environment's instantiation struct to a plist."
   "Persist session state for workspace WS to disk.
 Saves session-id for each environment so it survives Emacs restarts.
 Written to .claude-repl-state in the project root (alongside
-.claude-repl-history)."
+.claude-repl-history).
+
+Also rewrites the workspace roster snapshot
+(`claude-repl-workspace-snapshot-file') so the snapshot reflects the
+current `:project-dir' / `:priority' for this and all live workspaces.
+The snapshot used to save only at Emacs quit, which lost the roster on
+crash; pairing it with `state-save' makes the roster crash-safe at the
+same granularity as per-project state."
   (let* ((root (claude-repl--ws-get ws :project-dir))
          (file (claude-repl--state-file root)))
     (claude-repl--log ws "state-save ws=%s file=%s" ws file)
@@ -179,7 +186,10 @@ Written to .claude-repl-state in the project root (alongside
                            (claude-repl--collect-env-state ws))))
         (claude-repl--with-error-logging "state-save"
           (claude-repl--write-sexp-file file state)
-          (claude-repl--log ws "state-save: write complete ws=%s file=%s" ws file))))))
+          (claude-repl--log ws "state-save: write complete ws=%s file=%s" ws file))))
+    (claude-repl--with-error-logging "state-save: snapshot"
+      (when (fboundp 'claude-repl-save-workspace-snapshot)
+        (claude-repl-save-workspace-snapshot)))))
 
 (defun claude-repl--validate-ws-env (ws)
   "Validate that workspace WS has well-formed environment state.

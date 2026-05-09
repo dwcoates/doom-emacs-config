@@ -239,7 +239,10 @@
 ;;;; ---- Test utilities ----
 
 (defmacro claude-repl-test--with-clean-state (&rest body)
-  "Execute BODY with fresh claude-repl global state."
+  "Execute BODY with fresh claude-repl global state.
+Also redirects `claude-repl-workspace-snapshot-file' to a throwaway
+temp path so the state-save snapshot piggyback can't clobber the
+user's real snapshot during ERT runs."
   (declare (indent 0))
   `(let ((claude-repl--workspaces (make-hash-table :test 'equal))
          (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal))
@@ -248,8 +251,13 @@
          (claude-repl--sync-timer nil)
          (claude-repl--cursor-reset-timer nil)
          (claude-repl--hide-overlay-refcount 0)
-         (claude-repl-debug nil))
-     ,@body))
+         (claude-repl-debug nil)
+         (claude-repl-workspace-snapshot-file
+          (expand-file-name (format "claude-snap-%s" (random)) temporary-file-directory)))
+     (unwind-protect
+         (progn ,@body)
+       (when (file-exists-p claude-repl-workspace-snapshot-file)
+         (delete-file claude-repl-workspace-snapshot-file)))))
 
 (defmacro claude-repl-test--with-temp-buffer (name &rest body)
   "Create (or reuse) buffer NAME, execute BODY, kill buffer only if we created it.

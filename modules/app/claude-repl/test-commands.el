@@ -1153,36 +1153,6 @@ inherent-flash jump path on purpose."
               (should t)))
         (delete-file snapshot-file)))))
 
-(ert-deftest claude-repl-cmd-test-save-snapshot-on-quit/invokes-save ()
-  "Quit wrapper calls the real save function in an interactive session."
-  (claude-repl-test--with-clean-state
-    (let ((called nil)
-          (noninteractive nil))
-      (cl-letf (((symbol-function 'claude-repl-save-workspace-snapshot)
-                 (lambda () (setq called t))))
-        (claude-repl--save-workspace-snapshot-on-quit)
-        (should called)))))
-
-(ert-deftest claude-repl-cmd-test-save-snapshot-on-quit/skipped-in-batch-mode ()
-  "Quit wrapper must not run in batch/noninteractive sessions — batch ERT
-runs would otherwise clobber the user's real snapshot file."
-  (claude-repl-test--with-clean-state
-    (let ((called nil)
-          (noninteractive t))
-      (cl-letf (((symbol-function 'claude-repl-save-workspace-snapshot)
-                 (lambda () (setq called t))))
-        (claude-repl--save-workspace-snapshot-on-quit)
-        (should-not called)))))
-
-(ert-deftest claude-repl-cmd-test-save-snapshot-on-quit/swallows-errors ()
-  "Quit wrapper must not propagate errors out of `kill-emacs-hook'."
-  (claude-repl-test--with-clean-state
-    (let ((noninteractive nil))
-      (cl-letf (((symbol-function 'claude-repl-save-workspace-snapshot)
-                 (lambda () (error "boom"))))
-        (claude-repl--save-workspace-snapshot-on-quit)
-        (should t)))))
-
 ;;;; ---- Tests: snapshot entry normalizer ----
 
 (ert-deftest claude-repl-cmd-test-snapshot-entry-normalize/legacy-shape ()
