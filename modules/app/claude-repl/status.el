@@ -209,7 +209,15 @@ STATE is one of: nil, :init, :idle, :thinking, :done, :permission."
 STATE is one of:
   nil        — freshly killed / no session
   :active    — panels displayed, session alive
-  :inactive  — panels hidden, session alive
+  :inactive  — panels hidden, session alive (plain `SPC o c' close)
+  :hidden    — semantically `:inactive', but additionally marks the
+               workspace for persp-kill on the next workspace change
+               when `claude-repl-hide-mode-enabled' is non-nil.  Set
+               by the `SPC o C' deprio-close path; the kill happens in
+               `claude-repl--sweep-hidden-workspaces' from the
+               workspace-switch handler.  The on-disk state file is
+               preserved (kill goes through `:purge-state nil') so the
+               workspace can be re-opened later via project-switch.
   :dead      — vterm process gone
   :viewed    — panels displayed AND user has selected this workspace
                since `:claude-state' entered `:done'.  Acts as a gate

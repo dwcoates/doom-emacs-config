@@ -390,19 +390,30 @@ this is the simple-close audit point that `SPC o c' is bound to."
 
 (defun claude-repl--on-close (&optional ws)
   "Full close: bookkeep + hide + deprio + save tab index.
-Wraps `claude-repl--on-simple-close' (the bookkeep+hide core) with the
-tab-bar deprio: snapshots WS's tab-bar index via
-`claude-repl--save-tab-index' (read by `claude-repl--restore-tab-index'
-on the next reopen) and pushes it to the second-to-last position via
-`+dwc/workspace-push-to-back'.  Bound to `SPC o C' (the deprio toggle);
-also fires from `claude-repl-send-and-hide' since send-and-hide is
-semantically \"I'm done with this prompt, move on\".  Guarded by
+Sets WS's `:repl-state' to `:hidden' (NOT `:inactive' like the
+simple-close path) so the workspace becomes a kill candidate for the
+next sweep when `claude-repl-hide-mode-enabled' is on.  See
+`claude-repl--ws-set-repl-state' for the `:hidden' contract.  Then
+hides panels and pushes WS to the second-to-last tab position via
+`+dwc/workspace-push-to-back', snapshotting the tab index first via
+`claude-repl--save-tab-index' so a future reopen can restore the
+position.
+
+Bound to `SPC o C' (the deprio toggle); also fires from
+`claude-repl-send-and-hide' since send-and-hide is semantically
+\"I'm done with this prompt, move on\".  Push-to-back is guarded by
 `fboundp' so the module remains usable when the helper is not loaded.
 
 WS defaults to the current workspace; when WS is nil the function still
 hides panels but skips the bookkeeping write and the tab shuffle."
   (let ((ws (or ws (+workspace-current-name))))
-    (claude-repl--on-simple-close ws)
+    (claude-repl--log ws "on-close: CALLED this-command=%s last-command=%s"
+                      this-command last-command)
+    (when ws
+      (claude-repl--log ws "on-close ws=%s claude-state=%s -> repl-state=:hidden"
+                        ws (claude-repl--ws-claude-state ws))
+      (claude-repl--ws-set-repl-state ws :hidden))
+    (claude-repl--hide-panels)
     (when (and ws
                (equal ws (+workspace-current-name))
                (fboundp '+dwc/workspace-push-to-back))

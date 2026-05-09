@@ -413,7 +413,7 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ignored"))
               ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
       (claude-repl--on-close "specific-ws")
-      (should (eq (claude-repl--ws-get "specific-ws" :repl-state) :inactive))
+      (should (eq (claude-repl--ws-get "specific-ws" :repl-state) :hidden))
       (should-not (claude-repl--ws-get "ignored" :repl-state)))))
 
 (ert-deftest claude-repl-test-panels-on-close-nil-ws-still-hides ()
@@ -426,13 +426,15 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
         (claude-repl--on-close)
         (should hide-called)))))
 
-(ert-deftest claude-repl-test-panels-on-close-sets-repl-state-inactive ()
-  "on-close invariably writes :repl-state :inactive (item #1)."
+(ert-deftest claude-repl-test-panels-on-close-sets-repl-state-hidden ()
+  "on-close (deprio path) writes :repl-state :hidden so the workspace is a
+sweep candidate when hide-mode is enabled.  Distinct from on-simple-close
+which writes :inactive."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
       (claude-repl--on-close)
-      (should (eq (claude-repl--ws-get "test-ws" :repl-state) :inactive)))))
+      (should (eq (claude-repl--ws-get "test-ws" :repl-state) :hidden)))))
 
 (ert-deftest claude-repl-test-panels-on-close-preserves-claude-state ()
   "on-close does not touch :claude-state — mid-task :thinking survives close."
@@ -442,7 +444,7 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
               ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
       (claude-repl--on-close)
       (should (eq (claude-repl--ws-claude-state "test-ws") :thinking))
-      (should (eq (claude-repl--ws-get "test-ws" :repl-state) :inactive)))))
+      (should (eq (claude-repl--ws-get "test-ws" :repl-state) :hidden)))))
 
 (ert-deftest claude-repl-test-panels-on-close-pushes-current-ws-to-back ()
   "on-close calls `+dwc/workspace-push-to-back' when WS is the current workspace."
@@ -675,13 +677,15 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
 
 ;;;; ---- Tests: hide-and-preserve-status ----
 
-(ert-deftest claude-repl-test-panels-hide-and-preserve-marks-inactive ()
-  "hide-and-preserve-status routes through on-close and sets :repl-state :inactive."
+(ert-deftest claude-repl-test-panels-hide-and-preserve-marks-hidden ()
+  "hide-and-preserve-status routes through on-close (deprio path) and sets
+:repl-state :hidden so the workspace is a sweep candidate when hide-mode
+is on."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
       (claude-repl--hide-and-preserve-status)
-      (should (eq (claude-repl--ws-get "test-ws" :repl-state) :inactive)))))
+      (should (eq (claude-repl--ws-get "test-ws" :repl-state) :hidden)))))
 
 (ert-deftest claude-repl-test-panels-hide-and-preserve-no-workspace-errors ()
   "hide-and-preserve-status errors when no workspace is active."
