@@ -25,10 +25,12 @@
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-drawer-width 19
-  "Column width of the claude-repl drawer side-window.
-Sized for keep-it-open use, not transient consultation."
-  :type 'integer
+(defcustom claude-repl-drawer-width-fraction 0.20
+  "Fraction of the frame width the drawer should occupy.
+Computed against `frame-width' at display time so the drawer scales
+with the frame.  Capped at 20% by default — the drawer is meant to
+stay open during work, not dominate the layout."
+  :type 'float
   :group 'claude-repl)
 
 (defcustom claude-repl-drawer-state-icons
@@ -325,9 +327,12 @@ Intended to be called from the 1Hz poll in `status.el'."
      (no-other-window . nil)))
   "Display action for the drawer buffer.")
 
-(defun claude-repl-drawer--window-width (_window)
-  "Return the configured drawer width."
-  claude-repl-drawer-width)
+(defun claude-repl-drawer--window-width (window)
+  "Return the configured drawer width in columns for WINDOW.
+Computed as `claude-repl-drawer-width-fraction' of the frame width."
+  (max 1
+       (round (* claude-repl-drawer-width-fraction
+                 (frame-width (window-frame window))))))
 
 (defun claude-repl-drawer--get-or-create-buffer ()
   "Return the drawer buffer, creating and initializing if necessary."

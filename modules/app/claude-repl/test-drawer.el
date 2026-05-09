@@ -212,6 +212,22 @@
       (when buf (kill-buffer buf)))
     (should-not (claude-repl-drawer--refresh-if-visible))))
 
+;;;; ---- Window width ----
+
+(ert-deftest claude-repl-drawer-test-window-width-is-fraction-of-frame ()
+  "`claude-repl-drawer--window-width' returns the configured fraction of frame-width."
+  (let ((claude-repl-drawer-width-fraction 0.20))
+    (cl-letf (((symbol-function 'window-frame) (lambda (_) 'fake-frame))
+              ((symbol-function 'frame-width)  (lambda (_) 200)))
+      (should (= (claude-repl-drawer--window-width 'fake-window) 40)))))
+
+(ert-deftest claude-repl-drawer-test-window-width-floor-is-one ()
+  "Width never drops below 1 column even on degenerate frames."
+  (let ((claude-repl-drawer-width-fraction 0.20))
+    (cl-letf (((symbol-function 'window-frame) (lambda (_) 'fake-frame))
+              ((symbol-function 'frame-width)  (lambda (_) 0)))
+      (should (= (claude-repl-drawer--window-width 'fake-window) 1)))))
+
 ;;;; ---- Priority display ----
 
 (ert-deftest claude-repl-drawer-test-priority-display-falls-back-to-string ()
