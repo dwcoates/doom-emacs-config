@@ -1487,6 +1487,121 @@ so the lazy-start hook skips firing for each restored workspace."
             (should (equal flashed-ws "switched-ws")))
         (delete-directory tmp-dir t)))))
 
+;;;; ---- Workspace cycling (claude-repl-switch-left/right) ----
+
+(defmacro claude-repl-cmd-test--with-cycle-stubs (names current open-set
+                                                  switched-to flashed protected-p
+                                                  &rest body)
+  "Bind `+workspace-list-names' / `-current-name' / `-switch' / flash to
+fixtures.  NAMES is a list of workspace names, CURRENT is a string,
+OPEN-SET is a list of names whose REPL counts as open, SWITCHED-TO and
+FLASHED are place-symbols (boxed into single-cell lists) the stubs push
+to.  PROTECTED-P is a boolean controlling `+workspace--protected-p'."
+  (declare (indent 7))
+  `(cl-letf (((symbol-function '+workspace-list-names) (lambda () ,names))
+             ((symbol-function '+workspace-current-name) (lambda () ,current))
+             ((symbol-function '+workspace--protected-p)
+              (lambda (_name) ,protected-p))
+             ((symbol-function 'claude-repl--ws-claude-open-p)
+              (lambda (n) (member n ,open-set)))
+             ((symbol-function '+workspace-switch)
+              (lambda (name &optional _auto-create) (push name ,switched-to)))
+             ((symbol-function 'claude-repl--flash-current-tab)
+              (lambda () (push t ,flashed))))
+     ,@body))
+
+(ert-deftest claude-repl-cmd-test-switch-right/cycles-to-next ()
+  "switch-right with hide-mode off cycles to the next workspace."
+  (let ((switched (list)) (flashed (list))
+        (claude-repl-hide-mode-enabled nil))
+    (claude-repl-cmd-test--with-cycle-stubs
+        '("a" "b" "c") "a" '("a" "b" "c") switched flashed nil
+      (claude-repl-switch-right)
+      (should (equal switched '("b")))
+      (should flashed))))
+
+(ert-deftest claude-repl-cmd-test-switch-left/cycles-to-prev ()
+  "switch-left with hide-mode off cycles to the previous workspace."
+  (let ((switched (list)) (flashed (list))
+        (claude-repl-hide-mode-enabled nil))
+    (claude-repl-cmd-test--with-cycle-stubs
+        '("a" "b" "c") "b" '("a" "b" "c") switched flashed nil
+      (claude-repl-switch-left)
+      (should (equal switched '("a"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-right/wraps-around ()
+  "switch-right from the last workspace wraps to the first."
+  (let ((switched (list)) (flashed (list))
+        (claude-repl-hide-mode-enabled nil))
+    (claude-repl-cmd-test--with-cycle-stubs
+        '("a" "b" "c") "c" '("a" "b" "c") switched flashed nil
+      (claude-repl-switch-right)
+      (should (equal switched '("a"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-left/wraps-around ()
+  "switch-left from the first workspace wraps to the last."
+  (let ((switched (list)) (flashed (list))
+        (claude-repl-hide-mode-enabled nil))
+    (claude-repl-cmd-test--with-cycle-stubs
+        '("a" "b" "c") "a" '("a" "b" "c") switched flashed nil
+      (claude-repl-switch-left)
+      (should (equal switched '("c"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-right/skips-hidden-when-hide-on ()
+  "With hide-mode on, switch-right skips workspaces whose REPL is closed."
+  (let ((switched (list)) (flashed (list))
+        (claude-repl-hide-mode-enabled t))
+    (claude-repl-cmd-test--with-cycle-stubs
+        '("a" "b" "c") "a" '("a" "c") switched flashed nil
+      (claude-repl-switch-right)
+      (should (equal switched '("c"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-left/skips-hidden-when-hide-on ()
+  "With hide-mode on, switch-left skips workspaces whose REPL is closed."
+  (let ((switched (list)) (flashed (list))
+        (claude-repl-hide-mode-enabled t))
+    (claude-repl-cmd-test--with-cycle-stubs
+        '("a" "b" "c") "c" '("a" "c") switched flashed nil
+      (claude-repl-switch-left)
+      (should (equal switched '("a"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-right/single-visible-no-op ()
+  "When only the current workspace is visible, switch-right does not switch."
+  (let ((switched (list)) (flashed (list))
+        (claude-repl-hide-mode-enabled t)
+        ;; condition-case-unless-debug skips its handlers when
+        ;; `debug-on-error' is set, which ert turns on by default.  Bind
+        ;; it off so the user-error path is observable in tests.
+        (debug-on-error nil))
+    (claude-repl-cmd-test--with-cycle-stubs
+        '("a" "b" "c") "a" '("a") switched flashed nil
+      (cl-letf (((symbol-function '+workspace-error)
+                 (lambda (&rest _) nil)))
+        (claude-repl-switch-right)
+        (should-not switched)
+        (should-not flashed)))))
+
+(ert-deftest claude-repl-cmd-test-switch-right/protected-goes-to-main ()
+  "When current workspace is protected, switch-right routes to +workspaces-main."
+  (let ((switched (list)) (flashed (list))
+        (claude-repl-hide-mode-enabled nil)
+        (+workspaces-main "main"))
+    (claude-repl-cmd-test--with-cycle-stubs
+        '("nil") "nil" '() switched flashed t
+      (claude-repl-switch-right)
+      (should (equal switched '("main")))
+      ;; Protected branch bypasses the flash (matches Doom's cycle semantics).
+      (should-not flashed))))
+
+(ert-deftest claude-repl-cmd-test-switch-right/flashes-destination ()
+  "switch-right flashes the destination tab after a successful jump."
+  (let ((switched (list)) (flashed (list))
+        (claude-repl-hide-mode-enabled nil))
+    (claude-repl-cmd-test--with-cycle-stubs
+        '("a" "b") "a" '("a" "b") switched flashed nil
+      (claude-repl-switch-right)
+      (should (equal flashed '(t))))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here

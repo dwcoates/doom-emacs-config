@@ -69,6 +69,24 @@
     "Stub: return empty string."
     ""))
 
+(unless (fboundp '+workspace--protected-p)
+  (defun +workspace--protected-p (name)
+    "Stub: protected when NAME equals `persp-nil-name'."
+    (equal name (and (boundp 'persp-nil-name) persp-nil-name))))
+
+(unless (fboundp '+workspace-switch)
+  (defun +workspace-switch (_name &optional _auto-create-p)
+    "Stub: no-op."
+    nil))
+
+(unless (fboundp '+workspace-error)
+  (defun +workspace-error (message &optional _noerror)
+    "Stub: signal `user-error' with MESSAGE so tests can observe it."
+    (user-error "%s" message)))
+
+(unless (boundp '+workspaces-main)
+  (defvar +workspaces-main "main" "Stub: simulated main workspace name."))
+
 ;; Doom faces used by tabline
 (unless (facep '+workspace-tab-selected-face)
   (defface +workspace-tab-selected-face '((t :weight bold)) "Stub face."))

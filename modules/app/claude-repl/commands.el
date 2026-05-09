@@ -701,3 +701,43 @@ as the close-deprio and reopen paths."
     (+dwc/switch-to-project project)
     (claude-repl--hydrate-priority-from-state project)
     (claude-repl--flash-current-tab)))
+
+;;;; Workspace cycling (hide-mode aware)
+
+(defun claude-repl--workspace-cycle (n)
+  "Cycle N workspaces (negative = left, positive = right).
+Reimplements `+workspace/cycle' but iterates the hide-mode-filtered
+visible workspace list (`claude-repl--filter-hidden-names') instead of
+the raw `+workspace-list-names', so closed-REPL workspaces dropped from
+the tabline are also skipped during s-{ / s-}.  Mirrors Doom's
+protected-workspace handling: when current is the nil-persp, switch to
+`+workspaces-main' instead of cycling.  Flashes the destination tab
+post-jump to match every other identity-based workspace jump."
+  (let ((current-name (+workspace-current-name)))
+    (if (+workspace--protected-p current-name)
+        (+workspace-switch +workspaces-main t)
+      (condition-case-unless-debug ex
+          (let* ((visible (claude-repl--filter-hidden-names
+                           (+workspace-list-names) current-name))
+                 (perspc (length visible))
+                 (index (cl-position current-name visible :test #'equal)))
+            (when (= perspc 1)
+              (user-error "No other workspaces"))
+            (+workspace-switch (nth (mod (+ index n) perspc) visible))
+            (claude-repl--flash-current-tab))
+        ('user-error (+workspace-error (cadr ex) t))
+        ('error (+workspace-error ex t))))))
+
+(defun claude-repl-switch-left ()
+  "Cycle one workspace left, skipping hide-mode-filtered workspaces.
+Drop-in replacement for `+workspace/switch-left' that honors
+`claude-repl-hide-mode-enabled'."
+  (interactive)
+  (claude-repl--workspace-cycle -1))
+
+(defun claude-repl-switch-right ()
+  "Cycle one workspace right, skipping hide-mode-filtered workspaces.
+Drop-in replacement for `+workspace/switch-right' that honors
+`claude-repl-hide-mode-enabled'."
+  (interactive)
+  (claude-repl--workspace-cycle +1))

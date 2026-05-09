@@ -488,8 +488,8 @@ Reports comprehensive diagnostics."
        :desc "Pull workspace to second" "P" #'+dwc/workspace-pull-to-front
        :desc "Open most recent workspace" "R" #'+dwc/open-most-recent-workspace))
 
-(map! "s-{" #'+workspace/switch-left
-      "s-}" #'+workspace/switch-right)
+(map! "s-{" #'claude-repl-switch-left
+      "s-}" #'claude-repl-switch-right)
 
 (map! :leader
       :desc "Switch to 1st workspace"   "1" #'+workspace/switch-to-0
