@@ -696,6 +696,23 @@ hide-mode survives Emacs restart."
         (claude-repl--open-panels-after-ready "ws1")
         (should-not panels-opened)))))
 
+(ert-deftest claude-repl-test-open-panels-after-ready-respects-persisted-hidden ()
+  "open-panels-after-ready must NOT open panels when the workspace's
+hydrated `:repl-state' is `:hidden' — same skip as `:inactive' — so a
+deprio-closed ws (`SPC o C') stays hidden across restart."
+  (claude-repl-test--with-clean-state
+    (let ((panels-opened nil))
+      (claude-repl--ws-put "ws1" :repl-state :hidden)
+      (cl-letf (((symbol-function 'claude-repl--drain-pending-prompts)
+                 (lambda (_ws) nil))
+                ((symbol-function 'claude-repl--current-ws-p) (lambda (_ws) t))
+                ((symbol-function 'claude-repl--loading-placeholder-visible-p)
+                 (lambda () nil))
+                ((symbol-function 'claude-repl)
+                 (lambda () (setq panels-opened t))))
+        (claude-repl--open-panels-after-ready "ws1")
+        (should-not panels-opened)))))
+
 (ert-deftest claude-repl-test-open-panels-after-ready-pending-prompts-override-inactive ()
   "Pending prompts must force panel display even when persisted
 `:repl-state' is `:inactive' — the user has explicitly queued work, so
@@ -1016,6 +1033,24 @@ so hide-mode survives Emacs restart."
                :sandbox nil))
             (claude-repl--initialize-ws-env "ws1" tmpdir)
             (should (eq (claude-repl--ws-get "ws1" :repl-state) :inactive)))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-initialize-ws-env-restores-repl-state-hidden ()
+  "initialize-ws-env hydrates `:repl-state :hidden' from the saved file
+so the deprio-hide marker survives Emacs restart."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-rs-hidden-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (claude-repl--state-file tmpdir)
+             `(:project-dir ,(claude-repl--path-canonical tmpdir)
+               :active-env :bare-metal
+               :repl-state :hidden
+               :bare-metal nil
+               :sandbox nil))
+            (claude-repl--initialize-ws-env "ws1" tmpdir)
+            (should (eq (claude-repl--ws-get "ws1" :repl-state) :hidden)))
         (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-test-initialize-ws-env-skips-non-persistable-repl-state ()

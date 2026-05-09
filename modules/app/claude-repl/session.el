@@ -205,13 +205,16 @@ state-save.  Callers already guard on `claude-repl--claude-running-p'."
                          (or (and saved (plist-get saved :source-ws-dir))
                              (claude-repl--ws-get ws :source-ws-dir)))
     ;; Repl-state: hydrate the *desired* panel-visibility lifecycle from the
-    ;; saved file so `:inactive' (hide-mode) survives Emacs restart.  Only
+    ;; saved file so `:inactive' (panels closed via plain `SPC o c') and
+    ;; `:hidden' (deprio-close via `SPC o C') survive Emacs restart.  Only
     ;; persistable values matter at restart — `:dead'/nil reduce to "no
     ;; opinion, default to opening panels", so we only restore `:active' /
-    ;; `:inactive'.  `--open-panels-after-ready' reads this on first ready
-    ;; and skips the panel-open call when `:inactive'.
+    ;; `:inactive' / `:hidden'.  `--open-panels-after-ready' reads this on
+    ;; first ready and skips the panel-open call for `:inactive'/`:hidden';
+    ;; `--maybe-sweep-hidden-on-switch' demotes `:hidden' to `:inactive'
+    ;; when the user actually arrives back on the workspace.
     (let ((saved-repl-state (and saved (plist-get saved :repl-state))))
-      (when (memq saved-repl-state '(:active :inactive))
+      (when (memq saved-repl-state '(:active :inactive :hidden))
         (claude-repl--ws-put ws :repl-state saved-repl-state)))
     ;; Tab-bar slot: if the ws was deprioritized at the prior quit (i.e.
     ;; pushed to second-to-last via `SPC o C'), `:saved-tab-index' was
@@ -568,17 +571,19 @@ trigger `--show-existing-panels' with the wrong selected window."
   "Open panels for WS after Claude becomes ready.
 If there were pending prompts, always show panels (or defer).
 Otherwise, only show panels if WS is the current workspace AND its
-persisted `:repl-state' is not `:inactive' (hide-mode survives restart:
-when `--initialize-ws-env' hydrated `:repl-state :inactive' from the
-saved file, we honor that here by skipping the panel-open call)."
+persisted `:repl-state' is not `:inactive' or `:hidden' — both signal
+that the user wants panels closed (hide-mode survives restart: when
+`--initialize-ws-env' hydrated either value from the saved file, we
+honor it here by skipping the panel-open call)."
   (if (claude-repl--drain-pending-prompts ws)
       (progn
         (claude-repl--log ws "open-panels-after-ready: had pending prompts ws=%s — show or defer" ws)
         (claude-repl--show-panels-or-defer ws))
     (claude-repl--log ws "first-ready no pending prompts for ws=%s" ws)
     (cond
-     ((eq (claude-repl--ws-repl-state ws) :inactive)
-      (claude-repl--log ws "open-panels-after-ready: persisted :inactive ws=%s — skipping panel open" ws))
+     ((memq (claude-repl--ws-repl-state ws) '(:inactive :hidden))
+      (claude-repl--log ws "open-panels-after-ready: persisted %s ws=%s — skipping panel open"
+                        (claude-repl--ws-repl-state ws) ws))
      ((and (claude-repl--current-ws-p ws)
            (not (claude-repl--loading-placeholder-visible-p)))
       (claude-repl--log ws "open-panels-after-ready: no pending + current ws=%s — showing panels" ws)

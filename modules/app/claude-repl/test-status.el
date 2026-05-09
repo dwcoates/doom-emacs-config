@@ -73,6 +73,16 @@ hide-mode survives Emacs restart."
         (claude-repl--ws-set-repl-state "ws1" :inactive)
         (should (equal saved "ws1"))))))
 
+(ert-deftest claude-repl-test-ws-set-repl-state-persists-hidden ()
+  "ws-set-repl-state calls --state-save when STATE is :hidden so the
+deprio-hide marker (set by `SPC o C') survives Emacs restart."
+  (claude-repl-test--with-clean-state
+    (let ((saved nil))
+      (cl-letf (((symbol-function 'claude-repl--state-save)
+                 (lambda (ws) (setq saved ws))))
+        (claude-repl--ws-set-repl-state "ws1" :hidden)
+        (should (equal saved "ws1"))))))
+
 (ert-deftest claude-repl-test-ws-set-repl-state-skips-persist-for-dead ()
   "ws-set-repl-state does NOT persist `:dead' — process death is
 lifecycle bookkeeping, not a desired-state hint for restart."
