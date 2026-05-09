@@ -325,8 +325,8 @@
                               (buffer-substring-no-properties
                                (point-min) (point-max)))))))
 
-(ert-deftest claude-repl-drawer-test-render-no-double-space-when-no-priority ()
-  "Unprioritized workspaces render with a single space between glyph and name."
+(ert-deftest claude-repl-drawer-test-render-glyph-name-gap ()
+  "Two spaces separate the state glyph from the name when no priority is set."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "lonely")
     (claude-repl-drawer-test--with-buffer
@@ -334,8 +334,34 @@
       (let ((text (buffer-substring-no-properties (point-min) (point-max))))
         (should (string-match-p (concat (regexp-quote
                                          claude-repl-drawer-state-icon-default)
-                                        " lonely")
+                                        "  lonely")
                                 text))))))
+
+(ert-deftest claude-repl-drawer-test-render-glyph-priority-gap ()
+  "Two spaces separate the state glyph from the priority badge."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "feat" :priority "p1" :claude-state :idle)
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p
+                 (concat (regexp-quote
+                          (alist-get :idle claude-repl-drawer-state-icons))
+                         "  p1")
+                 text))))))
+
+(ert-deftest claude-repl-drawer-test-render-blank-line-between-workspaces ()
+  "Adjacent workspace entries are separated by a blank line."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--register "beta"  :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        ;; A `\n\n' must appear between the two workspace blocks.  The
+        ;; precise location is the boundary between alpha's summary
+        ;; line and beta's header line.
+        (should (string-match-p "\n\n  .* beta" text))))))
 
 ;;;; ---- State icon palette defaults ----
 

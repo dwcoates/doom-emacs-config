@@ -133,6 +133,21 @@ Used for registered-but-not-yet-started workspaces (claude-state nil)."
         mode-line-format nil)
   (hl-line-mode 1))
 
+;; Evil intercepts j/k/n/p in motion/normal state and routes them to
+;; line-wise commands.  Bind our drawer commands explicitly in those
+;; states so j/k jump workspace-by-workspace, not line-by-line.
+(when (fboundp 'evil-define-key)
+  (evil-define-key '(normal motion) claude-repl-drawer-mode-map
+    "j"           #'claude-repl-drawer-next
+    "k"           #'claude-repl-drawer-prev
+    "n"           #'claude-repl-drawer-next
+    "p"           #'claude-repl-drawer-prev
+    (kbd "<down>") #'claude-repl-drawer-next
+    (kbd "<up>")   #'claude-repl-drawer-prev
+    (kbd "RET")    #'claude-repl-drawer-visit
+    "g"           #'claude-repl-drawer-refresh
+    "q"           #'claude-repl-drawer-hide))
+
 ;;;; Sorting + selection helpers --------------------------------------------
 
 (defun claude-repl-drawer--workspace-hidden-p (ws)
@@ -234,7 +249,7 @@ the workspace is in the hidden section and should be dimmed."
          (prio-disp (claude-repl-drawer--priority-display priority))
          (sep       (if priority " " ""))
          (name-face (claude-repl-drawer--name-face ws))
-         (header    (concat "  " glyph " " prio-disp sep
+         (header    (concat "  " glyph "  " prio-disp sep
                             (propertize ws 'face name-face)
                             (if dirty " ●" "")))
          (summary   (claude-repl-drawer--summary-text ws)))
@@ -268,14 +283,19 @@ the workspace is in the hidden section and should be dimmed."
 (defun claude-repl-drawer--insert-section (label workspaces current hidden)
   "Render a section titled LABEL containing WORKSPACES.
 CURRENT highlights the active workspace.  HIDDEN dims the entries when
-they live in the hidden section."
+they live in the hidden section.  Inserts a blank line between
+adjacent workspaces (but not after the last) so the header+summary of
+each entry stay tighter than the inter-workspace gap."
   (claude-repl-drawer--insert-section-header label)
   (if (null workspaces)
       (insert (propertize (format "  %s\n"
                                   claude-repl-drawer-empty-section-label)
                           'face 'claude-repl-drawer-empty))
-    (dolist (ws workspaces)
-      (claude-repl-drawer--render-workspace ws current hidden))))
+    (let ((rest workspaces))
+      (while rest
+        (claude-repl-drawer--render-workspace (car rest) current hidden)
+        (when (cdr rest) (insert "\n"))
+        (setq rest (cdr rest))))))
 
 (defun claude-repl-drawer--render ()
   "Render the drawer contents from `claude-repl--workspaces' into the current buffer."
