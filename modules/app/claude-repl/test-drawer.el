@@ -212,6 +212,25 @@
       (when buf (kill-buffer buf)))
     (should-not (claude-repl-drawer--refresh-if-visible))))
 
+;;;; ---- Priority display ----
+
+(ert-deftest claude-repl-drawer-test-priority-display-falls-back-to-string ()
+  "Without a loaded image, priority renders as the raw string."
+  (let ((claude-repl--priority-images nil))
+    (should (equal (claude-repl-drawer--priority-display "p1") "p1"))))
+
+(ert-deftest claude-repl-drawer-test-priority-display-uses-image-when-available ()
+  "When an image spec exists, the priority string carries it as `display'."
+  (let* ((fake-image '(image :type png :file "/tmp/fake.png"))
+         (claude-repl--priority-images `(("p1" . ,fake-image))))
+    (let ((result (claude-repl-drawer--priority-display "p1")))
+      (should (equal result "p1"))
+      (should (equal (get-text-property 0 'display result) fake-image)))))
+
+(ert-deftest claude-repl-drawer-test-priority-display-nil-priority ()
+  "Nil priority renders as a single space placeholder."
+  (should (equal (claude-repl-drawer--priority-display nil) " ")))
+
 ;;;; ---- State glyph ----
 
 (ert-deftest claude-repl-drawer-test-state-glyph-dead-overrides-claude-state ()

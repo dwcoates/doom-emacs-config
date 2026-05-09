@@ -25,8 +25,9 @@
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-drawer-width 38
-  "Column width of the claude-repl drawer side-window."
+(defcustom claude-repl-drawer-width 19
+  "Column width of the claude-repl drawer side-window.
+Sized for keep-it-open use, not transient consultation."
   :type 'integer
   :group 'claude-repl)
 
@@ -143,6 +144,17 @@ Lower keys come first.  Sort by `:priority' rank, then name."
         (alist-get claude-state claude-repl-drawer-state-icons)
         " ")))
 
+(defun claude-repl-drawer--priority-display (priority)
+  "Return a display string for PRIORITY.
+Uses the badge PNG from `claude-repl--priority-images' when available,
+falling back to the raw PRIORITY string for terminal/batch contexts.
+Returns a single space when PRIORITY is nil."
+  (cond
+   ((null priority) " ")
+   ((claude-repl--priority-image priority)
+    (propertize priority 'display (claude-repl--priority-image priority)))
+   (t priority)))
+
 (defun claude-repl-drawer--summary-text (ws)
   "Return the aiTitle/prompt-summary string for WS, or a placeholder."
   (let ((summary (claude-repl--ws-get ws :last-prompt-summary))
@@ -166,11 +178,8 @@ the workspace is in the hidden section and should be dimmed."
          (dirty    (eq (claude-repl--ws-get ws :git-clean) 'dirty))
          (selected (and current (equal ws current)))
          (start    (point))
-         (header   (format "  %-3s %s %s%s"
-                           (or priority "")
-                           glyph
-                           ws
-                           (if dirty " ●" "")))
+         (prio-disp (claude-repl-drawer--priority-display priority))
+         (header   (concat " " prio-disp " " glyph " " ws (if dirty " ●" "")))
          (summary  (claude-repl-drawer--summary-text ws)))
     (insert header "\n")
     (insert "    "
