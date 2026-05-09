@@ -176,22 +176,57 @@
                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
                 ((symbol-function 'magit-status)
                  (lambda (&rest args) (setq magit-status-args args)))
-                ((symbol-function 'delete-other-windows) #'ignore))
+                ((symbol-function 'split-window) (lambda (&rest _) 'fake-left-win))
+                ((symbol-function 'select-window) #'ignore))
         (+dwc/magit-status-workspace)
         (should (equal magit-status-args '("/tmp/proj")))))))
 
-(ert-deftest claude-repl-test-magit-status-workspace-fullscreen-deletes-other-windows ()
-  "When claude is fullscreen, calls `delete-other-windows' to make magit fullscreen."
+(ert-deftest claude-repl-test-magit-status-workspace-fullscreen-does-not-delete-other-windows ()
+  "When claude is fullscreen, does NOT call `delete-other-windows' — claude panels stay visible."
   (claude-repl-test--with-clean-state
     (let ((delete-calls 0))
       (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
                 ((symbol-function 'magit-status) #'ignore)
+                ((symbol-function 'split-window) (lambda (&rest _) 'fake-left-win))
+                ((symbol-function 'select-window) #'ignore)
                 ((symbol-function 'delete-other-windows)
                  (lambda () (cl-incf delete-calls))))
         (+dwc/magit-status-workspace)
-        (should (= delete-calls 1))))))
+        (should (= delete-calls 0))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-fullscreen-splits-left-of-root ()
+  "When claude is fullscreen, splits the frame's root window with the new window on the left."
+  (claude-repl-test--with-clean-state
+    (let ((split-args nil))
+      (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+                ((symbol-function 'frame-root-window) (lambda (&rest _) 'fake-root))
+                ((symbol-function 'split-window)
+                 (lambda (&rest args) (setq split-args args) 'fake-left-win))
+                ((symbol-function 'select-window) #'ignore)
+                ((symbol-function 'magit-status) #'ignore))
+        (+dwc/magit-status-workspace)
+        (should (equal split-args '(fake-root nil left)))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-fullscreen-selects-new-left-window ()
+  "When claude is fullscreen, the newly-created left window is selected before opening magit."
+  (claude-repl-test--with-clean-state
+    (let ((selected-window nil)
+          (magit-call-window nil))
+      (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+                ((symbol-function 'split-window) (lambda (&rest _) 'fake-left-win))
+                ((symbol-function 'select-window)
+                 (lambda (win) (setq selected-window win)))
+                ((symbol-function 'magit-status)
+                 (lambda (&rest _) (setq magit-call-window selected-window))))
+        (+dwc/magit-status-workspace)
+        (should (eq selected-window 'fake-left-win))
+        (should (eq magit-call-window 'fake-left-win))))))
 
 (ert-deftest claude-repl-test-magit-status-workspace-fullscreen-clears-saved-config ()
   "When claude is fullscreen, the saved `:fullscreen-config' is cleared."
@@ -200,7 +235,8 @@
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
               ((symbol-function 'magit-status) #'ignore)
-              ((symbol-function 'delete-other-windows) #'ignore))
+              ((symbol-function 'split-window) (lambda (&rest _) 'fake-left-win))
+              ((symbol-function 'select-window) #'ignore))
       (+dwc/magit-status-workspace)
       (should (null (claude-repl--ws-get "test-ws" :fullscreen-config))))))
 

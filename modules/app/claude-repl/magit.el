@@ -132,11 +132,12 @@ associated with the current branch."
 (defun +dwc/magit-status-workspace ()
   "Open magit-status for the current workspace's project root.
 If claude-repl is currently fullscreened (i.e. `:fullscreen-config' is
-set for the workspace), magit replaces the panels and is itself made
-fullscreen — the saved fullscreen config is cleared since claude is no
-longer in fullscreen mode.  Otherwise: if a magit-status buffer is
-already visible, switch to that window and revert the buffer in place;
-else open fresh."
+set for the workspace), split the frame so a new window on the left
+holds the magit-status buffer while the claude panels remain on the
+right; the saved fullscreen config is cleared since claude is no longer
+in fullscreen mode.  Otherwise: if a magit-status buffer is already
+visible, switch to that window and revert the buffer in place; else
+open fresh."
   (interactive)
   (let* ((ws (+workspace-current-name))
          (claude-fs (claude-repl--ws-get ws :fullscreen-config))
@@ -154,11 +155,12 @@ else open fresh."
     (cond
      (claude-fs
       (when (fboundp 'claude-repl--log)
-        (claude-repl--log ws "magit-status-workspace: BRANCH=fullscreen-takeover dir=%s"
+        (claude-repl--log ws "magit-status-workspace: BRANCH=fullscreen-split-left dir=%s"
                           (claude-repl--ws-dir ws)))
       (claude-repl--ws-put ws :fullscreen-config nil)
-      (magit-status (claude-repl--ws-dir ws))
-      (delete-other-windows))
+      (let ((left-win (split-window (frame-root-window) nil 'left)))
+        (select-window left-win)
+        (magit-status (claude-repl--ws-dir ws))))
      (magit-win
       (when (fboundp 'claude-repl--log)
         (claude-repl--log ws "magit-status-workspace: BRANCH=reuse toplevel=%s"
