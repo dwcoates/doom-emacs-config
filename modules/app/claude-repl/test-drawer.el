@@ -363,6 +363,39 @@
     (should (eq (claude-repl-drawer--name-face "ws")
                 'claude-repl-drawer-workspace-name))))
 
+;;;; ---- Current-workspace gutter ----
+
+(ert-deftest claude-repl-drawer-test-current-workspace-gets-arrow-gutter ()
+  "The currently selected workspace's header line is prefixed with the arrow gutter."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "active" :priority "p1")
+    (claude-repl-drawer-test--register "other"  :priority "p2")
+    (cl-letf (((symbol-function '+workspace-current-name)
+               (lambda () "active")))
+      (claude-repl-drawer-test--with-buffer
+        (claude-repl-drawer--render)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          (should (string-match-p
+                   (concat (regexp-quote claude-repl-drawer-current-arrow)
+                           ".*active")
+                   text)))))))
+
+(ert-deftest claude-repl-drawer-test-non-current-workspace-uses-plain-gutter ()
+  "Non-current workspaces are prefixed with the plain (no-arrow) gutter."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "active" :priority "p1")
+    (claude-repl-drawer-test--register "other"  :priority "p2")
+    (cl-letf (((symbol-function '+workspace-current-name)
+               (lambda () "active")))
+      (claude-repl-drawer-test--with-buffer
+        (claude-repl-drawer--render)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          ;; "other" is non-current — its line must not carry the arrow.
+          (should-not (string-match-p
+                       (concat (regexp-quote claude-repl-drawer-current-arrow)
+                               ".*other")
+                       text)))))))
+
 ;;;; ---- Layout: priority/name spacing ----
 
 (ert-deftest claude-repl-drawer-test-render-space-between-priority-and-name ()

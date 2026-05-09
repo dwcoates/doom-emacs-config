@@ -77,6 +77,19 @@ Used for registered-but-not-yet-started workspaces (claude-state nil)."
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-drawer-current-arrow "▶ "
+  "Gutter prefix on the currently selected workspace's header line.
+Should match the visual width of `claude-repl-drawer-non-current-gutter'
+so MAIN/HIDDEN entries align in a single column."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-drawer-non-current-gutter "  "
+  "Gutter prefix on non-current workspace header lines.
+Width must match `claude-repl-drawer-current-arrow' for alignment."
+  :type 'string
+  :group 'claude-repl)
+
 ;;;; Faces ------------------------------------------------------------------
 
 (defface claude-repl-drawer-workspace-name
@@ -84,9 +97,9 @@ Used for registered-but-not-yet-started workspaces (claude-state nil)."
   "Face for the workspace name line in the drawer."
   :group 'claude-repl)
 
-(defface claude-repl-drawer-current-workspace
-  '((t :inherit highlight :weight bold))
-  "Face for the currently active workspace line in the drawer."
+(defface claude-repl-drawer-current-arrow
+  '((t :weight bold :inherit font-lock-keyword-face))
+  "Face for the gutter arrow that marks the currently selected workspace."
   :group 'claude-repl)
 
 (defface claude-repl-drawer-summary
@@ -292,7 +305,11 @@ the workspace is in the hidden section and should be dimmed."
          (prio-disp (claude-repl-drawer--priority-display priority))
          (sep       (if priority " " ""))
          (name-face (claude-repl-drawer--name-face ws))
-         (header    (concat "  " glyph "  " prio-disp sep
+         (gutter    (if selected
+                        (propertize claude-repl-drawer-current-arrow
+                                    'face 'claude-repl-drawer-current-arrow)
+                      claude-repl-drawer-non-current-gutter))
+         (header    (concat gutter glyph "  " prio-disp sep
                             (propertize ws 'face name-face)
                             (if dirty " ●" "")))
          (summary   (claude-repl-drawer--summary-text ws)))
@@ -307,11 +324,8 @@ the workspace is in the hidden section and should be dimmed."
              'help-echo (format "Workspace: %s%s"
                                 ws
                                 (if hidden " (hidden)" ""))))
-      (cond
-       (selected
-        (add-face-text-property start end 'claude-repl-drawer-current-workspace))
-       (hidden
-        (add-face-text-property start end 'claude-repl-drawer-hidden))))))
+      (when hidden
+        (add-face-text-property start end 'claude-repl-drawer-hidden)))))
 
 (defun claude-repl-drawer--insert-section-header (label)
   "Insert a bold section header LABEL with a rule line beneath it."
