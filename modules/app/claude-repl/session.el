@@ -149,7 +149,8 @@ The project root is resolved in this order:
   3. `(claude-repl--git-root default-directory)' — the repo of the
      current buffer.
 
-The state file at that root (`.claude-repl-state') is loaded when
+The state file at that root (`<root>/.claude/emacs/state.el', or the
+legacy `<root>/.claude-repl-state' if only it exists) is loaded when
 present and its contents supersede the derived defaults (`:project-dir'
 from the file is canonical, and per-env instantiation structs are
 reconstructed from the saved plists).  When absent, fresh defaults are
@@ -167,7 +168,7 @@ state-save.  Callers already guard on `claude-repl--claude-running-p'."
                              (claude-repl--ws-get ws :project-dir)
                              (claude-repl--git-root default-directory)))
          (root (and root-candidate (claude-repl--path-canonical root-candidate)))
-         (state-file (and root (claude-repl--state-file root)))
+         (state-file (and root (claude-repl--state-file-for-read root)))
          (saved (and state-file
                      (file-exists-p state-file)
                      (condition-case err
@@ -477,7 +478,7 @@ current workspace is different."
   "Set the session ID for workspace WS to ID and persist to disk.
 Persisting on capture is what makes a hook-delivered SID durable
 through an Emacs crash — without this `state-save', the SID would
-only reach `.claude-repl-state' at graceful teardown, so a crash
+only reach the per-project state file at graceful teardown, so a crash
 mid-session would drop the resume signal and the next launch would
 not pass `--continue'."
   (claude-repl--log ws "set-session-id: ws=%s id=%s" ws id)

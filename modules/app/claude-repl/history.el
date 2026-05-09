@@ -8,15 +8,35 @@
   "List of per-workspace environment keys.
 Each workspace has one `claude-repl-instantiation' struct per environment.")
 
-(defcustom claude-repl-history-filename ".claude-repl-history"
-  "Name of the per-project input history file."
+(defcustom claude-repl-emacs-data-subdir ".claude/emacs"
+  "Per-project subdirectory (relative to project root) for claude-repl data.
+Files inside use plain (non-hidden) names since the parent directory
+is already hidden via `.claude/'.  Auto-created on first write."
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-state-filename ".claude-repl-state"
-  "Name of the per-project session state file."
+(defcustom claude-repl-history-filename "history.el"
+  "Name of the per-project input history file (under
+`claude-repl-emacs-data-subdir')."
   :type 'string
   :group 'claude-repl)
+
+(defcustom claude-repl-state-filename "state.el"
+  "Name of the per-project session state file (under
+`claude-repl-emacs-data-subdir')."
+  :type 'string
+  :group 'claude-repl)
+
+(defconst claude-repl--legacy-history-filename ".claude-repl-history"
+  "Pre-relocation history filename at project root.
+Read-only fallback: when no file exists at the new location but a
+legacy file exists at the project root, the reader uses it.  The
+writer never targets this path — first save naturally migrates
+to the new location.")
+
+(defconst claude-repl--legacy-state-filename ".claude-repl-state"
+  "Pre-relocation state filename at project root.
+Same fallback semantics as `claude-repl--legacy-history-filename'.")
 
 ;;;; Error handling
 
@@ -41,8 +61,13 @@ then logs the full error via `claude-repl--log'."
     (read (current-buffer))))
 
 (defun claude-repl--write-sexp-file (file data)
-  "Write DATA as a sexp to FILE."
+  "Write DATA as a sexp to FILE.
+Creates FILE's parent directory if missing so the relocated `.claude/emacs/'
+data dir is auto-provisioned on first save."
   (claude-repl--log nil "write-sexp-file: file=%s" file)
+  (let ((dir (file-name-directory file)))
+    (when (and dir (not (file-directory-p dir)))
+      (make-directory dir t)))
   (with-temp-file file
     (prin1 data (current-buffer))))
 
@@ -77,34 +102,73 @@ Returns a fresh empty instantiation when SAVED is nil."
 
 ;;;; Persistence file paths
 
+(defun claude-repl--data-dir (root)
+  "Return the absolute path to the claude-repl data directory under ROOT.
+Used by writers to compose the destination path; readers use the
+`-for-read' resolvers below to also consider the legacy project-root
+locations."
+  (when root
+    (expand-file-name claude-repl-emacs-data-subdir root)))
+
 (defun claude-repl--history-file (root)
-  "Return the path to the history file under ROOT."
-  (expand-file-name claude-repl-history-filename root))
+  "Return the writer path for the history file under ROOT.
+This is always the new location (`<root>/<emacs-data-subdir>/<history>'),
+never the legacy file at the project root.  Use
+`claude-repl--history-file-for-read' when reading."
+  (when root
+    (expand-file-name claude-repl-history-filename
+                      (claude-repl--data-dir root))))
 
 (defun claude-repl--state-file (root)
-  "Return the path to the state file under ROOT, or nil if ROOT is nil."
+  "Return the writer path for the state file under ROOT, or nil if ROOT is nil.
+Always the new location; use `claude-repl--state-file-for-read' for
+reads (which falls back to the legacy project-root path)."
   (when root
-    (expand-file-name claude-repl-state-filename root)))
+    (expand-file-name claude-repl-state-filename
+                      (claude-repl--data-dir root))))
+
+(defun claude-repl--history-file-for-read (root)
+  "Return the read path for the history file under ROOT.
+Prefers the new location; falls back to the legacy project-root path
+when the new file does not exist (so existing on-disk histories keep
+working through the relocation transition)."
+  (when root
+    (let ((new (claude-repl--history-file root))
+          (legacy (expand-file-name claude-repl--legacy-history-filename root)))
+      (cond ((file-exists-p new) new)
+            ((file-exists-p legacy) legacy)
+            (t new)))))
+
+(defun claude-repl--state-file-for-read (root)
+  "Return the read path for the state file under ROOT.
+Same fallback semantics as `claude-repl--history-file-for-read'."
+  (when root
+    (let ((new (claude-repl--state-file root))
+          (legacy (expand-file-name claude-repl--legacy-state-filename root)))
+      (cond ((file-exists-p new) new)
+            ((file-exists-p legacy) legacy)
+            (t new)))))
 
 (defvar claude-repl--per-project-state-files
-  (list claude-repl-state-filename)
-  "State filenames purged when a workspace is nuked.
-Only includes ephemeral session state (`.claude-repl-state'); the
-history file is intentionally preserved so input history survives
-workspace recreation.")
+  (list (lambda (root) (claude-repl--state-file root))
+        (lambda (root) (expand-file-name claude-repl--legacy-state-filename root)))
+  "Functions returning state file paths purged when a workspace is nuked.
+Each entry is a (lambda (ROOT) PATH) — both the new location and the
+legacy project-root fallback are included so a nuke fully clears
+ephemeral session state regardless of which on-disk layout the
+workspace was using.  The history file is intentionally preserved.")
 
 (defun claude-repl--state-purge (root)
-  "Delete per-project state files under ROOT.
-Iterates `claude-repl--per-project-state-files' and unlinks each when
-present.  No-op when ROOT is nil or a file is missing.  Called by the
-nuke paths so a freshly-destroyed workspace cannot resurrect its
-stale session-id via `state-restore' on the next
+  "Delete per-project state files under ROOT (both new and legacy paths).
+No-op when ROOT is nil or a file is missing.  Called by the nuke
+paths so a freshly-destroyed workspace cannot resurrect its stale
+session-id via `state-restore' on the next
 `claude-repl--register-worktree-ws' at the same project root.
 The history file is intentionally preserved."
   (when root
-    (dolist (filename claude-repl--per-project-state-files)
-      (let ((path (expand-file-name filename root)))
-        (when (file-exists-p path)
+    (dolist (path-fn claude-repl--per-project-state-files)
+      (let ((path (funcall path-fn root)))
+        (when (and path (file-exists-p path))
           (claude-repl--log nil "state-purge: deleting %s" path)
           (condition-case err
               (delete-file path)
@@ -141,12 +205,14 @@ WS defaults to the current workspace name."
 
 (defun claude-repl--history-restore (ws)
   "Load input history from disk into the current buffer for workspace WS.
-Resolves the history file location via `claude-repl--ws-dir'."
+Resolves the history file location via `claude-repl--ws-dir', preferring
+the new `<root>/.claude/emacs/' location and falling back to the legacy
+project-root path when only the legacy file exists."
   (claude-repl--log ws "history-restore ws=%s" ws)
   (let* ((root (ignore-errors (claude-repl--ws-dir ws)))
          (data (when root
                  (claude-repl--read-sexp-file-if-exists
-                  (claude-repl--history-file root)))))
+                  (claude-repl--history-file-for-read root)))))
     (if data
         (setq claude-repl--input-history data)
       (claude-repl--log ws "history-restore: no data found, history unchanged"))))
@@ -165,8 +231,8 @@ environment's instantiation struct to a plist."
 (defun claude-repl--state-save (ws)
   "Persist session state for workspace WS to disk.
 Saves session-id for each environment so it survives Emacs restarts.
-Written to .claude-repl-state in the project root (alongside
-.claude-repl-history).
+Written to the per-project data dir (`<root>/.claude/emacs/state.el');
+the input history goes alongside as `history.el'.
 
 Also rewrites the workspace roster snapshot
 (`claude-repl-workspace-snapshot-file') so the snapshot reflects the

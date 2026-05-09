@@ -801,8 +801,8 @@ with `--resume <stale-sid>' — the exact failure the purge closes."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "claude-nuke-" t)))
       (unwind-protect
-          (let ((state-file (expand-file-name ".claude-repl-state" tmpdir)))
-            (with-temp-file state-file (insert "(:session-id \"stale-abc\")"))
+          (let ((state-file (claude-repl--state-file tmpdir)))
+            (claude-repl-test--seed-file state-file "(:session-id \"stale-abc\")")
             (claude-repl--ws-put "doomed" :project-dir tmpdir)
             (cl-letf (((symbol-function 'completing-read)
                        (lambda (_prompt _coll &rest _) "doomed"))
@@ -964,8 +964,8 @@ kill so the workspace can be re-opened with its identity intact."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "claude-kill-" t)))
       (unwind-protect
-          (let ((state-file (expand-file-name ".claude-repl-state" tmpdir)))
-            (with-temp-file state-file (insert "(:session-id \"keep-me\")"))
+          (let ((state-file (claude-repl--state-file tmpdir)))
+            (claude-repl-test--seed-file state-file "(:session-id \"keep-me\")")
             (claude-repl--ws-put "doomed" :project-dir tmpdir)
             (cl-letf (((symbol-function 'completing-read)
                        (lambda (_prompt _coll &rest _) "doomed"))
@@ -1379,9 +1379,9 @@ so the lazy-start hook skips firing for each restored workspace."
     (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-hydrate-" t))))
       (unwind-protect
           (progn
-            (with-temp-file (expand-file-name ".claude-repl-state" tmp-dir)
-              (prin1 '(:project-dir "/some/dir" :active-env :bare-metal :priority "p1")
-                     (current-buffer)))
+            (claude-repl-test--seed-file
+             (claude-repl--state-file tmp-dir)
+             (prin1-to-string '(:project-dir "/some/dir" :active-env :bare-metal :priority "p1")))
             (cl-letf (((symbol-function '+workspace-current-name)
                        (lambda () "test-ws"))
                       ((symbol-function 'force-mode-line-update)
@@ -1407,9 +1407,9 @@ so the lazy-start hook skips firing for each restored workspace."
     (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-hydrate-" t))))
       (unwind-protect
           (progn
-            (with-temp-file (expand-file-name ".claude-repl-state" tmp-dir)
-              (prin1 '(:project-dir "/some/dir" :active-env :bare-metal)
-                     (current-buffer)))
+            (claude-repl-test--seed-file
+             (claude-repl--state-file tmp-dir)
+             (prin1-to-string '(:project-dir "/some/dir" :active-env :bare-metal)))
             (cl-letf (((symbol-function '+workspace-current-name)
                        (lambda () "test-ws")))
               (claude-repl--hydrate-priority-from-state tmp-dir)
@@ -1425,8 +1425,9 @@ so the lazy-start hook skips firing for each restored workspace."
           switched-with)
       (unwind-protect
           (progn
-            (with-temp-file (expand-file-name ".claude-repl-state" tmp-dir)
-              (prin1 '(:priority "p2") (current-buffer)))
+            (claude-repl-test--seed-file
+             (claude-repl--state-file tmp-dir)
+             (prin1-to-string '(:priority "p2")))
             (cl-letf (((symbol-function '+dwc/switch-to-project)
                        (lambda (project) (setq switched-with project)))
                       ((symbol-function '+workspace-current-name)

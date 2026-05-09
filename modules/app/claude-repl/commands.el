@@ -488,9 +488,9 @@ Prompts once with the count before proceeding."
 Same teardown as `claude-repl-nuke-workspace' — kills the Claude
 process, vterm/input buffers, every other buffer attached to the
 persp, removes the workspace from `claude-repl--workspaces', and
-kills the persp itself — but leaves the on-disk
-`.claude-repl-state' untouched so priority and per-environment
-session-id survive.  Use this when you want to free in-memory
+kills the persp itself — but leaves the on-disk per-project state file (under
+`.claude/emacs/' — see `claude-repl--state-file') untouched so
+priority and per-environment session-id survive.  Use this when you want to free in-memory
 resources but expect to re-open the workspace later and resume the
 same Claude session.
 
@@ -706,13 +706,14 @@ never propagated, so a corrupt snapshot can't block startup."
 
 (defun claude-repl--hydrate-priority-from-state (project-root)
   "Hydrate :priority for the current workspace from PROJECT-ROOT's state file.
-Reads `<PROJECT-ROOT>/.claude-repl-state' and, if it carries a
-`:priority', records it on the current workspace's plist so the tabline
-badge renders without waiting for `claude-repl--initialize-ws-env'
+Reads the per-project state file (preferring `<PROJECT-ROOT>/.claude/emacs/state.el',
+falling back to the legacy `<PROJECT-ROOT>/.claude-repl-state') and, if it
+carries a `:priority', records it on the current workspace's plist so the
+tabline badge renders without waiting for `claude-repl--initialize-ws-env'
 \(which only runs when Claude actually starts).  No-op when the state
 file is missing, malformed, or carries no `:priority'."
   (when-let* ((ws (ignore-errors (+workspace-current-name)))
-              (state-file (claude-repl--state-file project-root))
+              (state-file (claude-repl--state-file-for-read project-root))
               (saved (condition-case err
                          (claude-repl--read-sexp-file-if-exists state-file)
                        (error
@@ -727,7 +728,8 @@ file is missing, malformed, or carries no `:priority'."
 (defun claude-repl-switch-to-project (&optional project)
   "Switch to PROJECT and hydrate the workspace's priority badge.
 Thin wrapper around `+dwc/switch-to-project' that, after switching,
-reads `.claude-repl-state' from the project root and applies any saved
+reads the per-project state file from the project root (see
+`claude-repl--state-file-for-read') and applies any saved
 `:priority' to the new workspace, so the tabline badge appears
 immediately on `SPC p p' instead of only after Claude starts.  Also
 pulses the activated workspace's tab via `claude-repl-flash-tab' so

@@ -259,6 +259,17 @@ user's real snapshot during ERT runs."
        (when (file-exists-p claude-repl-workspace-snapshot-file)
          (delete-file claude-repl-workspace-snapshot-file)))))
 
+(defun claude-repl-test--seed-file (path content)
+  "Write CONTENT (string) to PATH, creating any needed parent dirs.
+Used by tests that need to seed a fixture file at a path whose parent
+directory doesn't exist yet (e.g. the relocated `<root>/.claude/emacs/'
+data dir).  Avoids `with-temp-file's bare write that would otherwise
+fail with `file-missing'."
+  (let ((dir (file-name-directory path)))
+    (when (and dir (not (file-directory-p dir)))
+      (make-directory dir t)))
+  (with-temp-file path (insert content)))
+
 (defmacro claude-repl-test--with-temp-buffer (name &rest body)
   "Create (or reuse) buffer NAME, execute BODY, kill buffer only if we created it.
 If NAME already refers to a live buffer when the macro runs (e.g. `*scratch*',

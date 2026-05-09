@@ -932,8 +932,7 @@ where fresh-ws-env wrote :active-env without :project-dir."
       (unwind-protect
           (progn
             (claude-repl--write-sexp-file
-             (expand-file-name ".claude-repl-state"
-                               (claude-repl--path-canonical tmpdir))
+             (claude-repl--state-file (claude-repl--path-canonical tmpdir))
              `(:project-dir ,(claude-repl--path-canonical tmpdir)
                :active-env :sandbox
                :bare-metal (:session-id "bm-saved")
@@ -953,8 +952,7 @@ so hide-mode survives Emacs restart."
       (unwind-protect
           (progn
             (claude-repl--write-sexp-file
-             (expand-file-name ".claude-repl-state"
-                               (claude-repl--path-canonical tmpdir))
+             (claude-repl--state-file (claude-repl--path-canonical tmpdir))
              `(:project-dir ,(claude-repl--path-canonical tmpdir)
                :active-env :bare-metal
                :repl-state :inactive
@@ -973,8 +971,7 @@ restart (the lazy-start path applies its defaults instead)."
       (unwind-protect
           (progn
             (claude-repl--write-sexp-file
-             (expand-file-name ".claude-repl-state"
-                               (claude-repl--path-canonical tmpdir))
+             (claude-repl--state-file (claude-repl--path-canonical tmpdir))
              `(:project-dir ,(claude-repl--path-canonical tmpdir)
                :active-env :bare-metal
                :repl-state :dead
@@ -991,8 +988,7 @@ restart (the lazy-start path applies its defaults instead)."
       (unwind-protect
           (progn
             (claude-repl--write-sexp-file
-             (expand-file-name ".claude-repl-state"
-                               (claude-repl--path-canonical tmpdir))
+             (claude-repl--state-file (claude-repl--path-canonical tmpdir))
              `(:project-dir ,(claude-repl--path-canonical tmpdir)
                :active-env :bare-metal
                :priority "p1"
@@ -1316,7 +1312,7 @@ through an Emacs crash — without it, the SID would only reach
             (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
             (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
             (claude-repl--set-session-id "ws" "captured-sid")
-            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+            (let* ((file (claude-repl--state-file tmpdir))
                    (data (claude-repl--read-sexp-file file)))
               (should (equal (plist-get (plist-get data :bare-metal) :session-id)
                              "captured-sid"))))

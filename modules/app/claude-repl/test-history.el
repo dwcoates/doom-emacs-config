@@ -131,9 +131,44 @@
 ;;;; ---- Tests: history-file path ----
 
 (ert-deftest claude-repl-test-history-file-path ()
-  "`claude-repl--history-file' returns `<root>/.claude-repl-history'."
+  "`claude-repl--history-file' returns the history filename joined under
+the per-project data subdir."
   (should (equal (claude-repl--history-file "/test/root")
-                 (expand-file-name ".claude-repl-history" "/test/root"))))
+                 (expand-file-name claude-repl-history-filename
+                                   (expand-file-name claude-repl-emacs-data-subdir
+                                                     "/test/root")))))
+
+(ert-deftest claude-repl-test-history-file-for-read-prefers-new ()
+  "history-file-for-read returns the new path when it exists."
+  (let ((tmpdir (make-temp-file "test-hist-read-new-" t)))
+    (unwind-protect
+        (let ((new (claude-repl--history-file tmpdir)))
+          (make-directory (file-name-directory new) t)
+          (with-temp-file new (insert "(\"x\")"))
+          (should (equal (claude-repl--history-file-for-read tmpdir) new)))
+      (delete-directory tmpdir t))))
+
+(ert-deftest claude-repl-test-history-file-for-read-falls-back-to-legacy ()
+  "history-file-for-read returns the legacy project-root path when the
+new path does not exist but the legacy one does."
+  (let ((tmpdir (make-temp-file "test-hist-read-legacy-" t)))
+    (unwind-protect
+        (let ((legacy (expand-file-name claude-repl--legacy-history-filename
+                                        tmpdir)))
+          (with-temp-file legacy (insert "(\"x\")"))
+          (should (equal (claude-repl--history-file-for-read tmpdir) legacy)))
+      (delete-directory tmpdir t))))
+
+(ert-deftest claude-repl-test-state-file-for-read-falls-back-to-legacy ()
+  "state-file-for-read returns the legacy project-root path when the
+new path does not exist but the legacy one does."
+  (let ((tmpdir (make-temp-file "test-state-read-legacy-" t)))
+    (unwind-protect
+        (let ((legacy (expand-file-name claude-repl--legacy-state-filename
+                                        tmpdir)))
+          (with-temp-file legacy (insert "(:project-dir nil)"))
+          (should (equal (claude-repl--state-file-for-read tmpdir) legacy)))
+      (delete-directory tmpdir t))))
 
 ;;;; ---- Tests: history-save path resolution ----
 
@@ -149,7 +184,7 @@
             (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
             (let ((default-directory "/should-not-be-used/"))
               (claude-repl--history-save "test-ws"))
-            (should (file-exists-p (expand-file-name ".claude-repl-history" tmpdir))))
+            (should (file-exists-p (claude-repl--history-file tmpdir))))
         (delete-directory tmpdir t)))))
 
 ;;;; ---- Tests: history-push with explicit text argument ----
@@ -341,7 +376,7 @@
 (ert-deftest claude-repl-test-state-file-with-root ()
   "state-file returns path under the given root."
   (should (equal (claude-repl--state-file "/my/project")
-                 (expand-file-name ".claude-repl-state" "/my/project"))))
+                 (claude-repl--state-file "/my/project"))))
 
 (ert-deftest claude-repl-test-state-file-nil-root ()
   "state-file returns nil when root is nil."
@@ -416,7 +451,7 @@
             (claude-repl--ws-put "ws" :sandbox
                                  (make-claude-repl-instantiation))
             (claude-repl--state-save "ws")
-            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+            (let* ((file (claude-repl--state-file tmpdir))
                    (data (claude-repl--read-sexp-file file)))
               (should (equal (plist-get data :project-dir) tmpdir))
               (should (equal (plist-get data :active-env) :bare-metal))))
@@ -440,7 +475,7 @@
             (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
             (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
             (claude-repl--state-save "ws")
-            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+            (let* ((file (claude-repl--state-file tmpdir))
                    (data (claude-repl--read-sexp-file file)))
               (should (equal (plist-get data :priority) "p1"))))
         (delete-directory tmpdir t)))))
@@ -456,7 +491,7 @@
             (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
             (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
             (claude-repl--state-save "ws")
-            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+            (let* ((file (claude-repl--state-file tmpdir))
                    (data (claude-repl--read-sexp-file file)))
               (should (null (plist-get data :priority)))))
         (delete-directory tmpdir t)))))
@@ -473,7 +508,7 @@
             (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
             (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
             (claude-repl--state-save "ws")
-            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+            (let* ((file (claude-repl--state-file tmpdir))
                    (data (claude-repl--read-sexp-file file)))
               (should (equal (plist-get data :source-ws-dir) "/tmp/source-repo/"))))
         (delete-directory tmpdir t)))))
@@ -489,7 +524,7 @@
             (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
             (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
             (claude-repl--state-save "ws")
-            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+            (let* ((file (claude-repl--state-file tmpdir))
                    (data (claude-repl--read-sexp-file file)))
               (should (null (plist-get data :source-ws-dir)))))
         (delete-directory tmpdir t)))))
@@ -506,7 +541,7 @@
             (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
             (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
             (claude-repl--state-save "ws")
-            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+            (let* ((file (claude-repl--state-file tmpdir))
                    (data (claude-repl--read-sexp-file file)))
               (should (eq (plist-get data :repl-state) :inactive))))
         (delete-directory tmpdir t)))))
@@ -544,7 +579,7 @@ write is the primary obligation; snapshot is the piggyback)."
             (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
             (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
             (claude-repl--state-save "ws")
-            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+            (let* ((file (claude-repl--state-file tmpdir))
                    (data (claude-repl--read-sexp-file file)))
               (should (equal (plist-get data :project-dir) tmpdir))))
         (delete-directory tmpdir t)))))
@@ -610,7 +645,7 @@ write is the primary obligation; snapshot is the piggyback)."
       (unwind-protect
           (progn
             (claude-repl--write-sexp-file
-             (expand-file-name ".claude-repl-state" tmpdir)
+             (claude-repl--state-file tmpdir)
              '(:project-dir "/restored/root"
                :active-env :sandbox
                :bare-metal (:session-id "bm-id")
@@ -674,7 +709,7 @@ write is the primary obligation; snapshot is the piggyback)."
       (unwind-protect
           (progn
             (claude-repl--write-sexp-file
-             (expand-file-name ".claude-repl-state" tmpdir)
+             (claude-repl--state-file tmpdir)
              '(:project-dir "/restored/root"
                :active-env :bare-metal
                :source-ws-dir "/tmp/recorded-source/"
@@ -693,7 +728,7 @@ write is the primary obligation; snapshot is the piggyback)."
       (unwind-protect
           (progn
             (claude-repl--write-sexp-file
-             (expand-file-name ".claude-repl-state" tmpdir)
+             (claude-repl--state-file tmpdir)
              '(:project-dir "/restored/root"
                :active-env :bare-metal
                :bare-metal (:session-id nil)
@@ -755,7 +790,7 @@ write is the primary obligation; snapshot is the piggyback)."
             (claude-repl--history-save "test-ws")
             ;; File should not exist
             (should-not (file-exists-p
-                         (expand-file-name ".claude-repl-history" tmpdir))))
+                         (claude-repl--history-file tmpdir))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-test-history-save-skips-dead-buffer ()
@@ -912,7 +947,7 @@ write is the primary obligation; snapshot is the piggyback)."
             (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
             (claude-repl--history-save "test-ws")
             ;; Read back and verify
-            (let ((file (expand-file-name ".claude-repl-history" tmpdir)))
+            (let ((file (claude-repl--history-file tmpdir)))
               (should (equal (claude-repl--read-sexp-file file) '("only-one")))))
         (delete-directory tmpdir t)))))
 
@@ -928,7 +963,7 @@ write is the primary obligation; snapshot is the piggyback)."
             (claude-repl--ws-put "test-ws" :project-dir tmpdir)
             ;; Write a string (non-list) to the history file
             (claude-repl--write-sexp-file
-             (expand-file-name ".claude-repl-history" tmpdir) "just-a-string")
+             (claude-repl--history-file tmpdir) "just-a-string")
             (claude-repl--history-restore "test-ws")
             (should (equal claude-repl--input-history "just-a-string")))
         (delete-directory tmpdir t)))))
@@ -942,7 +977,7 @@ write is the primary obligation; snapshot is the piggyback)."
             (setq-local claude-repl--input-history '("old1" "old2"))
             (claude-repl--ws-put "test-ws" :project-dir tmpdir)
             (claude-repl--write-sexp-file
-             (expand-file-name ".claude-repl-history" tmpdir) '("new1"))
+             (claude-repl--history-file tmpdir) '("new1"))
             (claude-repl--history-restore "test-ws")
             (should (equal claude-repl--input-history '("new1"))))
         (delete-directory tmpdir t)))))
@@ -973,7 +1008,7 @@ write is the primary obligation; snapshot is the piggyback)."
             (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
             (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
             (claude-repl--state-save "ws")
-            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+            (let* ((file (claude-repl--state-file tmpdir))
                    (data (claude-repl--read-sexp-file file)))
               (should (plist-member data :active-env))
               (should-not (plist-get data :active-env))))
@@ -997,8 +1032,7 @@ write is the primary obligation; snapshot is the piggyback)."
     (let ((tmpdir (make-temp-file "test-state-empty-" t)))
       (unwind-protect
           (progn
-            (with-temp-file (expand-file-name ".claude-repl-state" tmpdir)
-              (insert ""))
+            (claude-repl-test--seed-file (claude-repl--state-file tmpdir) "")
             (claude-repl--ws-put "ws" :project-dir tmpdir)
             (claude-repl--initialize-ws-env "ws")
             (should (eq (claude-repl--ws-get "ws" :active-env) :bare-metal))
@@ -1015,8 +1049,7 @@ write is the primary obligation; snapshot is the piggyback)."
       (unwind-protect
           (progn
             ;; Unclosed paren triggers end-of-file error in (read ...)
-            (with-temp-file (expand-file-name ".claude-repl-state" tmpdir)
-              (insert "(unclosed paren"))
+            (claude-repl-test--seed-file (claude-repl--state-file tmpdir) "(unclosed paren")
             (claude-repl--ws-put "ws" :project-dir tmpdir)
             (claude-repl--initialize-ws-env "ws")
             (should (eq (claude-repl--ws-get "ws" :active-env) :bare-metal))
@@ -1031,8 +1064,7 @@ write is the primary obligation; snapshot is the piggyback)."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-write-" t)))
       (unwind-protect
-          (let ((state-path (expand-file-name ".claude-repl-state"
-                                              (claude-repl--path-canonical tmpdir))))
+          (let ((state-path (claude-repl--state-file (claude-repl--path-canonical tmpdir))))
             (claude-repl--ws-put "ws" :project-dir tmpdir)
             (should-not (file-exists-p state-path))
             (claude-repl--initialize-ws-env "ws")
@@ -1140,13 +1172,13 @@ write is the primary obligation; snapshot is the piggyback)."
 ;;;; ---- Tests: state-purge ----
 
 (ert-deftest claude-repl-test-state-purge-removes-state-preserves-history ()
-  "state-purge deletes .claude-repl-state but preserves .claude-repl-history."
+  "state-purge deletes the per-project state file but preserves history."
   (let ((tmpdir (make-temp-file "claude-purge-" t)))
     (unwind-protect
-        (let ((state-file   (expand-file-name ".claude-repl-state"   tmpdir))
-              (history-file (expand-file-name ".claude-repl-history" tmpdir)))
-          (with-temp-file state-file   (insert "(:session-id \"abc\")"))
-          (with-temp-file history-file (insert "(:history (\"x\"))"))
+        (let ((state-file   (claude-repl--state-file tmpdir))
+              (history-file (claude-repl--history-file tmpdir)))
+          (claude-repl-test--seed-file state-file   "(:session-id \"abc\")")
+          (claude-repl-test--seed-file history-file "(:history (\"x\"))")
           (should (file-exists-p state-file))
           (should (file-exists-p history-file))
           (claude-repl--state-purge tmpdir)
@@ -1173,10 +1205,10 @@ write is the primary obligation; snapshot is the piggyback)."
   "state-purge only removes the managed per-project files."
   (let ((tmpdir (make-temp-file "claude-purge-unrelated-" t)))
     (unwind-protect
-        (let ((state-file   (expand-file-name ".claude-repl-state" tmpdir))
+        (let ((state-file   (claude-repl--state-file tmpdir))
               (unrelated    (expand-file-name "README.md"          tmpdir)))
-          (with-temp-file state-file (insert "(:session-id \"abc\")"))
-          (with-temp-file unrelated  (insert "# project"))
+          (claude-repl-test--seed-file state-file "(:session-id \"abc\")")
+          (claude-repl-test--seed-file unrelated  "# project")
           (claude-repl--state-purge tmpdir)
           (should-not (file-exists-p state-file))
           (should (file-exists-p unrelated)))
