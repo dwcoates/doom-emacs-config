@@ -130,12 +130,38 @@ Used for registered-but-not-yet-started workspaces (claude-state nil)."
     map)
   "Keymap for `claude-repl-drawer-mode'.")
 
+(defun claude-repl-drawer--hl-line-range ()
+  "Return (START . END) covering the full workspace block at point.
+Used as `hl-line-range-function' so the highlight spans both the
+header and summary lines of an entry — matching the unit that j/k
+navigates between.  Returns nil on lines without a workspace property
+(section headers, separators, blanks), letting hl-line fall back to
+its default per-line behavior there."
+  (let ((ws (claude-repl-drawer--workspace-at-point)))
+    (when ws
+      (save-excursion
+        (let (start end)
+          (while (and (not (bobp))
+                      (equal (get-text-property (1- (point))
+                                                'claude-repl-drawer-workspace)
+                             ws))
+            (forward-char -1))
+          (setq start (point))
+          (while (and (not (eobp))
+                      (equal (get-text-property (point)
+                                                'claude-repl-drawer-workspace)
+                             ws))
+            (forward-char 1))
+          (setq end (point))
+          (cons start end))))))
+
 (define-derived-mode claude-repl-drawer-mode special-mode "ClaudeDrawer"
   "Major mode for the claude-repl workspace drawer."
   (setq truncate-lines t
         buffer-read-only t
         cursor-type 'box
         mode-line-format nil)
+  (setq-local hl-line-range-function #'claude-repl-drawer--hl-line-range)
   (hl-line-mode 1))
 
 ;; Evil intercepts j/k/n/p in motion/normal state and routes them to
@@ -473,16 +499,23 @@ restriction, which silently clamp small fractions otherwise."
         (ignore-errors (window-resize window delta t t))))))
 
 (defun claude-repl-drawer-show ()
-  "Show the workspace drawer in a left-side window."
+  "Show the workspace drawer in a left-side window.
+Selects the drawer window and positions the cursor on the currently
+active workspace (falling back to the first entry)."
   (interactive)
-  (let* ((buf (claude-repl-drawer--get-or-create-buffer))
-         (win (display-buffer buf claude-repl-drawer--display-action)))
+  (let* ((buf        (claude-repl-drawer--get-or-create-buffer))
+         (current-ws (claude-repl-drawer--current-ws))
+         (win        (display-buffer buf claude-repl-drawer--display-action)))
     (with-current-buffer buf
       (claude-repl-drawer--render)
-      (claude-repl-drawer--goto-first-workspace))
+      (or (and current-ws
+               (claude-repl-drawer--goto-workspace-line current-ws))
+          (claude-repl-drawer--goto-first-workspace)))
     (when win
       (set-window-dedicated-p win t)
-      (claude-repl-drawer--apply-width win))
+      (claude-repl-drawer--apply-width win)
+      (set-window-point win (with-current-buffer buf (point)))
+      (select-window win))
     win))
 
 (defun claude-repl-drawer-hide ()

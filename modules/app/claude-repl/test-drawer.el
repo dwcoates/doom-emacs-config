@@ -179,6 +179,24 @@
       (claude-repl-drawer--goto-first-workspace)
       (should (equal (claude-repl-drawer--workspace-at-point) "alpha")))))
 
+(ert-deftest claude-repl-drawer-test-goto-workspace-line-finds-target ()
+  "`claude-repl-drawer--goto-workspace-line' lands on the named workspace's block."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--register "beta"  :priority "p2")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (should (claude-repl-drawer--goto-workspace-line "beta"))
+      (should (equal (claude-repl-drawer--workspace-at-point) "beta")))))
+
+(ert-deftest claude-repl-drawer-test-goto-workspace-line-returns-nil-for-unknown ()
+  "`claude-repl-drawer--goto-workspace-line' returns nil when the workspace isn't rendered."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (should-not (claude-repl-drawer--goto-workspace-line "ghost")))))
+
 (ert-deftest claude-repl-drawer-test-prev-moves-back ()
   "`claude-repl-drawer-prev' moves up to the previous workspace block."
   (claude-repl-test--with-clean-state
@@ -228,6 +246,31 @@
       (claude-repl-drawer--render)
       (goto-char (point-min))
       (should-error (claude-repl-drawer-visit) :type 'user-error))))
+
+;;;; ---- hl-line range ----
+
+(ert-deftest claude-repl-drawer-test-hl-line-range-spans-block ()
+  "hl-line range covers both header and summary lines of the entry at point."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let* ((range (claude-repl-drawer--hl-line-range))
+             (text  (buffer-substring-no-properties (car range) (cdr range))))
+        (should range)
+        (should (string-match-p "alpha" text))
+        ;; Block contains both lines: a newline must appear inside the range.
+        (should (string-match-p "\n" text))))))
+
+(ert-deftest claude-repl-drawer-test-hl-line-range-nil-on-non-workspace-line ()
+  "hl-line range returns nil on section-header / separator / blank lines."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (goto-char (point-min)) ;; on the MAIN section header
+      (should-not (claude-repl-drawer--hl-line-range)))))
 
 ;;;; ---- Refresh-if-visible ----
 
