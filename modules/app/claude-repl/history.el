@@ -249,7 +249,10 @@ same granularity as per-project state."
                               :active-env ,(claude-repl--ws-get ws :active-env)
                               :priority ,(claude-repl--ws-get ws :priority)
                               :source-ws-dir ,(claude-repl--ws-get ws :source-ws-dir)
-                              :repl-state ,(claude-repl--ws-get ws :repl-state))
+                              :repl-state ,(claude-repl--ws-get ws :repl-state)
+                              :saved-tab-index ,(claude-repl--ws-get ws :saved-tab-index)
+                              :fork-session-id ,(claude-repl--ws-get ws :fork-session-id)
+                              :last-prompt-summary ,(claude-repl--ws-get ws :last-prompt-summary))
                            (claude-repl--collect-env-state ws))))
         (claude-repl--with-error-logging "state-save"
           (claude-repl--write-sexp-file file state)

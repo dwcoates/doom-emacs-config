@@ -213,6 +213,26 @@ state-save.  Callers already guard on `claude-repl--claude-running-p'."
     (let ((saved-repl-state (and saved (plist-get saved :repl-state))))
       (when (memq saved-repl-state '(:active :inactive))
         (claude-repl--ws-put ws :repl-state saved-repl-state)))
+    ;; Tab-bar slot: if the ws was deprioritized at the prior quit (i.e.
+    ;; pushed to second-to-last via `SPC o C'), `:saved-tab-index' was
+    ;; left non-nil pending the next reopen.  Restore it so the next
+    ;; `--show-existing-panels' returns the ws to its prior slot.
+    (when-let ((idx (and saved (plist-get saved :saved-tab-index))))
+      (claude-repl--ws-put ws :saved-tab-index idx))
+    ;; Fork session ID: a worktree-fork ws whose claude session was never
+    ;; actually started before quit needs the fork pointer to survive so
+    ;; the next `--initialize-claude' can launch with `--resume FORK
+    ;; --fork-session'.  Cleared by `--initialize-claude' once consumed.
+    (when-let ((fork (and saved (plist-get saved :fork-session-id))))
+      (claude-repl--ws-put ws :fork-session-id fork))
+    ;; Last prompt summary: the tabline / mode-line uses this to render a
+    ;; short "what is this ws working on" hint.  Restore just the summary
+    ;; — `:last-prompt-text' and `:last-prompt-summary-pending' are
+    ;; coordination fields for the in-flight async summary task, which
+    ;; can't survive Emacs quit, so persisting them would only confuse
+    ;; the apply-summary path on the next prompt.
+    (when-let ((summary (and saved (plist-get saved :last-prompt-summary))))
+      (claude-repl--ws-put ws :last-prompt-summary summary))
     (dolist (key claude-repl--environment-keys)
       (claude-repl--ws-put ws key
                            (claude-repl--make-instantiation-from-plist

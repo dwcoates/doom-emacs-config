@@ -529,6 +529,61 @@ new path does not exist but the legacy one does."
               (should (null (plist-get data :source-ws-dir)))))
         (delete-directory tmpdir t)))))
 
+(ert-deftest claude-repl-test-state-save-includes-saved-tab-index ()
+  "state-save serializes `:saved-tab-index' so a deprioritized ws returns
+to its prior tab-bar slot after Emacs restart."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-tabidx-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :saved-tab-index 3)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (claude-repl--state-file tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (eq (plist-get data :saved-tab-index) 3))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-state-save-includes-fork-session-id ()
+  "state-save serializes `:fork-session-id' so a fresh fork-ws whose
+claude session never started before quit can still launch with
+--fork-session on the next restart."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-fork-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :fork-session-id "fork-sid-123")
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (claude-repl--state-file tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (equal (plist-get data :fork-session-id) "fork-sid-123"))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-state-save-includes-last-prompt-summary ()
+  "state-save serializes `:last-prompt-summary' so the tabline hint
+survives Emacs restart."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-summary-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :last-prompt-summary "fix login bug")
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (claude-repl--state-file tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (equal (plist-get data :last-prompt-summary) "fix login bug"))))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest claude-repl-test-state-save-includes-repl-state ()
   "state-save serializes `:repl-state' so panel-visibility survives restart."
   (claude-repl-test--with-clean-state

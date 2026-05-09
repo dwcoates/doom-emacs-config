@@ -185,7 +185,11 @@ update on the vterm buffer so the new segment paints immediately."
         (claude-repl--log ws "prompt-summary: drop stale summary (raw mismatched)")
       (claude-repl--ws-put ws :last-prompt-summary summary)
       (claude-repl--ws-put ws :last-prompt-summary-pending nil)
-      (claude-repl--prompt-summary-redisplay ws))))
+      (claude-repl--prompt-summary-redisplay ws)
+      ;; Persist so the summary survives Emacs restart — the tabline /
+      ;; mode-line hint reads `:last-prompt-summary' to render the "what
+      ;; is this ws working on" segment, which is otherwise lost on quit.
+      (claude-repl--state-save ws))))
 
 (defun claude-repl--prompt-summary-redisplay (ws)
   "Force a mode-line redisplay for WS's vterm buffer."

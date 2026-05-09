@@ -344,12 +344,18 @@ events (kill, switch, add) are traceable."
 Read on reopen by `claude-repl--restore-tab-index' so the workspace
 returns to its prior slot in the tab-bar after a close-deprio cycle.
 Reads positions from `persp-names-current-frame-fast-ordered'; no-op
-when that helper is unavailable (e.g. test envs without persp-mode)."
+when that helper is unavailable (e.g. test envs without persp-mode).
+
+Also writes the index to disk via `--state-save' so a deprioritized ws
+that the user closes Emacs on still returns to its saved slot on
+restart (without this, `:saved-tab-index' is in-memory only and the ws
+loses its prior position across an Emacs lifecycle)."
   (when (fboundp 'persp-names-current-frame-fast-ordered)
     (when-let ((idx (cl-position ws (persp-names-current-frame-fast-ordered)
                                  :test #'string=)))
       (claude-repl--log ws "save-tab-index ws=%s index=%d" ws idx)
-      (claude-repl--ws-put ws :saved-tab-index idx))))
+      (claude-repl--ws-put ws :saved-tab-index idx)
+      (claude-repl--state-save ws))))
 
 (defun claude-repl--restore-tab-index (ws)
   "Move WS back to its persisted `:saved-tab-index' slot, if any.
@@ -375,6 +381,10 @@ string happens to compare equal under propertized-string semantics."
                           ws idx clamped)
         (persp-update-names-cache reordered)
         (claude-repl--ws-put ws :saved-tab-index nil)
+        ;; Persist the cleared index so a future restart doesn't see a
+        ;; stale value and re-restore (the ws is no longer deprioritized
+        ;; once we've reseated it).
+        (claude-repl--state-save ws)
         (when (fboundp 'claude-repl--force-tab-bar-redraw)
           (claude-repl--force-tab-bar-redraw))))))
 

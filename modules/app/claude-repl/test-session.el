@@ -944,6 +944,62 @@ where fresh-ws-env wrote :active-env without :project-dir."
                            "bm-saved")))
         (delete-directory tmpdir t)))))
 
+(ert-deftest claude-repl-test-initialize-ws-env-restores-saved-tab-index ()
+  "initialize-ws-env hydrates `:saved-tab-index' from the saved file so a
+ws that was deprioritized at quit returns to its prior slot on restart."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-tabidx-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (claude-repl--state-file tmpdir)
+             `(:project-dir ,(claude-repl--path-canonical tmpdir)
+               :active-env :bare-metal
+               :saved-tab-index 4
+               :bare-metal nil
+               :sandbox nil))
+            (claude-repl--initialize-ws-env "ws1" tmpdir)
+            (should (eq (claude-repl--ws-get "ws1" :saved-tab-index) 4)))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-initialize-ws-env-restores-fork-session-id ()
+  "initialize-ws-env hydrates `:fork-session-id' from the saved file so a
+fork-ws whose claude session never started before quit can launch with
+--fork-session on the next start."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-fork-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (claude-repl--state-file tmpdir)
+             `(:project-dir ,(claude-repl--path-canonical tmpdir)
+               :active-env :bare-metal
+               :fork-session-id "fsid-abc"
+               :bare-metal nil
+               :sandbox nil))
+            (claude-repl--initialize-ws-env "ws1" tmpdir)
+            (should (equal (claude-repl--ws-get "ws1" :fork-session-id) "fsid-abc")))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-initialize-ws-env-restores-last-prompt-summary ()
+  "initialize-ws-env hydrates `:last-prompt-summary' so the tabline hint
+survives restart."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-sum-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (claude-repl--state-file tmpdir)
+             `(:project-dir ,(claude-repl--path-canonical tmpdir)
+               :active-env :bare-metal
+               :last-prompt-summary "refactor auth"
+               :bare-metal nil
+               :sandbox nil))
+            (claude-repl--initialize-ws-env "ws1" tmpdir)
+            (should (equal (claude-repl--ws-get "ws1" :last-prompt-summary)
+                           "refactor auth")))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest claude-repl-test-initialize-ws-env-restores-repl-state-inactive ()
   "initialize-ws-env hydrates `:repl-state :inactive' from the saved file
 so hide-mode survives Emacs restart."
