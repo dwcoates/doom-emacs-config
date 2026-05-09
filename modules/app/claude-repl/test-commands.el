@@ -1489,21 +1489,23 @@ so the lazy-start hook skips firing for each restored workspace."
 
 ;;;; ---- Workspace cycling (claude-repl-switch-left/right) ----
 
-(defmacro claude-repl-cmd-test--with-cycle-stubs (names current open-set
+(defmacro claude-repl-cmd-test--with-cycle-stubs (names current hidden-set
                                                   switched-to flashed protected-p
                                                   &rest body)
   "Bind `+workspace-list-names' / `-current-name' / `-switch' / flash to
 fixtures.  NAMES is a list of workspace names, CURRENT is a string,
-OPEN-SET is a list of names whose REPL counts as open, SWITCHED-TO and
-FLASHED are place-symbols (boxed into single-cell lists) the stubs push
-to.  PROTECTED-P is a boolean controlling `+workspace--protected-p'."
+HIDDEN-SET is a list of names whose `:repl-state' is `:hidden' (the
+filter target since hide-mode reimpl moved to persp-level enforcement),
+SWITCHED-TO and FLASHED are place-symbols (boxed into single-cell lists)
+the stubs push to.  PROTECTED-P is a boolean controlling
+`+workspace--protected-p'."
   (declare (indent 7))
   `(cl-letf (((symbol-function '+workspace-list-names) (lambda () ,names))
              ((symbol-function '+workspace-current-name) (lambda () ,current))
              ((symbol-function '+workspace--protected-p)
               (lambda (_name) ,protected-p))
-             ((symbol-function 'claude-repl--ws-claude-open-p)
-              (lambda (n) (member n ,open-set)))
+             ((symbol-function 'claude-repl--ws-repl-state)
+              (lambda (n) (when (member n ,hidden-set) :hidden)))
              ((symbol-function '+workspace-switch)
               (lambda (name &optional _auto-create) (push name ,switched-to)))
              ((symbol-function 'claude-repl--flash-current-tab)
@@ -1515,7 +1517,7 @@ to.  PROTECTED-P is a boolean controlling `+workspace--protected-p'."
   (let ((switched (list)) (flashed (list))
         (claude-repl-hide-mode-enabled nil))
     (claude-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "a" '("a" "b" "c") switched flashed nil
+        '("a" "b" "c") "a" '() switched flashed nil
       (claude-repl-switch-right)
       (should (equal switched '("b")))
       (should flashed))))
@@ -1525,7 +1527,7 @@ to.  PROTECTED-P is a boolean controlling `+workspace--protected-p'."
   (let ((switched (list)) (flashed (list))
         (claude-repl-hide-mode-enabled nil))
     (claude-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "b" '("a" "b" "c") switched flashed nil
+        '("a" "b" "c") "b" '() switched flashed nil
       (claude-repl-switch-left)
       (should (equal switched '("a"))))))
 
@@ -1534,7 +1536,7 @@ to.  PROTECTED-P is a boolean controlling `+workspace--protected-p'."
   (let ((switched (list)) (flashed (list))
         (claude-repl-hide-mode-enabled nil))
     (claude-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "c" '("a" "b" "c") switched flashed nil
+        '("a" "b" "c") "c" '() switched flashed nil
       (claude-repl-switch-right)
       (should (equal switched '("a"))))))
 
@@ -1543,25 +1545,25 @@ to.  PROTECTED-P is a boolean controlling `+workspace--protected-p'."
   (let ((switched (list)) (flashed (list))
         (claude-repl-hide-mode-enabled nil))
     (claude-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "a" '("a" "b" "c") switched flashed nil
+        '("a" "b" "c") "a" '() switched flashed nil
       (claude-repl-switch-left)
       (should (equal switched '("c"))))))
 
 (ert-deftest claude-repl-cmd-test-switch-right/skips-hidden-when-hide-on ()
-  "With hide-mode on, switch-right skips workspaces whose REPL is closed."
+  "With hide-mode on, switch-right skips workspaces whose `:repl-state' is `:hidden'."
   (let ((switched (list)) (flashed (list))
         (claude-repl-hide-mode-enabled t))
     (claude-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "a" '("a" "c") switched flashed nil
+        '("a" "b" "c") "a" '("b") switched flashed nil
       (claude-repl-switch-right)
       (should (equal switched '("c"))))))
 
 (ert-deftest claude-repl-cmd-test-switch-left/skips-hidden-when-hide-on ()
-  "With hide-mode on, switch-left skips workspaces whose REPL is closed."
+  "With hide-mode on, switch-left skips workspaces whose `:repl-state' is `:hidden'."
   (let ((switched (list)) (flashed (list))
         (claude-repl-hide-mode-enabled t))
     (claude-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "c" '("a" "c") switched flashed nil
+        '("a" "b" "c") "c" '("b") switched flashed nil
       (claude-repl-switch-left)
       (should (equal switched '("a"))))))
 
@@ -1574,7 +1576,7 @@ to.  PROTECTED-P is a boolean controlling `+workspace--protected-p'."
         ;; it off so the user-error path is observable in tests.
         (debug-on-error nil))
     (claude-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "a" '("a") switched flashed nil
+        '("a" "b" "c") "a" '("b" "c") switched flashed nil
       (cl-letf (((symbol-function '+workspace-error)
                  (lambda (&rest _) nil)))
         (claude-repl-switch-right)
@@ -1598,7 +1600,7 @@ to.  PROTECTED-P is a boolean controlling `+workspace--protected-p'."
   (let ((switched (list)) (flashed (list))
         (claude-repl-hide-mode-enabled nil))
     (claude-repl-cmd-test--with-cycle-stubs
-        '("a" "b") "a" '("a" "b") switched flashed nil
+        '("a" "b") "a" '() switched flashed nil
       (claude-repl-switch-right)
       (should (equal flashed '(t))))))
 

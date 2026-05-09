@@ -2047,61 +2047,65 @@ identity-distinct string injected by `claude-repl-set-priority' from
   (let ((label (claude-repl--tab-label :stop-failed 3)))
     (should (string= label (concat "3" claude-repl--label-stop-failed)))))
 
-;;;; ---- Tests: hide-mode tabline filtering ----
+;;;; ---- Tests: hide-mode tabline (no filtering — tab-bar reflects raw list) ----
 
-(ert-deftest claude-repl-test-hide-mode-disabled-passthrough ()
-  "When hide-mode is off, all names render regardless of REPL open state."
+(ert-deftest claude-repl-test-hide-mode-tabline-passthrough-when-off ()
+  "When hide-mode is off, the tab-bar renders every name in the input list."
   (claude-repl-test--with-clean-state
     (let ((claude-repl-hide-mode-enabled nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-                ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) nil)))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))
         (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
           (should (string-match-p "current-ws" result))
           (should (string-match-p "bg-ws" result)))))))
 
-(ert-deftest claude-repl-test-hide-mode-filters-closed-non-current ()
-  "When hide-mode is on, a non-current workspace with closed REPL is dropped."
+(ert-deftest claude-repl-test-hide-mode-tabline-passthrough-when-on ()
+  "When hide-mode is on, the tab-bar STILL renders every name — filtering
+no longer happens at the tab-bar layer (it's enforced by persp-kill on
+workspace switch).  This guards against regressing back to the old
+tabline-filter design that caused tab-bar bugs."
   (claude-repl-test--with-clean-state
     (let ((claude-repl-hide-mode-enabled t))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-                ((symbol-function 'claude-repl--ws-claude-open-p)
-                 (lambda (ws) (equal ws "current-ws"))))
-        (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
-          (should (string-match-p "current-ws" result))
-          (should-not (string-match-p "bg-ws" result)))))))
-
-(ert-deftest claude-repl-test-hide-mode-keeps-current-when-closed ()
-  "When hide-mode is on, the current workspace is retained even if its REPL is closed."
-  (claude-repl-test--with-clean-state
-    (let ((claude-repl-hide-mode-enabled t))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-                ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) nil)))
-        (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
-          (should (string-match-p "current-ws" result))
-          (should-not (string-match-p "bg-ws" result)))))))
-
-(ert-deftest claude-repl-test-hide-mode-keeps-open-non-current ()
-  "When hide-mode is on, non-current workspaces with open REPL are retained."
-  (claude-repl-test--with-clean-state
-    (let ((claude-repl-hide-mode-enabled t))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-                ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) t)))
+      (claude-repl--ws-set-repl-state "bg-ws" :hidden)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))
         (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
           (should (string-match-p "current-ws" result))
           (should (string-match-p "bg-ws" result)))))))
 
-(ert-deftest claude-repl-test-hide-mode-renumbers-sequentially ()
-  "Indices on visible tabs are sequential 1..N over the filtered list, not absolute."
+;;;; ---- Tests: filter-hidden-names (cycle-skip helper) ----
+
+(ert-deftest claude-repl-test-filter-hidden-names-passthrough-when-off ()
+  "filter-hidden-names returns NAMES unchanged when hide-mode is off."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-hide-mode-enabled nil))
+      (claude-repl--ws-set-repl-state "ws-b" :hidden)
+      (should (equal (claude-repl--filter-hidden-names '("ws-a" "ws-b") "ws-a")
+                     '("ws-a" "ws-b"))))))
+
+(ert-deftest claude-repl-test-filter-hidden-names-drops-hidden ()
+  "filter-hidden-names drops non-current workspaces with `:repl-state :hidden'."
   (claude-repl-test--with-clean-state
     (let ((claude-repl-hide-mode-enabled t))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-a"))
-                ((symbol-function 'claude-repl--ws-claude-open-p)
-                 (lambda (ws) (member ws '("ws-a" "ws-c")))))
-        (let ((result (claude-repl--tabline-advice '("ws-a" "ws-b" "ws-c"))))
-          ;; ws-b is dropped, so ws-c gets index 2 (not 3).
-          (should (string-match-p "\\[1\\][^[]*ws-a" result))
-          (should (string-match-p "\\[2\\][^[]*ws-c" result))
-          (should-not (string-match-p "\\[3\\]" result)))))))
+      (claude-repl--ws-set-repl-state "ws-b" :hidden)
+      (should (equal (claude-repl--filter-hidden-names '("ws-a" "ws-b" "ws-c") "ws-a")
+                     '("ws-a" "ws-c"))))))
+
+(ert-deftest claude-repl-test-filter-hidden-names-keeps-current-even-if-hidden ()
+  "filter-hidden-names always retains the current workspace, even if `:hidden'."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-hide-mode-enabled t))
+      (claude-repl--ws-set-repl-state "ws-a" :hidden)
+      (should (equal (claude-repl--filter-hidden-names '("ws-a" "ws-b") "ws-a")
+                     '("ws-a" "ws-b"))))))
+
+(ert-deftest claude-repl-test-filter-hidden-names-keeps-non-hidden-states ()
+  "filter-hidden-names retains workspaces with `:active' / `:inactive' / nil
+states — only `:hidden' is filtered."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-hide-mode-enabled t))
+      (claude-repl--ws-set-repl-state "ws-b" :inactive)
+      (claude-repl--ws-set-repl-state "ws-c" :active)
+      (should (equal (claude-repl--filter-hidden-names '("ws-a" "ws-b" "ws-c") "ws-a")
+                     '("ws-a" "ws-b" "ws-c"))))))
 
 (ert-deftest claude-repl-test-toggle-hide-mode-flips-flag ()
   "claude-repl-toggle-hide-mode flips the flag and triggers a tab-bar redraw."

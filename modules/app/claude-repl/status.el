@@ -54,14 +54,21 @@ Read by `claude-repl--tabline-advice' to produce an alternating string
 that forces the tab-bar to repaint.  DO NOT REMOVE — see comment above.")
 
 (defvar claude-repl-hide-mode-enabled nil
-  "Non-nil means hide workspaces without an active Claude REPL from the tab-bar.
-Filtering happens inside `claude-repl--tabline-advice': a workspace
-whose `claude-repl--ws-claude-open-p' returns nil is dropped from the
-rendered list.  The currently selected workspace is always retained
-regardless of REPL state so the user keeps visual context.
+  "Non-nil means persp-kill `:hidden' workspaces on workspace switch.
+A workspace becomes `:hidden' when the user invokes `SPC o C' (the
+deprio close path, `claude-repl--on-close').  The kill happens in
+`claude-repl--sweep-hidden-workspaces' from the workspace-switch
+handler, with `:purge-state nil' so on-disk state survives and the
+workspace can be re-opened later via project switch.
 
-Indices on visible tabs are 1-based on the filtered list — they
-re-number sequentially rather than preserving absolute persp positions.
+The tab-bar itself is NOT filtered — it reflects the raw persp list.
+Workspace cycling (`claude-repl-switch-left/right') skips `:hidden'
+workspaces while hide-mode is on so the user does not land on a
+soon-to-be-killed workspace mid-cycle.
+
+The current workspace is exempt from sweep, and arriving on a `:hidden'
+workspace resets its state to `:inactive' (so it survives the next
+sweep).  To persistently keep a hidden workspace, toggle hide-mode off.
 
 Toggle via `claude-repl-toggle-hide-mode'.")
 
@@ -941,22 +948,34 @@ to a uniform pulse so the tab stands out."
     (claude-repl--render-tab name spec label face img-str)))
 
 (defun claude-repl--filter-hidden-names (names current-name)
-  "Drop NAMES whose Claude REPL is closed when `claude-repl-hide-mode-enabled'.
+  "Drop NAMES whose `:repl-state' is `:hidden' when hide-mode is on.
 CURRENT-NAME is always retained so the active workspace stays visible.
-When hide-mode is off, returns NAMES unchanged."
+When `claude-repl-hide-mode-enabled' is nil, returns NAMES unchanged.
+
+Used by workspace cycling (`claude-repl--workspace-cycle' in commands.el)
+to skip soon-to-be-killed `:hidden' workspaces.  The tab-bar itself is
+NOT filtered — it reflects the raw persp-names-cache, and `:hidden'
+workspaces disappear naturally once the next workspace switch triggers
+`claude-repl--sweep-hidden-workspaces'."
   (if claude-repl-hide-mode-enabled
-      (cl-remove-if-not
+      (cl-remove-if
        (lambda (n)
-         (or (equal n current-name)
-             (claude-repl--ws-claude-open-p n)))
+         (and (not (equal n current-name))
+              (eq (claude-repl--ws-repl-state n) :hidden)))
        names)
     names))
 
 (cl-defun claude-repl--tabline-advice (&optional (names nil names-supplied-p))
-  "Override for `+workspace--tabline' to color tabs by Claude status."
+  "Override for `+workspace--tabline' to color tabs by Claude status.
+
+The tab-bar reflects every workspace in NAMES (the raw persp list);
+no hide-mode filtering is applied here.  Hide-mode operates at the
+persp level — `:hidden' workspaces get persp-killed by
+`claude-repl--sweep-hidden-workspaces' on the next workspace switch
+and disappear from `persp-names-cache' (and therefore the tab-bar)
+naturally."
   (let* ((names (if names-supplied-p names (+workspace-list-names)))
          (current-name (+workspace-current-name))
-         (names (claude-repl--filter-hidden-names names current-name))
          (states (mapcar (lambda (n)
                            (cons n (claude-repl--ws-display-state n)))
                          names)))
@@ -976,7 +995,11 @@ When hide-mode is off, returns NAMES unchanged."
 (advice-add '+workspace--tabline :override #'claude-repl--tabline-advice)
 
 (defun claude-repl-toggle-hide-mode ()
-  "Toggle `claude-repl-hide-mode-enabled' and force a tab-bar repaint."
+  "Toggle `claude-repl-hide-mode-enabled'.
+When toggled ON, `:hidden' workspaces (those closed via `SPC o C')
+are persp-killed on the next workspace switch.  When OFF, they remain
+in the workspace list and behave like ordinary `:inactive' workspaces.
+Forces a tab-bar repaint so cycling-skip semantics update immediately."
   (interactive)
   (setq claude-repl-hide-mode-enabled (not claude-repl-hide-mode-enabled))
   (claude-repl--force-tab-bar-redraw)
