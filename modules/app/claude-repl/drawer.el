@@ -25,7 +25,7 @@
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-drawer-width-fraction 0.20
+(defcustom claude-repl-drawer-width-fraction 0.01
   "Fraction of the frame width the drawer should occupy.
 Computed against `frame-width' at display time so the drawer scales
 with the frame.  Capped at 20% by default — the drawer is meant to
@@ -438,6 +438,21 @@ Computed as `claude-repl-drawer-width-fraction' of the frame width."
         (forward-line 1)))
     found))
 
+(defun claude-repl-drawer--apply-width (window)
+  "Resize WINDOW to the configured drawer width.
+Side-window action alists honor `window-width' only at window-creation
+time, so a re-shown drawer keeps its old width even when the fraction
+changed.  This forces the resize on every show.  Locally lowers
+`window-min-width' so fractions below the global default (10 cols) are
+honored, and unblocks `window-size-fixed' if some prior pass locked it."
+  (let* ((target (claude-repl-drawer--window-width window))
+         (window-min-width 1))
+    (with-selected-window window
+      (setq-local window-size-fixed nil)
+      (let ((delta (- target (window-total-width window))))
+        (unless (zerop delta)
+          (ignore-errors (window-resize window delta t)))))))
+
 (defun claude-repl-drawer-show ()
   "Show the workspace drawer in a left-side window."
   (interactive)
@@ -447,7 +462,8 @@ Computed as `claude-repl-drawer-width-fraction' of the frame width."
       (claude-repl-drawer--render)
       (claude-repl-drawer--goto-first-workspace))
     (when win
-      (set-window-dedicated-p win t))
+      (set-window-dedicated-p win t)
+      (claude-repl-drawer--apply-width win))
     win))
 
 (defun claude-repl-drawer-hide ()

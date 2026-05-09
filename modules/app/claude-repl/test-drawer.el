@@ -254,6 +254,13 @@
               ((symbol-function 'frame-width)  (lambda (_) 0)))
       (should (= (claude-repl-drawer--window-width 'fake-window) 1)))))
 
+(ert-deftest claude-repl-drawer-test-window-width-tiny-fraction ()
+  "Tiny fractions like 0.01 are honored (no implicit clamping in the helper)."
+  (let ((claude-repl-drawer-width-fraction 0.01))
+    (cl-letf (((symbol-function 'window-frame) (lambda (_) 'fake-frame))
+              ((symbol-function 'frame-width)  (lambda (_) 200)))
+      (should (= (claude-repl-drawer--window-width 'fake-window) 2)))))
+
 ;;;; ---- Priority display ----
 
 (ert-deftest claude-repl-drawer-test-priority-display-falls-back-to-string ()
