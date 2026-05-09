@@ -270,8 +270,85 @@
       (should (equal (get-text-property 0 'display result) fake-image)))))
 
 (ert-deftest claude-repl-drawer-test-priority-display-nil-priority ()
-  "Nil priority renders as a single space placeholder."
-  (should (equal (claude-repl-drawer--priority-display nil) " ")))
+  "Nil priority renders as the empty string so unprioritized workspaces don't carry a phantom space."
+  (should (equal (claude-repl-drawer--priority-display nil) "")))
+
+;;;; ---- Name face (per-state coloring) ----
+
+(ert-deftest claude-repl-drawer-test-name-face-thinking-is-red ()
+  "`:thinking' state colors the name with the thinking-red foreground."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :claude-state :thinking)
+    (let ((face (claude-repl-drawer--name-face "ws")))
+      (should (equal (plist-get face :foreground) claude-repl--color-thinking-red))
+      (should (eq (plist-get face :weight) 'bold)))))
+
+(ert-deftest claude-repl-drawer-test-name-face-done-is-green ()
+  "`:done' state colors the name with the done-green foreground."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :claude-state :done)
+    (should (equal (plist-get (claude-repl-drawer--name-face "ws") :foreground)
+                   claude-repl--color-done-green))))
+
+(ert-deftest claude-repl-drawer-test-name-face-idle-is-orange ()
+  "`:idle' state colors the name with the idle-orange foreground."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :claude-state :idle)
+    (should (equal (plist-get (claude-repl-drawer--name-face "ws") :foreground)
+                   claude-repl--color-idle-orange))))
+
+(ert-deftest claude-repl-drawer-test-name-face-no-state-falls-back ()
+  "No claude-state falls back to the plain bold workspace-name face."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws")
+    (should (eq (claude-repl-drawer--name-face "ws")
+                'claude-repl-drawer-workspace-name))))
+
+(ert-deftest claude-repl-drawer-test-name-face-dead-falls-back ()
+  "`:repl-state :dead' falls back to plain bold; the hidden/dim treatment muting is layered separately."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws"
+                                       :claude-state :thinking
+                                       :repl-state :dead)
+    (should (eq (claude-repl-drawer--name-face "ws")
+                'claude-repl-drawer-workspace-name))))
+
+;;;; ---- Layout: priority/name spacing ----
+
+(ert-deftest claude-repl-drawer-test-render-space-between-priority-and-name ()
+  "When a priority is present, a space separates the badge text from the name."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "feature" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (should (string-match-p "p1 feature"
+                              (buffer-substring-no-properties
+                               (point-min) (point-max)))))))
+
+(ert-deftest claude-repl-drawer-test-render-no-double-space-when-no-priority ()
+  "Unprioritized workspaces render with a single space between glyph and name."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "lonely")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p (concat (regexp-quote
+                                         claude-repl-drawer-state-icon-default)
+                                        " lonely")
+                                text))))))
+
+;;;; ---- State icon palette defaults ----
+
+(ert-deftest claude-repl-drawer-test-state-icons-defaults-applied ()
+  "Reload-after-defcustom-change forces the latest palette to apply.
+Without the explicit force-reset, defcustom would keep prior values for
+already-bound symbols and palette tweaks would require an Emacs restart."
+  (should (equal (alist-get :done       claude-repl-drawer-state-icons) "✅"))
+  (should (equal (alist-get :thinking   claude-repl-drawer-state-icons) "⌛"))
+  (should (equal (alist-get :idle       claude-repl-drawer-state-icons) "💤"))
+  (should (equal (alist-get :init       claude-repl-drawer-state-icons) "⏳"))
+  (should (equal (alist-get :stop-failed claude-repl-drawer-state-icons) "❗"))
+  (should (equal (alist-get :dead       claude-repl-drawer-state-icons) "❌")))
 
 ;;;; ---- State glyph ----
 

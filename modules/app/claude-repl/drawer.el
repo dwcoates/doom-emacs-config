@@ -48,6 +48,14 @@ placeholder, used for workspaces registered but with no live session."
   :type '(alist :key-type symbol :value-type string)
   :group 'claude-repl)
 
+;; Force-apply the latest palette on every (re)load.  `defcustom' only
+;; initializes the value when the symbol is unbound, so palette tweaks
+;; otherwise require an Emacs restart to take effect.  Source is the
+;; canonical palette in this personal config; `M-x customize' values
+;; for this variable will be overwritten on reload.
+(setq claude-repl-drawer-state-icons
+      (eval (car (get 'claude-repl-drawer-state-icons 'standard-value))))
+
 (defcustom claude-repl-drawer-state-icon-default "·"
   "Glyph shown when a workspace has no recognized claude-state.
 Used for registered-but-not-yet-started workspaces (claude-state nil)."
@@ -172,12 +180,33 @@ Lower keys come first.  Sort by `:priority' rank, then name."
   "Return a display string for PRIORITY.
 Uses the badge PNG from `claude-repl--priority-images' when available,
 falling back to the raw PRIORITY string for terminal/batch contexts.
-Returns a single space when PRIORITY is nil."
+Returns the empty string when PRIORITY is nil so unprioritized
+workspaces don't carry a phantom space."
   (cond
-   ((null priority) " ")
+   ((null priority) "")
    ((claude-repl--priority-image priority)
     (propertize priority 'display (claude-repl--priority-image priority)))
    (t priority)))
+
+(defun claude-repl-drawer--name-face (ws)
+  "Return the face spec for WS's name, colored by claude-state.
+:dead falls through to the default workspace-name face (the existing
+hidden/dim treatment provides the muting).  Unrecognized states render
+as plain bold."
+  (let* ((repl-state   (claude-repl--ws-get ws :repl-state))
+         (claude-state (claude-repl--ws-get ws :claude-state))
+         (color (cond
+                 ((eq repl-state :dead)        nil)
+                 ((eq claude-state :init)      claude-repl--color-init-blue)
+                 ((eq claude-state :thinking)  claude-repl--color-thinking-red)
+                 ((memq claude-state '(:done :permission))
+                  claude-repl--color-done-green)
+                 ((eq claude-state :idle)      claude-repl--color-idle-orange)
+                 ((eq claude-state :stop-failed)
+                  claude-repl--color-stop-failed-magenta))))
+    (if color
+        `(:foreground ,color :weight bold)
+      'claude-repl-drawer-workspace-name)))
 
 (defun claude-repl-drawer--summary-text (ws)
   "Return the aiTitle/prompt-summary string for WS, or a placeholder."
@@ -197,14 +226,18 @@ Returns a single space when PRIORITY is nil."
   "Insert the rendered representation for workspace WS into the current buffer.
 CURRENT is the active workspace name (for highlighting).  HIDDEN means
 the workspace is in the hidden section and should be dimmed."
-  (let* ((priority (claude-repl--ws-get ws :priority))
-         (glyph    (claude-repl-drawer--state-glyph ws))
-         (dirty    (eq (claude-repl--ws-get ws :git-clean) 'dirty))
-         (selected (and current (equal ws current)))
-         (start    (point))
+  (let* ((priority  (claude-repl--ws-get ws :priority))
+         (glyph     (claude-repl-drawer--state-glyph ws))
+         (dirty     (eq (claude-repl--ws-get ws :git-clean) 'dirty))
+         (selected  (and current (equal ws current)))
+         (start     (point))
          (prio-disp (claude-repl-drawer--priority-display priority))
-         (header   (concat "  " glyph " " prio-disp ws (if dirty " ●" "")))
-         (summary  (claude-repl-drawer--summary-text ws)))
+         (sep       (if priority " " ""))
+         (name-face (claude-repl-drawer--name-face ws))
+         (header    (concat "  " glyph " " prio-disp sep
+                            (propertize ws 'face name-face)
+                            (if dirty " ●" "")))
+         (summary   (claude-repl-drawer--summary-text ws)))
     (insert header "\n")
     (insert "    "
             (propertize summary 'face 'claude-repl-drawer-summary)
@@ -220,11 +253,7 @@ the workspace is in the hidden section and should be dimmed."
        (selected
         (add-face-text-property start end 'claude-repl-drawer-current-workspace))
        (hidden
-        (add-face-text-property start end 'claude-repl-drawer-hidden))
-       (t
-        ;; Apply name face only to the header line.
-        (let ((header-end (save-excursion (goto-char start) (line-end-position))))
-          (add-face-text-property start header-end 'claude-repl-drawer-workspace-name)))))))
+        (add-face-text-property start end 'claude-repl-drawer-hidden))))))
 
 (defun claude-repl-drawer--insert-section-header (label)
   "Insert a bold section header LABEL with a rule line beneath it."
