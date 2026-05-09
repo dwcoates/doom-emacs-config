@@ -241,7 +241,7 @@
       (should (null (claude-repl--ws-get "test-ws" :fullscreen-config))))))
 
 (ert-deftest claude-repl-test-magit-status-workspace-not-fullscreen-no-delete ()
-  "When claude is not fullscreen and no magit-win, does NOT call `delete-other-windows'."
+  "When neither fullscreen nor panels visible, does NOT call `delete-other-windows'."
   (claude-repl-test--with-clean-state
     (let ((delete-calls 0))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
@@ -253,7 +253,7 @@
         (should (= delete-calls 0))))))
 
 (ert-deftest claude-repl-test-magit-status-workspace-not-fullscreen-no-magit-opens-fresh ()
-  "When not fullscreen and no magit window visible, calls `magit-status' with workspace dir."
+  "When neither fullscreen nor panels visible, falls back to plain `magit-status'."
   (claude-repl-test--with-clean-state
     (let ((magit-status-args nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
@@ -262,6 +262,106 @@
                  (lambda (&rest args) (setq magit-status-args args))))
         (+dwc/magit-status-workspace)
         (should (equal magit-status-args '("/tmp/proj")))))))
+
+;;;; ---- Tests: panels-visible-but-not-fullscreen path ----
+
+(defmacro claude-repl-test--with-panels-visible (&rest body)
+  "Run BODY with two live buffers wired up as the workspace's claude panels.
+Creates real (live) vterm + input buffers, stubs `claude-repl--ws-get'
+to return them for `:vterm-buffer' / `:input-buffer', and stubs
+`get-buffer-window' so those buffers look like they have a live window.
+Cleanup kills the buffers in an `unwind-protect'."
+  `(let ((vterm-buf (generate-new-buffer " *test-vterm*"))
+         (input-buf (generate-new-buffer " *test-input*")))
+     (unwind-protect
+         (cl-letf* ((real-ws-get (symbol-function 'claude-repl--ws-get))
+                    ((symbol-function 'claude-repl--ws-get)
+                     (lambda (ws key)
+                       (cond ((eq key :vterm-buffer) vterm-buf)
+                             ((eq key :input-buffer) input-buf)
+                             (t (funcall real-ws-get ws key)))))
+                    ((symbol-function 'get-buffer-window)
+                     (lambda (b &optional _all)
+                       (cond ((eq b vterm-buf) 'fake-vterm-win)
+                             ((eq b input-buf) 'fake-input-win)))))
+           ,@body)
+       (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
+       (when (buffer-live-p input-buf) (kill-buffer input-buf)))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-panels-visible-deletes-non-panel-windows ()
+  "When panels are visible (not fullscreen), `delete-non-panel-windows' is called first."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-panels-visible
+      (let ((delete-args nil))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+                  ((symbol-function 'claude-repl--delete-non-panel-windows)
+                   (lambda (vterm input) (setq delete-args (list vterm input))))
+                  ((symbol-function 'split-window) (lambda (&rest _) 'fake-left-win))
+                  ((symbol-function 'select-window) #'ignore)
+                  ((symbol-function 'magit-status) #'ignore))
+          (+dwc/magit-status-workspace)
+          (should (equal delete-args (list vterm-buf input-buf))))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-panels-visible-splits-left-of-root ()
+  "When panels are visible (not fullscreen), splits frame root from the left."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-panels-visible
+      (let ((split-args nil))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+                  ((symbol-function 'claude-repl--delete-non-panel-windows) #'ignore)
+                  ((symbol-function 'frame-root-window) (lambda (&rest _) 'fake-root))
+                  ((symbol-function 'split-window)
+                   (lambda (&rest args) (setq split-args args) 'fake-left-win))
+                  ((symbol-function 'select-window) #'ignore)
+                  ((symbol-function 'magit-status) #'ignore))
+          (+dwc/magit-status-workspace)
+          (should (equal split-args '(fake-root nil left))))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-panels-visible-magit-in-new-left-window ()
+  "When panels are visible (not fullscreen), magit opens in the new left window."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-panels-visible
+      (let ((selected nil)
+            (magit-call-window nil))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+                  ((symbol-function 'claude-repl--delete-non-panel-windows) #'ignore)
+                  ((symbol-function 'split-window) (lambda (&rest _) 'fake-left-win))
+                  ((symbol-function 'select-window) (lambda (w) (setq selected w)))
+                  ((symbol-function 'magit-status)
+                   (lambda (&rest _) (setq magit-call-window selected))))
+          (+dwc/magit-status-workspace)
+          (should (eq selected 'fake-left-win))
+          (should (eq magit-call-window 'fake-left-win)))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-fullscreen-skips-delete-non-panel-windows ()
+  "When already fullscreen, `delete-non-panel-windows' is NOT called (no non-panels to remove)."
+  (claude-repl-test--with-clean-state
+    (let ((delete-calls 0))
+      (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+                ((symbol-function 'claude-repl--delete-non-panel-windows)
+                 (lambda (&rest _) (cl-incf delete-calls)))
+                ((symbol-function 'split-window) (lambda (&rest _) 'fake-left-win))
+                ((symbol-function 'select-window) #'ignore)
+                ((symbol-function 'magit-status) #'ignore))
+        (+dwc/magit-status-workspace)
+        (should (= delete-calls 0))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-no-panels-no-split ()
+  "When neither fullscreen nor panels visible, does NOT split the frame root."
+  (claude-repl-test--with-clean-state
+    (let ((split-calls 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+                ((symbol-function 'split-window)
+                 (lambda (&rest _) (cl-incf split-calls) 'fake-left-win))
+                ((symbol-function 'magit-status) #'ignore))
+        (+dwc/magit-status-workspace)
+        (should (= split-calls 0))))))
 
 (provide 'test-magit)
 ;;; test-magit.el ends here

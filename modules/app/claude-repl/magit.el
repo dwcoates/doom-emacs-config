@@ -130,47 +130,50 @@ associated with the current branch."
 ;;;; --- magit-status-workspace ---------------------------------------------
 
 (defun +dwc/magit-status-workspace ()
-  "Open magit-status for the current workspace's project root.
-If claude-repl is currently fullscreened (i.e. `:fullscreen-config' is
-set for the workspace), split the frame so a new window on the left
-holds the magit-status buffer while the claude panels remain on the
-right; the saved fullscreen config is cleared since claude is no longer
-in fullscreen mode.  Otherwise: if a magit-status buffer is already
-visible, switch to that window and revert the buffer in place; else
-open fresh."
+  "Open magit-status with the canonical magit-left/claude-right layout.
+Guarantees the layout regardless of starting state by first reducing
+the frame to claude panels only — if claude isn't already fullscreen
+but panels are visible, any non-panel windows (e.g. file buffers, an
+existing magit window) are deleted first — then splitting the frame's
+root window from the left and opening magit-status in the new left
+window.  The saved `:fullscreen-config' is cleared since claude is no
+longer fullscreen once magit shares the frame.
+
+Falls back to a plain `magit-status' when no claude panels exist for
+the workspace (nothing to anchor the layout against)."
   (interactive)
   (let* ((ws (+workspace-current-name))
          (claude-fs (claude-repl--ws-get ws :fullscreen-config))
-         (magit-win (cl-loop for win in (window-list)
-                             when (with-current-buffer (window-buffer win)
-                                    (derived-mode-p 'magit-status-mode))
-                             return win)))
+         (vterm-buf (claude-repl--ws-get ws :vterm-buffer))
+         (input-buf (claude-repl--ws-get ws :input-buffer))
+         (panels-visible (and (buffer-live-p vterm-buf)
+                              (buffer-live-p input-buf)
+                              (get-buffer-window vterm-buf)
+                              (get-buffer-window input-buf))))
     (when (fboundp 'claude-repl--log)
       (claude-repl--log ws
-                        "magit-status-workspace: ENTER windows=%d magit-win=%s magit-buf=%s claude-fs=%s"
+                        "magit-status-workspace: ENTER windows=%d claude-fs=%s panels-visible=%s"
                         (length (window-list))
-                        (if magit-win "found" "nil")
-                        (if magit-win (buffer-name (window-buffer magit-win)) "-")
-                        (if claude-fs "yes" "no")))
+                        (if claude-fs "yes" "no")
+                        (if panels-visible "yes" "no")))
     (cond
-     (claude-fs
+     ((or claude-fs panels-visible)
       (when (fboundp 'claude-repl--log)
-        (claude-repl--log ws "magit-status-workspace: BRANCH=fullscreen-split-left dir=%s"
+        (claude-repl--log ws "magit-status-workspace: BRANCH=split-left dir=%s"
                           (claude-repl--ws-dir ws)))
+      ;; Step 1: ensure only claude panels are visible so the split is
+      ;; deterministic.  No-op when claude is already fullscreen.
+      (when (and panels-visible (not claude-fs))
+        (claude-repl--delete-non-panel-windows vterm-buf input-buf))
+      ;; Step 2: claude is no longer fullscreen once magit lands on the left.
       (claude-repl--ws-put ws :fullscreen-config nil)
+      ;; Step 3: split the frame root from the left and open magit there.
       (let ((left-win (split-window (frame-root-window) nil 'left)))
         (select-window left-win)
         (magit-status (claude-repl--ws-dir ws))))
-     (magit-win
-      (when (fboundp 'claude-repl--log)
-        (claude-repl--log ws "magit-status-workspace: BRANCH=reuse toplevel=%s"
-                          (with-current-buffer (window-buffer magit-win)
-                            (ignore-errors (magit-toplevel)))))
-      (select-window magit-win)
-      (revert-buffer nil t))
      (t
       (when (fboundp 'claude-repl--log)
-        (claude-repl--log ws "magit-status-workspace: BRANCH=fresh-open dir=%s"
+        (claude-repl--log ws "magit-status-workspace: BRANCH=fallback-no-panels dir=%s"
                           (claude-repl--ws-dir ws)))
       (magit-status (claude-repl--ws-dir ws))))))
 
