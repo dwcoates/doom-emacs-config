@@ -505,6 +505,50 @@ when registered."
     (force-mode-line-update t)
     (message "Killed workspace: %s" ws)))
 
+;;;; Hide-mode sweep
+
+(defun claude-repl--sweep-hidden-workspaces (&optional except)
+  "Persp-kill every claude-repl workspace whose `:repl-state' is `:hidden'.
+EXCEPT names a workspace to skip (typically the just-arrived destination
+of a workspace switch — we don't want to kill the workspace the user is
+currently sitting in).  Each match is torn down via
+`claude-repl--nuke-one-workspace' with `:purge-state nil', preserving the
+on-disk state file so the workspace can be re-opened via project switch.
+
+No-op when there are no matching workspaces.  Returns the list of names
+that were actually killed (useful for tests)."
+  (let* ((current (or except (+workspace-current-name)))
+         (candidates (cl-remove-if
+                      (lambda (ws)
+                        (or (equal ws current)
+                            (not (eq (claude-repl--ws-repl-state ws) :hidden))))
+                      (hash-table-keys claude-repl--workspaces))))
+    (claude-repl--log current
+                      "sweep-hidden-workspaces: except=%s candidates=%S"
+                      current candidates)
+    (dolist (ws candidates)
+      (condition-case err
+          (claude-repl--nuke-one-workspace ws :purge-state nil)
+        (error
+         (claude-repl--log ws "sweep-hidden-workspaces: kill error ws=%s err=%S"
+                           ws err))))
+    candidates))
+
+(defun claude-repl--maybe-sweep-hidden-on-switch ()
+  "Run `claude-repl--sweep-hidden-workspaces' when hide-mode is enabled.
+Hooked into `claude-repl--on-workspace-switch' (panels.el).  Also resets
+the just-arrived workspace's `:repl-state' from `:hidden' back to
+`:inactive' if applicable, so navigating to a hidden workspace removes
+its hidden flag (the user is actively viewing it; it should not be
+killed)."
+  (let ((current (+workspace-current-name)))
+    (when (eq (claude-repl--ws-repl-state current) :hidden)
+      (claude-repl--log current
+                        "maybe-sweep: arriving on :hidden ws, resetting to :inactive")
+      (claude-repl--ws-set-repl-state current :inactive))
+    (when claude-repl-hide-mode-enabled
+      (claude-repl--sweep-hidden-workspaces current))))
+
 (defun claude-repl-copy-reference ()
   "Copy the current file and line reference to the clipboard.
 With active region: copies file:startline-endline.

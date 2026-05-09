@@ -266,11 +266,16 @@ and auto-selects the input window if visible.
 If the newly-active workspace has `:claude-state :done', marks its
 `:repl-state' as `:viewed' so the decay timer can clear :done → :idle
 on the next tick.  This implements \"only decay after the user has
-viewed the workspace.\""
+viewed the workspace.\"
+
+Also runs `claude-repl--maybe-sweep-hidden-on-switch' so workspaces
+marked `:hidden' (via `SPC o C') are persp-killed when hide-mode is on
+— the persp-level enforcement of hide-mode."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log-verbose ws "workspace-switch ws=%s" ws)
     (when (eq (claude-repl--ws-claude-state ws) :done)
       (claude-repl--ws-set-repl-state ws :viewed))
+    (claude-repl--maybe-sweep-hidden-on-switch)
     (claude-repl--update-all-workspace-states)
     (claude-repl--refresh-vterm)
     (claude-repl--reset-vterm-cursors)

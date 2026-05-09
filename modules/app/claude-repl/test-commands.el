@@ -1602,6 +1602,121 @@ to.  PROTECTED-P is a boolean controlling `+workspace--protected-p'."
       (claude-repl-switch-right)
       (should (equal flashed '(t))))))
 
+;;;; ---- Hide-mode sweep ----
+
+(defmacro claude-repl-cmd-test--with-sweep-stubs (current killed &rest body)
+  "Stub `+workspace-current-name' to return CURRENT and replace
+`claude-repl--nuke-one-workspace' with a recorder that pushes the named
+ws onto KILLED (a place-symbol bound to a list)."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function '+workspace-current-name) (lambda () ,current))
+             ((symbol-function 'claude-repl--nuke-one-workspace)
+              (lambda (ws &rest _) (push ws ,killed))))
+     ,@body))
+
+(ert-deftest claude-repl-cmd-test-sweep-hidden/kills-non-current-hidden ()
+  "sweep-hidden-workspaces persp-kills every :hidden ws except the current one."
+  (claude-repl-test--with-clean-state
+    (let ((killed (list)))
+      (claude-repl--ws-set-repl-state "ws-a" :hidden)
+      (claude-repl--ws-set-repl-state "ws-b" :hidden)
+      (claude-repl--ws-set-repl-state "ws-c" :inactive)
+      (claude-repl-cmd-test--with-sweep-stubs "ws-c" killed
+        (claude-repl--sweep-hidden-workspaces)
+        (should (equal (sort killed #'string<) '("ws-a" "ws-b")))))))
+
+(ert-deftest claude-repl-cmd-test-sweep-hidden/skips-current ()
+  "sweep-hidden-workspaces never kills the current workspace, even if hidden."
+  (claude-repl-test--with-clean-state
+    (let ((killed (list)))
+      (claude-repl--ws-set-repl-state "ws-a" :hidden)
+      (claude-repl-cmd-test--with-sweep-stubs "ws-a" killed
+        (claude-repl--sweep-hidden-workspaces)
+        (should (null killed))))))
+
+(ert-deftest claude-repl-cmd-test-sweep-hidden/skips-non-hidden ()
+  "sweep-hidden-workspaces ignores workspaces with non-:hidden states."
+  (claude-repl-test--with-clean-state
+    (let ((killed (list)))
+      (claude-repl--ws-set-repl-state "ws-a" :inactive)
+      (claude-repl--ws-set-repl-state "ws-b" :active)
+      (claude-repl--ws-set-repl-state "ws-c" :viewed)
+      (claude-repl-cmd-test--with-sweep-stubs "ws-c" killed
+        (claude-repl--sweep-hidden-workspaces)
+        (should (null killed))))))
+
+(ert-deftest claude-repl-cmd-test-sweep-hidden/uses-purge-state-nil ()
+  "sweep-hidden-workspaces calls nuke-one-workspace with `:purge-state nil'
+so the on-disk state file survives and the workspace can be re-opened."
+  (claude-repl-test--with-clean-state
+    (let ((received-args nil))
+      (claude-repl--ws-set-repl-state "ws-a" :hidden)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-c"))
+                ((symbol-function 'claude-repl--nuke-one-workspace)
+                 (lambda (&rest args) (setq received-args args))))
+        (claude-repl--sweep-hidden-workspaces)
+        (should (equal received-args '("ws-a" :purge-state nil)))))))
+
+(ert-deftest claude-repl-cmd-test-sweep-hidden/except-overrides-current ()
+  "Explicit EXCEPT arg takes precedence over `+workspace-current-name'."
+  (claude-repl-test--with-clean-state
+    (let ((killed (list)))
+      (claude-repl--ws-set-repl-state "ws-a" :hidden)
+      (claude-repl--ws-set-repl-state "ws-b" :hidden)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-c"))
+                ((symbol-function 'claude-repl--nuke-one-workspace)
+                 (lambda (ws &rest _) (push ws killed))))
+        ;; EXCEPT="ws-a" should keep ws-a alive even though current is ws-c.
+        (claude-repl--sweep-hidden-workspaces "ws-a")
+        (should (equal killed '("ws-b")))))))
+
+;;;; ---- maybe-sweep-hidden-on-switch ----
+
+(ert-deftest claude-repl-cmd-test-maybe-sweep/runs-when-hide-on ()
+  "maybe-sweep-hidden-on-switch runs the sweep when hide-mode is enabled."
+  (claude-repl-test--with-clean-state
+    (let ((sweep-called 0)
+          (claude-repl-hide-mode-enabled t))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-c"))
+                ((symbol-function 'claude-repl--sweep-hidden-workspaces)
+                 (lambda (&rest _) (cl-incf sweep-called))))
+        (claude-repl--maybe-sweep-hidden-on-switch)
+        (should (= sweep-called 1))))))
+
+(ert-deftest claude-repl-cmd-test-maybe-sweep/skips-when-hide-off ()
+  "maybe-sweep-hidden-on-switch is a no-op when hide-mode is disabled."
+  (claude-repl-test--with-clean-state
+    (let ((sweep-called 0)
+          (claude-repl-hide-mode-enabled nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-c"))
+                ((symbol-function 'claude-repl--sweep-hidden-workspaces)
+                 (lambda (&rest _) (cl-incf sweep-called))))
+        (claude-repl--maybe-sweep-hidden-on-switch)
+        (should (= sweep-called 0))))))
+
+(ert-deftest claude-repl-cmd-test-maybe-sweep/resets-arrived-hidden-to-inactive ()
+  "Arriving on a `:hidden' workspace resets it to `:inactive' so the user
+actively viewing it does not get it killed.  Independent of hide-mode flag."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-hide-mode-enabled nil))
+      (claude-repl--ws-set-repl-state "ws-a" :hidden)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-a"))
+                ((symbol-function 'claude-repl--sweep-hidden-workspaces)
+                 (lambda (&rest _) nil)))
+        (claude-repl--maybe-sweep-hidden-on-switch)
+        (should (eq (claude-repl--ws-repl-state "ws-a") :inactive))))))
+
+(ert-deftest claude-repl-cmd-test-maybe-sweep/leaves-non-hidden-current-alone ()
+  "maybe-sweep-hidden-on-switch does not touch repl-state if current is not :hidden."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-hide-mode-enabled nil))
+      (claude-repl--ws-set-repl-state "ws-a" :active)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-a"))
+                ((symbol-function 'claude-repl--sweep-hidden-workspaces)
+                 (lambda (&rest _) nil)))
+        (claude-repl--maybe-sweep-hidden-on-switch)
+        (should (eq (claude-repl--ws-repl-state "ws-a") :active))))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here
