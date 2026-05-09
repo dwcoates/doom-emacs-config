@@ -28,9 +28,26 @@
   "Alist mapping commit type symbols to lists of candidate emojis.
 The `wildcard' category provides maximum variety for any commit type.")
 
-(defconst claude-repl--emoji-scope-re "(claude-repl)"
-  "Regexp matching the claude-repl conventional-commit scope.
-Only commit messages containing this scope receive emoji prefixes.")
+(defun claude-repl--current-branch ()
+  "Return the current git branch name (string), or nil if unresolvable.
+Returns nil when the working tree is not in a git repo, when HEAD is
+detached, or when the branch name is empty.  Shells out to git so the
+function is available without requiring magit to be loaded."
+  (let ((out (string-trim
+              (shell-command-to-string
+               "git rev-parse --abbrev-ref HEAD 2>/dev/null"))))
+    (cond ((string-empty-p out) nil)
+          ((string= out "HEAD") nil)
+          (t out))))
+
+(defun claude-repl--commit-prefix-regex (branch)
+  "Return a regex matching `<type>(<BRANCH>): <rest>' at start of message.
+Captures the type as group 1 and the rest-of-line as group 2.  BRANCH
+is regex-quoted so branch names with `.', `/', `+' etc. are handled
+literally."
+  (concat "^\\([a-z]+\\)("
+          (regexp-quote branch)
+          "): \\(.*\\)"))
 
 (defcustom claude-repl-emoji-wildcard-chance 30
   "Percentage chance (0-100) of using a wildcard emoji instead of a typed one.
@@ -39,17 +56,22 @@ Higher values produce more variety at the cost of semantic relevance."
   :group 'claude-repl)
 
 (defcustom claude-repl-emoji-lookback 50
-  "Number of recent (claude-repl) commits to scan for already-used emojis.
+  "Number of recent conventional-commit lines to scan for already-used emojis.
 Emojis used in the last LOOKBACK matching commits are excluded from the
 candidate pool, deterministically guaranteeing variety from the git history.
 When the typed pool is fully exhausted by recents, falls back to the
-wildcard pool (also minus recents)."
+wildcard pool (also minus recents).
+
+Scans commits whose subject matches `<type>(<scope>):' (any scope) so
+both the legacy `<emoji> type(scope):' format and the current
+`type(scope): <emoji> ...' format contribute to the recents set."
   :type 'integer
   :group 'claude-repl)
 
 (defun claude-repl--commit-type-from-message (msg)
   "Extract the conventional-commit type keyword from MSG.
-Returns a symbol like `feat', `fix', etc., or `wildcard' if no type matches."
+Returns a symbol like `feat', `fix', etc., or `wildcard' if no type matches.
+Tolerant of any scope: looks at the leading `<type>(' substring."
   (if (string-match "^\\([a-z]+\\)(" msg)
       (let ((type (intern (match-string 1 msg))))
         (if (assq type claude-repl--emoji-categories)
@@ -57,22 +79,43 @@ Returns a symbol like `feat', `fix', etc., or `wildcard' if no type matches."
           'wildcard))
     'wildcard))
 
+(defun claude-repl--extract-commit-emoji (line)
+  "Return the emoji token in conventional-commit subject LINE, or nil.
+Recognizes both formats:
+  - Legacy: `<emoji> type(scope): description'  → first token.
+  - Current: `type(scope): <emoji> description' → first token after `: '.
+The token must start with a non-ASCII character to qualify."
+  (let ((token
+         (cond
+          ;; New format: type(scope): EMOJI rest
+          ((string-match "^[a-z]+([^)]+): \\([^ ]+\\)" line)
+           (match-string 1 line))
+          ;; Legacy format: EMOJI type(scope): rest — first token.
+          (t (car (split-string line " " t))))))
+    (when (and token
+               (> (length token) 0)
+               (> (aref token 0) 127))
+      token)))
+
 (defun claude-repl--recent-commit-emojis (&optional lookback)
-  "Return list of leading emojis from the last LOOKBACK (claude-repl) commits.
-Defaults to `claude-repl-emoji-lookback'.  Returns nil when not in a git
-repository or on any git error.  Newest commit first."
+  "Return list of emojis used by the last LOOKBACK conventional commits.
+Defaults to `claude-repl-emoji-lookback'.  Returns nil when not in a
+git repository or on any git error.  Newest commit first.
+
+Scans commits whose subject matches `<type>(<scope>):' (any scope) so
+both legacy and current formats contribute — the post-rebase change
+to a branch-as-scope convention means filtering by a literal scope
+string would miss commits authored under the new format."
   (let* ((n (or lookback claude-repl-emoji-lookback))
-         (cmd (format "git log -n %d --grep='(claude-repl)' --format=%%s 2>/dev/null"
+         ;; Match any conventional-commit subject (any scope) via -E.
+         (cmd (format "git log -n %d -E --grep='^[a-z]+\\(.+\\):' --format=%%s 2>/dev/null"
                       n))
          (output (ignore-errors (shell-command-to-string cmd)))
          (lines (and (stringp output) (split-string output "\n" t)))
          (emojis '()))
     (dolist (line lines)
-      (let ((first-token (car (split-string line " " t))))
-        (when (and first-token
-                   (> (length first-token) 0)
-                   (> (aref first-token 0) 127))
-          (push first-token emojis))))
+      (when-let ((emoji (claude-repl--extract-commit-emoji line)))
+        (push emoji emojis)))
     (nreverse emojis)))
 
 (defun claude-repl--filter-pool (pool exclude)
@@ -104,39 +147,68 @@ RECENTS, then to the full wildcard pool as a final guarantee of progress."
       (setq candidates (cdr (assq 'wildcard claude-repl--emoji-categories))))
     (nth (random (length candidates)) candidates)))
 
-(defun claude-repl--message-has-emoji-prefix-p (msg)
-  "Return non-nil if MSG already starts with a non-ASCII character (likely emoji)."
-  (and (> (length msg) 0)
-       (> (aref msg 0) 127)))
+(defun claude-repl--description-has-emoji-prefix-p (description)
+  "Return non-nil if DESCRIPTION starts with a non-ASCII char (likely emoji)."
+  (and (> (length description) 0)
+       (> (aref description 0) 127)))
 
-(defun claude-repl--emoji-prefix-commit-message (msg)
-  "Prepend a random emoji to MSG if it contains the claude-repl scope.
-Only prefixes when MSG matches `claude-repl--emoji-scope-re' and does not
-already have an emoji prefix.  Returns the (possibly modified) message string.
-Excludes emojis used in the last `claude-repl-emoji-lookback' matching commits."
-  (if (and (string-match-p claude-repl--emoji-scope-re msg)
-           (not (claude-repl--message-has-emoji-prefix-p msg)))
-      (let* ((type (claude-repl--commit-type-from-message msg))
-             (recents (claude-repl--recent-commit-emojis))
-             (emoji (claude-repl--random-commit-emoji type recents)))
-        (concat emoji " " msg))
-    msg))
+;; Backward-compat alias — older tests still call this name.
+(defalias 'claude-repl--message-has-emoji-prefix-p
+  'claude-repl--description-has-emoji-prefix-p)
+
+(defun claude-repl--emoji-prefix-commit-message (msg &optional branch-override)
+  "Inject a random emoji into MSG when its scope matches the current branch.
+Expected MSG shape: `<type>(<branch>): <description>'.  When the scope
+matches the active branch (or BRANCH-OVERRIDE), the result becomes
+`<type>(<branch>): <emoji> <description>'.  When the description
+already starts with a non-ASCII char, MSG is returned unchanged
+(idempotent).  When the scope does not match the branch, MSG is
+returned unchanged.  When the branch cannot be resolved (no git repo
+/ detached HEAD), MSG is returned unchanged.
+
+Excludes emojis used in the last `claude-repl-emoji-lookback' matching
+commits to avoid back-to-back repeats (variety guarantee carried over
+from the prior auto-emoji iteration).
+
+BRANCH-OVERRIDE lets callers (mainly tests) inject a fixed branch
+without going through `git rev-parse'."
+  (let ((branch (or branch-override (claude-repl--current-branch))))
+    (if (or (null branch) (string-empty-p branch))
+        msg
+      (let* ((rx (claude-repl--commit-prefix-regex branch)))
+        (if (not (string-match rx msg))
+            msg
+          (let ((type-str (match-string 1 msg))
+                (description (match-string 2 msg))
+                (rest (substring msg (match-end 0))))
+            (if (claude-repl--description-has-emoji-prefix-p description)
+                msg
+              (let* ((type (claude-repl--commit-type-from-message msg))
+                     (recents (claude-repl--recent-commit-emojis))
+                     (emoji (claude-repl--random-commit-emoji type recents)))
+                (concat type-str "(" branch "): "
+                        emoji " " description rest)))))))))
 
 ;;; Magit integration
 
 (defun claude-repl--magit-emoji-setup ()
-  "Insert a random emoji prefix into the commit message buffer.
-Intended for `git-commit-setup-hook'.  Only acts when the initial
-message template contains the claude-repl scope and no emoji is already present.
-Excludes emojis used in the last `claude-repl-emoji-lookback' matching commits."
-  (let ((msg (string-trim (buffer-string))))
-    (when (and (string-match-p claude-repl--emoji-scope-re msg)
-               (not (claude-repl--message-has-emoji-prefix-p msg)))
-      (goto-char (point-min))
-      (let* ((type (claude-repl--commit-type-from-message msg))
-             (recents (claude-repl--recent-commit-emojis))
-             (emoji (claude-repl--random-commit-emoji type recents)))
-        (insert emoji " ")))))
+  "Inject a random emoji into the commit-message buffer's first line.
+Intended for `git-commit-setup-hook'.  Acts only when the buffer's
+first line matches `<type>(<current-branch>): <description>' and the
+description does not already start with a non-ASCII character.  The
+emoji is inserted between `: ' and the description, producing
+`<type>(<branch>): <emoji> <description>'.  Variety/lookback handling
+is delegated to `--emoji-prefix-commit-message' (which threads the
+recent-emojis list through `--random-commit-emoji')."
+  (let ((branch (claude-repl--current-branch)))
+    (when (and branch (not (string-empty-p branch)))
+      (let* ((msg (buffer-string))
+             (replaced (claude-repl--emoji-prefix-commit-message msg branch)))
+        (unless (equal replaced msg)
+          (let ((point-pos (point)))
+            (erase-buffer)
+            (insert replaced)
+            (goto-char (min point-pos (point-max)))))))))
 
 (with-eval-after-load 'git-commit
   (add-hook 'git-commit-setup-hook #'claude-repl--magit-emoji-setup))

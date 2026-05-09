@@ -1,11 +1,16 @@
 #!/bin/bash
-# prepare-commit-msg hook: prefix claude-repl commits with a random emoji.
+# prepare-commit-msg hook: inject a random emoji into commits whose
+# conventional-commit scope matches the current git branch.
 #
 # Install into .git/hooks/prepare-commit-msg or use
 # M-x claude-repl-install-commit-emoji-hook from Emacs.
 #
-# Only modifies commit messages containing "(claude-repl)".
-# Skips messages that already start with a non-ASCII character (emoji).
+# Convention enforced: <type>(<branch>): <emoji> <description>
+#
+# - Only acts on messages whose scope is the current branch name.
+# - Skips messages whose description already starts with a non-ASCII
+#   char (likely emoji from a prior run / hand-written).
+# - Skips merge / squash auto-templates.
 
 set -euo pipefail
 
@@ -19,16 +24,30 @@ if [[ "$MSG_SOURCE" == "merge" ]] || [[ "$MSG_SOURCE" == "squash" ]]; then
     exit 0
 fi
 
-MSG=$(cat "$MSG_FILE")
-
-# Only prefix commits with (claude-repl) scope
-if [[ "$MSG" != *"(claude-repl)"* ]]; then
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+if [[ -z "$BRANCH" ]] || [[ "$BRANCH" == "HEAD" ]]; then
     exit 0
 fi
 
-# Already has a non-ASCII prefix (likely emoji)? Skip.
-FIRST_BYTE=$(echo -n "$MSG" | head -c 1 | od -An -tx1 | tr -d ' ')
-if [[ "${FIRST_BYTE}" > "7f" ]]; then
+MSG=$(cat "$MSG_FILE")
+FIRST_LINE=$(printf '%s' "$MSG" | head -n1)
+REST_LINES=$(printf '%s' "$MSG" | tail -n +2)
+
+# Escape branch for safe inclusion in a bash regex.
+ESCAPED_BRANCH=$(printf '%s' "$BRANCH" | sed 's/[][\.*^$()+?{|/]/\\&/g')
+
+# Match: <type>(<branch>): <description>
+PREFIX_REGEX="^([a-z]+)\(${ESCAPED_BRANCH}\): (.*)$"
+if [[ ! "$FIRST_LINE" =~ $PREFIX_REGEX ]]; then
+    exit 0
+fi
+
+TYPE="${BASH_REMATCH[1]}"
+DESCRIPTION="${BASH_REMATCH[2]}"
+
+# Already has a non-ASCII description prefix (likely emoji)? Skip.
+FIRST_BYTE=$(printf '%s' "$DESCRIPTION" | head -c 1 | od -An -tx1 | tr -d ' ')
+if [[ -n "${FIRST_BYTE}" ]] && [[ "${FIRST_BYTE}" > "7f" ]]; then
     exit 0
 fi
 
@@ -49,9 +68,6 @@ WILDCARD_EMOJIS=(
     "🌮" "🍕" "🥨" "🧁" "🍩" "🫐" "🍉" "🥝" "🍇" "🧀" "🌶" "🥑" "🍑" "🫠" "🍣"
 )
 
-# Extract commit type from conventional commit format
-TYPE=$(echo "$MSG" | grep -oP '^\K[a-z]+(?=\()' || echo "")
-
 # Select pool based on type
 case "$TYPE" in
     feat)     POOL=("${FEAT_EMOJIS[@]}") ;;
@@ -71,21 +87,38 @@ if (( RANDOM % 100 < 30 )); then
     POOL=("${WILDCARD_EMOJIS[@]}")
 fi
 
-# --- Lookback exclusion: build list of emojis used by the last 50
-# (claude-repl) commits and remove them from POOL, deterministically
-# guaranteeing variety from git history.
+# --- Lookback exclusion: build list of emojis used by the last
+# LOOKBACK conventional commits and remove them from POOL,
+# deterministically guaranteeing variety from git history.
+#
+# Recognizes both formats:
+#   Legacy:  <emoji> type(scope): description    -> first token
+#   Current: type(scope): <emoji> description    -> first token after ': '
+# The grep pattern accepts any scope so the post-branch-scope refactor
+# doesn't lose history visibility.
 
 LOOKBACK=50
 RECENTS=()
+extract_emoji() {
+    local line="$1" tok byte
+    # New format first: type(scope): EMOJI rest
+    if [[ "$line" =~ ^[a-z]+\([^\)]+\):\ ([^[:space:]]+) ]]; then
+        tok="${BASH_REMATCH[1]}"
+    else
+        tok="${line%% *}"
+    fi
+    [[ -z "$tok" ]] && return 0
+    byte=$(printf '%s' "$tok" | head -c 1 | od -An -tx1 | tr -d ' \n')
+    if [[ -n "$byte" ]] && [[ "${byte}" > "7f" ]]; then
+        printf '%s' "$tok"
+    fi
+}
+
 while IFS= read -r line; do
     [[ -z "$line" ]] && continue
-    first_token="${line%% *}"
-    [[ -z "$first_token" ]] && continue
-    first_byte=$(printf '%s' "$first_token" | head -c 1 | od -An -tx1 | tr -d ' \n')
-    if [[ "${first_byte}" > "7f" ]]; then
-        RECENTS+=("$first_token")
-    fi
-done < <(git log -n "$LOOKBACK" --grep='(claude-repl)' --format=%s 2>/dev/null || true)
+    emoji=$(extract_emoji "$line")
+    [[ -n "$emoji" ]] && RECENTS+=("$emoji")
+done < <(git log -n "$LOOKBACK" -E --grep='^[a-z]+\(.+\):' --format=%s 2>/dev/null || true)
 
 filter_pool() {
     local result=() item recent skip
@@ -115,5 +148,10 @@ fi
 # Pick a random emoji from the pool
 EMOJI="${POOL[$((RANDOM % ${#POOL[@]}))]}"
 
-# Prepend emoji to the commit message
-echo "$EMOJI $MSG" > "$MSG_FILE"
+# Reassemble: <type>(<branch>): <emoji> <description>\n<rest>
+NEW_FIRST_LINE="${TYPE}(${BRANCH}): ${EMOJI} ${DESCRIPTION}"
+if [[ -n "$REST_LINES" ]]; then
+    printf '%s\n%s' "$NEW_FIRST_LINE" "$REST_LINES" > "$MSG_FILE"
+else
+    printf '%s\n' "$NEW_FIRST_LINE" > "$MSG_FILE"
+fi

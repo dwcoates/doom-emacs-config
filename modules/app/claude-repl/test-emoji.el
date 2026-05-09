@@ -150,51 +150,71 @@
   (should-not (claude-repl--message-has-emoji-prefix-p " feat(claude-repl): something")))
 
 ;;;; ---- Tests: emoji-prefix-commit-message ----
+;;
+;; The prefixer treats the active git branch as the conventional-commit
+;; scope.  Tests pass an explicit BRANCH-OVERRIDE so they don't have to
+;; mutate the actual git checkout.
 
-(ert-deftest claude-repl-test-prefix-adds-emoji-to-claude-repl-commit ()
-  "emoji-prefix-commit-message should add an emoji to claude-repl commits."
+(ert-deftest claude-repl-test-prefix-injects-emoji-after-colon ()
+  "Prefix function injects an emoji between `: ' and the description,
+producing `<type>(<branch>): <emoji> <description>'."
   (let ((claude-repl-emoji-wildcard-chance 0))
-    (let ((result (claude-repl--emoji-prefix-commit-message "feat(claude-repl): add feature")))
-      (should (claude-repl--message-has-emoji-prefix-p result))
-      (should (string-match-p "(claude-repl)" result)))))
+    (let ((result (claude-repl--emoji-prefix-commit-message
+                   "feat(my-branch): add feature" "my-branch")))
+      (should (string-match-p "^feat(my-branch): " result))
+      (should (string-match-p "^feat(my-branch): [^[:ascii:]]" result))
+      (should (string-suffix-p " add feature" result)))))
 
-(ert-deftest claude-repl-test-prefix-preserves-original-message ()
-  "emoji-prefix-commit-message should preserve the full original message after emoji."
+(ert-deftest claude-repl-test-prefix-preserves-original-description ()
+  "Prefix function preserves the description text verbatim after the emoji."
   (let ((claude-repl-emoji-wildcard-chance 0))
-    (let ((result (claude-repl--emoji-prefix-commit-message "fix(claude-repl): fix bug")))
-      (should (string-match-p "fix(claude-repl): fix bug$" result)))))
+    (let ((result (claude-repl--emoji-prefix-commit-message
+                   "fix(my-branch): fix bug" "my-branch")))
+      (should (string-suffix-p " fix bug" result)))))
 
-(ert-deftest claude-repl-test-prefix-skips-non-claude-repl ()
-  "emoji-prefix-commit-message should not modify non-claude-repl commits."
-  (let ((msg "feat(other-module): add feature"))
-    (should (equal (claude-repl--emoji-prefix-commit-message msg) msg))))
+(ert-deftest claude-repl-test-prefix-skips-when-scope-not-branch ()
+  "Prefix function does not modify commits whose scope is not the branch."
+  (let ((msg "feat(other-scope): add feature"))
+    (should (equal (claude-repl--emoji-prefix-commit-message msg "my-branch") msg))))
 
-(ert-deftest claude-repl-test-prefix-skips-already-prefixed ()
-  "emoji-prefix-commit-message should not double-prefix messages."
-  (let ((msg "🚀 feat(claude-repl): add feature"))
-    (should (equal (claude-repl--emoji-prefix-commit-message msg) msg))))
+(ert-deftest claude-repl-test-prefix-skips-when-description-already-emojified ()
+  "Prefix function leaves a message alone when the description already
+starts with a non-ASCII char (idempotent under repeated runs)."
+  (let ((msg "feat(my-branch): 🚀 add feature"))
+    (should (equal (claude-repl--emoji-prefix-commit-message msg "my-branch") msg))))
 
 (ert-deftest claude-repl-test-prefix-skips-empty-string ()
-  "emoji-prefix-commit-message should return empty string unchanged."
-  (should (equal (claude-repl--emoji-prefix-commit-message "") "")))
+  "Prefix function returns empty string unchanged."
+  (should (equal (claude-repl--emoji-prefix-commit-message "" "my-branch") "")))
 
-(ert-deftest claude-repl-test-prefix-format-emoji-space-message ()
-  "Prefixed message should be exactly: EMOJI SPACE ORIGINAL."
-  (let ((claude-repl-emoji-wildcard-chance 0))
-    (let* ((original "feat(claude-repl): do thing")
-           (result (claude-repl--emoji-prefix-commit-message original)))
-      ;; Result should end with a space followed by the original message
-      (should (string-suffix-p (concat " " original) result))
-      ;; The emoji prefix (everything before the space+original) should be non-empty
-      (let ((prefix-len (- (length result) (length original) 1)))
-        (should (> prefix-len 0))))))
+(ert-deftest claude-repl-test-prefix-skips-when-branch-unresolvable ()
+  "Prefix function returns the message unchanged when the branch lookup
+yields nil (e.g. detached HEAD or non-repo cwd)."
+  (cl-letf (((symbol-function 'claude-repl--current-branch) (lambda () nil)))
+    (let ((msg "feat(my-branch): add feature"))
+      (should (equal (claude-repl--emoji-prefix-commit-message msg) msg)))))
 
 (ert-deftest claude-repl-test-prefix-uses-correct-type-pool ()
-  "Prefixed message for fix(claude-repl) should use fix emoji pool (no wildcard)."
+  "Prefixed message for fix(<branch>) draws from the fix emoji pool
+(no wildcard injection at chance=0)."
   (let ((claude-repl-emoji-wildcard-chance 0))
-    (let* ((result (claude-repl--emoji-prefix-commit-message "fix(claude-repl): fix bug"))
-           (emoji (car (split-string result " "))))
+    (let* ((result (claude-repl--emoji-prefix-commit-message
+                    "fix(my-branch): fix bug" "my-branch"))
+           ;; Format: "fix(my-branch): EMOJI fix bug" — the third
+           ;; whitespace-separated token is the emoji.
+           (emoji (nth 1 (split-string result ": "))))
+      (setq emoji (car (split-string emoji " ")))
       (should (member emoji (cdr (assq 'fix claude-repl--emoji-categories)))))))
+
+(ert-deftest claude-repl-test-prefix-branch-with-special-chars ()
+  "Prefix function tolerates branches with regex-meta characters
+(slashes, dots, etc.) — `regexp-quote' is applied to the branch."
+  (let ((claude-repl-emoji-wildcard-chance 0))
+    (let* ((branch "feat/foo.bar")
+           (msg (concat "feat(" branch "): something"))
+           (result (claude-repl--emoji-prefix-commit-message msg branch)))
+      (should (string-prefix-p (concat "feat(" branch "): ") result))
+      (should-not (equal result msg)))))
 
 ;;;; ---- Tests: emoji-categories constant ----
 
@@ -226,60 +246,79 @@
         (feat-count (length (cdr (assq 'feat claude-repl--emoji-categories)))))
     (should (> wildcard-count feat-count))))
 
-;;;; ---- Tests: emoji-scope-re ----
+;;;; ---- Tests: commit-prefix-regex ----
 
-(ert-deftest claude-repl-test-scope-re-matches-claude-repl ()
-  "Scope regexp should match messages containing (claude-repl)."
-  (should (string-match-p claude-repl--emoji-scope-re "feat(claude-repl): something")))
+(ert-deftest claude-repl-test-commit-prefix-regex-matches-branch-scope ()
+  "commit-prefix-regex matches `<type>(<branch>): <rest>' and captures
+type + rest."
+  (let ((rx (claude-repl--commit-prefix-regex "my-branch")))
+    (should (string-match rx "feat(my-branch): hello"))
+    (should (equal (match-string 1 "feat(my-branch): hello") "feat"))
+    (should (equal (match-string 2 "feat(my-branch): hello") "hello"))))
 
-(ert-deftest claude-repl-test-scope-re-no-match-other-scope ()
-  "Scope regexp should not match other scopes."
-  (should-not (string-match-p claude-repl--emoji-scope-re "feat(other): something")))
+(ert-deftest claude-repl-test-commit-prefix-regex-no-match-other-scope ()
+  "commit-prefix-regex does not match a different scope."
+  (let ((rx (claude-repl--commit-prefix-regex "my-branch")))
+    (should-not (string-match-p rx "feat(other): hello"))))
 
-(ert-deftest claude-repl-test-scope-re-no-match-plain ()
-  "Scope regexp should not match plain messages."
-  (should-not (string-match-p claude-repl--emoji-scope-re "just a message")))
+(ert-deftest claude-repl-test-commit-prefix-regex-quotes-special-chars ()
+  "commit-prefix-regex regex-quotes the branch so meta characters in
+the branch name are matched literally."
+  (let ((rx (claude-repl--commit-prefix-regex "feat/foo.bar")))
+    (should (string-match-p rx "fix(feat/foo.bar): hi"))
+    ;; The literal `.' must NOT be treated as wildcard — a different
+    ;; char in that slot should NOT match.
+    (should-not (string-match-p rx "fix(feat/fooXbar): hi"))))
 
 ;;;; ---- Tests: magit-emoji-setup ----
 
-(ert-deftest claude-repl-test-magit-setup-inserts-emoji ()
-  "magit-emoji-setup should insert emoji at start of buffer for claude-repl commits."
+(ert-deftest claude-repl-test-magit-setup-inserts-emoji-after-colon ()
+  "magit-emoji-setup rewrites the buffer to inject an emoji after `: '."
   (let ((claude-repl-emoji-wildcard-chance 0))
+    (cl-letf (((symbol-function 'claude-repl--current-branch)
+               (lambda () "my-branch")))
+      (with-temp-buffer
+        (insert "feat(my-branch): new feature")
+        (claude-repl--magit-emoji-setup)
+        (let ((result (buffer-string)))
+          (should (string-match-p "^feat(my-branch): " result))
+          (should (string-match-p "^feat(my-branch): [^[:ascii:]]" result))
+          (should (string-suffix-p " new feature" result)))))))
+
+(ert-deftest claude-repl-test-magit-setup-skips-non-branch-scope ()
+  "magit-emoji-setup leaves the buffer alone when scope isn't the branch."
+  (cl-letf (((symbol-function 'claude-repl--current-branch)
+             (lambda () "my-branch")))
     (with-temp-buffer
-      (insert "feat(claude-repl): new feature")
+      (insert "feat(other): new feature")
       (claude-repl--magit-emoji-setup)
-      (let ((result (buffer-string)))
-        (should (claude-repl--message-has-emoji-prefix-p result))
-        (should (string-match-p "(claude-repl)" result))))))
+      (should (equal (buffer-string) "feat(other): new feature")))))
 
-(ert-deftest claude-repl-test-magit-setup-skips-non-claude-repl ()
-  "magit-emoji-setup should not modify non-claude-repl commit buffers."
-  (with-temp-buffer
-    (insert "feat(other): new feature")
-    (claude-repl--magit-emoji-setup)
-    (should (equal (buffer-string) "feat(other): new feature"))))
-
-(ert-deftest claude-repl-test-magit-setup-skips-existing-emoji ()
-  "magit-emoji-setup should not double-prefix messages."
-  (with-temp-buffer
-    (insert "🚀 feat(claude-repl): new feature")
-    (claude-repl--magit-emoji-setup)
-    (should (equal (buffer-string) "🚀 feat(claude-repl): new feature"))))
-
-(ert-deftest claude-repl-test-magit-setup-handles-leading-whitespace ()
-  "magit-emoji-setup should handle leading whitespace in buffer."
-  (let ((claude-repl-emoji-wildcard-chance 0))
+(ert-deftest claude-repl-test-magit-setup-skips-already-emojified-description ()
+  "magit-emoji-setup is idempotent — a description already starting with
+a non-ASCII char is left unchanged."
+  (cl-letf (((symbol-function 'claude-repl--current-branch)
+             (lambda () "my-branch")))
     (with-temp-buffer
-      (insert "\n  feat(claude-repl): new feature")
+      (insert "feat(my-branch): 🚀 new feature")
       (claude-repl--magit-emoji-setup)
-      (let ((result (buffer-string)))
-        (should (claude-repl--message-has-emoji-prefix-p result))))))
+      (should (equal (buffer-string) "feat(my-branch): 🚀 new feature")))))
 
 (ert-deftest claude-repl-test-magit-setup-empty-buffer ()
-  "magit-emoji-setup should be a no-op for empty buffers."
-  (with-temp-buffer
-    (claude-repl--magit-emoji-setup)
-    (should (equal (buffer-string) ""))))
+  "magit-emoji-setup is a no-op for empty buffers."
+  (cl-letf (((symbol-function 'claude-repl--current-branch)
+             (lambda () "my-branch")))
+    (with-temp-buffer
+      (claude-repl--magit-emoji-setup)
+      (should (equal (buffer-string) "")))))
+
+(ert-deftest claude-repl-test-magit-setup-skips-when-branch-nil ()
+  "magit-emoji-setup is a no-op when the branch lookup yields nil."
+  (cl-letf (((symbol-function 'claude-repl--current-branch) (lambda () nil)))
+    (with-temp-buffer
+      (insert "feat(my-branch): new feature")
+      (claude-repl--magit-emoji-setup)
+      (should (equal (buffer-string) "feat(my-branch): new feature")))))
 
 ;;;; ---- Tests: git-hooks-dir ----
 
