@@ -823,10 +823,15 @@ push-to-back, no flash.  Bound to `SPC o c'."
   (run-at-time claude-repl-sigkill-delay nil #'claude-repl--sigkill-if-alive proc))
 
 (defun claude-repl--kill-vterm-process (buf)
-  "Kill the vterm buffer BUF and its process."
+  "Kill the vterm buffer BUF and its process.
+Suppresses both the standard process-exit query (via
+`set-process-query-on-exit-flag') and any other
+`kill-buffer-query-functions' (e.g., vterm's own kill query) so the
+nuke path never prompts about the claude process."
   (claude-repl--log (+workspace-current-name) "kill-vterm-process buf=%s" (claude-repl--safe-buffer-name buf))
   (when (and buf (buffer-live-p buf))
-    (let ((proc (get-buffer-process buf)))
+    (let ((proc (get-buffer-process buf))
+          (kill-buffer-query-functions nil))
       (when proc
         (set-process-query-on-exit-flag proc nil))
       (kill-buffer buf)

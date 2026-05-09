@@ -1775,6 +1775,20 @@ we at least surface the stuck state so the user knows to click out."
       ;; Buffer should have been killed
       (should-not (buffer-live-p buf)))))
 
+(ert-deftest claude-repl-test-panels-kill-vterm-process-skips-kill-buffer-query-functions ()
+  "kill-vterm-process does not consult `kill-buffer-query-functions'.
+Regression: the nuke path must not prompt about closing the claude
+process, even when other hooks (e.g., vterm's own kill query) are
+registered."
+  (claude-repl-test--with-clean-state
+    (let* ((buf (get-buffer-create "*kill-no-prompt*"))
+           (consulted nil)
+           (kill-buffer-query-functions
+            (list (lambda () (setq consulted t) nil))))
+      (claude-repl--kill-vterm-process buf)
+      (should-not consulted)
+      (should-not (buffer-live-p buf)))))
+
 ;;;; ---- Tests: teardown-session-state ----
 
 (ert-deftest claude-repl-test-panels-teardown-session-state ()
