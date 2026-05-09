@@ -306,6 +306,111 @@
   "Default wildcard chance should be 30."
   (should (equal (default-value 'claude-repl-emoji-wildcard-chance) 30)))
 
+(ert-deftest claude-repl-test-lookback-default ()
+  "Default emoji lookback should be 50."
+  (should (equal (default-value 'claude-repl-emoji-lookback) 50)))
+
+;;;; ---- Tests: filter-pool ----
+
+(ert-deftest claude-repl-test-filter-pool-removes-excluded ()
+  "filter-pool should remove every emoji listed in EXCLUDE."
+  (should (equal (claude-repl--filter-pool '("a" "b" "c") '("b"))
+                 '("a" "c"))))
+
+(ert-deftest claude-repl-test-filter-pool-empty-exclude ()
+  "filter-pool with empty exclude should return the pool unchanged."
+  (should (equal (claude-repl--filter-pool '("a" "b" "c") '())
+                 '("a" "b" "c"))))
+
+(ert-deftest claude-repl-test-filter-pool-all-excluded ()
+  "filter-pool that excludes the whole pool should return nil."
+  (should-not (claude-repl--filter-pool '("a" "b") '("a" "b"))))
+
+;;;; ---- Tests: random-commit-emoji with recents ----
+
+(ert-deftest claude-repl-test-random-emoji-excludes-recents ()
+  "random-commit-emoji should never return an emoji listed in RECENTS."
+  (let* ((claude-repl-emoji-wildcard-chance 0)
+         (feat-pool (cdr (assq 'feat claude-repl--emoji-categories)))
+         (excluded (list (car feat-pool) (cadr feat-pool))))
+    (dotimes (_ 30)
+      (let ((emoji (claude-repl--random-commit-emoji 'feat excluded)))
+        (should-not (member emoji excluded))))))
+
+(ert-deftest claude-repl-test-random-emoji-typed-exhausted-falls-back-to-wildcard ()
+  "When the typed pool is fully excluded, random-commit-emoji should use the wildcard pool."
+  (let* ((claude-repl-emoji-wildcard-chance 0)
+         (feat-pool (cdr (assq 'feat claude-repl--emoji-categories)))
+         (wildcard-pool (cdr (assq 'wildcard claude-repl--emoji-categories))))
+    (let ((emoji (claude-repl--random-commit-emoji 'feat feat-pool)))
+      (should (member emoji wildcard-pool))
+      (should-not (member emoji feat-pool)))))
+
+(ert-deftest claude-repl-test-random-emoji-final-fallback-when-all-exhausted ()
+  "When typed and wildcard pools are both exhausted by recents, fall back to full wildcard."
+  (let* ((claude-repl-emoji-wildcard-chance 0)
+         (feat-pool (cdr (assq 'feat claude-repl--emoji-categories)))
+         (wildcard-pool (cdr (assq 'wildcard claude-repl--emoji-categories)))
+         (all (append feat-pool wildcard-pool)))
+    (let ((emoji (claude-repl--random-commit-emoji 'feat all)))
+      (should (member emoji wildcard-pool)))))
+
+(ert-deftest claude-repl-test-random-emoji-nil-recents-unchanged ()
+  "Passing nil RECENTS should leave behavior identical to the old single-arg call."
+  (let ((claude-repl-emoji-wildcard-chance 0))
+    (let ((emoji (claude-repl--random-commit-emoji 'fix nil)))
+      (should (member emoji (cdr (assq 'fix claude-repl--emoji-categories)))))))
+
+;;;; ---- Tests: recent-commit-emojis ----
+
+(ert-deftest claude-repl-test-recent-emojis-extracts-leading-emoji ()
+  "recent-commit-emojis should pull the leading emoji token from each subject line."
+  (cl-letf (((symbol-function 'shell-command-to-string)
+             (lambda (_cmd)
+               (concat "🩹 fix(claude-repl): one\n"
+                       "✨ feat(claude-repl): two\n"
+                       "🐛 fix(claude-repl): three\n"))))
+    (should (equal (claude-repl--recent-commit-emojis 50)
+                   '("🩹" "✨" "🐛")))))
+
+(ert-deftest claude-repl-test-recent-emojis-skips-ascii-prefix ()
+  "recent-commit-emojis should drop entries whose first token is plain ASCII."
+  (cl-letf (((symbol-function 'shell-command-to-string)
+             (lambda (_cmd)
+               (concat "tweak: bump version\n"
+                       "✨ feat(claude-repl): real one\n"))))
+    (should (equal (claude-repl--recent-commit-emojis 50)
+                   '("✨")))))
+
+(ert-deftest claude-repl-test-recent-emojis-empty-output ()
+  "recent-commit-emojis should return nil for empty git output."
+  (cl-letf (((symbol-function 'shell-command-to-string)
+             (lambda (_cmd) "")))
+    (should-not (claude-repl--recent-commit-emojis 50))))
+
+(ert-deftest claude-repl-test-recent-emojis-handles-error ()
+  "recent-commit-emojis should return nil if git invocation errors out."
+  (cl-letf (((symbol-function 'shell-command-to-string)
+             (lambda (_cmd) (error "git not found"))))
+    (should-not (claude-repl--recent-commit-emojis 50))))
+
+;;;; ---- Tests: emoji-prefix-commit-message integration with recents ----
+
+(ert-deftest claude-repl-test-prefix-excludes-recent-emojis ()
+  "End-to-end: prefix should not pick an emoji that appears in recent commits."
+  (let* ((claude-repl-emoji-wildcard-chance 0)
+         (feat-pool (cdr (assq 'feat claude-repl--emoji-categories)))
+         ;; Block all but one feat emoji via recents.
+         (allowed (car (last feat-pool)))
+         (recents (butlast feat-pool)))
+    (cl-letf (((symbol-function 'claude-repl--recent-commit-emojis)
+               (lambda (&optional _n) recents)))
+      (dotimes (_ 20)
+        (let* ((result (claude-repl--emoji-prefix-commit-message
+                        "feat(claude-repl): something"))
+               (emoji (car (split-string result " "))))
+          (should (equal emoji allowed)))))))
+
 (provide 'test-emoji)
 
 ;;; test-emoji.el ends here

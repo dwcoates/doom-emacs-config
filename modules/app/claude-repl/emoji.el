@@ -38,6 +38,15 @@ Higher values produce more variety at the cost of semantic relevance."
   :type 'integer
   :group 'claude-repl)
 
+(defcustom claude-repl-emoji-lookback 50
+  "Number of recent (claude-repl) commits to scan for already-used emojis.
+Emojis used in the last LOOKBACK matching commits are excluded from the
+candidate pool, deterministically guaranteeing variety from the git history.
+When the typed pool is fully exhausted by recents, falls back to the
+wildcard pool (also minus recents)."
+  :type 'integer
+  :group 'claude-repl)
+
 (defun claude-repl--commit-type-from-message (msg)
   "Extract the conventional-commit type keyword from MSG.
 Returns a symbol like `feat', `fix', etc., or `wildcard' if no type matches."
@@ -48,18 +57,51 @@ Returns a symbol like `feat', `fix', etc., or `wildcard' if no type matches."
           'wildcard))
     'wildcard))
 
-(defun claude-repl--random-commit-emoji (&optional commit-type)
-  "Return a random emoji for COMMIT-TYPE (a symbol).
+(defun claude-repl--recent-commit-emojis (&optional lookback)
+  "Return list of leading emojis from the last LOOKBACK (claude-repl) commits.
+Defaults to `claude-repl-emoji-lookback'.  Returns nil when not in a git
+repository or on any git error.  Newest commit first."
+  (let* ((n (or lookback claude-repl-emoji-lookback))
+         (cmd (format "git log -n %d --grep='(claude-repl)' --format=%%s 2>/dev/null"
+                      n))
+         (output (ignore-errors (shell-command-to-string cmd)))
+         (lines (and (stringp output) (split-string output "\n" t)))
+         (emojis '()))
+    (dolist (line lines)
+      (let ((first-token (car (split-string line " " t))))
+        (when (and first-token
+                   (> (length first-token) 0)
+                   (> (aref first-token 0) 127))
+          (push first-token emojis))))
+    (nreverse emojis)))
+
+(defun claude-repl--filter-pool (pool exclude)
+  "Return POOL with any emoji string in EXCLUDE removed."
+  (cl-remove-if (lambda (e) (member e exclude)) pool))
+
+(defun claude-repl--random-commit-emoji (&optional commit-type recents)
+  "Return a random emoji for COMMIT-TYPE (a symbol), avoiding RECENTS.
 When COMMIT-TYPE is nil or not in `claude-repl--emoji-categories', uses `wildcard'.
 Injects a wildcard emoji `claude-repl-emoji-wildcard-chance' percent of the time
-regardless of type, to maximize variety."
+regardless of type, to maximize variety.
+RECENTS, when non-nil, is a list of emoji strings to exclude from the pool;
+if exclusion empties the typed pool, falls back to the wildcard pool minus
+RECENTS, then to the full wildcard pool as a final guarantee of progress."
   (let* ((type (or commit-type 'wildcard))
          (use-wildcard (< (random 100) claude-repl-emoji-wildcard-chance))
          (effective-type (if (or use-wildcard
                                 (not (assq type claude-repl--emoji-categories)))
                             'wildcard
                           type))
-         (candidates (cdr (assq effective-type claude-repl--emoji-categories))))
+         (candidates (claude-repl--filter-pool
+                      (cdr (assq effective-type claude-repl--emoji-categories))
+                      recents)))
+    (when (null candidates)
+      (setq candidates (claude-repl--filter-pool
+                        (cdr (assq 'wildcard claude-repl--emoji-categories))
+                        recents)))
+    (when (null candidates)
+      (setq candidates (cdr (assq 'wildcard claude-repl--emoji-categories))))
     (nth (random (length candidates)) candidates)))
 
 (defun claude-repl--message-has-emoji-prefix-p (msg)
@@ -70,11 +112,13 @@ regardless of type, to maximize variety."
 (defun claude-repl--emoji-prefix-commit-message (msg)
   "Prepend a random emoji to MSG if it contains the claude-repl scope.
 Only prefixes when MSG matches `claude-repl--emoji-scope-re' and does not
-already have an emoji prefix.  Returns the (possibly modified) message string."
+already have an emoji prefix.  Returns the (possibly modified) message string.
+Excludes emojis used in the last `claude-repl-emoji-lookback' matching commits."
   (if (and (string-match-p claude-repl--emoji-scope-re msg)
            (not (claude-repl--message-has-emoji-prefix-p msg)))
       (let* ((type (claude-repl--commit-type-from-message msg))
-             (emoji (claude-repl--random-commit-emoji type)))
+             (recents (claude-repl--recent-commit-emojis))
+             (emoji (claude-repl--random-commit-emoji type recents)))
         (concat emoji " " msg))
     msg))
 
@@ -83,13 +127,15 @@ already have an emoji prefix.  Returns the (possibly modified) message string."
 (defun claude-repl--magit-emoji-setup ()
   "Insert a random emoji prefix into the commit message buffer.
 Intended for `git-commit-setup-hook'.  Only acts when the initial
-message template contains the claude-repl scope and no emoji is already present."
+message template contains the claude-repl scope and no emoji is already present.
+Excludes emojis used in the last `claude-repl-emoji-lookback' matching commits."
   (let ((msg (string-trim (buffer-string))))
     (when (and (string-match-p claude-repl--emoji-scope-re msg)
                (not (claude-repl--message-has-emoji-prefix-p msg)))
       (goto-char (point-min))
       (let* ((type (claude-repl--commit-type-from-message msg))
-             (emoji (claude-repl--random-commit-emoji type)))
+             (recents (claude-repl--recent-commit-emojis))
+             (emoji (claude-repl--random-commit-emoji type recents)))
         (insert emoji " ")))))
 
 (with-eval-after-load 'git-commit

@@ -71,6 +71,47 @@ if (( RANDOM % 100 < 30 )); then
     POOL=("${WILDCARD_EMOJIS[@]}")
 fi
 
+# --- Lookback exclusion: build list of emojis used by the last 50
+# (claude-repl) commits and remove them from POOL, deterministically
+# guaranteeing variety from git history.
+
+LOOKBACK=50
+RECENTS=()
+while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    first_token="${line%% *}"
+    [[ -z "$first_token" ]] && continue
+    first_byte=$(printf '%s' "$first_token" | head -c 1 | od -An -tx1 | tr -d ' \n')
+    if [[ "${first_byte}" > "7f" ]]; then
+        RECENTS+=("$first_token")
+    fi
+done < <(git log -n "$LOOKBACK" --grep='(claude-repl)' --format=%s 2>/dev/null || true)
+
+filter_pool() {
+    local result=() item recent skip
+    for item in "${POOL[@]}"; do
+        skip=0
+        for recent in "${RECENTS[@]}"; do
+            if [[ "$item" == "$recent" ]]; then skip=1; break; fi
+        done
+        [[ $skip -eq 0 ]] && result+=("$item")
+    done
+    POOL=("${result[@]}")
+}
+
+filter_pool
+
+# Typed pool exhausted? Fall back to wildcard pool minus recents.
+if [[ ${#POOL[@]} -eq 0 ]]; then
+    POOL=("${WILDCARD_EMOJIS[@]}")
+    filter_pool
+fi
+
+# Final fallback if even wildcard is exhausted.
+if [[ ${#POOL[@]} -eq 0 ]]; then
+    POOL=("${WILDCARD_EMOJIS[@]}")
+fi
+
 # Pick a random emoji from the pool
 EMOJI="${POOL[$((RANDOM % ${#POOL[@]}))]}"
 
