@@ -203,6 +203,15 @@ state-save.  Callers already guard on `claude-repl--claude-running-p'."
     (claude-repl--ws-put ws :source-ws-dir
                          (or (and saved (plist-get saved :source-ws-dir))
                              (claude-repl--ws-get ws :source-ws-dir)))
+    ;; Repl-state: hydrate the *desired* panel-visibility lifecycle from the
+    ;; saved file so `:inactive' (hide-mode) survives Emacs restart.  Only
+    ;; persistable values matter at restart — `:dead'/nil reduce to "no
+    ;; opinion, default to opening panels", so we only restore `:active' /
+    ;; `:inactive'.  `--open-panels-after-ready' reads this on first ready
+    ;; and skips the panel-open call when `:inactive'.
+    (let ((saved-repl-state (and saved (plist-get saved :repl-state))))
+      (when (memq saved-repl-state '(:active :inactive))
+        (claude-repl--ws-put ws :repl-state saved-repl-state)))
     (dolist (key claude-repl--environment-keys)
       (claude-repl--ws-put ws key
                            (claude-repl--make-instantiation-from-plist
@@ -537,18 +546,24 @@ trigger `--show-existing-panels' with the wrong selected window."
 (defun claude-repl--open-panels-after-ready (ws)
   "Open panels for WS after Claude becomes ready.
 If there were pending prompts, always show panels (or defer).
-Otherwise, only show panels if WS is the current workspace."
+Otherwise, only show panels if WS is the current workspace AND its
+persisted `:repl-state' is not `:inactive' (hide-mode survives restart:
+when `--initialize-ws-env' hydrated `:repl-state :inactive' from the
+saved file, we honor that here by skipping the panel-open call)."
   (if (claude-repl--drain-pending-prompts ws)
       (progn
         (claude-repl--log ws "open-panels-after-ready: had pending prompts ws=%s — show or defer" ws)
         (claude-repl--show-panels-or-defer ws))
     (claude-repl--log ws "first-ready no pending prompts for ws=%s" ws)
-    (if (and (claude-repl--current-ws-p ws)
-             (not (claude-repl--loading-placeholder-visible-p)))
-        (progn
-          (claude-repl--log ws "open-panels-after-ready: no pending + current ws=%s — showing panels" ws)
-          (claude-repl))
-      (claude-repl--log ws "open-panels-after-ready: no pending + other ws=%s — no-op" ws))))
+    (cond
+     ((eq (claude-repl--ws-repl-state ws) :inactive)
+      (claude-repl--log ws "open-panels-after-ready: persisted :inactive ws=%s — skipping panel open" ws))
+     ((and (claude-repl--current-ws-p ws)
+           (not (claude-repl--loading-placeholder-visible-p)))
+      (claude-repl--log ws "open-panels-after-ready: no pending + current ws=%s — showing panels" ws)
+      (claude-repl))
+     (t
+      (claude-repl--log ws "open-panels-after-ready: no pending + other ws=%s — no-op" ws)))))
 
 ;; Readiness is handled by the session_start hook via sentinel.el.
 ;; The hook fires when Claude Code initializes, delivering session-id and

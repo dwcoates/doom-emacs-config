@@ -53,6 +53,46 @@
   "ws-set-repl-state signals error on nil workspace."
   (should-error (claude-repl--ws-set-repl-state nil :inactive) :type 'error))
 
+(ert-deftest claude-repl-test-ws-set-repl-state-persists-active ()
+  "ws-set-repl-state calls --state-save when STATE is :active so panel
+visibility survives Emacs restart."
+  (claude-repl-test--with-clean-state
+    (let ((saved nil))
+      (cl-letf (((symbol-function 'claude-repl--state-save)
+                 (lambda (ws) (setq saved ws))))
+        (claude-repl--ws-set-repl-state "ws1" :active)
+        (should (equal saved "ws1"))))))
+
+(ert-deftest claude-repl-test-ws-set-repl-state-persists-inactive ()
+  "ws-set-repl-state calls --state-save when STATE is :inactive so
+hide-mode survives Emacs restart."
+  (claude-repl-test--with-clean-state
+    (let ((saved nil))
+      (cl-letf (((symbol-function 'claude-repl--state-save)
+                 (lambda (ws) (setq saved ws))))
+        (claude-repl--ws-set-repl-state "ws1" :inactive)
+        (should (equal saved "ws1"))))))
+
+(ert-deftest claude-repl-test-ws-set-repl-state-skips-persist-for-dead ()
+  "ws-set-repl-state does NOT persist `:dead' — process death is
+lifecycle bookkeeping, not a desired-state hint for restart."
+  (claude-repl-test--with-clean-state
+    (let ((saved nil))
+      (cl-letf (((symbol-function 'claude-repl--state-save)
+                 (lambda (ws) (setq saved ws))))
+        (claude-repl--ws-set-repl-state "ws1" :dead)
+        (should-not saved)))))
+
+(ert-deftest claude-repl-test-ws-set-repl-state-skips-persist-for-nil ()
+  "ws-set-repl-state does NOT persist nil — \"no session\" is the
+default at restart and shouldn't pin behavior."
+  (claude-repl-test--with-clean-state
+    (let ((saved nil))
+      (cl-letf (((symbol-function 'claude-repl--state-save)
+                 (lambda (ws) (setq saved ws))))
+        (claude-repl--ws-set-repl-state "ws1" nil)
+        (should-not saved)))))
+
 (ert-deftest claude-repl-test-ws-repl-state-getter ()
   "ws-repl-state reads :repl-state, not :status."
   (claude-repl-test--with-clean-state

@@ -182,7 +182,8 @@ same granularity as per-project state."
       (let ((state (append `(:project-dir ,root
                               :active-env ,(claude-repl--ws-get ws :active-env)
                               :priority ,(claude-repl--ws-get ws :priority)
-                              :source-ws-dir ,(claude-repl--ws-get ws :source-ws-dir))
+                              :source-ws-dir ,(claude-repl--ws-get ws :source-ws-dir)
+                              :repl-state ,(claude-repl--ws-get ws :repl-state))
                            (claude-repl--collect-env-state ws))))
         (claude-repl--with-error-logging "state-save"
           (claude-repl--write-sexp-file file state)

@@ -679,6 +679,37 @@ default-directory matches the workspace."
         (claude-repl--open-panels-after-ready "ws1")
         (should-not panels-opened)))))
 
+(ert-deftest claude-repl-test-open-panels-after-ready-respects-persisted-inactive ()
+  "open-panels-after-ready must NOT open panels when the workspace's
+hydrated `:repl-state' is `:inactive' — even on the current ws — so
+hide-mode survives Emacs restart."
+  (claude-repl-test--with-clean-state
+    (let ((panels-opened nil))
+      (claude-repl--ws-put "ws1" :repl-state :inactive)
+      (cl-letf (((symbol-function 'claude-repl--drain-pending-prompts)
+                 (lambda (_ws) nil))
+                ((symbol-function 'claude-repl--current-ws-p) (lambda (_ws) t))
+                ((symbol-function 'claude-repl--loading-placeholder-visible-p)
+                 (lambda () nil))
+                ((symbol-function 'claude-repl)
+                 (lambda () (setq panels-opened t))))
+        (claude-repl--open-panels-after-ready "ws1")
+        (should-not panels-opened)))))
+
+(ert-deftest claude-repl-test-open-panels-after-ready-pending-prompts-override-inactive ()
+  "Pending prompts must force panel display even when persisted
+`:repl-state' is `:inactive' — the user has explicitly queued work, so
+they want to see the result; hide-mode is overridden."
+  (claude-repl-test--with-clean-state
+    (let ((shown nil))
+      (claude-repl--ws-put "ws1" :repl-state :inactive)
+      (cl-letf (((symbol-function 'claude-repl--drain-pending-prompts)
+                 (lambda (_ws) '("prompt1")))
+                ((symbol-function 'claude-repl--show-panels-or-defer)
+                 (lambda (_ws) (setq shown t))))
+        (claude-repl--open-panels-after-ready "ws1")
+        (should shown)))))
+
 ;;;; ---- Tests: Loading placeholder ----
 
 (ert-deftest claude-repl-test-swap-placeholder-into-windows-live ()
@@ -912,6 +943,45 @@ where fresh-ws-env wrote :active-env without :project-dir."
             (should (equal (claude-repl-instantiation-session-id
                             (claude-repl--ws-get "ws1" :bare-metal))
                            "bm-saved")))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-initialize-ws-env-restores-repl-state-inactive ()
+  "initialize-ws-env hydrates `:repl-state :inactive' from the saved file
+so hide-mode survives Emacs restart."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-rs-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (expand-file-name ".claude-repl-state"
+                               (claude-repl--path-canonical tmpdir))
+             `(:project-dir ,(claude-repl--path-canonical tmpdir)
+               :active-env :bare-metal
+               :repl-state :inactive
+               :bare-metal nil
+               :sandbox nil))
+            (claude-repl--initialize-ws-env "ws1" tmpdir)
+            (should (eq (claude-repl--ws-get "ws1" :repl-state) :inactive)))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-initialize-ws-env-skips-non-persistable-repl-state ()
+  "initialize-ws-env ignores `:repl-state :dead' / nil from the saved file
+— those are not desired-state hints and should not pin behavior on
+restart (the lazy-start path applies its defaults instead)."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-rs-dead-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (expand-file-name ".claude-repl-state"
+                               (claude-repl--path-canonical tmpdir))
+             `(:project-dir ,(claude-repl--path-canonical tmpdir)
+               :active-env :bare-metal
+               :repl-state :dead
+               :bare-metal nil
+               :sandbox nil))
+            (claude-repl--initialize-ws-env "ws1" tmpdir)
+            (should (null (claude-repl--ws-get "ws1" :repl-state))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-test-initialize-ws-env-restores-priority-from-state ()

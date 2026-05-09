@@ -230,11 +230,20 @@ STATE is one of:
 The orthogonal `:done-acked' boolean tracks whether the user has seen
 the current `:claude-state :done' result.  It used to be the
 `:repl-state :viewed' value but was lifted out — viewing isn't a
-lifecycle phase, it's an acknowledgment flag that overlays :done."
+lifecycle phase, it's an acknowledgment flag that overlays :done.
+
+Persists the new value to disk via `claude-repl--state-save' when STATE
+is `:active' or `:inactive' so panel-visibility survives Emacs restart
+(`:dead' / nil are not persisted — they reduce to \"no opinion\" at
+restart, so default open-panels behavior applies).  `:dead' is set via
+`--ws-put' directly (in `--mark-dead-vterm'), bypassing this setter, so
+no special-case is needed there."
   (unless ws (error "claude-repl--ws-set-repl-state: ws is nil"))
   (claude-repl--log ws "repl-state %s -> %s" ws state)
   (claude-repl--ws-put ws :repl-state state)
-  (force-mode-line-update t))
+  (force-mode-line-update t)
+  (when (memq state '(:active :inactive))
+    (claude-repl--state-save ws)))
 
 (defun claude-repl--ws-claude-state-clear-if (ws state)
   "Clear WS's :claude-state when it currently equals STATE.

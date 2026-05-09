@@ -494,6 +494,23 @@
               (should (null (plist-get data :source-ws-dir)))))
         (delete-directory tmpdir t)))))
 
+(ert-deftest claude-repl-test-state-save-includes-repl-state ()
+  "state-save serializes `:repl-state' so panel-visibility survives restart."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :repl-state :inactive)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (expand-file-name ".claude-repl-state" tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (eq (plist-get data :repl-state) :inactive))))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest claude-repl-test-state-save-piggybacks-snapshot ()
   "state-save also rewrites the workspace snapshot file so the roster
 survives a crash that beats kill-emacs-hook."
