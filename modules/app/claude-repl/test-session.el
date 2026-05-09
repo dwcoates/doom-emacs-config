@@ -332,6 +332,27 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
         (claude-repl--mark-claude-done "ws1")
         (should (equal done-set "ws1"))))))
 
+(ert-deftest claude-repl-test-mark-claude-done-current-ws-acks ()
+  "mark-claude-done sets :done-acked t when the workspace is current
+(user is actively looking when :done arrives)."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--current-ws-p)
+               (lambda (_ws) t)))
+      (claude-repl--mark-claude-done "ws1")
+      (should (eq (claude-repl--ws-get "ws1" :done-acked) t)))))
+
+(ert-deftest claude-repl-test-mark-claude-done-non-current-ws-clears-ack ()
+  "mark-claude-done clears :done-acked to nil for non-current workspaces
+so a fresh :done starts unacknowledged regardless of any leftover ack
+from a prior cycle."
+  (claude-repl-test--with-clean-state
+    ;; Pretend a prior cycle left :done-acked t — must be cleared.
+    (claude-repl--ws-put "ws1" :done-acked t)
+    (cl-letf (((symbol-function 'claude-repl--current-ws-p)
+               (lambda (_ws) nil)))
+      (claude-repl--mark-claude-done "ws1")
+      (should (null (claude-repl--ws-get "ws1" :done-acked))))))
+
 (ert-deftest claude-repl-test-refresh-vterm-after-finish-live ()
   "refresh-vterm-after-finish should call do-refresh and update-hide-overlay for live buffer."
   (let ((refreshed nil)

@@ -1316,22 +1316,22 @@ selected tab dims to the normal selected face like other states."
       (claude-repl--update-ws-state "ws1")
       (should (eq (claude-repl--ws-state "ws1") :thinking)))))
 
-(ert-deftest claude-repl-test-update-ws-state-done-clean-viewed-to-idle ()
-  ":done + clean + :viewed → :idle (user has seen it; nothing outstanding)."
+(ert-deftest claude-repl-test-update-ws-state-done-clean-acked-to-idle ()
+  ":done + clean + :done-acked → :idle (user has seen it; nothing outstanding)."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :done)
-    (claude-repl--ws-set-repl-state "ws1" :viewed)
+    (claude-repl--ws-put "ws1" :done-acked t)
     (claude-repl--ws-put "ws1" :git-clean 'clean)
     (claude-repl--update-ws-state "ws1")
     (should (eq (claude-repl--ws-claude-state "ws1") :idle))
-    ;; :repl-state should also reset from :viewed back to :active
-    (should (eq (claude-repl--ws-repl-state "ws1") :active))))
+    ;; :done-acked clears so a future :done cycle starts unacknowledged.
+    (should (null (claude-repl--ws-get "ws1" :done-acked)))))
 
-(ert-deftest claude-repl-test-update-ws-state-done-clean-not-viewed-stays-done ()
-  ":done + clean + NOT viewed stays :done — wait for user to view."
+(ert-deftest claude-repl-test-update-ws-state-done-clean-not-acked-stays-done ()
+  ":done + clean + NOT acked stays :done — wait for user to view."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :done)
-    (claude-repl--ws-set-repl-state "ws1" :active)
+    (claude-repl--ws-put "ws1" :done-acked nil)
     (claude-repl--ws-put "ws1" :git-clean 'clean)
     (claude-repl--update-ws-state "ws1")
     (should (eq (claude-repl--ws-claude-state "ws1") :done))))
@@ -1340,7 +1340,7 @@ selected tab dims to the normal selected face like other states."
   ":done + dirty stays :done — waiting on user to stage/commit."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :done)
-    (claude-repl--ws-set-repl-state "ws1" :viewed)
+    (claude-repl--ws-put "ws1" :done-acked t)
     (claude-repl--ws-put "ws1" :git-clean 'dirty)
     (claude-repl--update-ws-state "ws1")
     (should (eq (claude-repl--ws-claude-state "ws1") :done))))
