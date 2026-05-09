@@ -116,18 +116,16 @@ state.  Returns the empty string when no prompt has been sent yet."
          (t ""))))))
 
 (defun claude-repl--prompt-summary-truncate (s &optional allow-empty)
-  "Return S trimmed to a single line, capped at the summary max length.
-Multiple lines collapse to spaces; trailing ellipsis is added when the
-input is longer than the cap.  Returns the empty string for nil or
-all-whitespace S unless ALLOW-EMPTY is non-nil (in which case nil
-becomes \"\")."
+  "Return S trimmed to a single line for mode-line display.
+Multiple lines / runs of whitespace collapse to single spaces.  No
+length cap is applied — the mode-line itself clips at the window's
+right edge.  Returns the empty string for nil or all-whitespace S
+unless ALLOW-EMPTY is non-nil (in which case nil becomes \"\")."
   (let* ((raw (or s ""))
-         (collapsed (replace-regexp-in-string "[ \t\n\r]+" " " (string-trim raw)))
-         (max claude-repl-prompt-summary-max-length))
-    (cond
-     ((and (string-empty-p collapsed) (not allow-empty)) "")
-     ((<= (length collapsed) max) collapsed)
-     (t (concat (substring collapsed 0 (max 1 (- max 1))) "…")))))
+         (collapsed (replace-regexp-in-string "[ \t\n\r]+" " " (string-trim raw))))
+    (if (and (string-empty-p collapsed) (not allow-empty))
+        ""
+      collapsed)))
 
 ;;;; Async kickoff
 

@@ -32,12 +32,12 @@
     (should (equal (claude-repl--prompt-summary-truncate "line1\nline2\n  line3")
                    "line1 line2 line3"))))
 
-(ert-deftest claude-repl-test-prompt-summary-truncate-caps-with-ellipsis ()
-  "Strings longer than max get an ellipsis-suffixed truncation."
-  (let ((claude-repl-prompt-summary-max-length 10))
-    (let ((out (claude-repl--prompt-summary-truncate "abcdefghijklmnop")))
-      (should (= (length out) 10))
-      (should (string-suffix-p "…" out)))))
+(ert-deftest claude-repl-test-prompt-summary-truncate-no-length-cap ()
+  "Strings longer than the configured max still pass through unchanged
+— the mode-line clips at the screen edge instead of an artificial cap."
+  (let ((claude-repl-prompt-summary-max-length 10)
+        (long "abcdefghijklmnopqrstuvwxyz"))
+    (should (equal (claude-repl--prompt-summary-truncate long) long))))
 
 ;;;; ---- Tests: prompt-summary-clean ----
 
