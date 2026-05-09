@@ -755,8 +755,10 @@ visible workspace list (`claude-repl--filter-hidden-names') instead of
 the raw `+workspace-list-names', so closed-REPL workspaces dropped from
 the tabline are also skipped during s-{ / s-}.  Mirrors Doom's
 protected-workspace handling: when current is the nil-persp, switch to
-`+workspaces-main' instead of cycling.  Flashes the destination tab
-post-jump to match every other identity-based workspace jump."
+`+workspaces-main' instead of cycling.  Does NOT flash the destination
+tab — left/right cycling is high-frequency navigation and the flash
+becomes noise; identity-based jumps (`SPC p p', priority change,
+worktree jump) keep the flash since they're discrete attention cues."
   (let ((current-name (+workspace-current-name)))
     (if (+workspace--protected-p current-name)
         (+workspace-switch +workspaces-main t)
@@ -767,8 +769,7 @@ post-jump to match every other identity-based workspace jump."
                  (index (cl-position current-name visible :test #'equal)))
             (when (= perspc 1)
               (user-error "No other workspaces"))
-            (+workspace-switch (nth (mod (+ index n) perspc) visible))
-            (claude-repl--flash-current-tab))
+            (+workspace-switch (nth (mod (+ index n) perspc) visible)))
         ('user-error (+workspace-error (cadr ex) t))
         ('error (+workspace-error ex t))))))
 

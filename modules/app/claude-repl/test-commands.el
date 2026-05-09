@@ -1519,8 +1519,7 @@ the stubs push to.  PROTECTED-P is a boolean controlling
     (claude-repl-cmd-test--with-cycle-stubs
         '("a" "b" "c") "a" '() switched flashed nil
       (claude-repl-switch-right)
-      (should (equal switched '("b")))
-      (should flashed))))
+      (should (equal switched '("b"))))))
 
 (ert-deftest claude-repl-cmd-test-switch-left/cycles-to-prev ()
   "switch-left with hide-mode off cycles to the previous workspace."
@@ -1592,17 +1591,19 @@ the stubs push to.  PROTECTED-P is a boolean controlling
         '("nil") "nil" '() switched flashed t
       (claude-repl-switch-right)
       (should (equal switched '("main")))
-      ;; Protected branch bypasses the flash (matches Doom's cycle semantics).
       (should-not flashed))))
 
-(ert-deftest claude-repl-cmd-test-switch-right/flashes-destination ()
-  "switch-right flashes the destination tab after a successful jump."
+(ert-deftest claude-repl-cmd-test-switch-right/does-not-flash-destination ()
+  "switch-right does NOT flash the destination tab.
+Left/right cycling is high-frequency navigation and the flash becomes
+noise; only identity-based jumps (`SPC p p', priority change,
+worktree jump) flash."
   (let ((switched (list)) (flashed (list))
         (claude-repl-hide-mode-enabled nil))
     (claude-repl-cmd-test--with-cycle-stubs
         '("a" "b") "a" '() switched flashed nil
       (claude-repl-switch-right)
-      (should (equal flashed '(t))))))
+      (should-not flashed))))
 
 ;;;; ---- Hide-mode sweep ----
 
