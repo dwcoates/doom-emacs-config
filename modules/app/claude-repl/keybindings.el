@@ -520,7 +520,8 @@ Reports comprehensive diagnostics."
       :desc "Claude interrupt" "o x" #'claude-repl-interrupt
       :desc "Copy file reference" "o r" #'claude-repl-copy-reference
       :desc "Switch sandbox/bare-metal" "o s" #'claude-repl-switch-environment
-      :desc "Toggle hide-mode (closed-REPL workspaces)" "o h" #'claude-repl-toggle-hide-mode)
+      :desc "Toggle hide-mode (closed-REPL workspaces)" "o h" #'claude-repl-toggle-hide-mode
+      :desc "Toggle workspace drawer" "o d" #'claude-repl-drawer-toggle)
 
 (map! :leader
       (:prefix "p"

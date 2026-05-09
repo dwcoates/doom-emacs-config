@@ -1128,7 +1128,9 @@ panel visibility (panels may be hidden via `SPC o c')."
   ;; `/workspace-status' skill) can read it.  Runs every poll tick so
   ;; the freshness matches the existing tab-bar update cadence.
   (when (fboundp 'claude-repl--write-workspace-status)
-    (claude-repl--write-workspace-status)))
+    (claude-repl--write-workspace-status))
+  (when (fboundp 'claude-repl-drawer--refresh-if-visible)
+    (claude-repl-drawer--refresh-if-visible)))
 
 ;; Periodically update all workspace states (catches git changes, etc.)
 (push (run-with-timer claude-repl-state-poll-interval claude-repl-state-poll-interval #'claude-repl--update-all-workspace-states)
