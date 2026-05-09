@@ -406,6 +406,16 @@ Returns the full SHA of the new commit."
           (should (= new-delay 10))
           (should (= (length handled) 1)))))))
 
+(ert-deftest claude-repl-test-dispatch-workspace-command-merge ()
+  "Merge commands do not change delay."
+  (let ((handled nil))
+    (cl-letf (((symbol-function 'claude-repl--handle-merge-command)
+               (lambda (cmd) (push cmd handled))))
+      (let ((cmd '((type . "merge") (workspace . "ws1"))))
+        (let ((new-delay (claude-repl--dispatch-workspace-command cmd 10)))
+          (should (= new-delay 10))
+          (should (= (length handled) 1)))))))
+
 (ert-deftest claude-repl-test-dispatch-workspace-command-unknown ()
   "Unknown command type does not change delay and does not error."
   (let ((new-delay (claude-repl--dispatch-workspace-command
@@ -456,6 +466,26 @@ Returns the full SHA of the new commit."
     (claude-repl--handle-clipboard-command
      '((workspace . "ws1") (text . "second")))
     (should (equal (claude-repl--ws-get "ws1" :clipboard) "second"))))
+
+;;;; ---- Tests: handle-merge-command ----
+
+(ert-deftest claude-repl-test-handle-merge-command-calls-merge-into-source ()
+  "handle-merge-command forwards the workspace name to workspace-merge-into-source."
+  (let ((received :unset))
+    (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+               (lambda (ws) (setq received ws))))
+      (claude-repl--handle-merge-command '((type . "merge") (workspace . "DWC/feature-one")))
+      (should (equal received "DWC/feature-one")))))
+
+(ert-deftest claude-repl-test-handle-merge-command-passes-bare-name-through ()
+  "handle-merge-command does not normalize the workspace name itself —
+normalization is the responsibility of workspace-merge-into-source so
+both interactive and command-file callers get identical handling."
+  (let ((received :unset))
+    (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+               (lambda (ws) (setq received ws))))
+      (claude-repl--handle-merge-command '((type . "merge") (workspace . "feature-one")))
+      (should (equal received "feature-one")))))
 
 ;;;; ---- Tests: process-workspace-commands-file ----
 
@@ -2924,6 +2954,57 @@ all-incorporated), tag-merge-completion is NOT invoked."
               (should-error (claude-repl-workspace-merge-current-into-source)
                             :type 'user-error)))
         (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-workspace-merge-into-source-accepts-explicit-ws ()
+  "workspace-merge-into-source operates on the named workspace, not (+workspace-current-name)."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-merge-explicit-" t))
+          (target-arg :unset)
+          (merge-do-args :unset))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "named-ws" :project-dir "/tmp/named-dir/")
+            (claude-repl--ws-put "named-ws" :source-ws-dir tmpdir)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
+                      ((symbol-function 'claude-repl--master-worktree-path)
+                       (lambda (_root) nil))
+                      ((symbol-function 'claude-repl--assert-clean-worktree)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'claude-repl-switch-to-project)
+                       (lambda (target) (setq target-arg target)))
+                      ((symbol-function 'claude-repl--workspace-merge-do)
+                       (lambda (&rest args) (setq merge-do-args args))))
+              (claude-repl--workspace-merge-into-source "named-ws")
+              (should (equal target-arg tmpdir))
+              (should (equal merge-do-args (list "named-ws" tmpdir)))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-workspace-merge-into-source-normalizes-branchy-name ()
+  "Branch-style names like \"DWC/feature-one\" are normalized to the bare workspace name."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-merge-branchy-" t))
+          (merge-do-args :unset))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "feature-one" :project-dir "/tmp/feature-one/")
+            (claude-repl--ws-put "feature-one" :source-ws-dir tmpdir)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
+                      ((symbol-function 'claude-repl--master-worktree-path)
+                       (lambda (_root) nil))
+                      ((symbol-function 'claude-repl--assert-clean-worktree)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'claude-repl-switch-to-project) #'ignore)
+                      ((symbol-function 'claude-repl--workspace-merge-do)
+                       (lambda (&rest args) (setq merge-do-args args))))
+              (claude-repl--workspace-merge-into-source "DWC/feature-one")
+              (should (equal (car merge-do-args) "feature-one"))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-workspace-merge-into-source-errors-on-unknown-ws ()
+  "user-errors when the named workspace is not registered in the workspaces hash."
+  (claude-repl-test--with-clean-state
+    (should-error (claude-repl--workspace-merge-into-source "no-such-ws")
+                  :type 'user-error)))
 
 ;;;; ---- Tests: resolve-merge-into-source-target ----
 

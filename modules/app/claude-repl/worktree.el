@@ -1037,6 +1037,15 @@ annotation must not error out the whole batch."
                ws (length text)
                (if note (format ": %s" note) ""))))))
 
+(defun claude-repl--handle-merge-command (cmd)
+  "Handle a \"merge\" workspace command CMD.
+Performs the equivalent of `SPC TAB M' on the named workspace: merges
+that workspace's commits into its source workspace via
+`claude-repl--workspace-merge-into-source'."
+  (let ((ws (alist-get 'workspace cmd)))
+    (claude-repl--log ws "workspace-commands-file merge: ws=%s" ws)
+    (claude-repl--workspace-merge-into-source ws)))
+
 (defun claude-repl--dispatch-workspace-command (cmd create-delay)
   "Dispatch a single workspace command CMD with current CREATE-DELAY.
 Returns the new create-delay value (incremented for \"create\" commands,
@@ -1054,6 +1063,9 @@ unchanged otherwise)."
       create-delay)
      ((string= type "clipboard")
       (claude-repl--handle-clipboard-command cmd)
+      create-delay)
+     ((string= type "merge")
+      (claude-repl--handle-merge-command cmd)
       create-delay)
      (t
       (claude-repl--log nil "workspace-commands-file unknown type: %s" type)
@@ -1363,10 +1375,10 @@ when MASTER-DIR is nil or when PARENT-DIR is master."
     master-dir)
    (t parent-dir)))
 
-(defun claude-repl-workspace-merge-current-into-source ()
-  "Merge the current workspace's commits into its source workspace.
-The source workspace is the one `SPC TAB n' was called from when this
-worktree was created (recorded as `:source-ws-dir').  When that
+(defun claude-repl--workspace-merge-into-source (source-ws)
+  "Merge SOURCE-WS's commits into its source workspace.
+The source workspace is the one `SPC TAB n' was called from when
+SOURCE-WS was created (recorded as `:source-ws-dir').  When that
 directory no longer exists or no source was recorded, falls back to the
 worktree on `claude-repl-master-branch-name'.
 
@@ -1378,38 +1390,51 @@ selecting the master workspace afterwards.
 
 Switches to the target workspace via `claude-repl-switch-to-project'
 \(which creates a perspective for the project if none is open) and
-cherry-picks this workspace's commits onto its branch.  The resolved
-target directory is passed explicitly to `--workspace-merge-do' so
-cherry-picks always land in the directory we just switched to, even if
-Doom's project-name -> workspace mapping doesn't recover the original
-parent's `:project-dir' lookup."
+cherry-picks SOURCE-WS's commits onto its branch.  The resolved target
+directory is passed explicitly to `--workspace-merge-do' so cherry-picks
+always land in the directory we just switched to, even if Doom's
+project-name -> workspace mapping doesn't recover the original parent's
+`:project-dir' lookup.
+
+Signals `user-error' if SOURCE-WS is unknown — checked explicitly via
+`claude-repl--ws-get' rather than `claude-repl--ws-dir' (which raises a
+generic `error') so command-file dispatch surfaces user-facing errors."
+  (let* ((source-ws (claude-repl--bare-workspace-name source-ws))
+         (source-dir (claude-repl--ws-get source-ws :project-dir)))
+    (unless source-dir
+      (user-error "Unknown workspace '%s' — cannot merge" source-ws))
+    (let* ((recorded (claude-repl--ws-get source-ws :source-ws-dir))
+           (parent-dir (or (and recorded (file-directory-p recorded) recorded)
+                           (claude-repl--master-worktree-path source-dir)))
+           (master-dir (claude-repl--master-worktree-path source-dir))
+           (target-dir (claude-repl--resolve-merge-into-source-target parent-dir master-dir)))
+      (claude-repl--log source-ws
+                        "workspace-merge-into-source: source-ws=%s source-dir=%s recorded=%s parent-dir=%s master-dir=%s target-dir=%s"
+                        source-ws source-dir (or recorded "nil")
+                        (or parent-dir "nil") (or master-dir "nil") (or target-dir "nil"))
+      (unless target-dir
+        (user-error "Cannot determine merge target for '%s': no recorded source and no '%s' worktree found"
+                    source-ws claude-repl-master-branch-name))
+      (when (string= (claude-repl--path-canonical target-dir)
+                     (claude-repl--path-canonical source-dir))
+        (user-error "Already on the source workspace — nothing to merge"))
+      ;; Guard: uncommitted changes would interfere with cherry-pick.
+      (claude-repl--assert-clean-worktree source-ws source-dir)
+      (claude-repl-switch-to-project target-dir)
+      ;; After switching, default-directory may still point at the source ws —
+      ;; bind it to the target so cherry-pick paths resolve there. Pass
+      ;; target-dir explicitly to --workspace-merge-do so the cherry-pick lands
+      ;; in the worktree we just selected, not in whatever :project-dir the
+      ;; post-switch current-ws happens to carry.
+      (let ((default-directory (file-name-as-directory target-dir)))
+        (claude-repl--workspace-merge-do source-ws target-dir)))))
+
+(defun claude-repl-workspace-merge-current-into-source ()
+  "Merge the current workspace's commits into its source workspace.
+Interactive entry point that delegates to
+`claude-repl--workspace-merge-into-source' with the current workspace
+as SOURCE-WS."
   (interactive)
-  (let* ((source-ws (+workspace-current-name))
-         (source-dir (claude-repl--ws-dir source-ws))
-         (recorded (claude-repl--ws-get source-ws :source-ws-dir))
-         (parent-dir (or (and recorded (file-directory-p recorded) recorded)
-                         (claude-repl--master-worktree-path source-dir)))
-         (master-dir (claude-repl--master-worktree-path source-dir))
-         (target-dir (claude-repl--resolve-merge-into-source-target parent-dir master-dir)))
-    (claude-repl--log source-ws
-                      "workspace-merge-current-into-source: source-ws=%s source-dir=%s recorded=%s parent-dir=%s master-dir=%s target-dir=%s"
-                      source-ws source-dir (or recorded "nil")
-                      (or parent-dir "nil") (or master-dir "nil") (or target-dir "nil"))
-    (unless target-dir
-      (user-error "Cannot determine merge target for '%s': no recorded source and no '%s' worktree found"
-                  source-ws claude-repl-master-branch-name))
-    (when (string= (claude-repl--path-canonical target-dir)
-                   (claude-repl--path-canonical source-dir))
-      (user-error "Already on the source workspace — nothing to merge"))
-    ;; Guard: uncommitted changes would interfere with cherry-pick.
-    (claude-repl--assert-clean-worktree source-ws source-dir)
-    (claude-repl-switch-to-project target-dir)
-    ;; After switching, default-directory may still point at the source ws —
-    ;; bind it to the target so cherry-pick paths resolve there. Pass
-    ;; target-dir explicitly to --workspace-merge-do so the cherry-pick lands
-    ;; in the worktree we just selected, not in whatever :project-dir the
-    ;; post-switch current-ws happens to carry.
-    (let ((default-directory (file-name-as-directory target-dir)))
-      (claude-repl--workspace-merge-do source-ws target-dir))))
+  (claude-repl--workspace-merge-into-source (+workspace-current-name)))
 
 (defalias '+dwc/workspace-merge-current-into-source #'claude-repl-workspace-merge-current-into-source)
