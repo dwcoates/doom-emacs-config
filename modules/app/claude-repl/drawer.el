@@ -557,16 +557,23 @@ restriction, which silently clamp small fractions otherwise."
 (defun claude-repl-drawer-show ()
   "Show the workspace drawer in a left-side window.
 Selects the drawer window and positions the cursor on the currently
-active workspace (falling back to the first entry)."
+selected workspace (falling back to the first entry).  Self-heals if
+an existing drawer buffer pre-dates the current mode init by ensuring
+the overlay-driving post-command hook is installed and firing it once
+so the arrow is positioned immediately, not after the next command."
   (interactive)
   (let* ((buf        (claude-repl-drawer--get-or-create-buffer))
          (current-ws (claude-repl-drawer--current-ws))
          (win        (display-buffer buf claude-repl-drawer--display-action)))
     (with-current-buffer buf
+      (add-hook 'post-command-hook
+                #'claude-repl-drawer--post-command nil t)
+      (setq-local cursor-type nil)
       (claude-repl-drawer--render)
       (or (and current-ws
                (claude-repl-drawer--goto-workspace-line current-ws))
-          (claude-repl-drawer--goto-first-workspace)))
+          (claude-repl-drawer--goto-first-workspace))
+      (claude-repl-drawer--post-command))
     (when win
       (set-window-dedicated-p win t)
       (claude-repl-drawer--apply-width win)
