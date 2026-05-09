@@ -1751,6 +1751,50 @@ emitting only the permission question."
               "raw" "prefixed" "/tmp/repo/" "HEAD" nil)))
     (should (string-match-p "[Dd]o NOT ask for permission" out))))
 
+(ert-deftest claude-repl-test-workspace-generation-prompt-requires-array-top-level ()
+  "The prompt explicitly tells the model the JSON top-level must be an array
+even for a single workspace.  Previously the model emitted a bare object
+`{...}' and the elisp parser crashed with `listp, (type . \"create\")'
+when `dolist' iterated the alist's cons cells."
+  (let ((out (claude-repl--workspace-generation-prompt
+              "raw" "prefixed" "/tmp/repo/" "HEAD" nil)))
+    (should (string-match-p "MUST be an array" out))))
+
+;;;; ---- Tests: workspace-commands JSON normalization ----
+
+(ert-deftest claude-repl-test-normalize-workspace-commands-vector-becomes-list ()
+  "A JSON array (parsed as vector) is normalized to a list."
+  (let* ((parsed (vector '((type . "create") (name . "a"))
+                         '((type . "create") (name . "b"))))
+         (out (claude-repl--normalize-workspace-commands parsed)))
+    (should (listp out))
+    (should (equal (length out) 2))
+    (should (equal (alist-get 'name (car out)) "a"))
+    (should (equal (alist-get 'name (cadr out)) "b"))))
+
+(ert-deftest claude-repl-test-normalize-workspace-commands-bare-object-wrapped ()
+  "A bare JSON object (parsed as alist) is wrapped into a one-element list.
+Without this, `dolist' iterates the alist's cons cells and dispatch
+crashes with `Wrong type argument: listp, (type . \"create\")'."
+  (let* ((parsed '((type . "create") (name . "solo") (git_root . "/g")))
+         (out (claude-repl--normalize-workspace-commands parsed)))
+    (should (equal (length out) 1))
+    (should (equal (alist-get 'name (car out)) "solo"))
+    (should (equal (alist-get 'type (car out)) "create"))))
+
+(ert-deftest claude-repl-test-normalize-workspace-commands-empty-vector-empty-list ()
+  "An empty JSON array produces an empty list (no commands to dispatch)."
+  (should (equal (claude-repl--normalize-workspace-commands (vector)) nil)))
+
+(ert-deftest claude-repl-test-normalize-workspace-commands-nil-empty-list ()
+  "Malformed/nil input produces an empty list — caller skips dispatch."
+  (should (equal (claude-repl--normalize-workspace-commands nil) nil)))
+
+(ert-deftest claude-repl-test-normalize-workspace-commands-scalar-empty-list ()
+  "A scalar JSON value (string/number) produces an empty list."
+  (should (equal (claude-repl--normalize-workspace-commands "oops") nil))
+  (should (equal (claude-repl--normalize-workspace-commands 42) nil)))
+
 (ert-deftest claude-repl-test-spawn-workspace-generation-appends-extra-args ()
   "The spawn command list includes `claude-repl-workspace-generation-extra-args'
 after the base `-p --model X' args.  Without these, the headless model

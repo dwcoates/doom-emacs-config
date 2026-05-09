@@ -402,6 +402,7 @@ rather than re-derive them."
    "Generate the `name' field as DWC/<short-slug> (lowercase, hyphenated, 3 words max after the DWC/ prefix) based on the DESCRIPTION above.\n"
    "\n"
    "Constraints:\n"
+   "- The JSON top-level MUST be an array, even when emitting only one workspace, e.g. `[{\"type\":\"create\", ...}]'. The downstream parser iterates the top-level as a list of commands; a bare object `{...}' is rejected.\n"
    "- Do not emit prompt or finish entries.\n"
    "- Do not run any mutating commands (for example, creating Jira tickets) unless explicitly asked to.\n"
    "- Only generate more than one workspace if explicitly asked to. Always generate one workspace unless explicitly asked to generate more.\n"
@@ -998,16 +999,40 @@ unchanged otherwise)."
       (claude-repl--log nil "workspace-commands-file unknown type: %s" type)
       create-delay))))
 
+(defun claude-repl--normalize-workspace-commands (parsed)
+  "Normalize PARSED workspace-commands JSON to a list of command alists.
+Accepts either the documented form (a JSON array of objects, parsed by
+`json-read' as a vector of alists) or a single JSON object that some
+upstream emitters produce (parsed as a single alist) — the latter
+previously crashed dispatch with `Wrong type argument: listp, (type . \"create\")'
+because `dolist' iterated the alist's cons cells.
+
+A vector is converted to a list; a single alist is wrapped in a one-element
+list; anything else (nil, scalar, malformed) yields the empty list so
+the caller skips dispatch cleanly."
+  (cond
+   ((vectorp parsed) (append parsed nil))
+   ((and (listp parsed) parsed
+         (consp (car parsed)) (symbolp (caar parsed)))
+    (list parsed))
+   (t nil)))
+
 (defun claude-repl--process-workspace-commands-file (file)
   "Process a workspace commands file FILE, dispatching each typed command.
 Create commands are staggered by `claude-repl-worktree-stagger-seconds' to
-avoid concurrent Claude startup writes corrupting ~/.claude.json."
+avoid concurrent Claude startup writes corrupting ~/.claude.json.
+
+Tolerates both the documented JSON-array form and a bare JSON object —
+the headless workspace-generation flow occasionally emits the latter."
   (if (not (file-exists-p file))
       (claude-repl--log nil "workspace-commands-file not found: %s" file)
     (claude-repl--log nil "workspace-commands-file processing: %s" file)
-    (let ((commands (json-read-file file))
+    (let ((commands (claude-repl--normalize-workspace-commands
+                     (json-read-file file)))
           (create-delay 0))
-      (dolist (cmd (append commands nil))
+      (claude-repl--log nil "workspace-commands-file normalized: %d command(s)"
+                        (length commands))
+      (dolist (cmd commands)
         (setq create-delay (claude-repl--dispatch-workspace-command cmd create-delay))))
     (delete-file file)
     (claude-repl--log nil "workspace-commands-file deleted: %s" file)))
