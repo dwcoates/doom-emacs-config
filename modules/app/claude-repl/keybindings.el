@@ -40,16 +40,32 @@
           (or (buffer-local-value 'claude-repl--owning-workspace buf) "nil")
           (or (claude-repl--workspace-for-buffer buf) "nil")))
 
-(defun claude-repl--kill-before-workspace-delete (&rest _)
+(defun claude-repl--kill-before-workspace-delete (&optional name &rest _)
   "Before-advice for `+workspace/kill': tear down any running Claude session.
-This ensures Claude buffers and windows are cleaned up while the workspace
-is still current."
-  (claude-repl--log (+workspace-current-name) "kill-before-workspace-delete: entry")
-  (if (claude-repl--claude-running-p)
-      (progn
-        (claude-repl--log (+workspace-current-name) "kill-before-workspace-delete: vterm running, killing session")
-        (claude-repl-kill))
-    (claude-repl--log (+workspace-current-name) "kill-before-workspace-delete: vterm not running, no-op")))
+NAME is the workspace `+workspace/kill' was invoked on.  Only fire when
+NAME refers to the current workspace — `claude-repl--claude-running-p'
+inspects the current ws's vterm, so applying it cross-workspace would
+kill the wrong session (e.g. when the hide-mode sweep persp-kills a
+background `:hidden' workspace from inside a workspace-switch handler,
+the named workspace's session has already been torn down by the sweep
+and the current workspace's session must be left alone).  Callers that
+need to kill a specific named workspace's session (the nuke / kill /
+sweep paths) handle teardown explicitly via `claude-repl--kill-session'
+before invoking `+workspace/kill'."
+  (let ((target (or name (+workspace-current-name)))
+        (current (+workspace-current-name)))
+    (claude-repl--log current
+                      "kill-before-workspace-delete: target=%s current=%s"
+                      target current)
+    (cond
+     ((not (equal target current))
+      (claude-repl--log current
+                        "kill-before-workspace-delete: target!=current, skipping (caller handles teardown)"))
+     ((claude-repl--claude-running-p)
+      (claude-repl--log current "kill-before-workspace-delete: vterm running, killing session")
+      (claude-repl-kill))
+     (t
+      (claude-repl--log current "kill-before-workspace-delete: vterm not running, no-op")))))
 
 (defun claude-repl--read-workspace (prompt)
   "Prompt for a workspace name with PROMPT.  Requires an exact match."

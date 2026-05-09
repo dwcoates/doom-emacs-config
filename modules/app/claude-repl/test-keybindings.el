@@ -77,9 +77,12 @@
 ;;;; ---- Tests: claude-repl--kill-before-workspace-delete ----
 
 (ert-deftest claude-repl-test-kill-before-workspace-delete-when-running ()
-  "kill-before-workspace-delete should call claude-repl-kill when vterm is running."
+  "kill-before-workspace-delete should call claude-repl-kill when vterm is
+running and the kill targets the current workspace (no NAME arg means the
+implicit target is the current workspace)."
   (let ((killed nil))
-    (cl-letf (((symbol-function 'claude-repl--claude-running-p) (lambda () t))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+              ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
               ((symbol-function 'claude-repl-kill) (lambda () (setq killed t))))
       (claude-repl--kill-before-workspace-delete)
       (should killed))))
@@ -87,18 +90,33 @@
 (ert-deftest claude-repl-test-kill-before-workspace-delete-when-not-running ()
   "kill-before-workspace-delete should not call claude-repl-kill when vterm is not running."
   (let ((killed nil))
-    (cl-letf (((symbol-function 'claude-repl--claude-running-p) (lambda () nil))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+              ((symbol-function 'claude-repl--claude-running-p) (lambda () nil))
               ((symbol-function 'claude-repl-kill) (lambda () (setq killed t))))
       (claude-repl--kill-before-workspace-delete)
       (should-not killed))))
 
-(ert-deftest claude-repl-test-kill-before-workspace-delete-ignores-args ()
-  "kill-before-workspace-delete should accept and ignore any arguments."
+(ert-deftest claude-repl-test-kill-before-workspace-delete-name-eq-current ()
+  "When NAME equals the current workspace, the advice fires the kill."
   (let ((killed nil))
-    (cl-letf (((symbol-function 'claude-repl--claude-running-p) (lambda () t))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+              ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
               ((symbol-function 'claude-repl-kill) (lambda () (setq killed t))))
-      (claude-repl--kill-before-workspace-delete "arg1" "arg2" 42)
+      (claude-repl--kill-before-workspace-delete "current-ws")
       (should killed))))
+
+(ert-deftest claude-repl-test-kill-before-workspace-delete-name-not-current ()
+  "When NAME refers to a non-current workspace, the advice MUST NOT kill the
+current workspace's session.  This guards against the cross-workspace bug
+where `(+workspace/kill other-ws)' would otherwise tear down current's
+running session via `claude-repl--claude-running-p' (which inspects the
+current workspace, not NAME)."
+  (let ((killed nil))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+              ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
+              ((symbol-function 'claude-repl-kill) (lambda () (setq killed t))))
+      (claude-repl--kill-before-workspace-delete "other-ws")
+      (should-not killed))))
 
 ;;;; ---- Tests: claude-repl--read-workspace ----
 
