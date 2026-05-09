@@ -1028,7 +1028,7 @@ otherwise prompt via `projectile-completing-read'."
   (global-centered-cursor-mode 1))
 
 (after! which-key
-  (setq which-key-idle-delay 0.2
+  (setq which-key-idle-delay 1
         which-key-max-description-length 60
         which-key-side-window-max-width 0.5))
 
