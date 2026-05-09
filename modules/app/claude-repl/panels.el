@@ -213,13 +213,19 @@ Works from any buffer or from within the vterm buffer itself."
 
 (defun claude-repl--drain-pending-show-panels (ws)
   "Open panels for WS if a preemptive prompt queued a :pending-show-panels flag.
-Clears the flag and calls `claude-repl' to display the panels."
-  (if (claude-repl--ws-get ws :pending-show-panels)
-      (progn
-        (claude-repl--log ws "drain-pending-show-panels: ws=%s branch=had-pending draining" ws)
-        (claude-repl--ws-put ws :pending-show-panels nil)
-        (claude-repl))
-    (claude-repl--log-verbose ws "drain-pending-show-panels: ws=%s branch=no-pending no-op" ws)))
+When Claude is ready, clears the flag and shows panels.  When Claude
+is still starting, leaves the flag set so `on-session-start-event' can
+re-drain via `open-panels-after-ready' once ready — avoids displaying
+an unloaded vterm window."
+  (cond
+   ((not (claude-repl--ws-get ws :pending-show-panels))
+    (claude-repl--log-verbose ws "drain-pending-show-panels: ws=%s branch=no-pending no-op" ws))
+   ((claude-repl--session-starting-p ws)
+    (claude-repl--log ws "drain-pending-show-panels: ws=%s branch=had-pending session-starting — deferring" ws))
+   (t
+    (claude-repl--log ws "drain-pending-show-panels: ws=%s branch=had-pending draining" ws)
+    (claude-repl--ws-put ws :pending-show-panels nil)
+    (claude-repl--show-hidden-panels))))
 
 (defun claude-repl--drain-pending-magit (ws)
   "Open `magit-status' for WS if it was created with `:pending-magit' set.

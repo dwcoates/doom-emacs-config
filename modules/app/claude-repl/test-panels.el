@@ -172,21 +172,36 @@
 
 ;;;; ---- Tests: drain-pending-show-panels ----
 
-(ert-deftest claude-repl-test-panels-drain-pending-when-set ()
-  "drain-pending-show-panels calls claude-repl and clears the flag."
+(ert-deftest claude-repl-test-panels-drain-pending-when-set-and-ready ()
+  "drain-pending-show-panels shows panels and clears the flag when Claude is ready."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "test-ws" :pending-show-panels t)
     (let ((called nil))
-      (cl-letf (((symbol-function 'claude-repl) (lambda () (setq called t))))
+      (cl-letf (((symbol-function 'claude-repl--session-starting-p) (lambda (_ws) nil))
+                ((symbol-function 'claude-repl--show-hidden-panels)
+                 (lambda () (setq called t))))
         (claude-repl--drain-pending-show-panels "test-ws")
         (should called)
         (should-not (claude-repl--ws-get "test-ws" :pending-show-panels))))))
+
+(ert-deftest claude-repl-test-panels-drain-pending-when-set-but-starting ()
+  "drain-pending-show-panels defers (leaves flag set, no show) when session is starting."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :pending-show-panels t)
+    (let ((called nil))
+      (cl-letf (((symbol-function 'claude-repl--session-starting-p) (lambda (_ws) t))
+                ((symbol-function 'claude-repl--show-hidden-panels)
+                 (lambda () (setq called t))))
+        (claude-repl--drain-pending-show-panels "test-ws")
+        (should-not called)
+        (should (claude-repl--ws-get "test-ws" :pending-show-panels))))))
 
 (ert-deftest claude-repl-test-panels-drain-pending-when-not-set ()
   "drain-pending-show-panels does nothing when flag is nil."
   (claude-repl-test--with-clean-state
     (let ((called nil))
-      (cl-letf (((symbol-function 'claude-repl) (lambda () (setq called t))))
+      (cl-letf (((symbol-function 'claude-repl--show-hidden-panels)
+                 (lambda () (setq called t))))
         (claude-repl--drain-pending-show-panels "test-ws")
         (should-not called)))))
 

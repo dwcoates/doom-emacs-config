@@ -628,11 +628,13 @@ default-directory matches the workspace."
                   :type 'error)))
 
 (ert-deftest claude-repl-test-show-panels-or-defer-current-ws ()
-  "show-panels-or-defer should call claude-repl when WS is current."
+  "show-panels-or-defer should show panels when WS is current."
   (claude-repl-test--with-clean-state
     (let ((panels-opened nil))
       (cl-letf (((symbol-function 'claude-repl--current-ws-p) (lambda (_ws) t))
-                ((symbol-function 'claude-repl)
+                ((symbol-function 'claude-repl--loading-placeholder-visible-p)
+                 (lambda () nil))
+                ((symbol-function 'claude-repl--show-hidden-panels)
                  (lambda () (setq panels-opened t))))
         (claude-repl--show-panels-or-defer "ws1")
         (should panels-opened)))))
@@ -662,7 +664,9 @@ default-directory matches the workspace."
       (cl-letf (((symbol-function 'claude-repl--drain-pending-prompts)
                  (lambda (_ws) nil))
                 ((symbol-function 'claude-repl--current-ws-p) (lambda (_ws) t))
-                ((symbol-function 'claude-repl)
+                ((symbol-function 'claude-repl--loading-placeholder-visible-p)
+                 (lambda () nil))
+                ((symbol-function 'claude-repl--show-hidden-panels)
                  (lambda () (setq panels-opened t))))
         (claude-repl--open-panels-after-ready "ws1")
         (should panels-opened)))))
@@ -674,7 +678,7 @@ default-directory matches the workspace."
       (cl-letf (((symbol-function 'claude-repl--drain-pending-prompts)
                  (lambda (_ws) nil))
                 ((symbol-function 'claude-repl--current-ws-p) (lambda (_ws) nil))
-                ((symbol-function 'claude-repl)
+                ((symbol-function 'claude-repl--show-hidden-panels)
                  (lambda () (setq panels-opened t))))
         (claude-repl--open-panels-after-ready "ws1")
         (should-not panels-opened)))))

@@ -556,14 +556,14 @@ so the terminal has time to settle."
   "Open panels if WS is the current workspace, otherwise defer until switch.
 `claude-repl--on-workspace-switch' checks :pending-show-panels.
 Skip if the loading placeholder is still visible — `--swap-placeholder'
-handles the visual transition and calling `claude-repl' here would
+handles the visual transition and showing panels here would
 trigger `--show-existing-panels' with the wrong selected window."
   (if (claude-repl--current-ws-p ws)
       ;; Skip if the loading placeholder is still visible — --swap-placeholder
       ;; handles the visual transition via run-at-time 0.
       (unless (claude-repl--loading-placeholder-visible-p)
         (claude-repl--log ws "show-panels-or-defer: current ws=%s — showing panels" ws)
-        (claude-repl))
+        (claude-repl--show-hidden-panels))
     (claude-repl--log ws "show-panels-or-defer: other ws=%s — deferring" ws)
     (claude-repl--ws-put ws :pending-show-panels t)))
 
@@ -587,7 +587,7 @@ honor it here by skipping the panel-open call)."
      ((and (claude-repl--current-ws-p ws)
            (not (claude-repl--loading-placeholder-visible-p)))
       (claude-repl--log ws "open-panels-after-ready: no pending + current ws=%s — showing panels" ws)
-      (claude-repl))
+      (claude-repl--show-hidden-panels))
      (t
       (claude-repl--log ws "open-panels-after-ready: no pending + other ws=%s — no-op" ws)))))
 
