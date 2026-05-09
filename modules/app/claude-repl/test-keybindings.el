@@ -335,6 +335,17 @@ current workspace, not NAME)."
       ;; Order is reversed because we use push
       (should (equal call-order '(eval revert))))))
 
+;;;; ---- Tests: claude-repl-reload-config ----
+
+(ert-deftest claude-repl-test-reload-config-loads-config-file ()
+  "reload-config should call load-file on `claude-repl--config-file'."
+  (let ((loaded-file nil)
+        (claude-repl--config-file "/tmp/fake/claude-repl/config.el"))
+    (cl-letf (((symbol-function 'load-file)
+               (lambda (f) (setq loaded-file f))))
+      (claude-repl-reload-config)
+      (should (equal loaded-file "/tmp/fake/claude-repl/config.el")))))
+
 ;;;; ---- Tests: claude-repl--kill-owned-panel-buffers ----
 
 (ert-deftest claude-repl-test-kill-owned-panel-buffers-kills-matching ()

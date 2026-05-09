@@ -224,6 +224,15 @@ image so the visual mapping between key and glyph is obvious."
   (revert-buffer :ignore-auto :noconfirm)
   (eval-buffer))
 
+;; SPC j R -- reload the claude-repl module's config.el (the claude
+;; workspace's config), independent of whatever buffer is current.
+(defun claude-repl-reload-config ()
+  "Reload the claude-repl module config from `claude-repl--config-file'."
+  (interactive)
+  (claude-repl--log (+workspace-current-name) "reload-config: file=%s" claude-repl--config-file)
+  (load-file claude-repl--config-file)
+  (message "[claude-repl] Reloaded %s" claude-repl--config-file))
+
 ;;; Section 3: Debug helpers -- interactive commands for diagnosing workspace state issues.
 ;;; Call via M-x claude-repl-debug/...
 
@@ -542,12 +551,7 @@ Reports comprehensive diagnostics."
          :desc "uncommitted" "u" #'claude-repl-explain-diff-uncommitted
          :desc "HEAD"        "h" #'claude-repl-explain-diff-head
          :desc "branch"      "b" #'claude-repl-explain-diff-branch))
-       (:prefix ("R" . "update PR diff")
-        :desc "worktree"    "w" #'claude-repl-update-pr-diff-worktree
-        :desc "staged"      "s" #'claude-repl-update-pr-diff-staged
-        :desc "uncommitted" "u" #'claude-repl-update-pr-diff-uncommitted
-        :desc "HEAD"        "h" #'claude-repl-update-pr-diff-head
-        :desc "branch"      "b" #'claude-repl-update-pr-diff-branch)
+       :desc "Reload claude-repl config" "R" #'claude-repl-reload-config
        (:prefix ("s" "Send predefined input to Claude")
         :desc "create PR (no --self-certified)" "p" #'claude-repl-create-or-update-pr-no-self-certified
         :desc "create PR"                       "P" #'claude-repl-create-or-update-pr)
