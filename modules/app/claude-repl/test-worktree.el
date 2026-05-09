@@ -1743,6 +1743,97 @@ with the exact values supplied."
               "raw" "prefixed" "/tmp/repo/" "HEAD" "source-ws")))
     (should (string-match-p "\"fork_from\": \"source-ws\"" out))))
 
+;;;; ---- Tests: workspace-generation logging helpers ----
+
+(ert-deftest claude-repl-test-workspace-generation-id-returns-non-empty-hex ()
+  "The correlation-ID generator returns a non-empty hex string."
+  (let ((id (claude-repl--workspace-generation-id)))
+    (should (stringp id))
+    (should (> (length id) 0))
+    (should (string-match-p "\\`[0-9a-f]+\\'" id))))
+
+(ert-deftest claude-repl-test-workspace-generation-truncate-leaves-short-strings ()
+  "Strings within the cap are returned unchanged."
+  (should (equal (claude-repl--workspace-generation-truncate "hello" 100) "hello")))
+
+(ert-deftest claude-repl-test-workspace-generation-truncate-truncates-long-strings ()
+  "Strings beyond the cap get a `...[truncated]' suffix."
+  (let ((out (claude-repl--workspace-generation-truncate "0123456789" 4)))
+    (should (string-prefix-p "0123" out))
+    (should (string-suffix-p "...[truncated]" out))))
+
+(ert-deftest claude-repl-test-workspace-generation-truncate-nil-cap-passes-through ()
+  "A nil cap disables truncation entirely."
+  (let ((s (make-string 10000 ?x)))
+    (should (equal (claude-repl--workspace-generation-truncate s nil) s))))
+
+(ert-deftest claude-repl-test-workspace-generation-truncate-nil-input-yields-empty ()
+  "A nil input is treated as the empty string."
+  (should (equal (claude-repl--workspace-generation-truncate nil 100) "")))
+
+(ert-deftest claude-repl-test-workspace-generation-finalize-logs-correlation-id ()
+  "Finalize includes the correlation ID in its log line so spawns can be matched."
+  (let ((logged nil))
+    (cl-letf (((symbol-function 'claude-repl--log)
+               (lambda (_ws fmt &rest args)
+                 (setq logged (apply #'format fmt args))))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (claude-repl--workspace-generation-finalize "abc123" 0 "finished\n" "ok")
+      (should (string-match-p "\\[abc123\\]" logged)))))
+
+(ert-deftest claude-repl-test-workspace-generation-finalize-logs-stdout-snippet ()
+  "Finalize includes the stdout content (truncated) in the log line — so
+failed spawns can be debugged without the buffer."
+  (let ((logged nil))
+    (cl-letf (((symbol-function 'claude-repl--log)
+               (lambda (_ws fmt &rest args)
+                 (setq logged (apply #'format fmt args))))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (claude-repl--workspace-generation-finalize "id" 1 "exit" "model-error-text")
+      (should (string-match-p "model-error-text" logged)))))
+
+(ert-deftest claude-repl-test-workspace-generation-finalize-truncates-long-stdout ()
+  "Finalize honors the stdout cap so the log line stays bounded."
+  (let ((logged nil)
+        (claude-repl-workspace-generation-stdout-log-cap 8))
+    (cl-letf (((symbol-function 'claude-repl--log)
+               (lambda (_ws fmt &rest args)
+                 (setq logged (apply #'format fmt args))))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (claude-repl--workspace-generation-finalize "id" 1 "exit" "0123456789abcdef")
+      (should (string-match-p "0123" logged))
+      (should (string-match-p "truncated" logged))
+      (should-not (string-match-p "abcdef" logged)))))
+
+(ert-deftest claude-repl-test-workspace-generation-finalize-no-message-on-success ()
+  "On status=0, finalize does not surface a user-facing failure message."
+  (let ((messaged nil))
+    (cl-letf (((symbol-function 'claude-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'message)
+               (lambda (&rest args) (setq messaged args))))
+      (claude-repl--workspace-generation-finalize "id" 0 "finished" "ok")
+      (should-not messaged))))
+
+(ert-deftest claude-repl-test-workspace-generation-finalize-message-includes-id ()
+  "On non-zero status, the user-facing message includes the correlation ID
+so the user can grep the log for the matching spawn."
+  (let ((messaged nil))
+    (cl-letf (((symbol-function 'claude-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args)
+                 (setq messaged (apply #'format fmt args)))))
+      (claude-repl--workspace-generation-finalize "id-xyz" 2 "exit" "")
+      (should (string-match-p "id-xyz" messaged)))))
+
+(ert-deftest claude-repl-test-workspace-generation-finalize-non-numeric-status-is-failure ()
+  "A non-numeric status (e.g. nil from a malformed signal) is treated as failure."
+  (let ((messaged nil))
+    (cl-letf (((symbol-function 'claude-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'message)
+               (lambda (&rest args) (setq messaged args))))
+      (claude-repl--workspace-generation-finalize "id" nil "killed" "")
+      (should messaged))))
+
 ;;;; ---- Tests: create-worktree-workspace (interactive) ----
 
 (ert-deftest claude-repl-test-resolve-worktree-base-head ()

@@ -331,6 +331,35 @@ Invoked with `-p --model MODEL' and the prompt sent on stdin."
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-workspace-generation-stdout-log-cap 1000
+  "Maximum chars of headless-claude stdout to include in the sentinel log line.
+Beyond this cap the log records `...[truncated]'.  Set to nil for no cap."
+  :type '(choice (const :tag "Unlimited" nil) integer)
+  :group 'claude-repl)
+
+(defcustom claude-repl-workspace-generation-prompt-log-cap 4096
+  "Maximum chars of the headless-claude prompt body to include in the spawn log line.
+Beyond this cap the log records `...[truncated]'.  Set to nil for no cap."
+  :type '(choice (const :tag "Unlimited" nil) integer)
+  :group 'claude-repl)
+
+(defun claude-repl--workspace-generation-id ()
+  "Return a short hex correlation ID for one workspace-generation spawn.
+Used to tie together spawn-time, sentinel-exit, and user-facing
+failure-message log lines so multiple in-flight spawns can be
+disambiguated."
+  (format "%08x%08x"
+          (random (expt 16 8))
+          (random (expt 16 8))))
+
+(defun claude-repl--workspace-generation-truncate (s cap)
+  "Return S with a `...[truncated]' suffix when longer than CAP.
+When CAP is nil, returns S unchanged.  S may be nil; treated as \"\"."
+  (let ((s (or s "")))
+    (if (and (integerp cap) (> (length s) cap))
+        (concat (substring s 0 cap) "...[truncated]")
+      s)))
+
 (defun claude-repl--workspace-generation-prompt (raw-prompt prefixed-prompt git-root base-commit fork-from)
   "Build the prompt sent to headless claude for workspace generation.
 RAW-PROMPT is the user's preemptive prompt — used purely as the source
@@ -366,25 +395,39 @@ rather than re-derive them."
    "- Only generate more than one workspace if explicitly asked to. Always generate one workspace unless explicitly asked to generate more."
    "- Write the JSON to ~/.claude/output/workspace_commands_<uuid>.json using the atomic write pattern from the skill.\n"))
 
-(defun claude-repl--workspace-generation-sentinel (out-buf)
+(defun claude-repl--workspace-generation-finalize (gen-id status event raw-out)
+  "Log the result of a workspace-generation spawn and surface failures.
+GEN-ID is the spawn correlation token; STATUS is the process exit
+status (or signal number); EVENT is the process-event string; RAW-OUT
+is the captured stdout (may be nil).  Stdout is truncated per
+`claude-repl-workspace-generation-stdout-log-cap' before logging.
+On non-zero/non-numeric STATUS, also surfaces a `message' to the user
+that includes GEN-ID so it can be cross-referenced in the log."
+  (let* ((trimmed (string-trim (or raw-out "")))
+         (snippet (claude-repl--workspace-generation-truncate
+                   trimmed claude-repl-workspace-generation-stdout-log-cap)))
+    (claude-repl--log nil
+                      "workspace-generation[%s]: status=%s event=%s out-len=%s out=%S"
+                      gen-id status (string-trim (or event ""))
+                      (if raw-out (length raw-out) "nil")
+                      snippet)
+    (unless (and (numberp status) (zerop status))
+      (message "[claude-repl] workspace-generation[%s] failed (status=%s); see *Messages* / claude-repl log"
+               gen-id status))))
+
+(defun claude-repl--workspace-generation-sentinel (out-buf gen-id)
   "Build a sentinel for the workspace-generation process.
-OUT-BUF is the stdout collection buffer, killed on exit.  Logs the
-result and surfaces a message on non-zero exit.  The skill's atomic
-file write into ~/.claude/output/ is what triggers actual workspace
-creation; this sentinel exists only for diagnostics."
+OUT-BUF is the stdout collection buffer (killed on exit); GEN-ID is the
+spawn correlation token threaded into every log line.  Defers all
+logging to `claude-repl--workspace-generation-finalize' so the
+finalize logic stays unit-testable without a real process."
   (lambda (proc event)
     (when (memq (process-status proc) '(exit signal))
       (unwind-protect
           (let* ((status (process-exit-status proc))
                  (raw-out (and (buffer-live-p out-buf)
                                (with-current-buffer out-buf (buffer-string)))))
-            (claude-repl--log nil
-                              "workspace-generation: status=%s event=%s out-len=%s"
-                              status (string-trim (or event ""))
-                              (if raw-out (length raw-out) "nil"))
-            (unless (and (eq (process-status proc) 'exit) (zerop status))
-              (message "[claude-repl] workspace-generation failed (status=%s); see *Messages* / claude-repl log"
-                       status)))
+            (claude-repl--workspace-generation-finalize gen-id status event raw-out))
         (when (buffer-live-p out-buf) (kill-buffer out-buf))))))
 
 (defun claude-repl--spawn-workspace-generation (raw-prompt prefixed-prompt git-root base-commit fork-from)
@@ -392,32 +435,45 @@ creation; this sentinel exists only for diagnostics."
 RAW-PROMPT, PREFIXED-PROMPT, GIT-ROOT, BASE-COMMIT, FORK-FROM are
 threaded through to `claude-repl--workspace-generation-prompt'.
 
+A short correlation ID (GEN-ID) is generated per spawn and embedded in
+every log line — spawn-time summary, prompt-body dump, sentinel exit,
+and user-facing failure message — so multiple in-flight spawns can be
+disambiguated.
+
 The skill writes a JSON file to ~/.claude/output/, which the existing
 file-watcher (`claude-repl--workspace-commands-watch-handler') picks up
 and dispatches via `claude-repl--handle-create-command' — so this
 function returns immediately and the workspace materializes
 asynchronously."
-  (let* ((out-buf (generate-new-buffer " *claude-workspace-generation*"))
+  (let* ((gen-id (claude-repl--workspace-generation-id))
+         (out-buf (generate-new-buffer
+                   (format " *claude-workspace-generation-%s*" gen-id)))
          (cmd (list claude-repl-workspace-generation-program
                     "-p" "--model" claude-repl-workspace-generation-model))
          (proc-input (claude-repl--workspace-generation-prompt
-                      raw-prompt prefixed-prompt git-root base-commit fork-from)))
+                      raw-prompt prefixed-prompt git-root base-commit fork-from))
+         (prompt-snippet (claude-repl--workspace-generation-truncate
+                          proc-input
+                          claude-repl-workspace-generation-prompt-log-cap)))
     (claude-repl--log nil
-                      "spawn-workspace-generation: git-root=%s base-commit=%s fork-from=%s"
-                      git-root base-commit (or fork-from "nil"))
+                      "spawn-workspace-generation[%s]: git-root=%s base-commit=%s fork-from=%s prompt-len=%d"
+                      gen-id git-root base-commit (or fork-from "nil") (length proc-input))
+    (claude-repl--log nil
+                      "spawn-workspace-generation[%s]: prompt=%S"
+                      gen-id prompt-snippet)
     (condition-case err
         (let ((proc (make-process
-                     :name "claude-workspace-generation"
+                     :name (format "claude-workspace-generation-%s" gen-id)
                      :buffer out-buf
                      :command cmd
                      :connection-type 'pipe
                      :noquery t
-                     :sentinel (claude-repl--workspace-generation-sentinel out-buf))))
+                     :sentinel (claude-repl--workspace-generation-sentinel out-buf gen-id))))
           (process-send-string proc proc-input)
           (process-send-eof proc)
           proc)
       (error
-       (claude-repl--log nil "spawn-workspace-generation: spawn failed err=%S" err)
+       (claude-repl--log nil "spawn-workspace-generation[%s]: spawn failed err=%S" gen-id err)
        (when (buffer-live-p out-buf) (kill-buffer out-buf))
        nil))))
 
