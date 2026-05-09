@@ -331,6 +331,18 @@ Invoked with `-p --model MODEL' and the prompt sent on stdin."
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-workspace-generation-extra-args
+  '("--permission-mode" "bypassPermissions")
+  "Extra arguments appended to the headless `claude -p' invocation.
+Defaults to bypassing the permission prompt so the skill can write
+its JSON command file via Bash without an interactive approval — in
+`-p' mode there is no one to approve, and the model otherwise asks
+(and the spawn dies emitting only the question).
+Set to nil to disable; replace with `(\"--allowedTools\" \"Bash\")'
+for a tighter scope."
+  :type '(repeat string)
+  :group 'claude-repl)
+
 (defcustom claude-repl-workspace-generation-stdout-log-cap 1000
   "Maximum chars of headless-claude stdout to include in the sentinel log line.
 Beyond this cap the log records `...[truncated]'.  Set to nil for no cap."
@@ -392,8 +404,9 @@ rather than re-derive them."
    "Constraints:\n"
    "- Do not emit prompt or finish entries.\n"
    "- Do not run any mutating commands (for example, creating Jira tickets) unless explicitly asked to.\n"
-   "- Only generate more than one workspace if explicitly asked to. Always generate one workspace unless explicitly asked to generate more."
-   "- Write the JSON to ~/.claude/output/workspace_commands_<uuid>.json using the atomic write pattern from the skill.\n"))
+   "- Only generate more than one workspace if explicitly asked to. Always generate one workspace unless explicitly asked to generate more.\n"
+   "- Write the JSON to ~/.claude/output/workspace_commands_<uuid>.json using the atomic write pattern from the skill.\n"
+   "- Do NOT ask for permission. You are running in headless `-p' mode with no human in the loop; the file write to ~/.claude/output/ is the entire purpose of this invocation and is pre-authorized. Just write the file.\n"))
 
 (defun claude-repl--workspace-generation-finalize (gen-id status event raw-out)
   "Log the result of a workspace-generation spawn and surface failures.
@@ -448,8 +461,9 @@ asynchronously."
   (let* ((gen-id (claude-repl--workspace-generation-id))
          (out-buf (generate-new-buffer
                    (format " *claude-workspace-generation-%s*" gen-id)))
-         (cmd (list claude-repl-workspace-generation-program
-                    "-p" "--model" claude-repl-workspace-generation-model))
+         (cmd (append (list claude-repl-workspace-generation-program
+                            "-p" "--model" claude-repl-workspace-generation-model)
+                      claude-repl-workspace-generation-extra-args))
          (proc-input (claude-repl--workspace-generation-prompt
                       raw-prompt prefixed-prompt git-root base-commit fork-from))
          (prompt-snippet (claude-repl--workspace-generation-truncate

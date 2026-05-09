@@ -1743,6 +1743,55 @@ with the exact values supplied."
               "raw" "prefixed" "/tmp/repo/" "HEAD" "source-ws")))
     (should (string-match-p "\"fork_from\": \"source-ws\"" out))))
 
+(ert-deftest claude-repl-test-workspace-generation-prompt-tells-model-not-to-ask ()
+  "The prompt instructs the model not to request permission — in headless
+`-p' mode there is no one to approve, and the spawn previously died
+emitting only the permission question."
+  (let ((out (claude-repl--workspace-generation-prompt
+              "raw" "prefixed" "/tmp/repo/" "HEAD" nil)))
+    (should (string-match-p "[Dd]o NOT ask for permission" out))))
+
+(ert-deftest claude-repl-test-spawn-workspace-generation-appends-extra-args ()
+  "The spawn command list includes `claude-repl-workspace-generation-extra-args'
+after the base `-p --model X' args.  Without these, the headless model
+hits the permission prompt and dies emitting only its question."
+  (let ((captured-cmd nil)
+        (claude-repl-workspace-generation-extra-args
+         '("--permission-mode" "bypassPermissions")))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest plist)
+                 (setq captured-cmd (plist-get plist :command))
+                 ;; Return a dummy proc-like object — we only care about
+                 ;; the command list captured above.  The lambda treats
+                 ;; nil as a failure, so do nothing more.
+                 (make-marker)))
+              ((symbol-function 'process-send-string) (lambda (&rest _) nil))
+              ((symbol-function 'process-send-eof) (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--log) (lambda (&rest _) nil)))
+      (claude-repl--spawn-workspace-generation "raw" "prefixed" "/tmp/repo/" "HEAD" nil)
+      (should (member "--permission-mode" captured-cmd))
+      (should (member "bypassPermissions" captured-cmd))
+      ;; Sanity: extra-args come after the base `-p --model MODEL'.
+      (should (equal (cl-subseq captured-cmd 0 4)
+                     (list claude-repl-workspace-generation-program
+                           "-p" "--model" claude-repl-workspace-generation-model))))))
+
+(ert-deftest claude-repl-test-spawn-workspace-generation-empty-extra-args ()
+  "When `claude-repl-workspace-generation-extra-args' is nil, no extra args appear."
+  (let ((captured-cmd nil)
+        (claude-repl-workspace-generation-extra-args nil))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest plist)
+                 (setq captured-cmd (plist-get plist :command))
+                 (make-marker)))
+              ((symbol-function 'process-send-string) (lambda (&rest _) nil))
+              ((symbol-function 'process-send-eof) (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--log) (lambda (&rest _) nil)))
+      (claude-repl--spawn-workspace-generation "raw" "prefixed" "/tmp/repo/" "HEAD" nil)
+      (should (equal captured-cmd
+                     (list claude-repl-workspace-generation-program
+                           "-p" "--model" claude-repl-workspace-generation-model))))))
+
 ;;;; ---- Tests: workspace-generation logging helpers ----
 
 (ert-deftest claude-repl-test-workspace-generation-id-returns-non-empty-hex ()
