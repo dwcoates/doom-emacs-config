@@ -253,11 +253,15 @@ user's real snapshot during ERT runs."
          (claude-repl--hide-overlay-refcount 0)
          (claude-repl-debug nil)
          (claude-repl-workspace-snapshot-file
-          (expand-file-name (format "claude-snap-%s" (random)) temporary-file-directory)))
+          (expand-file-name (format "claude-snap-%s" (random)) temporary-file-directory))
+         (claude-repl--snapshot-archived-this-run nil))
      (unwind-protect
          (progn ,@body)
        (when (file-exists-p claude-repl-workspace-snapshot-file)
-         (delete-file claude-repl-workspace-snapshot-file)))))
+         (delete-file claude-repl-workspace-snapshot-file))
+       (let ((archive-dir (claude-repl--workspace-snapshot-archive-dir)))
+         (when (file-directory-p archive-dir)
+           (delete-directory archive-dir t))))))
 
 (defun claude-repl-test--seed-file (path content)
   "Write CONTENT (string) to PATH, creating any needed parent dirs.

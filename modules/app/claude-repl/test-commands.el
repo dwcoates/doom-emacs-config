@@ -1184,6 +1184,91 @@ returns the configured path so callers get a reasonable default
     (should (equal (claude-repl--workspace-snapshot-file-for-read)
                    "/nonexistent/configured.el"))))
 
+;;;; ---- Tests: workspace snapshot archival ----
+
+(ert-deftest claude-repl-cmd-test-snapshot-archive/first-save-archives-prior ()
+  "First save in this Emacs run copies the existing snapshot file into
+the archive dir before overwriting (so the previous session's roster
+is preserved)."
+  (claude-repl-test--with-clean-state
+    ;; Seed an existing snapshot on disk to represent the prior session.
+    (let ((dir (file-name-directory claude-repl-workspace-snapshot-file)))
+      (when (and dir (not (file-directory-p dir))) (make-directory dir t)))
+    (with-temp-file claude-repl-workspace-snapshot-file
+      (insert "((\"prior-ws\" :project-dir \"/tmp/prior\" :priority nil))"))
+    (claude-repl--ws-put "new-ws" :project-dir "/tmp/new")
+    (claude-repl-save-workspace-snapshot)
+    (let* ((archive-dir (claude-repl--workspace-snapshot-archive-dir))
+           (archives (and (file-directory-p archive-dir)
+                          (directory-files archive-dir nil "\\.el\\'"))))
+      (should (= 1 (length archives))))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-archive/subsequent-saves-skip ()
+  "Subsequent saves in the same Emacs run do NOT create additional
+archive files — the archive ran already this run."
+  (claude-repl-test--with-clean-state
+    (let ((dir (file-name-directory claude-repl-workspace-snapshot-file)))
+      (when (and dir (not (file-directory-p dir))) (make-directory dir t)))
+    (with-temp-file claude-repl-workspace-snapshot-file
+      (insert "((\"prior\" :project-dir \"/tmp/prior\" :priority nil))"))
+    (claude-repl--ws-put "ws" :project-dir "/tmp/ws")
+    (claude-repl-save-workspace-snapshot)   ; first save: archives prior
+    (claude-repl-save-workspace-snapshot)   ; second save: must NOT archive again
+    (claude-repl-save-workspace-snapshot)   ; third save: still no new archive
+    (let* ((archive-dir (claude-repl--workspace-snapshot-archive-dir))
+           (archives (and (file-directory-p archive-dir)
+                          (directory-files archive-dir nil "\\.el\\'"))))
+      (should (= 1 (length archives))))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-archive/no-prior-file-is-noop ()
+  "When the snapshot file does not exist, the first save is just a
+write — no archive is created (nothing to preserve)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :project-dir "/tmp/ws")
+    (claude-repl-save-workspace-snapshot)
+    (let ((archive-dir (claude-repl--workspace-snapshot-archive-dir)))
+      (should-not (file-directory-p archive-dir)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-archive/disabled-when-max-zero ()
+  "Setting `claude-repl-workspace-snapshot-archive-max' to 0 disables
+archival entirely — even when a prior file exists."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-workspace-snapshot-archive-max 0)
+          (dir (file-name-directory claude-repl-workspace-snapshot-file)))
+      (when (and dir (not (file-directory-p dir))) (make-directory dir t))
+      (with-temp-file claude-repl-workspace-snapshot-file
+        (insert "((\"prior\" :project-dir \"/tmp/prior\" :priority nil))"))
+      (claude-repl--ws-put "ws" :project-dir "/tmp/ws")
+      (claude-repl-save-workspace-snapshot)
+      (let ((archive-dir (claude-repl--workspace-snapshot-archive-dir)))
+        (should-not (file-directory-p archive-dir))))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-archive/prunes-to-cap ()
+  "Archive count is capped at `claude-repl-workspace-snapshot-archive-max'.
+Older entries (lexicographically earliest filenames) are pruned."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-workspace-snapshot-archive-max 2)
+          (archive-dir (claude-repl--workspace-snapshot-archive-dir)))
+      (make-directory archive-dir t)
+      ;; Pre-seed three "old" archives.
+      (dolist (name '("20200101T000000.el"
+                      "20200102T000000.el"
+                      "20200103T000000.el"))
+        (with-temp-file (expand-file-name name archive-dir) (insert "()")))
+      ;; Seed the live snapshot so the next save triggers the once-per-run
+      ;; archival, which copies that file in and then prunes.
+      (let ((dir (file-name-directory claude-repl-workspace-snapshot-file)))
+        (when (and dir (not (file-directory-p dir))) (make-directory dir t)))
+      (with-temp-file claude-repl-workspace-snapshot-file
+        (insert "((\"prior\" :project-dir \"/tmp/p\" :priority nil))"))
+      (claude-repl-save-workspace-snapshot)
+      ;; After pruning, only the two newest entries remain.  The new
+      ;; archive (named after live file's mtime) is one of them; the
+      ;; oldest pre-seeded entry is gone.
+      (let ((remaining (directory-files archive-dir nil "\\.el\\'")))
+        (should (= 2 (length remaining)))
+        (should-not (member "20200101T000000.el" remaining))))))
+
 ;;;; ---- Tests: snapshot entry normalizer ----
 
 (ert-deftest claude-repl-cmd-test-snapshot-entry-normalize/legacy-shape ()

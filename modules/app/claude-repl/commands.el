@@ -590,6 +590,69 @@ legacy module-dir path when only the legacy file exists."
          claude-repl--legacy-workspace-snapshot-file)
         (t claude-repl-workspace-snapshot-file)))
 
+(defcustom claude-repl-workspace-snapshot-archive-max 20
+  "Maximum number of historical workspace-snapshot archives to retain.
+Each Emacs run archives the prior snapshot (if any) on its first save,
+so this caps the count of distinct prior sessions kept on disk.  Older
+archives are pruned silently.  Set to 0 to disable archival entirely."
+  :type 'integer
+  :group 'claude-repl)
+
+(defvar claude-repl--snapshot-archived-this-run nil
+  "Non-nil after the workspace snapshot has been archived this Emacs run.
+The archival path runs at most once per Emacs run: the first save that
+encounters an existing on-disk file copies it to the archive dir; every
+subsequent save in the same run is a regular overwrite.  Cleared
+implicitly by Emacs restart (the variable resets to nil at load).")
+
+(defun claude-repl--workspace-snapshot-archive-dir ()
+  "Return the directory where prior workspace-snapshot files are archived.
+Sibling of `claude-repl-workspace-snapshot-file', named
+`<basename-sans-ext>-archive'."
+  (expand-file-name
+   (concat (file-name-base claude-repl-workspace-snapshot-file) "-archive")
+   (file-name-directory claude-repl-workspace-snapshot-file)))
+
+(defun claude-repl--prune-snapshot-archives ()
+  "Trim the snapshot archive dir to `claude-repl-workspace-snapshot-archive-max'.
+Sorts archive files lexicographically (timestamp suffix is
+sortable) and unlinks any beyond the cap."
+  (let ((dir (claude-repl--workspace-snapshot-archive-dir))
+        (max claude-repl-workspace-snapshot-archive-max))
+    (when (and (file-directory-p dir) (> max 0))
+      (let* ((all (sort (directory-files dir t "\\.el\\'" t) #'string<))
+             (excess (- (length all) max)))
+        (when (> excess 0)
+          (dolist (f (seq-take all excess))
+            (claude-repl--log nil "prune-snapshot-archives: deleting %s" f)
+            (ignore-errors (delete-file f))))))))
+
+(defun claude-repl--archive-workspace-snapshot ()
+  "Copy the current workspace-snapshot file (if any) into the archive dir.
+No-op when:
+  - already archived this Emacs run (the once-per-run guard);
+  - the archive cap is 0 (archival disabled);
+  - the snapshot file does not yet exist (nothing to preserve).
+
+The archive filename uses the OLD file's mtime as a `%Y%m%dT%H%M%S'
+suffix so each archive is timestamped to the moment the previous
+session's snapshot was last written.  Errors are caught (archival is
+best-effort and must never block the live save)."
+  (unless (or claude-repl--snapshot-archived-this-run
+              (<= claude-repl-workspace-snapshot-archive-max 0)
+              (not (file-exists-p claude-repl-workspace-snapshot-file)))
+    (claude-repl--with-error-logging "archive-workspace-snapshot"
+      (let* ((src claude-repl-workspace-snapshot-file)
+             (mtime (file-attribute-modification-time (file-attributes src)))
+             (suffix (format-time-string "%Y%m%dT%H%M%S" mtime))
+             (dir (claude-repl--workspace-snapshot-archive-dir))
+             (dest (expand-file-name (format "%s.el" suffix) dir)))
+        (unless (file-directory-p dir) (make-directory dir t))
+        (claude-repl--log nil "archive-workspace-snapshot: %s -> %s" src dest)
+        (copy-file src dest t)
+        (setq claude-repl--snapshot-archived-this-run t)
+        (claude-repl--prune-snapshot-archives)))))
+
 (defvar claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal)
   "Workspaces restored from snapshot but not yet visited this session.
 Keys are workspace names, values are plists (at least `:project-dir',
@@ -650,6 +713,7 @@ roster-piggyback save doesn't spam the echo area on every state mutation."
       (let ((dir (file-name-directory claude-repl-workspace-snapshot-file)))
         (when (and dir (not (file-directory-p dir)))
           (make-directory dir t)))
+      (claude-repl--archive-workspace-snapshot)
       (with-temp-file claude-repl-workspace-snapshot-file
         (insert "(")
         (let ((first t))
