@@ -53,6 +53,18 @@ Flipped every poll cycle by `claude-repl--update-all-workspace-states'.
 Read by `claude-repl--tabline-advice' to produce an alternating string
 that forces the tab-bar to repaint.  DO NOT REMOVE — see comment above.")
 
+(defvar claude-repl-hide-mode-enabled nil
+  "Non-nil means hide workspaces without an active Claude REPL from the tab-bar.
+Filtering happens inside `claude-repl--tabline-advice': a workspace
+whose `claude-repl--ws-claude-open-p' returns nil is dropped from the
+rendered list.  The currently selected workspace is always retained
+regardless of REPL state so the user keeps visual context.
+
+Indices on visible tabs are 1-based on the filtered list — they
+re-number sequentially rather than preserving absolute persp positions.
+
+Toggle via `claude-repl-toggle-hide-mode'.")
+
 (defun claude-repl--load-priority-images ()
   "Load priority badge PNGs from the module images/ directory.
 Populates `claude-repl--priority-images' with display-ready image specs."
@@ -920,15 +932,28 @@ to a uniform pulse so the tab stands out."
          (img-str       (claude-repl--tab-priority-image-str name)))
     (claude-repl--render-tab name spec label face img-str)))
 
+(defun claude-repl--filter-hidden-names (names current-name)
+  "Drop NAMES whose Claude REPL is closed when `claude-repl-hide-mode-enabled'.
+CURRENT-NAME is always retained so the active workspace stays visible.
+When hide-mode is off, returns NAMES unchanged."
+  (if claude-repl-hide-mode-enabled
+      (cl-remove-if-not
+       (lambda (n)
+         (or (equal n current-name)
+             (claude-repl--ws-claude-open-p n)))
+       names)
+    names))
+
 (cl-defun claude-repl--tabline-advice (&optional (names nil names-supplied-p))
   "Override for `+workspace--tabline' to color tabs by Claude status."
   (let* ((names (if names-supplied-p names (+workspace-list-names)))
          (current-name (+workspace-current-name))
+         (names (claude-repl--filter-hidden-names names current-name))
          (states (mapcar (lambda (n)
                            (cons n (claude-repl--ws-display-state n)))
                          names)))
-    (claude-repl--log-verbose nil "tabline-advice: current=%s states=%S"
-                              current-name states)
+    (claude-repl--log-verbose nil "tabline-advice: current=%s hide=%s states=%S"
+                              current-name claude-repl-hide-mode-enabled states)
     (concat
      (mapconcat
       #'identity
@@ -941,6 +966,14 @@ to a uniform pulse so the tab stands out."
      (if claude-repl--tabline-space-toggle " " ""))))
 
 (advice-add '+workspace--tabline :override #'claude-repl--tabline-advice)
+
+(defun claude-repl-toggle-hide-mode ()
+  "Toggle `claude-repl-hide-mode-enabled' and force a tab-bar repaint."
+  (interactive)
+  (setq claude-repl-hide-mode-enabled (not claude-repl-hide-mode-enabled))
+  (claude-repl--force-tab-bar-redraw)
+  (message "claude-repl hide-mode %s"
+           (if claude-repl-hide-mode-enabled "enabled" "disabled")))
 
 ;; Suppress the echo area flash when switching workspaces.
 ;; Doom calls (+workspace/display) after switch/cycle/new/load, which uses

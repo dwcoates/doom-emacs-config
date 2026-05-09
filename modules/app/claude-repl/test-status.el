@@ -2047,6 +2047,76 @@ identity-distinct string injected by `claude-repl-set-priority' from
   (let ((label (claude-repl--tab-label :stop-failed 3)))
     (should (string= label (concat "3" claude-repl--label-stop-failed)))))
 
+;;;; ---- Tests: hide-mode tabline filtering ----
+
+(ert-deftest claude-repl-test-hide-mode-disabled-passthrough ()
+  "When hide-mode is off, all names render regardless of REPL open state."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-hide-mode-enabled nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+                ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) nil)))
+        (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
+          (should (string-match-p "current-ws" result))
+          (should (string-match-p "bg-ws" result)))))))
+
+(ert-deftest claude-repl-test-hide-mode-filters-closed-non-current ()
+  "When hide-mode is on, a non-current workspace with closed REPL is dropped."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-hide-mode-enabled t))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+                ((symbol-function 'claude-repl--ws-claude-open-p)
+                 (lambda (ws) (equal ws "current-ws"))))
+        (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
+          (should (string-match-p "current-ws" result))
+          (should-not (string-match-p "bg-ws" result)))))))
+
+(ert-deftest claude-repl-test-hide-mode-keeps-current-when-closed ()
+  "When hide-mode is on, the current workspace is retained even if its REPL is closed."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-hide-mode-enabled t))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+                ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) nil)))
+        (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
+          (should (string-match-p "current-ws" result))
+          (should-not (string-match-p "bg-ws" result)))))))
+
+(ert-deftest claude-repl-test-hide-mode-keeps-open-non-current ()
+  "When hide-mode is on, non-current workspaces with open REPL are retained."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-hide-mode-enabled t))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+                ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) t)))
+        (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
+          (should (string-match-p "current-ws" result))
+          (should (string-match-p "bg-ws" result)))))))
+
+(ert-deftest claude-repl-test-hide-mode-renumbers-sequentially ()
+  "Indices on visible tabs are sequential 1..N over the filtered list, not absolute."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-hide-mode-enabled t))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-a"))
+                ((symbol-function 'claude-repl--ws-claude-open-p)
+                 (lambda (ws) (member ws '("ws-a" "ws-c")))))
+        (let ((result (claude-repl--tabline-advice '("ws-a" "ws-b" "ws-c"))))
+          ;; ws-b is dropped, so ws-c gets index 2 (not 3).
+          (should (string-match-p "\\[1\\][^[]*ws-a" result))
+          (should (string-match-p "\\[2\\][^[]*ws-c" result))
+          (should-not (string-match-p "\\[3\\]" result)))))))
+
+(ert-deftest claude-repl-test-toggle-hide-mode-flips-flag ()
+  "claude-repl-toggle-hide-mode flips the flag and triggers a tab-bar redraw."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-hide-mode-enabled nil)
+          (redraw-called 0))
+      (cl-letf (((symbol-function 'claude-repl--force-tab-bar-redraw)
+                 (lambda () (cl-incf redraw-called))))
+        (claude-repl-toggle-hide-mode)
+        (should claude-repl-hide-mode-enabled)
+        (should (= redraw-called 1))
+        (claude-repl-toggle-hide-mode)
+        (should-not claude-repl-hide-mode-enabled)
+        (should (= redraw-called 2))))))
+
 (provide 'test-status)
 
 ;;; test-status.el ends here
