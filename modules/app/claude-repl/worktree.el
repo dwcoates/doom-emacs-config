@@ -318,6 +318,109 @@ value is stored via `claude-repl--ws-put'."
   "Prefix prepended to preemptive prompts to instruct Claude to plan,
 execute, and commit autonomously without waiting for confirmation.")
 
+;;; Async workspace-name generation via headless `claude -p'
+
+(defcustom claude-repl-workspace-generation-program "claude"
+  "Executable used to generate workspace names via /workspace-generation.
+Invoked with `-p --model MODEL' and the prompt sent on stdin."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-workspace-generation-model "haiku"
+  "Model alias passed to `--model' when generating workspace names."
+  :type 'string
+  :group 'claude-repl)
+
+(defun claude-repl--workspace-generation-prompt (raw-prompt prefixed-prompt git-root base-commit fork-from)
+  "Build the prompt sent to headless claude for workspace generation.
+RAW-PROMPT is the user's preemptive prompt — used purely as the source
+material for the slugified workspace name.
+PREFIXED-PROMPT is the autonomous-prefix + raw prompt that becomes the
+new workspace's first message; emitted verbatim into the JSON `prompt'
+field.
+GIT-ROOT, BASE-COMMIT, FORK-FROM are the deterministic values the
+caller already knows; the model is told to copy them through unchanged
+rather than re-derive them."
+  (concat
+   "Use the /workspace-generation skill to create a workspace (or, rarely, multiple"
+   " workspaces) for the provided user prompt..\n"
+   "\n"
+   "DESCRIPTION (use ONLY for generating the `name' slug):\n"
+   "<<<\n" raw-prompt "\n>>>\n"
+   "\n"
+   "JSON `prompt' field — emit this string VERBATIM (do not paraphrase, do not strip the prefix):\n"
+   "<<<\n" prefixed-prompt "\n>>>\n"
+   "\n"
+   "Deterministic fields you MUST emit on the create entry, EXACTLY as given:\n"
+   (format "  \"type\": \"create\"\n")
+   (format "  \"git_root\": %S\n" git-root)
+   (format "  \"base_commit\": %S\n" base-commit)
+   (when fork-from
+     (format "  \"fork_from\": %S\n" fork-from))
+   "\n"
+   "Generate the `name' field as DWC/<short-slug> (lowercase, hyphenated, 3 words max after the DWC/ prefix) based on the DESCRIPTION above.\n"
+   "\n"
+   "Constraints:\n"
+   "- Do not emit prompt or finish entries.\n"
+   "- Do not run any mutating commands (for example, creating Jira tickets) unless explicitly asked to.\n"
+   "- Only generate more than one workspace if explicitly asked to. Always generate one workspace unless explicitly asked to generate more."
+   "- Write the JSON to ~/.claude/output/workspace_commands_<uuid>.json using the atomic write pattern from the skill.\n"))
+
+(defun claude-repl--workspace-generation-sentinel (out-buf)
+  "Build a sentinel for the workspace-generation process.
+OUT-BUF is the stdout collection buffer, killed on exit.  Logs the
+result and surfaces a message on non-zero exit.  The skill's atomic
+file write into ~/.claude/output/ is what triggers actual workspace
+creation; this sentinel exists only for diagnostics."
+  (lambda (proc event)
+    (when (memq (process-status proc) '(exit signal))
+      (unwind-protect
+          (let* ((status (process-exit-status proc))
+                 (raw-out (and (buffer-live-p out-buf)
+                               (with-current-buffer out-buf (buffer-string)))))
+            (claude-repl--log nil
+                              "workspace-generation: status=%s event=%s out-len=%s"
+                              status (string-trim (or event ""))
+                              (if raw-out (length raw-out) "nil"))
+            (unless (and (eq (process-status proc) 'exit) (zerop status))
+              (message "[claude-repl] workspace-generation failed (status=%s); see *Messages* / claude-repl log"
+                       status)))
+        (when (buffer-live-p out-buf) (kill-buffer out-buf))))))
+
+(defun claude-repl--spawn-workspace-generation (raw-prompt prefixed-prompt git-root base-commit fork-from)
+  "Async-spawn `claude -p --model haiku' to generate a workspace command file.
+RAW-PROMPT, PREFIXED-PROMPT, GIT-ROOT, BASE-COMMIT, FORK-FROM are
+threaded through to `claude-repl--workspace-generation-prompt'.
+
+The skill writes a JSON file to ~/.claude/output/, which the existing
+file-watcher (`claude-repl--workspace-commands-watch-handler') picks up
+and dispatches via `claude-repl--handle-create-command' — so this
+function returns immediately and the workspace materializes
+asynchronously."
+  (let* ((out-buf (generate-new-buffer " *claude-workspace-generation*"))
+         (cmd (list claude-repl-workspace-generation-program
+                    "-p" "--model" claude-repl-workspace-generation-model))
+         (proc-input (claude-repl--workspace-generation-prompt
+                      raw-prompt prefixed-prompt git-root base-commit fork-from)))
+    (claude-repl--log nil
+                      "spawn-workspace-generation: git-root=%s base-commit=%s fork-from=%s"
+                      git-root base-commit (or fork-from "nil"))
+    (condition-case err
+        (let ((proc (make-process
+                     :name "claude-workspace-generation"
+                     :buffer out-buf
+                     :command cmd
+                     :connection-type 'pipe
+                     :noquery t
+                     :sentinel (claude-repl--workspace-generation-sentinel out-buf))))
+          (process-send-string proc proc-input)
+          (process-send-eof proc)
+          proc)
+      (error
+       (claude-repl--log nil "spawn-workspace-generation: spawn failed err=%S" err)
+       (when (buffer-live-p out-buf) (kill-buffer out-buf))
+       nil))))
+
 (defun claude-repl--enqueue-preemptive-prompt (ws prompt)
   "Enqueue PROMPT on workspace WS for delivery once Claude is ready.
 Sets :pending-show-panels so panels open after switching to WS."
@@ -542,12 +645,11 @@ worktree to a different repository than the ambient workspace's."
 
 (defun claude-repl-create-worktree-workspace (base &optional source-ws)
   "Create a new git worktree and switch to it as a project workspace.
-Prompts for a name (may use branch-style slashes like DC/CV-100/cool-branch).
-The worktree directory uses only the last path component; the full name becomes
-the branch name.
-
-If called from a worktree, the new worktree is created as a sibling (../<dirname>).
-If called from a normal repo, it is created under ../<repo-name>-worktrees/<dirname>.
+Prompts ONLY for the preemptive prompt; the workspace/branch name is
+generated asynchronously by a headless `claude -p --model haiku'
+invocation of the `/workspace-generation' skill.  The skill writes a
+JSON command file to ~/.claude/output/, which the existing file-watcher
+picks up to actually create the worktree.
 
 BASE selects the git ref the new branch is created from.  It is a
 symbol key in `claude-repl--worktree-base-commits':
@@ -559,29 +661,24 @@ SOURCE-WS, when non-nil, names the workspace whose repository the new
 worktree is rooted in (instead of the ambient workspace).  Interactively,
 `\\[universal-argument]' prompts for SOURCE-WS from the persp workspace list.
 
-Optionally prompts for a preemptive prompt.  If provided, the new workspace is
-created in the background (no switch) and the prompt is sent to Claude the moment
-its session becomes ready.  If left blank, behavior is the same as before: switch
-to the new workspace immediately.
-
-Git operations (fetch, worktree add) run asynchronously so Emacs is not blocked."
+Because name generation and worktree setup both run asynchronously,
+this command returns immediately; the new workspace materializes once
+the JSON file lands and the file-watcher dispatches it."
   (interactive (list 'head (claude-repl--read-source-workspace-maybe)))
   (let* ((base-commit (claude-repl--resolve-worktree-base base))
          (effective-source-ws (or source-ws (+workspace-current-name)))
          (source-dir (ignore-errors (claude-repl--ws-dir effective-source-ws)))
-         (source-git-root (when source-ws source-dir))
-         (name (read-string "Worktree name: "))
-         (raw-prompt (read-string "Preemptive prompt (blank to switch there normally): "))
-         (has-preemptive (and raw-prompt (not (string-empty-p raw-prompt))))
-         (preemptive-prompt (when has-preemptive
-                              (concat claude-repl--autonomous-prompt-prefix raw-prompt))))
-    (claude-repl--log name "create-worktree-workspace: name=%s base=%s base-commit=%s source-ws=%s source-git-root=%s source-dir=%s has-preemptive=%s"
-                      name base base-commit (or source-ws "nil") (or source-git-root "nil")
-                      (or source-dir "nil") has-preemptive)
-    (claude-repl--do-create-worktree-workspace
-     name nil nil preemptive-prompt
-     (unless has-preemptive #'claude-repl--worktree-creation-switch-callback)
-     nil base-commit source-git-root source-dir)))
+         (git-root (or source-dir (claude-repl--resolve-current-git-root)))
+         (raw-prompt (read-string "Preemptive prompt: ")))
+    (when (string-empty-p (string-trim (or raw-prompt "")))
+      (user-error "Preemptive prompt is required"))
+    (let ((prefixed-prompt (concat claude-repl--autonomous-prompt-prefix raw-prompt)))
+      (claude-repl--log nil "create-worktree-workspace: base=%s base-commit=%s source-ws=%s git-root=%s"
+                        base base-commit (or source-ws "nil") git-root)
+      (message "Generating workspace name via `claude -p --model %s'..."
+               claude-repl-workspace-generation-model)
+      (claude-repl--spawn-workspace-generation
+       raw-prompt prefixed-prompt git-root base-commit nil))))
 
 (defun claude-repl-create-worktree-workspace-from-origin-master (&optional source-ws)
   "Create a new worktree workspace branched from `origin/master'.
@@ -595,44 +692,38 @@ for it from the persp workspace list."
 
 (defun claude-repl-fork-worktree-workspace (&optional source-ws)
   "Fork a Claude session into a new worktree workspace.
-Like `claude-repl-create-worktree-workspace', but branches from HEAD (not
-origin/master) and resumes the source workspace's Claude session with
---fork-session.
+Like `claude-repl-create-worktree-workspace', but branches from HEAD
+and resumes the source workspace's Claude session via
+`--fork-session'.
+
+Prompts ONLY for the preemptive prompt; the workspace/branch name is
+generated asynchronously by a headless `claude -p --model haiku'
+invocation of the `/workspace-generation' skill.
 
 SOURCE-WS, when non-nil, names the workspace whose Claude session is
 forked AND whose repository roots the new worktree (instead of the
 ambient workspace).  Interactively, `\\[universal-argument]' prompts for
-SOURCE-WS from the persp workspace list.
-
-Optionally prompts for a preemptive prompt.  If provided, the new workspace is
-created in the background (no switch) and the prompt is sent to Claude the moment
-its session becomes ready.  If left blank, behavior is the same as before: switch
-to the new workspace immediately.
-
-Git operations (fetch, worktree add) run asynchronously so Emacs is not blocked."
+SOURCE-WS from the persp workspace list."
   (interactive (list (claude-repl--read-source-workspace-maybe)))
   (let* ((fork-ws (or source-ws (+workspace-current-name)))
          (source-dir (ignore-errors (claude-repl--ws-dir fork-ws)))
-         (source-git-root (when source-ws source-dir))
-         (fork-session-id
-          (let ((sid (claude-repl-instantiation-session-id
-                      (claude-repl--active-inst fork-ws))))
-            (unless sid
-              (user-error "No session ID for workspace '%s' — cannot fork" fork-ws))
-            (claude-repl--log fork-ws "fork-worktree-workspace: fork requested, sid=%s" sid)
-            sid))
-         (name (read-string "Worktree name: "))
-         (raw-prompt (read-string "Preemptive prompt (blank to switch there normally): "))
-         (has-preemptive (and raw-prompt (not (string-empty-p raw-prompt))))
-         (preemptive-prompt (when has-preemptive
-                              (concat claude-repl--autonomous-prompt-prefix raw-prompt))))
-    (claude-repl--log name "fork-worktree-workspace: name=%s fork-ws=%s source-git-root=%s source-dir=%s fork-session-id=%s has-preemptive=%s"
-                      name fork-ws (or source-git-root "nil") (or source-dir "nil")
-                      fork-session-id has-preemptive)
-    (claude-repl--do-create-worktree-workspace
-     name nil fork-session-id preemptive-prompt
-     (unless has-preemptive #'claude-repl--worktree-creation-switch-callback)
-     nil nil source-git-root source-dir)))
+         (git-root (or source-dir (claude-repl--resolve-current-git-root))))
+    ;; Verify the fork source has a session before doing anything else.
+    (let ((sid (claude-repl-instantiation-session-id
+                (claude-repl--active-inst fork-ws))))
+      (unless sid
+        (user-error "No session ID for workspace '%s' — cannot fork" fork-ws))
+      (claude-repl--log fork-ws "fork-worktree-workspace: fork requested, sid=%s" sid))
+    (let ((raw-prompt (read-string "Preemptive prompt: ")))
+      (when (string-empty-p (string-trim (or raw-prompt "")))
+        (user-error "Preemptive prompt is required"))
+      (let ((prefixed-prompt (concat claude-repl--autonomous-prompt-prefix raw-prompt)))
+        (claude-repl--log fork-ws "fork-worktree-workspace: fork-ws=%s git-root=%s"
+                          fork-ws git-root)
+        (message "Generating workspace name via `claude -p --model %s'..."
+                 claude-repl-workspace-generation-model)
+        (claude-repl--spawn-workspace-generation
+         raw-prompt prefixed-prompt git-root "HEAD" fork-ws)))))
 
 (defun claude-repl--new-workspace ()
   "Create a new workspace and open magit-status in it, mirroring
@@ -731,7 +822,7 @@ silently degrade to origin/master when forking was explicitly requested."
         (error "Cannot fork from workspace '%s': no active session ID (workspace unknown or session not started)" fork-from))
       sid)))
 
-(defun claude-repl--create-worktree-from-command (git-root name prompt priority &optional fork-session-id)
+(defun claude-repl--create-worktree-from-command (git-root name prompt priority &optional fork-session-id base-commit)
   "Timer callback: create a worktree workspace for NAME with PROMPT and PRIORITY.
 GIT-ROOT is the repository captured at enqueue time (in
 `claude-repl--handle-create-command'); it is threaded through so the
@@ -740,11 +831,13 @@ whatever workspace happens to be active when the timer fires.  GIT-ROOT
 is also recorded as `:source-ws-dir' on the new workspace so a later
 `SPC TAB M' can route the merge back to the originating repo.
 When FORK-SESSION-ID is non-nil, the new worktree branches from HEAD and
-resumes the fork source's Claude session."
-  (claude-repl--log name "create-worktree-from-command: name=%s git-root=%s priority=%s fork-session-id=%s"
-                    name git-root priority fork-session-id)
+resumes the fork source's Claude session.
+BASE-COMMIT, when non-nil, overrides the default base ref (which is
+\"HEAD\" for forks and `claude-repl-worktree-default-base' otherwise)."
+  (claude-repl--log name "create-worktree-from-command: name=%s git-root=%s priority=%s fork-session-id=%s base-commit=%s"
+                    name git-root priority fork-session-id (or base-commit "nil"))
   (claude-repl--do-create-worktree-workspace
-   name nil fork-session-id prompt nil priority nil git-root git-root))
+   name nil fork-session-id prompt nil priority base-commit git-root git-root))
 
 (defcustom claude-repl-worktree-stagger-seconds 5
   "Seconds between staggered worktree creation timers.
@@ -762,12 +855,21 @@ and an error message is shown to the user.
 CMD MUST contain a non-empty \"git_root\" field naming the target repository;
 it is used verbatim after `expand-file-name'.  If \"git_root\" is missing or
 empty, the workspace is NOT created — callers must emit git_root explicitly
-rather than relying on the ambient Emacs context."
+rather than relying on the ambient Emacs context.
+
+CMD may contain an optional \"base_commit\" field naming the git ref the
+new branch is created from (e.g. \"HEAD\", \"origin/master\").  When
+absent or empty, the default applies (HEAD for forks,
+`claude-repl-worktree-default-base' otherwise)."
   (let* ((name (alist-get 'name cmd))
          (prompt (alist-get 'prompt cmd nil))
          (priority (alist-get 'priority cmd nil))
          (fork-from (alist-get 'fork_from cmd nil))
          (cmd-git-root (alist-get 'git_root cmd nil))
+         (cmd-base-commit (alist-get 'base_commit cmd nil))
+         (base-commit (and (stringp cmd-base-commit)
+                           (not (string-empty-p cmd-base-commit))
+                           cmd-base-commit))
          (fork-session-id
           (condition-case err
               (claude-repl--resolve-fork-session-id fork-from)
@@ -789,11 +891,11 @@ rather than relying on the ambient Emacs context."
                name))
      (t
       (let ((git-root (file-name-as-directory (expand-file-name cmd-git-root))))
-        (claude-repl--log name "workspace-commands-file create: %s (delay %.1fs) priority=%s fork-session-id=%s git-root=%s"
-                          name delay priority fork-session-id git-root)
+        (claude-repl--log name "workspace-commands-file create: %s (delay %.1fs) priority=%s fork-session-id=%s git-root=%s base-commit=%s"
+                          name delay priority fork-session-id git-root (or base-commit "nil"))
         (run-with-timer delay nil
                         #'claude-repl--create-worktree-from-command
-                        git-root name prompt priority fork-session-id))))))
+                        git-root name prompt priority fork-session-id base-commit))))))
 
 (defun claude-repl--handle-prompt-command (cmd)
   "Handle a \"prompt\" workspace command CMD."
