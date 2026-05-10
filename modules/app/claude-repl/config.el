@@ -63,19 +63,41 @@
              (length claude-repl--load-errors)))
   (message "[claude-repl] Loaded Claude-Repl package."))
 
-;; Lazy claude start on first visit to a restored workspace.  The restore
-;; side is NOT wired to `emacs-startup-hook' — calling
-;; `+dwc/switch-to-project' 10x at startup hits `magit-status' per project
-;; and can hang the UI / race persp-mode's initialization (causing
-;; void-function errors on `safe-persp-name').  Users run
-;; `M-x claude-repl-load-workspace-snapshot' manually once Emacs is fully
-;; up.  TODO: re-enable auto-restore behind a safer entry point (e.g.
-;; `doom-init-ui-hook' + idle timer, with a lighter persp-creation path
-;; that skips magit/recent-file openings).
+;; Lazy claude start on first visit to a restored workspace.
+;;
+;; Restore is wired to `emacs-startup-hook' but fires through an idle
+;; timer (`claude-repl-snapshot-startup-load-delay' seconds).  The
+;; deferral avoids the two failure modes that previously kept this
+;; manual-only: (a) persp-mode races where `safe-persp-name' is unbound
+;; when the loader fires too early, and (b) UI hangs from
+;; `+dwc/switch-to-project' invoking `magit-status' per project while
+;; the frame is still painting.  Companion save-guard
+;; (`claude-repl--snapshot-loaded-p') prevents `--state-save' from
+;; clobbering the on-disk roster if a state-mutation fires before the
+;; idle timer resolves.
 ;;
 ;; Snapshot save is paired with `claude-repl--state-save' (history.el) so
 ;; the roster is updated on every workspace mutation rather than only at
 ;; Emacs quit — that way a crash before quit doesn't lose the roster.
+(defcustom claude-repl-snapshot-startup-load-delay 2.0
+  "Idle seconds to wait after `emacs-startup-hook' before restoring snapshot.
+Tuned to let persp-mode finish initialization (so `safe-persp-name'
+and friends are bound) before the loader iterates entries.  Set to nil
+to disable startup-time restore entirely."
+  :type '(choice (const :tag "Disabled" nil) number)
+  :group 'claude-repl)
+
+(defun claude-repl--schedule-snapshot-startup-load ()
+  "Schedule `--load-workspace-snapshot-on-startup' on an idle timer.
+Honours `claude-repl-snapshot-startup-load-delay'; a nil delay disables
+the auto-load entirely.  Intended to run from `emacs-startup-hook'."
+  (when claude-repl-snapshot-startup-load-delay
+    (run-with-idle-timer claude-repl-snapshot-startup-load-delay
+                         nil
+                         #'claude-repl--load-workspace-snapshot-on-startup)))
+
+(add-hook 'emacs-startup-hook #'claude-repl--schedule-snapshot-startup-load)
+
 (with-eval-after-load 'persp-mode
   (add-hook 'persp-activated-functions #'claude-repl--maybe-start-on-activate))
 

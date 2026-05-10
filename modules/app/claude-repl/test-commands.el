@@ -1603,6 +1603,34 @@ so the lazy-start hook skips firing for each restored workspace."
             (should (equal flashed-ws "switched-ws")))
         (delete-directory tmp-dir t)))))
 
+;;;; ---- Tests: snapshot startup-load scheduler ----
+
+(ert-deftest claude-repl-cmd-test-schedule-snapshot-startup-load/schedules-idle-timer ()
+  "schedule-snapshot-startup-load arms an idle timer with the configured delay."
+  (let ((claude-repl-snapshot-startup-load-delay 1.5)
+        captured-secs captured-repeat captured-fn)
+    (cl-letf (((symbol-function 'run-with-idle-timer)
+               (lambda (secs repeat fn &rest _)
+                 (setq captured-secs secs captured-repeat repeat captured-fn fn))))
+      (claude-repl--schedule-snapshot-startup-load)
+      (should (= 1.5 captured-secs))
+      (should-not captured-repeat)
+      (should (eq captured-fn #'claude-repl--load-workspace-snapshot-on-startup)))))
+
+(ert-deftest claude-repl-cmd-test-schedule-snapshot-startup-load/nil-delay-disables ()
+  "Setting the delay to nil disables the startup load entirely."
+  (let ((claude-repl-snapshot-startup-load-delay nil)
+        called)
+    (cl-letf (((symbol-function 'run-with-idle-timer)
+               (lambda (&rest _) (setq called t))))
+      (claude-repl--schedule-snapshot-startup-load)
+      (should-not called))))
+
+(ert-deftest claude-repl-cmd-test-schedule-snapshot-startup-load/installed-on-startup-hook ()
+  "The scheduler is registered on `emacs-startup-hook' (module-load wires it)."
+  (should (memq #'claude-repl--schedule-snapshot-startup-load
+                emacs-startup-hook)))
+
 ;;;; ---- Tests: workspace snapshot save-guard (unloaded-clobber prevention) ----
 
 (defmacro claude-repl-cmd-test--with-temp-snapshot-file (var &rest body)
