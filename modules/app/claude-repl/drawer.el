@@ -407,6 +407,7 @@ each entry stay tighter than the inter-workspace gap."
          (visible    (car parts))
          (hidden     (cdr parts)))
     (erase-buffer)
+    (insert "\n")
     (claude-repl-drawer--insert-section "MAIN" visible current nil)
     (insert "\n")
     (claude-repl-drawer--insert-section "HIDDEN" hidden current t)
