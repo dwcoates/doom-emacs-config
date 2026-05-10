@@ -686,6 +686,26 @@ The lazy-start hook checks this and skips firing during the loader loop
 — otherwise each `+dwc/switch-to-project' call would eager-start claude
 and defeat lazy restore.")
 
+(defvar claude-repl--snapshot-loaded-p nil
+  "Non-nil after `claude-repl-load-workspace-snapshot' has completed once
+this session.  The save path checks this to refuse clobbering a richer
+on-disk roster with the freshly started live roster (which only holds
+the workspaces the user has visited manually so far).  Set to t at the
+end of a successful load; reset by Emacs restart.")
+
+(defun claude-repl--snapshot-save-safe-p (live-count)
+  "Return non-nil when save may proceed with LIVE-COUNT entries.
+Safe iff loader already ran this session (`claude-repl--snapshot-loaded-p'
+is t) OR the on-disk roster is no larger than LIVE-COUNT.  The latter
+covers the fresh-install case where no prior file exists or it has
+fewer entries than the live state — there's nothing to lose."
+  (or claude-repl--snapshot-loaded-p
+      (let* ((file claude-repl-workspace-snapshot-file)
+             (on-disk (and (file-exists-p file)
+                           (claude-repl--read-sexp-file-if-exists file))))
+        (or (null on-disk)
+            (<= (length on-disk) live-count)))))
+
 (defun claude-repl--snapshot-entry-normalize (entry)
   "Normalize a snapshot ENTRY to (NAME . PLIST).
 Accepts the legacy `(NAME . DIR-STRING)' shape and the current
@@ -727,22 +747,26 @@ roster-piggyback save doesn't spam the echo area on every state mutation."
     (let (snapshot)
       (maphash (lambda (ws plist) (push (cons ws plist) snapshot))
                entries)
-      (claude-repl--log nil "write-sexp-file: file=%s" claude-repl-workspace-snapshot-file)
-      (let ((dir (file-name-directory claude-repl-workspace-snapshot-file)))
-        (when (and dir (not (file-directory-p dir)))
-          (make-directory dir t)))
-      (claude-repl--archive-workspace-snapshot)
-      (with-temp-file claude-repl-workspace-snapshot-file
-        (insert "(")
-        (let ((first t))
-          (dolist (entry snapshot)
-            (unless first (insert "\n "))
-            (setq first nil)
-            (prin1 entry (current-buffer))))
-        (insert ")"))
-      (when (called-interactively-p 'interactive)
-        (message "Saved %d workspace(s) to %s"
-                 (length snapshot) claude-repl-workspace-snapshot-file)))))
+      (if (not (claude-repl--snapshot-save-safe-p (length snapshot)))
+          (claude-repl--log nil
+                            "save-workspace-snapshot: ABORTED — loader hasn't run this session and on-disk roster is larger than live (%d)"
+                            (length snapshot))
+        (claude-repl--log nil "write-sexp-file: file=%s" claude-repl-workspace-snapshot-file)
+        (let ((dir (file-name-directory claude-repl-workspace-snapshot-file)))
+          (when (and dir (not (file-directory-p dir)))
+            (make-directory dir t)))
+        (claude-repl--archive-workspace-snapshot)
+        (with-temp-file claude-repl-workspace-snapshot-file
+          (insert "(")
+          (let ((first t))
+            (dolist (entry snapshot)
+              (unless first (insert "\n "))
+              (setq first nil)
+              (prin1 entry (current-buffer))))
+          (insert ")"))
+        (when (called-interactively-p 'interactive)
+          (message "Saved %d workspace(s) to %s"
+                   (length snapshot) claude-repl-workspace-snapshot-file))))))
 
 (defun claude-repl-load-workspace-snapshot ()
   "Load workspaces from `claude-repl-workspace-snapshot-file'.
@@ -779,6 +803,7 @@ Claude itself is not started here — the workspace is added to
                 (cl-incf loaded))
             (cl-incf skipped))))
       (force-mode-line-update t)
+      (setq claude-repl--snapshot-loaded-p t)
       (message "Loaded %d workspace(s), skipped %d" loaded skipped))))
 
 (defun claude-repl--maybe-start-on-activate (&rest _)

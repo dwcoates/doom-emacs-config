@@ -1603,6 +1603,95 @@ so the lazy-start hook skips firing for each restored workspace."
             (should (equal flashed-ws "switched-ws")))
         (delete-directory tmp-dir t)))))
 
+;;;; ---- Tests: workspace snapshot save-guard (unloaded-clobber prevention) ----
+
+(defmacro claude-repl-cmd-test--with-temp-snapshot-file (var &rest body)
+  "Bind `claude-repl-workspace-snapshot-file' to a temp path and run BODY.
+VAR receives the temp file path so BODY can inspect it.  Cleans up the
+file and the archive directory the save path materialises beside it."
+  (declare (indent 1))
+  `(let* ((,var (make-temp-file "claude-repl-snap-guard-" nil ".el"))
+          (claude-repl-workspace-snapshot-file ,var)
+          (claude-repl--snapshot-loaded-p nil)
+          (claude-repl--snapshot-archived-this-run nil))
+     (unwind-protect
+         (progn ,@body)
+       (when (file-exists-p ,var) (delete-file ,var))
+       (let ((archive (claude-repl--workspace-snapshot-archive-dir)))
+         (when (file-directory-p archive) (delete-directory archive t))))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-save-safe-p/loaded-flag-passes ()
+  "Once the loaded flag is set, save is always safe regardless of disk state."
+  (claude-repl-cmd-test--with-temp-snapshot-file f
+    (with-temp-file f
+      (insert "((\"a\" :project-dir \"/tmp/a\") (\"b\" :project-dir \"/tmp/b\") (\"c\" :project-dir \"/tmp/c\"))"))
+    (setq claude-repl--snapshot-loaded-p t)
+    (should (claude-repl--snapshot-save-safe-p 1))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-save-safe-p/no-disk-file-passes ()
+  "When no on-disk file exists, save is safe even if loader hasn't run."
+  (claude-repl-cmd-test--with-temp-snapshot-file f
+    (delete-file f)
+    (should (claude-repl--snapshot-save-safe-p 1))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-save-safe-p/disk-smaller-passes ()
+  "When loader hasn't run but on-disk roster is no larger than live, save is safe."
+  (claude-repl-cmd-test--with-temp-snapshot-file f
+    (with-temp-file f
+      (insert "((\"a\" :project-dir \"/tmp/a\"))"))
+    (should (claude-repl--snapshot-save-safe-p 1))
+    (should (claude-repl--snapshot-save-safe-p 2))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-save-safe-p/unloaded-and-disk-larger-blocks ()
+  "When loader hasn't run AND on-disk roster is larger than live, save is unsafe."
+  (claude-repl-cmd-test--with-temp-snapshot-file f
+    (with-temp-file f
+      (insert "((\"a\" :project-dir \"/tmp/a\") (\"b\" :project-dir \"/tmp/b\") (\"c\" :project-dir \"/tmp/c\"))"))
+    (should-not (claude-repl--snapshot-save-safe-p 1))
+    (should-not (claude-repl--snapshot-save-safe-p 2))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-save/refuses-when-unloaded-and-shrinking ()
+  "Save aborts (file unchanged) when loader hasn't run and write would shrink the roster."
+  (claude-repl-test--with-clean-state
+    (claude-repl-cmd-test--with-temp-snapshot-file f
+      (let ((seed "((\"prior-a\" :project-dir \"/tmp/a\") (\"prior-b\" :project-dir \"/tmp/b\") (\"prior-c\" :project-dir \"/tmp/c\"))"))
+        (with-temp-file f (insert seed))
+        (claude-repl--ws-put "only-live" :project-dir "/tmp/live")
+        (claude-repl-save-workspace-snapshot)
+        (with-temp-buffer
+          (insert-file-contents f)
+          (should (equal (buffer-string) seed)))))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-save/proceeds-after-load ()
+  "Save proceeds after the loader has run, even if live roster is smaller than disk."
+  (claude-repl-test--with-clean-state
+    (claude-repl-cmd-test--with-temp-snapshot-file f
+      (with-temp-file f
+        (insert "((\"prior-a\" :project-dir \"/tmp/a\") (\"prior-b\" :project-dir \"/tmp/b\"))"))
+      (setq claude-repl--snapshot-loaded-p t)
+      (claude-repl--ws-put "only-live" :project-dir "/tmp/live")
+      (claude-repl-save-workspace-snapshot)
+      (with-temp-buffer
+        (insert-file-contents f)
+        (should (string-match-p "only-live" (buffer-string)))
+        (should-not (string-match-p "prior-a" (buffer-string)))))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/sets-loaded-flag-on-success ()
+  "Successful load sets `claude-repl--snapshot-loaded-p' to t."
+  (claude-repl-test--with-clean-state
+    (claude-repl-cmd-test--with-temp-snapshot-file f
+      (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-snap-dir-" t))))
+        (unwind-protect
+            (progn
+              (with-temp-file f
+                (prin1 (list (list "ws-a" :project-dir tmp-dir :priority nil))
+                       (current-buffer)))
+              (cl-letf (((symbol-function '+dwc/switch-to-project) (lambda (&rest _) nil)))
+                (setq claude-repl--snapshot-loaded-p nil)
+                (claude-repl-load-workspace-snapshot)
+                (should claude-repl--snapshot-loaded-p)))
+          (delete-directory tmp-dir t))))))
+
 ;;;; ---- Workspace cycling (claude-repl-switch-left/right) ----
 
 (defmacro claude-repl-cmd-test--with-cycle-stubs (names current hidden-set
