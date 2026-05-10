@@ -723,6 +723,11 @@ immediately, not after the next command."
       (add-hook 'post-command-hook
                 #'claude-repl-drawer--post-command nil t)
       (setq-local cursor-type nil)
+      ;; Self-heal: pre-existing buffers from before the wrap rollout
+      ;; still have `truncate-lines' = t.  These are buffer-local; the
+      ;; mode-init only fires on first activation.
+      (setq-local truncate-lines nil
+                  word-wrap t)
       (claude-repl-drawer--render)
       (or (and current-ws
                (claude-repl-drawer--goto-workspace-line current-ws))
@@ -762,7 +767,9 @@ the drawer is already visible in the current frame's window tree."
       (with-current-buffer buf
         (add-hook 'post-command-hook
                   #'claude-repl-drawer--post-command nil t)
-        (setq-local cursor-type nil))
+        (setq-local cursor-type nil
+                    truncate-lines nil
+                    word-wrap t))
       (when win
         (set-window-dedicated-p win t)
         (claude-repl-drawer--apply-width win)
