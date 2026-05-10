@@ -106,6 +106,14 @@ The current-entry overlay covers this region with
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-drawer-background "#0a0a0a"
+  "Background color for the drawer buffer.
+Applied via `face-remap-add-relative' so the drawer reads as a
+distinct UI region rather than blending with the workspace below.
+Default is near-black."
+  :type 'color
+  :group 'claude-repl)
+
 ;;;; Faces ------------------------------------------------------------------
 
 (defface claude-repl-drawer-workspace-name
@@ -281,6 +289,14 @@ Runs after every command in the drawer buffer."
   (claude-repl-drawer--update-current-entry-overlay)
   (claude-repl-drawer--update-cursor))
 
+(defun claude-repl-drawer--apply-background ()
+  "Remap the buffer's `default' face to the drawer background color.
+Idempotent and cheap; safe to call from mode init and from show
+self-heal paths.  Uses `face-remap-add-relative' so the change is
+buffer-local and doesn't leak into the workspace's other windows."
+  (face-remap-add-relative
+   'default :background claude-repl-drawer-background))
+
 (define-derived-mode claude-repl-drawer-mode special-mode "ClaudeDrawer"
   "Major mode for the claude-repl workspace drawer."
   (setq truncate-lines nil
@@ -288,6 +304,7 @@ Runs after every command in the drawer buffer."
         mode-line-format nil
         word-wrap t)
   (setq-local cursor-type nil)
+  (claude-repl-drawer--apply-background)
   (add-hook 'post-command-hook
             #'claude-repl-drawer--post-command nil t))
 
@@ -1198,6 +1215,7 @@ immediately, not after the next command."
       ;; mode-init only fires on first activation.
       (setq-local truncate-lines nil
                   word-wrap t)
+      (claude-repl-drawer--apply-background)
       (claude-repl-drawer--render))
     (when win
       (set-window-dedicated-p win t)
@@ -1244,7 +1262,8 @@ the drawer is already visible in the current frame's window tree."
                   #'claude-repl-drawer--post-command nil t)
         (setq-local cursor-type nil
                     truncate-lines nil
-                    word-wrap t))
+                    word-wrap t)
+        (claude-repl-drawer--apply-background))
       (when win
         (set-window-dedicated-p win t)
         (claude-repl-drawer--apply-width win)
