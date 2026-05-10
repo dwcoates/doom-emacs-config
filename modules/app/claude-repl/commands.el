@@ -771,14 +771,27 @@ roster-piggyback save doesn't spam the echo area on every state mutation."
 (defun claude-repl-load-workspace-snapshot (&optional file)
   "Load workspaces from FILE (defaults to the configured snapshot path).
 When FILE is nil, reads `claude-repl-workspace-snapshot-file' (or its
-legacy module-dir fallback if the configured file is absent).  Then for
-each entry calls `+dwc/switch-to-project' to create/switch to the
-project's persp workspace and hydrates `:project-dir' and `:priority'
-into `claude-repl--workspaces' so the tabline paints the priority badge
-immediately.  Entries whose directory no longer exists are skipped.
-Claude itself is not started here — the workspace is added to
+legacy module-dir fallback if the configured file is absent).  For each
+entry, declaratively registers a persp via `persp-add-new' keyed by the
+snapshot's `ws' name, calls `projectile-add-known-project' so the
+project shows up under `SPC p p', and hydrates `:project-dir' /
+`:priority' into `claude-repl--workspaces' so the tabline paints the
+priority badge immediately.  Entries whose directory no longer exists
+are skipped.
+
+This deliberately bypasses Doom's `+dwc/switch-to-project' /
+`+workspaces-switch-to-project-h' path — that path runs the
+interactive user-switch workflow (rename-on-empty branch, magit auto-
+open, find-file recent, projectile hooks) which is the wrong layer for
+restoring 16 declarative entries from disk (in particular, the rename-
+on-empty branch collapses every entry after iteration 1 into a single
+renamed persp).
+
+Claude itself is NOT started here.  The workspace is added to
 `claude-repl--pending-snapshot-workspaces' and the lazy-start hook on
-`persp-activated-functions' starts claude on first visit."
+`persp-activated-functions' starts claude (and runs the deferred Doom
+project-switch side effects — default-directory, dir-locals, magit-
+status via `+workspaces-switch-project-function') on first visit."
   (interactive)
   (let* ((file (or file (claude-repl--workspace-snapshot-file-for-read)))
          (snapshot (claude-repl--read-sexp-file-if-exists file)))
@@ -789,53 +802,38 @@ Claude itself is not started here — the workspace is added to
           (iter 0)
           (total (length snapshot))
           (claude-repl--loading-snapshot-p t))
-      (claude-repl--log nil "load-workspace-snapshot: BEGIN file=%s entries=%d persp-count=%s persps=%S"
+      (claude-repl--log nil "load-workspace-snapshot: BEGIN file=%s entries=%d persp-count=%s"
                         file total
-                        (claude-repl--snapshot-loader-persp-count)
-                        (claude-repl--snapshot-loader-persp-names))
+                        (claude-repl--snapshot-loader-persp-count))
       (dolist (raw snapshot)
         (cl-incf iter)
         (let* ((entry (claude-repl--snapshot-entry-normalize raw))
                (ws (car entry))
                (plist (cdr entry))
                (dir (plist-get plist :project-dir))
-               (priority (plist-get plist :priority))
-               (before-count (claude-repl--snapshot-loader-persp-count))
-               (before-current (claude-repl--snapshot-loader-current-name)))
-          (claude-repl--log nil
-                            "load-snapshot iter=%d/%d ws=%s dir=%s exists=%s before-count=%s before-current=%s"
-                            iter total ws (or dir "nil")
-                            (and dir (file-directory-p dir))
-                            before-count (or before-current "nil"))
-          (if (and dir (file-directory-p dir))
-              (progn
-                (+dwc/switch-to-project dir)
-                (let* ((after-count (claude-repl--snapshot-loader-persp-count))
-                       (after-current (claude-repl--snapshot-loader-current-name))
-                       (delta (and (numberp after-count) (numberp before-count)
-                                   (- after-count before-count)))
-                       (branch (cond ((null delta) "unknown")
-                                     ((> delta 0) "THEN/new-persp")
-                                     ((= delta 0) "ELSE/recycle-or-existing")
-                                     (t "shrank"))))
-                  (claude-repl--log nil
-                                    "load-snapshot iter=%d after-count=%s after-current=%s delta=%s branch=%s snapshot-ws=%s persp-name-matches-snapshot-ws=%s"
-                                    iter after-count (or after-current "nil")
-                                    delta branch ws
-                                    (equal after-current ws)))
-                (claude-repl--ws-put ws :project-dir dir)
-                (when priority
-                  (claude-repl--ws-put ws :priority priority))
-                (puthash ws plist claude-repl--pending-snapshot-workspaces)
-                (cl-incf loaded))
-            (claude-repl--log nil "load-snapshot iter=%d SKIPPED ws=%s reason=dir-missing-or-nil" iter ws)
-            (cl-incf skipped))))
+               (priority (plist-get plist :priority)))
+          (cond
+           ((not (and dir (file-directory-p dir)))
+            (claude-repl--log nil "load-snapshot iter=%d/%d SKIPPED ws=%s dir=%s reason=dir-missing-or-nil"
+                              iter total ws (or dir "nil"))
+            (cl-incf skipped))
+           (t
+            (claude-repl--log nil "load-snapshot iter=%d/%d ws=%s dir=%s registering"
+                              iter total ws dir)
+            (when (fboundp 'persp-add-new)
+              (persp-add-new ws))
+            (when (fboundp 'projectile-add-known-project)
+              (projectile-add-known-project dir))
+            (claude-repl--ws-put ws :project-dir dir)
+            (when priority
+              (claude-repl--ws-put ws :priority priority))
+            (puthash ws plist claude-repl--pending-snapshot-workspaces)
+            (cl-incf loaded)))))
       (force-mode-line-update t)
       (setq claude-repl--snapshot-loaded-p t)
-      (claude-repl--log nil "load-workspace-snapshot: END loaded=%d skipped=%d final-persp-count=%s final-persps=%S"
+      (claude-repl--log nil "load-workspace-snapshot: END loaded=%d skipped=%d final-persp-count=%s"
                         loaded skipped
-                        (claude-repl--snapshot-loader-persp-count)
-                        (claude-repl--snapshot-loader-persp-names))
+                        (claude-repl--snapshot-loader-persp-count))
       (message "Loaded %d workspace(s), skipped %d" loaded skipped))))
 
 (defun claude-repl--snapshot-loader-persp-count ()
