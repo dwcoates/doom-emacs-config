@@ -463,6 +463,19 @@ hides panels but skips the bookkeeping write and the tab shuffle."
       (claude-repl--log ws "on-close: pushing ws=%s to second-to-last" ws)
       (+dwc/workspace-push-to-back))))
 
+(defun claude-repl--unhide-workspace (ws)
+  "Reverse `claude-repl--on-close' for WS by setting `:repl-state' to `:active'.
+A no-op when WS is nil or has a `:repl-state' other than `:hidden' —
+non-hidden workspaces don't need unhiding, and overwriting
+`:inactive' / `:dead' / nil with `:active' would lie about lifecycle
+state.  Does NOT re-show panels or re-shuffle tab order; that side of
+the close is reversible only by an explicit panel-show."
+  (when ws
+    (let ((rstate (claude-repl--ws-get ws :repl-state)))
+      (claude-repl--log ws "unhide-workspace: ws=%s repl-state=%s" ws rstate)
+      (when (eq rstate :hidden)
+        (claude-repl--ws-set-repl-state ws :active)))))
+
 ;;;; Window synchronization
 
 ;; Auto-close orphaned panels: if one is closed, close the other.

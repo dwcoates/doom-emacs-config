@@ -2525,4 +2525,25 @@ initialize-ws-env.  Models the worktree-creation / new-workspace paths."
         (setq claude-repl--window-fullscreen-config nil)
         (when (get-buffer "*other*") (kill-buffer "*other*"))))))
 
+;;;; ---- Tests: unhide-workspace ----
+
+(ert-deftest claude-repl-test-unhide-workspace-flips-hidden-to-active ()
+  "`claude-repl--unhide-workspace' resets `:hidden' to `:active'."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :repl-state :hidden)
+    (claude-repl--unhide-workspace "ws")
+    (should (eq (claude-repl--ws-get "ws" :repl-state) :active))))
+
+(ert-deftest claude-repl-test-unhide-workspace-noop-on-non-hidden ()
+  "`claude-repl--unhide-workspace' leaves non-hidden states alone."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :repl-state :inactive)
+    (claude-repl--unhide-workspace "ws")
+    (should (eq (claude-repl--ws-get "ws" :repl-state) :inactive))))
+
+(ert-deftest claude-repl-test-unhide-workspace-nil-ws-noop ()
+  "Nil WS is a no-op (matches the `:hidden'-only contract)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--unhide-workspace nil)))
+
 ;;; test-panels.el ends here
