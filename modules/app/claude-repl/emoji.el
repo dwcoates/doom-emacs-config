@@ -156,28 +156,41 @@ RECENTS, then to the full wildcard pool as a final guarantee of progress."
 (defalias 'claude-repl--message-has-emoji-prefix-p
   'claude-repl--description-has-emoji-prefix-p)
 
+(defconst claude-repl--no-scope-prefix-regex
+  "^\\([a-z]+\\): \\(.*\\)"
+  "Regex matching `<type>: <rest>' (no scope) at start of message.
+Captures the type as group 1 and the rest-of-line as group 2.")
+
 (defun claude-repl--emoji-prefix-commit-message (msg &optional branch-override)
-  "Inject a random emoji into MSG when its scope matches the current branch.
-Expected MSG shape: `<type>(<branch>): <description>'.  When the scope
-matches the active branch (or BRANCH-OVERRIDE), the result becomes
-`<type>(<branch>): <emoji> <description>'.  When the description
-already starts with a non-ASCII char, MSG is returned unchanged
-(idempotent).  When the scope does not match the branch, MSG is
-returned unchanged.  When the branch cannot be resolved (no git repo
-/ detached HEAD), MSG is returned unchanged.
+  "Inject the active branch as scope and a random emoji into MSG.
+Two input shapes are normalized to `<type>(<branch>): <emoji> <description>':
+
+  - `<type>: <description>'           → branch is injected as scope and
+    an emoji is prepended to the description.
+  - `<type>(<branch>): <description>' → emoji is prepended to the
+    description (existing behavior).
+
+When the description already starts with a non-ASCII char (likely
+emoji), the emoji injection step is skipped — but a missing scope is
+still filled in with the branch, so a hand-written
+`feat: 🚀 desc' becomes `feat(<branch>): 🚀 desc'.  When the scope
+is present but does NOT match the branch, MSG is returned unchanged
+(the user's explicit scope choice is respected).  When the branch
+cannot be resolved (no git repo / detached HEAD), MSG is returned
+unchanged.
 
 Excludes emojis used in the last `claude-repl-emoji-lookback' matching
-commits to avoid back-to-back repeats (variety guarantee carried over
-from the prior auto-emoji iteration).
+commits to avoid back-to-back repeats.
 
 BRANCH-OVERRIDE lets callers (mainly tests) inject a fixed branch
 without going through `git rev-parse'."
   (let ((branch (or branch-override (claude-repl--current-branch))))
     (if (or (null branch) (string-empty-p branch))
         msg
-      (let* ((rx (claude-repl--commit-prefix-regex branch)))
-        (if (not (string-match rx msg))
-            msg
+      (let ((branch-rx (claude-repl--commit-prefix-regex branch)))
+        (cond
+         ;; Already scoped to the branch: inject emoji only.
+         ((string-match branch-rx msg)
           (let ((type-str (match-string 1 msg))
                 (description (match-string 2 msg))
                 (rest (substring msg (match-end 0))))
@@ -187,7 +200,26 @@ without going through `git rev-parse'."
                      (recents (claude-repl--recent-commit-emojis))
                      (emoji (claude-repl--random-commit-emoji type recents)))
                 (concat type-str "(" branch "): "
-                        emoji " " description rest)))))))))
+                        emoji " " description rest)))))
+         ;; No scope at all: inject branch as scope, plus emoji unless
+         ;; description already starts with one.
+         ((string-match claude-repl--no-scope-prefix-regex msg)
+          (let* ((type-str (match-string 1 msg))
+                 (description (match-string 2 msg))
+                 (rest (substring msg (match-end 0))))
+            (if (claude-repl--description-has-emoji-prefix-p description)
+                (concat type-str "(" branch "): " description rest)
+              (let* ((type-sym (intern type-str))
+                     (effective-type (if (assq type-sym claude-repl--emoji-categories)
+                                         type-sym
+                                       'wildcard))
+                     (recents (claude-repl--recent-commit-emojis))
+                     (emoji (claude-repl--random-commit-emoji effective-type recents)))
+                (concat type-str "(" branch "): "
+                        emoji " " description rest)))))
+         ;; Scope present but not the branch (or no conventional prefix
+         ;; at all): leave unchanged.
+         (t msg))))))
 
 ;;; Magit integration
 

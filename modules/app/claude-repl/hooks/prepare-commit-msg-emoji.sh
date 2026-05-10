@@ -1,15 +1,21 @@
 #!/bin/bash
-# prepare-commit-msg hook: inject a random emoji into commits whose
-# conventional-commit scope matches the current git branch.
+# prepare-commit-msg hook: normalize commit subjects to
+#   <type>(<branch>): <emoji> <description>
 #
 # Install into .git/hooks/prepare-commit-msg or use
 # M-x claude-repl-install-commit-emoji-hook from Emacs.
 #
 # Convention enforced: <type>(<branch>): <emoji> <description>
 #
-# - Only acts on messages whose scope is the current branch name.
+# Accepts two input shapes for the first line and normalizes both:
+#   - <type>: <description>            → branch injected as scope, emoji prepended.
+#   - <type>(<branch>): <description>  → emoji prepended (existing behavior).
+# Messages whose scope is present but is NOT the current branch are
+# left unchanged (respects the author's explicit scope choice).
+#
 # - Skips messages whose description already starts with a non-ASCII
-#   char (likely emoji from a prior run / hand-written).
+#   char (likely emoji from a prior run / hand-written) for the emoji
+#   step, but still injects the branch into a missing scope.
 # - Skips merge / squash auto-templates.
 
 set -euo pipefail
@@ -36,18 +42,42 @@ REST_LINES=$(printf '%s' "$MSG" | tail -n +2)
 # Escape branch for safe inclusion in a bash regex.
 ESCAPED_BRANCH=$(printf '%s' "$BRANCH" | sed 's/[][\.*^$()+?{|/]/\\&/g')
 
-# Match: <type>(<branch>): <description>
-PREFIX_REGEX="^([a-z]+)\(${ESCAPED_BRANCH}\): (.*)$"
-if [[ ! "$FIRST_LINE" =~ $PREFIX_REGEX ]]; then
+# Match either:
+#   <type>(<branch>): <description>     → SCOPE_PRESENT=1
+#   <type>: <description>               → SCOPE_PRESENT=0 (branch will be injected)
+# A scope that is present but does NOT match the branch is left alone.
+BRANCH_SCOPE_REGEX="^([a-z]+)\(${ESCAPED_BRANCH}\): (.*)$"
+NO_SCOPE_REGEX="^([a-z]+): (.*)$"
+ANY_SCOPE_REGEX="^([a-z]+)\(([^)]+)\): (.*)$"
+
+if [[ "$FIRST_LINE" =~ $BRANCH_SCOPE_REGEX ]]; then
+    TYPE="${BASH_REMATCH[1]}"
+    DESCRIPTION="${BASH_REMATCH[2]}"
+    SCOPE_PRESENT=1
+elif [[ "$FIRST_LINE" =~ $NO_SCOPE_REGEX ]]; then
+    TYPE="${BASH_REMATCH[1]}"
+    DESCRIPTION="${BASH_REMATCH[2]}"
+    SCOPE_PRESENT=0
+elif [[ "$FIRST_LINE" =~ $ANY_SCOPE_REGEX ]]; then
+    # Scope present but not the branch — author's explicit choice.
+    exit 0
+else
     exit 0
 fi
 
-TYPE="${BASH_REMATCH[1]}"
-DESCRIPTION="${BASH_REMATCH[2]}"
-
-# Already has a non-ASCII description prefix (likely emoji)? Skip.
+# Already has a non-ASCII description prefix (likely emoji)?  Skip the
+# emoji step.  When the scope is still missing, fall through and just
+# inject the branch — emoji is preserved verbatim.
 FIRST_BYTE=$(printf '%s' "$DESCRIPTION" | head -c 1 | od -An -tx1 | tr -d ' ')
 if [[ -n "${FIRST_BYTE}" ]] && [[ "${FIRST_BYTE}" > "7f" ]]; then
+    if [[ "$SCOPE_PRESENT" -eq 0 ]]; then
+        NEW_FIRST_LINE="${TYPE}(${BRANCH}): ${DESCRIPTION}"
+        if [[ -n "$REST_LINES" ]]; then
+            printf '%s\n%s' "$NEW_FIRST_LINE" "$REST_LINES" > "$MSG_FILE"
+        else
+            printf '%s\n' "$NEW_FIRST_LINE" > "$MSG_FILE"
+        fi
+    fi
     exit 0
 fi
 

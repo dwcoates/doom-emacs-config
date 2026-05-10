@@ -216,6 +216,97 @@ yields nil (e.g. detached HEAD or non-repo cwd)."
       (should (string-prefix-p (concat "feat(" branch "): ") result))
       (should-not (equal result msg)))))
 
+;;;; ---- Tests: no-scope branch injection ----
+
+(ert-deftest claude-repl-test-prefix-injects-branch-when-scope-missing ()
+  "When MSG lacks a scope, the active branch is injected and an emoji
+is prepended to the description."
+  (let ((claude-repl-emoji-wildcard-chance 0))
+    (let ((result (claude-repl--emoji-prefix-commit-message
+                   "feat: add feature" "my-branch")))
+      (should (string-match-p "^feat(my-branch): " result))
+      (should (string-match-p "^feat(my-branch): [^[:ascii:]]" result))
+      (should (string-suffix-p " add feature" result)))))
+
+(ert-deftest claude-repl-test-prefix-no-scope-uses-correct-type-pool ()
+  "No-scope `fix: ...' draws an emoji from the fix pool (no wildcard at chance=0)."
+  (let ((claude-repl-emoji-wildcard-chance 0))
+    (let* ((result (claude-repl--emoji-prefix-commit-message
+                    "fix: bug" "my-branch"))
+           (after-colon (cadr (split-string result ": ")))
+           (emoji (car (split-string after-colon " "))))
+      (should (member emoji (cdr (assq 'fix claude-repl--emoji-categories)))))))
+
+(ert-deftest claude-repl-test-prefix-no-scope-unknown-type-uses-wildcard ()
+  "An unknown type (e.g. `infra:') still gets branch+emoji injected;
+the emoji comes from the wildcard pool."
+  (let ((claude-repl-emoji-wildcard-chance 0))
+    (let* ((result (claude-repl--emoji-prefix-commit-message
+                    "infra: bump runner" "my-branch"))
+           (after-colon (cadr (split-string result ": ")))
+           (emoji (car (split-string after-colon " "))))
+      (should (string-prefix-p "infra(my-branch): " result))
+      (should (string-suffix-p " bump runner" result))
+      (should (member emoji (cdr (assq 'wildcard claude-repl--emoji-categories)))))))
+
+(ert-deftest claude-repl-test-prefix-no-scope-with-existing-emoji-injects-branch-only ()
+  "When the description already starts with a non-ASCII char and the
+scope is missing, the branch is still injected but the emoji is
+preserved verbatim (no second emoji prepended)."
+  (let ((msg "feat: 🚀 add feature"))
+    (should (equal (claude-repl--emoji-prefix-commit-message msg "my-branch")
+                   "feat(my-branch): 🚀 add feature"))))
+
+(ert-deftest claude-repl-test-prefix-non-branch-scope-still-noop ()
+  "A scope that is present but does not match the branch is left alone
+(respects the author's explicit scope choice) — regression check that
+the new no-scope path didn't accidentally rewrite this case."
+  (let ((msg "feat(other-scope): add feature"))
+    (should (equal (claude-repl--emoji-prefix-commit-message msg "my-branch") msg))))
+
+(ert-deftest claude-repl-test-prefix-no-scope-skips-when-branch-unresolvable ()
+  "No-scope path is also a no-op when the branch lookup yields nil."
+  (cl-letf (((symbol-function 'claude-repl--current-branch) (lambda () nil)))
+    (let ((msg "feat: add feature"))
+      (should (equal (claude-repl--emoji-prefix-commit-message msg) msg)))))
+
+(ert-deftest claude-repl-test-prefix-no-scope-preserves-body ()
+  "Multi-line MSG: only the first line is rewritten; the body is preserved."
+  (let ((claude-repl-emoji-wildcard-chance 0))
+    (let* ((msg "feat: add feature\n\nLonger body line.\nAnother body line.")
+           (result (claude-repl--emoji-prefix-commit-message msg "my-branch")))
+      (should (string-match-p "^feat(my-branch): [^[:ascii:]]" result))
+      (should (string-suffix-p "\n\nLonger body line.\nAnother body line." result)))))
+
+(ert-deftest claude-repl-test-prefix-no-scope-special-char-branch ()
+  "Branch names with slashes/dots are injected as scope literally."
+  (let ((claude-repl-emoji-wildcard-chance 0))
+    (let* ((branch "DWC/feat.bar")
+           (result (claude-repl--emoji-prefix-commit-message
+                    "feat: ship it" branch)))
+      (should (string-prefix-p (concat "feat(" branch "): ") result))
+      (should (string-suffix-p " ship it" result)))))
+
+(ert-deftest claude-repl-test-prefix-no-prefix-at-all-noop ()
+  "Plain message with no `<type>:' header is left unchanged."
+  (let ((msg "just some random text"))
+    (should (equal (claude-repl--emoji-prefix-commit-message msg "my-branch") msg))))
+
+;;;; ---- Tests: magit-emoji-setup, no-scope path ----
+
+(ert-deftest claude-repl-test-magit-setup-injects-branch-when-scope-missing ()
+  "magit-emoji-setup injects the branch as scope when the buffer has
+`<type>: <description>' (no scope)."
+  (let ((claude-repl-emoji-wildcard-chance 0))
+    (cl-letf (((symbol-function 'claude-repl--current-branch)
+               (lambda () "my-branch")))
+      (with-temp-buffer
+        (insert "feat: new feature")
+        (claude-repl--magit-emoji-setup)
+        (let ((result (buffer-string)))
+          (should (string-match-p "^feat(my-branch): [^[:ascii:]]" result))
+          (should (string-suffix-p " new feature" result)))))))
+
 ;;;; ---- Tests: emoji-categories constant ----
 
 (ert-deftest claude-repl-test-all-categories-present ()
