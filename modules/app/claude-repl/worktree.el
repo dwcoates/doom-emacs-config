@@ -986,6 +986,31 @@ absent or empty, the default applies (HEAD for forks,
     (claude-repl--log ws "workspace-commands-file finish: ws=%s" ws)
     (claude-repl--finish-workspace ws)))
 
+(defun claude-repl--handle-clipboard-command (cmd)
+  "Handle a \"clipboard\" workspace command CMD.
+Stores the `text' field on workspace WS at `:clipboard'.  The OS
+clipboard is intentionally NOT touched — `claude-repl-paste-clipboard'
+\(or any future yank command) is the explicit user gateway, so each
+workspace effectively owns its own clipboard slot.
+
+Skips (logs only) when `workspace' or `text' is missing — a malformed
+annotation must not error out the whole batch."
+  (let ((ws (alist-get 'workspace cmd))
+        (text (alist-get 'text cmd))
+        (note (alist-get 'note cmd)))
+    (cond
+     ((not ws)
+      (claude-repl--log nil "workspace-commands-file clipboard: missing workspace, skipping"))
+     ((not text)
+      (claude-repl--log ws "workspace-commands-file clipboard: missing text, skipping"))
+     (t
+      (claude-repl--log ws "workspace-commands-file clipboard: ws=%s len=%d note=%s"
+                        ws (length text) (or note "nil"))
+      (claude-repl--ws-put ws :clipboard text)
+      (message "[claude-repl] %s clipboard set (%d chars)%s"
+               ws (length text)
+               (if note (format ": %s" note) ""))))))
+
 (defun claude-repl--dispatch-workspace-command (cmd create-delay)
   "Dispatch a single workspace command CMD with current CREATE-DELAY.
 Returns the new create-delay value (incremented for \"create\" commands,
@@ -1000,6 +1025,9 @@ unchanged otherwise)."
       create-delay)
      ((string= type "finish")
       (claude-repl--handle-finish-command cmd)
+      create-delay)
+     ((string= type "clipboard")
+      (claude-repl--handle-clipboard-command cmd)
       create-delay)
      (t
       (claude-repl--log nil "workspace-commands-file unknown type: %s" type)

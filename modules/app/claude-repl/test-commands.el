@@ -603,6 +603,35 @@
     (claude-repl-copy-reference)
     (should (equal (car kill-ring) "src/foo.el:42"))))
 
+;;;; ---- claude-repl-paste-clipboard ----
+
+(ert-deftest claude-repl-cmd-test-paste-clipboard/inserts-at-point ()
+  "paste-clipboard inserts the workspace's `:clipboard' text at point."
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+    (puthash "ws1" (list :clipboard "hello world") claude-repl--workspaces)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+      (with-temp-buffer
+        (claude-repl-paste-clipboard)
+        (should (equal (buffer-string) "hello world"))))))
+
+(ert-deftest claude-repl-cmd-test-paste-clipboard/errors-when-unset ()
+  "paste-clipboard signals user-error when no clipboard text is set."
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+    (puthash "ws1" '() claude-repl--workspaces)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+      (with-temp-buffer
+        (should-error (claude-repl-paste-clipboard) :type 'user-error)))))
+
+(ert-deftest claude-repl-cmd-test-paste-clipboard/does-not-touch-os-clipboard ()
+  "paste-clipboard inserts only at point — kill-ring is left untouched."
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+        (kill-ring '("pre-existing")))
+    (puthash "ws1" (list :clipboard "ws-text") claude-repl--workspaces)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+      (with-temp-buffer
+        (claude-repl-paste-clipboard)
+        (should (equal (car kill-ring) "pre-existing"))))))
+
 ;;;; ---- claude-repl--diff-command-form (macro expansion) ----
 
 (ert-deftest claude-repl-cmd-test-diff-commands/explain-diff-worktree-exists ()

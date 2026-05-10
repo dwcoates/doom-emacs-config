@@ -412,6 +412,51 @@ Returns the full SHA of the new commit."
                     '((type . "bogus")) 10)))
     (should (= new-delay 10))))
 
+(ert-deftest claude-repl-test-dispatch-workspace-command-clipboard ()
+  "Clipboard commands do not change delay and route to the handler."
+  (let ((handled nil))
+    (cl-letf (((symbol-function 'claude-repl--handle-clipboard-command)
+               (lambda (cmd) (push cmd handled))))
+      (let ((cmd '((type . "clipboard") (workspace . "ws1") (text . "hi"))))
+        (let ((new-delay (claude-repl--dispatch-workspace-command cmd 10)))
+          (should (= new-delay 10))
+          (should (= (length handled) 1)))))))
+
+;;;; ---- Tests: handle-clipboard-command ----
+
+(ert-deftest claude-repl-test-handle-clipboard-command-stores-text ()
+  "handle-clipboard-command stores `:text' on the workspace under `:clipboard'."
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+    (puthash "ws1" '() claude-repl--workspaces)
+    (claude-repl--handle-clipboard-command
+     '((type . "clipboard") (workspace . "ws1") (text . "payload")))
+    (should (equal (claude-repl--ws-get "ws1" :clipboard) "payload"))))
+
+(ert-deftest claude-repl-test-handle-clipboard-command-missing-workspace ()
+  "Missing `workspace' is logged and skipped — no error, no state change."
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+    (claude-repl--handle-clipboard-command
+     '((type . "clipboard") (text . "payload")))
+    (should (= 0 (hash-table-count claude-repl--workspaces)))))
+
+(ert-deftest claude-repl-test-handle-clipboard-command-missing-text ()
+  "Missing `text' is logged and skipped — no error, slot stays nil."
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+    (puthash "ws1" '() claude-repl--workspaces)
+    (claude-repl--handle-clipboard-command
+     '((type . "clipboard") (workspace . "ws1")))
+    (should-not (claude-repl--ws-get "ws1" :clipboard))))
+
+(ert-deftest claude-repl-test-handle-clipboard-command-overwrites ()
+  "Successive clipboard commands overwrite the prior value."
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+    (puthash "ws1" '() claude-repl--workspaces)
+    (claude-repl--handle-clipboard-command
+     '((workspace . "ws1") (text . "first")))
+    (claude-repl--handle-clipboard-command
+     '((workspace . "ws1") (text . "second")))
+    (should (equal (claude-repl--ws-get "ws1" :clipboard) "second"))))
+
 ;;;; ---- Tests: process-workspace-commands-file ----
 
 (ert-deftest claude-repl-test-process-workspace-commands-file-missing ()

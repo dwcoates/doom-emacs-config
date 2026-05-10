@@ -559,6 +559,22 @@ Without region: copies file:line."
     (kill-new ref)
     (message "Copied: %s" ref)))
 
+(defun claude-repl-paste-clipboard ()
+  "Insert the current workspace's `:clipboard' text at point.
+The slot is populated by `clipboard'-typed workspace_commands files
+\(see `claude-repl--handle-clipboard-command') — a per-workspace
+clipboard, deliberately distinct from the OS clipboard.
+
+Signals `user-error' when no text has been set for the current
+workspace."
+  (interactive)
+  (let* ((ws (+workspace-current-name))
+         (text (claude-repl--ws-get ws :clipboard)))
+    (unless text
+      (user-error "No clipboard text set for workspace '%s'" ws))
+    (claude-repl--log ws "paste-clipboard: ws=%s len=%d" ws (length text))
+    (insert text)))
+
 ;;;; Workspace snapshot save/load
 
 ;; defconst (not defcustom) so reload always re-evaluates the path —
