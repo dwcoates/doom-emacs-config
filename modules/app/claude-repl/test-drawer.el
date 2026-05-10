@@ -112,6 +112,33 @@
       (should-error (claude-repl-drawer-kill) :type 'user-error)
       (should-error (claude-repl-drawer-interrupt) :type 'user-error))))
 
+(ert-deftest claude-repl-drawer-test-toggle-hidden-active-to-hidden ()
+  "Toggling a non-hidden entry calls `claude-repl--on-close' with the entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws1" :priority "p1" :repl-state :active)
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((arg :unset))
+        (cl-letf (((symbol-function 'claude-repl--on-close)
+                   (lambda (&optional ws) (setq arg ws))))
+          (claude-repl-drawer-toggle-hidden))
+        (should (equal arg "ws1"))))))
+
+(ert-deftest claude-repl-drawer-test-toggle-hidden-hidden-to-active ()
+  "Toggling a `:hidden' entry calls `claude-repl--unhide-workspace' with the entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws1" :priority "p1" :repl-state :hidden)
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      ;; Hidden ws renders in HIDDEN section — find it via direct goto.
+      (should (claude-repl-drawer--goto-workspace-line "ws1"))
+      (let ((arg :unset))
+        (cl-letf (((symbol-function 'claude-repl--unhide-workspace)
+                   (lambda (ws) (setq arg ws))))
+          (claude-repl-drawer-toggle-hidden))
+        (should (equal arg "ws1"))))))
+
 (ert-deftest claude-repl-drawer-test-new-child-dispatches-to-entry ()
   "`claude-repl-drawer-new-child' calls create-worktree-workspace with `head'+entry."
   (claude-repl-test--with-clean-state

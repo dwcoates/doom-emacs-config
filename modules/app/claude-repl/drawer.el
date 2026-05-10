@@ -156,6 +156,7 @@ The current-entry overlay covers this region with
     (define-key map (kbd "m")       #'claude-repl-drawer-merge-child)
     (define-key map (kbd "n")       #'claude-repl-drawer-new-child)
     (define-key map (kbd "f")       #'claude-repl-drawer-new-fork)
+    (define-key map (kbd "H")       #'claude-repl-drawer-toggle-hidden)
     (define-key map (kbd "C-c C-k") #'claude-repl-drawer-interrupt)
     ;; Block horizontal char navigation — the entry is the unit of
     ;; selection; in-line cursor placement is reserved for searches.
@@ -262,6 +263,7 @@ Runs after every command in the drawer buffer."
     "m"             #'claude-repl-drawer-merge-child
     "n"             #'claude-repl-drawer-new-child
     "f"             #'claude-repl-drawer-new-fork
+    "H"             #'claude-repl-drawer-toggle-hidden
     (kbd "C-c C-k") #'claude-repl-drawer-interrupt)
   ;; Block horizontal char navigation — entry is the navigational unit.
   (evil-define-key '(normal motion) claude-repl-drawer-mode-map
@@ -733,6 +735,20 @@ workspace-generation skill."
   (interactive)
   (claude-repl-create-worktree-workspace
    'head (claude-repl-drawer--require-ws-at-point)))
+
+(defun claude-repl-drawer-toggle-hidden ()
+  "Toggle the entry-at-point's hidden state.
+When `:repl-state' is `:hidden', calls `claude-repl--unhide-workspace'
+to flip it back to `:active'.  Otherwise calls `claude-repl--on-close'
+which sets `:hidden' (the deprio-close path).  Refreshes the drawer
+so the entry moves between MAIN and HIDDEN sections."
+  (interactive)
+  (let* ((ws     (claude-repl-drawer--require-ws-at-point))
+         (rstate (claude-repl--ws-get ws :repl-state)))
+    (if (eq rstate :hidden)
+        (claude-repl--unhide-workspace ws)
+      (claude-repl--on-close ws))
+    (claude-repl-drawer-refresh)))
 
 (defun claude-repl-drawer-new-fork ()
   "Fork the claude session of the entry at point into a new worktree.
