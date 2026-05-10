@@ -112,6 +112,58 @@
       (should-error (claude-repl-drawer-kill) :type 'user-error)
       (should-error (claude-repl-drawer-interrupt) :type 'user-error))))
 
+(ert-deftest claude-repl-drawer-test-priority-up-from-p1-to-p05 ()
+  "`priority-up' cycles p1 → p05."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((args :unset))
+        (cl-letf (((symbol-function 'claude-repl-set-priority)
+                   (lambda (p ws) (setq args (list p ws)))))
+          (claude-repl-drawer-priority-up))
+        (should (equal args '("p05" "ws")))))))
+
+(ert-deftest claude-repl-drawer-test-priority-down-from-p1-to-p2 ()
+  "`priority-down' cycles p1 → p2."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((args :unset))
+        (cl-letf (((symbol-function 'claude-repl-set-priority)
+                   (lambda (p ws) (setq args (list p ws)))))
+          (claude-repl-drawer-priority-down))
+        (should (equal args '("p2" "ws")))))))
+
+(ert-deftest claude-repl-drawer-test-priority-down-from-p3-to-nil ()
+  "`priority-down' from p3 cycles to nil (sent as empty string to set-priority)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p3")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((args :unset))
+        (cl-letf (((symbol-function 'claude-repl-set-priority)
+                   (lambda (p ws) (setq args (list p ws)))))
+          (claude-repl-drawer-priority-down))
+        (should (equal args '("" "ws")))))))
+
+(ert-deftest claude-repl-drawer-test-priority-up-from-nil-to-p3 ()
+  "`priority-up' from nil cycles to p3 (one step toward higher priority)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((args :unset))
+        (cl-letf (((symbol-function 'claude-repl-set-priority)
+                   (lambda (p ws) (setq args (list p ws)))))
+          (claude-repl-drawer-priority-up))
+        (should (equal args '("p3" "ws")))))))
+
 (ert-deftest claude-repl-drawer-test-toggle-hidden-active-to-hidden ()
   "Toggling a non-hidden entry calls `claude-repl--on-close' with the entry."
   (claude-repl-test--with-clean-state

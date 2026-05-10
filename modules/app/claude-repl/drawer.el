@@ -157,6 +157,8 @@ The current-entry overlay covers this region with
     (define-key map (kbd "n")       #'claude-repl-drawer-new-child)
     (define-key map (kbd "f")       #'claude-repl-drawer-new-fork)
     (define-key map (kbd "H")       #'claude-repl-drawer-toggle-hidden)
+    (define-key map (kbd "+")       #'claude-repl-drawer-priority-up)
+    (define-key map (kbd "-")       #'claude-repl-drawer-priority-down)
     (define-key map (kbd "C-c C-k") #'claude-repl-drawer-interrupt)
     ;; Block horizontal char navigation — the entry is the unit of
     ;; selection; in-line cursor placement is reserved for searches.
@@ -264,6 +266,8 @@ Runs after every command in the drawer buffer."
     "n"             #'claude-repl-drawer-new-child
     "f"             #'claude-repl-drawer-new-fork
     "H"             #'claude-repl-drawer-toggle-hidden
+    "+"             #'claude-repl-drawer-priority-up
+    "-"             #'claude-repl-drawer-priority-down
     (kbd "C-c C-k") #'claude-repl-drawer-interrupt)
   ;; Block horizontal char navigation — entry is the navigational unit.
   (evil-define-key '(normal motion) claude-repl-drawer-mode-map
@@ -735,6 +739,42 @@ workspace-generation skill."
   (interactive)
   (claude-repl-create-worktree-workspace
    'head (claude-repl-drawer--require-ws-at-point)))
+
+(defcustom claude-repl-drawer-priority-cycle
+  '("p05" "p1" "p2" "p3" nil)
+  "Ordered list (highest → lowest) used by drawer `+'/`-' priority cycling.
+The trailing `nil' represents 'no priority'.  Cycle wraps at both ends."
+  :type '(repeat (choice string (const nil)))
+  :group 'claude-repl)
+
+(defun claude-repl-drawer--cycle-priority (ws step)
+  "Cycle WS's priority by STEP through `claude-repl-drawer-priority-cycle'.
+STEP is -1 (toward the head of the cycle, e.g. p05) or +1 (toward
+the tail, e.g. nil).  Calls `claude-repl-set-priority' with the new
+value (empty string when cycling to nil, since that's set-priority's
+clear sentinel)."
+  (let* ((cur (claude-repl--ws-get ws :priority))
+         (cycle claude-repl-drawer-priority-cycle)
+         (n (length cycle))
+         (idx (or (cl-position cur cycle :test #'equal) (1- n)))
+         (new-idx (mod (+ idx step) n))
+         (new (nth new-idx cycle))
+         (new-arg (or new "")))
+    (claude-repl-set-priority new-arg ws)))
+
+(defun claude-repl-drawer-priority-up ()
+  "Cycle the entry-at-point's priority up (toward p05)."
+  (interactive)
+  (claude-repl-drawer--cycle-priority
+   (claude-repl-drawer--require-ws-at-point) -1)
+  (claude-repl-drawer-refresh))
+
+(defun claude-repl-drawer-priority-down ()
+  "Cycle the entry-at-point's priority down (toward nil)."
+  (interactive)
+  (claude-repl-drawer--cycle-priority
+   (claude-repl-drawer--require-ws-at-point) +1)
+  (claude-repl-drawer-refresh))
 
 (defun claude-repl-drawer-toggle-hidden ()
   "Toggle the entry-at-point's hidden state.
