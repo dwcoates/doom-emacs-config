@@ -35,8 +35,14 @@ do not abort workspace creation."
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-worktree-default-base "origin/master"
-  "Default git ref for new worktree branches when no fork source is active."
+(defcustom claude-repl-worktree-default-base "master"
+  "Default git ref for new worktree branches when no fork source is active.
+Defaults to local `master' rather than `origin/master' so freshly created
+worktrees inherit any local-only commits on master.  When the resolved
+base equals `claude-repl-master-branch-name', the worktree-creation flow
+also runs `git fetch origin <name>' first so the corresponding remote
+tracking ref stays current — fetching on creation costs nothing extra
+but updates `origin/master' for later use."
   :type 'string
   :group 'claude-repl)
 
@@ -626,12 +632,16 @@ When everything is ready, CALLBACK (if non-nil) is called with (PATH DIRNAME).
 
 BASE-COMMIT is the git ref the new branch is created from.  When nil,
 defaults to \"HEAD\" if FORK-SESSION-ID is set (forks track the live
-session's tip) and \"origin/master\" otherwise.  The interactive entry
-point passes \"HEAD\" explicitly so `SPC TAB n' always branches off the
-current worktree; `SPC TAB N' passes \"origin/master\".
+session's tip) and `claude-repl-worktree-default-base' otherwise.  The
+interactive entry point passes \"HEAD\" explicitly so `SPC TAB n' always
+branches off the current worktree; `SPC TAB N' passes the local trunk
+branch (e.g. \"master\").
 
-The fetch step runs only when BASE-COMMIT has an \"origin/\" prefix
-\(i.e. the new branch needs an up-to-date remote ref).
+The fetch step runs in two cases:
+- BASE-COMMIT has an \"origin/\" prefix — fetch the parsed remote ref.
+- BASE-COMMIT equals `claude-repl-master-branch-name' — fetch the
+  corresponding origin ref so `origin/<trunk>' stays current even
+  though the new branch is rooted in the local trunk.
 
 GIT-ROOT is the repository the new worktree is rooted in.  When nil, it
 is resolved once here via `claude-repl--resolve-current-git-root'.  The
@@ -669,6 +679,11 @@ from; persisted as `:source-ws-dir' on the new workspace so
          "fetch" git-root
          (list "fetch" "origin" (substring base-commit (length "origin/")))
          (apply-partially #'claude-repl--worktree-fetch-callback add-fn)))
+       ((equal base-commit claude-repl-master-branch-name)
+        (claude-repl--async-git
+         "fetch" git-root
+         (list "fetch" "origin" base-commit)
+         (apply-partially #'claude-repl--worktree-fetch-callback add-fn)))
        (t
         (funcall add-fn))))))
 
@@ -698,10 +713,14 @@ paths, so every identity-based jump pulses uniformly."
 
 (defconst claude-repl--worktree-base-commits
   '((head   . "HEAD")
-    (master . "origin/master"))
+    (master . "master"))
   "Map of base-symbol to git ref for `claude-repl-create-worktree-workspace'.
 Keys are the symbols callers pass as the BASE argument; values are the
-git refs forwarded to `claude-repl--do-create-worktree-workspace'.")
+git refs forwarded to `claude-repl--do-create-worktree-workspace'.
+The `master' entry resolves to LOCAL `master' (not `origin/master') so
+new worktrees inherit any local-only commits; the worktree-creation
+flow still runs `git fetch origin master' first as a freshness gesture
+\(see `claude-repl--do-create-worktree-workspace').")
 
 (defun claude-repl--resolve-worktree-base (base)
   "Return the git ref corresponding to BASE.
@@ -732,7 +751,10 @@ BASE selects the git ref the new branch is created from.  It is a
 symbol key in `claude-repl--worktree-base-commits':
   `head'   — branch off the current worktree's HEAD (default; edits
              in-flight here carry over).
-  `master' — branch off `origin/master' (fetched first).
+  `master' — branch off LOCAL `master'.  A `git fetch origin master'
+             still runs first so `origin/master' stays current, but the
+             new branch is rooted in local `master' so any local-only
+             commits on master carry over.
 
 SOURCE-WS, when non-nil, names the workspace whose repository the new
 worktree is rooted in (instead of the ambient workspace).  Interactively,
@@ -758,9 +780,13 @@ the JSON file lands and the file-watcher dispatches it."
        raw-prompt prefixed-prompt git-root base-commit nil))))
 
 (defun claude-repl-create-worktree-workspace-from-origin-master (&optional source-ws)
-  "Create a new worktree workspace branched from `origin/master'.
+  "Create a new worktree workspace branched from local `master'.
 Thin wrapper around `claude-repl-create-worktree-workspace' that
 passes BASE = `master' so a keybinding can invoke it directly.
+
+A `git fetch origin master' still runs first (cheap freshness gesture
+that updates the `origin/master' tracking ref), but the new branch is
+rooted in local `master' so any local-only commits carry over.
 SOURCE-WS, when non-nil, names the workspace whose repository the new
 worktree is rooted in.  Interactively, `\\[universal-argument]' prompts
 for it from the persp workspace list."
@@ -888,7 +914,7 @@ FORK-FROM is a workspace name (possibly a full branch like \"DWC/foo\");
 it is normalized to the bare name (\"foo\") before lookup.
 Returns the session ID string.  Signals `error' if FORK-FROM is non-nil
 but the workspace is unknown or has no active session — callers must not
-silently degrade to origin/master when forking was explicitly requested."
+silently degrade to the default base when forking was explicitly requested."
   (when fork-from
     (let* ((ws (claude-repl--bare-workspace-name fork-from))
            (inst (ignore-errors (claude-repl--active-inst ws)))
@@ -935,8 +961,8 @@ empty, the workspace is NOT created — callers must emit git_root explicitly
 rather than relying on the ambient Emacs context.
 
 CMD may contain an optional \"base_commit\" field naming the git ref the
-new branch is created from (e.g. \"HEAD\", \"origin/master\").  When
-absent or empty, the default applies (HEAD for forks,
+new branch is created from (e.g. \"HEAD\", \"master\").  When absent or
+empty, the default applies (HEAD for forks,
 `claude-repl-worktree-default-base' otherwise)."
   (let* ((name (alist-get 'name cmd))
          (prompt (alist-get 'prompt cmd nil))
