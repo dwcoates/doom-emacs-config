@@ -201,6 +201,26 @@ overwriting the previous summary."
         (claude-repl--kickoff-prompt-summary "ws-target" "the prompt")
         (should (equal captured '("ws-target" "the prompt")))))))
 
+;;;; ---- Tests: prompt-summary-spawn cwd ----
+
+(ert-deftest claude-repl-test-prompt-summary-spawn-binds-temporary-default-directory ()
+  "Spawn must invoke `make-process' with `default-directory' rebound to
+`temporary-file-directory'.  Without this, the headless claude inherits
+the calling workspace's project-dir, its hooks fire with that cwd, and
+the sentinel watcher misattributes them — flipping :claude-state to :done
+while the user's interactive Claude is still mid-turn."
+  (let ((captured-cwd nil))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest _plist)
+                 (setq captured-cwd default-directory)
+                 (make-marker)))
+              ((symbol-function 'process-send-string) (lambda (&rest _) nil))
+              ((symbol-function 'process-send-eof) (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--log) (lambda (&rest _) nil)))
+      (claude-repl--prompt-summary-spawn "ws1" "some raw prompt that is long enough")
+      (should (equal (file-name-as-directory captured-cwd)
+                     (file-name-as-directory temporary-file-directory))))))
+
 ;;;; ---- Tests: apply-prompt-summary (writeback + stale-drop) ----
 
 (ert-deftest claude-repl-test-apply-prompt-summary-writes-when-raw-matches ()

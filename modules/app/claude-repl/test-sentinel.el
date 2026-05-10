@@ -178,8 +178,9 @@ re-dispatched by the poll fallback observing a still-present file."
         ;; File should still be deleted even when dir is nil
         (should (equal deleted-file "/tmp/stop_456"))))))
 
-(ert-deftest claude-repl-test-process-sentinel-file-nil-ws-warns ()
-  "When ws-for-dir returns nil, the warning should be logged and callback skipped."
+(ert-deftest claude-repl-test-process-sentinel-file-nil-ws-in-git-warns ()
+  "When ws-for-dir returns nil but dir is inside a git repo, the warning
+should be logged (genuine misattribution case) and callback skipped."
   (claude-repl-test--with-clean-state
     (let ((callback-called nil)
           (warning-msg nil)
@@ -188,6 +189,8 @@ re-dispatched by the poll fallback observing a still-present file."
                  (lambda (_f) '(:dir "/unknown/dir" :session-id nil)))
                 ((symbol-function 'claude-repl--ws-for-dir)
                  (lambda (_d) nil))
+                ((symbol-function 'claude-repl--git-root)
+                 (lambda (_d) "/unknown"))
                 ((symbol-function 'message)
                  (lambda (fmt &rest args) (setq warning-msg (apply #'format fmt args))))
                 ((symbol-function 'delete-file)
@@ -200,6 +203,33 @@ re-dispatched by the poll fallback observing a still-present file."
         (should-not callback-called)
         (should (string-match-p "matched no workspace" warning-msg))
         (should (string-match-p "/unknown/dir" warning-msg))
+        (should (equal deleted-file "/tmp/stop_789"))))))
+
+(ert-deftest claude-repl-test-process-sentinel-file-nil-ws-non-git-no-warn ()
+  "When ws-for-dir returns nil AND dir is outside any git repo, the warning
+should be SUPPRESSED (deliberate non-workspace cwd from headless spawns in
+prompt-summary.el / worktree.el).  Callback still skipped, file still deleted."
+  (claude-repl-test--with-clean-state
+    (let ((callback-called nil)
+          (warning-msg nil)
+          (deleted-file nil))
+      (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
+                 (lambda (_f) '(:dir "/var/folders/xx" :session-id nil)))
+                ((symbol-function 'claude-repl--ws-for-dir)
+                 (lambda (_d) nil))
+                ((symbol-function 'claude-repl--git-root)
+                 (lambda (_d) nil))
+                ((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq warning-msg (apply #'format fmt args))))
+                ((symbol-function 'delete-file)
+                 (lambda (f) (setq deleted-file f))))
+        (claude-repl--process-sentinel-file
+         "/tmp/stop_789"
+         '(:callback (lambda (&rest _) (setq callback-called t))
+           :warning "[claude-repl] WARNING: stop sentinel dir=%s matched no workspace"
+           :name "test"))
+        (should-not callback-called)
+        (should-not warning-msg)
         (should (equal deleted-file "/tmp/stop_789"))))))
 
 (ert-deftest claude-repl-test-process-sentinel-file-always-deletes ()

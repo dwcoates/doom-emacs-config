@@ -212,7 +212,17 @@ name and the directory."
       (claude-repl--log nil "process-sentinel-file: dir is nil (read failed) for %s"
                         (file-name-nondirectory file)))
      ((null ws)
-      (message (plist-get handler :warning) dir))
+      ;; A null ws on a sentinel from a non-git cwd is expected — the headless
+      ;; `claude -p' calls in `prompt-summary.el' / `worktree.el' deliberately
+      ;; spawn from `temporary-file-directory' so their hooks don't get
+      ;; attributed to the calling workspace.  Demote those to a verbose log;
+      ;; reserve the user-visible warning for genuine misattribution (cwd is
+      ;; inside a git repo, but the watcher couldn't match it).
+      (if (claude-repl--git-root dir)
+          (message (plist-get handler :warning) dir)
+        (claude-repl--log-verbose nil
+                                  "process-sentinel-file: skipping non-git cwd dir=%s file=%s"
+                                  dir (file-name-nondirectory file))))
      (t
       (claude-repl--update-session-id-from-sentinel ws session-id)
       (claude-repl--log ws "%s: file=%s dir=%s ws=%s status=%s"

@@ -477,13 +477,19 @@ asynchronously."
                       "spawn-workspace-generation[%s]: prompt=%S"
                       gen-id prompt-snippet)
     (condition-case err
-        (let ((proc (make-process
-                     :name (format "claude-workspace-generation-%s" gen-id)
-                     :buffer out-buf
-                     :command cmd
-                     :connection-type 'pipe
-                     :noquery t
-                     :sentinel (claude-repl--workspace-generation-sentinel out-buf gen-id))))
+        ;; Spawn from a non-project cwd so the headless claude's hooks
+        ;; (SessionStart / UserPromptSubmit / Stop) fire with a cwd that
+        ;; doesn't resolve to any registered workspace.  Otherwise the
+        ;; sentinel watcher attributes them to the calling workspace and
+        ;; flips :claude-state to :done.
+        (let* ((default-directory temporary-file-directory)
+               (proc (make-process
+                      :name (format "claude-workspace-generation-%s" gen-id)
+                      :buffer out-buf
+                      :command cmd
+                      :connection-type 'pipe
+                      :noquery t
+                      :sentinel (claude-repl--workspace-generation-sentinel out-buf gen-id))))
           (process-send-string proc proc-input)
           (process-send-eof proc)
           proc)

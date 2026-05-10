@@ -241,13 +241,20 @@ state-mutation entry point."
          (proc-input (claude-repl--prompt-summary-build-input raw))
          (sentinel (claude-repl--prompt-summary-make-sentinel ws raw out-buf)))
     (condition-case err
-        (let ((proc (make-process
-                     :name (format "claude-prompt-summary-%s" ws)
-                     :buffer out-buf
-                     :command cmd
-                     :connection-type 'pipe
-                     :noquery t
-                     :sentinel sentinel)))
+        ;; Spawn from a non-project cwd so the headless claude's hooks
+        ;; (SessionStart / UserPromptSubmit / Stop) fire with a cwd that
+        ;; doesn't resolve to any registered workspace.  Otherwise the
+        ;; sentinel watcher attributes them to the calling workspace and
+        ;; flips :claude-state to :done while the user's interactive Claude
+        ;; is still mid-turn.
+        (let* ((default-directory temporary-file-directory)
+               (proc (make-process
+                      :name (format "claude-prompt-summary-%s" ws)
+                      :buffer out-buf
+                      :command cmd
+                      :connection-type 'pipe
+                      :noquery t
+                      :sentinel sentinel)))
           (process-send-string proc proc-input)
           (process-send-eof proc)
           proc)

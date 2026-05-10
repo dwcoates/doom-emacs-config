@@ -1836,6 +1836,24 @@ hits the permission prompt and dies emitting only its question."
                      (list claude-repl-workspace-generation-program
                            "-p" "--model" claude-repl-workspace-generation-model))))))
 
+(ert-deftest claude-repl-test-spawn-workspace-generation-binds-temporary-default-directory ()
+  "Spawn must invoke `make-process' with `default-directory' rebound to
+`temporary-file-directory'.  Without this, the headless claude inherits
+the caller's cwd, its hooks fire with that cwd, and the sentinel watcher
+misattributes them to whichever workspace owns that project-dir — flipping
+:claude-state to :done."
+  (let ((captured-cwd nil))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest _plist)
+                 (setq captured-cwd default-directory)
+                 (make-marker)))
+              ((symbol-function 'process-send-string) (lambda (&rest _) nil))
+              ((symbol-function 'process-send-eof) (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--log) (lambda (&rest _) nil)))
+      (claude-repl--spawn-workspace-generation "raw" "prefixed" "/tmp/repo/" "HEAD" nil)
+      (should (equal (file-name-as-directory captured-cwd)
+                     (file-name-as-directory temporary-file-directory))))))
+
 ;;;; ---- Tests: workspace-generation logging helpers ----
 
 (ert-deftest claude-repl-test-workspace-generation-id-returns-non-empty-hex ()
