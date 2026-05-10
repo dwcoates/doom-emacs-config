@@ -1603,6 +1603,108 @@ so the lazy-start hook skips firing for each restored workspace."
             (should (equal flashed-ws "switched-ws")))
         (delete-directory tmp-dir t)))))
 
+;;;; ---- Tests: snapshot archive picker ----
+
+(ert-deftest claude-repl-cmd-test-snapshot-file-ws-count/counts-entries ()
+  "snapshot-file-ws-count returns the number of entries in the snapshot."
+  (let ((f (make-temp-file "claude-snap-count-" nil ".el")))
+    (unwind-protect
+        (progn
+          (with-temp-file f
+            (insert "((\"a\" :project-dir \"/tmp/a\") (\"b\" :project-dir \"/tmp/b\") (\"c\" :project-dir \"/tmp/c\"))"))
+          (should (= 3 (claude-repl--snapshot-file-ws-count f))))
+      (delete-file f))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-file-ws-count/zero-for-missing ()
+  "snapshot-file-ws-count returns 0 for a missing file (graceful)."
+  (should (= 0 (claude-repl--snapshot-file-ws-count "/nonexistent/snap.el"))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-candidate-label/contains-count-and-date ()
+  "Candidate label embeds workspace count and a YYYY-MM-DD HH:MM mtime."
+  (let ((f (make-temp-file "claude-snap-label-" nil ".el")))
+    (unwind-protect
+        (progn
+          (with-temp-file f
+            (insert "((\"a\" :project-dir \"/tmp/a\") (\"b\" :project-dir \"/tmp/b\"))"))
+          (let ((label (claude-repl--snapshot-candidate-label f)))
+            (should (string-match-p (file-name-nondirectory f) label))
+            (should (string-match-p "2ws" label))
+            (should (string-match-p "[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [0-9]\\{2\\}:[0-9]\\{2\\}"
+                                    label))))
+      (delete-file f))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-archive-candidates/current-and-archives ()
+  "snapshot-archive-candidates returns the current file and every archived file."
+  (let* ((dir (file-name-as-directory (make-temp-file "claude-snap-dir-" t)))
+         (current (expand-file-name "workspaces.el" dir))
+         (archive-dir (expand-file-name "workspaces-archive" dir))
+         (archive-a (expand-file-name "20260510T184855.el" archive-dir))
+         (archive-b (expand-file-name "20260505T094316.el" archive-dir)))
+    (unwind-protect
+        (let ((claude-repl-workspace-snapshot-file current))
+          (make-directory archive-dir t)
+          (with-temp-file current (insert "((\"cur\" :project-dir \"/tmp/c\"))"))
+          (with-temp-file archive-a (insert "((\"a\" :project-dir \"/tmp/a\") (\"b\" :project-dir \"/tmp/b\"))"))
+          (with-temp-file archive-b (insert "((\"x\" :project-dir \"/tmp/x\"))"))
+          (let* ((candidates (claude-repl--snapshot-archive-candidates))
+                 (paths (mapcar #'cdr candidates)))
+            (should (= 3 (length candidates)))
+            (should (member current paths))
+            (should (member archive-a paths))
+            (should (member archive-b paths))))
+      (delete-directory dir t))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-archive-candidates/archives-newest-first ()
+  "Archives are sorted newest-first (lexicographic on timestamped filename)."
+  (let* ((dir (file-name-as-directory (make-temp-file "claude-snap-dir-" t)))
+         (current (expand-file-name "workspaces.el" dir))
+         (archive-dir (expand-file-name "workspaces-archive" dir))
+         (older (expand-file-name "20260101T000000.el" archive-dir))
+         (newer (expand-file-name "20260601T120000.el" archive-dir)))
+    (unwind-protect
+        (let ((claude-repl-workspace-snapshot-file current))
+          (make-directory archive-dir t)
+          (with-temp-file current (insert "()"))
+          (with-temp-file older (insert "()"))
+          (with-temp-file newer (insert "()"))
+          (let* ((candidates (claude-repl--snapshot-archive-candidates))
+                 (paths (mapcar #'cdr candidates)))
+            ;; current first, then newer, then older
+            (should (equal paths (list current newer older)))))
+      (delete-directory dir t))))
+
+(ert-deftest claude-repl-cmd-test-load-from-archive/loads-selected-file ()
+  "load-from-archive invokes loader with the selected file's path."
+  (let* ((dir (file-name-as-directory (make-temp-file "claude-snap-dir-" t)))
+         (current (expand-file-name "workspaces.el" dir))
+         (archive-dir (expand-file-name "workspaces-archive" dir))
+         (chosen-archive (expand-file-name "20260510T184855.el" archive-dir))
+         loaded-file)
+    (unwind-protect
+        (let ((claude-repl-workspace-snapshot-file current))
+          (make-directory archive-dir t)
+          (with-temp-file current (insert "()"))
+          (with-temp-file chosen-archive (insert "()"))
+          (cl-letf (((symbol-function 'completing-read)
+                     (lambda (_prompt collection &rest _)
+                       ;; pick the archive entry (second, since current is first)
+                       (cl-find-if (lambda (s) (string-match-p "20260510T184855" s))
+                                   collection)))
+                    ((symbol-function 'claude-repl-load-workspace-snapshot)
+                     (lambda (file) (setq loaded-file file))))
+            (claude-repl-load-workspace-snapshot-from-archive)
+            (should (equal loaded-file chosen-archive))))
+      (delete-directory dir t))))
+
+(ert-deftest claude-repl-cmd-test-load-from-archive/errors-when-no-candidates ()
+  "load-from-archive signals user-error when no snapshot files exist anywhere."
+  (let ((claude-repl-workspace-snapshot-file "/nonexistent/snap.el")
+        (claude-repl--legacy-workspace-snapshot-file "/nonexistent/legacy.el"))
+    (cl-letf (((symbol-function 'claude-repl--workspace-snapshot-archive-dir)
+               (lambda () "/nonexistent/archive/")))
+      (should-error (claude-repl-load-workspace-snapshot-from-archive)
+                    :type 'user-error))))
+
 ;;;; ---- Tests: snapshot startup-load scheduler ----
 
 (ert-deftest claude-repl-cmd-test-schedule-snapshot-startup-load/schedules-idle-timer ()

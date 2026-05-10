@@ -768,19 +768,19 @@ roster-piggyback save doesn't spam the echo area on every state mutation."
           (message "Saved %d workspace(s) to %s"
                    (length snapshot) claude-repl-workspace-snapshot-file))))))
 
-(defun claude-repl-load-workspace-snapshot ()
-  "Load workspaces from `claude-repl-workspace-snapshot-file'.
-Reads `claude-repl-workspace-snapshot-file' (or its legacy module-dir
-fallback if the configured file is absent), then for each entry calls
-`+dwc/switch-to-project' to create/switch to the project's persp
-workspace and hydrates `:project-dir' and `:priority' into
-`claude-repl--workspaces' so the tabline paints the priority badge
+(defun claude-repl-load-workspace-snapshot (&optional file)
+  "Load workspaces from FILE (defaults to the configured snapshot path).
+When FILE is nil, reads `claude-repl-workspace-snapshot-file' (or its
+legacy module-dir fallback if the configured file is absent).  Then for
+each entry calls `+dwc/switch-to-project' to create/switch to the
+project's persp workspace and hydrates `:project-dir' and `:priority'
+into `claude-repl--workspaces' so the tabline paints the priority badge
 immediately.  Entries whose directory no longer exists are skipped.
 Claude itself is not started here — the workspace is added to
 `claude-repl--pending-snapshot-workspaces' and the lazy-start hook on
 `persp-activated-functions' starts claude on first visit."
   (interactive)
-  (let* ((file (claude-repl--workspace-snapshot-file-for-read))
+  (let* ((file (or file (claude-repl--workspace-snapshot-file-for-read)))
          (snapshot (claude-repl--read-sexp-file-if-exists file)))
     (unless snapshot
       (user-error "No workspace snapshot at %s" file))
@@ -833,6 +833,62 @@ corrupt snapshot can't block startup."
     (condition-case err
         (claude-repl-load-workspace-snapshot)
       (error (message "[claude-repl] snapshot load failed: %S" err)))))
+
+;;;; Workspace snapshot archive picker
+
+(defun claude-repl--snapshot-file-ws-count (file)
+  "Return the number of workspace entries in snapshot FILE, or 0 on error."
+  (or (ignore-errors
+        (length (claude-repl--read-sexp-file-if-exists file)))
+      0))
+
+(defun claude-repl--snapshot-file-mtime-string (file)
+  "Return FILE's last-modified time as a short `YYYY-MM-DD HH:MM' string."
+  (format-time-string "%Y-%m-%d %H:%M"
+                      (nth 5 (file-attributes file))))
+
+(defun claude-repl--snapshot-candidate-label (file)
+  "Format the completing-read label for snapshot FILE.
+Layout: `<basename>  <count>ws  <mtime>'.  Basename is padded so the
+count/date columns align across candidates in ivy/vertico."
+  (format "%-32s %3dws  %s"
+          (file-name-nondirectory file)
+          (claude-repl--snapshot-file-ws-count file)
+          (claude-repl--snapshot-file-mtime-string file)))
+
+(defun claude-repl--snapshot-archive-candidates ()
+  "Return an alist of (LABEL . PATH) for the current snapshot + archives.
+Current file first; archives newest-first by filename (the archive
+filename is a timestamp, so lexicographic sort works)."
+  (let* ((current (claude-repl--workspace-snapshot-file-for-read))
+         (archive-dir (claude-repl--workspace-snapshot-archive-dir))
+         (archives (and (file-directory-p archive-dir)
+                        (sort (directory-files archive-dir t "\\.el\\'" t)
+                              #'string>)))
+         (paths (cl-remove-duplicates
+                 (cl-remove-if-not #'file-exists-p
+                                   (cons current archives))
+                 :test #'equal)))
+    (mapcar (lambda (p)
+              (cons (claude-repl--snapshot-candidate-label p) p))
+            paths)))
+
+(defun claude-repl-load-workspace-snapshot-from-archive ()
+  "Pick a snapshot file (current or archived) and load it.
+Candidates are annotated with workspace count and last-modified time
+so the user can identify the right archive by size + recency.  Loads
+via `claude-repl-load-workspace-snapshot' with the chosen file passed
+explicitly (skips the configured-vs-legacy resolver)."
+  (interactive)
+  (let* ((candidates (claude-repl--snapshot-archive-candidates))
+         (_ (unless candidates
+              (user-error "No snapshot files found (no current file, no archives)")))
+         (choice (completing-read "Load workspace snapshot: "
+                                  (mapcar #'car candidates) nil t))
+         (file (cdr (assoc choice candidates))))
+    (when file
+      (claude-repl--log nil "load-workspace-snapshot-from-archive: file=%s" file)
+      (claude-repl-load-workspace-snapshot file))))
 
 ;;;; Project-switch wrapper
 
