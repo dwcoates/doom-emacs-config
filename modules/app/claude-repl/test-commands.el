@@ -1570,6 +1570,94 @@ so the lazy-start hook skips firing for each restored workspace."
         (should-not started)
         (should-not (gethash "test-ws" claude-repl--pending-snapshot-workspaces))))))
 
+(ert-deftest claude-repl-cmd-test-maybe-start-on-activate/sets-fallback-default-directory ()
+  "On first visit, hook sets `default-directory' on the fallback buffer to the
+workspace's :project-dir.  Backfills what `+workspaces-switch-to-project-h'
+normally does in the interactive switch path."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-fallback-" t)))
+           (fallback (get-buffer-create " *test-fallback-default-dir*"))
+           (claude-repl--loading-snapshot-p nil)
+           (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :project-dir tmp-dir)
+            (puthash "test-ws" (list :project-dir tmp-dir)
+                     claude-repl--pending-snapshot-workspaces)
+            (cl-letf (((symbol-function 'doom-fallback-buffer) (lambda () fallback))
+                      ((symbol-function 'claude-repl--initialize-claude) #'ignore)
+                      ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil)))
+              (claude-repl--maybe-start-on-activate)
+              (with-current-buffer fallback
+                (should (equal (file-name-as-directory default-directory) tmp-dir)))))
+        (when (buffer-live-p fallback) (kill-buffer fallback))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-maybe-start-on-activate/invokes-switch-project-function ()
+  "On first visit, hook calls `+workspaces-switch-project-function' with
+the workspace's :project-dir, so user-configured side effects (e.g.
+magit-status auto-open) fire lazily."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-switch-fn-" t)))
+           (claude-repl--loading-snapshot-p nil)
+           (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal))
+           (called-with nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :project-dir tmp-dir)
+            (puthash "test-ws" (list :project-dir tmp-dir)
+                     claude-repl--pending-snapshot-workspaces)
+            (let ((+workspaces-switch-project-function
+                   (lambda (dir) (setq called-with dir))))
+              (cl-letf (((symbol-function 'claude-repl--initialize-claude) #'ignore)
+                        ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil)))
+                (claude-repl--maybe-start-on-activate)
+                (should (equal (file-name-as-directory called-with) tmp-dir)))))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-maybe-start-on-activate/deferred-side-effects-precede-start ()
+  "Deferred side effects fire BEFORE `claude-repl--initialize-claude'.
+Order matters: claude's startup may inspect default-directory or expect
+the fallback buffer to be primed for the project."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-order-" t)))
+           (claude-repl--loading-snapshot-p nil)
+           (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal))
+           (events nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :project-dir tmp-dir)
+            (puthash "test-ws" (list :project-dir tmp-dir)
+                     claude-repl--pending-snapshot-workspaces)
+            (let ((+workspaces-switch-project-function
+                   (lambda (_dir) (push 'side-effect events))))
+              (cl-letf (((symbol-function 'claude-repl--initialize-claude)
+                         (lambda (&rest _) (push 'initialize-claude events)))
+                        ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil)))
+                (claude-repl--maybe-start-on-activate)
+                (should (equal (reverse events) '(side-effect initialize-claude))))))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-maybe-start-on-activate/skips-side-effects-when-dir-gone ()
+  "If the workspace's :project-dir no longer exists, deferred side effects
+are skipped (no crash); claude still gets a start attempt."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--loading-snapshot-p nil)
+          (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal))
+          (side-effect-fired nil)
+          (started nil))
+      (claude-repl--ws-put "test-ws" :project-dir "/nonexistent/gone")
+      (puthash "test-ws" (list :project-dir "/nonexistent/gone")
+               claude-repl--pending-snapshot-workspaces)
+      (let ((+workspaces-switch-project-function
+             (lambda (_dir) (setq side-effect-fired t))))
+        (cl-letf (((symbol-function 'claude-repl--initialize-claude)
+                   (lambda (&rest _) (setq started t)))
+                  ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil)))
+          (claude-repl--maybe-start-on-activate)
+          (should-not side-effect-fired)
+          (should started))))))
+
 ;;;; ---- claude-repl--hydrate-priority-from-state ----
 
 (ert-deftest claude-repl-cmd-test-hydrate-priority/sets-priority-from-state-file ()

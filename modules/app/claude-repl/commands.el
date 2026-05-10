@@ -851,12 +851,34 @@ status via `+workspaces-switch-project-function') on first visit."
   (and (fboundp '+workspace-current-name)
        (ignore-errors (+workspace-current-name))))
 
+(defun claude-repl--run-deferred-project-switch-side-effects (ws dir)
+  "Run the Doom project-switch side effects the loader deferred.
+The snapshot loader skips `+dwc/switch-to-project' to avoid the
+rename-on-empty collapse; the side effects that path normally provides
+\(setting `default-directory' on the fallback buffer, loading dir-locals,
+auto-opening magit via `+workspaces-switch-project-function') are run
+here on first visit instead.  WS is logged for traceability; DIR is the
+project root."
+  (claude-repl--with-error-logging "deferred-project-switch"
+    (when (and dir (file-directory-p dir))
+      (claude-repl--log ws "deferred-project-switch: ws=%s dir=%s" ws dir)
+      (when (fboundp 'doom-fallback-buffer)
+        (with-current-buffer (doom-fallback-buffer)
+          (setq default-directory (file-name-as-directory dir))
+          (when (fboundp 'hack-dir-local-variables-non-file-buffer)
+            (hack-dir-local-variables-non-file-buffer))))
+      (when (and (boundp '+workspaces-switch-project-function)
+                 +workspaces-switch-project-function)
+        (funcall +workspaces-switch-project-function dir)))))
+
 (defun claude-repl--maybe-start-on-activate (&rest _)
   "Lazy-start hook for `persp-activated-functions'.
-Starts claude for the just-activated workspace iff it was restored from
-snapshot (still in `claude-repl--pending-snapshot-workspaces') and
-claude isn't already running.  Skipped during snapshot loading so the
-loader's own `+dwc/switch-to-project' calls don't eager-start claude.
+On first visit to a snapshot-restored workspace, runs the deferred
+project-switch side effects (default-directory, dir-locals, magit auto-
+open via `+workspaces-switch-project-function') and then starts claude
+unless it's already running.  Skipped during snapshot loading so the
+loader doesn't eager-start anything.
+
 No-op if the Doom workspace API isn't fboundp yet — the hook may be
 invoked early in persp-mode activation before Doom's `+workspace-*'
 autoloads are in place."
@@ -864,10 +886,12 @@ autoloads are in place."
              (fboundp '+workspace-current-name))
     (let ((ws (ignore-errors (+workspace-current-name))))
       (when (and ws (gethash ws claude-repl--pending-snapshot-workspaces))
-        (remhash ws claude-repl--pending-snapshot-workspaces)
-        (unless (claude-repl--claude-running-p ws)
-          (claude-repl--log ws "maybe-start-on-activate: starting ws=%s" ws)
-          (claude-repl--initialize-claude ws))))))
+        (let ((dir (claude-repl--ws-get ws :project-dir)))
+          (remhash ws claude-repl--pending-snapshot-workspaces)
+          (claude-repl--run-deferred-project-switch-side-effects ws dir)
+          (unless (claude-repl--claude-running-p ws)
+            (claude-repl--log ws "maybe-start-on-activate: starting ws=%s" ws)
+            (claude-repl--initialize-claude ws)))))))
 
 (defun claude-repl--load-workspace-snapshot-on-startup ()
   "Restore the workspace snapshot silently at Emacs startup.
