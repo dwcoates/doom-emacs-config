@@ -448,10 +448,14 @@ content (rather than back to column 0).  HIDDEN dims the block."
                              (propertize ws 'face name-face)
                              (if dirty " ●" "")))
          (summary    (claude-repl-drawer--summary-text ws))
+         ;; Continuation lines align with content: header's content
+         ;; (the glyph) starts at gutter+indent; summary's content
+         ;; starts at gutter+indent+2 (the leading two-space pad
+         ;; before the summary text).
          (header-wrap-prefix
-          (concat claude-repl-drawer-gutter indent-str "  "))
+          (concat claude-repl-drawer-gutter indent-str))
          (summary-wrap-prefix
-          (concat claude-repl-drawer-gutter indent-str "    ")))
+          (concat claude-repl-drawer-gutter indent-str "  ")))
     (let ((header-start (point)))
       (insert header "\n")
       (add-text-properties header-start (point)
@@ -728,16 +732,21 @@ immediately, not after the next command."
       ;; mode-init only fires on first activation.
       (setq-local truncate-lines nil
                   word-wrap t)
-      (claude-repl-drawer--render)
-      (or (and current-ws
-               (claude-repl-drawer--goto-workspace-line current-ws))
-          (claude-repl-drawer--goto-first-workspace))
-      (claude-repl-drawer--post-command))
+      (claude-repl-drawer--render))
     (when win
       (set-window-dedicated-p win t)
       (claude-repl-drawer--apply-width win)
-      (set-window-point win (with-current-buffer buf (point)))
-      (select-window win))
+      ;; Kill the wrap-continuation fringe arrow.  Both fringes 0-width.
+      (set-window-fringes win 0 0 nil)
+      (select-window win)
+      ;; Position AFTER select-window so the window-point and buffer
+      ;; point are synced — `set-window-point' before selection can be
+      ;; clobbered by Emacs's display-buffer-time window-point capture.
+      (or (and current-ws
+               (claude-repl-drawer--goto-workspace-line current-ws))
+          (claude-repl-drawer--goto-first-workspace))
+      (set-window-point win (point))
+      (claude-repl-drawer--post-command))
     (setq claude-repl-drawer--global-visible-p t)
     win))
 
@@ -773,6 +782,7 @@ the drawer is already visible in the current frame's window tree."
       (when win
         (set-window-dedicated-p win t)
         (claude-repl-drawer--apply-width win)
+        (set-window-fringes win 0 0 nil)
         (set-window-point win (with-current-buffer buf (point)))))))
 
 (with-eval-after-load 'persp-mode
