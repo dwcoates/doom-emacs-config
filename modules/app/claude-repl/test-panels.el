@@ -2030,7 +2030,7 @@ from `create-buffer'.  Stubs can be overridden by wrapping BODY in another
              ((symbol-function 'claude-repl--log-session-start) #'ignore)
              ((symbol-function 'vterm-mode) #'ignore)
              ((symbol-function 'claude-repl--set-buffer-background) #'ignore)
-             ((symbol-function 'claude-repl--sandbox-mode-line) (lambda (_s _d) '("test")))
+             ((symbol-function 'claude-repl--workspace-mode-line) (lambda (_ws) '("test")))
              ((symbol-function 'vterm-send-string) #'ignore)
              ((symbol-function 'vterm-send-return) #'ignore)
              ((symbol-function 'claude-repl--schedule-ready-timer) #'ignore)
@@ -2104,11 +2104,12 @@ from `create-buffer'.  Stubs can be overridden by wrapping BODY in another
                 (should-not ready-at-send))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
-(ert-deftest claude-repl-test-panels-initialize-claude-sets-sandbox-mode-line ()
-  "initialize-claude sets mode-line-format via sandbox-mode-line in the vterm buffer."
+(ert-deftest claude-repl-test-panels-initialize-claude-sets-workspace-mode-line ()
+  "initialize-claude sets mode-line-format via workspace-mode-line, passing ws."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "test-ws" :active-env :sandbox)
-    (let ((vterm-buf (generate-new-buffer " *init-claude-ml*")))
+    (let ((vterm-buf (generate-new-buffer " *init-claude-ml*"))
+          (mode-line-ws :unset))
       (unwind-protect
           (claude-repl-test--initialize-claude-stubs vterm-buf
             (cl-letf (((symbol-function 'claude-repl--build-start-cmd)
@@ -2120,11 +2121,12 @@ from `create-buffer'.  Stubs can be overridden by wrapping BODY in another
                                            :worktree-p t
                                            :active-env :sandbox
                                            :inst (make-claude-repl-instantiation))))
-                      ((symbol-function 'claude-repl--sandbox-mode-line)
-                       (lambda (_s _d) '("SANDBOX-ML"))))
+                      ((symbol-function 'claude-repl--workspace-mode-line)
+                       (lambda (ws) (setq mode-line-ws ws) '("WS-ML"))))
               (claude-repl--initialize-claude)
+              (should (equal mode-line-ws "test-ws"))
               (with-current-buffer vterm-buf
-                (should (equal mode-line-format '("SANDBOX-ML"))))))
+                (should (equal mode-line-format '("WS-ML"))))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
 (ert-deftest claude-repl-test-panels-initialize-claude-clears-fork-session-id ()

@@ -661,7 +661,6 @@ echo-area message below."
       (let* ((vterm-buf (claude-repl--create-buffer ws))
              (start-info (claude-repl--build-start-cmd ws))
              (cmd         (plist-get start-info :cmd))
-             (sandboxed-p (plist-get start-info :sandboxed-p))
              (inst        (plist-get start-info :inst)))
         (claude-repl--ws-put ws :vterm-buffer vterm-buf)
         (setf (claude-repl-instantiation-start-cmd inst) cmd)
@@ -677,8 +676,7 @@ echo-area message below."
           (setq-local word-wrap t)
           (claude-repl--set-buffer-background claude-repl--vterm-background-grey)
           (setq-local mode-line-format
-                      (claude-repl--sandbox-mode-line sandboxed-p
-                                                      (plist-get start-info :docker-image)))
+                      (claude-repl--workspace-mode-line ws))
           (setq-local claude-repl--ready nil)
           (claude-repl--log ws "initialize-claude: vterm=%s sending cmd len=%d"
                             (buffer-name) (length cmd))

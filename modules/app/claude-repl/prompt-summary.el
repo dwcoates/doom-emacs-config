@@ -6,8 +6,8 @@
 ;; headless `claude -p --model haiku' call to produce a short title for
 ;; that prompt.  The result lands in the vterm buffer's mode-line (the
 ;; bar that sits between the vterm output and the input panel — visually
-;; the input panel's status area), in blue, after the BARE METAL /
-;; DOCKER SANDBOX environment label.
+;; the input panel's status area), in blue, after the parent-workspace
+;; label.
 ;;
 ;; Concurrency model: each kickoff captures the workspace name and the
 ;; raw prompt text in lexical scope.  The process sentinel writes the

@@ -290,20 +290,44 @@ by vterm-buf presence; the :done write is not."
   "assemble-cmd with empty flags should produce clean command."
   (should (equal (claude-repl--assemble-cmd nil nil "") "claude")))
 
-;;;; ---- Tests: Sandbox mode-line ----
+;;;; ---- Tests: Workspace mode-line ----
 
-(ert-deftest claude-repl-test-sandbox-mode-line-sandboxed ()
-  "sandbox-mode-line should include DOCKER SANDBOX when sandboxed."
-  (let ((result (claude-repl--sandbox-mode-line t "my-image:latest")))
-    (should (listp result))
-    (should (string-match-p "DOCKER SANDBOX" (car result)))
-    (should (string-match-p "my-image:latest" (car result)))))
+(ert-deftest claude-repl-test-workspace-mode-line-with-parent ()
+  "workspace-mode-line should show PARENT: <basename> when :source-ws-dir is set."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "child-ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
+    (let ((result (claude-repl--workspace-mode-line "child-ws")))
+      (should (listp result))
+      (should (string-match-p "PARENT: feature-foo" (car result))))))
 
-(ert-deftest claude-repl-test-sandbox-mode-line-bare-metal ()
-  "sandbox-mode-line should include BARE METAL when not sandboxed."
-  (let ((result (claude-repl--sandbox-mode-line nil nil)))
-    (should (listp result))
-    (should (string-match-p "BARE METAL" (car result)))))
+(ert-deftest claude-repl-test-workspace-mode-line-without-parent ()
+  "workspace-mode-line first segment should be empty when :source-ws-dir is nil."
+  (claude-repl-test--with-clean-state
+    (let ((result (claude-repl--workspace-mode-line "ws-no-parent")))
+      (should (listp result))
+      (should (equal (car result) "")))))
+
+(ert-deftest claude-repl-test-workspace-mode-line-empty-source-dir-treated-as-no-parent ()
+  "Empty-string :source-ws-dir is treated the same as nil — empty first segment."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-blank" :source-ws-dir "")
+    (let ((result (claude-repl--workspace-mode-line "ws-blank")))
+      (should (equal (car result) "")))))
+
+(ert-deftest claude-repl-test-workspace-mode-line-keeps-prompt-summary-segment ()
+  "The trailing :eval segment for the prompt summary is preserved."
+  (claude-repl-test--with-clean-state
+    (let ((result (claude-repl--workspace-mode-line "ws")))
+      (should (= (length result) 2))
+      (should (eq (car (cadr result)) :eval)))))
+
+(ert-deftest claude-repl-test-workspace-mode-line-strips-trailing-slash ()
+  "A trailing slash on :source-ws-dir does not leak into the parent name."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-bar/")
+    (let ((result (claude-repl--workspace-mode-line "ws")))
+      (should (string-match-p "PARENT: feature-bar" (car result)))
+      (should-not (string-match-p "feature-bar/" (car result))))))
 
 ;;;; ---- Tests: Session completion handling ----
 
