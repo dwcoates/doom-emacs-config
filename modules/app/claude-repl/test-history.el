@@ -1269,6 +1269,18 @@ write is the primary obligation; snapshot is the piggyback)."
           (should (file-exists-p unrelated)))
       (delete-directory tmpdir t))))
 
+(ert-deftest claude-repl-test-per-project-state-files-entries-are-funcallable ()
+  "Each entry in `claude-repl--per-project-state-files' must be a function.
+Regression: a prior version held filename strings; after the relocation
+refactor `state-purge' funcalls each entry, so a stale string element
+\(left over from a `defvar' that didn't reload) raised
+`Invalid function: \".claude-repl-state\"' on every nuke path."
+  (dolist (entry claude-repl--per-project-state-files)
+    (should (functionp entry))
+    (let ((path (funcall entry "/tmp/some-root")))
+      (should (stringp path))
+      (should (file-name-absolute-p path)))))
+
 (provide 'test-history)
 
 ;;; test-history.el ends here

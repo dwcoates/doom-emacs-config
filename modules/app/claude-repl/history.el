@@ -149,14 +149,18 @@ Same fallback semantics as `claude-repl--history-file-for-read'."
             ((file-exists-p legacy) legacy)
             (t new)))))
 
-(defvar claude-repl--per-project-state-files
+(defconst claude-repl--per-project-state-files
   (list (lambda (root) (claude-repl--state-file root))
         (lambda (root) (expand-file-name claude-repl--legacy-state-filename root)))
   "Functions returning state file paths purged when a workspace is nuked.
 Each entry is a (lambda (ROOT) PATH) — both the new location and the
 legacy project-root fallback are included so a nuke fully clears
 ephemeral session state regardless of which on-disk layout the
-workspace was using.  The history file is intentionally preserved.")
+workspace was using.  The history file is intentionally preserved.
+
+`defconst' (not `defvar') so a refactor that changes the list shape
+\(e.g. strings -> lambdas) self-heals on reload — `defvar' would leave
+the old value bound and `funcall' would fail on stale string entries.")
 
 (defun claude-repl--state-purge (root)
   "Delete per-project state files under ROOT (both new and legacy paths).
