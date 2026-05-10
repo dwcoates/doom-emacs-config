@@ -29,6 +29,36 @@
   "Register WS in `claude-repl--workspaces' with PROPS plist."
   (puthash ws (copy-sequence props) claude-repl--workspaces))
 
+;;;; ---- Persistence across workspaces ----
+
+(ert-deftest claude-repl-drawer-test-ensure-visible-noop-when-flag-nil ()
+  "`--ensure-visible-on-persp-switch' is a no-op when the global flag is nil."
+  (let ((claude-repl-drawer--global-visible-p nil)
+        (called nil))
+    (cl-letf (((symbol-function 'display-buffer)
+               (lambda (&rest _) (setq called t) nil)))
+      (claude-repl-drawer--ensure-visible-on-persp-switch)
+      (should-not called))))
+
+(ert-deftest claude-repl-drawer-test-ensure-visible-displays-when-flag-set ()
+  "`--ensure-visible-on-persp-switch' displays the drawer when flag is set and it's not visible."
+  (let ((claude-repl-drawer--global-visible-p t)
+        (display-called nil))
+    (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
+              ((symbol-function 'display-buffer)
+               (lambda (&rest _) (setq display-called t) nil))
+              ((symbol-function 'claude-repl-drawer--get-or-create-buffer)
+               (lambda () (get-buffer-create " *test-drawer-buf*"))))
+      (claude-repl-drawer--ensure-visible-on-persp-switch)
+      (should display-called))
+    (when-let ((b (get-buffer " *test-drawer-buf*"))) (kill-buffer b))))
+
+(ert-deftest claude-repl-drawer-test-hide-clears-global-flag ()
+  "`claude-repl-drawer-hide' clears the global visible-flag."
+  (let ((claude-repl-drawer--global-visible-p t))
+    (claude-repl-drawer-hide)
+    (should-not claude-repl-drawer--global-visible-p)))
+
 ;;;; ---- Section partition + tree ----
 
 (ert-deftest claude-repl-drawer-test-workspace-section-merged-dominates ()

@@ -697,13 +697,24 @@ fractions below the global default (10 cols) are honored, and clears
          ((> delta 0) (enlarge-window delta t))
          ((< delta 0) (shrink-window (abs delta) t)))))))
 
+(defvar claude-repl-drawer--global-visible-p nil
+  "Non-nil when the drawer should appear in every workspace/persp.
+Set by `claude-repl-drawer-show', cleared by
+`claude-repl-drawer-hide'.  The persp-activated hook
+(`claude-repl-drawer--ensure-visible-on-persp-switch') consults this
+flag and re-displays the drawer in newly-activated workspaces so the
+drawer feels like a frame-level UI element rather than a per-workspace
+artifact.")
+
 (defun claude-repl-drawer-show ()
   "Show the workspace drawer in a left-side window.
 Selects the drawer window and positions the cursor on the currently
-selected workspace (falling back to the first entry).  Self-heals if
-an existing drawer buffer pre-dates the current mode init by ensuring
-the overlay-driving post-command hook is installed and firing it once
-so the arrow is positioned immediately, not after the next command."
+selected workspace (falling back to the first entry).  Sets the
+global visible-flag so the drawer follows the user across workspace
+switches.  Self-heals if an existing drawer buffer pre-dates the
+current mode init by ensuring the overlay-driving post-command hook
+is installed and firing it once so the arrow is positioned
+immediately, not after the next command."
   (interactive)
   (let* ((buf        (claude-repl-drawer--get-or-create-buffer))
          (current-ws (claude-repl-drawer--current-ws))
@@ -722,16 +733,44 @@ so the arrow is positioned immediately, not after the next command."
       (claude-repl-drawer--apply-width win)
       (set-window-point win (with-current-buffer buf (point)))
       (select-window win))
+    (setq claude-repl-drawer--global-visible-p t)
     win))
 
 (defun claude-repl-drawer-hide ()
-  "Hide the workspace drawer."
+  "Hide the workspace drawer.
+Clears the global visible-flag so the drawer no longer auto-appears
+on workspace switches."
   (interactive)
+  (setq claude-repl-drawer--global-visible-p nil)
   (when-let ((buf (get-buffer claude-repl-drawer-buffer-name)))
     (dolist (win (get-buffer-window-list buf nil t))
       (when (window-live-p win)
         (set-window-dedicated-p win nil)
         (delete-window win)))))
+
+(defun claude-repl-drawer--ensure-visible-on-persp-switch (&rest _)
+  "Re-display the drawer in the newly activated workspace if the global flag is set.
+Does NOT select the drawer window or reposition point — the drawer
+behaves as a frame-level UI element, persistent across workspace
+switches with no cursor disruption.  No-op when the flag is nil or
+the drawer is already visible in the current frame's window tree."
+  (when (and claude-repl-drawer--global-visible-p
+             (not (and (get-buffer claude-repl-drawer-buffer-name)
+                       (get-buffer-window claude-repl-drawer-buffer-name))))
+    (let* ((buf (claude-repl-drawer--get-or-create-buffer))
+           (win (display-buffer buf claude-repl-drawer--display-action)))
+      (with-current-buffer buf
+        (add-hook 'post-command-hook
+                  #'claude-repl-drawer--post-command nil t)
+        (setq-local cursor-type nil))
+      (when win
+        (set-window-dedicated-p win t)
+        (claude-repl-drawer--apply-width win)
+        (set-window-point win (with-current-buffer buf (point)))))))
+
+(with-eval-after-load 'persp-mode
+  (add-hook 'persp-activated-functions
+            #'claude-repl-drawer--ensure-visible-on-persp-switch))
 
 (defun claude-repl-drawer-toggle ()
   "Toggle visibility of the workspace drawer."
