@@ -385,42 +385,46 @@ mode-line is constructed, not on every redisplay."
         (file-name-nondirectory (directory-file-name target-dir))))))
 
 (defun claude-repl--parent-label (parent-name merge-name)
-  "Return (GREEN-STR YELLOW-STR) for the PARENT mode-line label, or nil.
+  "Return (GREEN-STR YELLOW-STR) for the parent mode-line label, or nil.
 PARENT-NAME is the basename of `:source-ws-dir' (the recorded parent
 worktree, or nil if none).  MERGE-NAME is the basename of the
 workspace `SPC TAB M' would target (or nil if none).
 
-GREEN-STR is the always-green leading part (\" PARENT: <parent>\" or
-\" PARENT:\" when no parent).  YELLOW-STR is the parens-wrapped merge
-target with a leading space (\" (<merge>)\"), or nil when the merge
-target is absent or matches the parent (parens omitted to avoid the
-redundant \"PARENT: foo (foo)\" form).  Returns nil overall when both
-inputs are nil — caller should render an empty segment.
+GREEN-STR is the always-green leading part (\" <parent>\" or empty when
+no parent).  YELLOW-STR is the parens-wrapped merge target with a
+leading space (\" (<merge>)\"), or nil when the merge target is absent
+or matches the parent (parens omitted to avoid the redundant
+\" foo (foo)\" form).  Returns nil overall when both inputs are nil —
+caller should render an empty segment.
 
 The split is so callers can propertize each part with a different face
-\(green for PARENT:, yellow for the (...) suffix) without having to
-parse a single composed string."
+\(green for the parent, yellow for the (...) suffix) without having to
+parse a single composed string.  The label has no textual prefix; the
+green/yellow coloring is the sole signal that the segment denotes the
+parent/merge-target relationship."
   (cond
    ((and (null parent-name) (null merge-name)) nil)
-   ((null parent-name) (list " PARENT:" (format " (%s)" merge-name)))
+   ((null parent-name) (list "" (format " (%s)" merge-name)))
    ((or (null merge-name) (string= parent-name merge-name))
-    (list (format " PARENT: %s" parent-name) nil))
-   (t (list (format " PARENT: %s" parent-name) (format " (%s)" merge-name)))))
+    (list (format " %s" parent-name) nil))
+   (t (list (format " %s" parent-name) (format " (%s)" merge-name)))))
 
 (defun claude-repl--workspace-mode-line (ws)
   "Return a mode-line format list for workspace WS's vterm.
 Segments, in order:
-  1. Composed PARENT label: green ` PARENT: <parent>' followed by a
-     yellow ` (<merge-target>)' suffix when `SPC TAB M' would redirect
-     to a different workspace than the recorded parent (typically
-     master).  When the merge target equals the parent, the yellow
-     suffix is omitted.  Empty when WS has neither a recorded parent
-     nor a resolvable merge target.
+  1. Composed parent label: green ` <parent>' followed by a yellow
+     ` (<merge-target>)' suffix when `SPC TAB M' would redirect to a
+     different workspace than the recorded parent (typically master).
+     When the merge target equals the parent, the yellow suffix is
+     omitted.  Empty when WS has neither a recorded parent nor a
+     resolvable merge target.  The green/yellow coloring is the sole
+     signal that the segment denotes the parent/merge-target
+     relationship — there is no textual prefix.
   2. `:eval' segment that renders the last-prompt summary (see
      `claude-repl--prompt-summary-segment') and recomputes on every
      mode-line redisplay.
 
-The PARENT segment is computed once when the vterm is initialized; it
+The parent segment is computed once when the vterm is initialized; it
 is not reactive to later state changes."
   (let* ((source-dir (claude-repl--ws-get ws :source-ws-dir))
          (parent-name (when (and source-dir (not (string-empty-p source-dir)))

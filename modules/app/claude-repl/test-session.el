@@ -293,13 +293,14 @@ by vterm-buf presence; the :done write is not."
 ;;;; ---- Tests: Workspace mode-line ----
 
 (ert-deftest claude-repl-test-workspace-mode-line-with-parent-no-merge ()
-  "PARENT segment shows just the parent when no merge target is resolvable."
+  "Parent segment shows just the parent name when no merge target is resolvable."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "child-ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
     (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
       (let ((result (claude-repl--workspace-mode-line "child-ws")))
         (should (listp result))
-        (should (string-match-p "PARENT: feature-foo\\'" (car result)))))))
+        (should (string-match-p " feature-foo\\'" (car result)))
+        (should-not (string-match-p "PARENT" (car result)))))))
 
 (ert-deftest claude-repl-test-workspace-mode-line-without-parent ()
   "First segment is empty when there is neither parent nor merge target."
@@ -331,7 +332,7 @@ by vterm-buf presence; the :done write is not."
     (claude-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-bar/")
     (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
       (let ((result (claude-repl--workspace-mode-line "ws")))
-        (should (string-match-p "PARENT: feature-bar\\'" (car result)))))))
+        (should (string-match-p " feature-bar\\'" (car result)))))))
 
 (ert-deftest claude-repl-test-workspace-mode-line-merge-shown-in-parens-when-different ()
   "When merge target differs from parent, it appears in parens after the parent."
@@ -340,16 +341,16 @@ by vterm-buf presence; the :done write is not."
     (cl-letf (((symbol-function 'claude-repl--merge-target-name)
                (lambda (_ws) "explanation-engine")))
       (let ((result (claude-repl--workspace-mode-line "ws")))
-        (should (string-match-p "PARENT: feature-foo (explanation-engine)" (car result)))))))
+        (should (string-match-p " feature-foo (explanation-engine)" (car result)))))))
 
 (ert-deftest claude-repl-test-workspace-mode-line-merge-omitted-when-equal-to-parent ()
-  "When merge target equals parent, no parens are appended (avoids redundant PARENT: foo (foo))."
+  "When merge target equals parent, no parens are appended (avoids redundant ` foo (foo)`)."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
     (cl-letf (((symbol-function 'claude-repl--merge-target-name)
                (lambda (_ws) "feature-foo")))
       (let ((result (claude-repl--workspace-mode-line "ws")))
-        (should (string-match-p "PARENT: feature-foo\\'" (car result)))
+        (should (string-match-p " feature-foo\\'" (car result)))
         (should-not (string-match-p "(feature-foo)" (car result)))))))
 
 ;;;; ---- Tests: parent-label ----
@@ -359,24 +360,24 @@ by vterm-buf presence; the :done write is not."
   (should (null (claude-repl--parent-label nil nil))))
 
 (ert-deftest claude-repl-test-parent-label-parent-only ()
-  "Returns (\" PARENT: <parent>\" nil) when only parent is set."
+  "Returns (\" <parent>\" nil) when only parent is set."
   (should (equal (claude-repl--parent-label "feature-foo" nil)
-                 '(" PARENT: feature-foo" nil))))
+                 '(" feature-foo" nil))))
 
 (ert-deftest claude-repl-test-parent-label-merge-only ()
-  "Returns (\" PARENT:\" \" (<merge>)\") when only merge is set (rare fallback case)."
+  "Returns (\"\" \" (<merge>)\") when only merge is set (rare fallback case)."
   (should (equal (claude-repl--parent-label nil "explanation-engine")
-                 '(" PARENT:" " (explanation-engine)"))))
+                 '("" " (explanation-engine)"))))
 
 (ert-deftest claude-repl-test-parent-label-equal-omits-parens ()
   "Returns (green-only nil) when parent equals merge — parens would be redundant."
   (should (equal (claude-repl--parent-label "feature-foo" "feature-foo")
-                 '(" PARENT: feature-foo" nil))))
+                 '(" feature-foo" nil))))
 
 (ert-deftest claude-repl-test-parent-label-different-splits-parts ()
-  "Returns (\" PARENT: <parent>\" \" (<merge>)\") when they differ (master-redirect case)."
+  "Returns (\" <parent>\" \" (<merge>)\") when they differ (master-redirect case)."
   (should (equal (claude-repl--parent-label "feature-foo" "explanation-engine")
-                 '(" PARENT: feature-foo" " (explanation-engine)"))))
+                 '(" feature-foo" " (explanation-engine)"))))
 
 ;;;; ---- Tests: workspace-mode-line face splitting ----
 
