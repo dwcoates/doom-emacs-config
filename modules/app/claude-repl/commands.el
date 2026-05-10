@@ -856,9 +856,19 @@ status via `+workspaces-switch-project-function') on first visit."
 The snapshot loader skips `+dwc/switch-to-project' to avoid the
 rename-on-empty collapse; the side effects that path normally provides
 \(setting `default-directory' on the fallback buffer, loading dir-locals,
-auto-opening magit via `+workspaces-switch-project-function') are run
-here on first visit instead.  WS is logged for traceability; DIR is the
-project root."
+auto-opening magit via `+workspaces-switch-project-function', and
+opening the most-recent project file via `find-file') are run here on
+first visit instead.
+
+The `find-file' tail mirrors `+dwc/switch-to-project' (`config.el:810-812')
+— it attaches a buffer to the freshly-activated persp AND replaces the
+active window's buffer with a project file, which is what gives
+`SPC p p' a clean window layout on a snapshot-restored persp.  Without
+this step, `s-{' / `s-}' switching into a snapshot persp leaves the
+previous workspace's window layout intact and claude panels render on
+top of foreign windows.
+
+WS is logged for traceability; DIR is the project root."
   (claude-repl--with-error-logging "deferred-project-switch"
     (when (and dir (file-directory-p dir))
       (claude-repl--log ws "deferred-project-switch: ws=%s dir=%s" ws dir)
@@ -869,7 +879,12 @@ project root."
             (hack-dir-local-variables-non-file-buffer))))
       (when (and (boundp '+workspaces-switch-project-function)
                  +workspaces-switch-project-function)
-        (funcall +workspaces-switch-project-function dir)))))
+        (funcall +workspaces-switch-project-function dir))
+      (when (fboundp '+dwc/get-most-recent-file-in-project)
+        (when-let ((recent-file (+dwc/get-most-recent-file-in-project dir)))
+          (when (file-exists-p recent-file)
+            (claude-repl--log ws "deferred-project-switch: find-file=%s" recent-file)
+            (find-file recent-file)))))))
 
 (defun claude-repl--maybe-start-on-activate (&rest _)
   "Lazy-start hook for `persp-activated-functions'.

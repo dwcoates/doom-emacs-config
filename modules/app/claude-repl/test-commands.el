@@ -1638,6 +1638,81 @@ the fallback buffer to be primed for the project."
                 (should (equal (reverse events) '(side-effect initialize-claude))))))
         (delete-directory tmp-dir t)))))
 
+(ert-deftest claude-repl-cmd-test-maybe-start-on-activate/opens-most-recent-project-file ()
+  "On first visit, hook opens the most-recent file in the project via
+`find-file'.  Mirrors `+dwc/switch-to-project's tail so a snapshot-
+restored persp gets a project buffer attached (priming
+`persp-buffer-list-restricted') and the active window stops showing
+the previous workspace's foreign buffer."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-recent-" t)))
+           (tmp-file (expand-file-name "hello.el" tmp-dir))
+           (claude-repl--loading-snapshot-p nil)
+           (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal))
+           (opened nil))
+      (unwind-protect
+          (progn
+            (with-temp-file tmp-file (insert ";; placeholder"))
+            (claude-repl--ws-put "test-ws" :project-dir tmp-dir)
+            (puthash "test-ws" (list :project-dir tmp-dir)
+                     claude-repl--pending-snapshot-workspaces)
+            (cl-letf (((symbol-function '+dwc/get-most-recent-file-in-project)
+                       (lambda (_dir) tmp-file))
+                      ((symbol-function 'find-file)
+                       (lambda (file) (setq opened file)))
+                      ((symbol-function 'claude-repl--initialize-claude) #'ignore)
+                      ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil)))
+              (claude-repl--maybe-start-on-activate)
+              (should (equal opened tmp-file))))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-maybe-start-on-activate/skips-find-file-when-no-recent ()
+  "When the project has no entry in recentf (helper returns nil),
+hook skips `find-file' silently."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-no-recent-" t)))
+           (claude-repl--loading-snapshot-p nil)
+           (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal))
+           (find-file-called nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :project-dir tmp-dir)
+            (puthash "test-ws" (list :project-dir tmp-dir)
+                     claude-repl--pending-snapshot-workspaces)
+            (cl-letf (((symbol-function '+dwc/get-most-recent-file-in-project)
+                       (lambda (_dir) nil))
+                      ((symbol-function 'find-file)
+                       (lambda (&rest _) (setq find-file-called t)))
+                      ((symbol-function 'claude-repl--initialize-claude) #'ignore)
+                      ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil)))
+              (claude-repl--maybe-start-on-activate)
+              (should-not find-file-called)))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-maybe-start-on-activate/skips-find-file-when-recent-gone ()
+  "When recentf points to a file that no longer exists on disk, the hook
+skips `find-file' (would otherwise prompt for new file in find-file-confirm)."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-gone-recent-" t)))
+           (gone-file (expand-file-name "deleted.el" tmp-dir))
+           (claude-repl--loading-snapshot-p nil)
+           (claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal))
+           (find-file-called nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :project-dir tmp-dir)
+            (puthash "test-ws" (list :project-dir tmp-dir)
+                     claude-repl--pending-snapshot-workspaces)
+            (cl-letf (((symbol-function '+dwc/get-most-recent-file-in-project)
+                       (lambda (_dir) gone-file))
+                      ((symbol-function 'find-file)
+                       (lambda (&rest _) (setq find-file-called t)))
+                      ((symbol-function 'claude-repl--initialize-claude) #'ignore)
+                      ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil)))
+              (claude-repl--maybe-start-on-activate)
+              (should-not find-file-called)))
+        (delete-directory tmp-dir t)))))
+
 (ert-deftest claude-repl-cmd-test-maybe-start-on-activate/skips-side-effects-when-dir-gone ()
   "If the workspace's :project-dir no longer exists, deferred side effects
 are skipped (no crash); claude still gets a start attempt."
