@@ -112,6 +112,32 @@
       (should-error (claude-repl-drawer-kill) :type 'user-error)
       (should-error (claude-repl-drawer-interrupt) :type 'user-error))))
 
+(ert-deftest claude-repl-drawer-test-new-child-dispatches-to-entry ()
+  "`claude-repl-drawer-new-child' calls create-worktree-workspace with `head'+entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "parent" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((args :unset))
+        (cl-letf (((symbol-function 'claude-repl-create-worktree-workspace)
+                   (lambda (base &optional ws) (setq args (list base ws)))))
+          (claude-repl-drawer-new-child))
+        (should (equal args '(head "parent")))))))
+
+(ert-deftest claude-repl-drawer-test-new-fork-dispatches-to-entry ()
+  "`claude-repl-drawer-new-fork' calls fork-worktree-workspace with the entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "parent" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((arg :unset))
+        (cl-letf (((symbol-function 'claude-repl-fork-worktree-workspace)
+                   (lambda (&optional ws) (setq arg ws))))
+          (claude-repl-drawer-new-fork))
+        (should (equal arg "parent"))))))
+
 (ert-deftest claude-repl-drawer-test-merge-into-master-switches-then-calls ()
   "`claude-repl-drawer-merge-into-master' switches to entry, invokes merge, then restores."
   (claude-repl-test--with-clean-state

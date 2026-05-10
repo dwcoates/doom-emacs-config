@@ -141,10 +141,8 @@ The current-entry overlay covers this region with
 
 (defvar claude-repl-drawer-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "n")       #'claude-repl-drawer-next)
     (define-key map (kbd "j")       #'claude-repl-drawer-next)
     (define-key map (kbd "<down>")  #'claude-repl-drawer-next)
-    (define-key map (kbd "p")       #'claude-repl-drawer-prev)
     (define-key map (kbd "k")       #'claude-repl-drawer-prev)
     (define-key map (kbd "<up>")    #'claude-repl-drawer-prev)
     (define-key map (kbd "RET")     #'claude-repl-drawer-visit)
@@ -156,6 +154,8 @@ The current-entry overlay covers this region with
     (define-key map (kbd "i")       #'claude-repl-drawer-send-prompt)
     (define-key map (kbd "M")       #'claude-repl-drawer-merge-into-master)
     (define-key map (kbd "m")       #'claude-repl-drawer-merge-child)
+    (define-key map (kbd "n")       #'claude-repl-drawer-new-child)
+    (define-key map (kbd "f")       #'claude-repl-drawer-new-fork)
     (define-key map (kbd "C-c C-k") #'claude-repl-drawer-interrupt)
     ;; Block horizontal char navigation — the entry is the unit of
     ;; selection; in-line cursor placement is reserved for searches.
@@ -241,8 +241,6 @@ Runs after every command in the drawer buffer."
   (evil-define-key '(normal motion) claude-repl-drawer-mode-map
     "j"           #'claude-repl-drawer-next
     "k"           #'claude-repl-drawer-prev
-    "n"           #'claude-repl-drawer-next
-    "p"           #'claude-repl-drawer-prev
     (kbd "<down>") #'claude-repl-drawer-next
     (kbd "<up>")   #'claude-repl-drawer-prev
     (kbd "RET")    #'claude-repl-drawer-visit
@@ -262,6 +260,8 @@ Runs after every command in the drawer buffer."
     "i"             #'claude-repl-drawer-send-prompt
     "M"             #'claude-repl-drawer-merge-into-master
     "m"             #'claude-repl-drawer-merge-child
+    "n"             #'claude-repl-drawer-new-child
+    "f"             #'claude-repl-drawer-new-fork
     (kbd "C-c C-k") #'claude-repl-drawer-interrupt)
   ;; Block horizontal char navigation — entry is the navigational unit.
   (evil-define-key '(normal motion) claude-repl-drawer-mode-map
@@ -723,6 +723,24 @@ entry-at-point before invoking it."
   (claude-repl-drawer--with-temp-current-ws
    (claude-repl-drawer--require-ws-at-point)
    #'claude-repl-workspace-merge))
+
+(defun claude-repl-drawer-new-child ()
+  "Create a new worktree branched from the entry at point.
+Mirrors `SPC TAB n' (`claude-repl-create-worktree-workspace') with
+BASE = `head' and SOURCE-WS = entry-at-point.  The public function
+prompts for the preemptive prompt and dispatches to the async
+workspace-generation skill."
+  (interactive)
+  (claude-repl-create-worktree-workspace
+   'head (claude-repl-drawer--require-ws-at-point)))
+
+(defun claude-repl-drawer-new-fork ()
+  "Fork the claude session of the entry at point into a new worktree.
+Mirrors `SPC TAB f' (`claude-repl-fork-worktree-workspace') with
+SOURCE-WS = entry-at-point."
+  (interactive)
+  (claude-repl-fork-worktree-workspace
+   (claude-repl-drawer--require-ws-at-point)))
 
 (defun claude-repl-drawer--refresh-if-visible ()
   "Refresh the drawer if its buffer exists and is shown in some window.
