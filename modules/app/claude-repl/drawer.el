@@ -141,6 +141,13 @@ The current-entry overlay covers this region with
     (define-key map (kbd "RET")     #'claude-repl-drawer-visit)
     (define-key map (kbd "g")       #'claude-repl-drawer-refresh)
     (define-key map (kbd "q")       #'claude-repl-drawer-hide)
+    ;; Per-entry actions mirroring leader-key bindings:
+    (define-key map (kbd "x")       #'claude-repl-drawer-nuke)
+    (define-key map (kbd "d")       #'claude-repl-drawer-kill)
+    (define-key map (kbd "i")       #'claude-repl-drawer-send-prompt)
+    (define-key map (kbd "M")       #'claude-repl-drawer-merge-into-master)
+    (define-key map (kbd "m")       #'claude-repl-drawer-merge-child)
+    (define-key map (kbd "C-c C-k") #'claude-repl-drawer-interrupt)
     ;; Block horizontal char navigation — the entry is the unit of
     ;; selection; in-line cursor placement is reserved for searches.
     (define-key map (kbd "<left>")  #'ignore)
@@ -232,13 +239,21 @@ Runs after every command in the drawer buffer."
     (kbd "RET")    #'claude-repl-drawer-visit
     "g"           #'claude-repl-drawer-refresh
     "q"           #'claude-repl-drawer-hide)
-  ;; Block every insert-state entry point so the drawer is strictly
-  ;; navigational.  Buffer is already read-only via `special-mode',
-  ;; but evil would otherwise still flip the cursor and modeline into
-  ;; insert state on i/a/o/etc.
-  (dolist (key '("i" "I" "a" "A" "o" "O" "s" "S" "c" "C" "R"))
+  ;; Block every insert-state entry point we don't repurpose, so the
+  ;; drawer never flips into evil insert state.  `i', `m', `d' are
+  ;; rebound to drawer commands below.
+  (dolist (key '("I" "a" "A" "o" "O" "s" "S" "c" "C" "R"))
     (evil-define-key '(normal motion) claude-repl-drawer-mode-map
       key #'ignore))
+  ;; Per-entry action keys — bind in evil states too so they aren't
+  ;; intercepted by evil-motion's defaults.
+  (evil-define-key '(normal motion) claude-repl-drawer-mode-map
+    "x"             #'claude-repl-drawer-nuke
+    "d"             #'claude-repl-drawer-kill
+    "i"             #'claude-repl-drawer-send-prompt
+    "M"             #'claude-repl-drawer-merge-into-master
+    "m"             #'claude-repl-drawer-merge-child
+    (kbd "C-c C-k") #'claude-repl-drawer-interrupt)
   ;; Block horizontal char navigation — entry is the navigational unit.
   (evil-define-key '(normal motion) claude-repl-drawer-mode-map
     "h"             #'ignore
@@ -631,6 +646,73 @@ Returns non-nil on success."
   (when-let ((buf (get-buffer claude-repl-drawer-buffer-name)))
     (with-current-buffer buf
       (claude-repl-drawer--render))))
+
+(defun claude-repl-drawer--require-ws-at-point ()
+  "Return the workspace name at point, or signal a user-error."
+  (or (claude-repl-drawer--workspace-at-point)
+      (user-error "No workspace at point")))
+
+(defun claude-repl-drawer-nuke ()
+  "Nuke the workspace at point.  Mirrors `SPC j x' (`claude-repl-nuke-workspace')."
+  (interactive)
+  (claude-repl-nuke-workspace (claude-repl-drawer--require-ws-at-point)))
+
+(defun claude-repl-drawer-kill ()
+  "Kill the workspace at point.  Mirrors `SPC j d' (`claude-repl-kill-workspace')."
+  (interactive)
+  (claude-repl-kill-workspace (claude-repl-drawer--require-ws-at-point)))
+
+(defun claude-repl-drawer-interrupt ()
+  "Interrupt Claude in the workspace at point.  Mirrors `C-c C-k'."
+  (interactive)
+  (claude-repl-interrupt (claude-repl-drawer--require-ws-at-point)))
+
+(defun claude-repl-drawer-send-prompt ()
+  "Read a prompt and send it to the workspace at point.
+Mirrors the normal claude send (`claude-repl--send'), including
+history logging.  After send, the entry's summary will naturally
+transition to `:last-prompt-summary-pending' and render as `…' until
+the haiku summarizer returns the new aiTitle."
+  (interactive)
+  (let* ((ws     (claude-repl-drawer--require-ws-at-point))
+         (prompt (read-string (format "Send to %s: " ws))))
+    (when (and prompt (not (string-empty-p prompt)))
+      (claude-repl--send prompt ws))))
+
+(defun claude-repl-drawer--with-temp-current-ws (ws fn)
+  "Switch to WS, call FN, then return to the previous workspace.
+Used to dispatch merge commands for the entry at point — the merge
+public functions read `(+workspace-current-name)' internally and
+switch perspectives themselves, so we must temporarily inhabit the
+target workspace before invoking them."
+  (let ((prev (and (fboundp '+workspace-current-name)
+                   (+workspace-current-name))))
+    (+workspace-switch ws)
+    (unwind-protect
+        (funcall fn)
+      (when (and prev (not (equal prev (+workspace-current-name))))
+        (+workspace-switch prev)))))
+
+(defun claude-repl-drawer-merge-into-master ()
+  "Merge the entry at point into its source/master.
+Mirrors `SPC TAB M' (`claude-repl-workspace-merge-current-into-source').
+The public function operates on the current workspace, so we
+temporarily switch to the entry-at-point before invoking it."
+  (interactive)
+  (claude-repl-drawer--with-temp-current-ws
+   (claude-repl-drawer--require-ws-at-point)
+   #'claude-repl-workspace-merge-current-into-source))
+
+(defun claude-repl-drawer-merge-child ()
+  "Merge a child workspace into the entry at point.
+Mirrors `SPC TAB m' (`claude-repl-workspace-merge').  The public
+function uses the current workspace as the merge destination and
+prompts for the child to merge in, so we temporarily switch to the
+entry-at-point before invoking it."
+  (interactive)
+  (claude-repl-drawer--with-temp-current-ws
+   (claude-repl-drawer--require-ws-at-point)
+   #'claude-repl-workspace-merge))
 
 (defun claude-repl-drawer--refresh-if-visible ()
   "Refresh the drawer if its buffer exists and is shown in some window.

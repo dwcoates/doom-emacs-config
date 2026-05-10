@@ -309,17 +309,22 @@ WS is the current workspace name for logging."
           (vterm-send-string "i")))
     (claude-repl--log (+workspace-current-name) "enter-insert-mode: vterm is dead, skipping")))
 
-(defun claude-repl-interrupt ()
-  "Interrupt Claude and re-enter insert mode after a short delay.
-Sends Escape to stop the current operation, then automatically
-sends \"i\" after 0.25s to return to insert mode."
+(defun claude-repl-interrupt (&optional ws)
+  "Interrupt Claude in workspace WS and re-enter insert mode after a delay.
+Sends Escape to stop the current operation, then automatically sends
+\"i\" after `claude-repl-interrupt-reinsert-delay' seconds to return
+to insert mode.  Defaults to the current workspace when WS is nil
+(matches the interactive `SPC o x' behavior); the drawer passes the
+entry-at-point so interrupts target the selected entry."
   (interactive)
-  (let ((ws (+workspace-current-name)))
+  (let* ((ws (or ws (+workspace-current-name)))
+         (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (claude-repl--log ws "interrupt")
-    (if (claude-repl--vterm-live-p)
-        (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+    (if (and vterm-buf (buffer-live-p vterm-buf))
+        (progn
           (claude-repl--send-interrupt-escape ws vterm-buf)
-          (run-at-time claude-repl-interrupt-reinsert-delay nil #'claude-repl--enter-insert-mode vterm-buf))
+          (run-at-time claude-repl-interrupt-reinsert-delay nil
+                       #'claude-repl--enter-insert-mode vterm-buf))
       (claude-repl--log ws "interrupt: vterm not live, skipping"))))
 
 (defun claude-repl-update-pr ()
@@ -459,14 +464,16 @@ the post-condition: after the call returns \(or throws), WS is not in
                             ws (if (member ws persp-names-cache) "t" "nil") persp-names-cache))
       (error (claude-repl--log ws "nuke-one-workspace: workspace-kill error: %S" err)))))
 
-(defun claude-repl-nuke-workspace ()
+(defun claude-repl-nuke-workspace (&optional ws)
   "Tear down a claude-repl workspace: session, buffers, persp, and hashmap entry.
 Persisted state.el (priority, per-environment session-id) is preserved
 so the workspace can be re-opened later and resume its Claude session.
-Prompts to select from workspaces registered in `claude-repl--workspaces',
-defaulting to the current workspace when registered."
+When called interactively without WS, prompts to select from
+workspaces registered in `claude-repl--workspaces', defaulting to the
+current workspace when registered.  Programmatic callers (e.g. the
+drawer) pass WS directly to skip the prompt."
   (interactive)
-  (let ((ws (claude-repl--read-known-workspace "Nuke workspace: ")))
+  (let ((ws (or ws (claude-repl--read-known-workspace "Nuke workspace: "))))
     (unless (y-or-n-p (format "Nuke workspace '%s'? This kills processes and buffers but preserves on-disk state. " ws))
       (user-error "Aborted"))
     (claude-repl--nuke-one-workspace ws)
@@ -520,7 +527,7 @@ proceeding.  Same per-workspace teardown as
     (force-mode-line-update t)
     (message "Nuked %d restored workspace(s)" count)))
 
-(defun claude-repl-kill-workspace ()
+(defun claude-repl-kill-workspace (&optional ws)
   "Tear down a claude-repl workspace and preserve its persisted state.
 Alias for `claude-repl-nuke-workspace' — both functions go through
 `claude-repl--nuke-one-workspace', which always preserves the on-disk
@@ -529,9 +536,10 @@ muscle-memory that bind `kill' semantics distinctly from `nuke'.
 
 Prompts to select from workspaces registered in
 `claude-repl--workspaces', defaulting to the current workspace
-when registered."
+when registered.  Programmatic callers (e.g. the drawer) pass WS
+directly to skip the prompt."
   (interactive)
-  (let ((ws (claude-repl--read-known-workspace "Kill workspace: ")))
+  (let ((ws (or ws (claude-repl--read-known-workspace "Kill workspace: "))))
     (unless (y-or-n-p (format "Kill workspace '%s'? This kills processes and buffers but preserves priority/session-id on disk. " ws))
       (user-error "Aborted"))
     (claude-repl--nuke-one-workspace ws)

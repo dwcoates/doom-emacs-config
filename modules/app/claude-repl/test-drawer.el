@@ -29,6 +29,109 @@
   "Register WS in `claude-repl--workspaces' with PROPS plist."
   (puthash ws (copy-sequence props) claude-repl--workspaces))
 
+;;;; ---- Per-entry action commands ----
+
+(ert-deftest claude-repl-drawer-test-nuke-dispatches-to-entry ()
+  "`claude-repl-drawer-nuke' invokes `claude-repl-nuke-workspace' with the entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "target" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((arg :unset))
+        (cl-letf (((symbol-function 'claude-repl-nuke-workspace)
+                   (lambda (&optional ws) (setq arg ws))))
+          (claude-repl-drawer-nuke))
+        (should (equal arg "target"))))))
+
+(ert-deftest claude-repl-drawer-test-kill-dispatches-to-entry ()
+  "`claude-repl-drawer-kill' invokes `claude-repl-kill-workspace' with the entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "target" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((arg :unset))
+        (cl-letf (((symbol-function 'claude-repl-kill-workspace)
+                   (lambda (&optional ws) (setq arg ws))))
+          (claude-repl-drawer-kill))
+        (should (equal arg "target"))))))
+
+(ert-deftest claude-repl-drawer-test-interrupt-dispatches-to-entry ()
+  "`claude-repl-drawer-interrupt' invokes `claude-repl-interrupt' with the entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "target" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((arg :unset))
+        (cl-letf (((symbol-function 'claude-repl-interrupt)
+                   (lambda (&optional ws) (setq arg ws))))
+          (claude-repl-drawer-interrupt))
+        (should (equal arg "target"))))))
+
+(ert-deftest claude-repl-drawer-test-send-prompt-dispatches-to-entry ()
+  "`claude-repl-drawer-send-prompt' calls `claude-repl--send' with prompt and entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "target" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((sent-prompt :unset)
+            (sent-ws     :unset))
+        (cl-letf (((symbol-function 'read-string)
+                   (lambda (&rest _) "hello world"))
+                  ((symbol-function 'claude-repl--send)
+                   (lambda (prompt ws &rest _)
+                     (setq sent-prompt prompt sent-ws ws))))
+          (claude-repl-drawer-send-prompt))
+        (should (equal sent-prompt "hello world"))
+        (should (equal sent-ws "target"))))))
+
+(ert-deftest claude-repl-drawer-test-send-prompt-empty-skips-send ()
+  "Empty prompt input skips the send entirely."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "target" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((called nil))
+        (cl-letf (((symbol-function 'read-string) (lambda (&rest _) ""))
+                  ((symbol-function 'claude-repl--send)
+                   (lambda (&rest _) (setq called t))))
+          (claude-repl-drawer-send-prompt))
+        (should-not called)))))
+
+(ert-deftest claude-repl-drawer-test-action-no-ws-at-point-errors ()
+  "Action commands signal user-error when there is no workspace at point."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (goto-char (point-min))
+      (should-error (claude-repl-drawer-nuke) :type 'user-error)
+      (should-error (claude-repl-drawer-kill) :type 'user-error)
+      (should-error (claude-repl-drawer-interrupt) :type 'user-error))))
+
+(ert-deftest claude-repl-drawer-test-merge-into-master-switches-then-calls ()
+  "`claude-repl-drawer-merge-into-master' switches to entry, invokes merge, then restores."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "target" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((current "elsewhere")
+            (switch-log nil)
+            (merge-called nil))
+        (cl-letf (((symbol-function '+workspace-current-name)
+                   (lambda () current))
+                  ((symbol-function '+workspace-switch)
+                   (lambda (ws &rest _) (push ws switch-log) (setq current ws)))
+                  ((symbol-function 'claude-repl-workspace-merge-current-into-source)
+                   (lambda () (setq merge-called t))))
+          (claude-repl-drawer-merge-into-master))
+        (should merge-called)
+        (should (equal (nreverse switch-log) '("target" "elsewhere")))))))
+
 ;;;; ---- Persistence across workspaces ----
 
 (ert-deftest claude-repl-drawer-test-ensure-visible-noop-when-flag-nil ()
