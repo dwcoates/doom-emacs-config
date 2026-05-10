@@ -543,16 +543,22 @@ Side-window action alists honor `window-width' only at window-creation
 time, so a re-shown drawer keeps its old width even when the fraction
 changed.  This forces the resize on every show.
 
-`window-resize' is called with HORIZONTAL=t and IGNORE=t so the resize
-bypasses `window-min-width' (default 10) and any `window-size-fixed'
-restriction, which silently clamp small fractions otherwise."
+Uses `shrink-window'/`enlarge-window' rather than `window-resize'
+because side windows route through `window--resize-side-windows',
+which silently rejects the direct `window-resize' path under
+constraints (parent window slack, fixed-size flags, etc.) — the
+shrink/enlarge wrappers go through the side-window aware codepath
+and actually apply the delta.  Locally lowers `window-min-width' so
+fractions below the global default (10 cols) are honored, and clears
+`window-size-fixed' on the buffer in case a prior pass locked it."
   (let* ((target (claude-repl-drawer--window-width window))
          (window-min-width 1))
     (with-selected-window window
-      (setq-local window-size-fixed nil))
-    (let ((delta (- target (window-total-width window))))
-      (unless (zerop delta)
-        (ignore-errors (window-resize window delta t t))))))
+      (setq-local window-size-fixed nil)
+      (let ((delta (- target (window-total-width window))))
+        (cond
+         ((> delta 0) (enlarge-window delta t))
+         ((< delta 0) (shrink-window (abs delta) t)))))))
 
 (defun claude-repl-drawer-show ()
   "Show the workspace drawer in a left-side window.
