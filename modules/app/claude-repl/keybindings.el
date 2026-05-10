@@ -560,8 +560,10 @@ Reports comprehensive diagnostics."
        :desc "Update GitHub PR description"  "r" #'claude-repl-update-pr
        :desc "Nuke workspace"           "x" #'claude-repl-nuke-workspace
        :desc "Nuke ALL workspaces"      "X" #'claude-repl-nuke-all-workspaces
-       :desc "Dump workspace state"     "p" #'claude-repl-debug/dump-workspace
+       :desc "Paste workspace clipboard" "p" #'claude-repl-paste-clipboard
        :desc "Toggle debug logging"    "D" #'claude-repl-debug/toggle-logging
+       (:prefix ("h" . "help/debug")
+        :desc "Dump workspace state"   "p" #'claude-repl-debug/dump-workspace)
        (:prefix ("e" . "explain")
         :desc "line/region/hunk (prompt)" "e" #'claude-repl-explain-prompt
         :desc "line/region/hunk (canned)" "E" #'claude-repl-explain
