@@ -994,7 +994,7 @@ values are `t' (presence is the signal).")
 Called from TAB-toggle (when expanding) and `g'-refresh.  Avoids
 running git every poll cycle.  All values are best-effort: nil left
 in place when the underlying command errors or returns empty."
-  (when-let ((dir (claude-repl--ws-dir ws)))
+  (when-let ((dir (ignore-errors (claude-repl--ws-dir ws))))
     (let* ((branch (claude-repl--git-string-quiet
                     "-C" dir "rev-parse" "--abbrev-ref" "HEAD")))
       (claude-repl--ws-put ws :detail-branch

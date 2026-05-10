@@ -1354,9 +1354,12 @@ Prompts for which workspace to merge in."
   "Return the directory whose branch is WS's merge-target.
 Prefers `:source-ws-dir' when recorded and still a live directory;
 falls back to the master worktree path derived from WS's project-dir.
-Returns nil when neither can be resolved."
+Returns nil when neither can be resolved.  Resolves WS's project-dir
+defensively (`ignore-errors') so workspaces without a recorded
+`:project-dir' (test fixtures, half-initialized stubs) don't crash
+the poll-driven cache refresh."
   (let ((recorded (claude-repl--ws-get ws :source-ws-dir))
-        (ws-dir (claude-repl--ws-dir ws)))
+        (ws-dir (ignore-errors (claude-repl--ws-dir ws))))
     (cond
      ((and recorded (file-directory-p recorded)) recorded)
      (ws-dir (claude-repl--master-worktree-path ws-dir)))))
@@ -1391,7 +1394,7 @@ or `not-merged' on completion via `claude-repl--branch-merge-sentinel'.
 No-op when a refresh is already in flight, when WS or its parent dir
 can't be resolved, or when WS and parent are on the same branch (a
 branch is never considered merged into itself for cache purposes)."
-  (when-let* ((ws-dir (claude-repl--ws-dir ws))
+  (when-let* ((ws-dir (ignore-errors (claude-repl--ws-dir ws)))
               (parent-dir (claude-repl--ws-merge-parent-dir ws))
               ((not (claude-repl--branch-merge-check-in-progress-p ws))))
     (let ((ws-branch (claude-repl--git-string-quiet
