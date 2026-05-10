@@ -786,25 +786,72 @@ Claude itself is not started here — the workspace is added to
       (user-error "No workspace snapshot at %s" file))
     (let ((loaded 0)
           (skipped 0)
+          (iter 0)
+          (total (length snapshot))
           (claude-repl--loading-snapshot-p t))
+      (claude-repl--log nil "load-workspace-snapshot: BEGIN file=%s entries=%d persp-count=%s persps=%S"
+                        file total
+                        (claude-repl--snapshot-loader-persp-count)
+                        (claude-repl--snapshot-loader-persp-names))
       (dolist (raw snapshot)
+        (cl-incf iter)
         (let* ((entry (claude-repl--snapshot-entry-normalize raw))
                (ws (car entry))
                (plist (cdr entry))
                (dir (plist-get plist :project-dir))
-               (priority (plist-get plist :priority)))
+               (priority (plist-get plist :priority))
+               (before-count (claude-repl--snapshot-loader-persp-count))
+               (before-current (claude-repl--snapshot-loader-current-name)))
+          (claude-repl--log nil
+                            "load-snapshot iter=%d/%d ws=%s dir=%s exists=%s before-count=%s before-current=%s"
+                            iter total ws (or dir "nil")
+                            (and dir (file-directory-p dir))
+                            before-count (or before-current "nil"))
           (if (and dir (file-directory-p dir))
               (progn
                 (+dwc/switch-to-project dir)
+                (let* ((after-count (claude-repl--snapshot-loader-persp-count))
+                       (after-current (claude-repl--snapshot-loader-current-name))
+                       (delta (and (numberp after-count) (numberp before-count)
+                                   (- after-count before-count)))
+                       (branch (cond ((null delta) "unknown")
+                                     ((> delta 0) "THEN/new-persp")
+                                     ((= delta 0) "ELSE/recycle-or-existing")
+                                     (t "shrank"))))
+                  (claude-repl--log nil
+                                    "load-snapshot iter=%d after-count=%s after-current=%s delta=%s branch=%s snapshot-ws=%s persp-name-matches-snapshot-ws=%s"
+                                    iter after-count (or after-current "nil")
+                                    delta branch ws
+                                    (equal after-current ws)))
                 (claude-repl--ws-put ws :project-dir dir)
                 (when priority
                   (claude-repl--ws-put ws :priority priority))
                 (puthash ws plist claude-repl--pending-snapshot-workspaces)
                 (cl-incf loaded))
+            (claude-repl--log nil "load-snapshot iter=%d SKIPPED ws=%s reason=dir-missing-or-nil" iter ws)
             (cl-incf skipped))))
       (force-mode-line-update t)
       (setq claude-repl--snapshot-loaded-p t)
+      (claude-repl--log nil "load-workspace-snapshot: END loaded=%d skipped=%d final-persp-count=%s final-persps=%S"
+                        loaded skipped
+                        (claude-repl--snapshot-loader-persp-count)
+                        (claude-repl--snapshot-loader-persp-names))
       (message "Loaded %d workspace(s), skipped %d" loaded skipped))))
+
+(defun claude-repl--snapshot-loader-persp-count ()
+  "Return the current number of named persps, or nil if persp-mode isn't ready."
+  (and (fboundp '+workspace-list-names)
+       (ignore-errors (length (+workspace-list-names)))))
+
+(defun claude-repl--snapshot-loader-persp-names ()
+  "Return the current `+workspace-list-names', or nil if persp-mode isn't ready."
+  (and (fboundp '+workspace-list-names)
+       (ignore-errors (+workspace-list-names))))
+
+(defun claude-repl--snapshot-loader-current-name ()
+  "Return the current workspace name, or nil if persp-mode isn't ready."
+  (and (fboundp '+workspace-current-name)
+       (ignore-errors (+workspace-current-name))))
 
 (defun claude-repl--maybe-start-on-activate (&rest _)
   "Lazy-start hook for `persp-activated-functions'.
