@@ -1826,6 +1826,17 @@ emitting only the permission question."
               "raw" "prefixed" "/tmp/repo/" "HEAD" nil)))
     (should (string-match-p "[Dd]o NOT ask for permission" out))))
 
+(ert-deftest claude-repl-test-workspace-generation-prompt-isolates-inner-prompt ()
+  "The headless prompt explicitly tells the model the inner string is the
+USER PROMPT for a separate spawned agent and is NOT instructions for the
+headless model itself.  Without this, the headless model can read a
+suffix like `invoke /workspace-merge' inside the inner prompt and run it
+itself instead of just emitting it verbatim into the JSON."
+  (let ((out (claude-repl--workspace-generation-prompt
+              "raw" "prefixed" "/tmp/repo/" "HEAD" nil)))
+    (should (string-match-p "NOT instructions for you" out))
+    (should (string-match-p "verbatim" out))))
+
 (ert-deftest claude-repl-test-workspace-generation-prompt-requires-array-top-level ()
   "The prompt explicitly tells the model the JSON top-level must be an array
 even for a single workspace.  Previously the model emitted a bare object
@@ -3385,5 +3396,125 @@ leaking the opened buffers into the wrong workspace."
          "/tmp/fake" "test-ws" nil nil nil nil nil)
         (should (claude-repl--ws-get "test-ws" :pending-initial-buffers))
         (should-not open-called)))))
+
+;;;; ---- Tests: claude-repl-create-doom-oneshot-workspace ----
+
+(ert-deftest claude-repl-test-create-doom-oneshot-pins-git-root-to-doom-config ()
+  "doom-oneshot pins git-root to `~/.config/doom' regardless of the current
+workspace's project, so the binding can be invoked from anywhere and still
+edit the doom config."
+  (claude-repl-test--with-clean-state
+    (let ((captured-git-root :unset))
+      (cl-letf (((symbol-function '+workspace-current-name)
+                 (lambda () "unrelated-ws"))
+                ((symbol-function 'claude-repl--ws-dir)
+                 (lambda (_ws) "/tmp/unrelated-repo/"))
+                ((symbol-function 'read-string)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed git-root _base _fork-from)
+                   (setq captured-git-root git-root))))
+        (claude-repl-create-doom-oneshot-workspace)
+        (should (equal captured-git-root claude-repl--doom-config-dir))
+        (should (equal captured-git-root
+                       (file-name-as-directory
+                        (expand-file-name "~/.config/doom"))))))))
+
+(ert-deftest claude-repl-test-create-doom-oneshot-uses-master-base ()
+  "doom-oneshot branches off local `master', mirroring `SPC TAB N'."
+  (claude-repl-test--with-clean-state
+    (let ((captured-base :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root base _fork-from)
+                   (setq captured-base base))))
+        (claude-repl-create-doom-oneshot-workspace)
+        (should (equal captured-base "master"))))))
+
+(ert-deftest claude-repl-test-create-doom-oneshot-appends-merge-suffix-to-prefixed ()
+  "The merge-on-success suffix is included in the PREFIXED prompt (the
+spawned agent's first message) so the inner agent knows to invoke
+`/workspace-merge' after a successful, tested implementation."
+  (claude-repl-test--with-clean-state
+    (let ((captured-prefixed :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw prefixed _git-root _base _fork-from)
+                   (setq captured-prefixed prefixed))))
+        (claude-repl-create-doom-oneshot-workspace)
+        (should (string-match-p "/workspace-merge" captured-prefixed))
+        (should (string-match-p
+                 (regexp-quote claude-repl--oneshot-merge-suffix)
+                 captured-prefixed))))))
+
+(ert-deftest claude-repl-test-create-doom-oneshot-keeps-raw-prompt-clean ()
+  "The merge suffix is NOT appended to the raw prompt — raw is used purely
+for slug generation and should not get polluted with skill names like
+`/workspace-merge', which would derail the workspace-name slug."
+  (claude-repl-test--with-clean-state
+    (let ((captured-raw :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (raw _prefixed _git-root _base _fork-from)
+                   (setq captured-raw raw))))
+        (claude-repl-create-doom-oneshot-workspace)
+        (should (equal captured-raw "tweak the modeline"))
+        (should-not (string-match-p "/workspace-merge" captured-raw))))))
+
+(ert-deftest claude-repl-test-create-doom-oneshot-prefixed-includes-autonomous-prefix ()
+  "The prefixed prompt still starts with the standard autonomous-prompt
+prefix so the spawned agent runs autonomously without waiting."
+  (claude-repl-test--with-clean-state
+    (let ((captured-prefixed :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw prefixed _git-root _base _fork-from)
+                   (setq captured-prefixed prefixed))))
+        (claude-repl-create-doom-oneshot-workspace)
+        (should (string-prefix-p claude-repl--autonomous-prompt-prefix
+                                 captured-prefixed))))))
+
+(ert-deftest claude-repl-test-create-doom-oneshot-rejects-empty-prompt ()
+  "An empty/whitespace prompt is rejected — there is nothing to slug or
+implement, and we do not want to spawn a useless workspace."
+  (claude-repl-test--with-clean-state
+    (let ((spawned nil))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "   "))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (&rest _) (setq spawned t))))
+        (should-error (claude-repl-create-doom-oneshot-workspace)
+                      :type 'user-error)
+        (should-not spawned)))))
+
+(ert-deftest claude-repl-test-create-doom-oneshot-passes-no-fork-from ()
+  "doom-oneshot is not a fork — fork-from must be nil so the new workspace
+starts a fresh Claude session rather than resuming someone else's."
+  (claude-repl-test--with-clean-state
+    (let ((captured-fork-from :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root _base fork-from)
+                   (setq captured-fork-from fork-from))))
+        (claude-repl-create-doom-oneshot-workspace)
+        (should (null captured-fork-from))))))
+
+(ert-deftest claude-repl-test-oneshot-merge-suffix-mentions-stop-on-ambiguity ()
+  "The merge suffix tells the spawned agent to STOP (not push on) when it
+hits genuine ambiguity it cannot resolve — explicitly required so a
+faulty one-shot implementation isn't auto-merged."
+  (should (string-match-p "STOP" claude-repl--oneshot-merge-suffix))
+  (should (string-match-p "ambiguity" claude-repl--oneshot-merge-suffix)))
+
+(ert-deftest claude-repl-test-oneshot-merge-suffix-mentions-tests-and-commits ()
+  "Merge is gated on implementation, tests, AND commits — the suffix must
+spell that out so the spawned agent doesn't merge half-finished work."
+  (should (string-match-p "tests" claude-repl--oneshot-merge-suffix))
+  (should (string-match-p "[Cc]ommit" claude-repl--oneshot-merge-suffix)))
 
 ;;; test-worktree.el ends here
