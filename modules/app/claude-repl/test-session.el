@@ -296,38 +296,104 @@ by vterm-buf presence; the :done write is not."
   "workspace-mode-line should show PARENT: <basename> when :source-ws-dir is set."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "child-ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
-    (let ((result (claude-repl--workspace-mode-line "child-ws")))
-      (should (listp result))
-      (should (string-match-p "PARENT: feature-foo" (car result))))))
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
+      (let ((result (claude-repl--workspace-mode-line "child-ws")))
+        (should (listp result))
+        (should (string-match-p "PARENT: feature-foo" (car result)))))))
 
 (ert-deftest claude-repl-test-workspace-mode-line-without-parent ()
   "workspace-mode-line first segment should be empty when :source-ws-dir is nil."
   (claude-repl-test--with-clean-state
-    (let ((result (claude-repl--workspace-mode-line "ws-no-parent")))
-      (should (listp result))
-      (should (equal (car result) "")))))
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
+      (let ((result (claude-repl--workspace-mode-line "ws-no-parent")))
+        (should (listp result))
+        (should (equal (car result) ""))))))
 
 (ert-deftest claude-repl-test-workspace-mode-line-empty-source-dir-treated-as-no-parent ()
   "Empty-string :source-ws-dir is treated the same as nil — empty first segment."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws-blank" :source-ws-dir "")
-    (let ((result (claude-repl--workspace-mode-line "ws-blank")))
-      (should (equal (car result) "")))))
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
+      (let ((result (claude-repl--workspace-mode-line "ws-blank")))
+        (should (equal (car result) ""))))))
 
 (ert-deftest claude-repl-test-workspace-mode-line-keeps-prompt-summary-segment ()
-  "The trailing :eval segment for the prompt summary is preserved."
+  "The trailing :eval segment for the prompt summary is preserved at the tail."
   (claude-repl-test--with-clean-state
-    (let ((result (claude-repl--workspace-mode-line "ws")))
-      (should (= (length result) 2))
-      (should (eq (car (cadr result)) :eval)))))
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
+      (let ((result (claude-repl--workspace-mode-line "ws")))
+        (should (= (length result) 3))
+        (should (eq (car (car (last result))) :eval))))))
 
 (ert-deftest claude-repl-test-workspace-mode-line-strips-trailing-slash ()
   "A trailing slash on :source-ws-dir does not leak into the parent name."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-bar/")
-    (let ((result (claude-repl--workspace-mode-line "ws")))
-      (should (string-match-p "PARENT: feature-bar" (car result)))
-      (should-not (string-match-p "feature-bar/" (car result))))))
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
+      (let ((result (claude-repl--workspace-mode-line "ws")))
+        (should (string-match-p "PARENT: feature-bar" (car result)))
+        (should-not (string-match-p "feature-bar/" (car result)))))))
+
+(ert-deftest claude-repl-test-workspace-mode-line-shows-merge-segment ()
+  "When merge-target-name returns a name, the second segment shows MERGE: <name>."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name)
+               (lambda (_ws) "explanation-engine")))
+      (let ((result (claude-repl--workspace-mode-line "ws")))
+        (should (string-match-p "MERGE: explanation-engine" (cadr result)))))))
+
+(ert-deftest claude-repl-test-workspace-mode-line-merge-segment-empty-when-no-target ()
+  "When merge-target-name returns nil, the MERGE segment is the empty string."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
+      (let ((result (claude-repl--workspace-mode-line "ws")))
+        (should (equal (cadr result) ""))))))
+
+;;;; ---- Tests: merge-target-name ----
+
+(ert-deftest claude-repl-test-merge-target-name-no-project-dir ()
+  "Returns nil when the workspace has no :project-dir."
+  (claude-repl-test--with-clean-state
+    (should (null (claude-repl--merge-target-name "unknown-ws")))))
+
+(ert-deftest claude-repl-test-merge-target-name-uses-resolved-target ()
+  "Returns the basename of resolve-merge-into-source-target's output."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
+    (claude-repl--ws-put "wt-ws" :source-ws-dir "/tmp/parent-dir/")
+    (cl-letf (((symbol-function 'file-directory-p) (lambda (_d) t))
+              ((symbol-function 'claude-repl--master-worktree-path)
+               (lambda (_root) "/tmp/master-dir/"))
+              ((symbol-function 'claude-repl--resolve-merge-into-source-target)
+               (lambda (_p _m) "/tmp/parent-dir/"))
+              ((symbol-function 'claude-repl--path-canonical) #'identity))
+      (should (equal (claude-repl--merge-target-name "wt-ws") "parent-dir")))))
+
+(ert-deftest claude-repl-test-merge-target-name-nil-when-target-equals-source ()
+  "Returns nil when the resolved target equals the workspace's own dir
+\(nothing to merge into — typically the master worktree)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "self-ws" :project-dir "/tmp/self-dir/")
+    (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+               (lambda (_root) "/tmp/self-dir/"))
+              ((symbol-function 'claude-repl--resolve-merge-into-source-target)
+               (lambda (_p _m) "/tmp/self-dir/"))
+              ((symbol-function 'claude-repl--path-canonical) #'identity))
+      (should (null (claude-repl--merge-target-name "self-ws"))))))
+
+(ert-deftest claude-repl-test-merge-target-name-redirects-to-master-via-resolver ()
+  "When resolve-merge-into-source-target redirects to master, the basename
+shown is the master worktree's, not the recorded parent's."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
+    (claude-repl--ws-put "wt-ws" :source-ws-dir "/tmp/parent-dir/")
+    (cl-letf (((symbol-function 'file-directory-p) (lambda (_d) t))
+              ((symbol-function 'claude-repl--master-worktree-path)
+               (lambda (_root) "/tmp/explanation-engine/"))
+              ((symbol-function 'claude-repl--resolve-merge-into-source-target)
+               (lambda (_p m) m))
+              ((symbol-function 'claude-repl--path-canonical) #'identity))
+      (should (equal (claude-repl--merge-target-name "wt-ws") "explanation-engine")))))
 
 ;;;; ---- Tests: Session completion handling ----
 

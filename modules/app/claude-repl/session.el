@@ -361,19 +361,55 @@ with everything the caller needs for logging and mode-line setup."
 
 ;;;; Session startup
 
+(defun claude-repl--merge-target-name (ws)
+  "Return the basename of the workspace `SPC TAB M' would merge WS into.
+Mirrors the resolution logic in `claude-repl--workspace-merge-into-source':
+prefers WS's `:source-ws-dir' as the parent, then asks
+`claude-repl--resolve-merge-into-source-target' whether to redirect to
+the master worktree (when the parent's branch is already on master via
+patch-id equivalence).
+
+Returns nil when WS has no `:project-dir' (unknown workspace), or when
+the resolved target equals WS's own dir (nothing to merge into).  This
+is a snapshot at call time — the `git cherry' check runs once when the
+mode-line is constructed, not on every redisplay."
+  (when-let* ((source-dir (claude-repl--ws-get ws :project-dir)))
+    (let* ((recorded (claude-repl--ws-get ws :source-ws-dir))
+           (parent-dir (or (and recorded (file-directory-p recorded) recorded)
+                           (claude-repl--master-worktree-path source-dir)))
+           (master-dir (claude-repl--master-worktree-path source-dir))
+           (target-dir (claude-repl--resolve-merge-into-source-target parent-dir master-dir)))
+      (when (and target-dir
+                 (not (string= (claude-repl--path-canonical target-dir)
+                               (claude-repl--path-canonical source-dir))))
+        (file-name-nondirectory (directory-file-name target-dir))))))
+
 (defun claude-repl--workspace-mode-line (ws)
   "Return a mode-line format list for workspace WS's vterm.
-First segment shows the parent workspace name in green (derived from
-the basename of `:source-ws-dir'); empty when WS has no recorded
-parent.  Trailing `:eval' segment renders the last-prompt summary (see
-`claude-repl--prompt-summary-segment') and recomputes on every
-mode-line redisplay."
+Segments, in order:
+  1. Green ` PARENT: <name>' — basename of `:source-ws-dir'; empty when
+     WS has no recorded parent.
+  2. Yellow ` MERGE: <name>' — basename of the workspace `SPC TAB M'
+     would target (parent worktree, redirected to master when the
+     parent's branch is already on master).  Empty when WS has no
+     resolvable merge target (e.g. the master worktree itself).
+  3. `:eval' segment that renders the last-prompt summary (see
+     `claude-repl--prompt-summary-segment') and recomputes on every
+     mode-line redisplay.
+
+Segments 1 and 2 are computed once when the vterm is initialized; they
+are not reactive to later state changes."
   (let* ((source-dir (claude-repl--ws-get ws :source-ws-dir))
          (parent-name (when (and source-dir (not (string-empty-p source-dir)))
-                        (file-name-nondirectory (directory-file-name source-dir)))))
+                        (file-name-nondirectory (directory-file-name source-dir))))
+         (merge-name (claude-repl--merge-target-name ws)))
     (list (if parent-name
               (propertize (format " PARENT: %s" parent-name)
                           'face '(:foreground "green" :weight bold))
+            "")
+          (if merge-name
+              (propertize (format " MERGE: %s" merge-name)
+                          'face '(:foreground "yellow" :weight bold))
             "")
           '(:eval (claude-repl--prompt-summary-segment)))))
 
