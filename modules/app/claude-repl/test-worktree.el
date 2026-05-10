@@ -2901,6 +2901,53 @@ is reachable from master (it's just M), so the helper reports merged."
       ;; HEAD is master; helper must short-circuit to nil.
       (should-not (claude-repl--branch-merged-into-master-p repo repo)))))
 
+(ert-deftest claude-repl-test-branch-merged-true-when-fully-cherry-picked ()
+  "Returns t when the parent branch's commits all live on master under
+different SHAs (the cherry-pick / rebase workflow).  The previous
+ancestry-based check returned nil here even though the parent has
+nothing left to send to master, defeating the redirect."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-master-branch-name "master"))
+      (claude-repl-test--git-commit repo "M0" "base")
+      (claude-repl-test--git-checkout repo "parent-branch" t)
+      (let ((p1 (claude-repl-test--git-commit repo "P1" "p1-content")))
+        ;; Cherry-pick P1 onto master under a new SHA.
+        (claude-repl-test--git-checkout repo "master")
+        (claude-repl-test--git-cherry-pick-x repo p1)
+        ;; Flip back so worktree-dir reads parent-branch as HEAD.
+        (claude-repl-test--git-checkout repo "parent-branch")
+        ;; parent-branch's tip is NOT an ancestor of master (different SHA),
+        ;; but its patch-id IS on master via cherry-pick.  Helper must say merged.
+        (should (claude-repl--branch-merged-into-master-p repo repo))))))
+
+(ert-deftest claude-repl-test-branch-merged-false-when-partially-cherry-picked ()
+  "Returns nil when the parent has at least one commit whose patch-id is
+NOT yet on master, even if earlier commits were cherry-picked."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-master-branch-name "master"))
+      (claude-repl-test--git-commit repo "M0" "base")
+      (claude-repl-test--git-checkout repo "parent-branch" t)
+      (let ((p1 (claude-repl-test--git-commit repo "P1" "p1-content")))
+        (claude-repl-test--git-commit repo "P2" "p2-content")
+        ;; Master gets only P1; P2 stays unique to parent-branch.
+        (claude-repl-test--git-checkout repo "master")
+        (claude-repl-test--git-cherry-pick-x repo p1)
+        (claude-repl-test--git-checkout repo "parent-branch")
+        (should-not (claude-repl--branch-merged-into-master-p repo repo))))))
+
+(ert-deftest claude-repl-test-branch-merged-nil-on-cherry-failure ()
+  "Returns nil when `git cherry' itself errors (e.g. master ref missing).
+Defensive: an unsuccessful check must not be silently treated as merged,
+since the redirect would then drop commits on the floor."
+  (claude-repl-test--with-temp-git-repo repo
+    ;; Use a master branch name that does not exist in the repo so cherry
+    ;; emits `fatal: bad revision' to stderr.  Helper must reject.
+    (let ((claude-repl-master-branch-name "no-such-branch"))
+      (claude-repl-test--git-commit repo "M0" "base")
+      (claude-repl-test--git-checkout repo "parent-branch" t)
+      (claude-repl-test--git-commit repo "P1" "p1")
+      (should-not (claude-repl--branch-merged-into-master-p repo repo)))))
+
 ;;;; ---- Tests: merge-into-source re-routes when parent merged into master ----
 
 (ert-deftest claude-repl-test-merge-into-source-reroutes-to-master-when-parent-already-merged ()

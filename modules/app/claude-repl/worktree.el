@@ -1247,15 +1247,28 @@ Prompts for which workspace to merge in."
 (defalias '+dwc/workspace-merge #'claude-repl-workspace-merge)
 
 (defun claude-repl--branch-merged-into-master-p (worktree-dir master-dir)
-  "Return non-nil if the branch checked out at WORKTREE-DIR is fully
-incorporated into the master branch checked out at MASTER-DIR.
-Tests whether WORKTREE-DIR's HEAD ref is an ancestor of master via
-`git merge-base --is-ancestor': true means every commit on the parent
-is already reachable from master, so a future cherry-pick has nothing
-new to send to the parent and can be routed straight to master.
+  "Return non-nil when the branch at WORKTREE-DIR is fully on master.
+\"Fully on master\" is checked by patch-id equivalence (`git cherry'),
+not strict ancestry — so commits that landed on master via cherry-pick
+or rebase still count as merged, even though their SHAs differ from
+the parent branch's.
+
+Algorithm: `git cherry MASTER PARENT-BRANCH' from WORKTREE-DIR lists
+every commit on PARENT-BRANCH; lines starting with `+' are commits
+whose patch-id is NOT yet on master, `-' lines are already-equivalent.
+Empty output (or all-`-') means there is nothing left to send to the
+parent — the merge can be routed straight to master.
+
+Why patch-id rather than `git merge-base --is-ancestor': in workflows
+that rebase or cherry-pick onto master rather than fast-forward-merging,
+the parent branch's tip is never an ancestor of master even after every
+patch has landed.  The previous ancestry check therefore returned nil
+in exactly the case this redirect is meant to optimize.
+
 Returns nil when either argument is nil, when the worktree's branch
 cannot be resolved, when it equals `claude-repl-master-branch-name',
-or when the ancestor check fails."
+or when `git cherry' fails (defensive — refuses to silently treat an
+errored check as `merged')."
   (and worktree-dir master-dir
        (let ((parent-branch (claude-repl--git-string
                              "-C" worktree-dir "rev-parse" "--abbrev-ref" "HEAD")))
@@ -1263,10 +1276,17 @@ or when the ancestor check fails."
               (not (string-empty-p parent-branch))
               (not (string-prefix-p "fatal" parent-branch))
               (not (string= parent-branch claude-repl-master-branch-name))
-              (= 0 (claude-repl--git-exit-code
-                    worktree-dir
-                    "merge-base" "--is-ancestor"
-                    parent-branch claude-repl-master-branch-name))))))
+              (let ((cherry-out (claude-repl--git-string
+                                 "-C" worktree-dir
+                                 "cherry"
+                                 claude-repl-master-branch-name
+                                 parent-branch)))
+                (and cherry-out
+                     (not (string-prefix-p "fatal" cherry-out))
+                     (not (string-prefix-p "error" cherry-out))
+                     (cl-every (lambda (line)
+                                 (not (string-prefix-p "+" line)))
+                               (split-string cherry-out "\n" t))))))))
 
 (defun claude-repl--resolve-merge-into-source-target (parent-dir master-dir)
   "Pick the cherry-pick destination for `merge-current-into-source'.
