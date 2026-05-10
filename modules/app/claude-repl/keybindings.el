@@ -379,7 +379,7 @@ window changes, git-diff sentinels, resolve-root, etc.)."
       (claude-repl--log (+workspace-current-name) "debug logging toggled: %s" label))))
 
 (defun claude-repl-debug/toggle-log-to-file ()
-  "Toggle writing debug log output to `~/.claude/doom-claude-repl.log'.
+  "Toggle writing debug log output to `~/.claude/emacs/doom-claude-repl.log'.
 When enabled, all messages that pass through `claude-repl--do-log' are
 appended to the file regardless of the `claude-repl-debug' level."
   (interactive)

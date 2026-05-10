@@ -485,9 +485,9 @@ environments without notification tools (terminal-notifier or osascript)."
 ;;;; ---- Tests: log-to-file ----
 
 (ert-deftest claude-repl-test-logfile-path-returns-fixed-path ()
-  "`claude-repl--logfile-path' should return ~/.claude/doom-claude-repl.log."
+  "`claude-repl--logfile-path' should return ~/.claude/emacs/doom-claude-repl.log."
   (should (equal (claude-repl--logfile-path)
-                 (expand-file-name "~/.claude/doom-claude-repl.log"))))
+                 (expand-file-name "~/.claude/emacs/doom-claude-repl.log"))))
 
 (ert-deftest claude-repl-test-logfile-path-honors-defcustom ()
   "`claude-repl--logfile-path' should expand `claude-repl-log-file-name'."

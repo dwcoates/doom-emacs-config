@@ -36,7 +36,7 @@ high-frequency events (window changes, resolve-root)."
   :group 'claude-repl)
 
 (defcustom claude-repl-log-to-file t
-  "When non-nil, append all log output to `~/.claude/doom-claude-repl.log'.
+  "When non-nil, append all log output to `~/.claude/emacs/doom-claude-repl.log'.
 Logging to file occurs independently of `claude-repl-debug' — messages are
 written to the file whenever they pass through `claude-repl--do-log',
 regardless of the current debug level.  Use
@@ -50,7 +50,7 @@ Longer values reduce collision risk in setups with many workspaces."
   :type 'integer
   :group 'claude-repl)
 
-(defcustom claude-repl-log-file-name "~/.claude/doom-claude-repl.log"
+(defcustom claude-repl-log-file-name "~/.claude/emacs/doom-claude-repl.log"
   "Path to the claude-repl log file.
 The value is passed through `expand-file-name', and the parent directory
 is created on demand by `claude-repl--logfile-path'."
