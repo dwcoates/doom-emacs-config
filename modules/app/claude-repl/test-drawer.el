@@ -29,6 +29,48 @@
   "Register WS in `claude-repl--workspaces' with PROPS plist."
   (puthash ws (copy-sequence props) claude-repl--workspaces))
 
+;;;; ---- Expand-detail ----
+
+(ert-deftest claude-repl-drawer-test-toggle-expand-adds-and-removes ()
+  "TAB toggle adds the entry to the expanded-set on first press, removes on second."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1" :project-dir "/tmp/")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (cl-letf (((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore))
+        (claude-repl-drawer-toggle-expand)
+        (should (claude-repl-drawer--expanded-p "ws"))
+        (claude-repl-drawer-toggle-expand)
+        (should-not (claude-repl-drawer--expanded-p "ws"))))))
+
+(ert-deftest claude-repl-drawer-test-render-detail-lines-shows-cached-fields ()
+  "When an entry is expanded, render emits its `:detail-*' fields."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :detail-branch "feature/x"
+                                       :detail-master-ahead 7
+                                       :detail-last-commit "fix: thing"
+                                       :detail-last-commit-time "5 minutes ago")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--ensure-expanded-set)
+      (puthash "ws" t claude-repl-drawer--expanded-set)
+      (claude-repl-drawer--render)
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p "feature/x" text))
+        (should (string-match-p "ahead master:" text))
+        (should (string-match-p "fix: thing" text))
+        (should (string-match-p "5 minutes ago" text))))))
+
+(ert-deftest claude-repl-drawer-test-format-duration ()
+  "`--format-duration' produces short human-readable strings."
+  (should (equal (claude-repl-drawer--format-duration 30)   "30s ago"))
+  (should (equal (claude-repl-drawer--format-duration 600)  "10m ago"))
+  (should (equal (claude-repl-drawer--format-duration 7200) "2.0h ago"))
+  (should (equal (claude-repl-drawer--format-duration 172800) "2.0d ago")))
+
 ;;;; ---- Per-entry action commands ----
 
 (ert-deftest claude-repl-drawer-test-nuke-dispatches-to-entry ()

@@ -146,6 +146,8 @@ The current-entry overlay covers this region with
     (define-key map (kbd "k")       #'claude-repl-drawer-prev)
     (define-key map (kbd "<up>")    #'claude-repl-drawer-prev)
     (define-key map (kbd "RET")     #'claude-repl-drawer-visit)
+    (define-key map (kbd "TAB")     #'claude-repl-drawer-toggle-expand)
+    (define-key map (kbd "<tab>")   #'claude-repl-drawer-toggle-expand)
     (define-key map (kbd "g")       #'claude-repl-drawer-refresh)
     (define-key map (kbd "q")       #'claude-repl-drawer-hide)
     ;; Per-entry actions mirroring leader-key bindings:
@@ -268,6 +270,8 @@ Runs after every command in the drawer buffer."
     "H"             #'claude-repl-drawer-toggle-hidden
     "+"             #'claude-repl-drawer-priority-up
     "-"             #'claude-repl-drawer-priority-down
+    (kbd "TAB")     #'claude-repl-drawer-toggle-expand
+    (kbd "<tab>")   #'claude-repl-drawer-toggle-expand
     (kbd "C-c C-k") #'claude-repl-drawer-interrupt)
   ;; Block horizontal char navigation — entry is the navigational unit.
   (evil-define-key '(normal motion) claude-repl-drawer-mode-map
@@ -521,11 +525,16 @@ content (rather than back to column 0).  HIDDEN dims the block."
   "Render TREE (a `(WS . CHILDREN)' cell) at DEPTH.
 SECTION is :main, :hidden, or :merged — only :hidden propagates the
 dim treatment via the HIDDEN flag passed to `--render-workspace'.
-Children render contiguously (no inter-child blank); blank-between-
-roots is the caller's responsibility."
-  (claude-repl-drawer--render-workspace (car tree) current
-                                        (eq section :hidden)
-                                        depth)
+When the entry is in the expanded-set, additional detail lines are
+appended under the standard 2-line render.  Children render
+contiguously (no inter-child blank); blank-between-roots is the
+caller's responsibility."
+  (let ((ws (car tree)))
+    (claude-repl-drawer--render-workspace ws current
+                                          (eq section :hidden)
+                                          depth)
+    (when (claude-repl-drawer--expanded-p ws)
+      (claude-repl-drawer--render-detail-lines ws depth)))
   (dolist (child (cdr tree))
     (claude-repl-drawer--render-subtree child (1+ depth) current section)))
 
@@ -660,10 +669,17 @@ Returns non-nil on success."
     (+workspace-switch ws)))
 
 (defun claude-repl-drawer-refresh ()
-  "Manually refresh the drawer contents."
+  "Manually refresh the drawer contents.
+Also refreshes the detail cache for any currently-expanded entries
+so their git-derived fields (commits ahead, last commit, etc.) are
+re-fetched."
   (interactive)
   (when-let ((buf (get-buffer claude-repl-drawer-buffer-name)))
     (with-current-buffer buf
+      (when claude-repl-drawer--expanded-set
+        (maphash (lambda (ws _)
+                   (claude-repl-drawer--refresh-detail-cache ws))
+                 claude-repl-drawer--expanded-set))
       (claude-repl-drawer--render))))
 
 (defun claude-repl-drawer--require-ws-at-point ()
@@ -810,6 +826,126 @@ Intended to be called from the 1Hz poll in `status.el'."
       (claude-repl-drawer--render))))
 
 ;;;; Display + toggle -------------------------------------------------------
+
+;;;; Expand-detail ----------------------------------------------------------
+
+(defvar-local claude-repl-drawer--expanded-set nil
+  "Hash table of workspace names currently expanded in detail view.
+Buffer-local: one set per drawer buffer.  Keys are workspace names,
+values are `t' (presence is the signal).")
+
+(defun claude-repl-drawer--ensure-expanded-set ()
+  "Create `claude-repl-drawer--expanded-set' if not yet initialized."
+  (unless claude-repl-drawer--expanded-set
+    (setq-local claude-repl-drawer--expanded-set
+                (make-hash-table :test 'equal))))
+
+(defun claude-repl-drawer--expanded-p (ws)
+  "Return non-nil if WS is currently expanded."
+  (and claude-repl-drawer--expanded-set
+       (gethash ws claude-repl-drawer--expanded-set)))
+
+(defun claude-repl-drawer--refresh-detail-cache (ws)
+  "Populate WS's `:detail-*' plist fields with synchronous git calls.
+Called from TAB-toggle (when expanding) and `g'-refresh.  Avoids
+running git every poll cycle.  All values are best-effort: nil left
+in place when the underlying command errors or returns empty."
+  (when-let ((dir (claude-repl--ws-dir ws)))
+    (let* ((branch (claude-repl--git-string-quiet
+                    "-C" dir "rev-parse" "--abbrev-ref" "HEAD")))
+      (claude-repl--ws-put ws :detail-branch
+                           (and branch (not (string-empty-p branch)) branch)))
+    (let ((ahead (claude-repl--git-string-quiet
+                  "-C" dir "rev-list" "--count"
+                  (concat claude-repl-master-branch-name "..HEAD"))))
+      (claude-repl--ws-put ws :detail-master-ahead
+                           (and ahead (not (string-empty-p ahead))
+                                (string-to-number ahead))))
+    (when-let* ((src-dir (claude-repl--ws-get ws :source-ws-dir))
+                ((file-directory-p src-dir))
+                (src-branch (claude-repl--git-string-quiet
+                             "-C" src-dir "rev-parse" "--abbrev-ref" "HEAD")))
+      (when (and src-branch (not (string-empty-p src-branch))
+                 (not (string-prefix-p "fatal" src-branch)))
+        (let ((ahead (claude-repl--git-string-quiet
+                      "-C" dir "rev-list" "--count"
+                      (concat src-branch "..HEAD"))))
+          (claude-repl--ws-put ws :detail-source-ahead
+                               (and ahead (not (string-empty-p ahead))
+                                    (string-to-number ahead))))))
+    (let ((subj (claude-repl--git-string-quiet
+                 "-C" dir "log" "-1" "--pretty=format:%s")))
+      (claude-repl--ws-put ws :detail-last-commit
+                           (and subj (not (string-empty-p subj)) subj)))
+    (let ((tm (claude-repl--git-string-quiet
+               "-C" dir "log" "-1" "--pretty=format:%ar")))
+      (claude-repl--ws-put ws :detail-last-commit-time
+                           (and tm (not (string-empty-p tm)) tm)))
+    (let ((status (claude-repl--git-string-quiet
+                   "-C" dir "status" "--porcelain")))
+      (claude-repl--ws-put ws :detail-dirty-count
+                           (if (or (null status) (string-empty-p status))
+                               0
+                             (length (split-string status "\n" t)))))))
+
+(defun claude-repl-drawer--format-duration (seconds)
+  "Format SECONDS as a short human-readable duration."
+  (cond
+   ((< seconds 60)    (format "%ds ago"  (round seconds)))
+   ((< seconds 3600)  (format "%dm ago"  (round (/ seconds 60))))
+   ((< seconds 86400) (format "%.1fh ago" (/ seconds 3600.0)))
+   (t                 (format "%.1fd ago" (/ seconds 86400.0)))))
+
+(defun claude-repl-drawer-toggle-expand ()
+  "Toggle the expanded detail view for the entry at point.
+On expand, refreshes the detail cache (synchronous git calls); on
+collapse, removes from the expanded set.  Re-renders the drawer."
+  (interactive)
+  (let ((ws (claude-repl-drawer--require-ws-at-point)))
+    (claude-repl-drawer--ensure-expanded-set)
+    (if (gethash ws claude-repl-drawer--expanded-set)
+        (remhash ws claude-repl-drawer--expanded-set)
+      (claude-repl-drawer--refresh-detail-cache ws)
+      (puthash ws t claude-repl-drawer--expanded-set))
+    (claude-repl-drawer--render)))
+
+(defun claude-repl-drawer--render-detail-lines (ws depth)
+  "Insert detail lines for an expanded WS at DEPTH.
+Reads only cached `:detail-*' fields and existing plist values; never
+invokes git.  Caller is `--render-workspace-expanded'."
+  (let* ((indent-str (make-string (* depth claude-repl-drawer-indent-per-level) ?\s))
+         (detail-prefix (concat claude-repl-drawer-gutter indent-str "    "))
+         (branch       (claude-repl--ws-get ws :detail-branch))
+         (master-ahead (claude-repl--ws-get ws :detail-master-ahead))
+         (source-ahead (claude-repl--ws-get ws :detail-source-ahead))
+         (last-commit  (claude-repl--ws-get ws :detail-last-commit))
+         (last-commit-time (claude-repl--ws-get ws :detail-last-commit-time))
+         (dirty-count  (claude-repl--ws-get ws :detail-dirty-count))
+         (last-prompt-time (claude-repl--ws-get ws :last-prompt-time))
+         (pending-count (length (claude-repl--ws-get ws :pending-prompts))))
+    (cl-flet ((line (label value)
+                (insert detail-prefix
+                        (propertize (concat label " ") 'face 'shadow)
+                        (propertize (format "%s" value)
+                                    'face 'claude-repl-drawer-summary
+                                    'wrap-prefix detail-prefix)
+                        "\n")))
+      (when branch        (line "branch:" branch))
+      (when master-ahead  (line "ahead master:" (format "%d" master-ahead)))
+      (when source-ahead  (line "ahead source:" (format "%d" source-ahead)))
+      (when last-commit
+        (line "last commit:"
+              (if last-commit-time
+                  (format "%s (%s)" last-commit last-commit-time)
+                last-commit)))
+      (when (and dirty-count (> dirty-count 0))
+        (line "dirty:" (format "%d files" dirty-count)))
+      (when last-prompt-time
+        (line "last prompt:"
+              (claude-repl-drawer--format-duration
+               (- (float-time) last-prompt-time))))
+      (when (and pending-count (> pending-count 0))
+        (line "pending:" (format "%d prompt(s)" pending-count))))))
 
 (defvar claude-repl-drawer--display-action
   `((display-buffer-in-side-window)
