@@ -333,6 +333,20 @@
       (should (equal (mapcar #'car forest) '("root")))
       (should (equal (mapcar #'car (cdr (car forest))) '("kid"))))))
 
+(ert-deftest claude-repl-drawer-test-section-headers-include-counts ()
+  "Section header labels show entry counts."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "main-a")
+    (claude-repl-drawer-test--register "main-b")
+    (claude-repl-drawer-test--register "hid"     :repl-state    :hidden)
+    (claude-repl-drawer-test--register "merged"  :branch-merged 'merged)
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p "MAIN (2)"   text))
+        (should (string-match-p "HIDDEN (1)" text))
+        (should (string-match-p "MERGED (1)" text))))))
+
 (ert-deftest claude-repl-drawer-test-render-three-sections ()
   "Render emits MAIN, HIDDEN, and MERGED headers in that order."
   (claude-repl-test--with-clean-state

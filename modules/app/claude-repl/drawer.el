@@ -574,14 +574,17 @@ Empty sections render the `(none)' placeholder under the header."
                       (hash-table-keys claude-repl--workspaces))))
     (erase-buffer)
     (insert "\n")
-    (claude-repl-drawer--insert-section
-     "MAIN" (alist-get :main sections) current :main)
-    (insert "\n")
-    (claude-repl-drawer--insert-section
-     "HIDDEN" (alist-get :hidden sections) current :hidden)
-    (insert "\n")
-    (claude-repl-drawer--insert-section
-     "MERGED" (alist-get :merged sections) current :merged)
+    (let ((mains   (alist-get :main   sections))
+          (hiddens (alist-get :hidden sections))
+          (mergeds (alist-get :merged sections)))
+      (claude-repl-drawer--insert-section
+       (format "MAIN (%d)" (length mains))     mains   current :main)
+      (insert "\n")
+      (claude-repl-drawer--insert-section
+       (format "HIDDEN (%d)" (length hiddens)) hiddens current :hidden)
+      (insert "\n")
+      (claude-repl-drawer--insert-section
+       (format "MERGED (%d)" (length mergeds)) mergeds current :merged))
     (goto-char (point-min))
     (forward-line (1- saved-line))
     (move-to-column saved-col)))
