@@ -1038,6 +1038,13 @@ otherwise prompt via `projectile-completing-read'."
   (add-to-list 'undo-fu-session-incompatible-files
                (concat "\\`" (regexp-quote (expand-file-name "~/.config/doom/")))))
 
+;; Manually load the claude-repl module here rather than relying on `:app
+;; claude-repl' in init.el — the module-system path has been flaky on this
+;; setup, and a direct `load!' is reliable.  Guarded by `featurep' so that
+;; if init.el's listing ever does pick it up, we don't double-load.
+(unless (featurep 'claude-repl)
+  (load! "modules/app/claude-repl/config"))
+
 ;; Per-repo initial buffers for new worktree workspaces.
 (after! claude-repl
   (add-to-list 'claude-repl-workspace-initial-buffers
