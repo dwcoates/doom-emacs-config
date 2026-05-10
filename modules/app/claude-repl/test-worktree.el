@@ -3114,6 +3114,82 @@ must not infinite-loop if it does."
              (lambda (&rest _) "main")))
     (should-not (claude-repl--branch-merged-into-p "/a/" "/b/"))))
 
+;;;; ---- Tests: branch-merged async cache ----
+
+(ert-deftest claude-repl-test-ws-merge-parent-dir-uses-source-when-live ()
+  "`--ws-merge-parent-dir' returns `:source-ws-dir' when it is a live directory."
+  (claude-repl-test--with-clean-state
+    (let ((tmp (make-temp-file "merge-parent-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir "/anything/")
+            (claude-repl--ws-put "ws" :source-ws-dir tmp)
+            (should (equal (claude-repl--ws-merge-parent-dir "ws") tmp)))
+        (delete-directory tmp t)))))
+
+(ert-deftest claude-repl-test-ws-merge-parent-dir-falls-back-to-master ()
+  "Falls back to the master worktree path when `:source-ws-dir' is missing."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :project-dir "/some/repo/")
+    (cl-letf (((symbol-function 'claude-repl--ws-dir)
+               (lambda (_) "/some/repo/"))
+              ((symbol-function 'claude-repl--master-worktree-path)
+               (lambda (_) "/master/dir/")))
+      (should (equal (claude-repl--ws-merge-parent-dir "ws") "/master/dir/")))))
+
+(ert-deftest claude-repl-test-branch-merge-sentinel-merged-on-zero-exit ()
+  "Sentinel records `merged' when git merge-base exits 0."
+  (claude-repl-test--with-clean-state
+    (let ((proc (make-pipe-process :name "test-merge" :buffer nil :noquery t)))
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_) nil))
+                ((symbol-function 'process-exit-status) (lambda (_) 0)))
+        (claude-repl--branch-merge-sentinel "ws" proc "finished\n")
+        (should (eq (claude-repl--ws-get "ws" :branch-merged) 'merged))
+        (should (null (claude-repl--ws-get "ws" :merge-proc))))
+      (delete-process proc))))
+
+(ert-deftest claude-repl-test-branch-merge-sentinel-not-merged-on-one-exit ()
+  "Sentinel records `not-merged' when git merge-base exits 1."
+  (claude-repl-test--with-clean-state
+    (let ((proc (make-pipe-process :name "test-merge" :buffer nil :noquery t)))
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_) nil))
+                ((symbol-function 'process-exit-status) (lambda (_) 1)))
+        (claude-repl--branch-merge-sentinel "ws" proc "finished\n")
+        (should (eq (claude-repl--ws-get "ws" :branch-merged) 'not-merged)))
+      (delete-process proc))))
+
+(ert-deftest claude-repl-test-branch-merge-sentinel-leaves-cache-on-error ()
+  "Unexpected exit codes leave `:branch-merged' untouched."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :branch-merged 'merged)
+    (let ((proc (make-pipe-process :name "test-merge" :buffer nil :noquery t)))
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_) nil))
+                ((symbol-function 'process-exit-status) (lambda (_) 128)))
+        (claude-repl--branch-merge-sentinel "ws" proc "fatal\n")
+        (should (eq (claude-repl--ws-get "ws" :branch-merged) 'merged)))
+      (delete-process proc))))
+
+(ert-deftest claude-repl-test-branch-merge-check-in-progress-detects-live-proc ()
+  "`--branch-merge-check-in-progress-p' returns non-nil when `:merge-proc' is alive."
+  (claude-repl-test--with-clean-state
+    (let ((proc (make-pipe-process :name "test-live" :buffer nil :noquery t)))
+      (claude-repl--ws-put "ws" :merge-proc proc)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (p) (eq p proc))))
+        (should (claude-repl--branch-merge-check-in-progress-p "ws")))
+      (delete-process proc))))
+
+(ert-deftest claude-repl-test-async-refresh-branch-merged-skips-when-in-progress ()
+  "No new process is spawned when one is already live for the workspace."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :project-dir "/some/")
+    (let ((spawned nil))
+      (cl-letf (((symbol-function 'claude-repl--branch-merge-check-in-progress-p)
+                 (lambda (_) t))
+                ((symbol-function 'make-process)
+                 (lambda (&rest _) (setq spawned t) :proc)))
+        (claude-repl--async-refresh-branch-merged "ws")
+        (should-not spawned)))))
+
 ;;;; ---- Tests: ws-name-for-dir (reverse lookup) ----
 
 (ert-deftest claude-repl-test-ws-name-for-dir-nil-arg ()

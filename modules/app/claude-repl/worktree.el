@@ -1350,6 +1350,72 @@ Prompts for which workspace to merge in."
 
 (defalias '+dwc/workspace-merge #'claude-repl-workspace-merge)
 
+(defun claude-repl--ws-merge-parent-dir (ws)
+  "Return the directory whose branch is WS's merge-target.
+Prefers `:source-ws-dir' when recorded and still a live directory;
+falls back to the master worktree path derived from WS's project-dir.
+Returns nil when neither can be resolved."
+  (let ((recorded (claude-repl--ws-get ws :source-ws-dir))
+        (ws-dir (claude-repl--ws-dir ws)))
+    (cond
+     ((and recorded (file-directory-p recorded)) recorded)
+     (ws-dir (claude-repl--master-worktree-path ws-dir)))))
+
+(defun claude-repl--branch-merge-check-in-progress-p (ws)
+  "Return non-nil when an `:branch-merged' refresh process is live for WS."
+  (when-let ((proc (claude-repl--ws-get ws :merge-proc)))
+    (process-live-p proc)))
+
+(defun claude-repl--branch-merge-sentinel (ws proc _event)
+  "Process sentinel for the async `:branch-merged' refresh of WS.
+Records `merged' (exit 0) or `not-merged' (exit 1) in WS's plist;
+unexpected exit codes leave the cache untouched and log a warning."
+  (unless (process-live-p proc)
+    (let* ((exit-code (process-exit-status proc))
+           (result (cond
+                    ((= 0 exit-code) 'merged)
+                    ((= 1 exit-code) 'not-merged)
+                    (t (claude-repl--log
+                        ws "branch-merge-sentinel: ws=%s unexpected exit=%d"
+                        ws exit-code)
+                       nil))))
+      (when result
+        (claude-repl--ws-put ws :branch-merged result))
+      (claude-repl--ws-put ws :merge-proc nil))))
+
+(defun claude-repl--async-refresh-branch-merged (ws)
+  "Async refresh of `:branch-merged' cache for workspace WS.
+Runs `git merge-base --is-ancestor WS-BRANCH PARENT-BRANCH' from WS's
+project-dir; PARENT is `:source-ws-dir' or master.  Records `merged'
+or `not-merged' on completion via `claude-repl--branch-merge-sentinel'.
+No-op when a refresh is already in flight, when WS or its parent dir
+can't be resolved, or when WS and parent are on the same branch (a
+branch is never considered merged into itself for cache purposes)."
+  (when-let* ((ws-dir (claude-repl--ws-dir ws))
+              (parent-dir (claude-repl--ws-merge-parent-dir ws))
+              ((not (claude-repl--branch-merge-check-in-progress-p ws))))
+    (let ((ws-branch (claude-repl--git-string-quiet
+                      "-C" ws-dir "rev-parse" "--abbrev-ref" "HEAD"))
+          (parent-branch (claude-repl--git-string-quiet
+                          "-C" parent-dir "rev-parse" "--abbrev-ref" "HEAD")))
+      (when (and ws-branch parent-branch
+                 (not (string-empty-p ws-branch))
+                 (not (string-empty-p parent-branch))
+                 (not (string-prefix-p "fatal" ws-branch))
+                 (not (string-prefix-p "fatal" parent-branch))
+                 (not (string= ws-branch parent-branch)))
+        (let* ((default-directory ws-dir)
+               (proc (make-process
+                      :name (format "claude-repl-merge-%s" ws)
+                      :command (list "git" "merge-base" "--is-ancestor"
+                                     ws-branch parent-branch)
+                      :connection-type 'pipe
+                      :noquery t
+                      :buffer nil
+                      :sentinel (apply-partially
+                                 #'claude-repl--branch-merge-sentinel ws))))
+          (claude-repl--ws-put ws :merge-proc proc))))))
+
 (defun claude-repl--branch-merged-into-p (source-dir target-dir)
   "Return non-nil when the branch at SOURCE-DIR is fully merged into the branch at TARGET-DIR.
 Reads each side's current branch name via `git rev-parse --abbrev-ref

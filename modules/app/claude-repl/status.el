@@ -1122,7 +1122,12 @@ panel visibility (panels may be hidden via `SPC o c')."
             (claude-repl--update-ws-state ws)
             (claude-repl--async-refresh-git-status ws))
         ;; No live vterm process → clear non-thinking state
-        (claude-repl--mark-dead-vterm ws))))
+        (claude-repl--mark-dead-vterm ws))
+      ;; Merged-ness is independent of claude/vterm liveness — refresh
+      ;; for every workspace so the drawer's flatten-through-merged
+      ;; rendering has fresh `:branch-merged' values.
+      (when (fboundp 'claude-repl--async-refresh-branch-merged)
+        (claude-repl--async-refresh-branch-merged ws))))
   ;; Cross-workspace introspection: surface the current state of every
   ;; registered workspace on disk so peer claude sessions (via the
   ;; `/workspace-status' skill) can read it.  Runs every poll tick so
