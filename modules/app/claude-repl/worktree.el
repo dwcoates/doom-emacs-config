@@ -1350,6 +1350,30 @@ Prompts for which workspace to merge in."
 
 (defalias '+dwc/workspace-merge #'claude-repl-workspace-merge)
 
+(defun claude-repl--branch-merged-into-p (source-dir target-dir)
+  "Return non-nil when the branch at SOURCE-DIR is fully merged into the branch at TARGET-DIR.
+Reads each side's current branch name via `git rev-parse --abbrev-ref
+HEAD' and runs `git merge-base --is-ancestor SOURCE TARGET' from
+SOURCE-DIR.  Returns nil when either dir is nil, either branch can't
+be resolved, or the two branches are identical (a branch is never
+considered merged into itself for the purposes of merge-target
+redirection)."
+  (and source-dir target-dir
+       (let ((source-branch (claude-repl--git-string
+                             "-C" source-dir "rev-parse" "--abbrev-ref" "HEAD"))
+             (target-branch (claude-repl--git-string
+                             "-C" target-dir "rev-parse" "--abbrev-ref" "HEAD")))
+         (and source-branch target-branch
+              (not (string-empty-p source-branch))
+              (not (string-empty-p target-branch))
+              (not (string-prefix-p "fatal" source-branch))
+              (not (string-prefix-p "fatal" target-branch))
+              (not (string= source-branch target-branch))
+              (= 0 (claude-repl--git-exit-code
+                    source-dir
+                    "merge-base" "--is-ancestor"
+                    source-branch target-branch))))))
+
 (defun claude-repl--branch-merged-into-master-p (worktree-dir master-dir)
   "Return non-nil when the branch at WORKTREE-DIR is fully on master.
 \"Fully on master\" is checked by patch-id equivalence (`git cherry'),
@@ -1368,6 +1392,12 @@ that rebase or cherry-pick onto master rather than fast-forward-merging,
 the parent branch's tip is never an ancestor of master even after every
 patch has landed.  The previous ancestry check therefore returned nil
 in exactly the case this redirect is meant to optimize.
+
+Master is identified by name via `claude-repl-master-branch-name'
+rather than by reading MASTER-DIR's HEAD, so this works in
+single-worktree-per-repo test scenarios where source and target dirs
+coincide.  For the cross-worktree case used by the recursive
+merge-target walk, see `claude-repl--branch-merged-into-p'.
 
 Returns nil when either argument is nil, when the worktree's branch
 cannot be resolved, when it equals `claude-repl-master-branch-name',
@@ -1392,26 +1422,77 @@ errored check as `merged')."
                                  (not (string-prefix-p "+" line)))
                                (split-string cherry-out "\n" t))))))))
 
+(defun claude-repl--ws-name-for-dir (dir)
+  "Return the workspace name whose `:project-dir' is canonical-equal to DIR, or nil.
+Reverse lookup over `claude-repl--workspaces'.  First match wins —
+canonical paths are unique per workspace by construction."
+  (when dir
+    (let ((canon (claude-repl--path-canonical dir))
+          (result nil))
+      (maphash (lambda (ws plist)
+                 (unless result
+                   (let ((wd (plist-get plist :project-dir)))
+                     (when (and wd
+                                (string= (claude-repl--path-canonical wd)
+                                         canon))
+                       (setq result ws)))))
+               claude-repl--workspaces)
+      result)))
+
+(defcustom claude-repl-merge-resolve-max-depth 16
+  "Cycle defense for `claude-repl--resolve-merge-into-source-target'.
+Maximum number of `:source-ws-dir' hops the resolver walks before
+returning the current candidate.  Hit only by malformed parent chains
+(self-cycle, mutual cycle); normal trees are 2–4 deep."
+  :type 'integer
+  :group 'claude-repl)
+
 (defun claude-repl--resolve-merge-into-source-target (parent-dir master-dir)
   "Pick the cherry-pick destination for `merge-current-into-source'.
 PARENT-DIR is the originally-recorded source worktree (or the master
 worktree when no source was recorded).  MASTER-DIR is the worktree
 checked out on `claude-repl-master-branch-name'.
 
-Returns PARENT-DIR by default, but switches to MASTER-DIR when
-PARENT-DIR is a non-master worktree whose branch is already fully
-merged into master — there is nothing to send to the parent, so the
-merge should land in master directly.  Returns PARENT-DIR unchanged
-when MASTER-DIR is nil or when PARENT-DIR is master."
+Walks the `:source-ws-dir' chain upward from PARENT-DIR: at each hop
+asks 'is this candidate's branch merged into the next ancestor's
+branch?'.  When yes, hops to the next ancestor and repeats.  When no
+(or when the next ancestor is unreachable / we hit master / we exceed
+`claude-repl-merge-resolve-max-depth'), returns the current candidate.
+
+Subsumes the prior single-level redirect: if PARENT-DIR has no
+`:source-ws-dir' recorded but is itself merged into master, the walk
+falls back to MASTER-DIR exactly as before.  Recursive case: if both
+PARENT-DIR and its grandparent are merged into their respective
+parents, the resolver returns the great-grandparent (or master)."
   (cond
    ((null parent-dir) nil)
    ((null master-dir) parent-dir)
    ((string= (claude-repl--path-canonical parent-dir)
              (claude-repl--path-canonical master-dir))
     parent-dir)
-   ((claude-repl--branch-merged-into-master-p parent-dir master-dir)
-    master-dir)
-   (t parent-dir)))
+   (t
+    (let ((target parent-dir)
+          (depth 0)
+          (continue t))
+      (while (and continue
+                  (< depth claude-repl-merge-resolve-max-depth)
+                  target
+                  (not (string= (claude-repl--path-canonical target)
+                                (claude-repl--path-canonical master-dir))))
+        (setq depth (1+ depth))
+        (let* ((target-ws (claude-repl--ws-name-for-dir target))
+               (recorded (and target-ws
+                              (claude-repl--ws-get target-ws :source-ws-dir)))
+               (next (cond
+                      ((and recorded (file-directory-p recorded)) recorded)
+                      (t master-dir))))
+          (if (claude-repl--branch-merged-into-p target next)
+              (setq target next)
+            (setq continue nil))))
+      (claude-repl--log nil
+                        "resolve-merge-into-source-target: parent=%s master=%s depth=%d -> %s"
+                        parent-dir master-dir depth target)
+      target))))
 
 (defun claude-repl--workspace-merge-into-source (source-ws)
   "Merge SOURCE-WS's commits into its source workspace.

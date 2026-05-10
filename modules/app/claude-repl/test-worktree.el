@@ -3038,17 +3038,102 @@ all-incorporated), tag-merge-completion is NOT invoked."
 
 (ert-deftest claude-repl-test-resolve-merge-target-parent-already-merged ()
   "Returns master-dir when parent != master and parent's branch is in master."
-  (cl-letf (((symbol-function 'claude-repl--branch-merged-into-master-p)
-             (lambda (_p _m) t)))
-    (should (equal (claude-repl--resolve-merge-into-source-target "/p/" "/m/")
-                   "/m/"))))
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--branch-merged-into-p)
+               (lambda (_s _t) t)))
+      (should (equal (claude-repl--resolve-merge-into-source-target "/p/" "/m/")
+                     "/m/")))))
 
 (ert-deftest claude-repl-test-resolve-merge-target-parent-not-merged ()
   "Returns parent-dir when parent's branch is not yet in master."
-  (cl-letf (((symbol-function 'claude-repl--branch-merged-into-master-p)
-             (lambda (_p _m) nil)))
-    (should (equal (claude-repl--resolve-merge-into-source-target "/p/" "/m/")
-                   "/p/"))))
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--branch-merged-into-p)
+               (lambda (_s _t) nil)))
+      (should (equal (claude-repl--resolve-merge-into-source-target "/p/" "/m/")
+                     "/p/")))))
+
+(ert-deftest claude-repl-test-resolve-merge-target-walks-merged-grandparent ()
+  "Walks the source-ws-dir chain when intermediate ancestors are merged.
+parent merged into grandparent, grandparent merged into master ⇒ returns master."
+  (claude-repl-test--with-clean-state
+    (puthash "p-ws" '(:project-dir "/p/" :source-ws-dir "/g/")
+             claude-repl--workspaces)
+    (puthash "g-ws" '(:project-dir "/g/" :source-ws-dir nil)
+             claude-repl--workspaces)
+    (cl-letf (((symbol-function 'claude-repl--branch-merged-into-p)
+               (lambda (_s _t) t))
+              ((symbol-function 'file-directory-p) (lambda (_) t))
+              ((symbol-function 'claude-repl--path-canonical) #'identity))
+      (should (equal (claude-repl--resolve-merge-into-source-target "/p/" "/m/")
+                     "/m/")))))
+
+(ert-deftest claude-repl-test-resolve-merge-target-stops-at-unmerged-grandparent ()
+  "When parent is merged but grandparent is not, returns the grandparent dir."
+  (claude-repl-test--with-clean-state
+    (puthash "p-ws" '(:project-dir "/p/" :source-ws-dir "/g/")
+             claude-repl--workspaces)
+    (puthash "g-ws" '(:project-dir "/g/" :source-ws-dir nil)
+             claude-repl--workspaces)
+    (let ((calls 0))
+      (cl-letf (((symbol-function 'claude-repl--branch-merged-into-p)
+                 (lambda (_s _t)
+                   (setq calls (1+ calls))
+                   ;; First call (p→g) merged; second call (g→m) not.
+                   (= calls 1)))
+                ((symbol-function 'file-directory-p) (lambda (_) t))
+                ((symbol-function 'claude-repl--path-canonical) #'identity))
+        (should (equal (claude-repl--resolve-merge-into-source-target "/p/" "/m/")
+                       "/g/"))))))
+
+(ert-deftest claude-repl-test-resolve-merge-target-cycle-cap ()
+  "Self-referential `:source-ws-dir' chain terminates at the depth cap.
+Defense-in-depth — should never happen in practice, but the resolver
+must not infinite-loop if it does."
+  (claude-repl-test--with-clean-state
+    (puthash "p-ws" '(:project-dir "/p/" :source-ws-dir "/p/")
+             claude-repl--workspaces)
+    (let ((claude-repl-merge-resolve-max-depth 4))
+      (cl-letf (((symbol-function 'claude-repl--branch-merged-into-p)
+                 (lambda (_s _t) t))
+                ((symbol-function 'file-directory-p) (lambda (_) t))
+                ((symbol-function 'claude-repl--path-canonical) #'identity))
+        ;; Should return without hanging; exact value is the candidate
+        ;; held when the depth cap fires.
+        (should (claude-repl--resolve-merge-into-source-target "/p/" "/m/"))))))
+
+;;;; ---- Tests: branch-merged-into-p (generalized predicate) ----
+
+(ert-deftest claude-repl-test-branch-merged-into-p-nil-args ()
+  "Returns nil when either dir is nil."
+  (should (null (claude-repl--branch-merged-into-p nil "/m/")))
+  (should (null (claude-repl--branch-merged-into-p "/p/" nil))))
+
+(ert-deftest claude-repl-test-branch-merged-into-p-same-branch ()
+  "Returns nil when source and target have the same current branch."
+  (cl-letf (((symbol-function 'claude-repl--git-string)
+             (lambda (&rest _) "main")))
+    (should-not (claude-repl--branch-merged-into-p "/a/" "/b/"))))
+
+;;;; ---- Tests: ws-name-for-dir (reverse lookup) ----
+
+(ert-deftest claude-repl-test-ws-name-for-dir-nil-arg ()
+  "Returns nil for nil DIR."
+  (should (null (claude-repl--ws-name-for-dir nil))))
+
+(ert-deftest claude-repl-test-ws-name-for-dir-finds-match ()
+  "Returns the workspace name whose `:project-dir' canonicalizes to DIR."
+  (claude-repl-test--with-clean-state
+    (puthash "alpha" '(:project-dir "/repo-a/") claude-repl--workspaces)
+    (puthash "beta"  '(:project-dir "/repo-b/") claude-repl--workspaces)
+    (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+      (should (equal (claude-repl--ws-name-for-dir "/repo-b/") "beta")))))
+
+(ert-deftest claude-repl-test-ws-name-for-dir-returns-nil-on-miss ()
+  "Returns nil when no workspace's `:project-dir' matches DIR."
+  (claude-repl-test--with-clean-state
+    (puthash "alpha" '(:project-dir "/repo-a/") claude-repl--workspaces)
+    (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+      (should (null (claude-repl--ws-name-for-dir "/missing/"))))))
 
 ;;;; ---- Tests: branch-merged-into-master-p ----
 
@@ -3156,8 +3241,8 @@ since the redirect would then drop commits on the floor."
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
                       ((symbol-function 'claude-repl--master-worktree-path)
                        (lambda (_root) master-dir))
-                      ((symbol-function 'claude-repl--branch-merged-into-master-p)
-                       (lambda (_p _m) t))
+                      ((symbol-function 'claude-repl--branch-merged-into-p)
+                       (lambda (_s _t) t))
                       ((symbol-function 'claude-repl--assert-clean-worktree)
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project)
@@ -3184,8 +3269,8 @@ since the redirect would then drop commits on the floor."
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
                       ((symbol-function 'claude-repl--master-worktree-path)
                        (lambda (_root) master-dir))
-                      ((symbol-function 'claude-repl--branch-merged-into-master-p)
-                       (lambda (_p _m) nil))
+                      ((symbol-function 'claude-repl--branch-merged-into-p)
+                       (lambda (_s _t) nil))
                       ((symbol-function 'claude-repl--assert-clean-worktree)
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project)
