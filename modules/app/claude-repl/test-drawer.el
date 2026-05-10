@@ -416,6 +416,53 @@
     (claude-repl-drawer-hide)
     (should-not claude-repl-drawer--global-visible-p)))
 
+;;;; ---- Repo grouping ----
+
+(ert-deftest claude-repl-drawer-test-group-label-from-key ()
+  "`--group-label' returns the basename of the parent of KEY."
+  (should (equal (claude-repl-drawer--group-label "/path/to/doom/.git")
+                 "doom"))
+  (should (equal (claude-repl-drawer--group-label "/x/y/explanation-engine/.git")
+                 "explanation-engine"))
+  (should (null  (claude-repl-drawer--group-label nil))))
+
+(ert-deftest claude-repl-drawer-test-group-key-cached-on-plist ()
+  "`--workspace-group-key' caches its result on `:group-key'."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :project-dir "/some/")
+    (claude-repl--ws-put "ws" :group-key "/cached/.git")
+    ;; Cached value short-circuits the git call.
+    (should (equal (claude-repl-drawer--workspace-group-key "ws")
+                   "/cached/.git"))))
+
+(ert-deftest claude-repl-drawer-test-group-trees-by-repo-buckets ()
+  "`--group-trees-by-repo' partitions a forest by its roots' group-key labels."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "doom-ws"      :project-dir "/d/")
+    (claude-repl-drawer-test--register "doom-ws-2"    :project-dir "/d2/")
+    (claude-repl-drawer-test--register "ee-ws"        :project-dir "/e/")
+    (claude-repl--ws-put "doom-ws"   :group-key "/path/doom/.git")
+    (claude-repl--ws-put "doom-ws-2" :group-key "/path/doom/.git")
+    (claude-repl--ws-put "ee-ws"     :group-key "/path/explanation-engine/.git")
+    (let* ((trees '(("doom-ws") ("doom-ws-2") ("ee-ws")))
+           (groups (claude-repl-drawer--group-trees-by-repo trees)))
+      (should (equal (mapcar #'car groups) '("doom" "explanation-engine")))
+      (should (= 2 (length (cdr (assoc "doom" groups)))))
+      (should (= 1 (length (cdr (assoc "explanation-engine" groups))))))))
+
+(ert-deftest claude-repl-drawer-test-render-emits-group-labels ()
+  "Render emits the group label between repo groups."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "doom-a" :project-dir "/d/")
+    (claude-repl-drawer-test--register "ee-a"   :project-dir "/e/")
+    (claude-repl--ws-put "doom-a" :group-key "/path/doom/.git")
+    (claude-repl--ws-put "ee-a"   :group-key "/path/explanation-engine/.git")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p "▸ doom" text))
+        (should (string-match-p "▸ explanation-engine" text))))))
+
 ;;;; ---- Section partition + tree ----
 
 (ert-deftest claude-repl-drawer-test-workspace-section-merged-dominates ()

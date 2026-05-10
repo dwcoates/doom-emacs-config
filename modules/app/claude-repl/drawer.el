@@ -86,6 +86,14 @@ Used for registered-but-not-yet-started workspaces (claude-state nil)."
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-drawer-group-label-format " ▸ %s\n"
+  "Format string for repo group labels (separators) in drawer sections.
+Within a section, entries are partitioned by their workspace's git
+common-dir (each top-level repo / its worktree set is one group).
+Groups are separated by a blank line and labeled with this format."
+  :type 'string
+  :group 'claude-repl)
+
 (defcustom claude-repl-drawer-marked-glyph "● "
   "Gutter glyph for entries the user has marked for bulk operations.
 Width must match `claude-repl-drawer-gutter' for column alignment."
@@ -149,6 +157,11 @@ Default is near-black."
 (defface claude-repl-drawer-section-rule
   '((t :inherit shadow))
   "Face for the rule line beneath a section title."
+  :group 'claude-repl)
+
+(defface claude-repl-drawer-group-label
+  '((t :inherit font-lock-comment-face :weight bold))
+  "Face for repo group labels in drawer sections."
   :group 'claude-repl)
 
 (defface claude-repl-drawer-empty
@@ -613,13 +626,73 @@ caller's responsibility."
   (dolist (child (cdr tree))
     (claude-repl-drawer--render-subtree child (1+ depth) current section)))
 
+(defun claude-repl-drawer--workspace-group-key (ws)
+  "Return a stable group key for WS based on git common-dir.
+Cached on the workspace plist as `:group-key' so each workspace runs
+git at most once.  Returns nil when WS has no project-dir or git
+fails — such workspaces fall into the unlabeled `(no repo)' bucket."
+  (or (claude-repl--ws-get ws :group-key)
+      (when-let* ((dir (ignore-errors (claude-repl--ws-dir ws)))
+                  (raw (claude-repl--git-string-quiet
+                        "-C" dir "rev-parse" "--git-common-dir")))
+        (when (and raw (not (string-empty-p raw))
+                   (not (string-prefix-p "fatal" raw)))
+          (let* ((abs (if (file-name-absolute-p raw) raw
+                        (expand-file-name raw dir)))
+                 (key (claude-repl--path-canonical abs)))
+            (claude-repl--ws-put ws :group-key key)
+            key)))))
+
+(defun claude-repl-drawer--group-label (key)
+  "Derive a human-readable group label from KEY (a canonical .git path).
+Returns the basename of KEY's parent directory — i.e. the project
+name, since git's common-dir is conventionally `<project>/.git'."
+  (when key
+    (let ((parent (file-name-directory key)))
+      (when parent
+        (file-name-nondirectory (directory-file-name parent))))))
+
+(defun claude-repl-drawer--group-trees-by-repo (trees)
+  "Partition TREES into (LABEL . TREES-IN-GROUP) buckets by repo.
+Bucket keys are derived from each tree root's `:group-key' via
+`--workspace-group-key' and `--group-label'.  Insertion order of the
+returned alist matches the first-encounter order in TREES, so groups
+appear in the order their first root appeared after sorting."
+  (let ((order nil)
+        (buckets (make-hash-table :test 'equal)))
+    (dolist (tree trees)
+      (let* ((root  (car tree))
+             (key   (claude-repl-drawer--workspace-group-key root))
+             (label (or (claude-repl-drawer--group-label key) "(no repo)")))
+        (unless (gethash label buckets)
+          (push label order))
+        (puthash label
+                 (append (gethash label buckets) (list tree))
+                 buckets)))
+    (mapcar (lambda (label) (cons label (gethash label buckets)))
+            (nreverse order))))
+
 (defun claude-repl-drawer--render-trees (trees current section)
-  "Render TREES (forest) with a blank line between adjacent root subtrees."
-  (let ((rest trees))
-    (while rest
-      (claude-repl-drawer--render-subtree (car rest) 0 current section)
-      (when (cdr rest) (insert "\n"))
-      (setq rest (cdr rest)))))
+  "Render TREES (forest) grouped by top-level repo.
+Within a group, root subtrees render contiguously with a blank line
+between siblings.  Between groups, a labeled separator (plus blank
+line) marks the boundary so multi-repo drawers stay scannable."
+  (let ((groups (claude-repl-drawer--group-trees-by-repo trees))
+        (first-group t))
+    (dolist (group groups)
+      (let ((label       (car group))
+            (group-trees (cdr group)))
+        (unless first-group
+          (insert "\n"))
+        (insert (propertize (format claude-repl-drawer-group-label-format label)
+                            'face 'claude-repl-drawer-group-label))
+        (let ((tree-rest group-trees))
+          (while tree-rest
+            (claude-repl-drawer--render-subtree (car tree-rest) 0
+                                                current section)
+            (when (cdr tree-rest) (insert "\n"))
+            (setq tree-rest (cdr tree-rest))))
+        (setq first-group nil)))))
 
 (defun claude-repl-drawer--parent-fn-for-section (workspaces section)
   "Return a parent-resolution function for SECTION.
