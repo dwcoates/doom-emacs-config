@@ -148,6 +148,41 @@ The current-entry overlay covers this region with
   "Face for the placeholder shown under an empty section."
   :group 'claude-repl)
 
+(defface claude-repl-drawer-detail-branch
+  '((t :foreground "deep sky blue"))
+  "Face for the branch name in expanded detail view."
+  :group 'claude-repl)
+
+(defface claude-repl-drawer-detail-ahead-master
+  '((t :foreground "spring green" :weight bold))
+  "Face for the ahead-master commit count in expanded detail view."
+  :group 'claude-repl)
+
+(defface claude-repl-drawer-detail-ahead-source
+  '((t :foreground "gold" :weight bold))
+  "Face for the ahead-source commit count in expanded detail view."
+  :group 'claude-repl)
+
+(defface claude-repl-drawer-detail-last-commit
+  '((t :foreground "medium orchid"))
+  "Face for the last commit subject + relative time in expanded detail view."
+  :group 'claude-repl)
+
+(defface claude-repl-drawer-detail-dirty
+  '((t :foreground "tomato" :weight bold))
+  "Face for the dirty file count in expanded detail view."
+  :group 'claude-repl)
+
+(defface claude-repl-drawer-detail-last-prompt
+  '((t :foreground "light steel blue" :slant italic))
+  "Face for the duration-since-last-prompt value in expanded detail view."
+  :group 'claude-repl)
+
+(defface claude-repl-drawer-detail-pending
+  '((t :foreground "orange" :weight bold))
+  "Face for the pending-prompt count in expanded detail view."
+  :group 'claude-repl)
+
 ;;;; Mode -------------------------------------------------------------------
 
 (defvar claude-repl-drawer-mode-map
@@ -1015,29 +1050,38 @@ invokes git.  Caller is `--render-workspace-expanded'."
          (dirty-count  (claude-repl--ws-get ws :detail-dirty-count))
          (last-prompt-time (claude-repl--ws-get ws :last-prompt-time))
          (pending-count (length (claude-repl--ws-get ws :pending-prompts))))
-    (cl-flet ((line (label value)
+    (cl-flet ((line (label value face)
                 (insert detail-prefix
                         (propertize (concat label " ") 'face 'shadow)
                         (propertize (format "%s" value)
-                                    'face 'claude-repl-drawer-summary
+                                    'face face
                                     'wrap-prefix detail-prefix)
                         "\n")))
-      (when branch        (line "branch:" branch))
-      (when master-ahead  (line "ahead master:" (format "%d" master-ahead)))
-      (when source-ahead  (line "ahead source:" (format "%d" source-ahead)))
+      (when branch
+        (line "branch:" branch 'claude-repl-drawer-detail-branch))
+      (when master-ahead
+        (line "ahead master:" (format "%d" master-ahead)
+              'claude-repl-drawer-detail-ahead-master))
+      (when source-ahead
+        (line "ahead source:" (format "%d" source-ahead)
+              'claude-repl-drawer-detail-ahead-source))
       (when last-commit
         (line "last commit:"
               (if last-commit-time
                   (format "%s (%s)" last-commit last-commit-time)
-                last-commit)))
+                last-commit)
+              'claude-repl-drawer-detail-last-commit))
       (when (and dirty-count (> dirty-count 0))
-        (line "dirty:" (format "%d files" dirty-count)))
+        (line "dirty:" (format "%d files" dirty-count)
+              'claude-repl-drawer-detail-dirty))
       (when last-prompt-time
         (line "last prompt:"
               (claude-repl-drawer--format-duration
-               (- (float-time) last-prompt-time))))
+               (- (float-time) last-prompt-time))
+              'claude-repl-drawer-detail-last-prompt))
       (when (and pending-count (> pending-count 0))
-        (line "pending:" (format "%d prompt(s)" pending-count))))))
+        (line "pending:" (format "%d prompt(s)" pending-count)
+              'claude-repl-drawer-detail-pending)))))
 
 (defvar claude-repl-drawer--display-action
   `((display-buffer-in-side-window)

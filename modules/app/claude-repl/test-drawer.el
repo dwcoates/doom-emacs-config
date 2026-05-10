@@ -153,6 +153,31 @@
   (should (equal (claude-repl-drawer--format-duration 7200) "2.0h ago"))
   (should (equal (claude-repl-drawer--format-duration 172800) "2.0d ago")))
 
+(ert-deftest claude-repl-drawer-test-detail-values-have-distinct-faces ()
+  "Detail-line values carry their per-field faces (not the generic summary face)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register
+     "ws"
+     :priority "p1" :project-dir "/tmp/"
+     :detail-branch       "feature/x"
+     :detail-master-ahead 5
+     :detail-last-commit  "fix: thing")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--ensure-expanded-set)
+      (puthash "ws" t claude-repl-drawer--expanded-set)
+      (claude-repl-drawer--render)
+      (cl-flet ((face-at (needle face)
+                  (let ((pos (string-match (regexp-quote needle)
+                                           (buffer-substring-no-properties
+                                            (point-min) (point-max)))))
+                    (and pos
+                         (memq face
+                               (let ((f (get-text-property (1+ pos) 'face)))
+                                 (if (listp f) f (list f))))))))
+        (should (face-at "feature/x" 'claude-repl-drawer-detail-branch))
+        (should (face-at "5"          'claude-repl-drawer-detail-ahead-master))
+        (should (face-at "fix: thing" 'claude-repl-drawer-detail-last-commit))))))
+
 ;;;; ---- Per-entry action commands ----
 
 (ert-deftest claude-repl-drawer-test-nuke-dispatches-to-entry ()
