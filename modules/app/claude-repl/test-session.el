@@ -359,24 +359,52 @@ by vterm-buf presence; the :done write is not."
   (should (null (claude-repl--parent-label nil nil))))
 
 (ert-deftest claude-repl-test-parent-label-parent-only ()
-  "Returns ` PARENT: <parent>' when only parent is set."
+  "Returns (\" PARENT: <parent>\" nil) when only parent is set."
   (should (equal (claude-repl--parent-label "feature-foo" nil)
-                 " PARENT: feature-foo")))
+                 '(" PARENT: feature-foo" nil))))
 
 (ert-deftest claude-repl-test-parent-label-merge-only ()
-  "Returns ` PARENT: (<merge>)' when only merge is set (rare fallback case)."
+  "Returns (\" PARENT:\" \" (<merge>)\") when only merge is set (rare fallback case)."
   (should (equal (claude-repl--parent-label nil "explanation-engine")
-                 " PARENT: (explanation-engine)")))
+                 '(" PARENT:" " (explanation-engine)"))))
 
 (ert-deftest claude-repl-test-parent-label-equal-omits-parens ()
-  "Returns just ` PARENT: <name>' when parent equals merge — parens would be redundant."
+  "Returns (green-only nil) when parent equals merge — parens would be redundant."
   (should (equal (claude-repl--parent-label "feature-foo" "feature-foo")
-                 " PARENT: feature-foo")))
+                 '(" PARENT: feature-foo" nil))))
 
-(ert-deftest claude-repl-test-parent-label-different-includes-parens ()
-  "Returns ` PARENT: <parent> (<merge>)' when they differ (master-redirect case)."
+(ert-deftest claude-repl-test-parent-label-different-splits-parts ()
+  "Returns (\" PARENT: <parent>\" \" (<merge>)\") when they differ (master-redirect case)."
   (should (equal (claude-repl--parent-label "feature-foo" "explanation-engine")
-                 " PARENT: feature-foo (explanation-engine)")))
+                 '(" PARENT: feature-foo" " (explanation-engine)"))))
+
+;;;; ---- Tests: workspace-mode-line face splitting ----
+
+(ert-deftest claude-repl-test-workspace-mode-line-yellow-face-on-merge-suffix ()
+  "When merge differs from parent, the (...) suffix is yellow while PARENT: <parent> stays green."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name)
+               (lambda (_ws) "explanation-engine")))
+      (let* ((seg (car (claude-repl--workspace-mode-line "ws")))
+             (paren-start (string-match-p " (" seg)))
+        (should paren-start)
+        (let ((face-before (get-text-property (1- paren-start) 'face seg))
+              (face-at-paren (get-text-property paren-start 'face seg)))
+          (should (equal face-before '(:foreground "green" :weight bold)))
+          (should (equal face-at-paren '(:foreground "yellow" :weight bold))))))))
+
+(ert-deftest claude-repl-test-workspace-mode-line-green-throughout-when-no-merge-suffix ()
+  "When merge equals parent (no suffix), the entire segment is green."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name)
+               (lambda (_ws) "feature-foo")))
+      (let ((seg (car (claude-repl--workspace-mode-line "ws"))))
+        (should (equal (get-text-property 0 'face seg)
+                       '(:foreground "green" :weight bold)))
+        (should (equal (get-text-property (1- (length seg)) 'face seg)
+                       '(:foreground "green" :weight bold)))))))
 
 ;;;; ---- Tests: merge-target-name ----
 
