@@ -226,12 +226,32 @@ image so the visual mapping between key and glyph is obvious."
 
 ;; SPC j R -- reload the claude-repl module's config.el (the claude
 ;; workspace's config), independent of whatever buffer is current.
+(defun claude-repl--reload-config-file ()
+  "Return the config.el path to reload for the current workspace.
+
+Prefers `<project-dir>/modules/app/claude-repl/config.el' when it exists,
+so reloading inside a doom-config worktree (e.g.
+`~/.config/doom-worktrees/foo/') picks up THAT worktree's checkout
+rather than the root `~/.config/doom' copy the module was originally
+loaded from.  Falls back to `claude-repl--config-file' (the original
+load path) for non-doom-config workspaces, unregistered workspaces, or
+workspaces with no `:project-dir'."
+  (let* ((ws (+workspace-current-name))
+         (proj (and ws (claude-repl--ws-get ws :project-dir)))
+         (candidate (and proj (expand-file-name "modules/app/claude-repl/config.el" proj))))
+    (if (and candidate (file-exists-p candidate))
+        candidate
+      claude-repl--config-file)))
+
 (defun claude-repl-reload-config ()
-  "Reload the claude-repl module config from `claude-repl--config-file'."
+  "Reload the claude-repl module config for the current workspace.
+Resolves the config path via `claude-repl--reload-config-file' so a
+doom-config worktree reloads its own checkout."
   (interactive)
-  (claude-repl--log (+workspace-current-name) "reload-config: file=%s" claude-repl--config-file)
-  (load-file claude-repl--config-file)
-  (message "[claude-repl] Reloaded %s" claude-repl--config-file))
+  (let ((file (claude-repl--reload-config-file)))
+    (claude-repl--log (+workspace-current-name) "reload-config: file=%s" file)
+    (load-file file)
+    (message "[claude-repl] Reloaded %s" file)))
 
 ;;; Section 3: Debug helpers -- interactive commands for diagnosing workspace state issues.
 ;;; Call via M-x claude-repl-debug/...

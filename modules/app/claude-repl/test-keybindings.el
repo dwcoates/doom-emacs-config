@@ -337,14 +337,69 @@ current workspace, not NAME)."
 
 ;;;; ---- Tests: claude-repl-reload-config ----
 
-(ert-deftest claude-repl-test-reload-config-loads-config-file ()
-  "reload-config should call load-file on `claude-repl--config-file'."
+(ert-deftest claude-repl-test-reload-config-falls-back-when-no-ws ()
+  "When the current workspace is unknown (nil), reload uses
+`claude-repl--config-file' (the original load path)."
   (let ((loaded-file nil)
         (claude-repl--config-file "/tmp/fake/claude-repl/config.el"))
     (cl-letf (((symbol-function 'load-file)
-               (lambda (f) (setq loaded-file f))))
+               (lambda (f) (setq loaded-file f)))
+              ((symbol-function '+workspace-current-name) (lambda () nil)))
       (claude-repl-reload-config)
       (should (equal loaded-file "/tmp/fake/claude-repl/config.el")))))
+
+(ert-deftest claude-repl-test-reload-config-uses-ws-project-dir-when-config-exists ()
+  "When the current workspace's `:project-dir' contains a
+`modules/app/claude-repl/config.el', reload uses THAT path so a doom-config
+worktree picks up its own checkout instead of the originally-loaded copy."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-root (make-temp-file "claude-repl-reload-test-" t))
+           (config-rel "modules/app/claude-repl/config.el")
+           (config-abs (expand-file-name config-rel tmp-root))
+           (loaded-file nil)
+           (claude-repl--config-file "/tmp/orig/config.el"))
+      (unwind-protect
+          (progn
+            (make-directory (file-name-directory config-abs) t)
+            (with-temp-file config-abs (insert ";; stub\n"))
+            (claude-repl--ws-put "ws1" :project-dir tmp-root)
+            (cl-letf (((symbol-function 'load-file)
+                       (lambda (f) (setq loaded-file f)))
+                      ((symbol-function '+workspace-current-name) (lambda () "ws1")))
+              (claude-repl-reload-config)
+              (should (equal loaded-file config-abs))))
+        (delete-directory tmp-root t)))))
+
+(ert-deftest claude-repl-test-reload-config-falls-back-when-ws-not-doom-config ()
+  "When the current workspace's `:project-dir' is a real directory but
+contains no `modules/app/claude-repl/config.el', reload falls back to
+`claude-repl--config-file'."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-root (make-temp-file "claude-repl-reload-test-" t))
+           (loaded-file nil)
+           (claude-repl--config-file "/tmp/orig/config.el"))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :project-dir tmp-root)
+            (cl-letf (((symbol-function 'load-file)
+                       (lambda (f) (setq loaded-file f)))
+                      ((symbol-function '+workspace-current-name) (lambda () "ws1")))
+              (claude-repl-reload-config)
+              (should (equal loaded-file "/tmp/orig/config.el"))))
+        (delete-directory tmp-root t)))))
+
+(ert-deftest claude-repl-test-reload-config-falls-back-when-no-project-dir ()
+  "When the current workspace exists in the registry but has no
+`:project-dir', reload falls back to `claude-repl--config-file'."
+  (claude-repl-test--with-clean-state
+    (let ((loaded-file nil)
+          (claude-repl--config-file "/tmp/orig/config.el"))
+      (claude-repl--ws-put "ws1" :some-other-key "value")
+      (cl-letf (((symbol-function 'load-file)
+                 (lambda (f) (setq loaded-file f)))
+                ((symbol-function '+workspace-current-name) (lambda () "ws1")))
+        (claude-repl-reload-config)
+        (should (equal loaded-file "/tmp/orig/config.el"))))))
 
 ;;;; ---- Tests: claude-repl--kill-owned-panel-buffers ----
 
