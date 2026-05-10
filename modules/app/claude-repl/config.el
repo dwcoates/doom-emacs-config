@@ -63,18 +63,19 @@
              (length claude-repl--load-errors)))
   (message "[claude-repl] Loaded Claude-Repl package."))
 
-;; Lazy claude start on first visit to a restored workspace.
-;;
-;; Restore is wired to `emacs-startup-hook' but fires through an idle
+;; Snapshot restore is wired to `emacs-startup-hook' through an idle
 ;; timer (`claude-repl-snapshot-startup-load-delay' seconds).  The
-;; deferral avoids the two failure modes that previously kept this
-;; manual-only: (a) persp-mode races where `safe-persp-name' is unbound
-;; when the loader fires too early, and (b) UI hangs from
-;; `+dwc/switch-to-project' invoking `magit-status' per project while
-;; the frame is still painting.  Companion save-guard
-;; (`claude-repl--snapshot-loaded-p') prevents `--state-save' from
-;; clobbering the on-disk roster if a state-mutation fires before the
-;; idle timer resolves.
+;; deferral exists only to let persp-mode finish its own initialization
+;; before our loader iterates entries — once the timer fires, restore
+;; runs fully synchronously: each entry is created, activated,
+;; project-aligned (default-directory, dir-locals, magit lambda,
+;; find-file recent), and has its claude session started before the
+;; loader moves to the next entry.  The loader returns to whichever
+;; workspace was active when it began.
+;;
+;; Companion save-guard (`claude-repl--snapshot-loaded-p') prevents
+;; `--state-save' from clobbering the on-disk roster if a state-
+;; mutation fires before the idle timer resolves.
 ;;
 ;; Snapshot save is paired with `claude-repl--state-save' (history.el) so
 ;; the roster is updated on every workspace mutation rather than only at
@@ -97,9 +98,6 @@ the auto-load entirely.  Intended to run from `emacs-startup-hook'."
                          #'claude-repl--load-workspace-snapshot-on-startup)))
 
 (add-hook 'emacs-startup-hook #'claude-repl--schedule-snapshot-startup-load)
-
-(with-eval-after-load 'persp-mode
-  (add-hook 'persp-activated-functions #'claude-repl--maybe-start-on-activate))
 
 (provide 'claude-repl)
 ;;; config.el ends here

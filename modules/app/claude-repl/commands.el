@@ -671,21 +671,6 @@ best-effort and must never block the live save)."
         (setq claude-repl--snapshot-archived-this-run t)
         (claude-repl--prune-snapshot-archives)))))
 
-(defvar claude-repl--pending-snapshot-workspaces (make-hash-table :test 'equal)
-  "Workspaces restored from snapshot but not yet visited this session.
-Keys are workspace names, values are plists (at least `:project-dir',
-optionally `:priority').  The lazy-start hook consumes from this set
-on `persp-activated-functions' and starts claude for matching workspaces.
-Entries remain here until the user actually switches to them, so
-`claude-repl-save-workspace-snapshot' can still record them at quit
-time even if they were never visited.")
-
-(defvar claude-repl--loading-snapshot-p nil
-  "Non-nil while `claude-repl-load-workspace-snapshot' is iterating entries.
-The lazy-start hook checks this and skips firing during the loader loop
-— otherwise each `+dwc/switch-to-project' call would eager-start claude
-and defeat lazy restore.")
-
 (defvar claude-repl--snapshot-loaded-p nil
   "Non-nil after `claude-repl-load-workspace-snapshot' has completed once
 this session.  The save path checks this to refuse clobbering a richer
@@ -720,18 +705,14 @@ Accepts the legacy `(NAME . DIR-STRING)' shape and the current
 
 (defun claude-repl-save-workspace-snapshot ()
   "Save the current set of claude-repl workspaces to a hidden file.
-Writes a list of (NAME :project-dir DIR :priority PRI) entries.  Sources:
-workspaces registered in `claude-repl--workspaces' with a `:project-dir',
-merged with any entries still pending in
-`claude-repl--pending-snapshot-workspaces' (restored from snapshot but
-never visited — included so unvisited workspaces aren't dropped).
+Writes a list of (NAME :project-dir DIR :priority PRI) entries sourced
+from `claude-repl--workspaces' (the live hash).
 
 Called interactively prints a confirmation; called from
 `claude-repl--state-save' (the common path) stays silent so the
 roster-piggyback save doesn't spam the echo area on every state mutation."
   (interactive)
   (let ((entries (make-hash-table :test 'equal)))
-    ;; Visited workspaces — the live hash is the source of truth.
     (maphash (lambda (ws _plist)
                (when-let ((dir (claude-repl--ws-get ws :project-dir)))
                  (puthash ws
@@ -739,11 +720,6 @@ roster-piggyback save doesn't spam the echo area on every state mutation."
                                 :priority (claude-repl--ws-get ws :priority))
                           entries)))
              claude-repl--workspaces)
-    ;; Pending (unvisited) entries fill in anything still outstanding.
-    (maphash (lambda (ws plist)
-               (unless (gethash ws entries)
-                 (puthash ws plist entries)))
-             claude-repl--pending-snapshot-workspaces)
     (let (snapshot)
       (maphash (lambda (ws plist) (push (cons ws plist) snapshot))
                entries)
@@ -768,43 +744,83 @@ roster-piggyback save doesn't spam the echo area on every state mutation."
           (message "Saved %d workspace(s) to %s"
                    (length snapshot) claude-repl-workspace-snapshot-file))))))
 
+(defun claude-repl--establish-workspace (ws dir priority)
+  "Synchronously create + activate + fully set up workspace WS for DIR.
+Mirrors what `+dwc/switch-to-project' would do on an interactive
+`SPC p p' but bypasses `+workspaces-switch-to-project-h' to avoid the
+rename-on-empty collapse: persp is added directly via `persp-add-new'
+and activated via `persp-frame-switch' keyed by the snapshot's `ws'
+name (not the project basename Doom would otherwise derive).
+
+Each call:
+
+- creates the persp (`persp-add-new'),
+- activates it on this frame (`persp-frame-switch') so persp-mode
+  saves a clean window-configuration for the previous persp and
+  starts capturing one for this one,
+- registers the project with projectile,
+- sets `default-directory' on the fallback buffer + loads dir-locals,
+- runs `+workspaces-switch-project-function' (the user lambda that
+  auto-opens magit when the persp has no real buffers),
+- opens the most-recent project file via `find-file' when one exists
+  in `recentf-list',
+- hydrates `:project-dir' / `:priority' into `claude-repl--workspaces',
+- starts claude (`claude-repl--initialize-claude') unless already
+  running."
+  (claude-repl--with-error-logging (format "establish-workspace[%s]" ws)
+    (when (fboundp 'persp-add-new)
+      (persp-add-new ws))
+    (when (fboundp 'persp-frame-switch)
+      (persp-frame-switch ws))
+    (when (fboundp 'projectile-add-known-project)
+      (projectile-add-known-project dir))
+    (when (fboundp 'doom-fallback-buffer)
+      (with-current-buffer (doom-fallback-buffer)
+        (setq default-directory (file-name-as-directory dir))
+        (when (fboundp 'hack-dir-local-variables-non-file-buffer)
+          (hack-dir-local-variables-non-file-buffer))))
+    (when (and (boundp '+workspaces-switch-project-function)
+               +workspaces-switch-project-function)
+      (funcall +workspaces-switch-project-function dir))
+    (when (fboundp '+dwc/get-most-recent-file-in-project)
+      (when-let ((recent-file (+dwc/get-most-recent-file-in-project dir)))
+        (when (file-exists-p recent-file)
+          (find-file recent-file))))
+    (claude-repl--ws-put ws :project-dir dir)
+    (when priority
+      (claude-repl--ws-put ws :priority priority))
+    (when (and (fboundp 'claude-repl--initialize-claude)
+               (fboundp 'claude-repl--claude-running-p)
+               (not (claude-repl--claude-running-p ws)))
+      (claude-repl--initialize-claude ws))))
+
 (defun claude-repl-load-workspace-snapshot (&optional file)
   "Load workspaces from FILE (defaults to the configured snapshot path).
 When FILE is nil, reads `claude-repl-workspace-snapshot-file' (or its
 legacy module-dir fallback if the configured file is absent).  For each
-entry, declaratively registers a persp via `persp-add-new' keyed by the
-snapshot's `ws' name, calls `projectile-add-known-project' so the
-project shows up under `SPC p p', and hydrates `:project-dir' /
-`:priority' into `claude-repl--workspaces' so the tabline paints the
-priority badge immediately.  Entries whose directory no longer exists
-are skipped.
+entry, fully sets up the workspace via `claude-repl--establish-workspace'
+\(persp creation + activation + projectile + dir-locals + magit lambda
++ find-file recent + claude init).  Returns to the workspace that was
+active when the load began.
 
-This deliberately bypasses Doom's `+dwc/switch-to-project' /
-`+workspaces-switch-to-project-h' path — that path runs the
-interactive user-switch workflow (rename-on-empty branch, magit auto-
-open, find-file recent, projectile hooks) which is the wrong layer for
-restoring 16 declarative entries from disk (in particular, the rename-
-on-empty branch collapses every entry after iteration 1 into a single
-renamed persp).
-
-Claude itself is NOT started here.  The workspace is added to
-`claude-repl--pending-snapshot-workspaces' and the lazy-start hook on
-`persp-activated-functions' starts claude (and runs the deferred Doom
-project-switch side effects — default-directory, dir-locals, magit-
-status via `+workspaces-switch-project-function') on first visit."
+Bypasses Doom's `+dwc/switch-to-project' / `+workspaces-switch-to-
+project-h' path to avoid the rename-on-empty collapse, but otherwise
+performs the same per-workspace setup synchronously per entry — every
+loaded workspace ends up with a saved persp-mode window configuration
+because we briefly activate it during setup."
   (interactive)
   (let* ((file (or file (claude-repl--workspace-snapshot-file-for-read)))
          (snapshot (claude-repl--read-sexp-file-if-exists file)))
     (unless snapshot
       (user-error "No workspace snapshot at %s" file))
-    (let ((loaded 0)
-          (skipped 0)
-          (iter 0)
-          (total (length snapshot))
-          (claude-repl--loading-snapshot-p t))
-      (claude-repl--log nil "load-workspace-snapshot: BEGIN file=%s entries=%d persp-count=%s"
-                        file total
-                        (claude-repl--snapshot-loader-persp-count))
+    (let* ((loaded 0)
+           (skipped 0)
+           (iter 0)
+           (total (length snapshot))
+           (origin-ws (and (fboundp '+workspace-current-name)
+                           (ignore-errors (+workspace-current-name)))))
+      (claude-repl--log nil "load-workspace-snapshot: BEGIN file=%s entries=%d origin-ws=%s"
+                        file total (or origin-ws "nil"))
       (dolist (raw snapshot)
         (cl-incf iter)
         (let* ((entry (claude-repl--snapshot-entry-normalize raw))
@@ -818,95 +834,20 @@ status via `+workspaces-switch-project-function') on first visit."
                               iter total ws (or dir "nil"))
             (cl-incf skipped))
            (t
-            (claude-repl--log nil "load-snapshot iter=%d/%d ws=%s dir=%s registering"
+            (claude-repl--log nil "load-snapshot iter=%d/%d ws=%s dir=%s establishing"
                               iter total ws dir)
-            (when (fboundp 'persp-add-new)
-              (persp-add-new ws))
-            (when (fboundp 'projectile-add-known-project)
-              (projectile-add-known-project dir))
-            (claude-repl--ws-put ws :project-dir dir)
-            (when priority
-              (claude-repl--ws-put ws :priority priority))
-            (puthash ws plist claude-repl--pending-snapshot-workspaces)
+            (claude-repl--establish-workspace ws dir priority)
             (cl-incf loaded)))))
+      (when (and origin-ws
+                 (fboundp '+workspace-exists-p)
+                 (+workspace-exists-p origin-ws)
+                 (fboundp 'persp-frame-switch))
+        (persp-frame-switch origin-ws))
       (force-mode-line-update t)
       (setq claude-repl--snapshot-loaded-p t)
-      (claude-repl--log nil "load-workspace-snapshot: END loaded=%d skipped=%d final-persp-count=%s"
-                        loaded skipped
-                        (claude-repl--snapshot-loader-persp-count))
+      (claude-repl--log nil "load-workspace-snapshot: END loaded=%d skipped=%d returned-to=%s"
+                        loaded skipped (or origin-ws "nil"))
       (message "Loaded %d workspace(s), skipped %d" loaded skipped))))
-
-(defun claude-repl--snapshot-loader-persp-count ()
-  "Return the current number of named persps, or nil if persp-mode isn't ready."
-  (and (fboundp '+workspace-list-names)
-       (ignore-errors (length (+workspace-list-names)))))
-
-(defun claude-repl--snapshot-loader-persp-names ()
-  "Return the current `+workspace-list-names', or nil if persp-mode isn't ready."
-  (and (fboundp '+workspace-list-names)
-       (ignore-errors (+workspace-list-names))))
-
-(defun claude-repl--snapshot-loader-current-name ()
-  "Return the current workspace name, or nil if persp-mode isn't ready."
-  (and (fboundp '+workspace-current-name)
-       (ignore-errors (+workspace-current-name))))
-
-(defun claude-repl--run-deferred-project-switch-side-effects (ws dir)
-  "Run the Doom project-switch side effects the loader deferred.
-The snapshot loader skips `+dwc/switch-to-project' to avoid the
-rename-on-empty collapse; the side effects that path normally provides
-\(setting `default-directory' on the fallback buffer, loading dir-locals,
-auto-opening magit via `+workspaces-switch-project-function', and
-opening the most-recent project file via `find-file') are run here on
-first visit instead.
-
-The `find-file' tail mirrors `+dwc/switch-to-project' (`config.el:810-812')
-— it attaches a buffer to the freshly-activated persp AND replaces the
-active window's buffer with a project file, which is what gives
-`SPC p p' a clean window layout on a snapshot-restored persp.  Without
-this step, `s-{' / `s-}' switching into a snapshot persp leaves the
-previous workspace's window layout intact and claude panels render on
-top of foreign windows.
-
-WS is logged for traceability; DIR is the project root."
-  (claude-repl--with-error-logging "deferred-project-switch"
-    (when (and dir (file-directory-p dir))
-      (claude-repl--log ws "deferred-project-switch: ws=%s dir=%s" ws dir)
-      (when (fboundp 'doom-fallback-buffer)
-        (with-current-buffer (doom-fallback-buffer)
-          (setq default-directory (file-name-as-directory dir))
-          (when (fboundp 'hack-dir-local-variables-non-file-buffer)
-            (hack-dir-local-variables-non-file-buffer))))
-      (when (and (boundp '+workspaces-switch-project-function)
-                 +workspaces-switch-project-function)
-        (funcall +workspaces-switch-project-function dir))
-      (when (fboundp '+dwc/get-most-recent-file-in-project)
-        (when-let ((recent-file (+dwc/get-most-recent-file-in-project dir)))
-          (when (file-exists-p recent-file)
-            (claude-repl--log ws "deferred-project-switch: find-file=%s" recent-file)
-            (find-file recent-file)))))))
-
-(defun claude-repl--maybe-start-on-activate (&rest _)
-  "Lazy-start hook for `persp-activated-functions'.
-On first visit to a snapshot-restored workspace, runs the deferred
-project-switch side effects (default-directory, dir-locals, magit auto-
-open via `+workspaces-switch-project-function') and then starts claude
-unless it's already running.  Skipped during snapshot loading so the
-loader doesn't eager-start anything.
-
-No-op if the Doom workspace API isn't fboundp yet — the hook may be
-invoked early in persp-mode activation before Doom's `+workspace-*'
-autoloads are in place."
-  (when (and (not claude-repl--loading-snapshot-p)
-             (fboundp '+workspace-current-name))
-    (let ((ws (ignore-errors (+workspace-current-name))))
-      (when (and ws (gethash ws claude-repl--pending-snapshot-workspaces))
-        (let ((dir (claude-repl--ws-get ws :project-dir)))
-          (remhash ws claude-repl--pending-snapshot-workspaces)
-          (claude-repl--run-deferred-project-switch-side-effects ws dir)
-          (unless (claude-repl--claude-running-p ws)
-            (claude-repl--log ws "maybe-start-on-activate: starting ws=%s" ws)
-            (claude-repl--initialize-claude ws)))))))
 
 (defun claude-repl--load-workspace-snapshot-on-startup ()
   "Restore the workspace snapshot silently at Emacs startup.
