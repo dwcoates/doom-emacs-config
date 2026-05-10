@@ -29,6 +29,88 @@
   "Register WS in `claude-repl--workspaces' with PROPS plist."
   (puthash ws (copy-sequence props) claude-repl--workspaces))
 
+;;;; ---- Multi-select ----
+
+(ert-deftest claude-repl-drawer-test-toggle-mark-adds-and-removes ()
+  "`toggle-mark' adds the entry on first press, removes on second."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws1" :priority "p1")
+    (claude-repl-drawer-test--register "ws2" :priority "p2")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (claude-repl-drawer-toggle-mark)
+      (should (claude-repl-drawer--marked-p "ws1"))
+      ;; toggle-mark auto-advances; come back and unmark.
+      (claude-repl-drawer--goto-workspace-line "ws1")
+      (claude-repl-drawer-toggle-mark)
+      (should-not (claude-repl-drawer--marked-p "ws1")))))
+
+(ert-deftest claude-repl-drawer-test-target-workspaces-falls-back-to-point ()
+  "`--target-workspaces' returns just the entry at point when no marks."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws1" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (should (equal (claude-repl-drawer--target-workspaces) '("ws1"))))))
+
+(ert-deftest claude-repl-drawer-test-target-workspaces-uses-marks-when-set ()
+  "`--target-workspaces' returns the marked-set when non-empty (ignoring point)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws1" :priority "p1")
+    (claude-repl-drawer-test--register "ws2" :priority "p2")
+    (claude-repl-drawer-test--register "ws3" :priority "p3")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--ensure-marked-set)
+      (puthash "ws1" t claude-repl-drawer--marked-set)
+      (puthash "ws3" t claude-repl-drawer--marked-set)
+      (let ((targets (claude-repl-drawer--target-workspaces)))
+        (should (= (length targets) 2))
+        (should (member "ws1" targets))
+        (should (member "ws3" targets))))))
+
+(ert-deftest claude-repl-drawer-test-bulk-nuke-iterates-marks ()
+  "Bulk nuke iterates the marked-set when non-empty."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws1" :priority "p1")
+    (claude-repl-drawer-test--register "ws2" :priority "p2")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--ensure-marked-set)
+      (puthash "ws1" t claude-repl-drawer--marked-set)
+      (puthash "ws2" t claude-repl-drawer--marked-set)
+      (let ((nuked nil))
+        (cl-letf (((symbol-function 'claude-repl-nuke-workspace)
+                   (lambda (&optional ws) (push ws nuked))))
+          (claude-repl-drawer-nuke))
+        (should (member "ws1" nuked))
+        (should (member "ws2" nuked))))))
+
+(ert-deftest claude-repl-drawer-test-clear-marks-empties-set ()
+  "`clear-marks' empties the marked-set."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--ensure-marked-set)
+      (puthash "ws" t claude-repl-drawer--marked-set)
+      (claude-repl-drawer-clear-marks)
+      (should (zerop (claude-repl-drawer--marked-count))))))
+
+(ert-deftest claude-repl-drawer-test-render-marked-uses-marked-glyph ()
+  "Rendered marked entry's gutter contains the marked glyph."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--ensure-marked-set)
+      (puthash "ws" t claude-repl-drawer--marked-set)
+      (claude-repl-drawer--render)
+      (should (string-match-p (regexp-quote claude-repl-drawer-marked-glyph)
+                              (buffer-substring-no-properties
+                               (point-min) (point-max)))))))
+
 ;;;; ---- Expand-detail ----
 
 (ert-deftest claude-repl-drawer-test-toggle-expand-adds-and-removes ()

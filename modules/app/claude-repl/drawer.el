@@ -86,6 +86,12 @@ Used for registered-but-not-yet-started workspaces (claude-state nil)."
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-drawer-marked-glyph "● "
+  "Gutter glyph for entries the user has marked for bulk operations.
+Width must match `claude-repl-drawer-gutter' for column alignment."
+  :type 'string
+  :group 'claude-repl)
+
 (defcustom claude-repl-drawer-current-arrow "▶ "
   "Gutter glyph displayed on the entry the cursor is currently on.
 Width must match the static `claude-repl-drawer-gutter' so the arrow
@@ -105,6 +111,11 @@ The current-entry overlay covers this region with
 (defface claude-repl-drawer-workspace-name
   '((t :weight bold))
   "Face for the workspace name line in the drawer."
+  :group 'claude-repl)
+
+(defface claude-repl-drawer-marked
+  '((t :foreground "red" :weight bold))
+  "Face for the marked-entry gutter glyph in the drawer."
   :group 'claude-repl)
 
 (defface claude-repl-drawer-current-arrow
@@ -161,6 +172,8 @@ The current-entry overlay covers this region with
     (define-key map (kbd "H")       #'claude-repl-drawer-toggle-hidden)
     (define-key map (kbd "+")       #'claude-repl-drawer-priority-up)
     (define-key map (kbd "-")       #'claude-repl-drawer-priority-down)
+    (define-key map (kbd "t")       #'claude-repl-drawer-toggle-mark)
+    (define-key map (kbd "u")       #'claude-repl-drawer-clear-marks)
     (define-key map (kbd "C-c C-k") #'claude-repl-drawer-interrupt)
     ;; Block horizontal char navigation — the entry is the unit of
     ;; selection; in-line cursor placement is reserved for searches.
@@ -197,11 +210,15 @@ Repositioned by `claude-repl-drawer--post-command' to follow point.")
   "Move the current-entry arrow overlay onto the entry containing point.
 Covers the static gutter region (chars [START, START+gutter-width)) of
 the entry's first line with a `display' override that renders the
-arrow.  Removes the overlay when point is not on a workspace entry."
+arrow.  Removes the overlay when point is not on a workspace entry,
+or when the entry is marked (the red `●' takes precedence so the
+cursor's identity is folded into the marked set)."
   (let ((bounds (claude-repl-drawer--entry-bounds-at-point))
+        (ws-at-point (claude-repl-drawer--workspace-at-point))
         (gutter-len (length claude-repl-drawer-gutter)))
     (cond
-     ((null bounds)
+     ((or (null bounds)
+          (claude-repl-drawer--marked-p ws-at-point))
       (when (overlayp claude-repl-drawer--current-entry-overlay)
         (delete-overlay claude-repl-drawer--current-entry-overlay)))
      (t
@@ -270,6 +287,8 @@ Runs after every command in the drawer buffer."
     "H"             #'claude-repl-drawer-toggle-hidden
     "+"             #'claude-repl-drawer-priority-up
     "-"             #'claude-repl-drawer-priority-down
+    "t"             #'claude-repl-drawer-toggle-mark
+    "u"             #'claude-repl-drawer-clear-marks
     (kbd "TAB")     #'claude-repl-drawer-toggle-expand
     (kbd "<tab>")   #'claude-repl-drawer-toggle-expand
     (kbd "C-c C-k") #'claude-repl-drawer-interrupt)
@@ -478,7 +497,11 @@ content (rather than back to column 0).  HIDDEN dims the block."
          (name-face  (claude-repl-drawer--name-face ws))
          (indent-str (make-string (* depth claude-repl-drawer-indent-per-level)
                                   ?\s))
-         (header     (concat claude-repl-drawer-gutter indent-str
+         (gutter-str (if (claude-repl-drawer--marked-p ws)
+                         (propertize claude-repl-drawer-marked-glyph
+                                     'face 'claude-repl-drawer-marked)
+                       claude-repl-drawer-gutter))
+         (header     (concat gutter-str indent-str
                              glyph "  " prio-disp sep
                              (propertize ws 'face name-face)
                              (if dirty " ●" "")))
@@ -687,32 +710,100 @@ re-fetched."
   (or (claude-repl-drawer--workspace-at-point)
       (user-error "No workspace at point")))
 
-(defun claude-repl-drawer-nuke ()
-  "Nuke the workspace at point.  Mirrors `SPC j x' (`claude-repl-nuke-workspace')."
+;;;; Multi-select -----------------------------------------------------------
+
+(defvar-local claude-repl-drawer--marked-set nil
+  "Hash table of workspace names currently marked for bulk operations.
+Buffer-local: each drawer buffer has its own set.  Keys are workspace
+names, values are `t' (presence is the signal).")
+
+(defun claude-repl-drawer--ensure-marked-set ()
+  "Initialize `claude-repl-drawer--marked-set' if not yet created."
+  (unless claude-repl-drawer--marked-set
+    (setq-local claude-repl-drawer--marked-set
+                (make-hash-table :test 'equal))))
+
+(defun claude-repl-drawer--marked-p (ws)
+  "Return non-nil when WS is in the marked-set."
+  (and claude-repl-drawer--marked-set
+       (gethash ws claude-repl-drawer--marked-set)))
+
+(defun claude-repl-drawer--marked-count ()
+  "Return the number of marked entries in the current drawer buffer."
+  (if claude-repl-drawer--marked-set
+      (hash-table-count claude-repl-drawer--marked-set)
+    0))
+
+(defun claude-repl-drawer--target-workspaces ()
+  "Return the list of workspaces an action should target.
+The marked-set if non-empty; otherwise just the entry at point.  This
+is the standard 'act on marks if any, else on point' idiom — no
+duplicate keybindings for bulk versions."
+  (if (> (claude-repl-drawer--marked-count) 0)
+      (hash-table-keys claude-repl-drawer--marked-set)
+    (list (claude-repl-drawer--require-ws-at-point))))
+
+(defun claude-repl-drawer-toggle-mark ()
+  "Toggle the mark on the entry at point.
+Marked entries render with a red `●' in the gutter and become the
+target set for action keys (x/d/i/M).  Auto-advances to the next
+entry as a quality-of-life convenience."
   (interactive)
-  (claude-repl-nuke-workspace (claude-repl-drawer--require-ws-at-point)))
+  (let ((ws (claude-repl-drawer--require-ws-at-point)))
+    (claude-repl-drawer--ensure-marked-set)
+    (if (gethash ws claude-repl-drawer--marked-set)
+        (remhash ws claude-repl-drawer--marked-set)
+      (puthash ws t claude-repl-drawer--marked-set))
+    (claude-repl-drawer--render)
+    (claude-repl-drawer-next)))
+
+(defun claude-repl-drawer-clear-marks ()
+  "Clear all marks in the current drawer buffer."
+  (interactive)
+  (when claude-repl-drawer--marked-set
+    (clrhash claude-repl-drawer--marked-set))
+  (claude-repl-drawer--render))
+
+(defun claude-repl-drawer-nuke ()
+  "Nuke the target workspaces.
+Targets the marked-set when non-empty, otherwise the entry at point.
+Mirrors `SPC j x' (`claude-repl-nuke-workspace') per target."
+  (interactive)
+  (dolist (ws (claude-repl-drawer--target-workspaces))
+    (claude-repl-nuke-workspace ws)))
 
 (defun claude-repl-drawer-kill ()
-  "Kill the workspace at point.  Mirrors `SPC j d' (`claude-repl-kill-workspace')."
+  "Kill the target workspaces.
+Targets the marked-set when non-empty, otherwise the entry at point.
+Mirrors `SPC j d' (`claude-repl-kill-workspace') per target."
   (interactive)
-  (claude-repl-kill-workspace (claude-repl-drawer--require-ws-at-point)))
+  (dolist (ws (claude-repl-drawer--target-workspaces))
+    (claude-repl-kill-workspace ws)))
 
 (defun claude-repl-drawer-interrupt ()
-  "Interrupt Claude in the workspace at point.  Mirrors `C-c C-k'."
+  "Interrupt Claude in the target workspaces.
+Targets the marked-set when non-empty, otherwise the entry at point.
+Mirrors `C-c C-k' per target."
   (interactive)
-  (claude-repl-interrupt (claude-repl-drawer--require-ws-at-point)))
+  (dolist (ws (claude-repl-drawer--target-workspaces))
+    (claude-repl-interrupt ws)))
 
 (defun claude-repl-drawer-send-prompt ()
-  "Read a prompt and send it to the workspace at point.
+  "Read a prompt and send it to the target workspaces.
+Targets the marked-set when non-empty, otherwise the entry at point.
 Mirrors the normal claude send (`claude-repl--send'), including
-history logging.  After send, the entry's summary will naturally
-transition to `:last-prompt-summary-pending' and render as `…' until
-the haiku summarizer returns the new aiTitle."
+history logging.  After send, each target's summary transitions to
+`:last-prompt-summary-pending' and renders as `…' until the haiku
+summarizer returns the new aiTitle."
   (interactive)
-  (let* ((ws     (claude-repl-drawer--require-ws-at-point))
-         (prompt (read-string (format "Send to %s: " ws))))
+  (let* ((targets (claude-repl-drawer--target-workspaces))
+         (prompt  (read-string
+                   (if (= 1 (length targets))
+                       (format "Send to %s: " (car targets))
+                     (format "Send to %d workspaces: " (length targets))))))
     (when (and prompt (not (string-empty-p prompt)))
-      (claude-repl--send prompt ws))))
+      (dolist (ws targets)
+        (claude-repl--send prompt ws)))))
 
 (defun claude-repl-drawer--with-temp-current-ws (ws fn)
   "Switch to WS, call FN, then return to the previous workspace.
@@ -729,14 +820,15 @@ target workspace before invoking them."
         (+workspace-switch prev)))))
 
 (defun claude-repl-drawer-merge-into-master ()
-  "Merge the entry at point into its source/master.
-Mirrors `SPC TAB M' (`claude-repl-workspace-merge-current-into-source').
-The public function operates on the current workspace, so we
-temporarily switch to the entry-at-point before invoking it."
+  "Merge the target workspaces into their source/master.
+Targets the marked-set when non-empty, otherwise the entry at point.
+Mirrors `SPC TAB M' (`claude-repl-workspace-merge-current-into-source')
+per target.  Each target requires temporarily switching to that
+workspace before invoking the public function."
   (interactive)
-  (claude-repl-drawer--with-temp-current-ws
-   (claude-repl-drawer--require-ws-at-point)
-   #'claude-repl-workspace-merge-current-into-source))
+  (dolist (ws (claude-repl-drawer--target-workspaces))
+    (claude-repl-drawer--with-temp-current-ws
+     ws #'claude-repl-workspace-merge-current-into-source)))
 
 (defun claude-repl-drawer-merge-child ()
   "Merge a child workspace into the entry at point.
