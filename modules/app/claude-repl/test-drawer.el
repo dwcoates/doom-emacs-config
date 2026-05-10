@@ -29,6 +29,102 @@
   "Register WS in `claude-repl--workspaces' with PROPS plist."
   (puthash ws (copy-sequence props) claude-repl--workspaces))
 
+;;;; ---- Section partition + tree ----
+
+(ert-deftest claude-repl-drawer-test-workspace-section-merged-dominates ()
+  "Merged-branch workspaces land in :merged regardless of hidden state."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws"
+                                       :branch-merged 'merged
+                                       :repl-state    :hidden)
+    (should (eq (claude-repl-drawer--workspace-section "ws") :merged))))
+
+(ert-deftest claude-repl-drawer-test-workspace-section-hidden ()
+  "Non-merged hidden workspaces land in :hidden."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :repl-state :hidden)
+    (should (eq (claude-repl-drawer--workspace-section "ws") :hidden))))
+
+(ert-deftest claude-repl-drawer-test-workspace-section-default-main ()
+  "Workspaces with no flags default to :main."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws")
+    (should (eq (claude-repl-drawer--workspace-section "ws") :main))))
+
+(ert-deftest claude-repl-drawer-test-effective-parent-skips-merged-ancestor ()
+  "Effective parent walks past merged ancestors to the first unmerged one."
+  (claude-repl-test--with-clean-state
+    (puthash "gp" '(:project-dir "/gp/" :branch-merged not-merged)
+             claude-repl--workspaces)
+    (puthash "p"  '(:project-dir "/p/"  :source-ws-dir "/gp/"
+                    :branch-merged merged)
+             claude-repl--workspaces)
+    (puthash "c"  '(:project-dir "/c/"  :source-ws-dir "/p/")
+             claude-repl--workspaces)
+    (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+      (should (equal (claude-repl-drawer--effective-parent "c" '("gp" "c"))
+                     "gp")))))
+
+(ert-deftest claude-repl-drawer-test-effective-parent-nil-when-parent-missing-from-section ()
+  "Effective parent returns nil when no ancestor lives in SECTION-SET."
+  (claude-repl-test--with-clean-state
+    (puthash "p" '(:project-dir "/p/") claude-repl--workspaces)
+    (puthash "c" '(:project-dir "/c/" :source-ws-dir "/p/")
+             claude-repl--workspaces)
+    (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+      (should (null (claude-repl-drawer--effective-parent "c" '("c")))))))
+
+(ert-deftest claude-repl-drawer-test-effective-parent-in-merged-direct-only ()
+  "MERGED-section parent is direct source-ws when also in merged-set."
+  (claude-repl-test--with-clean-state
+    (puthash "p" '(:project-dir "/p/") claude-repl--workspaces)
+    (puthash "c" '(:project-dir "/c/" :source-ws-dir "/p/")
+             claude-repl--workspaces)
+    (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+      (should (equal (claude-repl-drawer--effective-parent-in-merged
+                      "c" '("p" "c"))
+                     "p")))))
+
+(ert-deftest claude-repl-drawer-test-build-tree-roots-and-children ()
+  "`--build-tree' returns sorted forest with sorted children."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "root" :priority "p1")
+    (claude-repl-drawer-test--register "kid"  :priority "p2")
+    (let* ((parent-fn (lambda (w) (when (equal w "kid") "root")))
+           (forest (claude-repl-drawer--build-tree '("root" "kid") parent-fn)))
+      (should (equal (mapcar #'car forest) '("root")))
+      (should (equal (mapcar #'car (cdr (car forest))) '("kid"))))))
+
+(ert-deftest claude-repl-drawer-test-render-three-sections ()
+  "Render emits MAIN, HIDDEN, and MERGED headers in that order."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "main-ws")
+    (claude-repl-drawer-test--register "hidden-ws" :repl-state :hidden)
+    (claude-repl-drawer-test--register "merged-ws" :branch-merged 'merged)
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p "MAIN" text))
+        (should (string-match-p "HIDDEN" text))
+        (should (string-match-p "MERGED" text))
+        ;; MAIN must precede HIDDEN, HIDDEN must precede MERGED
+        (should (< (string-match "MAIN" text)
+                   (string-match "HIDDEN" text)))
+        (should (< (string-match "HIDDEN" text)
+                   (string-match "MERGED" text)))))))
+
+(ert-deftest claude-repl-drawer-test-render-merged-ws-only-in-merged-section ()
+  "A merged workspace appears in MERGED, not MAIN."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "merged-ws" :branch-merged 'merged)
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (let* ((text (buffer-substring-no-properties (point-min) (point-max)))
+             (merged-pos (string-match "MERGED" text))
+             (ws-pos     (string-match "merged-ws" text)))
+        ;; merged-ws appears AFTER the MERGED header (not in MAIN above it)
+        (should (and merged-pos ws-pos (> ws-pos merged-pos)))))))
+
 ;;;; ---- Sort + partition ----
 
 (ert-deftest claude-repl-drawer-test-sort-by-priority ()

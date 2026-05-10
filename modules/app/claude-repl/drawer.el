@@ -210,9 +210,10 @@ Runs after every command in the drawer buffer."
 
 (define-derived-mode claude-repl-drawer-mode special-mode "ClaudeDrawer"
   "Major mode for the claude-repl workspace drawer."
-  (setq truncate-lines t
+  (setq truncate-lines nil
         buffer-read-only t
-        mode-line-format nil)
+        mode-line-format nil
+        word-wrap t)
   (setq-local cursor-type nil)
   (add-hook 'post-command-hook
             #'claude-repl-drawer--post-command nil t))
@@ -273,7 +274,9 @@ Lower keys come first.  Sort by `:priority' rank, then name."
                      (string< (cdr ka) (cdr kb))))))))
 
 (defun claude-repl-drawer--partition (names)
-  "Return (VISIBLE . HIDDEN) lists from NAMES, each sorted."
+  "Return (VISIBLE . HIDDEN) lists from NAMES, each sorted.
+Legacy two-section partition; tree-aware sectioning lives in
+`claude-repl-drawer--partition-by-section'."
   (let (visible hidden)
     (dolist (ws names)
       (if (claude-repl-drawer--workspace-hidden-p ws)
@@ -281,6 +284,90 @@ Lower keys come first.  Sort by `:priority' rank, then name."
         (push ws visible)))
     (cons (claude-repl-drawer--sort visible)
           (claude-repl-drawer--sort hidden))))
+
+;;;; Section + tree helpers -------------------------------------------------
+
+(defun claude-repl-drawer--workspace-section (ws)
+  "Return :main, :hidden, or :merged for WS based on its plist state.
+Merged dominates hidden — a merged+hidden workspace lands in MERGED."
+  (cond
+   ((eq (claude-repl--ws-get ws :branch-merged) 'merged) :merged)
+   ((eq (claude-repl--ws-get ws :repl-state) :hidden)    :hidden)
+   (t :main)))
+
+(defun claude-repl-drawer--source-ws-name (ws)
+  "Return the workspace name recorded as WS's source, or nil.
+Reverse-lookups `:source-ws-dir' through `claude-repl--ws-name-for-dir'."
+  (when-let ((dir (claude-repl--ws-get ws :source-ws-dir)))
+    (claude-repl--ws-name-for-dir dir)))
+
+(defcustom claude-repl-drawer-tree-max-depth 16
+  "Cycle defense for drawer parent-chain walks."
+  :type 'integer
+  :group 'claude-repl)
+
+(defun claude-repl-drawer--effective-parent (ws section-set)
+  "Return WS's effective parent in SECTION-SET (a list of workspace names).
+Walks the source-ws chain skipping ancestors whose `:branch-merged'
+is `merged'.  Returns the first unmerged ancestor that lives in
+SECTION-SET, or nil when no ancestor qualifies (WS is a root in this
+section).  Cycle-capped via `claude-repl-drawer-tree-max-depth'."
+  (let ((candidate (claude-repl-drawer--source-ws-name ws))
+        (depth 0)
+        (result nil)
+        (done nil))
+    (while (and (not done) candidate
+                (< depth claude-repl-drawer-tree-max-depth))
+      (setq depth (1+ depth))
+      (cond
+       ((eq (claude-repl--ws-get candidate :branch-merged) 'merged)
+        (setq candidate (claude-repl-drawer--source-ws-name candidate)))
+       ((member candidate section-set)
+        (setq result candidate done t))
+       (t (setq done t))))
+    result))
+
+(defun claude-repl-drawer--effective-parent-in-merged (ws merged-set)
+  "Return WS's parent in the MERGED section: source-ws if also merged, else nil.
+Preserves original topology — no flattening."
+  (when-let ((src (claude-repl-drawer--source-ws-name ws)))
+    (when (member src merged-set) src)))
+
+(defun claude-repl-drawer--partition-by-section (workspaces)
+  "Partition WORKSPACES into (:main :hidden :merged) buckets."
+  (let (main hidden merged)
+    (dolist (ws workspaces)
+      (pcase (claude-repl-drawer--workspace-section ws)
+        (:main   (push ws main))
+        (:hidden (push ws hidden))
+        (:merged (push ws merged))))
+    `((:main   . ,main)
+      (:hidden . ,hidden)
+      (:merged . ,merged))))
+
+(defun claude-repl-drawer--build-tree (workspaces parent-fn)
+  "Build a forest of trees from WORKSPACES using PARENT-FN to resolve parents.
+PARENT-FN takes a workspace name and returns its parent in this
+section, or nil if it's a root.  Each tree is `(WS . CHILDREN)' where
+CHILDREN is a list of trees.  Roots and siblings are sorted by
+`claude-repl-drawer--sort'."
+  (let ((children-of (make-hash-table :test 'equal))
+        (parents (make-hash-table :test 'equal)))
+    (dolist (ws workspaces)
+      (let ((p (funcall parent-fn ws)))
+        (puthash ws (or p :no-parent) parents)
+        (when p
+          (puthash p (cons ws (gethash p children-of)) children-of))))
+    (let (roots)
+      (dolist (ws workspaces)
+        (when (eq (gethash ws parents) :no-parent)
+          (push ws roots)))
+      (cl-labels ((build (ws)
+                    (cons ws
+                          (mapcar #'build
+                                  (claude-repl-drawer--sort
+                                   (or (gethash ws children-of) nil))))))
+        (mapcar #'build (claude-repl-drawer--sort roots))))))
 
 ;;;; Render -----------------------------------------------------------------
 
@@ -339,26 +426,42 @@ as plain bold."
   "Return the currently active workspace name, or nil."
   (and (fboundp '+workspace-current-name) (+workspace-current-name)))
 
-(defun claude-repl-drawer--render-workspace (ws current hidden)
+(defun claude-repl-drawer--render-workspace (ws _current hidden &optional depth)
   "Insert the rendered representation for workspace WS into the current buffer.
-CURRENT is the active workspace name (for highlighting).  HIDDEN means
-the workspace is in the hidden section and should be dimmed."
-  (let* ((priority  (claude-repl--ws-get ws :priority))
-         (glyph     (claude-repl-drawer--state-glyph ws))
-         (dirty     (eq (claude-repl--ws-get ws :git-clean) 'dirty))
-         (start     (point))
-         (prio-disp (claude-repl-drawer--priority-display priority))
-         (sep       (if priority " " ""))
-         (name-face (claude-repl-drawer--name-face ws))
-         (header    (concat claude-repl-drawer-gutter glyph "  "
-                            prio-disp sep
-                            (propertize ws 'face name-face)
-                            (if dirty " ●" "")))
-         (summary   (claude-repl-drawer--summary-text ws)))
-    (insert header "\n")
-    (insert "    "
-            (propertize summary 'face 'claude-repl-drawer-summary)
-            "\n")
+Optional DEPTH (default 0) shifts the entry right by `depth × 2'
+spaces *after* the static gutter — the gutter stays at column 0 so
+the current-entry arrow overlay aligns regardless of nesting.  Sets a
+`wrap-prefix' text property on both header and summary lines so soft
+word-wrap continuation lines indent to the same start column as the
+content (rather than back to column 0).  HIDDEN dims the block."
+  (let* ((depth      (or depth 0))
+         (priority   (claude-repl--ws-get ws :priority))
+         (glyph      (claude-repl-drawer--state-glyph ws))
+         (dirty      (eq (claude-repl--ws-get ws :git-clean) 'dirty))
+         (start      (point))
+         (prio-disp  (claude-repl-drawer--priority-display priority))
+         (sep        (if priority " " ""))
+         (name-face  (claude-repl-drawer--name-face ws))
+         (indent-str (make-string (* depth 2) ?\s))
+         (header     (concat claude-repl-drawer-gutter indent-str
+                             glyph "  " prio-disp sep
+                             (propertize ws 'face name-face)
+                             (if dirty " ●" "")))
+         (summary    (claude-repl-drawer--summary-text ws))
+         (header-wrap-prefix
+          (concat claude-repl-drawer-gutter indent-str "  "))
+         (summary-wrap-prefix
+          (concat claude-repl-drawer-gutter indent-str "    ")))
+    (let ((header-start (point)))
+      (insert header "\n")
+      (add-text-properties header-start (point)
+                           (list 'wrap-prefix header-wrap-prefix)))
+    (let ((summary-start (point)))
+      (insert claude-repl-drawer-gutter indent-str "  "
+              (propertize summary 'face 'claude-repl-drawer-summary)
+              "\n")
+      (add-text-properties summary-start (point)
+                           (list 'wrap-prefix summary-wrap-prefix)))
     (let ((end (point)))
       (add-text-properties
        start end
@@ -379,38 +482,71 @@ the workspace is in the hidden section and should be dimmed."
                               "\n")
                       'face 'claude-repl-drawer-section-rule)))
 
-(defun claude-repl-drawer--insert-section (label workspaces current hidden)
-  "Render a section titled LABEL containing WORKSPACES.
-CURRENT highlights the active workspace.  HIDDEN dims the entries when
-they live in the hidden section.  Inserts a blank line between
-adjacent workspaces (but not after the last) so the header+summary of
-each entry stay tighter than the inter-workspace gap."
+(defun claude-repl-drawer--render-subtree (tree depth current section)
+  "Render TREE (a `(WS . CHILDREN)' cell) at DEPTH.
+SECTION is :main, :hidden, or :merged — only :hidden propagates the
+dim treatment via the HIDDEN flag passed to `--render-workspace'.
+Children render contiguously (no inter-child blank); blank-between-
+roots is the caller's responsibility."
+  (claude-repl-drawer--render-workspace (car tree) current
+                                        (eq section :hidden)
+                                        depth)
+  (dolist (child (cdr tree))
+    (claude-repl-drawer--render-subtree child (1+ depth) current section)))
+
+(defun claude-repl-drawer--render-trees (trees current section)
+  "Render TREES (forest) with a blank line between adjacent root subtrees."
+  (let ((rest trees))
+    (while rest
+      (claude-repl-drawer--render-subtree (car rest) 0 current section)
+      (when (cdr rest) (insert "\n"))
+      (setq rest (cdr rest)))))
+
+(defun claude-repl-drawer--parent-fn-for-section (workspaces section)
+  "Return a parent-resolution function for SECTION.
+:main and :hidden flatten through merged ancestors; :merged preserves
+original topology."
+  (lambda (ws)
+    (cond
+     ((eq section :merged)
+      (claude-repl-drawer--effective-parent-in-merged ws workspaces))
+     (t
+      (claude-repl-drawer--effective-parent ws workspaces)))))
+
+(defun claude-repl-drawer--insert-section (label workspaces current section)
+  "Render a section titled LABEL.
+WORKSPACES is the list of names belonging to this section.  CURRENT
+is the currently selected workspace (per persp).  SECTION is :main,
+:hidden, or :merged — controls parent-resolution and dim treatment.
+Empty sections render the `(none)' placeholder under the header."
   (claude-repl-drawer--insert-section-header label)
   (if (null workspaces)
       (insert (propertize (format "  %s\n"
                                   claude-repl-drawer-empty-section-label)
                           'face 'claude-repl-drawer-empty))
-    (let ((rest workspaces))
-      (while rest
-        (claude-repl-drawer--render-workspace (car rest) current hidden)
-        (when (cdr rest) (insert "\n"))
-        (setq rest (cdr rest))))))
+    (let* ((parent-fn (claude-repl-drawer--parent-fn-for-section
+                       workspaces section))
+           (trees (claude-repl-drawer--build-tree workspaces parent-fn)))
+      (claude-repl-drawer--render-trees trees current section))))
 
 (defun claude-repl-drawer--render ()
-  "Render the drawer contents from `claude-repl--workspaces' into the current buffer."
+  "Render the drawer: MAIN, HIDDEN, MERGED, in that order, each as a tree."
   (let* ((inhibit-read-only t)
          (saved-line (line-number-at-pos))
          (saved-col  (current-column))
          (current    (claude-repl-drawer--current-ws))
-         (parts      (claude-repl-drawer--partition
-                      (hash-table-keys claude-repl--workspaces)))
-         (visible    (car parts))
-         (hidden     (cdr parts)))
+         (sections   (claude-repl-drawer--partition-by-section
+                      (hash-table-keys claude-repl--workspaces))))
     (erase-buffer)
     (insert "\n")
-    (claude-repl-drawer--insert-section "MAIN" visible current nil)
+    (claude-repl-drawer--insert-section
+     "MAIN" (alist-get :main sections) current :main)
     (insert "\n")
-    (claude-repl-drawer--insert-section "HIDDEN" hidden current t)
+    (claude-repl-drawer--insert-section
+     "HIDDEN" (alist-get :hidden sections) current :hidden)
+    (insert "\n")
+    (claude-repl-drawer--insert-section
+     "MERGED" (alist-get :merged sections) current :merged)
     (goto-char (point-min))
     (forward-line (1- saved-line))
     (move-to-column saved-col)))
