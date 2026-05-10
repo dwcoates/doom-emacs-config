@@ -645,6 +645,18 @@ The :thinking transition belongs to the prompt_submit Claude Code hook
           (claude-repl--do-send "ws1" "decorated-input" "raw-input"))
         (should (equal posthook-args '("ws1" "raw-input")))))))
 
+(ert-deftest claude-repl-test-do-send-records-last-prompt-time ()
+  "`claude-repl--do-send' stamps :last-prompt-time with the current float-time."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-do-send-time*"
+      (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+      (cl-letf (((symbol-function 'claude-repl--send-input-to-vterm) #'ignore)
+                ((symbol-function 'claude-repl--run-send-posthooks) #'ignore)
+                ((symbol-function 'float-time) (lambda (&rest _) 1234567.0)))
+        (claude-repl--do-send "ws1" "input" "raw"))
+      (should (equal (claude-repl--ws-get "ws1" :last-prompt-time)
+                     1234567.0)))))
+
 ;;;; ---- Tests: discard-or-send-interrupt ----
 
 (ert-deftest claude-repl-test-discard-or-send-interrupt-empty-sends-raw-etx ()

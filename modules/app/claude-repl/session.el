@@ -204,6 +204,13 @@ state-save.  Callers already guard on `claude-repl--claude-running-p'."
     (claude-repl--ws-put ws :source-ws-dir
                          (or (and saved (plist-get saved :source-ws-dir))
                              (claude-repl--ws-get ws :source-ws-dir)))
+    ;; Last-prompt-time: prefer saved value, fall back to whatever is
+    ;; already in the plist.  Used by the drawer's detail view to show
+    ;; "duration since last user message"; survives Emacs restarts so
+    ;; the duration reflects real elapsed wall-clock, not session age.
+    (claude-repl--ws-put ws :last-prompt-time
+                         (or (and saved (plist-get saved :last-prompt-time))
+                             (claude-repl--ws-get ws :last-prompt-time)))
     ;; Repl-state: hydrate the *desired* panel-visibility lifecycle from the
     ;; saved file so `:inactive' (panels closed via plain `SPC o c') and
     ;; `:hidden' (deprio-close via `SPC o C') survive Emacs restart.  Only

@@ -543,6 +543,7 @@ permitted action — `:thinking' is the correct state."
   (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (claude-repl--log ws "do-send ws=%s len=%d" ws (length input))
     (claude-repl--increment-prefix-counter ws)
+    (claude-repl--ws-put ws :last-prompt-time (float-time))
     (claude-repl--pin-owning-workspace vterm-buf ws)
     (claude-repl--send-input-to-vterm vterm-buf input on-settle)
     (when (eq (claude-repl--ws-claude-state ws) :permission)

@@ -496,6 +496,23 @@ new path does not exist but the legacy one does."
               (should (null (plist-get data :priority)))))
         (delete-directory tmpdir t)))))
 
+(ert-deftest claude-repl-test-state-save-includes-last-prompt-time ()
+  "state-save serializes `:last-prompt-time' so duration-since-last-message survives restarts."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :last-prompt-time 1700000000.5)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (claude-repl--state-file tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (equal (plist-get data :last-prompt-time) 1700000000.5))))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest claude-repl-test-state-save-includes-source-ws-dir ()
   "state-save serializes `:source-ws-dir' so the merge target survives restarts."
   (claude-repl-test--with-clean-state
