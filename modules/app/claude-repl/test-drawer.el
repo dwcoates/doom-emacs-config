@@ -563,24 +563,69 @@
 
 (ert-deftest claude-repl-drawer-test-window-width-is-fraction-of-frame ()
   "`claude-repl-drawer--window-width' returns the configured fraction of frame-width."
-  (let ((claude-repl-drawer-width-fraction 0.20))
-    (cl-letf (((symbol-function 'window-frame) (lambda (_) 'fake-frame))
-              ((symbol-function 'frame-width)  (lambda (_) 200)))
-      (should (= (claude-repl-drawer--window-width 'fake-window) 40)))))
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-drawer-width-fraction 0.20))
+      (cl-letf (((symbol-function 'window-frame) (lambda (_) 'fake-frame))
+                ((symbol-function 'frame-width)  (lambda (_) 200)))
+        (should (= (claude-repl-drawer--window-width 'fake-window) 40))))))
 
 (ert-deftest claude-repl-drawer-test-window-width-floor-is-one ()
   "Width never drops below 1 column even on degenerate frames."
-  (let ((claude-repl-drawer-width-fraction 0.20))
-    (cl-letf (((symbol-function 'window-frame) (lambda (_) 'fake-frame))
-              ((symbol-function 'frame-width)  (lambda (_) 0)))
-      (should (= (claude-repl-drawer--window-width 'fake-window) 1)))))
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-drawer-width-fraction 0.20))
+      (cl-letf (((symbol-function 'window-frame) (lambda (_) 'fake-frame))
+                ((symbol-function 'frame-width)  (lambda (_) 0)))
+        (should (= (claude-repl-drawer--window-width 'fake-window) 1))))))
 
 (ert-deftest claude-repl-drawer-test-window-width-tiny-fraction ()
   "Tiny fractions like 0.01 are honored (no implicit clamping in the helper)."
-  (let ((claude-repl-drawer-width-fraction 0.01))
-    (cl-letf (((symbol-function 'window-frame) (lambda (_) 'fake-frame))
-              ((symbol-function 'frame-width)  (lambda (_) 200)))
-      (should (= (claude-repl-drawer--window-width 'fake-window) 2)))))
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-drawer-width-fraction 0.01))
+      (cl-letf (((symbol-function 'window-frame) (lambda (_) 'fake-frame))
+                ((symbol-function 'frame-width)  (lambda (_) 200)))
+        (should (= (claude-repl-drawer--window-width 'fake-window) 2))))))
+
+(ert-deftest claude-repl-drawer-test-window-width-adds-depth-bonus ()
+  "Width = base fraction + (max-depth × indent-per-level)."
+  (claude-repl-test--with-clean-state
+    (puthash "gp" '(:project-dir "/gp/") claude-repl--workspaces)
+    (puthash "p"  '(:project-dir "/p/"  :source-ws-dir "/gp/")
+             claude-repl--workspaces)
+    (puthash "c"  '(:project-dir "/c/"  :source-ws-dir "/p/")
+             claude-repl--workspaces)
+    (let ((claude-repl-drawer-width-fraction    0.10)
+          (claude-repl-drawer-indent-per-level  2))
+      (cl-letf (((symbol-function 'window-frame) (lambda (_) 'fake-frame))
+                ((symbol-function 'frame-width)  (lambda (_) 200))
+                ((symbol-function 'claude-repl--ws-name-for-dir)
+                 (lambda (dir)
+                   (cond ((equal dir "/gp/") "gp")
+                         ((equal dir "/p/")  "p")
+                         (t nil)))))
+        ;; Base = 0.10 × 200 = 20.  Max depth = 2 (c → p → gp).
+        ;; Indent-per-level = 2.  Bonus = 2 × 2 = 4.  Total = 24.
+        (should (= (claude-repl-drawer--window-width 'fake-window) 24))))))
+
+(ert-deftest claude-repl-drawer-test-max-depth-walks-chain ()
+  "`--max-depth' returns the longest source-chain hop count."
+  (claude-repl-test--with-clean-state
+    (puthash "root" '(:project-dir "/root/") claude-repl--workspaces)
+    (puthash "mid"  '(:project-dir "/mid/"  :source-ws-dir "/root/")
+             claude-repl--workspaces)
+    (puthash "leaf" '(:project-dir "/leaf/" :source-ws-dir "/mid/")
+             claude-repl--workspaces)
+    (cl-letf (((symbol-function 'claude-repl--ws-name-for-dir)
+               (lambda (dir)
+                 (cond ((equal dir "/root/") "root")
+                       ((equal dir "/mid/")  "mid")
+                       (t nil)))))
+      (should (= (claude-repl-drawer--max-depth) 2)))))
+
+(ert-deftest claude-repl-drawer-test-max-depth-zero-when-no-chains ()
+  "Max-depth returns 0 when no workspace has a recorded source."
+  (claude-repl-test--with-clean-state
+    (puthash "alone" '(:project-dir "/a/") claude-repl--workspaces)
+    (should (= (claude-repl-drawer--max-depth) 0))))
 
 ;;;; ---- Priority display ----
 

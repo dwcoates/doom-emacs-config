@@ -33,6 +33,15 @@ stay open during work, not dominate the layout."
   :type 'float
   :group 'claude-repl)
 
+(defcustom claude-repl-drawer-indent-per-level 2
+  "Columns to indent each nesting level in the drawer.
+Read by both the render (per-depth indent string) and the window
+width calculation (depth bonus added to fraction-derived base width),
+so changing this single value resizes the drawer in proportion to
+the indent change — no other knobs needed."
+  :type 'integer
+  :group 'claude-repl)
+
 ;; Force-apply on reload — defcustom only initializes for unbound
 ;; symbols, so source tweaks otherwise need a full Emacs restart.
 (setq claude-repl-drawer-width-fraction
@@ -457,7 +466,8 @@ content (rather than back to column 0).  HIDDEN dims the block."
          (prio-disp  (claude-repl-drawer--priority-display priority))
          (sep        (if priority " " ""))
          (name-face  (claude-repl-drawer--name-face ws))
-         (indent-str (make-string (* depth 2) ?\s))
+         (indent-str (make-string (* depth claude-repl-drawer-indent-per-level)
+                                  ?\s))
          (header     (concat claude-repl-drawer-gutter indent-str
                              glyph "  " prio-disp sep
                              (propertize ws 'face name-face)
@@ -734,12 +744,37 @@ Intended to be called from the 1Hz poll in `status.el'."
      (no-other-window . nil)))
   "Display action for the drawer buffer.")
 
+(defun claude-repl-drawer--max-depth ()
+  "Return the deepest workspace nesting depth in `claude-repl--workspaces'.
+Walks each workspace's `:source-ws-dir' chain and returns the maximum
+hop count.  Cycle-capped via `claude-repl-drawer-tree-max-depth'.
+Slight overestimate when merged ancestors exist (the rendered tree
+flattens through them, but this counts raw chain hops) — acceptable;
+the drawer ends up a couple cols wider than strictly needed."
+  (let ((maxd 0))
+    (maphash
+     (lambda (ws _)
+       (let ((d 0)
+             (cur (claude-repl-drawer--source-ws-name ws)))
+         (while (and cur (< d claude-repl-drawer-tree-max-depth))
+           (setq d (1+ d))
+           (setq cur (claude-repl-drawer--source-ws-name cur)))
+         (when (> d maxd) (setq maxd d))))
+     claude-repl--workspaces)
+    maxd))
+
 (defun claude-repl-drawer--window-width (window)
   "Return the configured drawer width in columns for WINDOW.
-Computed as `claude-repl-drawer-width-fraction' of the frame width."
-  (max 1
-       (round (* claude-repl-drawer-width-fraction
-                 (frame-width (window-frame window))))))
+Sum of `claude-repl-drawer-width-fraction' × frame-width and a depth
+bonus equal to (max-tree-depth × `claude-repl-drawer-indent-per-level').
+The bonus expands the drawer by exactly the same amount the render
+indents children, so deep trees never get clipped — and changing
+either knob propagates through both render and width consistently."
+  (let* ((frame-cols (frame-width (window-frame window)))
+         (base       (round (* claude-repl-drawer-width-fraction frame-cols)))
+         (depth-bonus (* (claude-repl-drawer--max-depth)
+                         claude-repl-drawer-indent-per-level)))
+    (max 1 (+ base depth-bonus))))
 
 (defun claude-repl-drawer--get-or-create-buffer ()
   "Return the drawer buffer, creating and initializing if necessary."
