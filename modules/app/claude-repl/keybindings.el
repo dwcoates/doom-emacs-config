@@ -504,9 +504,24 @@ Reports comprehensive diagnostics."
 
 ;;; Section 4: Keybinding definitions
 
-(map! :nvi "C-S-m" #'claude-repl-cycle)
-(map! :nvi "C-S-n" #'claude-repl-scroll-output-down)
-(map! :nvi "C-S-p" #'claude-repl-scroll-output-up)
+;; C-S-<key>: drawer-equivalent operations dispatched against the drawer's
+;; selected entry.  Auto-revert keeps the drawer cursor sync'd with the
+;; active workspace by default, so these naturally target the current
+;; workspace until the user moves the drawer cursor.
+(map! :nvi "C-S-n"        #'claude-repl-drawer-global-next)
+(map! :nvi "C-S-p"        #'claude-repl-drawer-global-prev)
+(map! :nvi "C-S-j"        #'claude-repl-scroll-output-down)
+(map! :nvi "C-S-k"        #'claude-repl-scroll-output-up)
+(map! :nvi "C-S-<return>" #'claude-repl-drawer-global-visit)
+(map! :nvi "C-S-x"        #'claude-repl-drawer-global-nuke)
+(map! :nvi "C-S-d"        #'claude-repl-drawer-global-kill)
+(map! :nvi "C-S-i"        #'claude-repl-drawer-global-send-prompt)
+(map! :nvi "C-S-m"        #'claude-repl-drawer-global-merge-into-master)
+(map! :nvi "C-S-h"        #'claude-repl-drawer-global-toggle-hidden)
+(map! :nvi "C-S-t"        #'claude-repl-drawer-global-toggle-mark)
+(map! :nvi "C-S-u"        #'claude-repl-drawer-global-clear-marks)
+(map! :nvi "C-S-+"        #'claude-repl-drawer-global-priority-up)
+(map! :nvi "C-S--"        #'claude-repl-drawer-global-priority-down)
 (map! :i "C-S-f" #'claude-repl-toggle-fullscreen)
 (map! :leader :prefix "w" :n "c" #'claude-repl-toggle-fullscreen)
 (map! :leader :prefix "w" :n "f" #'claude-repl-fullscreen-and-focus)

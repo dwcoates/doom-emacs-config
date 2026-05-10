@@ -416,6 +416,66 @@
     (claude-repl-drawer-hide)
     (should-not claude-repl-drawer--global-visible-p)))
 
+;;;; ---- Global dispatch + auto-revert ----
+
+(ert-deftest claude-repl-drawer-test-global-next-dispatches-to-drawer ()
+  "`claude-repl-drawer-global-next' calls `--next' inside the drawer buffer."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "first"  :priority "p1")
+    (claude-repl-drawer-test--register "second" :priority "p2")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (claude-repl-drawer-mode)
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-first-workspace))
+            (claude-repl-drawer-global-next)
+            (with-current-buffer buf
+              (should (equal (claude-repl-drawer--workspace-at-point) "second"))))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-drawer-test-global-call-errors-when-no-drawer ()
+  "Global wrappers signal user-error when the drawer buffer doesn't exist."
+  (when-let ((b (get-buffer claude-repl-drawer-buffer-name)))
+    (kill-buffer b))
+  (should-error (claude-repl-drawer-global-next) :type 'user-error))
+
+(ert-deftest claude-repl-drawer-test-sync-cursor-to-current-ws ()
+  "`--sync-cursor-to-current-ws' positions point on the current ws's entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--register "beta"  :priority "p2")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (claude-repl-drawer-mode)
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-first-workspace))
+            (cl-letf (((symbol-function '+workspace-current-name)
+                       (lambda () "beta")))
+              (claude-repl-drawer--sync-cursor-to-current-ws))
+            (with-current-buffer buf
+              (should (equal (claude-repl-drawer--workspace-at-point) "beta"))))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-drawer-test-global-post-command-fires-sync-on-leave ()
+  "`--global-post-command' calls sync when transitioning out of the drawer."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
+          (sync-called 0))
+      (unwind-protect
+          (cl-letf (((symbol-function 'claude-repl-drawer--sync-cursor-to-current-ws)
+                     (lambda (&rest _) (setq sync-called (1+ sync-called)))))
+            ;; Simulate "last command was in drawer".
+            (let ((claude-repl-drawer--last-was-drawer t))
+              ;; Now we're elsewhere (not in drawer buffer).
+              (with-temp-buffer
+                (claude-repl-drawer--global-post-command)))
+            (should (= sync-called 1)))
+        (kill-buffer buf)))))
+
 ;;;; ---- Repo grouping ----
 
 (ert-deftest claude-repl-drawer-test-group-label-from-key ()
