@@ -1357,12 +1357,23 @@ falls back to the master worktree path derived from WS's project-dir.
 Returns nil when neither can be resolved.  Resolves WS's project-dir
 defensively (`ignore-errors') so workspaces without a recorded
 `:project-dir' (test fixtures, half-initialized stubs) don't crash
-the poll-driven cache refresh."
-  (let ((recorded (claude-repl--ws-get ws :source-ws-dir))
-        (ws-dir (ignore-errors (claude-repl--ws-dir ws))))
-    (cond
-     ((and recorded (file-directory-p recorded)) recorded)
-     (ws-dir (claude-repl--master-worktree-path ws-dir)))))
+the poll-driven cache refresh.
+
+Caches the resolved path on `:merge-parent-dir' on first computation.
+The fallback path runs `claude-repl--master-worktree-path' which is
+expensive (shells out to git worktree list), and the result is stable
+per workspace once recorded — caching saves N git invocations per
+poll cycle in multi-workspace setups."
+  (or (claude-repl--ws-get ws :merge-parent-dir)
+      (let ((recorded (claude-repl--ws-get ws :source-ws-dir))
+            (ws-dir (ignore-errors (claude-repl--ws-dir ws))))
+        (let ((resolved
+               (cond
+                ((and recorded (file-directory-p recorded)) recorded)
+                (ws-dir (claude-repl--master-worktree-path ws-dir)))))
+          (when resolved
+            (claude-repl--ws-put ws :merge-parent-dir resolved))
+          resolved))))
 
 (defun claude-repl--branch-merge-check-in-progress-p (ws)
   "Return non-nil when an `:branch-merged' refresh process is live for WS."
@@ -1386,21 +1397,35 @@ unexpected exit codes leave the cache untouched and log a warning."
         (claude-repl--ws-put ws :branch-merged result))
       (claude-repl--ws-put ws :merge-proc nil))))
 
+(defcustom claude-repl-branch-merged-refresh-interval 30
+  "Minimum seconds between async `:branch-merged' refreshes per workspace.
+Merged-state changes rarely (only on explicit merge/rebase), so a
+1Hz poll cadence is wasteful.  This throttle skips refresh attempts
+within INTERVAL of the previous successful refresh."
+  :type 'integer
+  :group 'claude-repl)
+
 (defun claude-repl--async-refresh-branch-merged (ws)
   "Async refresh of `:branch-merged' cache for workspace WS.
 Runs `git merge-base --is-ancestor WS-BRANCH PARENT-BRANCH' from WS's
 project-dir; PARENT is `:source-ws-dir' or master.  Records `merged'
 or `not-merged' on completion via `claude-repl--branch-merge-sentinel'.
 No-op when a refresh is already in flight, when WS or its parent dir
-can't be resolved, or when WS and parent are on the same branch (a
-branch is never considered merged into itself for cache purposes)."
+can't be resolved, when WS and parent are on the same branch (a
+branch is never considered merged into itself for cache purposes),
+or when the previous refresh ran within
+`claude-repl-branch-merged-refresh-interval' seconds (throttle)."
   (when-let* ((ws-dir (ignore-errors (claude-repl--ws-dir ws)))
               (parent-dir (claude-repl--ws-merge-parent-dir ws))
               ((not (claude-repl--branch-merge-check-in-progress-p ws))))
-    (let ((ws-branch (claude-repl--git-string-quiet
-                      "-C" ws-dir "rev-parse" "--abbrev-ref" "HEAD"))
-          (parent-branch (claude-repl--git-string-quiet
-                          "-C" parent-dir "rev-parse" "--abbrev-ref" "HEAD")))
+    (let* ((now  (float-time))
+           (last (or (claude-repl--ws-get ws :branch-merged-last-check) 0)))
+      (when (> (- now last) claude-repl-branch-merged-refresh-interval)
+        (claude-repl--ws-put ws :branch-merged-last-check now)
+        (let ((ws-branch (claude-repl--git-string-quiet
+                          "-C" ws-dir "rev-parse" "--abbrev-ref" "HEAD"))
+              (parent-branch (claude-repl--git-string-quiet
+                              "-C" parent-dir "rev-parse" "--abbrev-ref" "HEAD")))
       (when (and ws-branch parent-branch
                  (not (string-empty-p ws-branch))
                  (not (string-empty-p parent-branch))
@@ -1417,7 +1442,7 @@ branch is never considered merged into itself for cache purposes)."
                       :buffer nil
                       :sentinel (apply-partially
                                  #'claude-repl--branch-merge-sentinel ws))))
-          (claude-repl--ws-put ws :merge-proc proc))))))
+          (claude-repl--ws-put ws :merge-proc proc))))))))
 
 (defun claude-repl--branch-merged-into-p (source-dir target-dir)
   "Return non-nil when the branch at SOURCE-DIR is fully merged into the branch at TARGET-DIR.
