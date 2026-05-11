@@ -25,7 +25,7 @@
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-drawer-width-fraction 0.01
+(defcustom claude-repl-drawer-width-fraction 0.25
   "Fraction of the frame width the drawer should occupy.
 Computed against `frame-width' at display time so the drawer scales
 with the frame.  Capped at 20% by default — the drawer is meant to
@@ -409,7 +409,7 @@ Legacy two-section partition; tree-aware sectioning lives in
   "Return :main, :hidden, or :merged for WS based on its plist state.
 Merged dominates hidden — a merged+hidden workspace lands in MERGED."
   (cond
-   ((eq (claude-repl--ws-get ws :branch-merged) 'merged) :merged)
+   ((claude-repl--ws-merged-p ws)                        :merged)
    ((eq (claude-repl--ws-get ws :repl-state) :hidden)    :hidden)
    (t :main)))
 
@@ -438,7 +438,7 @@ section).  Cycle-capped via `claude-repl-drawer-tree-max-depth'."
                 (< depth claude-repl-drawer-tree-max-depth))
       (setq depth (1+ depth))
       (cond
-       ((eq (claude-repl--ws-get candidate :branch-merged) 'merged)
+       ((claude-repl--ws-merged-p candidate)
         (setq candidate (claude-repl-drawer--source-ws-name candidate)))
        ((member candidate section-set)
         (setq result candidate done t))

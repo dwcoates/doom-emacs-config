@@ -3211,95 +3211,25 @@ must not infinite-loop if it does."
     (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
       (should (null (claude-repl--ws-name-for-dir "/missing/"))))))
 
-;;;; ---- Tests: branch-merged-into-master-p ----
+;;;; ---- Tests: ws-merged-p ----
 
-(ert-deftest claude-repl-test-branch-merged-nil-args ()
-  "Returns nil when worktree-dir or master-dir is nil."
-  (should (null (claude-repl--branch-merged-into-master-p nil "/m/")))
-  (should (null (claude-repl--branch-merged-into-master-p "/p/" nil))))
+(ert-deftest claude-repl-test-ws-merged-p-true-when-cached-merged ()
+  "Returns t when WS's `:branch-merged' cache is `merged'."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" '(:branch-merged merged) claude-repl--workspaces)
+    (should (claude-repl--ws-merged-p "ws"))))
 
-(ert-deftest claude-repl-test-branch-merged-true-when-ancestor ()
-  "Returns t when parent branch's tip is an ancestor of master's tip.
-Setup: parent-branch is at M; master then advances to M->X. parent's tip
-is reachable from master (it's just M), so the helper reports merged."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-master-branch-name "master"))
-      (claude-repl-test--git-commit repo "M" "base")
-      ;; Branch parent-branch off master at M and stay at M.
-      (claude-repl-test--git-checkout repo "parent-branch" t)
-      ;; Advance master with X (parent-branch stays at M).
-      (claude-repl-test--git-checkout repo "master")
-      (claude-repl-test--git-commit repo "X" "x")
-      ;; HEAD is currently master; flip to parent-branch so the helper
-      ;; reads parent-branch as the "current" branch at worktree-dir.
-      (claude-repl-test--git-checkout repo "parent-branch")
-      ;; parent-branch tip (M) is an ancestor of master (M->X) -> merged.
-      (should (claude-repl--branch-merged-into-master-p repo repo)))))
+(ert-deftest claude-repl-test-ws-merged-p-nil-when-cached-not-merged ()
+  "Returns nil when WS's `:branch-merged' cache is `not-merged'."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" '(:branch-merged not-merged) claude-repl--workspaces)
+    (should-not (claude-repl--ws-merged-p "ws"))))
 
-(ert-deftest claude-repl-test-branch-merged-false-when-divergent ()
-  "Returns nil when parent has commits master doesn't have."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-master-branch-name "master"))
-      (claude-repl-test--git-commit repo "M" "base")
-      (claude-repl-test--git-checkout repo "parent-branch" t)
-      (claude-repl-test--git-commit repo "P1" "p1")
-      ;; master is at M, parent at M->P1. parent NOT in master.
-      (should-not (claude-repl--branch-merged-into-master-p repo repo)))))
-
-(ert-deftest claude-repl-test-branch-merged-false-when-on-master ()
-  "Returns nil when worktree-dir's HEAD is the master branch itself."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-master-branch-name "master"))
-      (claude-repl-test--git-commit repo "M" "base")
-      ;; HEAD is master; helper must short-circuit to nil.
-      (should-not (claude-repl--branch-merged-into-master-p repo repo)))))
-
-(ert-deftest claude-repl-test-branch-merged-true-when-fully-cherry-picked ()
-  "Returns t when the parent branch's commits all live on master under
-different SHAs (the cherry-pick / rebase workflow).  The previous
-ancestry-based check returned nil here even though the parent has
-nothing left to send to master, defeating the redirect."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-master-branch-name "master"))
-      (claude-repl-test--git-commit repo "M0" "base")
-      (claude-repl-test--git-checkout repo "parent-branch" t)
-      (let ((p1 (claude-repl-test--git-commit repo "P1" "p1-content")))
-        ;; Cherry-pick P1 onto master under a new SHA.
-        (claude-repl-test--git-checkout repo "master")
-        (claude-repl-test--git-cherry-pick-x repo p1)
-        ;; Flip back so worktree-dir reads parent-branch as HEAD.
-        (claude-repl-test--git-checkout repo "parent-branch")
-        ;; parent-branch's tip is NOT an ancestor of master (different SHA),
-        ;; but its patch-id IS on master via cherry-pick.  Helper must say merged.
-        (should (claude-repl--branch-merged-into-master-p repo repo))))))
-
-(ert-deftest claude-repl-test-branch-merged-false-when-partially-cherry-picked ()
-  "Returns nil when the parent has at least one commit whose patch-id is
-NOT yet on master, even if earlier commits were cherry-picked."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-master-branch-name "master"))
-      (claude-repl-test--git-commit repo "M0" "base")
-      (claude-repl-test--git-checkout repo "parent-branch" t)
-      (let ((p1 (claude-repl-test--git-commit repo "P1" "p1-content")))
-        (claude-repl-test--git-commit repo "P2" "p2-content")
-        ;; Master gets only P1; P2 stays unique to parent-branch.
-        (claude-repl-test--git-checkout repo "master")
-        (claude-repl-test--git-cherry-pick-x repo p1)
-        (claude-repl-test--git-checkout repo "parent-branch")
-        (should-not (claude-repl--branch-merged-into-master-p repo repo))))))
-
-(ert-deftest claude-repl-test-branch-merged-nil-on-cherry-failure ()
-  "Returns nil when `git cherry' itself errors (e.g. master ref missing).
-Defensive: an unsuccessful check must not be silently treated as merged,
-since the redirect would then drop commits on the floor."
-  (claude-repl-test--with-temp-git-repo repo
-    ;; Use a master branch name that does not exist in the repo so cherry
-    ;; emits `fatal: bad revision' to stderr.  Helper must reject.
-    (let ((claude-repl-master-branch-name "no-such-branch"))
-      (claude-repl-test--git-commit repo "M0" "base")
-      (claude-repl-test--git-checkout repo "parent-branch" t)
-      (claude-repl-test--git-commit repo "P1" "p1")
-      (should-not (claude-repl--branch-merged-into-master-p repo repo)))))
+(ert-deftest claude-repl-test-ws-merged-p-nil-when-cache-absent ()
+  "Returns nil on cache miss — drawer should treat unknown as :main."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" '() claude-repl--workspaces)
+    (should-not (claude-repl--ws-merged-p "ws"))))
 
 ;;;; ---- Tests: merge-into-source re-routes when parent merged into master ----
 

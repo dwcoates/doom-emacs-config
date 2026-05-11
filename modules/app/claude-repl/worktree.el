@@ -1380,6 +1380,15 @@ poll cycle in multi-workspace setups."
   (when-let ((proc (claude-repl--ws-get ws :merge-proc)))
     (process-live-p proc)))
 
+(defun claude-repl--ws-merged-p (ws)
+  "Return non-nil when WS's branch is merged into its immediate parent.
+Single source of truth for the \"is this workspace merged?\" question.
+Reads the cached `:branch-merged' value populated asynchronously by
+`claude-repl--async-refresh-branch-merged' against WS's
+`:merge-parent-dir' (recorded `:source-ws-dir' or the master worktree
+fallback).  Returns nil on cache miss — the next poll fills it in."
+  (eq (claude-repl--ws-get ws :branch-merged) 'merged))
+
 (defun claude-repl--branch-merge-sentinel (ws proc _event)
   "Process sentinel for the async `:branch-merged' refresh of WS.
 Records `merged' (exit 0) or `not-merged' (exit 1) in WS's plist;
@@ -1405,16 +1414,35 @@ within INTERVAL of the previous successful refresh."
   :type 'integer
   :group 'claude-repl)
 
+(defun claude-repl--merge-base-ancestor-args (source-dir target-dir)
+  "Return (SOURCE-BRANCH . TARGET-BRANCH) for an ancestry check, or nil.
+Resolves both worktrees' current branches via `git rev-parse
+--abbrev-ref HEAD' and returns nil when the check should be skipped:
+either dir is nil, either branch can't be resolved (empty or fatal),
+or the two branches are identical (a branch is never considered
+merged into itself).  Shared by the sync and async ancestry paths."
+  (when (and source-dir target-dir)
+    (let ((source-branch (claude-repl--git-string-quiet
+                          "-C" source-dir "rev-parse" "--abbrev-ref" "HEAD"))
+          (target-branch (claude-repl--git-string-quiet
+                          "-C" target-dir "rev-parse" "--abbrev-ref" "HEAD")))
+      (when (and source-branch target-branch
+                 (not (string-empty-p source-branch))
+                 (not (string-empty-p target-branch))
+                 (not (string-prefix-p "fatal" source-branch))
+                 (not (string-prefix-p "fatal" target-branch))
+                 (not (string= source-branch target-branch)))
+        (cons source-branch target-branch)))))
+
 (defun claude-repl--async-refresh-branch-merged (ws)
   "Async refresh of `:branch-merged' cache for workspace WS.
 Runs `git merge-base --is-ancestor WS-BRANCH PARENT-BRANCH' from WS's
 project-dir; PARENT is `:source-ws-dir' or master.  Records `merged'
 or `not-merged' on completion via `claude-repl--branch-merge-sentinel'.
 No-op when a refresh is already in flight, when WS or its parent dir
-can't be resolved, when WS and parent are on the same branch (a
-branch is never considered merged into itself for cache purposes),
-or when the previous refresh ran within
-`claude-repl-branch-merged-refresh-interval' seconds (throttle)."
+can't be resolved, when preconditions fail (see
+`claude-repl--merge-base-ancestor-args'), or when the previous refresh
+ran within `claude-repl-branch-merged-refresh-interval' seconds."
   (when-let* ((ws-dir (ignore-errors (claude-repl--ws-dir ws)))
               (parent-dir (claude-repl--ws-merge-parent-dir ws))
               ((not (claude-repl--branch-merge-check-in-progress-p ws))))
@@ -1422,99 +1450,38 @@ or when the previous refresh ran within
            (last (or (claude-repl--ws-get ws :branch-merged-last-check) 0)))
       (when (> (- now last) claude-repl-branch-merged-refresh-interval)
         (claude-repl--ws-put ws :branch-merged-last-check now)
-        (let ((ws-branch (claude-repl--git-string-quiet
-                          "-C" ws-dir "rev-parse" "--abbrev-ref" "HEAD"))
-              (parent-branch (claude-repl--git-string-quiet
-                              "-C" parent-dir "rev-parse" "--abbrev-ref" "HEAD")))
-      (when (and ws-branch parent-branch
-                 (not (string-empty-p ws-branch))
-                 (not (string-empty-p parent-branch))
-                 (not (string-prefix-p "fatal" ws-branch))
-                 (not (string-prefix-p "fatal" parent-branch))
-                 (not (string= ws-branch parent-branch)))
-        (let* ((default-directory ws-dir)
-               (proc (make-process
-                      :name (format "claude-repl-merge-%s" ws)
-                      :command (list "git" "merge-base" "--is-ancestor"
-                                     ws-branch parent-branch)
-                      :connection-type 'pipe
-                      :noquery t
-                      :buffer nil
-                      :sentinel (apply-partially
-                                 #'claude-repl--branch-merge-sentinel ws))))
-          (claude-repl--ws-put ws :merge-proc proc))))))))
+        (when-let* ((branches (claude-repl--merge-base-ancestor-args
+                               ws-dir parent-dir)))
+          (let* ((default-directory ws-dir)
+                 (proc (make-process
+                        :name (format "claude-repl-merge-%s" ws)
+                        :command (list "git" "merge-base" "--is-ancestor"
+                                       (car branches) (cdr branches))
+                        :connection-type 'pipe
+                        :noquery t
+                        :buffer nil
+                        :sentinel (apply-partially
+                                   #'claude-repl--branch-merge-sentinel ws))))
+            (claude-repl--ws-put ws :merge-proc proc)))))))
 
 (defun claude-repl--branch-merged-into-p (source-dir target-dir)
-  "Return non-nil when the branch at SOURCE-DIR is fully merged into the branch at TARGET-DIR.
-Reads each side's current branch name via `git rev-parse --abbrev-ref
-HEAD' and runs `git merge-base --is-ancestor SOURCE TARGET' from
-SOURCE-DIR.  Returns nil when either dir is nil, either branch can't
-be resolved, or the two branches are identical (a branch is never
-considered merged into itself for the purposes of merge-target
-redirection)."
-  (and source-dir target-dir
-       (let ((source-branch (claude-repl--git-string
-                             "-C" source-dir "rev-parse" "--abbrev-ref" "HEAD"))
-             (target-branch (claude-repl--git-string
-                             "-C" target-dir "rev-parse" "--abbrev-ref" "HEAD")))
-         (and source-branch target-branch
-              (not (string-empty-p source-branch))
-              (not (string-empty-p target-branch))
-              (not (string-prefix-p "fatal" source-branch))
-              (not (string-prefix-p "fatal" target-branch))
-              (not (string= source-branch target-branch))
-              (= 0 (claude-repl--git-exit-code
-                    source-dir
-                    "merge-base" "--is-ancestor"
-                    source-branch target-branch))))))
+  "Return non-nil when the branch at SOURCE-DIR is an ancestor of the branch at TARGET-DIR.
+Synchronous dir-pair primitive used by the merge-target resolve walk
+\(see `claude-repl--resolve-merge-into-source-target'), which traverses
+arbitrary `:source-ws-dir' chains where the candidate may not be a
+tracked workspace.  Workspace-level callers should use
+`claude-repl--ws-merged-p' instead, which reads the async-populated
+cache and matches the drawer's view.
 
-(defun claude-repl--branch-merged-into-master-p (worktree-dir master-dir)
-  "Return non-nil when the branch at WORKTREE-DIR is fully on master.
-\"Fully on master\" is checked by patch-id equivalence (`git cherry'),
-not strict ancestry — so commits that landed on master via cherry-pick
-or rebase still count as merged, even though their SHAs differ from
-the parent branch's.
-
-Algorithm: `git cherry MASTER PARENT-BRANCH' from WORKTREE-DIR lists
-every commit on PARENT-BRANCH; lines starting with `+' are commits
-whose patch-id is NOT yet on master, `-' lines are already-equivalent.
-Empty output (or all-`-') means there is nothing left to send to the
-parent — the merge can be routed straight to master.
-
-Why patch-id rather than `git merge-base --is-ancestor': in workflows
-that rebase or cherry-pick onto master rather than fast-forward-merging,
-the parent branch's tip is never an ancestor of master even after every
-patch has landed.  The previous ancestry check therefore returned nil
-in exactly the case this redirect is meant to optimize.
-
-Master is identified by name via `claude-repl-master-branch-name'
-rather than by reading MASTER-DIR's HEAD, so this works in
-single-worktree-per-repo test scenarios where source and target dirs
-coincide.  For the cross-worktree case used by the recursive
-merge-target walk, see `claude-repl--branch-merged-into-p'.
-
-Returns nil when either argument is nil, when the worktree's branch
-cannot be resolved, when it equals `claude-repl-master-branch-name',
-or when `git cherry' fails (defensive — refuses to silently treat an
-errored check as `merged')."
-  (and worktree-dir master-dir
-       (let ((parent-branch (claude-repl--git-string
-                             "-C" worktree-dir "rev-parse" "--abbrev-ref" "HEAD")))
-         (and parent-branch
-              (not (string-empty-p parent-branch))
-              (not (string-prefix-p "fatal" parent-branch))
-              (not (string= parent-branch claude-repl-master-branch-name))
-              (let ((cherry-out (claude-repl--git-string
-                                 "-C" worktree-dir
-                                 "cherry"
-                                 claude-repl-master-branch-name
-                                 parent-branch)))
-                (and cherry-out
-                     (not (string-prefix-p "fatal" cherry-out))
-                     (not (string-prefix-p "error" cherry-out))
-                     (cl-every (lambda (line)
-                                 (not (string-prefix-p "+" line)))
-                               (split-string cherry-out "\n" t))))))))
+Preconditions delegated to `claude-repl--merge-base-ancestor-args';
+returns nil when those fail.  Otherwise runs `git merge-base
+--is-ancestor SOURCE TARGET' from SOURCE-DIR and returns t on exit 0."
+  (when-let* ((branches (claude-repl--merge-base-ancestor-args
+                         source-dir target-dir)))
+    (= 0 (claude-repl--git-exit-code
+          source-dir
+          "merge-base" "--is-ancestor"
+          (car branches) (cdr branches)))))
 
 (defun claude-repl--ws-name-for-dir (dir)
   "Return the workspace name whose `:project-dir' is canonical-equal to DIR, or nil.
