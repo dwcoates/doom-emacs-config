@@ -1434,4 +1434,11 @@ otherwise a future trim could silently re-break workspace-visit nav."
   (should (member "C-S-n" claude-repl--vterm-shadow-keys))
   (should (member "C-S-p" claude-repl--vterm-shadow-keys)))
 
+(ert-deftest claude-repl-test-vterm-shadow-keys-covers-scroll-pair ()
+  "The unmap list must include `C-S-j' / `C-S-k' — the global scroll-output
+chords — so vterm doesn't capture them via `vterm--self-insert' when point
+sits inside the Claude vterm buffer."
+  (should (member "C-S-j" claude-repl--vterm-shadow-keys))
+  (should (member "C-S-k" claude-repl--vterm-shadow-keys)))
+
 ;;; test-keybindings.el ends here

@@ -1425,6 +1425,18 @@ binding falls through.  Asserts the local key is unbound in the map."
 binding falls through.  Asserts the local key is unbound in the map."
   (should-not (lookup-key claude-input-mode-map (kbd "C-S-p"))))
 
+(ert-deftest claude-repl-test-input-map-does-not-shadow-csj ()
+  "`claude-input-mode-map' must not bind `C-S-j' so the global
+scroll-output binding falls through everywhere, including in the
+Claude input buffer."
+  (should-not (lookup-key claude-input-mode-map (kbd "C-S-j"))))
+
+(ert-deftest claude-repl-test-input-map-does-not-shadow-csk ()
+  "`claude-input-mode-map' must not bind `C-S-k' so the global
+scroll-output binding falls through everywhere, including in the
+Claude input buffer."
+  (should-not (lookup-key claude-input-mode-map (kbd "C-S-k"))))
+
 ;;; send-char with dead vterm buffer
 
 (ert-deftest claude-repl-test-send-char-dead-vterm-noop ()
