@@ -181,26 +181,16 @@ worktree is on master or if git fails."
   (file-name-nondirectory (directory-file-name ws)))
 
 (defun claude-repl--switch-to-workspace (ws)
-  "Switch to workspace WS.
-Tries `+workspace-switch-to' first, then `+workspace/switch-to' on failure.
-Signals an error if both methods fail — downstream code assumes the switch
-succeeded, so silent failure would operate on the wrong workspace.
+  "Switch to workspace WS via `+workspace-switch'.
+Signals an error if the switch fails — downstream code assumes the
+switch succeeded, so silent failure would operate on the wrong
+workspace.
 
 This is the raw primitive — prefer `claude-repl-jump-to-workspace' for
 user-facing identity-based jumps so the destination tab flashes."
   (claude-repl--log ws "switch-to-workspace: ws=%s" ws)
-  (condition-case err
-      (progn
-        (+workspace-switch-to ws)
-        (claude-repl--log ws "switch-to-workspace: switched successfully via +workspace-switch-to ws=%s" ws))
-    (error
-     (claude-repl--log ws "switch-to-workspace: +workspace-switch-to failed, trying fallback ws=%s: %s"
-                       ws (error-message-string err))
-     (condition-case err2
-         (+workspace/switch-to ws)
-       (error
-        (error "claude-repl--switch-to-workspace: both switch methods failed for ws=%s — primary: %S, fallback: %S"
-               ws err err2))))))
+  (+workspace-switch ws)
+  (claude-repl--log ws "switch-to-workspace: switched ws=%s" ws))
 
 (defun claude-repl-jump-to-workspace (ws &optional no-flash)
   "Jump to workspace WS and pulse its tab via `claude-repl-flash-tab'.
