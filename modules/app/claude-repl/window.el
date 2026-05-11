@@ -228,9 +228,32 @@ opted into specificity)."
               (delete-window win)
               (push win deleted))
           (error
-           (message "[claude-repl] window--delete-where: could not delete %s: %S"
-                    win err)))))
+           ;; Three structural delete-window errors are benign here —
+           ;; they fire when prior iterations have already collapsed the
+           ;; tree such that this window is the sole remaining
+           ;; main/side/frame window.  The sweep's job is best-effort
+           ;; trimming, not strict deletion, so swallow these quietly
+           ;; instead of dumping a scary [claude-repl] error into
+           ;; *Messages* on every `SPC w f' that lands in this shape
+           ;; (the original `SPC w f' regression).  Any other failure
+           ;; is still surfaced.
+           (if (claude-repl-window--benign-undeletable-error-p err)
+               (claude-repl--log nil "window--delete-where: skip-undeletable %s: %S" win err)
+             (message "[claude-repl] window--delete-where: could not delete %s: %S"
+                      win err))))))
     (nreverse deleted)))
+
+(defun claude-repl-window--benign-undeletable-error-p (err)
+  "Return non-nil when ERR is one of `delete-window's structural refusals.
+Matches the three error strings Emacs raises when a window is the sole
+remaining main/side/ordinary window of its frame — these are expected
+mid-sweep outcomes and should not be reported as failures."
+  (and (consp err)
+       (eq (car err) 'error)
+       (stringp (cadr err))
+       (or (string-prefix-p "Attempt to delete main window of frame" (cadr err))
+           (string-prefix-p "Attempt to delete sole side window of frame" (cadr err))
+           (string-prefix-p "Attempt to delete sole ordinary window of frame" (cadr err)))))
 
 (cl-defun claude-repl-window--delete-buffer-windows (buf &key (all-frames t))
   "Delete every live window currently displaying BUF.

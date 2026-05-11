@@ -403,6 +403,10 @@ survive."
       ;; predicate looks for to keep it.
       (set-window-buffer vterm-win  vterm-buf)
       (set-window-buffer other-win  other-buf)
+      ;; Mirror the production hardening so `delete-other-windows'
+      ;; treats panels and the drawer the same way the real layout does.
+      (set-window-parameter vterm-win  'no-delete-other-windows t)
+      (set-window-parameter drawer-win 'no-delete-other-windows t)
       (unwind-protect
           (progn
             (should (window-live-p drawer-win))
@@ -418,6 +422,95 @@ survive."
         (kill-buffer vterm-buf)
         (kill-buffer input-buf)
         (kill-buffer drawer-buf)
+        (kill-buffer other-buf)))))
+
+;;;; ---- Benign-undeletable-error predicate ----
+
+(ert-deftest claude-repl-window-test-benign-undeletable-main-window ()
+  "Recognizes the main-window-of-frame error as benign."
+  (should (claude-repl-window--benign-undeletable-error-p
+           '(error "Attempt to delete main window of frame #<frame foo>"))))
+
+(ert-deftest claude-repl-window-test-benign-undeletable-sole-side ()
+  "Recognizes the sole-side-window error as benign."
+  (should (claude-repl-window--benign-undeletable-error-p
+           '(error "Attempt to delete sole side window of frame #<frame foo>"))))
+
+(ert-deftest claude-repl-window-test-benign-undeletable-sole-ordinary ()
+  "Recognizes the sole-ordinary-window error as benign."
+  (should (claude-repl-window--benign-undeletable-error-p
+           '(error "Attempt to delete sole ordinary window of frame #<frame foo>"))))
+
+(ert-deftest claude-repl-window-test-benign-undeletable-unrelated-error ()
+  "Unrelated errors are NOT classified as benign — they still surface."
+  (should-not (claude-repl-window--benign-undeletable-error-p
+               '(error "Some other failure"))))
+
+(ert-deftest claude-repl-window-test-benign-undeletable-non-error-form ()
+  "Non-error structures don't crash the predicate."
+  (should-not (claude-repl-window--benign-undeletable-error-p nil))
+  (should-not (claude-repl-window--benign-undeletable-error-p '(user-error "Nope"))))
+
+;;;; ---- delete-where: benign-error suppression ----
+
+(ert-deftest claude-repl-window-test-delete-where-skips-main-window-quietly ()
+  "Regression for `SPC w f' in claude-repl: when iteration reaches a
+window that has collapsed to the sole main-area window, `delete-window'
+errors with 'Attempt to delete main window of frame', and the old
+code dumped that into *Messages* via `message'.  After the fix, the
+sweep swallows the structural error and produces no `[claude-repl]
+window--delete-where: could not delete' message."
+  (claude-repl-window-test--with-temp-frame
+    (let* ((drawer-buf (generate-new-buffer " *test-drawer*"))
+           (main-buf   (generate-new-buffer " *test-main*"))
+           (drawer-win (display-buffer-in-side-window
+                        drawer-buf '((side . left) (slot . 0)))))
+      (set-window-buffer (selected-window) main-buf)
+      (unwind-protect
+          (let* ((captured nil)
+                 (orig-message (symbol-function 'message)))
+            (cl-letf (((symbol-function 'message)
+                       (lambda (fmt &rest args)
+                         (let ((s (apply #'format fmt args)))
+                           (when (string-match-p "could not delete" s)
+                             (push s captured))
+                           (apply orig-message fmt args)))))
+              ;; Sweep targets `main-buf' — it's the only main-area window
+              ;; with the drawer present, so `delete-window' refuses it
+              ;; as the frame's main window.  We want the sweep to
+              ;; recognize that and stay silent.
+              (claude-repl-window--delete-where
+               (lambda (win) (eq (window-buffer win) main-buf)))
+              (should-not captured)))
+        (when (window-live-p drawer-win) (delete-window drawer-win))
+        (kill-buffer drawer-buf)
+        (kill-buffer main-buf)))))
+
+(ert-deftest claude-repl-window-test-delete-where-still-logs-unrelated-errors ()
+  "Sanity: non-structural errors from `delete-window' still get logged.
+Stubs `delete-window' to throw an unrelated error so we exercise the
+non-benign branch without needing a window state that produces one
+naturally."
+  (claude-repl-window-test--with-temp-frame
+    (let* ((other-buf (generate-new-buffer " *test-other*"))
+           (other-win (split-window (selected-window))))
+      (set-window-buffer other-win other-buf)
+      (unwind-protect
+          (let ((captured nil)
+                (orig-message (symbol-function 'message)))
+            (cl-letf (((symbol-function 'delete-window)
+                       (lambda (&rest _) (error "Synthetic unrelated failure")))
+                      ((symbol-function 'message)
+                       (lambda (fmt &rest args)
+                         (let ((s (apply #'format fmt args)))
+                           (when (string-match-p "could not delete" s)
+                             (push s captured))
+                           (apply orig-message fmt args)))))
+              (claude-repl-window--delete-where
+               (lambda (win) (eq win other-win)))
+              (should captured)))
+        (when (window-live-p other-win)
+          (ignore-errors (delete-window other-win)))
         (kill-buffer other-buf)))))
 
 ;;; test-window.el ends here

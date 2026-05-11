@@ -1016,6 +1016,57 @@ contrast to SPC o C, which hides further)."
          (get-buffer "*fake-vterm*")
          (get-buffer "*fake-input*"))))))
 
+(ert-deftest claude-repl-test-panels-delete-non-panel-windows-silent-on-tricky-layout ()
+  "Regression for `SPC w f' in claude-repl: when a non-panel window
+ends up as the sole main-area window mid-sweep, the prior
+implementation logged `[claude-repl] window--delete-where: could not
+delete ...' into *Messages*.  The fixed implementation routes through
+Emacs's `delete-other-windows', whose internal `condition-case'
+silences the structural refusal — verify no warning escapes."
+  (let ((wconf (current-window-configuration)))
+    (unwind-protect
+        (progn
+          (delete-other-windows)
+          (let* ((vterm-buf  (generate-new-buffer " *test-vterm*"))
+                 (input-buf  (generate-new-buffer " *test-input*"))
+                 (drawer-buf (generate-new-buffer " *test-drawer*"))
+                 (extra-buf  (generate-new-buffer " *test-extra*"))
+                 (vterm-win  (selected-window))
+                 (input-win  (split-window vterm-win nil 'below))
+                 (extra-win  (split-window vterm-win nil 'below))
+                 (drawer-win (display-buffer-in-side-window
+                              drawer-buf '((side . left) (slot . 0)))))
+            (set-window-buffer vterm-win vterm-buf)
+            (set-window-buffer input-win input-buf)
+            (set-window-buffer extra-win extra-buf)
+            ;; Mirror production: panels and drawer carry
+            ;; `no-delete-other-windows', so `delete-other-windows'
+            ;; from vterm-win sweeps only `extra-win'.
+            (set-window-parameter vterm-win  'no-delete-other-windows t)
+            (set-window-parameter input-win  'no-delete-other-windows t)
+            (set-window-parameter drawer-win 'no-delete-other-windows t)
+            (unwind-protect
+                (let ((captured nil)
+                      (orig-message (symbol-function 'message)))
+                  (cl-letf (((symbol-function 'message)
+                             (lambda (fmt &rest args)
+                               (let ((s (apply #'format fmt args)))
+                                 (when (string-match-p "could not delete" s)
+                                   (push s captured))
+                                 (apply orig-message fmt args)))))
+                    (claude-repl--delete-non-panel-windows vterm-buf input-buf)
+                    (should-not captured)
+                    (should (window-live-p vterm-win))
+                    (should (window-live-p input-win))
+                    (should (window-live-p drawer-win))
+                    (should-not (window-live-p extra-win))))
+              (when (window-live-p drawer-win) (delete-window drawer-win))
+              (kill-buffer vterm-buf)
+              (kill-buffer input-buf)
+              (kill-buffer drawer-buf)
+              (kill-buffer extra-buf))))
+      (set-window-configuration wconf))))
+
 ;;;; ---- Tests: ws-buffer-visible-p with live but undisplayed buffer ----
 
 (ert-deftest claude-repl-test-panels-ws-buffer-visible-p-live-not-displayed ()

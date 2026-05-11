@@ -1045,13 +1045,28 @@ Side windows (e.g. the workspace drawer) are preserved — they are
 frame-level UI elements that should survive panel-layout resets.
 Pre-consolidation this function walked `window-list' directly and
 killed the drawer on `SPC g g'; the side-window skip lives inside
-`claude-repl-window--delete-where' now."
+`claude-repl-window--delete-where' now.
+
+Prefers Emacs's built-in `delete-other-windows' from one of the panel
+windows: panels carry `no-delete-other-windows', so the built-in
+iteration keeps both panels AND the drawer side window while sweeping
+the rest, and silences mid-iteration structural-delete errors via its
+own internal `condition-case'.  This is the `SPC w f' path that used
+to spam `Attempt to delete main window of frame ...' when the layout
+happened to collapse to a sole non-panel main window.  Falls back to
+the predicate sweep when no panel is visible (test fixtures, edge
+cases)."
   (claude-repl--log (+workspace-current-name)
                     "delete-non-panel-windows: window-count=%d"
                     (length (window-list)))
-  (claude-repl-window--delete-where
-   (lambda (win)
-     (not (memq (window-buffer win) (list vterm-buf input-buf))))))
+  (let ((panel-win (or (and (buffer-live-p vterm-buf) (get-buffer-window vterm-buf))
+                       (and (buffer-live-p input-buf) (get-buffer-window input-buf)))))
+    (if panel-win
+        (with-selected-window panel-win
+          (delete-other-windows))
+      (claude-repl-window--delete-where
+       (lambda (win)
+         (not (memq (window-buffer win) (list vterm-buf input-buf))))))))
 
 (defun claude-repl-toggle-fullscreen ()
   "Toggle fullscreen for the Claude REPL vterm and input windows.
