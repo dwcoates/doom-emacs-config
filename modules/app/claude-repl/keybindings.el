@@ -528,6 +528,34 @@ Reports comprehensive diagnostics."
 (map! "C-S-u"        #'claude-repl-drawer-global-clear-marks)
 (map! "C-S-+"        #'claude-repl-drawer-global-priority-up)
 (map! "C-S--"        #'claude-repl-drawer-global-priority-down)
+
+;; vterm-mode-map binds every `C-S-<letter>' to `vterm--self-insert' via
+;; its define-keys loop over '("C-" "M-" "C-S-").  That major-mode
+;; binding shadows our global-map entries whenever point lands in a
+;; vterm buffer (e.g. immediately after `C-S-<return>' visits a
+;; workspace and selects its Claude REPL output window), causing the
+;; chord to be sent to the shell instead of triggering drawer nav.
+;; Strip the conflicting keys from `vterm-mode-map' so global-map sees
+;; them.  Done lazily inside `after! vterm' so it survives package
+;; reloads.
+
+(defconst claude-repl--vterm-shadow-keys
+  '("C-S-n" "C-S-p" "C-S-j" "C-S-k" "C-S-x" "C-S-d"
+    "C-S-i" "C-S-m" "C-S-h" "C-S-t" "C-S-u")
+  "C-S-<letter> chords that `vterm-mode-map' would otherwise capture
+via `vterm--self-insert', shadowing our global drawer-mirror bindings.
+Non-letter chords like `C-S-<return>', `C-S-+', `C-S--' are not in
+vterm's exclusion loop and need no stripping.")
+
+(defun claude-repl--strip-vterm-shadow-keys ()
+  "Unmap `claude-repl--vterm-shadow-keys' from `vterm-mode-map' so the
+global drawer-mirror bindings win in vterm buffers."
+  (dolist (key claude-repl--vterm-shadow-keys)
+    (define-key vterm-mode-map (kbd key) nil)))
+
+(after! vterm
+  (claude-repl--strip-vterm-shadow-keys))
+
 (map! :i "C-S-f" #'claude-repl-toggle-fullscreen)
 (map! :leader :prefix "w" :n "c" #'claude-repl-toggle-fullscreen)
 (map! :leader :prefix "w" :n "f" #'claude-repl-fullscreen-and-focus)

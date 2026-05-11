@@ -1396,4 +1396,38 @@ user can spot the slot whose priority just shifted."
       (claude-repl-set-priority "p1")
       (should (equal (claude-repl--ws-get "ws1" :priority) "p1")))))
 
+;;;; ---- Tests: vterm-mode-map shadow strip ----
+
+;;; vterm-mode-map binds C-S-<letter> to `vterm--self-insert', which
+;;; shadows our global drawer-mirror bindings whenever point lands in a
+;;; vterm buffer (e.g. immediately after `C-S-<return>' visits a
+;;; workspace).  The (after! vterm ...) block in keybindings.el must
+;;; unmap those keys so the global binding wins.
+
+(ert-deftest claude-repl-test-strip-vterm-shadow-keys-unmaps-csn-csp ()
+  "`--strip-vterm-shadow-keys' must unmap `C-S-n' and `C-S-p' from
+`vterm-mode-map' so the global drawer-mirror bindings win in vterm."
+  (let ((vterm-mode-map (make-sparse-keymap)))
+    (define-key vterm-mode-map (kbd "C-S-n") #'ignore)
+    (define-key vterm-mode-map (kbd "C-S-p") #'ignore)
+    (claude-repl--strip-vterm-shadow-keys)
+    (should-not (lookup-key vterm-mode-map (kbd "C-S-n")))
+    (should-not (lookup-key vterm-mode-map (kbd "C-S-p")))))
+
+(ert-deftest claude-repl-test-strip-vterm-shadow-keys-unmaps-all-letters ()
+  "Every entry of `claude-repl--vterm-shadow-keys' must be unmapped."
+  (let ((vterm-mode-map (make-sparse-keymap)))
+    (dolist (key claude-repl--vterm-shadow-keys)
+      (define-key vterm-mode-map (kbd key) #'ignore))
+    (claude-repl--strip-vterm-shadow-keys)
+    (dolist (key claude-repl--vterm-shadow-keys)
+      (should-not (lookup-key vterm-mode-map (kbd key))))))
+
+(ert-deftest claude-repl-test-vterm-shadow-keys-covers-nav-pair ()
+  "Sanity: the unmap list must include the two chords that actually
+provoked the user-visible bug — `C-S-n' (next) and `C-S-p' (prev) —
+otherwise a future trim could silently re-break workspace-visit nav."
+  (should (member "C-S-n" claude-repl--vterm-shadow-keys))
+  (should (member "C-S-p" claude-repl--vterm-shadow-keys)))
+
 ;;; test-keybindings.el ends here

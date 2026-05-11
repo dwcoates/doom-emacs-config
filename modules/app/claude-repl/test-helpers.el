@@ -116,6 +116,12 @@
   (defun vterm--redraw (&rest _args) "Stub." nil))
 (unless (fboundp 'vterm--set-title)
   (defun vterm--set-title (&rest _args) "Stub." nil))
+
+;; vterm-mode-map stub — `(after! vterm ...)' in keybindings.el strips
+;; conflicting `C-S-<letter>' bindings via `define-key' at load time
+;; (the `after!' shim above is eager), so the variable must exist.
+(unless (boundp 'vterm-mode-map)
+  (defvar vterm-mode-map (make-sparse-keymap) "Stub."))
 (unless (boundp 'vterm--term)
   (defvar vterm--term nil "Stub."))
 (unless (boundp 'vterm--process)
