@@ -508,20 +508,26 @@ Reports comprehensive diagnostics."
 ;; selected entry.  Auto-revert keeps the drawer cursor sync'd with the
 ;; active workspace by default, so these naturally target the current
 ;; workspace until the user moves the drawer cursor.
-(map! :nvi "C-S-n"        #'claude-repl-drawer-global-next)
-(map! :nvi "C-S-p"        #'claude-repl-drawer-global-prev)
-(map! :nvi "C-S-j"        #'claude-repl-scroll-output-down)
-(map! :nvi "C-S-k"        #'claude-repl-scroll-output-up)
-(map! :nvi "C-S-<return>" #'claude-repl-drawer-global-visit)
-(map! :nvi "C-S-x"        #'claude-repl-drawer-global-nuke)
-(map! :nvi "C-S-d"        #'claude-repl-drawer-global-kill)
-(map! :nvi "C-S-i"        #'claude-repl-drawer-global-send-prompt)
-(map! :nvi "C-S-m"        #'claude-repl-drawer-global-merge-into-master)
-(map! :nvi "C-S-h"        #'claude-repl-drawer-global-toggle-hidden)
-(map! :nvi "C-S-t"        #'claude-repl-drawer-global-toggle-mark)
-(map! :nvi "C-S-u"        #'claude-repl-drawer-global-clear-marks)
-(map! :nvi "C-S-+"        #'claude-repl-drawer-global-priority-up)
-(map! :nvi "C-S--"        #'claude-repl-drawer-global-priority-down)
+;;
+;; Bind in `global-map' (no `:nvi' state prefix) so the chord works
+;; uniformly across evil normal/visual/insert AND evil-emacs-state
+;; buffers (vterm, *scratch*, magit popups, etc.).  Evil state maps
+;; only override global-map when they bind the same key, so leaving
+;; these in global-map means they fall through correctly everywhere.
+(map! "C-S-n"        #'claude-repl-drawer-global-next)
+(map! "C-S-p"        #'claude-repl-drawer-global-prev)
+(map! "C-S-j"        #'claude-repl-scroll-output-down)
+(map! "C-S-k"        #'claude-repl-scroll-output-up)
+(map! "C-S-<return>" #'claude-repl-drawer-global-visit)
+(map! "C-S-x"        #'claude-repl-drawer-global-nuke)
+(map! "C-S-d"        #'claude-repl-drawer-global-kill)
+(map! "C-S-i"        #'claude-repl-drawer-global-send-prompt)
+(map! "C-S-m"        #'claude-repl-drawer-global-merge-into-master)
+(map! "C-S-h"        #'claude-repl-drawer-global-toggle-hidden)
+(map! "C-S-t"        #'claude-repl-drawer-global-toggle-mark)
+(map! "C-S-u"        #'claude-repl-drawer-global-clear-marks)
+(map! "C-S-+"        #'claude-repl-drawer-global-priority-up)
+(map! "C-S--"        #'claude-repl-drawer-global-priority-down)
 (map! :i "C-S-f" #'claude-repl-toggle-fullscreen)
 (map! :leader :prefix "w" :n "c" #'claude-repl-toggle-fullscreen)
 (map! :leader :prefix "w" :n "f" #'claude-repl-fullscreen-and-focus)

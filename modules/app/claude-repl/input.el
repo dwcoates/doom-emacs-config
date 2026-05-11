@@ -244,7 +244,7 @@ whitespace-only buffers uncleared after C-c C-c."
 ;;; Vterm output scrolling
 
 (defcustom claude-repl-scroll-lines 15
-  "Number of lines to scroll per `C-S-n' / `C-S-p' keypress."
+  "Number of lines to scroll per `S-<up>' / `S-<down>' keypress."
   :type 'integer
   :group 'claude-repl)
 
@@ -311,8 +311,6 @@ SCROLL-FN is called with a line count (e.g. `scroll-up' or `scroll-down')."
       :i  "<down>"      #'claude-repl--send-down-arrow
       :ni "S-<up>"      #'claude-repl-scroll-output-up
       :ni "S-<down>"    #'claude-repl-scroll-output-down
-      :ni "C-S-p"       #'claude-repl-scroll-output-up
-      :ni "C-S-n"       #'claude-repl-scroll-output-down
       [wheel-up]        #'claude-repl--input-wheel-up
       [wheel-down]      #'claude-repl--input-wheel-down)
 

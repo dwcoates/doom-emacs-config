@@ -1365,6 +1365,20 @@ must not accumulate phantom entries that trap the user in slash mode."
           (claude-repl-scroll-output-down)
           (should (equal fn-called (list 'scroll-up claude-repl-scroll-lines))))))))
 
+;;; C-S-n / C-S-p must NOT be bound in the input map — the global
+;;; drawer-nav bindings need to fall through to global-map.  S-<up>
+;;; / S-<down> are the dedicated scroll keys in the input buffer.
+
+(ert-deftest claude-repl-test-input-map-does-not-shadow-csn ()
+  "`claude-input-mode-map' must not bind `C-S-n' so the global drawer-nav
+binding falls through.  Asserts the local key is unbound in the map."
+  (should-not (lookup-key claude-input-mode-map (kbd "C-S-n"))))
+
+(ert-deftest claude-repl-test-input-map-does-not-shadow-csp ()
+  "`claude-input-mode-map' must not bind `C-S-p' so the global drawer-nav
+binding falls through.  Asserts the local key is unbound in the map."
+  (should-not (lookup-key claude-input-mode-map (kbd "C-S-p"))))
+
 ;;; send-char with dead vterm buffer
 
 (ert-deftest claude-repl-test-send-char-dead-vterm-noop ()
