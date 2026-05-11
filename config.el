@@ -269,7 +269,7 @@
       ;; Better window navigation bindings
       :nv "C-h" #'evil-window-left
       :nv "C-j" #'evil-window-down
-      :nv "C-k" #'evil-window-up
+      :nv "C-k" #'kill-visual-line
       :nv "C-l" #'evil-window-right
       ;; Use Emacs bindings in insert mode
       :i "C-a"  #'beginning-of-line
@@ -279,7 +279,7 @@
       :i "C-n"  #'next-line
       :i "C-p"  #'previous-line
       :i "C-d"  #'delete-char
-      :i "C-k"  #'kill-line
+      :i "C-k"  #'kill-visual-line
       :i "C-y"  #'yank
       :i "M-f"  #'forward-word
       :i "M-b"  #'backward-word
@@ -300,7 +300,7 @@
       :map general-override-local-mode-map
       :nv "C-h" #'evil-window-left
       :nv "C-j" #'evil-window-down
-      :nv "C-k" #'evil-window-up
+      :nv "C-k" #'kill-visual-line
       :nv "C-l" #'evil-window-right
       )
 (after! cc-mode
