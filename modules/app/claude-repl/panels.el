@@ -104,7 +104,13 @@ input panel (or a warning if the input isn't displayed)."
   "Display vterm and input panels to the right of the current window.
 Splits right for vterm (60% width to work window), then splits vterm bottom for input (15%).
 If a window exists above the current one, selects it first so panels
-are not split from a bottom popup (e.g. a regular vterm)."
+are not split from a bottom popup (e.g. a regular vterm).
+If the selected window is a side window (e.g. the drawer), redirects
+to the frame's main window before splitting — side windows can't be
+split, and we must never touch the drawer."
+  (when (claude-repl-window--side-window-p (selected-window))
+    (when-let ((main (and (fboundp 'window-main-window) (window-main-window))))
+      (select-window main)))
   (when-let ((above (window-in-direction 'above)))
     (select-window above))
   (let* ((ws (+workspace-current-name))
@@ -749,6 +755,19 @@ echo-area message below."
                  ws (claude-repl--workspace-id) root (or cmd "?"))
         (claude-repl--state-save ws)))))
 
+(defun claude-repl--clear-main-area-for-panels ()
+  "Delete every non-side window other than the selected one.
+Side-window-aware replacement for `delete-other-windows' on the
+panel-show path: the workspace drawer (a left-side window) must
+survive panel reopen.  `delete-other-windows' relies on each side
+window carrying `no-delete-other-windows', which is fragile —
+window-parameter loss anywhere upstream (e.g. a buffer redisplayed
+without the original action alist) leaves the drawer vulnerable.
+Routing through `claude-repl-window--delete-where' makes the
+side-window skip explicit and parameter-independent."
+  (claude-repl-window--delete-where
+   (lambda (win) (not (eq win (selected-window))))))
+
 (defun claude-repl--show-existing-panels ()
   "Show panels for an already-running Claude session.
 Demotes indicators, refreshes display, and restores panel layout.
@@ -756,19 +775,24 @@ Sets `:repl-state :active' now that panels are visible and the
 session is in use.
 
 Tab-bar bookkeeping happens FIRST (before any window manipulation) so
-the persp-names reorder is in place before `delete-other-windows' /
+the persp-names reorder is in place before the main-area clear /
 `show-panels-and-focus' trigger redisplay — otherwise the intermediate
 paint can lock the pre-restore order into the tab-bar's cache.  After
 panels are up, pulses the tab via `claude-repl-flash-tab' so the user
 can track its return to the prior slot — symmetric with the
-deprio-on-close flash."
+deprio-on-close flash.
+
+Main-area clear routes through `--clear-main-area-for-panels' rather
+than `delete-other-windows' so the drawer side window is preserved
+unconditionally, not just when its `no-delete-other-windows' parameter
+survived upstream."
   (let ((ws (+workspace-current-name)))
     (claude-repl--log ws "show-existing-panels")
     (unless ws (error "claude-repl--show-existing-panels: no active workspace"))
     (claude-repl--ws-set-repl-state ws :active)
     (claude-repl--restore-tab-index ws)
     (claude-repl--refresh-vterm)
-    (delete-other-windows)
+    (claude-repl--clear-main-area-for-panels)
     (claude-repl--show-panels-and-focus)
     (claude-repl--update-hide-overlay)
     (claude-repl--flash-current-tab)))

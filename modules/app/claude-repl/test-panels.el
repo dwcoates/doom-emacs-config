@@ -2600,4 +2600,102 @@ initialize-ws-env.  Models the worktree-creation / new-workspace paths."
   (claude-repl-test--with-clean-state
     (claude-repl--unhide-workspace nil)))
 
+;;;; ---- Tests: clear-main-area-for-panels (drawer preservation) ----
+
+(ert-deftest claude-repl-test-panels-clear-main-area-preserves-side-windows ()
+  "`--clear-main-area-for-panels' must NOT delete side windows (drawer).
+Opening Claude routes through `--show-existing-panels' which clears
+the main area; the drawer side window must survive unconditionally,
+even when its `no-delete-other-windows' parameter is absent (regression:
+opening Claude used to destroy the drawer)."
+  (claude-repl-test--with-clean-state
+    (let ((drawer-buf (get-buffer-create "*clear-main-drawer*"))
+          (work-buf   (get-buffer-create "*clear-main-work*"))
+          (other-buf  (get-buffer-create "*clear-main-other*")))
+      (unwind-protect
+          (progn
+            (delete-other-windows)
+            (set-window-buffer (selected-window) work-buf)
+            (let ((other-win (split-window-right)))
+              (set-window-buffer other-win other-buf))
+            ;; Drawer is a side window with NO `no-delete-other-windows' —
+            ;; the side-window-aware sweep must still preserve it.
+            (let ((drawer-win (display-buffer-in-side-window
+                              drawer-buf '((side . left) (slot . 0)))))
+              (select-window (get-buffer-window work-buf))
+              (claude-repl--clear-main-area-for-panels)
+              (should (window-live-p drawer-win))
+              (should (get-buffer-window drawer-buf))
+              ;; The "other" main-area window should have been deleted.
+              (should-not (get-buffer-window other-buf))))
+        (mapc (lambda (b) (when (buffer-live-p b) (kill-buffer b)))
+              (list drawer-buf work-buf other-buf))))))
+
+(ert-deftest claude-repl-test-panels-show-existing-panels-preserves-drawer ()
+  "Opening Claude (full show-existing-panels flow) must NOT destroy the drawer.
+End-to-end regression: any drawer-as-side-window setup survives the
+panel-open path regardless of whether the drawer's window parameters
+match the canonical display-action."
+  (claude-repl-test--with-clean-state
+    (let ((drawer-buf (get-buffer-create "*spe-drawer*"))
+          (vterm-buf  (get-buffer-create "*spe-vterm*"))
+          (input-buf  (get-buffer-create "*spe-input*"))
+          (work-buf   (get-buffer-create "*spe-work*"))
+          (ws         "spe-ws"))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put ws :vterm-buffer vterm-buf)
+            (claude-repl--ws-put ws :input-buffer input-buf)
+            (delete-other-windows)
+            (set-window-buffer (selected-window) work-buf)
+            (let ((drawer-win (display-buffer-in-side-window
+                              drawer-buf '((side . left) (slot . 0)))))
+              (select-window (get-buffer-window work-buf))
+              (cl-letf (((symbol-function '+workspace-current-name) (lambda () ws))
+                        ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+                        ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
+                        ((symbol-function 'claude-repl--restore-tab-index) #'ignore)
+                        ((symbol-function 'claude-repl--flash-current-tab) #'ignore)
+                        ((symbol-function 'claude-repl--focus-input-panel) #'ignore))
+                (claude-repl--show-existing-panels))
+              (should (window-live-p drawer-win))
+              (should (get-buffer-window drawer-buf))))
+        (mapc (lambda (b) (when (buffer-live-p b) (kill-buffer b)))
+              (list drawer-buf vterm-buf input-buf work-buf))))))
+
+(ert-deftest claude-repl-test-panels-show-panels-redirects-from-side-window ()
+  "`--show-panels' must not try to split a side window.
+When the selected window is a side window (drawer), redirect to the
+frame's main window before splitting; splitting a side window would
+otherwise signal `Cannot split side window' and leave panels half-shown."
+  (claude-repl-test--with-clean-state
+    (let ((drawer-buf (get-buffer-create "*sp-redir-drawer*"))
+          (work-buf   (get-buffer-create "*sp-redir-work*"))
+          (vterm-buf  (get-buffer-create "*sp-redir-vterm*"))
+          (input-buf  (get-buffer-create "*sp-redir-input*"))
+          (ws         "sp-redir-ws"))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put ws :vterm-buffer vterm-buf)
+            (claude-repl--ws-put ws :input-buffer input-buf)
+            (delete-other-windows)
+            (set-window-buffer (selected-window) work-buf)
+            (let ((drawer-win (display-buffer-in-side-window
+                              drawer-buf '((side . left) (slot . 0)))))
+              ;; Simulate selected window being the drawer (e.g. mouse-click
+              ;; landed here just before claude opened).
+              (select-window drawer-win)
+              (cl-letf (((symbol-function '+workspace-current-name) (lambda () ws))
+                        ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+                        ((symbol-function 'claude-repl--update-all-workspace-states) #'ignore))
+                ;; Should NOT error.
+                (claude-repl--show-panels))
+              ;; Drawer still alive.
+              (should (window-live-p drawer-win))
+              ;; Panels were created.
+              (should (get-buffer-window vterm-buf))
+              (should (get-buffer-window input-buf))))
+        (mapc (lambda (b) (when (buffer-live-p b) (kill-buffer b)))
+              (list drawer-buf work-buf vterm-buf input-buf))))))
+
 ;;; test-panels.el ends here
