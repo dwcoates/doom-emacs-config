@@ -42,6 +42,7 @@
 (claude-repl--load-module "history")
 (claude-repl--load-module "overlay")
 (claude-repl--load-module "status")
+(claude-repl--load-module "workspace-status-export")
 (claude-repl--load-module "autosave")
 (claude-repl--load-module "sentinel")
 (claude-repl--load-module "input")
