@@ -3114,6 +3114,28 @@ must not infinite-loop if it does."
              (lambda (&rest _) "main")))
     (should-not (claude-repl--branch-merged-into-p "/a/" "/b/"))))
 
+(ert-deftest claude-repl-test-merge-base-ancestor-args-bails-on-same-sha ()
+  "Returns nil when both branches resolve to the same tip SHA.
+A freshly created child worktree starts at its parent's HEAD commit, so
+the two branches are commit-identical even though their names differ —
+the ancestry check would trivially succeed and mis-bucket the empty
+child as merged.  The helper must bail before that point."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "M0" "base")
+    (let ((child-wt (concat (make-temp-file "claude-repl-test-child-wt-" t)
+                            "-actual")))
+      (unwind-protect
+          (progn
+            (call-process "git" nil nil nil "-C" repo
+                          "worktree" "add" "-b" "child" child-wt "HEAD")
+            ;; repo HEAD is master, child-wt HEAD is `child' — both at M0.
+            (should (null (claude-repl--merge-base-ancestor-args
+                           child-wt repo))))
+        (ignore-errors
+          (call-process "git" nil nil nil "-C" repo
+                        "worktree" "remove" "-f" child-wt))
+        (ignore-errors (delete-directory child-wt t))))))
+
 ;;;; ---- Tests: branch-merged async cache ----
 
 (ert-deftest claude-repl-test-ws-merge-parent-dir-uses-source-when-live ()

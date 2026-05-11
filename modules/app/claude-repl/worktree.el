@@ -1419,8 +1419,14 @@ within INTERVAL of the previous successful refresh."
 Resolves both worktrees' current branches via `git rev-parse
 --abbrev-ref HEAD' and returns nil when the check should be skipped:
 either dir is nil, either branch can't be resolved (empty or fatal),
-or the two branches are identical (a branch is never considered
-merged into itself).  Shared by the sync and async ancestry paths."
+the two branches are identical (a branch is never considered merged
+into itself), or the two branches resolve to the same tip SHA.
+
+The same-SHA bail covers the fresh-child case: `git worktree add -b
+CHILD PATH PARENT-HEAD' starts CHILD at PARENT's tip, so the ancestry
+check would trivially succeed (a commit is its own ancestor) and the
+empty child would be mis-bucketed as merged until it acquires its
+first commit.  Shared by the sync and async ancestry paths."
   (when (and source-dir target-dir)
     (let ((source-branch (claude-repl--git-string-quiet
                           "-C" source-dir "rev-parse" "--abbrev-ref" "HEAD"))
@@ -1432,7 +1438,17 @@ merged into itself).  Shared by the sync and async ancestry paths."
                  (not (string-prefix-p "fatal" source-branch))
                  (not (string-prefix-p "fatal" target-branch))
                  (not (string= source-branch target-branch)))
-        (cons source-branch target-branch)))))
+        (let ((source-sha (claude-repl--git-string-quiet
+                           "-C" source-dir "rev-parse" "HEAD"))
+              (target-sha (claude-repl--git-string-quiet
+                           "-C" target-dir "rev-parse" "HEAD")))
+          (when (and source-sha target-sha
+                     (not (string-empty-p source-sha))
+                     (not (string-empty-p target-sha))
+                     (not (string-prefix-p "fatal" source-sha))
+                     (not (string-prefix-p "fatal" target-sha))
+                     (not (string= source-sha target-sha)))
+            (cons source-branch target-branch)))))))
 
 (defun claude-repl--async-refresh-branch-merged (ws)
   "Async refresh of `:branch-merged' cache for workspace WS.
