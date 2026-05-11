@@ -1094,7 +1094,9 @@ once per existing entry, passing the snapshot's `ws' name."
                                           `(("ws-a" . ,dir-a)
                                             ("ws-b" . ,dir-b)))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (ws _dir _pri) (push ws established))))
+                       (lambda (ws _dir _pri) (push ws established)))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t)))
               (claude-repl-load-workspace-snapshot)
               (should (= 2 (length established)))
               (should (member "ws-a" established))
@@ -1115,7 +1117,9 @@ once per existing entry, passing the snapshot's `ws' name."
                                           `(("ws-real" . ,real-dir)
                                             ("ws-gone" . "/nonexistent/path")))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (ws _dir _pri) (push ws established))))
+                       (lambda (ws _dir _pri) (push ws established)))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t)))
               (claude-repl-load-workspace-snapshot)
               (should (equal established (list "ws-real")))))
         (delete-file snapshot-file)
@@ -1136,6 +1140,8 @@ jump path on purpose."
                                           `(("ws-a" . ,dir-a)
                                             ("ws-b" . ,dir-b)))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
                       ((symbol-function 'claude-repl-flash-tab)
                        (lambda (&rest _) (cl-incf flash-calls)))
                       ((symbol-function 'claude-repl--flash-current-tab)
@@ -1372,7 +1378,9 @@ Older entries (lexicographically earliest filenames) are pruned."
             (cl-letf (((symbol-function 'claude-repl--establish-workspace)
                        (lambda (ws dir _pri)
                          (push (cons ws dir) established)
-                         (claude-repl--ws-put ws :project-dir dir))))
+                         (claude-repl--ws-put ws :project-dir dir)))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t)))
               (claude-repl-load-workspace-snapshot)
               (should (member (cons "ws-legacy" real-dir) established))
               (should (equal (claude-repl--ws-get "ws-legacy" :project-dir) real-dir))))
@@ -1391,7 +1399,9 @@ Older entries (lexicographically earliest filenames) are pruned."
              snapshot-file
              `(("ws-pri" :project-dir ,real-dir :priority "p1")))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (_ws _dir pri) (setq captured-priority pri))))
+                       (lambda (_ws _dir pri) (setq captured-priority pri)))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t)))
               (claude-repl-load-workspace-snapshot)
               (should (equal captured-priority "p1"))))
         (delete-file snapshot-file)
@@ -1412,7 +1422,9 @@ Older entries (lexicographically earliest filenames) are pruned."
                       ((symbol-function '+workspace-exists-p) (lambda (_n) t))
                       ((symbol-function 'persp-frame-switch)
                        (lambda (name) (setq returned-to name)))
-                      ((symbol-function 'claude-repl--establish-workspace) #'ignore))
+                      ((symbol-function 'claude-repl--establish-workspace) #'ignore)
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t)))
               (claude-repl-load-workspace-snapshot)
               (should (equal returned-to "origin-ws"))))
         (delete-file snapshot-file)
@@ -1524,6 +1536,207 @@ so persp-mode begins capturing a window configuration for that persp."
             (claude-repl--establish-workspace "DC/CV-494738/worker-suite" tmp-dir nil)
             (should (equal switched-to "DC/CV-494738/worker-suite")))
         (delete-directory tmp-dir t)))))
+
+;;;; ---- Tests: snapshot-load queue driver (after-ready hook) ----
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/refuses-concurrent-invocation ()
+  "Calling load while a load is in progress signals user-error."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--snapshot-load-state (list :queue nil)))
+      (should-error (claude-repl-load-workspace-snapshot) :type 'user-error))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/advances-on-ready-event ()
+  "An after-ready callback for the awaited ws advances the queue."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (dir-a (make-temp-file "claude-proj-a-" t))
+          (dir-b (make-temp-file "claude-proj-b-" t))
+          (established nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+                       (lambda (ws _dir _pri) (push ws established)))
+                      ;; Don't short-circuit on already-ready — force the
+                      ;; hook-driven path.
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) nil))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (claude-repl-load-workspace-snapshot)
+              ;; First entry established; loader is awaiting ws-a.
+              (should (equal established '("ws-a")))
+              (should (equal "ws-a"
+                             (plist-get claude-repl--snapshot-load-state :awaiting)))
+              ;; Simulate ready signal for ws-a.
+              (run-hook-with-args 'claude-repl-after-ready-functions "ws-a")
+              (should (equal (sort (copy-sequence established) #'string<)
+                             '("ws-a" "ws-b")))
+              ;; Simulate ready for ws-b → load finishes.
+              (run-hook-with-args 'claude-repl-after-ready-functions "ws-b")
+              (should-not claude-repl--snapshot-load-state)))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/ignores-foreign-ready ()
+  "Ready signal for a workspace we're not awaiting does NOT advance the queue."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (dir-a (make-temp-file "claude-proj-a-" t))
+          (dir-b (make-temp-file "claude-proj-b-" t))
+          (established nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+                       (lambda (ws _dir _pri) (push ws established)))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) nil))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (claude-repl-load-workspace-snapshot)
+              ;; Foreign ready — must NOT advance.
+              (run-hook-with-args 'claude-repl-after-ready-functions "some-other-ws")
+              (should (equal established '("ws-a")))
+              (should (equal "ws-a"
+                             (plist-get claude-repl--snapshot-load-state :awaiting)))))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/already-ready-short-circuits ()
+  "When `--snapshot-load-ws-ready-p' is t after establish, queue advances
+without waiting for a hook fire."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (dir-a (make-temp-file "claude-proj-a-" t))
+          (dir-b (make-temp-file "claude-proj-b-" t))
+          (established nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+                       (lambda (ws _dir _pri) (push ws established)))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (claude-repl-load-workspace-snapshot)
+              (should (equal (sort established #'string<) '("ws-a" "ws-b")))
+              (should-not claude-repl--snapshot-load-state)))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/skip-missing-dir-does-not-wait ()
+  "Missing-dir entries are skipped and the queue advances synchronously."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (real-dir (make-temp-file "claude-proj-" t))
+          (established nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file
+             snapshot-file
+             `(("ws-gone" . "/nonexistent/path")
+               ("ws-real" . ,real-dir)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+                       (lambda (ws _dir _pri) (push ws established)))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (claude-repl-load-workspace-snapshot)
+              ;; ws-gone skipped; ws-real established (no wait).
+              (should (equal established '("ws-real")))
+              (should-not claude-repl--snapshot-load-state)))
+        (delete-file snapshot-file)
+        (delete-directory real-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/timeout-advances-queue ()
+  "Per-entry watchdog firing advances past a wedged workspace."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (dir-a (make-temp-file "claude-proj-a-" t))
+          (dir-b (make-temp-file "claude-proj-b-" t))
+          (established nil)
+          captured-timer-callback)
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+                       (lambda (ws _dir _pri) (push ws established)))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) nil))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (_secs _rep fn &rest args)
+                         (setq captured-timer-callback (cons fn args))
+                         'fake-timer))
+                      ((symbol-function 'timerp) (lambda (_t) nil))
+                      ((symbol-function 'cancel-timer) #'ignore))
+              (claude-repl-load-workspace-snapshot)
+              (should (equal established '("ws-a")))
+              ;; Fire the timeout for ws-a manually.
+              (apply (car captured-timer-callback) (cdr captured-timer-callback))
+              (should (equal (sort (copy-sequence established) #'string<)
+                             '("ws-a" "ws-b")))))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/hook-detached-on-finish ()
+  "After a successful load, `claude-repl--snapshot-load-on-ready' is removed
+from `claude-repl-after-ready-functions'."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (real-dir (make-temp-file "claude-proj-" t)))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file `(("ws-a" . ,real-dir)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (claude-repl-load-workspace-snapshot)
+              (should-not (memq #'claude-repl--snapshot-load-on-ready
+                                claude-repl-after-ready-functions))))
+        (delete-file snapshot-file)
+        (delete-directory real-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/establish-error-advances ()
+  "If `--establish-workspace' errors, the loader logs and advances anyway."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (dir-a (make-temp-file "claude-proj-a-" t))
+          (dir-b (make-temp-file "claude-proj-b-" t))
+          (attempts nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+                       (lambda (ws _dir _pri)
+                         (push ws attempts)
+                         (when (equal ws "ws-a")
+                           (error "boom"))))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (claude-repl-load-workspace-snapshot)
+              ;; Both entries attempted despite ws-a's error.
+              (should (equal (sort (copy-sequence attempts) #'string<)
+                             '("ws-a" "ws-b")))
+              (should-not claude-repl--snapshot-load-state)))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)))))
 
 ;;;; ---- claude-repl--hydrate-priority-from-state ----
 
@@ -1825,7 +2038,9 @@ file and the archive directory the save path materialises beside it."
               (with-temp-file f
                 (prin1 (list (list "ws-a" :project-dir tmp-dir :priority nil))
                        (current-buffer)))
-              (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore))
+              (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
+                        ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                         (lambda (_ws) t)))
                 (setq claude-repl--snapshot-loaded-p nil)
                 (claude-repl-load-workspace-snapshot)
                 (should claude-repl--snapshot-loaded-p)))

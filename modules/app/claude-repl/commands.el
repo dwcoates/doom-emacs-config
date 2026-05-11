@@ -794,60 +794,182 @@ Each call:
                (not (claude-repl--claude-running-p ws)))
       (claude-repl--initialize-claude ws))))
 
+(defvar claude-repl--snapshot-load-state nil
+  "Plist describing an in-progress recursive snapshot load, or nil.
+Keys: `:queue' (list of (NORMALIZED-WS . PLIST) entries still to do),
+`:origin' (workspace to switch back to at end), `:awaiting' (ws-name
+the loader is currently waiting on a ready signal for, or nil),
+`:loaded' / `:skipped' counters, `:total' (entry count from the file),
+`:timeout-timer' (the per-entry watchdog timer).
+
+Non-nil means a load is in flight — concurrent invocations of
+`claude-repl-load-workspace-snapshot' are refused via a guard.")
+
+(defcustom claude-repl-snapshot-load-per-entry-timeout 30
+  "Per-entry watchdog in seconds for the recursive snapshot loader.
+If the awaited workspace's `claude-repl--on-session-start-event' hasn't
+fired by then, the loader advances to the next entry anyway and logs
+a warning.  Tuned long enough for sandbox image build / first-time
+claude startup but short enough that a wedged workspace doesn't lock
+the entire load."
+  :type 'number
+  :group 'claude-repl)
+
+(defun claude-repl--snapshot-load-ws-ready-p (ws)
+  "Return non-nil when WS's vterm buffer reports ready."
+  (when-let ((buf (claude-repl--ws-get ws :vterm-buffer)))
+    (and (buffer-live-p buf)
+         (buffer-local-value 'claude-repl--ready buf))))
+
+(defun claude-repl--snapshot-load-cancel-timer ()
+  "Cancel the pending per-entry watchdog timer, if any."
+  (when-let ((timer (and claude-repl--snapshot-load-state
+                         (plist-get claude-repl--snapshot-load-state :timeout-timer))))
+    (when (timerp timer) (cancel-timer timer))
+    (setq claude-repl--snapshot-load-state
+          (plist-put claude-repl--snapshot-load-state :timeout-timer nil))))
+
+(defun claude-repl--snapshot-load-finish ()
+  "Finalize the recursive load: detach hook, return to origin, message."
+  (remove-hook 'claude-repl-after-ready-functions
+               #'claude-repl--snapshot-load-on-ready)
+  (claude-repl--snapshot-load-cancel-timer)
+  (let* ((state claude-repl--snapshot-load-state)
+         (origin (plist-get state :origin))
+         (loaded (plist-get state :loaded))
+         (skipped (plist-get state :skipped)))
+    (when (and origin
+               (fboundp '+workspace-exists-p)
+               (+workspace-exists-p origin)
+               (fboundp 'persp-frame-switch))
+      (persp-frame-switch origin))
+    (force-mode-line-update t)
+    (setq claude-repl--snapshot-loaded-p t)
+    (claude-repl--log nil "snapshot-load: END loaded=%d skipped=%d returned-to=%s"
+                      loaded skipped (or origin "nil"))
+    (message "Loaded %d workspace(s), skipped %d" loaded skipped))
+  (setq claude-repl--snapshot-load-state nil))
+
+(defun claude-repl--snapshot-load-on-ready (ws)
+  "After-ready hook: advance the snapshot load queue iff WS is awaited."
+  (let ((state claude-repl--snapshot-load-state))
+    (when (and state (equal ws (plist-get state :awaiting)))
+      (claude-repl--log ws "snapshot-load: awaited ws=%s reported ready — advancing" ws)
+      (claude-repl--snapshot-load-cancel-timer)
+      (setq claude-repl--snapshot-load-state
+            (plist-put claude-repl--snapshot-load-state :awaiting nil))
+      (claude-repl--snapshot-load-step))))
+
+(defun claude-repl--snapshot-load-timeout (ws)
+  "Watchdog firing for WS — advance the queue with a warning."
+  (let ((state claude-repl--snapshot-load-state))
+    (when (and state (equal ws (plist-get state :awaiting)))
+      (claude-repl--log ws "snapshot-load: TIMEOUT awaiting ws=%s — advancing anyway" ws)
+      (message "[claude-repl] snapshot-load timeout awaiting ws=%s — advancing" ws)
+      (setq claude-repl--snapshot-load-state
+            (plist-put claude-repl--snapshot-load-state :awaiting nil))
+      (setq claude-repl--snapshot-load-state
+            (plist-put claude-repl--snapshot-load-state :timeout-timer nil))
+      (claude-repl--snapshot-load-step))))
+
+(defun claude-repl--snapshot-load-step ()
+  "Process the next entry in the snapshot-load queue.
+Called both at start and from the after-ready hook / timeout callback."
+  (let* ((state claude-repl--snapshot-load-state)
+         (queue (plist-get state :queue))
+         (total (plist-get state :total))
+         (iter  (1+ (+ (plist-get state :loaded) (plist-get state :skipped)))))
+    (cond
+     ((null queue)
+      (claude-repl--snapshot-load-finish))
+     (t
+      (let* ((entry (car queue))
+             (ws (car entry))
+             (plist (cdr entry))
+             (dir (plist-get plist :project-dir))
+             (priority (plist-get plist :priority)))
+        ;; Pop this entry off the queue immediately so we don't double-process.
+        (setq claude-repl--snapshot-load-state
+              (plist-put state :queue (cdr queue)))
+        (cond
+         ((not (and dir (file-directory-p dir)))
+          (claude-repl--log nil "snapshot-load iter=%d/%d SKIPPED ws=%s dir=%s reason=dir-missing-or-nil"
+                            iter total ws (or dir "nil"))
+          (setq claude-repl--snapshot-load-state
+                (plist-put claude-repl--snapshot-load-state :skipped
+                           (1+ (plist-get claude-repl--snapshot-load-state :skipped))))
+          (claude-repl--snapshot-load-step))
+         (t
+          (claude-repl--log nil "snapshot-load iter=%d/%d ws=%s dir=%s establishing"
+                            iter total ws dir)
+          (setq claude-repl--snapshot-load-state
+                (plist-put claude-repl--snapshot-load-state :awaiting ws))
+          (condition-case err
+              (claude-repl--establish-workspace ws dir priority)
+            (error
+             (claude-repl--log nil "snapshot-load: establish-workspace err ws=%s err=%S" ws err)
+             (message "[claude-repl] establish failed ws=%s — advancing" ws)))
+          (setq claude-repl--snapshot-load-state
+                (plist-put claude-repl--snapshot-load-state :loaded
+                           (1+ (plist-get claude-repl--snapshot-load-state :loaded))))
+          (cond
+           ((claude-repl--snapshot-load-ws-ready-p ws)
+            ;; Already ready (e.g. re-load, or claude was already up) —
+            ;; advance immediately without waiting for a session_start.
+            (claude-repl--log ws "snapshot-load: ws=%s already ready — advancing without waiting" ws)
+            (setq claude-repl--snapshot-load-state
+                  (plist-put claude-repl--snapshot-load-state :awaiting nil))
+            (claude-repl--snapshot-load-step))
+           (t
+            ;; Arm the watchdog and yield to the main loop.  The after-
+            ;; ready hook (or the watchdog) will call --snapshot-load-step
+            ;; again.
+            (setq claude-repl--snapshot-load-state
+                  (plist-put claude-repl--snapshot-load-state :timeout-timer
+                             (run-with-timer
+                              claude-repl-snapshot-load-per-entry-timeout
+                              nil
+                              #'claude-repl--snapshot-load-timeout
+                              ws))))))))))))
+
 (defun claude-repl-load-workspace-snapshot (&optional file)
   "Load workspaces from FILE (defaults to the configured snapshot path).
 When FILE is nil, reads `claude-repl-workspace-snapshot-file' (or its
 legacy module-dir fallback if the configured file is absent).  For each
 entry, fully sets up the workspace via `claude-repl--establish-workspace'
 \(persp creation + activation + projectile + dir-locals + magit lambda
-+ find-file recent + claude init).  Returns to the workspace that was
-active when the load began.
++ find-file recent + claude init).
 
-Bypasses Doom's `+dwc/switch-to-project' / `+workspaces-switch-to-
-project-h' path to avoid the rename-on-empty collapse, but otherwise
-performs the same per-workspace setup synchronously per entry — every
-loaded workspace ends up with a saved persp-mode window configuration
-because we briefly activate it during setup."
+Recursive queue driver: establishes one entry, then yields to the main
+loop until that workspace's `claude-repl-after-ready-functions' hook
+fires, then advances.  Per-entry watchdog
+\(`claude-repl-snapshot-load-per-entry-timeout') guarantees forward
+progress even if a ready signal goes missing.
+
+Returns to the workspace that was active when the load began."
   (interactive)
+  (when claude-repl--snapshot-load-state
+    (user-error "claude-repl: a snapshot load is already in progress"))
   (let* ((file (or file (claude-repl--workspace-snapshot-file-for-read)))
          (snapshot (claude-repl--read-sexp-file-if-exists file)))
     (unless snapshot
       (user-error "No workspace snapshot at %s" file))
-    (let* ((loaded 0)
-           (skipped 0)
-           (iter 0)
-           (total (length snapshot))
-           (origin-ws (and (fboundp '+workspace-current-name)
-                           (ignore-errors (+workspace-current-name)))))
-      (claude-repl--log nil "load-workspace-snapshot: BEGIN file=%s entries=%d origin-ws=%s"
-                        file total (or origin-ws "nil"))
-      (dolist (raw snapshot)
-        (cl-incf iter)
-        (let* ((entry (claude-repl--snapshot-entry-normalize raw))
-               (ws (car entry))
-               (plist (cdr entry))
-               (dir (plist-get plist :project-dir))
-               (priority (plist-get plist :priority)))
-          (cond
-           ((not (and dir (file-directory-p dir)))
-            (claude-repl--log nil "load-snapshot iter=%d/%d SKIPPED ws=%s dir=%s reason=dir-missing-or-nil"
-                              iter total ws (or dir "nil"))
-            (cl-incf skipped))
-           (t
-            (claude-repl--log nil "load-snapshot iter=%d/%d ws=%s dir=%s establishing"
-                              iter total ws dir)
-            (claude-repl--establish-workspace ws dir priority)
-            (cl-incf loaded)))))
-      (when (and origin-ws
-                 (fboundp '+workspace-exists-p)
-                 (+workspace-exists-p origin-ws)
-                 (fboundp 'persp-frame-switch))
-        (persp-frame-switch origin-ws))
-      (force-mode-line-update t)
-      (setq claude-repl--snapshot-loaded-p t)
-      (claude-repl--log nil "load-workspace-snapshot: END loaded=%d skipped=%d returned-to=%s"
-                        loaded skipped (or origin-ws "nil"))
-      (message "Loaded %d workspace(s), skipped %d" loaded skipped))))
+    (let ((queue (mapcar #'claude-repl--snapshot-entry-normalize snapshot))
+          (origin-ws (and (fboundp '+workspace-current-name)
+                          (ignore-errors (+workspace-current-name)))))
+      (setq claude-repl--snapshot-load-state
+            (list :queue queue
+                  :origin origin-ws
+                  :awaiting nil
+                  :loaded 0
+                  :skipped 0
+                  :total (length queue)
+                  :timeout-timer nil))
+      (add-hook 'claude-repl-after-ready-functions
+                #'claude-repl--snapshot-load-on-ready)
+      (claude-repl--log nil "snapshot-load: BEGIN file=%s entries=%d origin-ws=%s"
+                        file (length queue) (or origin-ws "nil"))
+      (claude-repl--snapshot-load-step))))
 
 (defun claude-repl--load-workspace-snapshot-on-startup ()
   "Restore the workspace snapshot silently at Emacs startup.

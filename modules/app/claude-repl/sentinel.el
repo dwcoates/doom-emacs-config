@@ -326,7 +326,30 @@ Idempotent on repeated fires for the same workspace."
       (with-current-buffer vterm-buf
         (setq claude-repl--ready t))
       (claude-repl--cancel-ready-timer ws)
-      (claude-repl--open-panels-after-ready ws)))))
+      (claude-repl--open-panels-after-ready ws)
+      ;; Fire the public after-ready hook so observers (e.g. the snapshot
+      ;; loader's queue driver) can advance.  `run-hook-wrapped' so a
+      ;; broken handler can't prevent later handlers from running.
+      (run-hook-wrapped 'claude-repl-after-ready-functions
+                        (lambda (fn ws)
+                          (condition-case err
+                              (funcall fn ws)
+                            (error
+                             (claude-repl--log ws
+                                               "after-ready-hook fn=%s err=%S"
+                                               fn err)))
+                          nil)
+                        ws)))))
+
+(defvar claude-repl-after-ready-functions nil
+  "Hook run after a workspace's Claude session becomes ready.
+Each function is called with one argument: the workspace name (string)
+that just transitioned to `:idle' via `claude-repl--on-session-start-event'.
+
+Fires once per `session_start' transition.  Handlers run via
+`run-hook-wrapped' wrapped in `condition-case', so a broken handler
+cannot prevent later handlers (or the underlying state transition)
+from completing.")
 
 ;;; Event dispatch
 

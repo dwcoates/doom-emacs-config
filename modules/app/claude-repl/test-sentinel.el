@@ -1407,6 +1407,41 @@ the module does not manage."
               (should-not panels-opened)))
         (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
 
+(ert-deftest claude-repl-test-on-session-start-event-fires-after-ready-hook ()
+  "on-session-start-event runs `claude-repl-after-ready-functions' with the ws name."
+  (claude-repl-test--with-clean-state
+    (let ((fake-buf (generate-new-buffer " *test-session-start-hook*"))
+          (hook-called-with nil))
+      (unwind-protect
+          (progn
+            (with-current-buffer fake-buf (setq-local claude-repl--ready nil))
+            (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
+            (cl-letf (((symbol-function 'claude-repl--cancel-ready-timer) #'ignore)
+                      ((symbol-function 'claude-repl--open-panels-after-ready) #'ignore))
+              (let ((claude-repl-after-ready-functions
+                     (list (lambda (ws) (push ws hook-called-with)))))
+                (claude-repl--on-session-start-event "ws1" "/some/dir")
+                (should (equal hook-called-with '("ws1"))))))
+        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
+
+(ert-deftest claude-repl-test-on-session-start-event-hook-handler-error-isolated ()
+  "A broken after-ready handler must not prevent later handlers from running."
+  (claude-repl-test--with-clean-state
+    (let ((fake-buf (generate-new-buffer " *test-session-start-hook-err*"))
+          (second-called nil))
+      (unwind-protect
+          (progn
+            (with-current-buffer fake-buf (setq-local claude-repl--ready nil))
+            (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
+            (cl-letf (((symbol-function 'claude-repl--cancel-ready-timer) #'ignore)
+                      ((symbol-function 'claude-repl--open-panels-after-ready) #'ignore))
+              (let ((claude-repl-after-ready-functions
+                     (list (lambda (_ws) (error "boom"))
+                           (lambda (_ws) (setq second-called t)))))
+                (claude-repl--on-session-start-event "ws1" "/some/dir")
+                (should second-called))))
+        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
+
 (ert-deftest claude-repl-test-on-session-start-event-no-vterm-warns ()
   "on-session-start-event emits a loud ERROR message when no vterm buffer exists.
 Reaching this branch means ws is registered (caller chain checks that)

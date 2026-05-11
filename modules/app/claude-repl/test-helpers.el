@@ -257,6 +257,8 @@ temp path so the state-save snapshot piggyback can't clobber the
 user's real snapshot during ERT runs."
   (declare (indent 0))
   `(let ((claude-repl--workspaces (make-hash-table :test 'equal))
+         (claude-repl--snapshot-load-state nil)
+         (claude-repl-after-ready-functions nil)
          (claude-repl--fullscreen-config nil)
          (claude-repl--sync-timer nil)
          (claude-repl--cursor-reset-timer nil)
