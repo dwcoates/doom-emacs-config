@@ -534,14 +534,21 @@ that were actually killed (useful for tests)."
                            ws err))))
     candidates))
 
-(defun claude-repl--maybe-sweep-hidden-on-switch ()
+(defun claude-repl--maybe-sweep-hidden-on-switch (&optional ws)
   "Run `claude-repl--sweep-hidden-workspaces' when hide-mode is enabled.
+WS is the just-arrived-on workspace; when nil, falls back to
+`(+workspace-current-name)'.  Callers from `--on-workspace-switch'
+pass the ws captured at hook-fire time so the reset and sweep operate
+on the workspace that was just switched to — not on whatever is
+current when this deferred call eventually runs (rapid back-to-back
+switches would otherwise leave intermediate `:hidden' workspaces
+unreset and exposed to the sweep).
+
 Hooked into `claude-repl--on-workspace-switch' (panels.el).  Also resets
-the just-arrived workspace's `:repl-state' from `:hidden' back to
-`:inactive' if applicable, so navigating to a hidden workspace removes
-its hidden flag (the user is actively viewing it; it should not be
-killed)."
-  (let ((current (+workspace-current-name)))
+WS's `:repl-state' from `:hidden' back to `:inactive' if applicable, so
+navigating to a hidden workspace removes its hidden flag (the user is
+actively viewing it; it should not be killed)."
+  (let ((current (or ws (+workspace-current-name))))
     (when (eq (claude-repl--ws-repl-state current) :hidden)
       (claude-repl--log current
                         "maybe-sweep: arriving on :hidden ws, resetting to :inactive")

@@ -2629,6 +2629,24 @@ actively viewing it does not get it killed.  Independent of hide-mode flag."
         (claude-repl--maybe-sweep-hidden-on-switch)
         (should (eq (claude-repl--ws-repl-state "ws-a") :active))))))
 
+(ert-deftest claude-repl-cmd-test-maybe-sweep/explicit-ws-overrides-current ()
+  "An explicit WS argument takes precedence over `+workspace-current-name'.
+This is how `--on-workspace-switch' passes the ws captured at
+hook-fire time, so the reset/sweep operate on the workspace that was
+just switched to even if another switch raced ahead first."
+  (claude-repl-test--with-clean-state
+    (let ((swept-with nil)
+          (claude-repl-hide-mode-enabled t))
+      (claude-repl--ws-set-repl-state "ws-a" :hidden)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-c"))
+                ((symbol-function 'claude-repl--sweep-hidden-workspaces)
+                 (lambda (&optional except) (setq swept-with except))))
+        (claude-repl--maybe-sweep-hidden-on-switch "ws-a")
+        ;; ws-a was reset because it was the explicit arg, even though
+        ;; +workspace-current-name returns "ws-c".
+        (should (eq (claude-repl--ws-repl-state "ws-a") :inactive))
+        (should (equal swept-with "ws-a"))))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here

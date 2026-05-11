@@ -264,10 +264,16 @@ Respects `claude-repl-autoselect-input-on-workspace-switch'."
       (claude-repl--log ws "maybe-autoselect-input: selecting input-win=%s" win)
       (select-window win))))
 
-(defun claude-repl--on-workspace-switch ()
+(defun claude-repl--on-workspace-switch (&optional ws)
   "Handle workspace switch: update all workspace states, refresh vterm, reset cursors.
-Also opens panels for workspaces that were created with a preemptive prompt,
-and auto-selects the input window if visible.
+WS is the workspace name to operate on; when nil, falls back to
+`(+workspace-current-name)' at call time.  Callers from
+`--after-persp-activated' pass the ws captured at hook-fire time so
+the deferred call operates on the workspace that was just switched
+to, even if another switch raced ahead before the timer fired.
+
+Also opens panels for workspaces that were created with a preemptive
+prompt, and auto-selects the input window if visible.
 
 If the newly-active workspace has `:claude-state :done', sets
 `:done-acked' to t so the decay timer can clear :done → :idle on the
@@ -277,11 +283,11 @@ the workspace.\"
 Also runs `claude-repl--maybe-sweep-hidden-on-switch' so workspaces
 marked `:hidden' (via `SPC o C') are persp-killed when hide-mode is on
 — the persp-level enforcement of hide-mode."
-  (let ((ws (+workspace-current-name)))
+  (let ((ws (or ws (+workspace-current-name))))
     (claude-repl--log-verbose ws "workspace-switch ws=%s" ws)
     (when (eq (claude-repl--ws-claude-state ws) :done)
       (claude-repl--ws-put ws :done-acked t))
-    (claude-repl--maybe-sweep-hidden-on-switch)
+    (claude-repl--maybe-sweep-hidden-on-switch ws)
     (claude-repl--update-all-workspace-states)
     (claude-repl--refresh-vterm)
     (claude-repl--reset-vterm-cursors)
@@ -325,11 +331,19 @@ events (kill, switch, add) are traceable."
 
 (defun claude-repl--after-persp-activated (&rest _)
   "Handle perspective activation by scheduling a workspace switch.
+Captures `(+workspace-current-name)' at hook-fire time and passes it
+to the deferred `--on-workspace-switch' so the call operates on the
+workspace that just activated, not whatever happens to be current
+when the run-at-time-0 timer eventually fires (rapid back-to-back
+switches would otherwise have every deferred call resolve to the
+latest ws, dropping bookkeeping on the intermediate ones).
+
 Logs `persp-names-cache' so cache mutations across persp lifecycle
 events (kill, switch, add) are traceable."
   (claude-repl--log (+workspace-current-name) "after-persp-activated: entry cache=%S"
                     (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
-  (run-at-time 0 nil #'claude-repl--on-workspace-switch))
+  (let ((ws (+workspace-current-name)))
+    (run-at-time 0 nil #'claude-repl--on-workspace-switch ws)))
 
 (when (modulep! :ui workspaces)
   (add-hook 'persp-before-deactivate-functions

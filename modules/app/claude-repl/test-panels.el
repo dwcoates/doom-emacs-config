@@ -1448,6 +1448,33 @@ bypassed by `window--resize-mini-window' (ignore=t), so the stronger
       ;; Should not error -- the when guard skips mark-viewed
       (claude-repl--on-workspace-switch))))
 
+(ert-deftest claude-repl-test-panels-on-workspace-switch-explicit-ws-overrides-current ()
+  "An explicit WS argument propagates to every per-ws side effect,
+overriding `(+workspace-current-name)' at call time.  This is how
+`--after-persp-activated' delivers the just-switched-to ws name to
+the deferred call so back-to-back switches don't collapse onto the
+latest one."
+  (claude-repl-test--with-clean-state
+    (let ((received-ws nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "racing-current"))
+                ((symbol-function 'claude-repl--maybe-sweep-hidden-on-switch)
+                 (lambda (ws) (push (cons :sweep ws) received-ws)))
+                ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil))
+                ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
+                ((symbol-function 'claude-repl--reset-vterm-cursors) (lambda () nil))
+                ((symbol-function 'claude-repl--drain-pending-magit)
+                 (lambda (ws) (push (cons :magit ws) received-ws)))
+                ((symbol-function 'claude-repl--drain-pending-initial-buffers)
+                 (lambda (ws) (push (cons :init-bufs ws) received-ws)))
+                ((symbol-function 'claude-repl--drain-pending-show-panels)
+                 (lambda (ws) (push (cons :show-panels ws) received-ws)))
+                ((symbol-function 'claude-repl--maybe-autoselect-input)
+                 (lambda (ws) (push (cons :autoselect ws) received-ws))))
+        (claude-repl--on-workspace-switch "captured-ws")
+        ;; Every per-ws helper got "captured-ws", not "racing-current".
+        (should (cl-every (lambda (e) (equal (cdr e) "captured-ws"))
+                          received-ws))))))
+
 ;;;; ---- Tests: maybe-autoselect-input ----
 
 (ert-deftest claude-repl-test-panels-maybe-autoselect-input-selects-visible-input ()
