@@ -757,21 +757,12 @@ current `(NAME :project-dir DIR)' plist shape."
            ((listp payload) payload)
            (t (error "claude-repl: malformed snapshot entry: %S" entry))))))
 
-(defun claude-repl-save-workspace-snapshot ()
-  "Save the current set of claude-repl workspaces to a hidden file.
-Writes a list of (NAME :project-dir DIR) entries sourced from
-`claude-repl--workspaces' (the live hash).
-
-`:priority' is deliberately NOT included here — it lives in each
-project's `<root>/.claude/emacs/state.el' (written by
-`claude-repl--state-save', read by `claude-repl--initialize-ws-env'
-and the fast-path `claude-repl--hydrate-priority-from-state').  Saving
-it in the roster too would create two sources of truth.
-
-Called interactively prints a confirmation; called from
-`claude-repl--state-save' (the common path) stays silent so the
-roster-piggyback save doesn't spam the echo area on every state mutation."
-  (interactive)
+(defun claude-repl--collect-snapshot-entries ()
+  "Return a list of (NAME :project-dir DIR) entries from `claude-repl--workspaces'.
+Includes every workspace whose plist has a non-nil `:project-dir'.
+`:priority' is deliberately NOT included — it lives in each project's
+`<root>/.claude/emacs/state.el' so the roster doesn't become a second
+source of truth."
   (let ((entries (make-hash-table :test 'equal)))
     (maphash (lambda (ws _plist)
                (when-let ((dir (claude-repl--ws-get ws :project-dir)))
@@ -780,26 +771,83 @@ roster-piggyback save doesn't spam the echo area on every state mutation."
     (let (snapshot)
       (maphash (lambda (ws plist) (push (cons ws plist) snapshot))
                entries)
-      (if (not (claude-repl--snapshot-save-safe-p (length snapshot)))
-          (claude-repl--log nil
-                            "save-workspace-snapshot: ABORTED — loader hasn't run this session and on-disk roster is larger than live (%d)"
-                            (length snapshot))
-        (claude-repl--log nil "write-sexp-file: file=%s" claude-repl-workspace-snapshot-file)
-        (let ((dir (file-name-directory claude-repl-workspace-snapshot-file)))
-          (when (and dir (not (file-directory-p dir)))
-            (make-directory dir t)))
-        (claude-repl--archive-workspace-snapshot)
-        (with-temp-file claude-repl-workspace-snapshot-file
-          (insert "(")
-          (let ((first t))
-            (dolist (entry snapshot)
-              (unless first (insert "\n "))
-              (setq first nil)
-              (prin1 entry (current-buffer))))
-          (insert ")"))
-        (when (called-interactively-p 'interactive)
-          (message "Saved %d workspace(s) to %s"
-                   (length snapshot) claude-repl-workspace-snapshot-file))))))
+      snapshot)))
+
+(defun claude-repl--write-workspace-snapshot (snapshot)
+  "Write SNAPSHOT (a list of entries) to `claude-repl-workspace-snapshot-file'.
+Creates the parent directory if missing and archives the previous file
+before overwriting.  Caller is responsible for any pre-write checks
+\(e.g. `--snapshot-save-safe-p' or interactive confirmation)."
+  (claude-repl--log nil "write-sexp-file: file=%s" claude-repl-workspace-snapshot-file)
+  (let ((dir (file-name-directory claude-repl-workspace-snapshot-file)))
+    (when (and dir (not (file-directory-p dir)))
+      (make-directory dir t)))
+  (claude-repl--archive-workspace-snapshot)
+  (with-temp-file claude-repl-workspace-snapshot-file
+    (insert "(")
+    (let ((first t))
+      (dolist (entry snapshot)
+        (unless first (insert "\n "))
+        (setq first nil)
+        (prin1 entry (current-buffer))))
+    (insert ")")))
+
+(defun claude-repl-save-workspace-snapshot ()
+  "Save the current set of claude-repl workspaces to a hidden file.
+Writes a list of (NAME :project-dir DIR) entries sourced from
+`claude-repl--workspaces' (the live hash).
+
+Refuses to overwrite when the loader hasn't run this session AND the
+on-disk roster is larger than the live hash — the auto-piggyback save
+path uses this to avoid clobbering a richer snapshot with a half-
+populated live set during startup.  Use
+`claude-repl-update-workspace-snapshot' to force an overwrite.
+
+Called interactively prints a confirmation; called from
+`claude-repl--state-save' (the common path) stays silent so the
+roster-piggyback save doesn't spam the echo area on every state mutation."
+  (interactive)
+  (let ((snapshot (claude-repl--collect-snapshot-entries)))
+    (if (not (claude-repl--snapshot-save-safe-p (length snapshot)))
+        (claude-repl--log nil
+                          "save-workspace-snapshot: ABORTED — loader hasn't run this session and on-disk roster is larger than live (%d)"
+                          (length snapshot))
+      (claude-repl--write-workspace-snapshot snapshot)
+      (when (called-interactively-p 'interactive)
+        (message "Saved %d workspace(s) to %s"
+                 (length snapshot) claude-repl-workspace-snapshot-file)))))
+
+(defun claude-repl-update-workspace-snapshot ()
+  "Force-write the current live workspace roster to the snapshot file.
+Captures every workspace in `claude-repl--workspaces' with a
+`:project-dir' (the same set offered by `claude-repl-nuke-workspace')
+and overwrites `claude-repl-workspace-snapshot-file' unconditionally.
+
+Unlike `claude-repl-save-workspace-snapshot', this command bypasses the
+loader-hasn't-run safety guard.  If the write would reduce the entry
+count compared to what is currently on disk, prompts for confirmation
+first so a slip can't silently shrink the roster.
+
+Use this after manually creating / killing workspaces when you want
+the on-disk snapshot to reflect the current live state immediately,
+without waiting for the next `--state-save' piggyback."
+  (interactive)
+  (let* ((snapshot (claude-repl--collect-snapshot-entries))
+         (live-count (length snapshot))
+         (file claude-repl-workspace-snapshot-file)
+         (on-disk (and (file-exists-p file)
+                       (condition-case _
+                           (claude-repl--read-sexp-file-if-exists file)
+                         (error nil))))
+         (on-disk-count (length on-disk)))
+    (when (and (> on-disk-count live-count)
+               (not (y-or-n-p
+                     (format "On-disk snapshot has %d entries, live has %d.  Overwrite anyway? "
+                             on-disk-count live-count))))
+      (user-error "Aborted"))
+    (claude-repl--write-workspace-snapshot snapshot)
+    (message "Updated snapshot: %d workspace(s) -> %s"
+             live-count file)))
 
 (defun claude-repl--clean-frame-foreign-windows (ws)
   "Delete frame windows whose buffer is owned by a different workspace.

@@ -1191,6 +1191,68 @@ kill so the workspace can be re-opened with its identity intact."
               (should-not (assoc "ws2" data))))
         (delete-file snapshot-file)))))
 
+(ert-deftest claude-repl-cmd-test-update-workspace-snapshot/forces-write-bypassing-safe-guard ()
+  "update-workspace-snapshot writes the live roster even when the loader
+hasn't run and the on-disk roster is larger — `save-workspace-snapshot'
+aborts in that case, but the explicit update command bypasses the
+safety check after a user confirmation."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-")))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file)
+                (claude-repl--snapshot-loaded-p nil))
+            ;; Seed a richer on-disk roster than the live hash.
+            (claude-repl--write-sexp-file snapshot-file
+                                          '(("old-a" :project-dir "/tmp/old-a")
+                                            ("old-b" :project-dir "/tmp/old-b")
+                                            ("old-c" :project-dir "/tmp/old-c")))
+            (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+            (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) t)))
+              (claude-repl-update-workspace-snapshot))
+            (let ((data (claude-repl--read-sexp-file snapshot-file)))
+              (should (= 1 (length data)))
+              (should (equal (plist-get (cdr (assoc "ws1" data)) :project-dir) "/tmp/ws1"))))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-update-workspace-snapshot/aborts-on-shrink-decline ()
+  "update-workspace-snapshot aborts when the user declines the shrink
+confirmation, leaving the on-disk file untouched."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-")))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          '(("old-a" :project-dir "/tmp/old-a")
+                                            ("old-b" :project-dir "/tmp/old-b")))
+            (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+            (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) nil)))
+              (should-error (claude-repl-update-workspace-snapshot)
+                            :type 'user-error))
+            ;; File contents are unchanged.
+            (let ((data (claude-repl--read-sexp-file snapshot-file)))
+              (should (= 2 (length data)))))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-update-workspace-snapshot/no-prompt-when-not-shrinking ()
+  "update-workspace-snapshot writes without confirmation when the live
+roster is at least as large as the on-disk one."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (prompted nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          '(("old-a" :project-dir "/tmp/old-a")))
+            (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+            (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+            (cl-letf (((symbol-function 'y-or-n-p)
+                       (lambda (_prompt) (setq prompted t) t)))
+              (claude-repl-update-workspace-snapshot))
+            (should-not prompted)
+            (let ((data (claude-repl--read-sexp-file snapshot-file)))
+              (should (= 2 (length data)))))
+        (delete-file snapshot-file)))))
+
 ;;;; ---- Tests: clean-frame-foreign-windows ----
 
 (defun claude-repl-test--make-owned-buffer (name ws)
