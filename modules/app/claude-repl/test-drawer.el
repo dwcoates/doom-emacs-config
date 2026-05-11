@@ -135,6 +135,49 @@ the 1Hz status poll when the drawer is not the selected window)."
         (should (string-match-p (regexp-quote claude-repl-drawer-current-arrow)
                                 disp))))))
 
+(ert-deftest claude-repl-drawer-test-render-anchors-cursor-to-workspace ()
+  "`--render' restores point onto the same workspace by identity (not line
+number) so the current-entry arrow tracks the entry through layout shifts
+above the cursor — e.g. a parent above a nested child collapses between
+polls, shrinking the buffer; line-number restoration would land on a now-
+shorter intermediate line where `--workspace-at-point' is nil, deleting the
+overlay.  Tests the workspace-anchored restoration path."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "parent"
+                                       :priority "p1"
+                                       :project-dir "/tmp/parent"
+                                       :detail-branch "feature/x"
+                                       :detail-master-ahead 7
+                                       :detail-last-commit "fix: thing")
+    (claude-repl-drawer-test--register "child"
+                                       :priority "p2"
+                                       :project-dir "/tmp/child"
+                                       :source-ws-dir "/tmp/parent")
+    (cl-letf (((symbol-function 'claude-repl--ws-name-for-dir)
+               (lambda (dir)
+                 (cond ((equal dir "/tmp/parent") "parent")
+                       ((equal dir "/tmp/child")  "child")))))
+      (claude-repl-drawer-test--with-buffer
+        (claude-repl-drawer--ensure-expanded-set)
+        (puthash "parent" t claude-repl-drawer--expanded-set)
+        (claude-repl-drawer--render)
+        ;; Park on the nested child while parent is expanded.
+        (should (claude-repl-drawer--goto-workspace-line "child"))
+        (claude-repl-drawer--update-current-entry-overlay)
+        ;; Collapse parent — child's line number shifts up.  A poll-driven
+        ;; re-render fires before the user moves point.
+        (remhash "parent" claude-repl-drawer--expanded-set)
+        (claude-repl-drawer--render)
+        ;; Point must still be on the child, and the overlay must still
+        ;; mark the child's gutter region.
+        (should (equal (claude-repl-drawer--workspace-at-point) "child"))
+        (let ((ov claude-repl-drawer--current-entry-overlay))
+          (should (overlayp ov))
+          (should (overlay-buffer ov))
+          (should (equal (get-text-property (overlay-start ov)
+                                            'claude-repl-drawer-workspace)
+                         "child")))))))
+
 ;;;; ---- Expand-detail ----
 
 (ert-deftest claude-repl-drawer-test-toggle-expand-adds-and-removes ()

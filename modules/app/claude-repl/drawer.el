@@ -726,6 +726,14 @@ Empty sections render the `(none)' placeholder under the header."
   (let* ((inhibit-read-only t)
          (saved-line (line-number-at-pos))
          (saved-col  (current-column))
+         ;; Anchor cursor restoration by workspace identity, not just line
+         ;; number: line numbers shift when an entry above the cursor
+         ;; expands/collapses or appears/disappears between polls, and
+         ;; `forward-line saved-line' can then land on a non-workspace
+         ;; line (detail line, blank, section header), which causes
+         ;; `--update-current-entry-overlay' to delete the arrow.  Nested
+         ;; children sit deeper in the buffer and so are most affected.
+         (saved-ws   (claude-repl-drawer--workspace-at-point))
          (current    (claude-repl-drawer--current-ws))
          (sections   (claude-repl-drawer--partition-by-section
                       (hash-table-keys claude-repl--workspaces))))
@@ -742,9 +750,11 @@ Empty sections render the `(none)' placeholder under the header."
       (insert "\n")
       (claude-repl-drawer--insert-section
        (format "MERGED (%d)" (length mergeds)) mergeds current :merged))
-    (goto-char (point-min))
-    (forward-line (1- saved-line))
-    (move-to-column saved-col)
+    (unless (and saved-ws
+                 (claude-repl-drawer--goto-workspace-line saved-ws))
+      (goto-char (point-min))
+      (forward-line (1- saved-line))
+      (move-to-column saved-col))
     ;; `erase-buffer' above collapses the current-entry overlay to (1,1).
     ;; Reposition it here so the arrow persists across 1Hz status-poll
     ;; renders, when the drawer's buffer-local post-command-hook is not
