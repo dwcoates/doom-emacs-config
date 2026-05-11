@@ -196,20 +196,22 @@
         (+dwc/magit-status-workspace)
         (should (= delete-calls 0))))))
 
-(ert-deftest claude-repl-test-magit-status-workspace-fullscreen-splits-left-of-root ()
-  "When claude is fullscreen, splits the frame's root window with the new window on the left."
+(ert-deftest claude-repl-test-magit-status-workspace-fullscreen-splits-left-of-main ()
+  "When claude is fullscreen, splits the frame's MAIN window (side windows
+excluded) with the new window on the left — so the new magit window can
+never land as a sibling of the drawer side window."
   (claude-repl-test--with-clean-state
     (let ((split-args nil))
       (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
-                ((symbol-function 'frame-root-window) (lambda (&rest _) 'fake-root))
+                ((symbol-function 'window-main-window) (lambda (&rest _) 'fake-main))
                 ((symbol-function 'split-window)
                  (lambda (&rest args) (setq split-args args) 'fake-left-win))
                 ((symbol-function 'select-window) #'ignore)
                 ((symbol-function 'magit-status) #'ignore))
         (+dwc/magit-status-workspace)
-        (should (equal split-args '(fake-root nil left)))))))
+        (should (equal split-args '(fake-main nil left)))))))
 
 (ert-deftest claude-repl-test-magit-status-workspace-fullscreen-selects-new-left-window ()
   "When claude is fullscreen, the newly-created left window is selected before opening magit."
@@ -303,21 +305,23 @@ Cleanup kills the buffers in an `unwind-protect'."
           (+dwc/magit-status-workspace)
           (should (equal delete-args (list vterm-buf input-buf))))))))
 
-(ert-deftest claude-repl-test-magit-status-workspace-panels-visible-splits-left-of-root ()
-  "When panels are visible (not fullscreen), splits frame root from the left."
+(ert-deftest claude-repl-test-magit-status-workspace-panels-visible-splits-left-of-main ()
+  "When panels are visible (not fullscreen), splits the frame's MAIN window
+from the left — never the frame root, so the new magit window cannot land
+adjacent to the drawer side window."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-panels-visible
       (let ((split-args nil))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
                   ((symbol-function 'claude-repl--delete-non-panel-windows) #'ignore)
-                  ((symbol-function 'frame-root-window) (lambda (&rest _) 'fake-root))
+                  ((symbol-function 'window-main-window) (lambda (&rest _) 'fake-main))
                   ((symbol-function 'split-window)
                    (lambda (&rest args) (setq split-args args) 'fake-left-win))
                   ((symbol-function 'select-window) #'ignore)
                   ((symbol-function 'magit-status) #'ignore))
           (+dwc/magit-status-workspace)
-          (should (equal split-args '(fake-root nil left))))))))
+          (should (equal split-args '(fake-main nil left))))))))
 
 (ert-deftest claude-repl-test-magit-status-workspace-panels-visible-magit-in-new-left-window ()
   "When panels are visible (not fullscreen), magit opens in the new left window."
@@ -362,6 +366,152 @@ Cleanup kills the buffers in an `unwind-protect'."
                 ((symbol-function 'magit-status) #'ignore))
         (+dwc/magit-status-workspace)
         (should (= split-calls 0))))))
+
+;;;; ---- Tests: claude-repl--existing-magit-status-window ----
+
+(defmacro claude-repl-test--with-magit-mode-buffer (sym &rest body)
+  "Bind SYM to a real buffer whose `major-mode' is `magit-status-mode',
+execute BODY, then kill the buffer."
+  (declare (indent 1))
+  `(let ((,sym (generate-new-buffer " *test-magit-status*")))
+     (unwind-protect
+         (progn
+           (with-current-buffer ,sym
+             (setq major-mode 'magit-status-mode))
+           ,@body)
+       (when (buffer-live-p ,sym) (kill-buffer ,sym)))))
+
+(defmacro claude-repl-test--with-buffer-in-selected-window (buf &rest body)
+  "Temporarily show BUF in the selected window, run BODY, restore prior buffer.
+Uses real Emacs window state rather than stubbing `window-list' /
+`window-buffer' — those are C primitives whose `cl-letf' overrides
+trigger native-comp trampoline compilation that fails in batch."
+  (declare (indent 1))
+  (let ((orig-buf (make-symbol "orig-buf"))
+        (win (make-symbol "win")))
+    `(let* ((,win (selected-window))
+            (,orig-buf (window-buffer ,win)))
+       (set-window-buffer ,win ,buf)
+       (unwind-protect
+           (progn ,@body)
+         (set-window-buffer ,win ,orig-buf)))))
+
+(ert-deftest claude-repl-test-existing-magit-status-window-finds-magit-window ()
+  "Returns the live, non-side window displaying a `magit-status-mode' buffer."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-magit-mode-buffer magit-buf
+      (claude-repl-test--with-buffer-in-selected-window magit-buf
+        (should (eq (claude-repl--existing-magit-status-window)
+                    (selected-window)))))))
+
+(ert-deftest claude-repl-test-existing-magit-status-window-returns-nil-when-none ()
+  "Returns nil when no window displays a `magit-status-mode' buffer."
+  (claude-repl-test--with-clean-state
+    ;; Selected window holds a vanilla buffer (fundamental-mode), so
+    ;; the search must yield no match.
+    (let ((plain-buf (generate-new-buffer " *test-plain*")))
+      (unwind-protect
+          (claude-repl-test--with-buffer-in-selected-window plain-buf
+            (should (null (claude-repl--existing-magit-status-window))))
+        (when (buffer-live-p plain-buf) (kill-buffer plain-buf))))))
+
+(ert-deftest claude-repl-test-existing-magit-status-window-skips-side-windows ()
+  "Side windows are excluded even if they hold a `magit-status-mode' buffer
+— guards against the drawer or any future side panel being mis-selected."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-magit-mode-buffer magit-buf
+      (claude-repl-test--with-buffer-in-selected-window magit-buf
+        (let ((win (selected-window)))
+          (unwind-protect
+              (progn
+                (set-window-parameter win 'window-side 'left)
+                (should (null (claude-repl--existing-magit-status-window))))
+            (set-window-parameter win 'window-side nil)))))))
+
+;;;; ---- Tests: +dwc/magit-status-workspace reuse-existing branch ----
+
+(defmacro claude-repl-test--with-existing-magit-win (win &rest body)
+  "Run BODY with `claude-repl--existing-magit-status-window' stubbed to
+return WIN."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'claude-repl--existing-magit-status-window)
+              (lambda (&rest _) ,win)))
+     ,@body))
+
+(ert-deftest claude-repl-test-magit-status-workspace-reuses-existing-magit-window ()
+  "When a magit-status window already exists, selects it and calls
+`magit-status' (refresh in place) — no split, no panel teardown."
+  (claude-repl-test--with-clean-state
+    (let ((selected nil)
+          (magit-args nil))
+      (claude-repl-test--with-existing-magit-win 'existing-win
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+                  ((symbol-function 'select-window) (lambda (w) (setq selected w)))
+                  ((symbol-function 'magit-status)
+                   (lambda (&rest args) (setq magit-args args))))
+          (+dwc/magit-status-workspace)
+          (should (eq selected 'existing-win))
+          (should (equal magit-args '("/tmp/proj"))))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-reuse-does-not-split ()
+  "Reuse branch must not call `split-window' — a second magit window must
+never appear next to the drawer."
+  (claude-repl-test--with-clean-state
+    (let ((split-calls 0))
+      (claude-repl-test--with-existing-magit-win 'existing-win
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+                  ((symbol-function 'select-window) #'ignore)
+                  ((symbol-function 'magit-status) #'ignore)
+                  ((symbol-function 'split-window)
+                   (lambda (&rest _) (cl-incf split-calls) 'should-not-happen)))
+          (+dwc/magit-status-workspace)
+          (should (= split-calls 0)))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-reuse-skips-delete-non-panel-windows ()
+  "Reuse branch must not tear down panel-adjacent windows — only the
+existing magit window is touched."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-panels-visible
+      (let ((delete-calls 0))
+        (claude-repl-test--with-existing-magit-win 'existing-win
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+                    ((symbol-function 'select-window) #'ignore)
+                    ((symbol-function 'magit-status) #'ignore)
+                    ((symbol-function 'claude-repl--delete-non-panel-windows)
+                     (lambda (&rest _) (cl-incf delete-calls))))
+            (+dwc/magit-status-workspace)
+            (should (= delete-calls 0))))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-reuse-takes-priority-over-fullscreen ()
+  "When BOTH an existing magit window AND `:fullscreen-config' are present,
+the reuse branch wins — no split, fullscreen-config is left alone (the
+existing magit window already shares the frame; no transition needed)."
+  (claude-repl-test--with-clean-state
+    (let ((split-calls 0))
+      (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
+      (claude-repl-test--with-existing-magit-win 'existing-win
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
+                  ((symbol-function 'select-window) #'ignore)
+                  ((symbol-function 'magit-status) #'ignore)
+                  ((symbol-function 'split-window)
+                   (lambda (&rest _) (cl-incf split-calls) 'should-not-happen)))
+          (+dwc/magit-status-workspace)
+          (should (= split-calls 0))
+          (should (eq (claude-repl--ws-get "test-ws" :fullscreen-config)
+                      'fake-config)))))))
+
+;;;; ---- Tests: claude-repl--magit-split-base-window ----
+
+(ert-deftest claude-repl-test-magit-split-base-prefers-window-main-window ()
+  "Returns `window-main-window' when available — guarantees splits land
+inside the non-side main area."
+  (cl-letf (((symbol-function 'window-main-window) (lambda (&rest _) 'fake-main))
+            ((symbol-function 'frame-root-window) (lambda (&rest _) 'fake-root)))
+    (should (eq (claude-repl--magit-split-base-window) 'fake-main))))
 
 (provide 'test-magit)
 ;;; test-magit.el ends here
