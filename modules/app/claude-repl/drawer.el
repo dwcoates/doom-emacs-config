@@ -1317,14 +1317,23 @@ immediately, not after the next command."
 (defun claude-repl-drawer-hide ()
   "Hide the workspace drawer.
 Clears the global visible-flag so the drawer no longer auto-appears
-on workspace switches."
+on workspace switches.
+
+Each drawer window is explicitly un-dedicated before deletion — the
+display-action gives the drawer regular (`t') dedication which does
+NOT block `delete-window' in modern Emacs, but the un-dedicate is
+preserved as defense against legacy strong-dedication code paths
+that may have set a non-`t' value.  Delegates the deletion itself to
+`claude-repl-window--delete-buffer-windows', which targets the
+buffer specifically and bypasses the side-window skip — drawer
+hiding genuinely wants to delete a side window."
   (interactive)
   (setq claude-repl-drawer--global-visible-p nil)
   (when-let ((buf (get-buffer claude-repl-drawer-buffer-name)))
     (dolist (win (get-buffer-window-list buf nil t))
       (when (window-live-p win)
-        (set-window-dedicated-p win nil)
-        (delete-window win)))))
+        (set-window-dedicated-p win nil)))
+    (claude-repl-window--delete-buffer-windows buf)))
 
 ;;;; Global drawer-mirror dispatch -----------------------------------------
 

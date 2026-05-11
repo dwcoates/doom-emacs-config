@@ -232,6 +232,74 @@ and returns an empty list."
       (should (window-live-p main))
       (should (window-live-p extra)))))
 
+;;;; ---- Delete by buffer ----
+
+(ert-deftest claude-repl-window-test-delete-buffer-windows-deletes-window ()
+  "`--delete-buffer-windows' deletes the window showing BUF."
+  (claude-repl-window-test--with-temp-frame
+    (let* ((buf  (generate-new-buffer " *test-target*"))
+           (main (selected-window))
+           (extra (split-window main)))
+      (set-window-buffer extra buf)
+      (unwind-protect
+          (progn
+            (claude-repl-window--delete-buffer-windows buf)
+            (should-not (window-live-p extra))
+            (should (window-live-p main)))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-window-test-delete-buffer-windows-deletes-side-window ()
+  "`--delete-buffer-windows' deletes a side window targeting BUF —
+specifically, the workspace drawer hide path needs this to work
+even though `--delete-where' would skip side windows by default."
+  (claude-repl-window-test--with-temp-frame
+    (let* ((buf  (generate-new-buffer " *test-side-target*"))
+           (side (display-buffer-in-side-window
+                  buf '((side . left) (slot . 0)))))
+      (unwind-protect
+          (progn
+            (should (window-live-p side))
+            (should (claude-repl-window--side-window-p side))
+            (claude-repl-window--delete-buffer-windows buf)
+            (should-not (window-live-p side)))
+        (when (window-live-p side) (delete-window side))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-window-test-delete-buffer-windows-nil-buf-noop ()
+  "`--delete-buffer-windows' with a nil buffer is a no-op."
+  (claude-repl-window-test--with-temp-frame
+    (let* ((main (selected-window))
+           (extra (split-window main))
+           (deleted (claude-repl-window--delete-buffer-windows nil)))
+      (should (null deleted))
+      (should (window-live-p main))
+      (should (window-live-p extra)))))
+
+(ert-deftest claude-repl-window-test-delete-buffer-windows-killed-buf-noop ()
+  "`--delete-buffer-windows' on a killed buffer is a no-op (returns
+nil) — defensive for callers passing stale buffer references."
+  (claude-repl-window-test--with-temp-frame
+    (let* ((buf (generate-new-buffer " *test-killed*"))
+           (main (selected-window))
+           (extra (split-window main)))
+      (kill-buffer buf)
+      (let ((deleted (claude-repl-window--delete-buffer-windows buf)))
+        (should (null deleted))
+        (should (window-live-p main))
+        (should (window-live-p extra))))))
+
+(ert-deftest claude-repl-window-test-delete-buffer-windows-returns-deleted ()
+  "`--delete-buffer-windows' returns the list of windows it deleted."
+  (claude-repl-window-test--with-temp-frame
+    (let* ((buf  (generate-new-buffer " *test-return*"))
+           (main (selected-window))
+           (extra (split-window main)))
+      (set-window-buffer extra buf)
+      (unwind-protect
+          (let ((deleted (claude-repl-window--delete-buffer-windows buf)))
+            (should (equal deleted (list extra))))
+        (kill-buffer buf)))))
+
 ;;;; ---- Integration: delete-non-panel-windows regression ----
 
 (ert-deftest claude-repl-window-test-delete-non-panel-preserves-side-windows ()

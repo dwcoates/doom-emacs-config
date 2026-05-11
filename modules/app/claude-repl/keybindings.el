@@ -322,17 +322,15 @@ Use this to verify the processor works independently of the file watcher."
 
 (defun claude-repl--kill-owned-panel-buffers (ws)
   "Kill all Claude panel buffers owned by workspace WS.
-Closes their windows and silences process exit queries before killing."
+Closes their windows (selected-frame, to preserve historical scope)
+and silences process exit queries before killing."
   (claude-repl--log ws "kill-owned-panel-buffers: entry ws=%s" ws)
   (dolist (buf (buffer-list))
     (when (and (buffer-live-p buf)
                (claude-repl--claude-panel-buffer-p buf)
                (equal ws (buffer-local-value 'claude-repl--owning-workspace buf)))
       (claude-repl--log ws "kill-owned-panel-buffers: killing buffer=%s" (buffer-name buf))
-      (when-let ((win (get-buffer-window buf)))
-        (condition-case err
-            (delete-window win)
-          (error (message "[claude-repl] could not close window for %s: %S" (buffer-name buf) err))))
+      (claude-repl-window--delete-buffer-windows buf :all-frames nil)
       (let ((proc (get-buffer-process buf)))
         (when proc (set-process-query-on-exit-flag proc nil)))
       (kill-buffer buf))))

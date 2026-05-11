@@ -169,7 +169,13 @@ drawer afterward).
 FRAME limits the scan; defaults to the selected frame.  Deletion is
 wrapped in `condition-case' so one undeletable window doesn't abort
 the sweep — the error is logged via `message' and iteration
-continues."
+continues.
+
+When the caller knows the target buffer ahead of time, prefer
+`claude-repl-window--delete-buffer-windows' — it's both simpler at
+the call site and intentionally bypasses the side-window skip
+(because targeting a specific buffer means the caller has already
+opted into specificity)."
   (let ((deleted '()))
     (dolist (win (window-list frame))
       (when (and (window-live-p win)
@@ -183,6 +189,36 @@ continues."
           (error
            (message "[claude-repl] window--delete-where: could not delete %s: %S"
                     win err)))))
+    (nreverse deleted)))
+
+(cl-defun claude-repl-window--delete-buffer-windows (buf &key (all-frames t))
+  "Delete every live window currently displaying BUF.
+
+ALL-FRAMES has the same semantics as `get-buffer-window-list's
+ALL-FRAMES argument — default `t' scans every frame; `nil' scans
+only the selected frame; a frame value scans that frame's windows.
+
+This helper deliberately bypasses the side-window skip that
+`--delete-where' applies, because the caller is targeting a specific
+buffer — if BUF lives in a side window (e.g. the workspace drawer
+being hidden), that side window is the precise target.
+
+A nil BUF or a killed BUF is a no-op (returns nil).  Errors during
+individual `delete-window' calls are caught and logged via `message'
+so one undeletable window doesn't abort the sweep — typical cause is
+the buffer's window being the lone window in a frame.  Returns the
+list of windows that were actually deleted."
+  (let ((deleted '()))
+    (when (and buf (buffer-live-p buf))
+      (dolist (win (get-buffer-window-list buf nil all-frames))
+        (when (window-live-p win)
+          (condition-case err
+              (progn
+                (delete-window win)
+                (push win deleted))
+            (error
+             (message "[claude-repl] window--delete-buffer-windows: could not delete %s: %S"
+                      win err))))))
     (nreverse deleted)))
 
 (provide 'claude-repl-window)

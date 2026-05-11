@@ -65,12 +65,13 @@ window is selected so the user can start typing immediately."
   (and b (buffer-name b)))
 
 (defun claude-repl--close-buffer-window (buf)
-  "Close the window displaying BUF.  Warns if the window cannot be closed."
-  (when-let ((win (get-buffer-window buf)))
-    (condition-case err
-        (delete-window win)
-      (error (message "[claude-repl] could not close window for %s: %S"
-                      (claude-repl--safe-buffer-name buf) err)))))
+  "Close windows displaying BUF in the selected frame.
+Delegates to `claude-repl-window--delete-buffer-windows' with
+`:all-frames nil' to preserve the historical selected-frame-only
+scope.  If a panel buffer is torn out to another frame, this
+function leaves that frame's window alone — by design, since the
+caller is doing a per-frame teardown."
+  (claude-repl-window--delete-buffer-windows buf :all-frames nil))
 
 (defun claude-repl--close-buffer-windows (&rest bufs)
   "Close windows displaying any of BUFS."
@@ -521,16 +522,31 @@ loading placeholder exists (the vterm has not been swapped in yet)."
       result)))
 
 (defun claude-repl--sync-panels ()
-  "Close any Claude panel whose partner is no longer visible."
-  (claude-repl--log-verbose (+workspace-current-name) "sync-panels: entry windows=%d" (length (window-list)))
-  (let ((orphan-count 0))
-    (dolist (win (window-list))
-      (let ((name (buffer-name (window-buffer win))))
-        (when (claude-repl--orphaned-panel-p name)
-          (setq orphan-count (1+ orphan-count))
-          (claude-repl--log (+workspace-current-name) "sync-panels closing orphaned %s" name)
-          (delete-window win))))
-    (claude-repl--log-verbose (+workspace-current-name) "sync-panels: closed %d orphans" orphan-count)))
+  "Close any Claude panel whose partner is no longer visible.
+Side windows (e.g. the drawer) can never be claude panels by
+predicate construction, so the default `--delete-where' side-skip
+costs nothing and remains defense-in-depth.
+
+Logs each orphan's buffer name BEFORE the sweep (capturing names
+while windows are still live) so the per-orphan log survives the
+deletion that follows."
+  (let* ((ws (+workspace-current-name))
+         (orphan-names
+          (cl-loop for win in (window-list)
+                   for name = (buffer-name (window-buffer win))
+                   when (claude-repl--orphaned-panel-p name)
+                   collect name)))
+    (claude-repl--log-verbose ws "sync-panels: entry windows=%d"
+                              (length (window-list)))
+    (dolist (name orphan-names)
+      (claude-repl--log ws "sync-panels closing orphaned %s" name))
+    (let ((deleted
+           (claude-repl-window--delete-where
+            (lambda (win)
+              (claude-repl--orphaned-panel-p
+               (buffer-name (window-buffer win)))))))
+      (claude-repl--log-verbose ws "sync-panels: closed %d orphans"
+                                (length deleted)))))
 
 ;; Keep visible Claude vterm buffers scrolled to the cursor.
 ;; Skips the selected window so clicking into vterm to read/copy isn't disrupted.

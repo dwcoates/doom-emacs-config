@@ -882,22 +882,26 @@ value and writes :repl-state :dead."
 ;;;; ---- Tests: kill-owned-panel-buffers closes window before killing ----
 
 (ert-deftest claude-repl-test-kill-owned-panel-buffers-closes-window ()
-  "kill-owned-panel-buffers should close the buffer's window before killing the buffer."
+  "kill-owned-panel-buffers should close the buffer's window before
+killing the buffer.  Asserts via the contract: the window.el helper
+`claude-repl-window--delete-buffer-windows' is invoked with the
+panel buffer before `kill-buffer'.  Pre-consolidation this test
+intercepted `get-buffer-window' / `delete-window' directly; now the
+deletion is routed through the helper so the contract test follows."
   (let ((buf (get-buffer-create "*claude-panel-a1b2c3d4*"))
-        (window-deleted nil))
+        (helper-called-with nil)
+        (kill-called-with nil))
     (unwind-protect
         (progn
           (with-current-buffer buf
             (setq-local claude-repl--owning-workspace "target-ws"))
-          (cl-letf (((symbol-function 'get-buffer-window)
-                     (lambda (_buf &optional _all-frames) 'fake-window))
-                    ((symbol-function 'delete-window)
-                     (lambda (win)
-                       (when (eq win 'fake-window)
-                         (setq window-deleted t)))))
+          (cl-letf (((symbol-function 'claude-repl-window--delete-buffer-windows)
+                     (lambda (b &rest _) (setq helper-called-with b)))
+                    ((symbol-function 'kill-buffer)
+                     (lambda (b) (setq kill-called-with b) t)))
             (claude-repl--kill-owned-panel-buffers "target-ws")
-            (should window-deleted)
-            (should-not (buffer-live-p buf))))
+            (should (eq helper-called-with buf))
+            (should (eq kill-called-with buf))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 ;;;; ---- Tests: set-owning-workspace (interactive) ----
