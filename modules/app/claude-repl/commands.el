@@ -1010,8 +1010,14 @@ the error-routing `condition-case'."
          (t
           (claude-repl--log nil "snapshot-load iter=%d/%d ws=%s dir=%s establishing"
                             iter total ws dir)
-          (setq claude-repl--snapshot-load-state
-                (plist-put claude-repl--snapshot-load-state :awaiting ws))
+          ;; `:awaiting' must remain nil across the establish call so that any
+          ;; re-entrant ready/timeout callback (today impossible because Emacs
+          ;; is single-threaded and `--establish-workspace' is fully
+          ;; synchronous, but a latent hazard if establish ever yields) sees
+          ;; `(equal ws :awaiting)' fail and treats the firing as a no-op
+          ;; instead of advancing the queue while establish is still on the
+          ;; stack.  The `condition-case' both handles a thrown error and
+          ;; ensures `:awaiting' is set only on the successful return path.
           (let ((establish-error nil))
             (condition-case err
                 (claude-repl--establish-workspace ws dir)
@@ -1021,13 +1027,11 @@ the error-routing `condition-case'."
                (message "[claude-repl] establish failed ws=%s — advancing" ws)))
             (cond
              (establish-error
-              ;; Failure: bump :load-error, clear :awaiting, advance
+              ;; Failure: bump :load-error, leave :awaiting nil, advance
               ;; immediately without arming the watchdog (no ws to wait on).
               (setq claude-repl--snapshot-load-state
                     (plist-put claude-repl--snapshot-load-state :load-error
                                (1+ (or (plist-get claude-repl--snapshot-load-state :load-error) 0))))
-              (setq claude-repl--snapshot-load-state
-                    (plist-put claude-repl--snapshot-load-state :awaiting nil))
               (claude-repl--snapshot-load-step))
              (t
               ;; Success: bump :loaded, then wait for ready (or detect
@@ -1038,15 +1042,15 @@ the error-routing `condition-case'."
               (cond
                ((claude-repl--snapshot-load-ws-ready-p ws)
                 ;; Already ready (e.g. re-load, or claude was already up) —
-                ;; advance immediately without waiting for a session_start.
+                ;; advance immediately without ever setting `:awaiting'.
                 (claude-repl--log ws "snapshot-load: ws=%s already ready — advancing without waiting" ws)
-                (setq claude-repl--snapshot-load-state
-                      (plist-put claude-repl--snapshot-load-state :awaiting nil))
                 (claude-repl--snapshot-load-step))
                (t
-                ;; Arm the watchdog and yield to the main loop.  The after-
-                ;; ready hook (or the watchdog) will call --snapshot-load-step
-                ;; again.
+                ;; Now — after establish has fully returned — mark `:awaiting'
+                ;; and arm the watchdog.  The after-ready hook (or the
+                ;; watchdog) will call --snapshot-load-step again.
+                (setq claude-repl--snapshot-load-state
+                      (plist-put claude-repl--snapshot-load-state :awaiting ws))
                 (setq claude-repl--snapshot-load-state
                       (plist-put claude-repl--snapshot-load-state :timeout-timer
                                  (run-with-timer

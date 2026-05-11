@@ -2074,6 +2074,62 @@ instead of leaving a zombie loader."
         (delete-file snapshot-file)
         (delete-directory dir-a t)))))
 
+(ert-deftest claude-repl-cmd-test-snapshot-load/awaiting-nil-during-establish ()
+  "Bug 6: `:awaiting' must remain nil for the duration of
+`--establish-workspace' so a re-entrant ready event (today impossible,
+latent if establish ever yields) is a no-op rather than advancing the
+queue mid-call.  Asserts the contract by firing
+`--snapshot-load-on-ready' synchronously from inside the mocked
+establish and verifying (a) `:awaiting' is nil at the re-entry point,
+(b) the queue did NOT advance to the next ws during establish, and
+(c) `:awaiting' is set to ws-a only after establish returned."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (dir-a (make-temp-file "claude-proj-a-" t))
+          (dir-b (make-temp-file "claude-proj-b-" t))
+          (established nil)
+          (reentry-awaiting 'unset)
+          (reentry-established 'unset))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+                       (lambda (ws _dir)
+                         (push ws established)
+                         (when (equal ws "ws-a")
+                           ;; Capture state at the moment of re-entry, then
+                           ;; synchronously fire the after-ready hook for ws-a
+                           ;; from inside establish.  The on-ready callback
+                           ;; must see `:awaiting' nil and short-circuit.
+                           (setq reentry-awaiting
+                                 (plist-get claude-repl--snapshot-load-state :awaiting))
+                           (claude-repl--snapshot-load-on-ready "ws-a")
+                           ;; If the re-entry had advanced the queue, ws-b
+                           ;; would have been pushed onto `established' here.
+                           (setq reentry-established (copy-sequence established)))))
+                      ;; Force the hook-driven path (not already-ready).
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) nil))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (claude-repl-load-workspace-snapshot)
+              ;; (a) During re-entry, `:awaiting' was nil — the on-ready check
+              ;; `(equal ws :awaiting)' failed, so the callback was a no-op.
+              (should (null reentry-awaiting))
+              ;; (b) The queue did NOT advance to ws-b while establish for
+              ;; ws-a was still on the stack.
+              (should (equal reentry-established '("ws-a")))
+              ;; (c) After establish returned and the watchdog branch ran,
+              ;; `:awaiting' is now ws-a — the loader is properly parked.
+              (should (equal "ws-a"
+                             (plist-get claude-repl--snapshot-load-state :awaiting)))
+              ;; Sanity: ws-b was never established.
+              (should (equal established '("ws-a")))))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)))))
+
 (ert-deftest claude-repl-cmd-test-snapshot-load-finish/idempotent ()
   "Calling `--snapshot-load-finish' twice is harmless: the second call
 sees nil state and short-circuits without printing bogus counters."
