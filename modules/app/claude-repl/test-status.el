@@ -2171,6 +2171,60 @@ states — only `:hidden' is filtered."
         (should-not claude-repl-hide-mode-enabled)
         (should (= redraw-called 2))))))
 
+;;;; ---- Tests: tabline entry packing (wrap between entries) ----
+
+(ert-deftest claude-repl-test-pack-tabline-entries-empty ()
+  "Empty entry list packs to a single empty line."
+  (should (equal (claude-repl--pack-tabline-entries nil 80) '(""))))
+
+(ert-deftest claude-repl-test-pack-tabline-entries-single-fits ()
+  "A single entry within WIDTH stays on one line."
+  (should (equal (claude-repl--pack-tabline-entries '("abc") 80) '("abc"))))
+
+(ert-deftest claude-repl-test-pack-tabline-entries-multiple-fit ()
+  "Multiple entries that fit join with single-space separators on one line."
+  (should (equal (claude-repl--pack-tabline-entries '("abc" "def" "ghi") 80)
+                 '("abc def ghi"))))
+
+(ert-deftest claude-repl-test-pack-tabline-entries-wraps-between ()
+  "Entries that exceed WIDTH wrap to a new line at the entry boundary."
+  ;; "aaaa bbbb" = 9 chars; width 8 forces "bbbb" to wrap.
+  (should (equal (claude-repl--pack-tabline-entries '("aaaa" "bbbb") 8)
+                 '("aaaa" "bbbb"))))
+
+(ert-deftest claude-repl-test-pack-tabline-entries-greedy-fill ()
+  "Packing is greedy: fills each line before wrapping."
+  ;; "aa bb" = 5; "aa bb cc" = 8; width 6 → "aa bb", then "cc".
+  (should (equal (claude-repl--pack-tabline-entries '("aa" "bb" "cc") 6)
+                 '("aa bb" "cc"))))
+
+(ert-deftest claude-repl-test-pack-tabline-entries-oversize-entry-own-line ()
+  "A single entry wider than WIDTH still occupies its own line, never split."
+  (should (equal (claude-repl--pack-tabline-entries '("xxxxxxxxxx") 4)
+                 '("xxxxxxxxxx"))))
+
+(ert-deftest claude-repl-test-pack-tabline-entries-oversize-entry-with-neighbors ()
+  "An oversize entry sits alone; smaller entries pack around it."
+  (should (equal (claude-repl--pack-tabline-entries '("a" "xxxxxxxxxx" "b") 4)
+                 '("a" "xxxxxxxxxx" "b"))))
+
+(ert-deftest claude-repl-test-tabline-rendered-entries-count ()
+  "rendered-entries returns one element per workspace name."
+  (claude-repl-test--with-clean-state
+    (let ((entries (claude-repl--tabline-rendered-entries '("a" "b" "c"))))
+      (should (= (length entries) 3))
+      (should (cl-every #'stringp entries)))))
+
+(ert-deftest claude-repl-test-tabline-advice-uses-rendered-entries ()
+  "tabline-advice's output is equivalent to mapconcating rendered-entries with a space."
+  (claude-repl-test--with-clean-state
+    (let* ((claude-repl--tabline-space-toggle nil)
+           (entries (claude-repl--tabline-rendered-entries '("a" "b")))
+           (expected (mapconcat #'identity entries " "))
+           (result (claude-repl--tabline-advice '("a" "b"))))
+      (should (equal (substring-no-properties result)
+                     (substring-no-properties expected))))))
+
 (provide 'test-status)
 
 ;;; test-status.el ends here

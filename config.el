@@ -431,13 +431,26 @@ this trick is necessary.")
 
   (defun +dwc/workspace-tabline-formatted ()
     "Format workspace list for tab-bar display.
-Appends a toggled trailing space tied to `+dwc/tab-bar-refresh-toggle'
-so the left-aligned tab-bar segment's string content actually changes
-across refresh ticks (the alternating-space trick — see the block
-comment above).  Without this, face-only status transitions
-(e.g. :thinking -> :done) stay invisible until a workspace switch."
-    (concat (+doom-dashboard--center (frame-width) (+workspace--tabline))
-            (if +dwc/tab-bar-refresh-toggle " " "")))
+Packs entries into lines no wider than `frame-width' so the tab-bar
+wraps only between entries (never mid-name), then centers each line
+independently.  Appends a toggled trailing space tied to
+`+dwc/tab-bar-refresh-toggle' so the left-aligned tab-bar segment's
+string content actually changes across refresh ticks (the
+alternating-space trick — see the block comment above).  Without the
+toggle, face-only status transitions (e.g. :thinking -> :done) stay
+invisible until a workspace switch."
+    (let* ((width (frame-width))
+           (entries (if (fboundp 'claude-repl--tabline-rendered-entries)
+                        (claude-repl--tabline-rendered-entries)
+                      (list (+workspace--tabline))))
+           (lines (if (fboundp 'claude-repl--pack-tabline-entries)
+                      (claude-repl--pack-tabline-entries entries width)
+                    (list (mapconcat #'identity entries " "))))
+           (centered (mapconcat (lambda (line)
+                                  (+doom-dashboard--center width line))
+                                lines "\n")))
+      (concat centered
+              (if +dwc/tab-bar-refresh-toggle " " ""))))
 
   (defun +dwc/current-workspace-name ()
     "Return current workspace name as an invisible tab-bar segment.

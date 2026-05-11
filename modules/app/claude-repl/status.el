@@ -978,6 +978,53 @@ workspaces disappear naturally once the next workspace switch triggers
        names)
     names))
 
+(cl-defun claude-repl--tabline-rendered-entries (&optional (names nil names-supplied-p))
+  "Return the list of rendered tab-entry strings for NAMES.
+
+Each element is the propertized output of `claude-repl--render-tab-entry'
+for the corresponding workspace, 1-indexed.  Used by both
+`claude-repl--tabline-advice' (which mapconcats with a space separator)
+and `+dwc/workspace-tabline-formatted' (which packs entries into lines
+so wrapping happens between entries, not mid-name)."
+  (let* ((names (if names-supplied-p names (+workspace-list-names)))
+         (current-name (+workspace-current-name)))
+    (cl-loop for name in names
+             for i from 1
+             collect (claude-repl--render-tab-entry name current-name i))))
+
+(defun claude-repl--pack-tabline-entries (entries width)
+  "Greedily pack ENTRIES into lines no wider than WIDTH columns.
+
+ENTRIES is a list of rendered tab-entry strings (see
+`claude-repl--tabline-rendered-entries').  Returns a list of line
+strings, where adjacent entries on the same line are joined with a
+single space.  A single entry wider than WIDTH still occupies its own
+line — packing never breaks an entry mid-string.
+
+The result is suitable for joining with \"\\n\" so the tab-bar wraps
+only at entry boundaries.  WIDTH is treated as a character count
+(`length' of propertized strings), which is approximate for entries
+containing display-property images but close enough that wrap points
+remain at entry boundaries."
+  (if (null entries)
+      (list "")
+    (let ((lines '())
+          (current nil)
+          (current-w 0))
+      (dolist (e entries)
+        (let ((ew (length e)))
+          (cond
+           ((null current)
+            (setq current e current-w ew))
+           ((> (+ current-w 1 ew) width)
+            (push current lines)
+            (setq current e current-w ew))
+           (t
+            (setq current (concat current " " e)
+                  current-w (+ current-w 1 ew))))))
+      (when current (push current lines))
+      (nreverse lines))))
+
 (cl-defun claude-repl--tabline-advice (&optional (names nil names-supplied-p))
   "Override for `+workspace--tabline' to color tabs by Claude status.
 
@@ -987,20 +1034,16 @@ persp level — `:hidden' workspaces get persp-killed by
 `claude-repl--sweep-hidden-workspaces' on the next workspace switch
 and disappear from `persp-names-cache' (and therefore the tab-bar)
 naturally."
-  (let* ((names (if names-supplied-p names (+workspace-list-names)))
+  (let* ((entries (claude-repl--tabline-rendered-entries
+                   (if names-supplied-p names (+workspace-list-names))))
          (current-name (+workspace-current-name))
          (states (mapcar (lambda (n)
                            (cons n (claude-repl--ws-display-state n)))
-                         names)))
+                         (if names-supplied-p names (+workspace-list-names)))))
     (claude-repl--log-verbose nil "tabline-advice: current=%s hide=%s states=%S"
                               current-name claude-repl-hide-mode-enabled states)
     (concat
-     (mapconcat
-      #'identity
-      (cl-loop for name in names
-               for i from 1
-               collect (claude-repl--render-tab-entry name current-name i))
-      " ")
+     (mapconcat #'identity entries " ")
      ;; Trailing space toggle — DO NOT REMOVE.  See the block comment
      ;; above `claude-repl--tabline-space-toggle' for why this exists.
      (if claude-repl--tabline-space-toggle " " ""))))
