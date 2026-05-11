@@ -459,6 +459,52 @@ the 1Hz status poll when the drawer is not the selected window)."
               (should (equal (claude-repl-drawer--workspace-at-point) "second"))))
         (kill-buffer buf)))))
 
+(ert-deftest claude-repl-drawer-test-global-next-refreshes-overlay-synchronously ()
+  "`claude-repl-drawer-global-next' updates the current-entry overlay
+immediately so the arrow tracks the new selection — does not wait for
+the next 1Hz render cycle (which used to cause perceived lag)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "first"  :priority "p1")
+    (claude-repl-drawer-test--register "second" :priority "p2")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (claude-repl-drawer-mode)
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-first-workspace))
+            (claude-repl-drawer-global-next)
+            (with-current-buffer buf
+              (let* ((ov claude-repl-drawer--current-entry-overlay)
+                     (start (and (overlayp ov) (overlay-start ov))))
+                (should (overlayp ov))
+                ;; Overlay must cover the "second" entry now.
+                (should (equal (get-text-property
+                                start 'claude-repl-drawer-workspace)
+                               "second")))))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-drawer-test-global-call-does-not-select-window ()
+  "`--call-in-drawer' must NOT change the selected window — keystroke
+overhead from window selection is what made global nav feel slow vs.
+local j/k.  Asserts the selected window is unchanged across the call."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (claude-repl-drawer-mode)
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-first-workspace))
+            (let ((before (selected-window))
+                  (called nil))
+              (claude-repl-drawer--call-in-drawer
+               (lambda () (setq called t)))
+              (should called)
+              (should (eq (selected-window) before))))
+        (kill-buffer buf)))))
+
 (ert-deftest claude-repl-drawer-test-global-call-errors-when-no-drawer ()
   "Global wrappers signal user-error when the drawer buffer doesn't exist."
   (when-let ((b (get-buffer claude-repl-drawer-buffer-name)))

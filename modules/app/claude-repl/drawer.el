@@ -1327,17 +1327,32 @@ on workspace switches."
 ;;;; Global drawer-mirror dispatch -----------------------------------------
 
 (defun claude-repl-drawer--call-in-drawer (fn)
-  "Call FN with the drawer buffer current and selected when possible.
-Uses `with-selected-window' when the drawer is visible so window
-point stays in sync with buffer point as FN moves cursor.  Errors if
-no drawer buffer exists — caller can recover by toggling the drawer
-open with `SPC o d' first."
+  "Call FN with the drawer buffer current; sync window-point + overlay
+afterward without selecting the drawer window.
+
+We deliberately avoid `with-selected-window' here.  Selecting and then
+unselecting the drawer window for every keystroke fires window-selection
+hooks and redisplays the modeline/hl-line/etc., which makes rapid global
+navigation (`C-S-n' / `C-S-p') feel sluggish compared to in-drawer `j' /
+`k' — those just move point inside the already-selected window and pay
+none of that overhead.
+
+Instead we run FN with the drawer current, then mirror the new
+buffer-point onto the displayed window via `set-window-point' and
+manually invoke `--post-command' so the current-entry arrow tracks
+immediately (the buffer-local post-command-hook would not fire because
+the actual command is running in the caller's buffer, not the drawer).
+
+Errors if no drawer buffer exists — caller can recover by toggling
+the drawer open with `SPC o d' first."
   (let* ((buf (or (get-buffer claude-repl-drawer-buffer-name)
                   (user-error "Drawer not open — `SPC o d' first")))
          (win (get-buffer-window buf t)))
-    (if win
-        (with-selected-window win (funcall fn))
-      (with-current-buffer buf (funcall fn)))))
+    (with-current-buffer buf
+      (funcall fn)
+      (claude-repl-drawer--post-command)
+      (when (window-live-p win)
+        (set-window-point win (point))))))
 
 (defun claude-repl-drawer-global-next ()
   "Move drawer cursor to next entry from any window."
