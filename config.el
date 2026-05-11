@@ -812,11 +812,15 @@ otherwise prompt via `projectile-completing-read'."
           (find-file recent-file)))))
   
   (defun +dwc/get-most-recent-file-in-project (project-root)
-    "Get the most recently accessed file in the given project."
-    (let ((project-files (seq-filter 
+    "Get the most recently accessed file in the given project.
+Uses `file-in-directory-p' (boundary-aware) rather than
+`string-prefix-p' — the latter would mis-match `/p/foo' against a file
+under `/p/foo-bar/' because the prefix isn't terminated at a path
+separator."
+    (let ((project-files (seq-filter
                           (lambda (file)
                             (and (file-exists-p file)
-                                 (string-prefix-p project-root file)))
+                                 (file-in-directory-p file project-root)))
                           recentf-list)))
       (car project-files)))
   
