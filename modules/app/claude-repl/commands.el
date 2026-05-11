@@ -918,37 +918,6 @@ the entire load."
     (setq claude-repl--snapshot-load-state
           (plist-put claude-repl--snapshot-load-state :timeout-timer nil))))
 
-(defun claude-repl--wstate-replace-foreign-buffers (wstate persp-bufs fallback)
-  "Walk WSTATE in-place, replacing dead or foreign buffer refs with FALLBACK.
-
-WSTATE is a `window-state-get' tree (writable=nil form, so buffer refs
-are buffer objects).  PERSP-BUFS is the buffer list of the destination
-persp.  A buffer is replaced when it's dead, or live but absent from
-PERSP-BUFS.  FALLBACK must be a live buffer (typically `*scratch*').
-
-When PERSP-BUFS is nil (persp-mode unavailable, persp not found, or
-freshly-initialized with an empty buffer list) only liveness is checked
-— otherwise every captured buffer would be flagged foreign and the
-restored layout would collapse to all-fallback panes.
-
-Returns WSTATE (mutated in place)."
-  (when (and (consp wstate) (proper-list-p wstate))
-    (cond
-     ((and (eq (car wstate) 'buffer) (consp (cdr wstate)))
-      (let* ((entry (cadr wstate))
-             (buf (cond ((bufferp entry) entry)
-                        ((stringp entry) (get-buffer entry))
-                        (t nil)))
-             (dead (not (buffer-live-p buf)))
-             (foreign (and persp-bufs (not (memq buf persp-bufs)))))
-        (when (or dead foreign)
-          (setcar (cdr wstate) fallback))))
-     (t
-      (dolist (child wstate)
-        (claude-repl--wstate-replace-foreign-buffers
-         child persp-bufs fallback)))))
-  wstate)
-
 (defun claude-repl--snapshot-load-finish ()
   "Finalize the recursive load: detach hook, return to origin, message.
 Idempotent: re-entry with `claude-repl--snapshot-load-state' already
@@ -960,34 +929,18 @@ can call finish without worrying whether a normal finish already ran."
     (claude-repl--snapshot-load-cancel-timer)
     (let* ((state claude-repl--snapshot-load-state)
            (origin (plist-get state :origin))
-           (origin-wstate (plist-get state :origin-window-state))
            (loaded (plist-get state :loaded))
            (skipped (plist-get state :skipped))
            (load-error (or (plist-get state :load-error) 0)))
+      ;; persp-mode saved origin's window-config when the loader's first
+      ;; `--establish-workspace' switched away from it, so this switch-back
+      ;; replays that layout — and persp-mode's restore filters foreign
+      ;; buffers, so panels owned by some other ws can't bleed in.
       (when (and origin
                  (fboundp '+workspace-exists-p)
                  (+workspace-exists-p origin)
                  (fboundp 'persp-frame-switch))
-        (persp-frame-switch origin)
-        ;; persp-frame-switch alone leaves whatever windows the last-loaded
-        ;; ws ended with — restoring the captured pre-load layout gives
-        ;; origin its original panes back instead of inheriting the last
-        ;; loaded ws's panels.  Before applying, walk the captured tree
-        ;; and replace dead or foreign buffer refs with `*scratch*' so a
-        ;; killed/reparented buffer can't resurrect into origin's frame.
-        ;; Frame may have died (rare); the ignore-errors keeps finish from
-        ;; crashing the recovery path that calls it.
-        (when (and origin-wstate (consp origin-wstate))
-          (let* ((persp (and (fboundp 'persp-get-by-name)
-                             (persp-get-by-name origin)))
-                 (persp-bufs (and persp (not (symbolp persp))
-                                  (fboundp 'persp-buffers)
-                                  (persp-buffers persp)))
-                 (fallback (get-buffer-create "*scratch*"))
-                 (sanitized (claude-repl--wstate-replace-foreign-buffers
-                             origin-wstate persp-bufs fallback)))
-            (ignore-errors
-              (window-state-put sanitized (frame-root-window) 'safe)))))
+        (persp-frame-switch origin))
       (force-mode-line-update t)
       (setq claude-repl--snapshot-loaded-p t)
       (claude-repl--log nil "snapshot-load: END loaded=%d skipped=%d load-error=%d returned-to=%s"
@@ -1164,22 +1117,10 @@ Returns to the workspace that was active when the load began."
       (user-error "No workspace snapshot at %s" file))
     (let ((queue (mapcar #'claude-repl--snapshot-entry-normalize snapshot))
           (origin-ws (and (fboundp '+workspace-current-name)
-                          (ignore-errors (+workspace-current-name))))
-          ;; Capture the frame's window layout as a `window-state-get'
-          ;; tree (not an opaque `current-window-configuration') so finish
-          ;; can validate each buffer reference before restoring.  Restoring
-          ;; an opaque wconf via `set-window-configuration' silently
-          ;; substitutes `*scratch*' for dead buffers AND happily resurrects
-          ;; foreign buffers (panels owned by some other ws that were on
-          ;; screen at load start) into origin's frame, bypassing persp
-          ;; filtering.  The walkable form lets us replace both classes of
-          ;; offending buffer with a safe fallback before `window-state-put'.
-          (origin-wstate (ignore-errors
-                           (window-state-get (frame-root-window) nil))))
+                          (ignore-errors (+workspace-current-name)))))
       (setq claude-repl--snapshot-load-state
             (list :queue queue
                   :origin origin-ws
-                  :origin-window-state origin-wstate
                   :awaiting nil
                   :loaded 0
                   :skipped 0

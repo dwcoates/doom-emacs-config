@@ -2045,283 +2045,32 @@ no ws is alive to wait on, advance immediately."
         (delete-directory dir-a t)
         (delete-directory dir-b t)))))
 
-(ert-deftest claude-repl-cmd-test-snapshot-load/captures-origin-window-state ()
-  "Loader captures a `window-state-get' tree into the load state at start,
-so finish can validate buffers before restoring the pre-load layout."
+(ert-deftest claude-repl-cmd-test-snapshot-load/state-omits-pre-load-window-snapshot ()
+  "Loader state must not carry a captured window-configuration or
+window-state for origin: persp-mode's own switch-away save (triggered
+by the first `--establish-workspace's `persp-frame-switch') handles
+origin's layout, so any extra capture is dead weight that risks
+resurrecting foreign or dead buffers on restore."
   (claude-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "claude-snap-"))
           (real-dir (make-temp-file "claude-proj-" t))
-          (captured nil))
+          (state-during-establish nil))
       (unwind-protect
           (let ((claude-repl-workspace-snapshot-file snapshot-file))
             (claude-repl--write-sexp-file snapshot-file `(("ws-a" . ,real-dir)))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace)
                        (lambda (&rest _)
-                         (setq captured
-                               (plist-get claude-repl--snapshot-load-state
-                                          :origin-window-state))))
+                         (setq state-during-establish
+                               (copy-sequence claude-repl--snapshot-load-state))))
                       ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
                        (lambda (_ws) t))
                       ((symbol-function 'run-with-timer)
                        (lambda (&rest _) nil)))
               (claude-repl-load-workspace-snapshot)
-              ;; window-state-get returns a cons (a tree of lists), not an
-              ;; opaque window-configuration object.
-              (should (consp captured))
-              (should-not (window-configuration-p captured))))
+              (should-not (plist-member state-during-establish :origin-window-config))
+              (should-not (plist-member state-during-establish :origin-window-state))))
         (delete-file snapshot-file)
         (delete-directory real-dir t)))))
-
-(ert-deftest claude-repl-cmd-test-snapshot-load/restores-origin-window-state-on-finish ()
-  "Finish calls `window-state-put' with the (sanitized) captured state
-when origin still exists."
-  (claude-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (real-dir (make-temp-file "claude-proj-" t))
-          (put-called-with nil))
-      (unwind-protect
-          (let ((claude-repl-workspace-snapshot-file snapshot-file))
-            (claude-repl--write-sexp-file snapshot-file `(("ws-a" . ,real-dir)))
-            (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
-                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
-                       (lambda (_ws) t))
-                      ((symbol-function 'run-with-timer)
-                       (lambda (&rest _) nil))
-                      ((symbol-function '+workspace-exists-p) (lambda (_n) t))
-                      ((symbol-function 'persp-frame-switch) #'ignore)
-                      ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
-                      ((symbol-function 'window-state-put)
-                       (lambda (state &rest _) (setq put-called-with state))))
-              (claude-repl-load-workspace-snapshot)
-              (should (consp put-called-with))))
-        (delete-file snapshot-file)
-        (delete-directory real-dir t)))))
-
-(ert-deftest claude-repl-cmd-test-snapshot-load/skips-window-state-restore-when-origin-missing ()
-  "If origin persp no longer exists, finish does not call `window-state-put'
-\(would land the layout in the wrong persp)."
-  (claude-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (real-dir (make-temp-file "claude-proj-" t))
-          (restore-called nil))
-      (unwind-protect
-          (let ((claude-repl-workspace-snapshot-file snapshot-file))
-            (claude-repl--write-sexp-file snapshot-file `(("ws-a" . ,real-dir)))
-            (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
-                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
-                       (lambda (_ws) t))
-                      ((symbol-function 'run-with-timer)
-                       (lambda (&rest _) nil))
-                      ((symbol-function '+workspace-exists-p) (lambda (_n) nil))
-                      ((symbol-function 'persp-frame-switch) #'ignore)
-                      ((symbol-function 'window-state-put)
-                       (lambda (&rest _) (setq restore-called t))))
-              (claude-repl-load-workspace-snapshot)
-              (should-not restore-called)))
-        (delete-file snapshot-file)
-        (delete-directory real-dir t)))))
-
-(ert-deftest claude-repl-cmd-test-snapshot-load/replaces-dead-buffer-in-wstate-on-finish ()
-  "If the captured wstate references a buffer that's been killed before
-finish, the sanitizer rewrites that buffer entry to the fallback rather
-than letting `window-state-put' silently substitute and produce a
-confusing landing in origin's frame."
-  (claude-repl-test--with-clean-state
-    (let* ((snapshot-file (make-temp-file "claude-snap-"))
-           (real-dir (make-temp-file "claude-proj-" t))
-           (doomed (generate-new-buffer " *claude-repl-test-doomed*"))
-           (fake-wstate (list 'leaf (list 'buffer doomed)))
-           (put-arg nil))
-      (unwind-protect
-          (let ((claude-repl-workspace-snapshot-file snapshot-file))
-            (claude-repl--write-sexp-file snapshot-file `(("ws-a" . ,real-dir)))
-            (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (&rest _)
-                         ;; Replace the genuine captured state with one
-                         ;; that points at our doomed buffer, then kill it
-                         ;; so finish sees a dead reference.
-                         (setq claude-repl--snapshot-load-state
-                               (plist-put claude-repl--snapshot-load-state
-                                          :origin-window-state fake-wstate))
-                         (kill-buffer doomed)))
-                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
-                       (lambda (_ws) t))
-                      ((symbol-function 'run-with-timer)
-                       (lambda (&rest _) nil))
-                      ((symbol-function '+workspace-exists-p) (lambda (_n) t))
-                      ((symbol-function 'persp-frame-switch) #'ignore)
-                      ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
-                      ((symbol-function 'window-state-put)
-                       (lambda (state &rest _) (setq put-arg state))))
-              (claude-repl-load-workspace-snapshot)
-              ;; After sanitization, the buffer cell should reference the
-              ;; *scratch* buffer instead of the dead one.
-              (let ((buf-entry (cadr (cadr put-arg))))
-                (should (bufferp buf-entry))
-                (should (buffer-live-p buf-entry))
-                (should (equal (buffer-name buf-entry) "*scratch*")))))
-        (when (buffer-live-p doomed) (kill-buffer doomed))
-        (delete-file snapshot-file)
-        (delete-directory real-dir t)))))
-
-(ert-deftest claude-repl-cmd-test-snapshot-load/replaces-foreign-buffer-in-wstate-on-finish ()
-  "If the captured wstate references a buffer not in origin persp's
-`persp-buffers' list, the sanitizer rewrites that entry to the fallback
-so a foreign panel can't resurrect into origin's frame."
-  (claude-repl-test--with-clean-state
-    (let* ((snapshot-file (make-temp-file "claude-snap-"))
-           (real-dir (make-temp-file "claude-proj-" t))
-           (foreign (generate-new-buffer " *claude-repl-test-foreign*"))
-           (origin-buf (generate-new-buffer " *claude-repl-test-origin*"))
-           (fake-wstate (list 'leaf (list 'buffer foreign)))
-           (put-arg nil))
-      (unwind-protect
-          (let ((claude-repl-workspace-snapshot-file snapshot-file))
-            (claude-repl--write-sexp-file snapshot-file `(("ws-a" . ,real-dir)))
-            (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (&rest _)
-                         (setq claude-repl--snapshot-load-state
-                               (plist-put claude-repl--snapshot-load-state
-                                          :origin-window-state fake-wstate))))
-                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
-                       (lambda (_ws) t))
-                      ((symbol-function 'run-with-timer)
-                       (lambda (&rest _) nil))
-                      ((symbol-function '+workspace-exists-p) (lambda (_n) t))
-                      ((symbol-function 'persp-frame-switch) #'ignore)
-                      ;; persp exists and reports a buffer list that does
-                      ;; NOT include `foreign' — so the captured ref is
-                      ;; flagged as foreign and must be replaced.
-                      ((symbol-function 'persp-get-by-name)
-                       (lambda (_n) (list 'fake-persp)))
-                      ((symbol-function 'persp-buffers)
-                       (lambda (_p) (list origin-buf)))
-                      ((symbol-function 'window-state-put)
-                       (lambda (state &rest _) (setq put-arg state))))
-              (claude-repl-load-workspace-snapshot)
-              (let ((buf-entry (cadr (cadr put-arg))))
-                (should (bufferp buf-entry))
-                (should-not (eq buf-entry foreign))
-                (should (equal (buffer-name buf-entry) "*scratch*")))))
-        (kill-buffer foreign)
-        (kill-buffer origin-buf)
-        (delete-file snapshot-file)
-        (delete-directory real-dir t)))))
-
-(ert-deftest claude-repl-cmd-test-snapshot-load/freshly-initialized-origin-preserves-live-buffers ()
-  "When origin is a freshly-initialized persp with no recorded buffers
-\(persp-buffers returns nil), the sanitizer falls back to liveness-only
-filtering — otherwise every captured live buffer would be flagged
-foreign and the layout would collapse to all-scratch panes."
-  (claude-repl-test--with-clean-state
-    (let* ((snapshot-file (make-temp-file "claude-snap-"))
-           (real-dir (make-temp-file "claude-proj-" t))
-           (live-buf (generate-new-buffer " *claude-repl-test-live*"))
-           (fake-wstate (list 'leaf (list 'buffer live-buf)))
-           (put-arg nil))
-      (unwind-protect
-          (let ((claude-repl-workspace-snapshot-file snapshot-file))
-            (claude-repl--write-sexp-file snapshot-file `(("ws-a" . ,real-dir)))
-            (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (&rest _)
-                         (setq claude-repl--snapshot-load-state
-                               (plist-put claude-repl--snapshot-load-state
-                                          :origin-window-state fake-wstate))))
-                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
-                       (lambda (_ws) t))
-                      ((symbol-function 'run-with-timer)
-                       (lambda (&rest _) nil))
-                      ((symbol-function '+workspace-exists-p) (lambda (_n) t))
-                      ((symbol-function 'persp-frame-switch) #'ignore)
-                      ;; Freshly-initialized persp: object exists but
-                      ;; persp-buffers is empty.
-                      ((symbol-function 'persp-get-by-name)
-                       (lambda (_n) (list 'fake-persp)))
-                      ((symbol-function 'persp-buffers) (lambda (_p) nil))
-                      ((symbol-function 'window-state-put)
-                       (lambda (state &rest _) (setq put-arg state))))
-              (claude-repl-load-workspace-snapshot)
-              ;; live-buf is live → kept verbatim despite empty persp-bufs.
-              (let ((buf-entry (cadr (cadr put-arg))))
-                (should (eq buf-entry live-buf)))))
-        (kill-buffer live-buf)
-        (delete-file snapshot-file)
-        (delete-directory real-dir t)))))
-
-;;;; ---- claude-repl--wstate-replace-foreign-buffers (unit) ----
-
-(ert-deftest claude-repl-cmd-test-wstate-sanitize/replaces-dead-buffer ()
-  "Sanitizer rewrites a (buffer ...) cell pointing at a killed buffer."
-  (let* ((doomed (generate-new-buffer " *claude-repl-test-dead*"))
-         (fallback (get-buffer-create "*scratch*"))
-         (wstate (list 'leaf (list 'buffer doomed))))
-    (kill-buffer doomed)
-    (claude-repl--wstate-replace-foreign-buffers wstate nil fallback)
-    (should (eq (cadr (cadr wstate)) fallback))))
-
-(ert-deftest claude-repl-cmd-test-wstate-sanitize/replaces-foreign-buffer ()
-  "Sanitizer rewrites a live buffer absent from PERSP-BUFS."
-  (let* ((foreign (generate-new-buffer " *claude-repl-test-foreign-2*"))
-         (other (generate-new-buffer " *claude-repl-test-other*"))
-         (fallback (get-buffer-create "*scratch*"))
-         (wstate (list 'leaf (list 'buffer foreign))))
-    (unwind-protect
-        (progn
-          (claude-repl--wstate-replace-foreign-buffers
-           wstate (list other) fallback)
-          (should (eq (cadr (cadr wstate)) fallback)))
-      (kill-buffer foreign)
-      (kill-buffer other))))
-
-(ert-deftest claude-repl-cmd-test-wstate-sanitize/keeps-buffer-in-persp ()
-  "Sanitizer leaves a live buffer alone when it appears in PERSP-BUFS."
-  (let* ((keeper (generate-new-buffer " *claude-repl-test-keeper*"))
-         (fallback (get-buffer-create "*scratch*"))
-         (wstate (list 'leaf (list 'buffer keeper))))
-    (unwind-protect
-        (progn
-          (claude-repl--wstate-replace-foreign-buffers
-           wstate (list keeper) fallback)
-          (should (eq (cadr (cadr wstate)) keeper)))
-      (kill-buffer keeper))))
-
-(ert-deftest claude-repl-cmd-test-wstate-sanitize/keeps-live-buffer-when-persp-bufs-nil ()
-  "With PERSP-BUFS nil the sanitizer only filters dead buffers, so a
-live captured buffer is preserved (freshly-initialized persp case)."
-  (let* ((live-buf (generate-new-buffer " *claude-repl-test-live-2*"))
-         (fallback (get-buffer-create "*scratch*"))
-         (wstate (list 'leaf (list 'buffer live-buf))))
-    (unwind-protect
-        (progn
-          (claude-repl--wstate-replace-foreign-buffers wstate nil fallback)
-          (should (eq (cadr (cadr wstate)) live-buf)))
-      (kill-buffer live-buf))))
-
-(ert-deftest claude-repl-cmd-test-wstate-sanitize/recurses-into-splits ()
-  "Sanitizer descends into nested split nodes (hc/vc) and rewrites every
-offending leaf."
-  (let* ((a (generate-new-buffer " *claude-repl-test-a*"))
-         (b (generate-new-buffer " *claude-repl-test-b*"))
-         (good (generate-new-buffer " *claude-repl-test-good*"))
-         (fallback (get-buffer-create "*scratch*"))
-         (wstate (list 'hc
-                       (list 'leaf (list 'buffer a))
-                       (list 'vc
-                             (list 'leaf (list 'buffer b))
-                             (list 'leaf (list 'buffer good))))))
-    (unwind-protect
-        (progn
-          (kill-buffer a)
-          (claude-repl--wstate-replace-foreign-buffers
-           wstate (list good) fallback)
-          ;; Dead `a' → fallback.
-          (should (eq (cadr (cadr (nth 1 wstate))) fallback))
-          ;; Foreign `b' → fallback.
-          (should (eq (cadr (cadr (nth 1 (nth 2 wstate)))) fallback))
-          ;; `good' is in persp-bufs → preserved.
-          (should (eq (cadr (cadr (nth 2 (nth 2 wstate)))) good)))
-      (when (buffer-live-p b) (kill-buffer b))
-      (kill-buffer good))))
 
 (ert-deftest claude-repl-cmd-test-snapshot-load/top-level-error-finishes ()
   "An error inside `--snapshot-load-step' (outside establish-workspace) is
