@@ -221,7 +221,13 @@
   (add-to-list 'hl-todo-keyword-faces '("PRREVIEW" . "#7cb8bb")))
 
 (after! vterm
-  (set-popup-rule! "\\.*doom:vterm\\.*" :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
+  ;; `:actions' points at the claude-repl sibling-popup display fn so
+  ;; the bottom vterm popup stops at the claude panel boundary when
+  ;; claude is open; when claude is closed the fn falls back to the
+  ;; standard `:side 'bottom' frame-wide popup.
+  (set-popup-rule! "\\.*doom:vterm\\.*"
+    :actions '(claude-repl-sibling-popup-display-fn)
+    :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
   (defun +dwc/vterm-toggle (ARG)
     (interactive "P")
     (if (and (s-contains-p  "vterm" (buffer-name)) (= (length (window-list)) 1))
