@@ -1063,8 +1063,9 @@ cleared on restore.")
   "Toggle fullscreen for Claude panels and focus the input window.
 When in a Claude panel buffer, maximizes both Claude windows and moves
 point to the input buffer, or restores the layout.
-When not in a Claude panel buffer, maximizes the current window and
-saves the layout; calling again restores it."
+When not in a Claude panel buffer, maximizes the current window within
+the non-side area (preserving the workspace drawer) and saves the
+layout; calling again restores it."
   (interactive)
   (if (claude-repl--claude-panel-buffer-p)
       (progn
@@ -1081,7 +1082,9 @@ saves the layout; calling again restores it."
           (set-window-configuration claude-repl--window-fullscreen-config)
           (setq claude-repl--window-fullscreen-config nil))
       (setq claude-repl--window-fullscreen-config (current-window-configuration))
-      (delete-other-windows))))
+      (let ((keep (selected-window)))
+        (claude-repl-window--delete-where
+         (lambda (win) (not (eq win keep))))))))
 
 (defun claude-repl-cycle ()
   "Send backtab to Claude vterm to cycle through options."

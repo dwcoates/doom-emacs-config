@@ -2495,19 +2495,73 @@ initialize-ws-env.  Models the worktree-creation / new-workspace paths."
         (when (buffer-live-p claude-buf) (kill-buffer claude-buf))))))
 
 (ert-deftest claude-repl-test-panels-fullscreen-and-focus-non-claude-maximizes ()
-  "fullscreen-and-focus saves config and calls delete-other-windows when not in a Claude buffer."
+  "fullscreen-and-focus saves config and sweeps other windows when not in a Claude buffer."
   (claude-repl-test--with-clean-state
-    (let ((maximize-called nil)
+    (let ((sweep-called nil)
           (claude-repl--window-fullscreen-config nil))
       (switch-to-buffer (get-buffer-create "*other*"))
       (unwind-protect
-          (cl-letf (((symbol-function 'delete-other-windows)
-                     (lambda () (setq maximize-called t))))
+          (cl-letf (((symbol-function 'claude-repl-window--delete-where)
+                     (lambda (&rest _) (setq sweep-called t) nil)))
             (claude-repl-fullscreen-and-focus)
-            (should maximize-called)
+            (should sweep-called)
             (should claude-repl--window-fullscreen-config))
         (setq claude-repl--window-fullscreen-config nil)
         (when (get-buffer "*other*") (kill-buffer "*other*"))))))
+
+(ert-deftest claude-repl-test-panels-fullscreen-and-focus-non-claude-preserves-drawer ()
+  "fullscreen-and-focus does NOT delete side windows (e.g. the drawer) when maximizing a non-Claude buffer."
+  (claude-repl-test--with-clean-state
+    (let* ((other-buf (get-buffer-create "*other-fs*"))
+           (drawer-buf (get-buffer-create "*claude-drawer-fs*"))
+           (claude-repl--window-fullscreen-config nil)
+           (predicate-captured nil)
+           (skip-captured nil))
+      (switch-to-buffer other-buf)
+      (unwind-protect
+          (let ((fake-drawer-win (split-window-right)))
+            (set-window-buffer fake-drawer-win drawer-buf)
+            (set-window-parameter fake-drawer-win 'window-side 'left)
+            (cl-letf (((symbol-function 'claude-repl-window--delete-where)
+                       (lambda (pred &rest args)
+                         (setq predicate-captured pred
+                               skip-captured (plist-get args :skip-side-windows))
+                         nil)))
+              (claude-repl-fullscreen-and-focus)
+              ;; The sweep must skip side windows by default (drawer survives).
+              (should (or (null skip-captured) (eq skip-captured t)))
+              ;; Predicate keeps the selected (non-drawer) window and would
+              ;; target the drawer window if side-windows were not skipped.
+              (should (functionp predicate-captured))
+              (should-not (funcall predicate-captured (selected-window)))
+              (should (funcall predicate-captured fake-drawer-win))))
+        (setq claude-repl--window-fullscreen-config nil)
+        (when (buffer-live-p drawer-buf) (kill-buffer drawer-buf))
+        (when (buffer-live-p other-buf) (kill-buffer other-buf))))))
+
+(ert-deftest claude-repl-test-panels-fullscreen-and-focus-non-claude-real-drawer-survives ()
+  "End-to-end: maximizing a non-Claude buffer leaves a real side window alive."
+  (claude-repl-test--with-clean-state
+    (let* ((other-buf (get-buffer-create "*other-fs-real*"))
+           (extra-buf (get-buffer-create "*extra-fs-real*"))
+           (drawer-buf (get-buffer-create "*claude-drawer-fs-real*"))
+           (claude-repl--window-fullscreen-config nil))
+      (switch-to-buffer other-buf)
+      (unwind-protect
+          (let* ((extra-win (split-window-below))
+                 (drawer-win (display-buffer-in-side-window
+                              drawer-buf
+                              '((side . left) (slot . 0)))))
+            (set-window-buffer extra-win extra-buf)
+            (should (window-live-p drawer-win))
+            (claude-repl-fullscreen-and-focus)
+            ;; Drawer (side window) is still alive after fullscreen.
+            (should (window-live-p drawer-win))
+            ;; Extra non-side window was swept.
+            (should-not (window-live-p extra-win)))
+        (setq claude-repl--window-fullscreen-config nil)
+        (dolist (buf (list drawer-buf extra-buf other-buf))
+          (when (buffer-live-p buf) (kill-buffer buf)))))))
 
 (ert-deftest claude-repl-test-panels-fullscreen-and-focus-non-claude-restores ()
   "fullscreen-and-focus restores saved config on second press when not in a Claude buffer."
