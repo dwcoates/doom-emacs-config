@@ -58,8 +58,9 @@ that forces the tab-bar to repaint.  DO NOT REMOVE — see comment above.")
 A workspace becomes `:hidden' when the user invokes `SPC o C' (the
 deprio close path, `claude-repl--on-close').  The kill happens in
 `claude-repl--sweep-hidden-workspaces' from the workspace-switch
-handler, with `:purge-state nil' so on-disk state survives and the
-workspace can be re-opened later via project switch.
+handler via `claude-repl--nuke-one-workspace', which always preserves
+the on-disk state file so the workspace can be re-opened later via
+project switch.
 
 The tab-bar itself is NOT filtered — it reflects the raw persp list.
 Workspace cycling (`claude-repl-switch-left/right') skips `:hidden'
@@ -223,7 +224,7 @@ STATE is one of:
                by the `SPC o C' deprio-close path; the kill happens in
                `claude-repl--sweep-hidden-workspaces' from the
                workspace-switch handler.  The on-disk state file is
-               preserved (kill goes through `:purge-state nil') so the
+               always preserved by `--nuke-one-workspace' so the
                workspace can be re-opened later via project-switch.
   :dead      — vterm process gone
 

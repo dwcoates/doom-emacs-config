@@ -824,26 +824,63 @@
       (claude-repl-nuke-workspace)
       (should-not (gethash "doomed" claude-repl--workspaces)))))
 
-(ert-deftest claude-repl-cmd-test-nuke-workspace/purges-state-file ()
-  "nuke-workspace unlinks the .claude-repl-state file at the project root.
-Without this, a subsequent workspace registered at the same root would
-inherit the stale session-id via `state-restore' and launch Claude
-with `--resume <stale-sid>' — the exact failure the purge closes."
+(ert-deftest claude-repl-cmd-test-nuke-workspace/preserves-state-file ()
+  "nuke-workspace MUST preserve the per-project state.el so the
+captured session-id survives the in-memory teardown.  The next time
+the same project is opened, `--initialize-ws-env' reads this file and
+launches Claude with `--continue', resuming the prior session.  A
+nuke that wipes state.el would force a fresh session each time, which
+is the regression this test pins."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "claude-nuke-" t)))
       (unwind-protect
           (let ((state-file (claude-repl--state-file tmpdir)))
-            (claude-repl-test--seed-file state-file "(:session-id \"stale-abc\")")
+            (claude-repl-test--seed-file state-file "(:session-id \"keep-abc\")")
             (claude-repl--ws-put "doomed" :project-dir tmpdir)
             (cl-letf (((symbol-function 'completing-read)
                        (lambda (_prompt _coll &rest _) "doomed"))
                       ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                      ;; Stub kill-session so its embedded state-save can't
+                      ;; rewrite the file with empty session-id — we want
+                      ;; to verify the up-front state-save (or the no-purge
+                      ;; guarantee) preserves the seeded contents.
                       ((symbol-function 'claude-repl--kill-session) #'ignore)
+                      ;; Stub state-save too so the seeded content is what
+                      ;; the test asserts on; this isolates the "no purge"
+                      ;; property from the orthogonal "save before tear
+                      ;; down" property tested separately below.
+                      ((symbol-function 'claude-repl--state-save) #'ignore)
                       ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                       ((symbol-function 'force-mode-line-update) #'ignore))
               (claude-repl-nuke-workspace)
-              (should-not (file-exists-p state-file))))
+              (should (file-exists-p state-file))))
         (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-cmd-test-nuke-workspace/saves-state-before-teardown ()
+  "nuke-workspace runs `--state-save' BEFORE any teardown so session-id
+is persisted even if a downstream step (kill-session, ws-del, persp
+kill) signals.  Order assertion: state-save called at least once
+before kill-session."
+  (claude-repl-test--with-clean-state
+    (let ((events nil))
+      (claude-repl--ws-put "doomed" :project-dir "/tmp/whatever")
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "doomed"))
+                ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                ((symbol-function 'claude-repl--state-save)
+                 (lambda (_ws) (push 'state-save events)))
+                ((symbol-function 'claude-repl--kill-session)
+                 (lambda (_ws) (push 'kill-session events)))
+                ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-nuke-workspace)
+        ;; Reverse so events are in chronological order.
+        (let ((ordered (reverse events)))
+          (should (memq 'state-save ordered))
+          (should (memq 'kill-session ordered))
+          ;; state-save must precede kill-session.
+          (should (< (cl-position 'state-save ordered)
+                     (cl-position 'kill-session ordered))))))))
 
 (ert-deftest claude-repl-cmd-test-nuke-workspace/kills-workspace-buffers ()
   "nuke-workspace invokes kill-workspace-buffers so every persp buffer is torn down."
@@ -2734,9 +2771,11 @@ ws onto KILLED (a place-symbol bound to a list)."
         (claude-repl--sweep-hidden-workspaces)
         (should (null killed))))))
 
-(ert-deftest claude-repl-cmd-test-sweep-hidden/uses-purge-state-nil ()
-  "sweep-hidden-workspaces calls nuke-one-workspace with `:purge-state nil'
-so the on-disk state file survives and the workspace can be re-opened."
+(ert-deftest claude-repl-cmd-test-sweep-hidden/forwards-to-nuke ()
+  "sweep-hidden-workspaces calls nuke-one-workspace for each `:hidden' ws.
+nuke-one-workspace always preserves the on-disk state file, so there's
+no explicit purge flag to assert — just that nuke was called with the
+right ws name."
   (claude-repl-test--with-clean-state
     (let ((received-args nil))
       (claude-repl--ws-set-repl-state "ws-a" :hidden)
@@ -2744,7 +2783,7 @@ so the on-disk state file survives and the workspace can be re-opened."
                 ((symbol-function 'claude-repl--nuke-one-workspace)
                  (lambda (&rest args) (setq received-args args))))
         (claude-repl--sweep-hidden-workspaces)
-        (should (equal received-args '("ws-a" :purge-state nil)))))))
+        (should (equal received-args '("ws-a")))))))
 
 (ert-deftest claude-repl-cmd-test-sweep-hidden/except-overrides-current ()
   "Explicit EXCEPT arg takes precedence over `+workspace-current-name'."
