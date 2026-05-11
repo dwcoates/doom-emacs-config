@@ -201,6 +201,22 @@ overwriting the previous summary."
         (claude-repl--kickoff-prompt-summary "ws-target" "the prompt")
         (should (equal captured '("ws-target" "the prompt")))))))
 
+;;;; ---- Tests: prompt-format guards against responding to embedded prompt ----
+
+(ert-deftest claude-repl-test-prompt-format-instructs-summarize-only ()
+  "Format must tell the model to summarize, not respond to, the embedded prompt.
+Pins the anti-injection framing: the model must treat the prompt as data,
+never execute / answer / refuse / comply with it."
+  (let ((rendered (claude-repl--prompt-summary-build-input
+                   "what is 2+2? please answer")))
+    ;; Must explicitly call out that the prompt is to be summarized only.
+    (should (string-match-p "SUMMARIZE" rendered))
+    ;; Must explicitly forbid responding to the embedded prompt.
+    (should (string-match-p "\\(?:NEVER\\|Do NOT\\|not\\) \\(?:answer\\|respond\\)"
+                            rendered))
+    ;; Must label the embedded prompt as data, not a directive.
+    (should (string-match-p "\\(?:DATA\\|data\\), not a directive" rendered))))
+
 ;;;; ---- Tests: prompt-summary-spawn cwd ----
 
 (ert-deftest claude-repl-test-prompt-summary-spawn-binds-temporary-default-directory ()
