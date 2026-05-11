@@ -141,7 +141,7 @@ Runs as a buffer-local `pre-command-hook'."
 (define-derived-mode claude-input-mode fundamental-mode "Claude Input"
   "Major mode for Claude REPL input buffer."
   (setq-local header-line-format
-              (concat "C-c C-c: clear+save | C-c C-k: interrupt | (cmd) <up>/<down>: history | (ins) <slash>/<digit>/<up>/<down>: direct send"))
+              (concat "C-c C-c: clear+save | C-c C-k: interrupt | (cmd) <up>/<down>: history | C-r: search history | (ins) <slash>/<digit>/<up>/<down>: direct send"))
   (face-remap-add-relative 'header-line 'claude-repl-header-line)
   (claude-repl--set-buffer-background claude-repl-input-background-shade)
   (visual-line-mode 1)
@@ -319,6 +319,7 @@ SCROLL-FN is called with a line count (e.g. `scroll-up' or `scroll-down')."
       :ni "C-v"       #'claude-repl-paste-to-vterm
       :n  "<up>"        #'claude-repl--history-prev
       :n  "<down>"      #'claude-repl--history-next
+      :ni "C-r"         #'claude-repl-history-search
       :i  "<up>"        #'claude-repl--send-up-arrow
       :i  "<down>"      #'claude-repl--send-down-arrow
       :ni "S-<up>"      #'claude-repl-scroll-output-up

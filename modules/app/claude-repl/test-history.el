@@ -1242,6 +1242,108 @@ write is the primary obligation; snapshot is the piggyback)."
     (claude-repl--history-on-change 1 5 0)
     (should (= claude-repl--history-index -1))))
 
+;;;; ---- Tests: history-search candidates ----
+
+(ert-deftest claude-repl-test-history-format-candidate-basic ()
+  "history-format-candidate prepends the index and preserves single-line text."
+  (let ((label (claude-repl--history-format-candidate "hello" 2)))
+    (should (string-match-p "\\`[[:space:]]*2" label))
+    (should (string-match-p "hello\\'" label))))
+
+(ert-deftest claude-repl-test-history-format-candidate-collapses-newlines ()
+  "history-format-candidate collapses newlines so multi-line entries stay on one line."
+  (let ((label (claude-repl--history-format-candidate "first\nsecond" 0)))
+    (should-not (string-match-p "\n" label))
+    (should (string-match-p "first" label))
+    (should (string-match-p "second" label))))
+
+(ert-deftest claude-repl-test-history-search-candidates-labels-and-indices ()
+  "history-search-candidates returns (LABEL . INDEX) pairs in history order."
+  (claude-repl-test--with-temp-buffer " *test-hist-search-cand*"
+    (setq-local claude-repl--input-history '("newest" "older" "oldest"))
+    (let ((cands (claude-repl--history-search-candidates)))
+      (should (= (length cands) 3))
+      (should (= (cdar cands) 0))
+      (should (= (cdr (nth 1 cands)) 1))
+      (should (= (cdr (nth 2 cands)) 2))
+      (should (string-match-p "newest" (caar cands)))
+      (should (string-match-p "oldest" (car (nth 2 cands)))))))
+
+(ert-deftest claude-repl-test-history-search-candidates-empty ()
+  "history-search-candidates returns nil for empty history."
+  (claude-repl-test--with-temp-buffer " *test-hist-search-empty*"
+    (setq-local claude-repl--input-history nil)
+    (should-not (claude-repl--history-search-candidates))))
+
+(ert-deftest claude-repl-test-history-search-candidates-duplicates-unique ()
+  "history-search-candidates produces unique labels even for duplicate entries."
+  (claude-repl-test--with-temp-buffer " *test-hist-search-dup*"
+    (setq-local claude-repl--input-history '("same" "same"))
+    (let* ((cands (claude-repl--history-search-candidates))
+           (labels (mapcar #'car cands)))
+      (should (= (length labels) (length (delete-dups (copy-sequence labels)))))) ))
+
+;;;; ---- Tests: history-search ----
+
+(ert-deftest claude-repl-test-history-search-replaces-buffer-with-selection ()
+  "history-search replaces buffer with the chosen entry and updates the index."
+  (claude-repl-test--with-temp-buffer " *test-hist-search-pick*"
+    (setq-local claude-repl--input-history '("newest" "middle" "oldest"))
+    (setq-local claude-repl--history-index -1)
+    (setq-local claude-repl--history-stash nil)
+    (setq-local claude-repl--history-navigating nil)
+    (insert "draft")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt collection &rest _)
+                 ;; Pick the "middle" candidate (index 1)
+                 (nth 1 collection))))
+      (claude-repl-history-search))
+    (should (equal (buffer-string) "middle"))
+    (should (= claude-repl--history-index 1))))
+
+(ert-deftest claude-repl-test-history-search-stashes-buffer-on-first-nav ()
+  "history-search stashes the in-progress buffer text when called from a fresh index."
+  (claude-repl-test--with-temp-buffer " *test-hist-search-stash*"
+    (setq-local claude-repl--input-history '("entry"))
+    (setq-local claude-repl--history-index -1)
+    (setq-local claude-repl--history-stash nil)
+    (setq-local claude-repl--history-navigating nil)
+    (insert "in progress")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt collection &rest _) (car collection))))
+      (claude-repl-history-search))
+    (should (equal claude-repl--history-stash "in progress"))))
+
+(ert-deftest claude-repl-test-history-search-preserves-existing-stash ()
+  "history-search does not overwrite an existing stash when already browsing."
+  (claude-repl-test--with-temp-buffer " *test-hist-search-keep-stash*"
+    (setq-local claude-repl--input-history '("a" "b"))
+    (setq-local claude-repl--history-index 0)
+    (setq-local claude-repl--history-stash "original")
+    (setq-local claude-repl--history-navigating nil)
+    (insert "a")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt collection &rest _) (nth 1 collection))))
+      (claude-repl-history-search))
+    (should (equal claude-repl--history-stash "original"))
+    (should (= claude-repl--history-index 1))
+    (should (equal (buffer-string) "b"))))
+
+(ert-deftest claude-repl-test-history-search-empty-history-is-noop ()
+  "history-search with empty history does not call completing-read and leaves buffer untouched."
+  (claude-repl-test--with-temp-buffer " *test-hist-search-empty-noop*"
+    (setq-local claude-repl--input-history nil)
+    (setq-local claude-repl--history-index -1)
+    (setq-local claude-repl--history-stash nil)
+    (insert "draft text")
+    (let ((called nil))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (&rest _) (setq called t) "")))
+        (claude-repl-history-search))
+      (should-not called))
+    (should (equal (buffer-string) "draft text"))
+    (should (= claude-repl--history-index -1))))
+
 (provide 'test-history)
 
 ;;; test-history.el ends here

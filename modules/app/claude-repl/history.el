@@ -327,3 +327,41 @@ Updates `claude-repl--history-index' and replaces the buffer contents."
              (>= claude-repl--history-index 0))
     (claude-repl--log (+workspace-current-name) "history-on-change resetting from index=%d" claude-repl--history-index)
     (claude-repl--history-reset)))
+
+;;;; History search (completing-read)
+
+(defun claude-repl--history-format-candidate (entry index)
+  "Return a single-line label for ENTRY at INDEX.
+Collapses internal newlines to a visible glyph so multi-line inputs stay
+on one line in the completing-read frame.  The INDEX prefix keeps
+otherwise-identical entries unique candidates."
+  (let ((collapsed (replace-regexp-in-string "[\n\r]+" " ⏎ " entry)))
+    (format "%4d  %s" index collapsed)))
+
+(defun claude-repl--history-search-candidates ()
+  "Return an alist of (LABEL . INDEX) candidates for the current buffer's history.
+Index is the position into `claude-repl--input-history' (0 = most recent)."
+  (cl-loop for entry in claude-repl--input-history
+           for i from 0
+           collect (cons (claude-repl--history-format-candidate entry i) i)))
+
+(defun claude-repl-history-search ()
+  "Search the input buffer's history via `completing-read'.
+Picks any entry (not just adjacent ones) and replaces the buffer with
+the selection.  Stashes the in-progress text on first navigation so
+`history-next' past the newest entry restores it, matching the
+arrow-key navigation flow.  No-op (with a message) when history is
+empty."
+  (interactive)
+  (claude-repl--log (+workspace-current-name) "history-search: entries=%d"
+                    (length claude-repl--input-history))
+  (if (null claude-repl--input-history)
+      (message "[claude-repl] input history is empty")
+    (let* ((candidates (claude-repl--history-search-candidates))
+           (choice (completing-read "Claude history: "
+                                    (mapcar #'car candidates) nil t))
+           (index (cdr (assoc choice candidates))))
+      (when index
+        (when (= claude-repl--history-index -1)
+          (setq claude-repl--history-stash (buffer-string)))
+        (claude-repl--history-show-entry index)))))
