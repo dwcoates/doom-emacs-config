@@ -387,8 +387,16 @@
 
 ;; Workspace configuration
 (after! persp-mode
-  ;; persp-mode's own session persistence is disabled; claude-repl manages
-  ;; workspace save/restore via its snapshot mechanism (see modules/app/claude-repl/config.el).
+  ;; persp-mode's own session persistence is disabled — claude-repl is the
+  ;; single source of truth for workspace save/restore via its snapshot
+  ;; mechanism (see modules/app/claude-repl/config.el).  These are explicit
+  ;; belt-and-suspenders in case Doom's defaults or a future package
+  ;; re-enables them: -1 disables auto-resume (`<= 0 → no autoresume' per
+  ;; persp-mode's own docs), 0 disables auto-save on kill, and nilling the
+  ;; save dir ensures stray `persp-load-state-from-file' calls without an
+  ;; explicit arg have nowhere to read from.
+  (setq persp-auto-resume-time -1
+        persp-auto-save-opt 0)
   ;; Never ask for confirmation when killing a buffer not in the current workspace
   (setq persp-kill-foreign-buffer-behaviour 'kill)
   ;; Only show buffers belonging to the current workspace in buffer lists (SPC ,)
@@ -499,18 +507,7 @@ Focus remains on the current workspace."
       (+dwc/refresh-tab-bar)
       (+workspace/switch-to current)
       (message "Pulled '%s' to second position." current)))
-  (run-with-timer 1 1 #'+dwc/refresh-tab-bar)
-
-  ;; Delete the "main" workspace after session restore.
-  (add-hook 'persp-after-load-state-functions
-            (lambda (&rest _)
-              (let ((names (+workspace-list-names)))
-                (when (member "main" names)
-                  (condition-case err
-                      (progn
-                        (persp-kill "main")
-                        (message "Deleted 'main' workspace."))
-                    (error (message "Failed to delete 'main' workspace: %s" err))))))))
+  (run-with-timer 1 1 #'+dwc/refresh-tab-bar))
 
 ;; Cmd+<numeral> workspace switching in insert mode
 ;; Doom binds s-1..s-9 with :n (normal only) on macOS. Add insert state.
