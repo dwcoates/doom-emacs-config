@@ -751,6 +751,40 @@ roster-piggyback save doesn't spam the echo area on every state mutation."
           (message "Saved %d workspace(s) to %s"
                    (length snapshot) claude-repl-workspace-snapshot-file))))))
 
+(defun claude-repl--clean-frame-foreign-windows (ws)
+  "Delete frame windows whose buffer isn't in persp WS's buffer set.
+Strips `no-delete-other-windows' and dedication from foreign windows
+first so prior persps' claude-repl panel windows (which are marked
+dedicated + `no-delete-other-windows') can be torn down.  When every
+frame window is foreign, deletes all but one and swaps that one's
+buffer to `doom-fallback-buffer' so the new persp starts with a clean
+single-window layout instead of inheriting the previous persp's
+window-configuration.  No-op when persp APIs are unavailable or the
+persp has no recorded buffer set (test environments)."
+  (when (and (fboundp 'persp-get-by-name)
+             (fboundp 'persp-buffers))
+    (let* ((persp (persp-get-by-name ws))
+           (allowed (and persp (not (symbolp persp)) (persp-buffers persp)))
+           (fallback (and (fboundp 'doom-fallback-buffer) (doom-fallback-buffer)))
+           (all (window-list nil 'nomini))
+           (foreign (cl-remove-if (lambda (w) (memq (window-buffer w) allowed)) all))
+           (any-native (cl-some (lambda (w) (memq (window-buffer w) allowed)) all)))
+      (when foreign
+        (claude-repl--log ws "clean-frame-foreign-windows: ws=%s removing=%d total=%d"
+                          ws (length foreign) (length all))
+        (dolist (win foreign)
+          (set-window-parameter win 'no-delete-other-windows nil)
+          (set-window-dedicated-p win nil))
+        (cond
+         (any-native
+          (dolist (win foreign)
+            (ignore-errors (delete-window win))))
+         (t
+          (dolist (win (cdr foreign))
+            (ignore-errors (delete-window win)))
+          (when (and fallback (car foreign) (window-live-p (car foreign)))
+            (set-window-buffer (car foreign) fallback))))))))
+
 (defun claude-repl--establish-workspace (ws dir)
   "Synchronously create + activate + fully set up workspace WS for DIR.
 Mirrors what `+dwc/switch-to-project' would do on an interactive
@@ -765,6 +799,9 @@ Each call:
 - activates it on this frame (`persp-frame-switch') so persp-mode
   saves a clean window-configuration for the previous persp and
   starts capturing one for this one,
+- scrubs foreign windows lingering from the prior persp via
+  `claude-repl--clean-frame-foreign-windows' (dedicated panels from
+  the previous workspace would otherwise survive into WS's frame),
 - registers the project with projectile,
 - sets `default-directory' on the fallback buffer + loads dir-locals,
 - runs `+workspaces-switch-project-function' (the user lambda that
@@ -781,6 +818,11 @@ Each call:
       (persp-add-new ws))
     (when (fboundp 'persp-frame-switch)
       (persp-frame-switch ws))
+    ;; Strip any window-configuration bleed-over from the prior persp before
+    ;; populating WS — panels left over from the previous workspace are marked
+    ;; `no-delete-other-windows', so the later `delete-other-windows' in
+    ;; `--show-existing-panels' won't tear them down on its own.
+    (claude-repl--clean-frame-foreign-windows ws)
     (when (fboundp 'projectile-add-known-project)
       (projectile-add-known-project dir))
     (when (fboundp 'doom-fallback-buffer)

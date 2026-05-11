@@ -1074,6 +1074,113 @@ kill so the workspace can be re-opened with its identity intact."
               (should-not (assoc "ws2" data))))
         (delete-file snapshot-file)))))
 
+;;;; ---- Tests: clean-frame-foreign-windows ----
+
+(defmacro claude-repl-test--with-fake-persp (ws-name allowed-bufs &rest body)
+  "Run BODY with `persp-get-by-name'/`persp-buffers' stubbed.
+For WS-NAME the stub returns a sentinel non-symbol persp object whose
+`persp-buffers' is ALLOWED-BUFS; for any other name, returns nil."
+  (declare (indent 2))
+  `(let ((--fake-persp-- (list 'fake-persp)))
+     (cl-letf (((symbol-function 'persp-get-by-name)
+                (lambda (name) (when (equal name ,ws-name) --fake-persp--)))
+               ((symbol-function 'persp-buffers)
+                (lambda (persp) (when (eq persp --fake-persp--) ,allowed-bufs))))
+       ,@body)))
+
+(ert-deftest claude-repl-cmd-test-clean-frame-foreign-windows/no-op-when-all-native ()
+  "Helper leaves windows alone when every visible buffer is in the persp."
+  (claude-repl-test--with-clean-state
+    (let ((native (get-buffer-create "*ws-native*"))
+          (extra-win nil))
+      (unwind-protect
+          (claude-repl-test--with-fake-persp "ws-a" (list native)
+            (switch-to-buffer native)
+            (setq extra-win (split-window))
+            (set-window-buffer extra-win native)
+            (claude-repl--clean-frame-foreign-windows "ws-a")
+            (should (= 2 (length (window-list nil 'nomini))))
+            (dolist (win (window-list nil 'nomini))
+              (should (eq (window-buffer win) native))))
+        (when (and extra-win (window-live-p extra-win))
+          (ignore-errors (delete-window extra-win)))
+        (when (buffer-live-p native) (kill-buffer native))))))
+
+(ert-deftest claude-repl-cmd-test-clean-frame-foreign-windows/deletes-mixed-foreign ()
+  "Helper deletes foreign windows while preserving native ones."
+  (claude-repl-test--with-clean-state
+    (let ((native  (get-buffer-create "*ws-native*"))
+          (foreign (get-buffer-create "*ws-foreign*"))
+          (foreign-win nil))
+      (unwind-protect
+          (claude-repl-test--with-fake-persp "ws-a" (list native)
+            (switch-to-buffer native)
+            (setq foreign-win (split-window))
+            (set-window-buffer foreign-win foreign)
+            ;; Mark as a claude-repl-style protected panel.
+            (set-window-parameter foreign-win 'no-delete-other-windows t)
+            (set-window-dedicated-p foreign-win t)
+            (claude-repl--clean-frame-foreign-windows "ws-a")
+            (let ((wins (window-list nil 'nomini)))
+              (should (= 1 (length wins)))
+              (should (eq (window-buffer (car wins)) native))))
+        (when (and foreign-win (window-live-p foreign-win))
+          (set-window-parameter foreign-win 'no-delete-other-windows nil)
+          (set-window-dedicated-p foreign-win nil)
+          (ignore-errors (delete-window foreign-win)))
+        (when (buffer-live-p native)  (kill-buffer native))
+        (when (buffer-live-p foreign) (kill-buffer foreign))))))
+
+(ert-deftest claude-repl-cmd-test-clean-frame-foreign-windows/swaps-when-all-foreign ()
+  "When every window is foreign, helper collapses to one window showing fallback."
+  (claude-repl-test--with-clean-state
+    (let ((foreign1 (get-buffer-create "*ws-foreign-1*"))
+          (foreign2 (get-buffer-create "*ws-foreign-2*"))
+          (fallback (get-buffer-create " *test-fallback*"))
+          (extra-win nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'doom-fallback-buffer)
+                     (lambda () fallback)))
+            (claude-repl-test--with-fake-persp "ws-fresh" nil
+              (switch-to-buffer foreign1)
+              (set-window-parameter (selected-window) 'no-delete-other-windows t)
+              (set-window-dedicated-p (selected-window) t)
+              (setq extra-win (split-window))
+              (set-window-buffer extra-win foreign2)
+              (set-window-parameter extra-win 'no-delete-other-windows t)
+              (set-window-dedicated-p extra-win t)
+              (claude-repl--clean-frame-foreign-windows "ws-fresh")
+              (let ((wins (window-list nil 'nomini)))
+                (should (= 1 (length wins)))
+                (should (eq (window-buffer (car wins)) fallback))
+                ;; Surviving window must be writable for the next setup step.
+                (should-not (window-dedicated-p (car wins))))))
+        ;; Cleanup any leftover windows that survived a failed assertion.
+        (dolist (w (window-list nil 'nomini))
+          (set-window-parameter w 'no-delete-other-windows nil)
+          (set-window-dedicated-p w nil))
+        (when (and extra-win (window-live-p extra-win))
+          (ignore-errors (delete-window extra-win)))
+        (when (buffer-live-p foreign1) (kill-buffer foreign1))
+        (when (buffer-live-p foreign2) (kill-buffer foreign2))))))
+
+(ert-deftest claude-repl-cmd-test-clean-frame-foreign-windows/unknown-persp ()
+  "Helper treats an unknown persp as having no allowed buffers — every
+window is foreign and gets collapsed to a single fallback window."
+  (claude-repl-test--with-clean-state
+    (let ((other (get-buffer-create "*unknown-persp-other*"))
+          (fallback (get-buffer-create " *test-fallback*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_n) nil))
+                    ((symbol-function 'persp-buffers)     (lambda (_p) nil))
+                    ((symbol-function 'doom-fallback-buffer) (lambda () fallback)))
+            (switch-to-buffer other)
+            (claude-repl--clean-frame-foreign-windows "ws-missing")
+            (let ((wins (window-list nil 'nomini)))
+              (should (= 1 (length wins)))
+              (should (eq (window-buffer (car wins)) fallback))))
+        (when (buffer-live-p other) (kill-buffer other))))))
+
 (ert-deftest claude-repl-cmd-test-load-workspace-snapshot/errors-when-file-missing ()
   "load-workspace-snapshot signals user-error when the snapshot file is absent."
   (claude-repl-test--with-clean-state
