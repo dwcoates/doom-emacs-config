@@ -105,15 +105,17 @@
       "foo" "bar" "DWC/bar" nil "/nonexistent/path" "/tmp/foo")
      :type 'user-error)))
 
-(ert-deftest claude-repl-test-rename-validate-existing-tag-branch-errors ()
-  "Existing target tag-branch signals user-error."
+(ert-deftest claude-repl-test-rename-validate-existing-start-tag-errors ()
+  "Existing target start tag signals user-error."
   (cl-letf (((symbol-function 'claude-repl--git-branch-exists-p)
-             (lambda (_root branch) (string= branch "DWC/bar-tag")))
+             (lambda (&rest _) nil))
+            ((symbol-function 'claude-repl--git-tag-exists-p)
+             (lambda (_root tag) (string= tag "start/DWC/bar")))
             ((symbol-function '+workspace-list-names)
              (lambda () '("other"))))
     (should-error
      (claude-repl--rename-validate
-      "foo" "bar" "DWC/bar" "DWC/bar-tag" "/nonexistent/path" "/tmp/foo")
+      "foo" "bar" "DWC/bar" "start/DWC/bar" "/nonexistent/path" "/tmp/foo")
      :type 'user-error)))
 
 (ert-deftest claude-repl-test-rename-validate-existing-workspace-errors ()
@@ -131,10 +133,12 @@
   "All checks passing returns nil without error."
   (cl-letf (((symbol-function 'claude-repl--git-branch-exists-p)
              (lambda (&rest _) nil))
+            ((symbol-function 'claude-repl--git-tag-exists-p)
+             (lambda (&rest _) nil))
             ((symbol-function '+workspace-list-names)
              (lambda () '("other"))))
     (should (null (claude-repl--rename-validate
-                   "foo" "bar" "DWC/bar" "DWC/bar-tag"
+                   "foo" "bar" "DWC/bar" "start/DWC/bar"
                    "/nonexistent/path" "/tmp/foo")))))
 
 ;;;; ---- Tests: assert-no-pending-merge ----
@@ -302,21 +306,21 @@ new path back even when the input is the raw path."
 ;;;; ---- Tests: end-to-end against a real git worktree ----
 
 (ert-deftest claude-repl-test-rename-end-to-end-renames-branch-and-dir ()
-  "Full rename pipeline against a real worktree renames branch, tag,
+  "Full rename pipeline against a real worktree renames branch, start tag,
 directory, and rehashes state."
   (claude-repl-test--with-clean-state
     (claude-repl-test-rename--with-temp-git-repo repo
       (claude-repl-test-rename--seed-commit repo)
       (let* ((parent (make-temp-file "claude-repl-rename-wt-parent-" t))
              (wt (expand-file-name "foo" parent))
-             (claude-repl-worktree-tag-branch-suffix "-tag"))
+             (claude-repl-worktree-start-tag-prefix "start/"))
         (unwind-protect
             (progn
-              ;; Create the worktree on DWC/foo and a companion tag branch.
+              ;; Create the worktree on DWC/foo and a companion start tag.
               (call-process "git" nil nil nil "-C" repo
                             "worktree" "add" "-b" "DWC/foo" wt)
               (call-process "git" nil nil nil "-C" repo
-                            "branch" "DWC/foo-tag" "DWC/foo")
+                            "tag" "start/DWC/foo" "DWC/foo")
               ;; Register state mirroring how the create flow does.
               (claude-repl--ws-put "foo" :project-dir
                                    (claude-repl--path-canonical wt))
@@ -326,11 +330,11 @@ directory, and rehashes state."
                         ((symbol-function 'persp-rename) (lambda (&rest _) t))
                         ((symbol-function '+workspace-list-names) (lambda () '("foo"))))
                 (claude-repl--do-rename-workspace "foo" "bar"))
-              ;; New branch + tag branch exist; old ones do not.
+              ;; New branch + start tag exist; old ones do not.
               (should (claude-repl--git-branch-exists-p repo "DWC/bar"))
-              (should (claude-repl--git-branch-exists-p repo "DWC/bar-tag"))
+              (should (claude-repl--git-tag-exists-p repo "start/DWC/bar"))
               (should-not (claude-repl--git-branch-exists-p repo "DWC/foo"))
-              (should-not (claude-repl--git-branch-exists-p repo "DWC/foo-tag"))
+              (should-not (claude-repl--git-tag-exists-p repo "start/DWC/foo"))
               ;; New directory exists; old does not.
               (should (file-directory-p (expand-file-name "bar" parent)))
               (should-not (file-directory-p wt))
@@ -357,7 +361,7 @@ directory, and rehashes state."
       (claude-repl-test-rename--seed-commit repo)
       (let* ((parent (make-temp-file "claude-repl-rename-wt-parent-" t))
              (wt (expand-file-name "foo" parent))
-             (claude-repl-worktree-tag-branch-suffix nil))
+             (claude-repl-worktree-start-tag-prefix nil))
         (unwind-protect
             (progn
               (call-process "git" nil nil nil "-C" repo

@@ -53,13 +53,13 @@ when a workspace has no recorded `:source-ws-dir'."
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-worktree-tag-branch-suffix "-tag"
-  "Suffix appended to a worktree's branch name to form its companion tag branch.
-On worktree creation, a sibling branch named BRANCH+suffix is created at
-the same BASE-COMMIT, so `git diff <branch>-tag..<branch>' always shows
-the worktree's full divergence from its starting point — even after the
+(defcustom claude-repl-worktree-start-tag-prefix "start/"
+  "Prefix prepended to a worktree's branch name to form its companion start tag.
+On worktree creation, a real git tag named PREFIX+BRANCH is created at
+BASE-COMMIT, so `git diff start/<branch>..<branch>' always shows the
+worktree's full divergence from its starting point — even after the
 original base branch (e.g. master) advances.  Set to nil or the empty
-string to disable tag branch creation."
+string to disable start-tag creation."
   :type '(choice (const :tag "Disabled" nil) string)
   :group 'claude-repl)
 
@@ -130,26 +130,33 @@ Tears down any existing watch first to avoid duplicates on re-eval."
     (claude-repl--log nil "git-branch-exists-p: root=%s branch=%s result=%s" root branch result)
     result))
 
-(defun claude-repl--tag-branch-name (branch-name)
-  "Return the companion tag branch name for BRANCH-NAME, or nil if disabled.
-Disabled when `claude-repl-worktree-tag-branch-suffix' is nil or empty."
-  (when (and claude-repl-worktree-tag-branch-suffix
-             (not (string-empty-p claude-repl-worktree-tag-branch-suffix)))
-    (concat branch-name claude-repl-worktree-tag-branch-suffix)))
+(defun claude-repl--git-tag-exists-p (root tag)
+  "Return non-nil if TAG exists as a git tag in repo at ROOT."
+  (let ((result (= 0 (claude-repl--git-exit-code
+                      root "rev-parse" "--verify" (concat "refs/tags/" tag)))))
+    (claude-repl--log nil "git-tag-exists-p: root=%s tag=%s result=%s" root tag result)
+    result))
 
-(defun claude-repl--create-tag-branch (git-root branch-name base-commit)
-  "Create a companion tag branch for BRANCH-NAME at BASE-COMMIT in GIT-ROOT.
-The tag branch name is BRANCH-NAME + `claude-repl-worktree-tag-branch-suffix'.
-No-op when the suffix is nil/empty.  Signals `error' on git failure: the tag
-branch is the durable diff anchor for `<branch>-tag..<branch>', so silent
+(defun claude-repl--start-tag-name (branch-name)
+  "Return the companion start-tag name for BRANCH-NAME, or nil if disabled.
+Disabled when `claude-repl-worktree-start-tag-prefix' is nil or empty."
+  (when (and claude-repl-worktree-start-tag-prefix
+             (not (string-empty-p claude-repl-worktree-start-tag-prefix)))
+    (concat claude-repl-worktree-start-tag-prefix branch-name)))
+
+(defun claude-repl--create-start-tag (git-root branch-name base-commit)
+  "Create a companion start-tag for BRANCH-NAME at BASE-COMMIT in GIT-ROOT.
+The tag name is `claude-repl-worktree-start-tag-prefix' + BRANCH-NAME.
+No-op when the prefix is nil/empty.  Signals `error' on git failure: the
+tag is the durable diff anchor for `start/<branch>..<branch>', so silent
 failure would leave the workspace without a working diff target."
-  (when-let ((tag-branch (claude-repl--tag-branch-name branch-name)))
-    (let ((exit-code (claude-repl--git-exit-code git-root "branch" tag-branch base-commit)))
-      (claude-repl--log branch-name "create-tag-branch: git-root=%s tag-branch=%s base-commit=%s exit-code=%s"
-                        git-root tag-branch base-commit exit-code)
+  (when-let ((tag-name (claude-repl--start-tag-name branch-name)))
+    (let ((exit-code (claude-repl--git-exit-code git-root "tag" tag-name base-commit)))
+      (claude-repl--log branch-name "create-start-tag: git-root=%s tag=%s base-commit=%s exit-code=%s"
+                        git-root tag-name base-commit exit-code)
       (unless (zerop exit-code)
-        (error "Failed to create tag branch '%s' at %s in %s (exit %d)"
-               tag-branch base-commit git-root exit-code)))))
+        (error "Failed to create start tag '%s' at %s in %s (exit %d)"
+               tag-name base-commit git-root exit-code)))))
 
 (defun claude-repl--parse-worktree-porcelain (text target-ref)
   "Return the worktree path in TEXT whose branch matches TARGET-REF.
@@ -599,8 +606,8 @@ project-dir of the workspace this worktree was created from)."
                                               &optional source-dir)
   "Run `git worktree add' asynchronously for a new worktree.
 Creates the worktree at PATH on BRANCH-NAME off BASE-COMMIT in GIT-ROOT.
-On success, also creates the companion tag branch at BASE-COMMIT (see
-`claude-repl--create-tag-branch') so `<branch>-tag..<branch>' diffs
+On success, also creates the companion start tag at BASE-COMMIT (see
+`claude-repl--create-start-tag') so `start/<branch>..<branch>' diffs
 remain stable as the upstream base branch advances.
 When the git command finishes, `claude-repl--worktree-add-callback'
 finalizes the workspace.  SOURCE-DIR is the project-dir of the workspace
@@ -609,7 +616,7 @@ this worktree was created from; threaded through to be persisted as
   (let* ((add-args (list "worktree" "add" "-b" branch-name path base-commit))
          (after-add (lambda (ok output)
                       (when ok
-                        (claude-repl--create-tag-branch
+                        (claude-repl--create-start-tag
                          git-root branch-name base-commit))
                       (claude-repl--worktree-add-callback
                        path dirname preemptive-prompt
@@ -644,10 +651,10 @@ report the new path as an existing project."
   (when (claude-repl--git-branch-exists-p git-root branch-name)
     (claude-repl--log name "ERROR: branch '%s' already exists — cannot create worktree" branch-name)
     (user-error "Branch '%s' already exists — delete it first or choose a different name" branch-name))
-  (when-let ((tag-branch (claude-repl--tag-branch-name branch-name)))
-    (when (claude-repl--git-branch-exists-p git-root tag-branch)
-      (claude-repl--log name "ERROR: tag branch '%s' already exists — cannot create worktree" tag-branch)
-      (user-error "Tag branch '%s' already exists — delete it first or choose a different name" tag-branch))))
+  (when-let ((start-tag (claude-repl--start-tag-name branch-name)))
+    (when (claude-repl--git-tag-exists-p git-root start-tag)
+      (claude-repl--log name "ERROR: start tag '%s' already exists — cannot create worktree" start-tag)
+      (user-error "Start tag '%s' already exists — delete it first or choose a different name" start-tag))))
 
 (defun claude-repl--do-create-worktree-workspace (name &optional force-sandbox fork-session-id preemptive-prompt callback priority base-commit git-root source-dir)
   "Create a git worktree and Doom workspace for NAME.

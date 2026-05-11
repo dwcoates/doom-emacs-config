@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 
-;; End-to-end workspace rename: git branch, companion tag branch,
+;; End-to-end workspace rename: git branch, companion start tag,
 ;; worktree directory, projectile entry, perspective, vterm/input
 ;; buffers, owning-workspace buffer-locals, and `:source-ws-dir'
 ;; back-references in peer workspaces.
@@ -34,10 +34,10 @@ Signals `user-error' when PATH is not inside a git repo."
     (unless (string= branch "HEAD")
       branch)))
 
-(defun claude-repl--rename-validate (old-ws new-bare new-branch new-tag-branch new-path old-path)
+(defun claude-repl--rename-validate (old-ws new-bare new-branch new-start-tag new-path old-path)
   "Validate that OLD-WS can be renamed to NEW-BARE.
 Checks for empty/identical names, existing target path, existing target
-branches (main and companion tag), and existing target workspace name.
+branch, existing target start tag, and existing target workspace name.
 Signals `user-error' on any conflict."
   (when (string-empty-p new-bare)
     (user-error "New workspace name cannot be empty"))
@@ -47,9 +47,9 @@ Signals `user-error' on any conflict."
     (user-error "Target path already exists: %s" new-path))
   (when (claude-repl--git-branch-exists-p old-path new-branch)
     (user-error "Branch '%s' already exists" new-branch))
-  (when (and new-tag-branch
-             (claude-repl--git-branch-exists-p old-path new-tag-branch))
-    (user-error "Tag branch '%s' already exists" new-tag-branch))
+  (when (and new-start-tag
+             (claude-repl--git-tag-exists-p old-path new-start-tag))
+    (user-error "Start tag '%s' already exists" new-start-tag))
   (when (member new-bare (+workspace-list-names))
     (user-error "Workspace '%s' already exists" new-bare)))
 
@@ -76,6 +76,29 @@ Signals `error' on failure so the orchestrator can roll back."
       (error "Failed to rename branch '%s' -> '%s' in %s (exit %d)"
              old-branch new-branch path exit-code))))
 
+(defun claude-repl--rename-git-tag (path old-tag new-tag)
+  "Rename OLD-TAG to NEW-TAG in the repo at PATH.
+Git has no native tag-rename, so we create NEW-TAG at OLD-TAG's commit
+and then delete OLD-TAG.  If the create step fails we error out without
+deleting OLD-TAG; if the delete step fails we attempt to remove NEW-TAG
+to leave the repo unchanged before erroring."
+  (let ((create-exit (claude-repl--git-exit-code
+                      path "tag" new-tag old-tag)))
+    (claude-repl--log nil "rename-git-tag: path=%s create %s -> %s exit=%d"
+                      path old-tag new-tag create-exit)
+    (unless (zerop create-exit)
+      (error "Failed to create tag '%s' from '%s' in %s (exit %d)"
+             new-tag old-tag path create-exit)))
+  (let ((delete-exit (claude-repl--git-exit-code
+                      path "tag" "-d" old-tag)))
+    (claude-repl--log nil "rename-git-tag: path=%s delete %s exit=%d"
+                      path old-tag delete-exit)
+    (unless (zerop delete-exit)
+      (ignore-errors
+        (claude-repl--git-exit-code path "tag" "-d" new-tag))
+      (error "Failed to delete old tag '%s' in %s (exit %d)"
+             old-tag path delete-exit))))
+
 (defun claude-repl--rename-git-worktree-move (path old-path new-path)
   "Move the worktree at OLD-PATH to NEW-PATH.
 PATH is the cwd for the git invocation — kept distinct so the caller
@@ -90,8 +113,8 @@ Signals `error' on failure."
              old-path new-path exit-code))))
 
 (defun claude-repl--rename-execute-git
-    (old-path new-path git-cwd old-branch new-branch old-tag-branch new-tag-branch)
-  "Perform the git-level rename: branch, optional tag-branch, worktree move.
+    (old-path new-path git-cwd old-branch new-branch old-start-tag new-start-tag)
+  "Perform the git-level rename: branch, optional start tag, worktree move.
 GIT-CWD is the directory passed to `git -C' — must remain valid across
 the worktree move (so we use the common-dir or a sibling, not OLD-PATH).
 On any failure mid-flight, attempts to roll back any already-applied
@@ -102,16 +125,16 @@ rename so the repo is left in its original state."
         (progn
           (claude-repl--rename-git-branch git-cwd old-branch new-branch)
           (setq branch-renamed t)
-          (when (and old-tag-branch new-tag-branch
-                     (claude-repl--git-branch-exists-p git-cwd old-tag-branch))
-            (claude-repl--rename-git-branch git-cwd old-tag-branch new-tag-branch)
+          (when (and old-start-tag new-start-tag
+                     (claude-repl--git-tag-exists-p git-cwd old-start-tag))
+            (claude-repl--rename-git-tag git-cwd old-start-tag new-start-tag)
             (setq tag-renamed t))
           (claude-repl--rename-git-worktree-move git-cwd old-path new-path))
       (error
        (claude-repl--log nil "rename-execute-git: rollback after error: %S" err)
        (when tag-renamed
          (ignore-errors
-           (claude-repl--rename-git-branch git-cwd new-tag-branch old-tag-branch)))
+           (claude-repl--rename-git-tag git-cwd new-start-tag old-start-tag)))
        (when branch-renamed
          (ignore-errors
            (claude-repl--rename-git-branch git-cwd new-branch old-branch)))
@@ -246,7 +269,7 @@ the common-dir cannot be resolved or its parent does not exist."
 (defun claude-repl--do-rename-workspace (old-ws new-name)
   "Rename workspace OLD-WS to NEW-NAME.
 Renames the git branch (preserving any directory prefix when NEW-NAME
-is bare), the companion tag branch (when configured), the worktree
+is bare), the companion start tag (when configured), the worktree
 directory, the projectile entry, the perspective, vterm/input buffers,
 and any peer workspace's `:source-ws-dir' back-reference.
 Signals `user-error' on validation failures and surfaces git-level
@@ -262,19 +285,19 @@ errors verbatim after attempting a best-effort rollback."
          (_ (unless old-branch
               (user-error "Cannot rename a detached-HEAD worktree")))
          (new-branch (claude-repl--rename-derive-branch old-branch new-name))
-         (old-tag-branch (claude-repl--tag-branch-name old-branch))
-         (new-tag-branch (claude-repl--tag-branch-name new-branch))
+         (old-start-tag (claude-repl--start-tag-name old-branch))
+         (new-start-tag (claude-repl--start-tag-name new-branch))
          (git-cwd (claude-repl--rename-git-common-cwd old-path)))
     (claude-repl--log old-ws
                       "rename: old-ws=%s new-bare=%s old-path=%s new-path=%s old-branch=%s new-branch=%s git-cwd=%s"
                       old-ws new-bare old-path new-path
                       old-branch new-branch git-cwd)
     (claude-repl--rename-validate
-     old-ws new-bare new-branch new-tag-branch new-path old-path)
+     old-ws new-bare new-branch new-start-tag new-path old-path)
     (claude-repl--rename-assert-no-pending-merge old-path)
     (claude-repl--rename-execute-git
      old-path new-path git-cwd
-     old-branch new-branch old-tag-branch new-tag-branch)
+     old-branch new-branch old-start-tag new-start-tag)
     (claude-repl--rename-rehash-state old-ws new-bare new-path)
     (claude-repl--rename-update-source-back-refs old-path new-path)
     (claude-repl--rename-update-buffers old-ws new-bare new-path)
