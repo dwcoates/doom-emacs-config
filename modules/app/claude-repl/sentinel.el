@@ -307,7 +307,12 @@ chain has confirmed WS is non-nil and registered in
 `error', since we run from a file-notify callback and a hard error
 would kill the watcher) so the condition is visible.
 
-Idempotent on repeated fires for the same workspace."
+State transition (the inner `unless') runs at most once per load
+cycle, gated on `claude-repl--ready'.  Hook firing (after-ready and
+the ws-fully-loaded latch flip) runs UNCONDITIONALLY on every
+observed `session_start' for a live vterm — duplicate or stale
+events still flip the latch and fire the narrow hook so observers
+waiting on them are never stalled by a swallowed duplicate."
   (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (claude-repl--log ws "on-session-start-event: ENTER ws=%s vterm-buf=%S vterm-live=%s"
                       ws (when vterm-buf (buffer-name vterm-buf))
@@ -318,18 +323,15 @@ Idempotent on repeated fires for the same workspace."
       (claude-repl--log ws
                         "on-session-start-event: ERROR ws=%s vterm buffer is null/dead — structural inconsistency"
                         ws))
-     ((buffer-local-value 'claude-repl--ready vterm-buf)
-      (claude-repl--log ws "on-session-start-event: already ready ws=%s — no-op" ws))
      (t
-      (claude-repl--log ws "on-session-start-event: marking ready ws=%s" ws)
-      (claude-repl--ws-set-claude-state ws :idle)
-      (with-current-buffer vterm-buf
-        (setq claude-repl--ready t))
-      (claude-repl--cancel-ready-timer ws)
-      (claude-repl--open-panels-after-ready ws)
-      ;; Fire the public after-ready hook so observers (e.g. the snapshot
-      ;; loader's queue driver) can advance.  `run-hook-wrapped' so a
-      ;; broken handler can't prevent later handlers from running.
+      (unless (buffer-local-value 'claude-repl--ready vterm-buf)
+        (claude-repl--log ws "on-session-start-event: marking ready ws=%s" ws)
+        (claude-repl--ws-set-claude-state ws :idle)
+        (with-current-buffer vterm-buf
+          (setq claude-repl--ready t))
+        (claude-repl--cancel-ready-timer ws)
+        (claude-repl--open-panels-after-ready ws))
+      ;; Fire narrow after-ready hook (every observed session_start).
       (run-hook-wrapped 'claude-repl-after-ready-functions
                         (lambda (fn ws)
                           (condition-case err
@@ -339,17 +341,85 @@ Idempotent on repeated fires for the same workspace."
                                                "after-ready-hook fn=%s err=%S"
                                                fn err)))
                           nil)
-                        ws)))))
+                        ws)
+      ;; Flip the claude-side bit on the fully-loaded latch.  If
+      ;; --on-workspace-switch has also fired, this fires the ws-fully-loaded
+      ;; hook; otherwise we just record the bit and wait for switch settle.
+      (claude-repl--latch-and-maybe-fire-loaded ws :claude-ready)))))
 
 (defvar claude-repl-after-ready-functions nil
-  "Hook run after a workspace's Claude session becomes ready.
+  "Hook run when a `session_start' event is observed for a workspace.
 Each function is called with one argument: the workspace name (string)
-that just transitioned to `:idle' via `claude-repl--on-session-start-event'.
+whose Claude process printed `session_start'.
 
-Fires once per `session_start' transition.  Handlers run via
-`run-hook-wrapped' wrapped in `condition-case', so a broken handler
-cannot prevent later handlers (or the underlying state transition)
-from completing.")
+Unlike `claude-repl-ws-fully-loaded-functions', this hook is the
+NARROW signal — it fires on every observed `session_start' event,
+including duplicates that arrive after `claude-repl--ready' is
+already t.  Use this only when you specifically need the
+claude-side ready event; prefer `claude-repl-ws-fully-loaded-functions'
+for anything that needs the workspace to also be settled on the
+Emacs side.
+
+Handlers run via `run-hook-wrapped' wrapped in `condition-case', so a
+broken handler cannot prevent later handlers from completing.")
+
+(defvar claude-repl-ws-fully-loaded-functions nil
+  "Hook run when a Claude REPL workspace is fully loaded.
+A workspace is fully loaded when BOTH:
+  1. `--on-session-start-event' has fired (`:claude-ready' bit set),
+  2. `--on-workspace-switch' has completed (`:ws-loaded' bit set).
+
+Each handler is called with two arguments: (WS &optional MARKER).
+WS is the workspace name string.  MARKER is `:timed-out' when the
+snapshot loader's watchdog fired the hook synthetically because the
+ws never reached both ready+settled within the timeout; otherwise
+MARKER is nil (happy path).  Handlers that don't care about the
+distinction may accept `(ws)' alone — the second arg is optional.
+
+This hook is the LOAD BARRIER.  At fire time, no further
+claude-repl-managed automatic code is queued to run for this
+workspace's load lifecycle.
+
+HANDLERS MUST BE SYNCHRONOUS AND SHORT-RUNNING.  The barrier guarantee
+breaks the moment a handler schedules async work (`run-at-time',
+`file-notify-add-watch', a process sentinel, `make-thread', etc.) —
+that work will interleave with subsequent workspace loads and
+resurrect every race this hook was designed to eliminate.  If you
+need async behavior keyed off load completion, drive it from a
+separate mechanism with its own state, not from this hook.
+
+Handlers run via `run-hook-wrapped' wrapped in `condition-case', so a
+broken handler cannot prevent later handlers from completing.
+
+Fires exactly once per load cycle.  Latch state is cleared after
+firing; a subsequent kill/restart that resets the ws plist also
+implicitly resets the latch bits.")
+
+(defun claude-repl--latch-and-maybe-fire-loaded (ws key &optional marker)
+  "Set KEY to t on WS's plist; fire `ws-fully-loaded-functions' if both bits set.
+KEY is `:claude-ready' or `:ws-loaded'.  When both bits are now t,
+clears them and runs `claude-repl-ws-fully-loaded-functions' with
+WS (and MARKER, when non-nil — typically `:timed-out' from the
+watchdog path).  Both bits are explicitly cleared after firing so a
+later kill-and-relaunch cycle starts clean (kill clears the whole
+plist; explicit clear here covers the case where the ws keeps
+running but its load cycle has logically ended)."
+  (claude-repl--ws-put ws key t)
+  (when (and (claude-repl--ws-get ws :claude-ready)
+             (claude-repl--ws-get ws :ws-loaded))
+    (claude-repl--ws-put ws :claude-ready nil)
+    (claude-repl--ws-put ws :ws-loaded nil)
+    (claude-repl--log ws "ws-fully-loaded: ws=%s marker=%s" ws (or marker "nil"))
+    (run-hook-wrapped 'claude-repl-ws-fully-loaded-functions
+                      (lambda (fn ws marker)
+                        (condition-case err
+                            (funcall fn ws marker)
+                          (error
+                           (claude-repl--log ws
+                                             "ws-fully-loaded-hook fn=%s err=%S"
+                                             fn err)))
+                        nil)
+                      ws marker)))
 
 ;;; Event dispatch
 

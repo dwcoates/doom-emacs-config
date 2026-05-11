@@ -1497,6 +1497,127 @@ must surface, not be silently swallowed."
               (should (eq (claude-repl--ws-claude-state "ws1") :idle))))
         (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
 
+;;;; ---- Tests: ws-fully-loaded latch ----
+
+(ert-deftest claude-repl-test-latch-claude-ready-alone-does-not-fire ()
+  "Latch flip of `:claude-ready' alone does not fire ws-fully-loaded.
+The hook requires BOTH bits set; setting only one is a no-op fire-wise."
+  (claude-repl-test--with-clean-state
+    (let ((fires 0))
+      (let ((claude-repl-ws-fully-loaded-functions
+             (list (lambda (&rest _) (cl-incf fires)))))
+        (claude-repl--latch-and-maybe-fire-loaded "ws1" :claude-ready)
+        (should (= fires 0))
+        ;; Latch bit set, but `:ws-loaded' still nil.
+        (should (eq (claude-repl--ws-get "ws1" :claude-ready) t))
+        (should (eq (claude-repl--ws-get "ws1" :ws-loaded) nil))))))
+
+(ert-deftest claude-repl-test-latch-ws-loaded-alone-does-not-fire ()
+  "Latch flip of `:ws-loaded' alone does not fire ws-fully-loaded.
+Symmetric to the `:claude-ready'-alone case."
+  (claude-repl-test--with-clean-state
+    (let ((fires 0))
+      (let ((claude-repl-ws-fully-loaded-functions
+             (list (lambda (&rest _) (cl-incf fires)))))
+        (claude-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded)
+        (should (= fires 0))
+        (should (eq (claude-repl--ws-get "ws1" :ws-loaded) t))
+        (should (eq (claude-repl--ws-get "ws1" :claude-ready) nil))))))
+
+(ert-deftest claude-repl-test-latch-claude-then-ws-fires ()
+  "Latch fires once when both bits are set, regardless of order.
+Setting `:claude-ready' first then `:ws-loaded' triggers the hook."
+  (claude-repl-test--with-clean-state
+    (let ((fired-with nil))
+      (let ((claude-repl-ws-fully-loaded-functions
+             (list (lambda (ws marker) (push (cons ws marker) fired-with)))))
+        (claude-repl--latch-and-maybe-fire-loaded "ws1" :claude-ready)
+        (should (null fired-with))
+        (claude-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded)
+        (should (equal fired-with '(("ws1" . nil))))))))
+
+(ert-deftest claude-repl-test-latch-ws-then-claude-fires ()
+  "Latch fires once when both bits are set, regardless of order.
+Setting `:ws-loaded' first then `:claude-ready' also triggers the hook."
+  (claude-repl-test--with-clean-state
+    (let ((fired-with nil))
+      (let ((claude-repl-ws-fully-loaded-functions
+             (list (lambda (ws marker) (push (cons ws marker) fired-with)))))
+        (claude-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded)
+        (should (null fired-with))
+        (claude-repl--latch-and-maybe-fire-loaded "ws1" :claude-ready)
+        (should (equal fired-with '(("ws1" . nil))))))))
+
+(ert-deftest claude-repl-test-latch-clears-bits-after-fire ()
+  "After ws-fully-loaded fires, both latch bits are cleared on the ws plist
+so a subsequent load cycle (e.g. claude-repl-restart) starts fresh."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-ws-fully-loaded-functions
+           (list (lambda (&rest _) nil))))
+      (claude-repl--latch-and-maybe-fire-loaded "ws1" :claude-ready)
+      (claude-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded)
+      (should (eq (claude-repl--ws-get "ws1" :claude-ready) nil))
+      (should (eq (claude-repl--ws-get "ws1" :ws-loaded) nil)))))
+
+(ert-deftest claude-repl-test-latch-passes-marker-through ()
+  "Latch passes the optional MARKER arg straight to handlers — used by the
+watchdog path to signal `:timed-out'."
+  (claude-repl-test--with-clean-state
+    (let ((received-marker 'unset))
+      (let ((claude-repl-ws-fully-loaded-functions
+             (list (lambda (_ws marker) (setq received-marker marker)))))
+        ;; Pre-set :claude-ready so the :ws-loaded flip triggers fire.
+        (claude-repl--ws-put "ws1" :claude-ready t)
+        (claude-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded :timed-out)
+        (should (eq received-marker :timed-out))))))
+
+(ert-deftest claude-repl-test-latch-handler-error-isolated ()
+  "A broken ws-fully-loaded handler must not prevent later handlers from running."
+  (claude-repl-test--with-clean-state
+    (let ((second-called nil))
+      (let ((claude-repl-ws-fully-loaded-functions
+             (list (lambda (&rest _) (error "boom"))
+                   (lambda (&rest _) (setq second-called t)))))
+        (claude-repl--ws-put "ws1" :claude-ready t)
+        (claude-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded)
+        (should second-called)))))
+
+(ert-deftest claude-repl-test-on-session-start-event-flips-claude-ready ()
+  "on-session-start-event flips the `:claude-ready' latch bit on the ws plist."
+  (claude-repl-test--with-clean-state
+    (let ((fake-buf (generate-new-buffer " *test-session-start-latch*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
+            (cl-letf (((symbol-function 'claude-repl--cancel-ready-timer) #'ignore)
+                      ((symbol-function 'claude-repl--open-panels-after-ready) #'ignore))
+              (claude-repl--on-session-start-event "ws1" "/some/dir")
+              ;; :ws-loaded is nil, so the latch shouldn't have fired+cleared yet.
+              (should (eq (claude-repl--ws-get "ws1" :claude-ready) t))))
+        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
+
+(ert-deftest claude-repl-test-on-session-start-event-duplicate-still-fires-hooks ()
+  "Even when `claude-repl--ready' is already t (duplicate session_start),
+both `after-ready-functions' and the `:claude-ready' latch flip still fire.
+This is the stall fix: a swallowed duplicate must not block loader advance."
+  (claude-repl-test--with-clean-state
+    (let ((fake-buf (generate-new-buffer " *test-session-start-dup*"))
+          (after-ready-fires 0))
+      (unwind-protect
+          (progn
+            (with-current-buffer fake-buf (setq-local claude-repl--ready t))
+            (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
+            (cl-letf (((symbol-function 'claude-repl--cancel-ready-timer) #'ignore)
+                      ((symbol-function 'claude-repl--open-panels-after-ready) #'ignore))
+              (let ((claude-repl-after-ready-functions
+                     (list (lambda (_ws) (cl-incf after-ready-fires)))))
+                (claude-repl--on-session-start-event "ws1" "/some/dir")
+                ;; Hook fired despite duplicate.
+                (should (= after-ready-fires 1))
+                ;; Latch bit set despite duplicate.
+                (should (eq (claude-repl--ws-get "ws1" :claude-ready) t)))))
+        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
+
 (provide 'test-sentinel)
 
 ;;; test-sentinel.el ends here

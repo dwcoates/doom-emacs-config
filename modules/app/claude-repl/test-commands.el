@@ -1756,7 +1756,7 @@ so persp-mode begins capturing a window configuration for that persp."
       (should-error (claude-repl-load-workspace-snapshot) :type 'user-error))))
 
 (ert-deftest claude-repl-cmd-test-snapshot-load/advances-on-ready-event ()
-  "An after-ready callback for the awaited ws advances the queue."
+  "A ws-fully-loaded callback for the awaited ws advances the queue."
   (claude-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "claude-snap-"))
           (dir-a (make-temp-file "claude-proj-a-" t))
@@ -1779,12 +1779,12 @@ so persp-mode begins capturing a window configuration for that persp."
               (should (equal established '("ws-a")))
               (should (equal "ws-a"
                              (plist-get claude-repl--snapshot-load-state :awaiting)))
-              ;; Simulate ready signal for ws-a.
-              (run-hook-with-args 'claude-repl-after-ready-functions "ws-a")
+              ;; Simulate ws-fully-loaded signal for ws-a (no marker = happy path).
+              (run-hook-with-args 'claude-repl-ws-fully-loaded-functions "ws-a" nil)
               (should (equal (sort (copy-sequence established) #'string<)
                              '("ws-a" "ws-b")))
-              ;; Simulate ready for ws-b → load finishes.
-              (run-hook-with-args 'claude-repl-after-ready-functions "ws-b")
+              ;; Simulate ws-fully-loaded for ws-b → load finishes.
+              (run-hook-with-args 'claude-repl-ws-fully-loaded-functions "ws-b" nil)
               (should-not claude-repl--snapshot-load-state)))
         (delete-file snapshot-file)
         (delete-directory dir-a t)
@@ -1808,8 +1808,8 @@ so persp-mode begins capturing a window configuration for that persp."
                       ((symbol-function 'run-with-timer)
                        (lambda (&rest _) nil)))
               (claude-repl-load-workspace-snapshot)
-              ;; Foreign ready — must NOT advance.
-              (run-hook-with-args 'claude-repl-after-ready-functions "some-other-ws")
+              ;; Foreign ws-fully-loaded — must NOT advance.
+              (run-hook-with-args 'claude-repl-ws-fully-loaded-functions "some-other-ws" nil)
               (should (equal established '("ws-a")))
               (should (equal "ws-a"
                              (plist-get claude-repl--snapshot-load-state :awaiting)))))
@@ -1899,9 +1899,49 @@ without waiting for a hook fire."
         (delete-directory dir-a t)
         (delete-directory dir-b t)))))
 
+(ert-deftest claude-repl-cmd-test-snapshot-load/timeout-fires-fully-loaded-with-marker ()
+  "Watchdog timeout for ws fires `ws-fully-loaded-functions' with the
+`:timed-out' marker so observers can distinguish forced advance from
+the happy-path advance."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (dir-a (make-temp-file "claude-proj-a-" t))
+          (dir-b (make-temp-file "claude-proj-b-" t))
+          (fired-with nil)
+          captured-timer-callback)
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) nil))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (_secs _rep fn &rest args)
+                         (setq captured-timer-callback (cons fn args))
+                         'fake-timer))
+                      ((symbol-function 'timerp) (lambda (_t) nil))
+                      ((symbol-function 'cancel-timer) #'ignore))
+              (let ((claude-repl-ws-fully-loaded-functions
+                     (list (lambda (ws marker)
+                             (push (cons ws marker) fired-with))
+                           ;; Plus the loader's own subscriber stays attached.
+                           #'claude-repl--snapshot-load-on-loaded)))
+                (claude-repl-load-workspace-snapshot)
+                ;; Fire the timeout for ws-a manually.
+                (apply (car captured-timer-callback) (cdr captured-timer-callback))
+                ;; Hook fired for ws-a with :timed-out marker.
+                (should (cl-some (lambda (e)
+                                   (and (equal (car e) "ws-a")
+                                        (eq (cdr e) :timed-out)))
+                                 fired-with)))))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)))))
+
 (ert-deftest claude-repl-cmd-test-snapshot-load/hook-detached-on-finish ()
-  "After a successful load, `claude-repl--snapshot-load-on-ready' is removed
-from `claude-repl-after-ready-functions'."
+  "After a successful load, `claude-repl--snapshot-load-on-loaded' is removed
+from `claude-repl-ws-fully-loaded-functions'."
   (claude-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "claude-snap-"))
           (real-dir (make-temp-file "claude-proj-" t)))
@@ -1914,8 +1954,8 @@ from `claude-repl-after-ready-functions'."
                       ((symbol-function 'run-with-timer)
                        (lambda (&rest _) nil)))
               (claude-repl-load-workspace-snapshot)
-              (should-not (memq #'claude-repl--snapshot-load-on-ready
-                                claude-repl-after-ready-functions))))
+              (should-not (memq #'claude-repl--snapshot-load-on-loaded
+                                claude-repl-ws-fully-loaded-functions))))
         (delete-file snapshot-file)
         (delete-directory real-dir t)))))
 
@@ -2097,8 +2137,8 @@ instead of leaving a zombie loader."
                        (lambda (&rest _) nil)))
               (claude-repl-load-workspace-snapshot)
               (should-not claude-repl--snapshot-load-state)
-              (should-not (memq #'claude-repl--snapshot-load-on-ready
-                                claude-repl-after-ready-functions))
+              (should-not (memq #'claude-repl--snapshot-load-on-loaded
+                                claude-repl-ws-fully-loaded-functions))
               (should claude-repl--snapshot-loaded-p)))
         (delete-file snapshot-file)
         (delete-directory dir-a t)))))
@@ -2108,7 +2148,7 @@ instead of leaving a zombie loader."
 `--establish-workspace' so a re-entrant ready event (today impossible,
 latent if establish ever yields) is a no-op rather than advancing the
 queue mid-call.  Asserts the contract by firing
-`--snapshot-load-on-ready' synchronously from inside the mocked
+`--snapshot-load-on-loaded' synchronously from inside the mocked
 establish and verifying (a) `:awaiting' is nil at the re-entry point,
 (b) the queue did NOT advance to the next ws during establish, and
 (c) `:awaiting' is set to ws-a only after establish returned."
@@ -2128,12 +2168,12 @@ establish and verifying (a) `:awaiting' is nil at the re-entry point,
                          (push ws established)
                          (when (equal ws "ws-a")
                            ;; Capture state at the moment of re-entry, then
-                           ;; synchronously fire the after-ready hook for ws-a
-                           ;; from inside establish.  The on-ready callback
-                           ;; must see `:awaiting' nil and short-circuit.
+                           ;; synchronously fire the loaded hook for ws-a
+                           ;; from inside establish.  The handler must see
+                           ;; `:awaiting' nil and short-circuit.
                            (setq reentry-awaiting
                                  (plist-get claude-repl--snapshot-load-state :awaiting))
-                           (claude-repl--snapshot-load-on-ready "ws-a")
+                           (claude-repl--snapshot-load-on-loaded "ws-a")
                            ;; If the re-entry had advanced the queue, ws-b
                            ;; would have been pushed onto `established' here.
                            (setq reentry-established (copy-sequence established)))))
@@ -2143,7 +2183,7 @@ establish and verifying (a) `:awaiting' is nil at the re-entry point,
                       ((symbol-function 'run-with-timer)
                        (lambda (&rest _) nil)))
               (claude-repl-load-workspace-snapshot)
-              ;; (a) During re-entry, `:awaiting' was nil — the on-ready check
+              ;; (a) During re-entry, `:awaiting' was nil — the handler check
               ;; `(equal ws :awaiting)' failed, so the callback was a no-op.
               (should (null reentry-awaiting))
               ;; (b) The queue did NOT advance to ws-b while establish for

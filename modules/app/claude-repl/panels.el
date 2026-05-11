@@ -294,7 +294,14 @@ marked `:hidden' (via `SPC o C') are persp-killed when hide-mode is on
     (claude-repl--drain-pending-magit ws)
     (claude-repl--drain-pending-initial-buffers ws)
     (claude-repl--drain-pending-show-panels ws)
-    (claude-repl--maybe-autoselect-input ws)))
+    (claude-repl--maybe-autoselect-input ws)
+    ;; Flip the emacs-side bit on the fully-loaded latch.  If
+    ;; --on-session-start-event has also fired, this fires the
+    ;; ws-fully-loaded hook; otherwise we just record the bit and wait
+    ;; for claude-ready.  Guarded on ws non-nil so the nil-ws fallback
+    ;; (test envs, persp init) doesn't poison the hash table.
+    (when ws
+      (claude-repl--latch-and-maybe-fire-loaded ws :ws-loaded))))
 
 ;; Save window state for current workspace before switching away,
 ;; so update-all-workspace-states can inspect the saved config.

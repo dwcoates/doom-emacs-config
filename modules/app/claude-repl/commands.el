@@ -924,8 +924,8 @@ Idempotent: re-entry with `claude-repl--snapshot-load-state' already
 nil is a no-op so the error-recovery path in `--snapshot-load-step'
 can call finish without worrying whether a normal finish already ran."
   (when claude-repl--snapshot-load-state
-    (remove-hook 'claude-repl-after-ready-functions
-                 #'claude-repl--snapshot-load-on-ready)
+    (remove-hook 'claude-repl-ws-fully-loaded-functions
+                 #'claude-repl--snapshot-load-on-loaded)
     (claude-repl--snapshot-load-cancel-timer)
     (let* ((state claude-repl--snapshot-load-state)
            (origin (plist-get state :origin))
@@ -954,36 +954,57 @@ can call finish without worrying whether a normal finish already ran."
                loaded skipped load-error))
     (setq claude-repl--snapshot-load-state nil)))
 
-(defun claude-repl--snapshot-load-on-ready (ws)
-  "After-ready hook: advance the snapshot load queue iff WS is awaited."
+(defun claude-repl--snapshot-load-on-loaded (ws &optional _marker)
+  "Ws-fully-loaded hook handler: advance the snapshot load queue iff WS is awaited.
+Called from `claude-repl-ws-fully-loaded-functions' with the ws name and
+an optional MARKER (e.g. `:timed-out' when the watchdog synthesized the
+event).  Loader doesn't distinguish the marker — once a ws is loaded
+or timed out, it advances.  Idempotent: the `:awaiting' equality guard
+makes second fires for the same ws no-ops."
   (let ((state claude-repl--snapshot-load-state))
     (when (and state (equal ws (plist-get state :awaiting)))
-      (claude-repl--log ws "snapshot-load: awaited ws=%s reported ready — advancing" ws)
+      (claude-repl--log ws "snapshot-load: awaited ws=%s fully loaded — advancing" ws)
       (claude-repl--snapshot-load-cancel-timer)
       (setq claude-repl--snapshot-load-state
             (plist-put claude-repl--snapshot-load-state :awaiting nil))
       (claude-repl--snapshot-load-step))))
 
 (defun claude-repl--snapshot-load-timeout (ws)
-  "Watchdog firing for WS — advance the queue with a warning."
+  "Watchdog firing for WS — force ws-fully-loaded with `:timed-out' marker.
+The latch helper fires the ws-fully-loaded hook when both bits are
+set, which in turn calls `--snapshot-load-on-loaded' to advance the
+queue.  Flipping the missing bit(s) here funnels timeout through the
+same advance path as the happy case, so observers see exactly one
+ws-fully-loaded fire per entry (happy or timed-out, never both).
+
+The bits we flip:
+- `:ws-loaded' is flipped via the helper; the helper itself sets it
+  before checking the both-bits condition, so this drives the
+  emacs-side bit to t if it wasn't already.
+- `:claude-ready' is also flipped to t directly so the helper's
+  both-bits check passes even when claude never printed
+  `session_start' (the most common timeout cause)."
   (let ((state claude-repl--snapshot-load-state))
     (when (and state (equal ws (plist-get state :awaiting)))
-      (claude-repl--log ws "snapshot-load: TIMEOUT awaiting ws=%s — advancing anyway" ws)
+      (claude-repl--log ws "snapshot-load: TIMEOUT awaiting ws=%s — forcing fully-loaded :timed-out" ws)
       (message "[claude-repl] snapshot-load timeout awaiting ws=%s — advancing" ws)
       (setq claude-repl--snapshot-load-state
-            (plist-put claude-repl--snapshot-load-state :awaiting nil))
-      (setq claude-repl--snapshot-load-state
             (plist-put claude-repl--snapshot-load-state :timeout-timer nil))
-      (claude-repl--snapshot-load-step))))
+      ;; Force both latch bits then fire via the helper.  Setting
+      ;; :claude-ready directly before the helper call means the
+      ;; helper's both-bits check will pass on its own :ws-loaded
+      ;; flip, firing ws-fully-loaded with the :timed-out marker.
+      (claude-repl--ws-put ws :claude-ready t)
+      (claude-repl--latch-and-maybe-fire-loaded ws :ws-loaded :timed-out))))
 
 (defun claude-repl--snapshot-load-step ()
   "Process the next entry in the snapshot-load queue.
-Called both at start and from the after-ready hook / timeout callback.
+Called both at start and from the ws-fully-loaded hook / timeout callback.
 
 The body is wrapped in `condition-case' that routes any uncaught error
 to `--snapshot-load-finish' — without this, a signal from
 `--snapshot-load-ws-ready-p', `run-with-timer', a plist mutation, etc.,
-would leave `claude-repl-after-ready-functions' attached and
+would leave `claude-repl-ws-fully-loaded-functions' attached and
 `claude-repl--snapshot-load-state' non-nil, turning a future
 `session_start' event into a zombie-loader resume from a corrupt queue."
   (condition-case err
@@ -1062,7 +1083,7 @@ the error-routing `condition-case'."
                 (claude-repl--snapshot-load-step))
                (t
                 ;; Now — after establish has fully returned — mark `:awaiting'
-                ;; and arm the watchdog.  The after-ready hook (or the
+                ;; and arm the watchdog.  The ws-fully-loaded hook (or the
                 ;; watchdog) will call --snapshot-load-step again.
                 (setq claude-repl--snapshot-load-state
                       (plist-put claude-repl--snapshot-load-state :awaiting ws))
@@ -1083,10 +1104,13 @@ entry, fully sets up the workspace via `claude-repl--establish-workspace'
 + find-file recent + claude init).
 
 Recursive queue driver: establishes one entry, then yields to the main
-loop until that workspace's `claude-repl-after-ready-functions' hook
-fires, then advances.  Per-entry watchdog
+loop until that workspace's `claude-repl-ws-fully-loaded-functions'
+hook fires (i.e., both claude-side ready and emacs-side switch-settle
+have completed), then advances.  Per-entry watchdog
 \(`claude-repl-snapshot-load-per-entry-timeout') guarantees forward
-progress even if a ready signal goes missing.
+progress even if the load barrier never fires; on timeout the loader
+synthesizes a ws-fully-loaded fire with a `:timed-out' marker so all
+hook observers see the same advance event.
 
 Returns to the workspace that was active when the load began."
   (interactive)
@@ -1117,8 +1141,8 @@ Returns to the workspace that was active when the load began."
                   :load-error 0
                   :total (length queue)
                   :timeout-timer nil))
-      (add-hook 'claude-repl-after-ready-functions
-                #'claude-repl--snapshot-load-on-ready)
+      (add-hook 'claude-repl-ws-fully-loaded-functions
+                #'claude-repl--snapshot-load-on-loaded)
       (claude-repl--log nil "snapshot-load: BEGIN file=%s entries=%d origin-ws=%s"
                         file (length queue) (or origin-ws "nil"))
       (claude-repl--snapshot-load-step))))
