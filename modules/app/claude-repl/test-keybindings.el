@@ -1441,4 +1441,83 @@ sits inside the Claude vterm buffer."
   (should (member "C-S-j" claude-repl--vterm-shadow-keys))
   (should (member "C-S-k" claude-repl--vterm-shadow-keys)))
 
+;;;; ---- Tests: scroll-output override install ----
+
+;;; `C-S-j' / `C-S-k' must win lookup even when evil intercept aux maps
+;;; on `general-override-mode-map' have `C-j' / `C-k' bound to
+;;; `evil-window-down/up' (via `config.el's `:nv "C-j"' / `:nv "C-k"').
+;;; Without an explicit `C-S-j' entry in the same intercept aux map,
+;;; shift-translation routes the chord to the window-nav command.
+
+(ert-deftest claude-repl-test-scroll-chords-covers-csj-csk ()
+  "`claude-repl--scroll-output-chords' must include both `C-S-j' and
+`C-S-k' — the two chords the override install is meant to protect."
+  (should (assoc "C-S-j" claude-repl--scroll-output-chords))
+  (should (assoc "C-S-k" claude-repl--scroll-output-chords))
+  (should (eq (cdr (assoc "C-S-j" claude-repl--scroll-output-chords))
+              'claude-repl-scroll-output-down))
+  (should (eq (cdr (assoc "C-S-k" claude-repl--scroll-output-chords))
+              'claude-repl-scroll-output-up)))
+
+(ert-deftest claude-repl-test-scroll-intercept-states-covers-normal-visual ()
+  "`claude-repl--scroll-output-intercept-states' must include `normal'
+and `visual' — the two states where `config.el's `:nv \"C-j\"' /
+`:nv \"C-k\"' window-nav intercept aux maps live (the source of the
+shift-translation shadow)."
+  (should (memq 'normal claude-repl--scroll-output-intercept-states))
+  (should (memq 'visual claude-repl--scroll-output-intercept-states)))
+
+(ert-deftest claude-repl-test-scroll-intercept-states-covers-all-evil-states ()
+  "Sanity: the intercept state list must cover every evil state so the
+chord works regardless of which state is current.  A future trim that
+drops a state would silently re-break the chord there."
+  (dolist (state '(normal visual insert emacs operator motion replace))
+    (should (memq state claude-repl--scroll-output-intercept-states))))
+
+(ert-deftest claude-repl-test-install-scroll-overrides-installs-top-level ()
+  "`--install-scroll-output-overrides' must populate `general-override-mode-map'
+at top level so the chord works in non-evil contexts and wins above
+any other minor-mode-map binding."
+  (let ((general-override-mode-map (make-sparse-keymap)))
+    (cl-letf (((symbol-function 'evil-get-auxiliary-keymap)
+               (lambda (&rest _) (make-sparse-keymap))))
+      (claude-repl--install-scroll-output-overrides))
+    (should (eq (lookup-key general-override-mode-map (kbd "C-S-j"))
+                'claude-repl-scroll-output-down))
+    (should (eq (lookup-key general-override-mode-map (kbd "C-S-k"))
+                'claude-repl-scroll-output-up))))
+
+(ert-deftest claude-repl-test-install-scroll-overrides-installs-intercept-aux ()
+  "`--install-scroll-output-overrides' must populate the evil intercept
+aux map of `general-override-mode-map' for every state in
+`--scroll-output-intercept-states' -- this is what defeats the
+shift-translation fallback that routes `C-S-j' to `evil-window-down'."
+  (let* ((general-override-mode-map (make-sparse-keymap))
+         (aux-maps nil))
+    (cl-letf (((symbol-function 'evil-get-auxiliary-keymap)
+               (lambda (_keymap state &rest _)
+                 (or (cdr (assq state aux-maps))
+                     (let ((m (make-sparse-keymap)))
+                       (push (cons state m) aux-maps)
+                       m)))))
+      (claude-repl--install-scroll-output-overrides))
+    (dolist (state claude-repl--scroll-output-intercept-states)
+      (let ((aux (cdr (assq state aux-maps))))
+        (should aux)
+        (should (eq (lookup-key aux (kbd "C-S-j"))
+                    'claude-repl-scroll-output-down))
+        (should (eq (lookup-key aux (kbd "C-S-k"))
+                    'claude-repl-scroll-output-up))))))
+
+(ert-deftest claude-repl-test-install-scroll-overrides-skips-aux-without-evil ()
+  "When `evil-get-auxiliary-keymap' is unbound (evil not loaded),
+`--install-scroll-output-overrides' must still install the top-level
+binding without erroring."
+  (let ((general-override-mode-map (make-sparse-keymap)))
+    (cl-letf (((symbol-function 'fboundp)
+               (lambda (sym) (not (eq sym 'evil-get-auxiliary-keymap)))))
+      (claude-repl--install-scroll-output-overrides))
+    (should (eq (lookup-key general-override-mode-map (kbd "C-S-j"))
+                'claude-repl-scroll-output-down))))
+
 ;;; test-keybindings.el ends here

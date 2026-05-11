@@ -514,8 +514,6 @@ Reports comprehensive diagnostics."
 ;; these in global-map means they fall through correctly everywhere.
 (map! "C-S-n"        #'claude-repl-drawer-global-next)
 (map! "C-S-p"        #'claude-repl-drawer-global-prev)
-(map! "C-S-j"        #'claude-repl-scroll-output-down)
-(map! "C-S-k"        #'claude-repl-scroll-output-up)
 (map! "C-S-<return>" #'claude-repl-drawer-global-visit)
 (map! "C-S-x"        #'claude-repl-drawer-global-nuke)
 (map! "C-S-d"        #'claude-repl-drawer-global-kill)
@@ -526,6 +524,52 @@ Reports comprehensive diagnostics."
 (map! "C-S-u"        #'claude-repl-drawer-global-clear-marks)
 (map! "C-S-+"        #'claude-repl-drawer-global-priority-up)
 (map! "C-S--"        #'claude-repl-drawer-global-priority-down)
+
+;; `C-S-j' / `C-S-k' need a stronger binding than the plain global-map
+;; entry the rest of the drawer chords use, because `config.el' wires
+;; `:nv "C-j" -> evil-window-down' / `:nv "C-k" -> evil-window-up' into
+;; `general-override-mode-map''s evil intercept aux maps for
+;; normal/visual.  When the user presses `C-S-j' in normal state,
+;; `read-key-sequence' looks up `[?\C-\S-j]' across the active keymaps;
+;; if no map binds the shifted key, Emacs performs shift-translation,
+;; retrying as `[?\C-j]' -- which HITS the intercept aux map and fires
+;; `evil-window-down', shadowing the global-map binding to
+;; `claude-repl-scroll-output-down'.  Defeat the fallback by planting
+;; explicit `C-S-j' / `C-S-k' entries in the same intercept aux maps
+;; (for every evil state), and a matching top-level entry in
+;; `general-override-mode-map' for non-evil contexts.
+(defconst claude-repl--scroll-output-chords
+  '(("C-S-j" . claude-repl-scroll-output-down)
+    ("C-S-k" . claude-repl-scroll-output-up))
+  "Alist of (KEY-STRING . COMMAND) for scroll-output chords that must
+win key lookup above any minor-mode-map and any evil intercept aux map
+-- specifically defeating shift-translation back to `C-j' / `C-k' which
+would otherwise route the chord to `evil-window-down/up'.")
+
+(defconst claude-repl--scroll-output-intercept-states
+  '(normal visual insert emacs operator motion replace)
+  "Evil states for which `claude-repl--scroll-output-chords' install
+intercept aux map entries on `general-override-mode-map'.  Covers every
+evil state so the chord wins regardless of which state is current.")
+
+(defun claude-repl--install-scroll-output-overrides ()
+  "Install `claude-repl--scroll-output-chords' into
+`general-override-mode-map' at top-level AND into its evil intercept
+aux maps for every state in `claude-repl--scroll-output-intercept-states'.
+The top-level entry covers non-evil contexts; the per-state aux entries
+beat any same-state evil binding and prevent shift-translation fallback.
+Idempotent."
+  (dolist (entry claude-repl--scroll-output-chords)
+    (let ((seq (kbd (car entry)))
+          (cmd (cdr entry)))
+      (define-key general-override-mode-map seq cmd)
+      (when (fboundp 'evil-get-auxiliary-keymap)
+        (dolist (state claude-repl--scroll-output-intercept-states)
+          (define-key (evil-get-auxiliary-keymap
+                       general-override-mode-map state t t)
+                      seq cmd))))))
+
+(claude-repl--install-scroll-output-overrides)
 
 ;; vterm-mode-map binds every `C-S-<letter>' to `vterm--self-insert' via
 ;; its define-keys loop over '("C-" "M-" "C-S-").  That major-mode

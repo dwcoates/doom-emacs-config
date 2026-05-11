@@ -122,6 +122,12 @@
 ;; (the `after!' shim above is eager), so the variable must exist.
 (unless (boundp 'vterm-mode-map)
   (defvar vterm-mode-map (make-sparse-keymap) "Stub."))
+
+;; general-override-mode-map stub — keybindings.el installs scroll-output
+;; override chords into this keymap at load time, so the variable must
+;; exist before that load runs.
+(unless (boundp 'general-override-mode-map)
+  (defvar general-override-mode-map (make-sparse-keymap) "Stub."))
 (unless (boundp 'vterm--term)
   (defvar vterm--term nil "Stub."))
 (unless (boundp 'vterm--process)
