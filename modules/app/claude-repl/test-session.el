@@ -292,187 +292,120 @@ by vterm-buf presence; the :done write is not."
 
 ;;;; ---- Tests: Workspace mode-line ----
 
+(ert-deftest claude-repl-test-workspace-mode-line-with-parent-no-merge ()
+  "Parent segment shows just the parent name when no merge target is resolvable."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "child-ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
+      (let ((result (claude-repl--workspace-mode-line "child-ws")))
+        (should (listp result))
+        (should (string-match-p " feature-foo\\'" (car result)))
+        (should-not (string-match-p "PARENT" (car result)))))))
+
 (ert-deftest claude-repl-test-workspace-mode-line-without-parent ()
   "First segment is empty when there is neither parent nor merge target."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--resolve-merge-target-dir)
-               (lambda (_ws) nil)))
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
       (let ((result (claude-repl--workspace-mode-line "ws-no-parent")))
         (should (listp result))
         (should (equal (car result) ""))))))
 
-(ert-deftest claude-repl-test-workspace-mode-line-empty-source-dir-no-target ()
-  "Empty :source-ws-dir with no resolvable target yields an empty segment."
+(ert-deftest claude-repl-test-workspace-mode-line-empty-source-dir-treated-as-no-parent ()
+  "Empty-string :source-ws-dir is treated the same as nil for parent resolution."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws-blank" :source-ws-dir "")
-    (cl-letf (((symbol-function 'claude-repl--resolve-merge-target-dir)
-               (lambda (_ws) nil)))
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
       (let ((result (claude-repl--workspace-mode-line "ws-blank")))
         (should (equal (car result) ""))))))
 
 (ert-deftest claude-repl-test-workspace-mode-line-keeps-prompt-summary-segment ()
   "Mode-line list has 2 elements; the trailing :eval prompt-summary segment is preserved."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--resolve-merge-target-dir)
-               (lambda (_ws) nil)))
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
       (let ((result (claude-repl--workspace-mode-line "ws")))
         (should (= (length result) 2))
         (should (eq (car (car (last result))) :eval))))))
 
-(ert-deftest claude-repl-test-workspace-mode-line-target-equals-parent-shows-target-only ()
-  "When the merge target equals the recorded parent, only ` <target>' is shown."
+(ert-deftest claude-repl-test-workspace-mode-line-strips-trailing-slash ()
+  "A trailing slash on :source-ws-dir does not leak into the parent name."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-bar/")
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
+      (let ((result (claude-repl--workspace-mode-line "ws")))
+        (should (string-match-p " feature-bar\\'" (car result)))))))
+
+(ert-deftest claude-repl-test-workspace-mode-line-merge-shown-in-parens-when-different ()
+  "When merge target differs from parent, it appears in parens after the parent."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
-    (cl-letf (((symbol-function 'claude-repl--resolve-merge-target-dir)
-               (lambda (_ws) "/tmp/parent-worktrees/feature-foo"))
-              ((symbol-function 'claude-repl--ws-merged-into-target-p)
-               (lambda (_ws _target) nil)))
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name)
+               (lambda (_ws) "explanation-engine")))
+      (let ((result (claude-repl--workspace-mode-line "ws")))
+        (should (string-match-p " feature-foo (explanation-engine)" (car result)))))))
+
+(ert-deftest claude-repl-test-workspace-mode-line-merge-omitted-when-equal-to-parent ()
+  "When merge target equals parent, no parens are appended (avoids redundant ` foo (foo)`)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name)
+               (lambda (_ws) "feature-foo")))
       (let ((result (claude-repl--workspace-mode-line "ws")))
         (should (string-match-p " feature-foo\\'" (car result)))
         (should-not (string-match-p "(feature-foo)" (car result)))))))
 
-(ert-deftest claude-repl-test-workspace-mode-line-redirect-shows-target-with-orig-parent-in-parens ()
-  "When the merge target was redirected, ` <target> (<orig-parent>)' is shown."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
-    (cl-letf (((symbol-function 'claude-repl--resolve-merge-target-dir)
-               (lambda (_ws) "/tmp/doom"))
-              ((symbol-function 'claude-repl--ws-merged-into-target-p)
-               (lambda (_ws _target) nil)))
-      (let ((result (claude-repl--workspace-mode-line "ws")))
-        (should (string-match-p " doom (feature-foo)" (car result)))))))
-
-(ert-deftest claude-repl-test-workspace-mode-line-strips-trailing-slash-on-orig-parent ()
-  "A trailing slash on :source-ws-dir does not leak into the orig-parent name."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-bar/")
-    (cl-letf (((symbol-function 'claude-repl--resolve-merge-target-dir)
-               (lambda (_ws) "/tmp/doom"))
-              ((symbol-function 'claude-repl--ws-merged-into-target-p)
-               (lambda (_ws _target) nil)))
-      (let ((result (claude-repl--workspace-mode-line "ws")))
-        (should (string-match-p " doom (feature-bar)" (car result)))))))
-
 ;;;; ---- Tests: parent-label ----
 
-(ert-deftest claude-repl-test-parent-label-display-nil ()
-  "Returns nil when DISPLAY-NAME is nil (empty segment case)."
-  (should (null (claude-repl--parent-label nil nil)))
-  (should (null (claude-repl--parent-label nil "feature-foo"))))
+(ert-deftest claude-repl-test-parent-label-both-nil ()
+  "Returns nil when both inputs are nil."
+  (should (null (claude-repl--parent-label nil nil))))
 
-(ert-deftest claude-repl-test-parent-label-display-only ()
-  "Returns (\" <display>\" nil) when orig-parent is nil."
+(ert-deftest claude-repl-test-parent-label-parent-only ()
+  "Returns (\" <parent>\" nil) when only parent is set."
   (should (equal (claude-repl--parent-label "feature-foo" nil)
                  '(" feature-foo" nil))))
 
-(ert-deftest claude-repl-test-parent-label-orig-equals-display-omits-parens ()
-  "Returns (` <display>' nil) when orig-parent equals display (no redirect)."
+(ert-deftest claude-repl-test-parent-label-merge-only ()
+  "Returns (\"\" \" (<merge>)\") when only merge is set (rare fallback case)."
+  (should (equal (claude-repl--parent-label nil "explanation-engine")
+                 '("" " (explanation-engine)"))))
+
+(ert-deftest claude-repl-test-parent-label-equal-omits-parens ()
+  "Returns (green-only nil) when parent equals merge — parens would be redundant."
   (should (equal (claude-repl--parent-label "feature-foo" "feature-foo")
                  '(" feature-foo" nil))))
 
-(ert-deftest claude-repl-test-parent-label-redirect-splits-parts ()
-  "Returns (` <display>' ` (<orig-parent>)') when display differs from orig-parent."
-  (should (equal (claude-repl--parent-label "doom" "feature-foo")
-                 '(" doom" " (feature-foo)"))))
+(ert-deftest claude-repl-test-parent-label-different-splits-parts ()
+  "Returns (\" <parent>\" \" (<merge>)\") when they differ (master-redirect case)."
+  (should (equal (claude-repl--parent-label "feature-foo" "explanation-engine")
+                 '(" feature-foo" " (explanation-engine)"))))
 
-;;;; ---- Tests: workspace-mode-line color reflects merge status ----
+;;;; ---- Tests: workspace-mode-line face splitting ----
 
-(ert-deftest claude-repl-test-workspace-mode-line-green-when-not-fully-merged ()
-  "Segment is fully green when WS's commits are not yet on the target's branch."
+(ert-deftest claude-repl-test-workspace-mode-line-yellow-face-on-merge-suffix ()
+  "When merge differs from parent, the (...) suffix is yellow while PARENT: <parent> stays green."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
-    (cl-letf (((symbol-function 'claude-repl--resolve-merge-target-dir)
-               (lambda (_ws) "/tmp/parent-worktrees/feature-foo"))
-              ((symbol-function 'claude-repl--ws-merged-into-target-p)
-               (lambda (_ws _target) nil)))
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name)
+               (lambda (_ws) "explanation-engine")))
+      (let* ((seg (car (claude-repl--workspace-mode-line "ws")))
+             (paren-start (string-match-p " (" seg)))
+        (should paren-start)
+        (let ((face-before (get-text-property (1- paren-start) 'face seg))
+              (face-at-paren (get-text-property paren-start 'face seg)))
+          (should (equal face-before '(:foreground "green" :weight bold)))
+          (should (equal face-at-paren '(:foreground "yellow" :weight bold))))))))
+
+(ert-deftest claude-repl-test-workspace-mode-line-green-throughout-when-no-merge-suffix ()
+  "When merge equals parent (no suffix), the entire segment is green."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
+    (cl-letf (((symbol-function 'claude-repl--merge-target-name)
+               (lambda (_ws) "feature-foo")))
       (let ((seg (car (claude-repl--workspace-mode-line "ws"))))
         (should (equal (get-text-property 0 'face seg)
                        '(:foreground "green" :weight bold)))
         (should (equal (get-text-property (1- (length seg)) 'face seg)
                        '(:foreground "green" :weight bold)))))))
-
-(ert-deftest claude-repl-test-workspace-mode-line-yellow-when-fully-merged ()
-  "Segment is fully yellow when WS's commits are already on the target's branch."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
-    (cl-letf (((symbol-function 'claude-repl--resolve-merge-target-dir)
-               (lambda (_ws) "/tmp/parent-worktrees/feature-foo"))
-              ((symbol-function 'claude-repl--ws-merged-into-target-p)
-               (lambda (_ws _target) t)))
-      (let ((seg (car (claude-repl--workspace-mode-line "ws"))))
-        (should (equal (get-text-property 0 'face seg)
-                       '(:foreground "yellow" :weight bold)))
-        (should (equal (get-text-property (1- (length seg)) 'face seg)
-                       '(:foreground "yellow" :weight bold)))))))
-
-(ert-deftest claude-repl-test-workspace-mode-line-parens-share-color-with-main ()
-  "On redirect, the ` (<orig-parent>)' parens use the same color as the main label."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
-    (cl-letf (((symbol-function 'claude-repl--resolve-merge-target-dir)
-               (lambda (_ws) "/tmp/doom"))
-              ((symbol-function 'claude-repl--ws-merged-into-target-p)
-               (lambda (_ws _target) t)))
-      (let* ((seg (car (claude-repl--workspace-mode-line "ws")))
-             (paren-start (string-match-p " (" seg)))
-        (should paren-start)
-        (should (equal (get-text-property (1- paren-start) 'face seg)
-                       '(:foreground "yellow" :weight bold)))
-        (should (equal (get-text-property paren-start 'face seg)
-                       '(:foreground "yellow" :weight bold)))))))
-
-;;;; ---- Tests: ws-merged-into-target-p ----
-
-(ert-deftest claude-repl-test-ws-merged-into-target-p-nil-when-no-project-dir ()
-  "Returns nil when WS has no :project-dir."
-  (claude-repl-test--with-clean-state
-    (should (null (claude-repl--ws-merged-into-target-p "missing" "/tmp/whatever")))))
-
-(ert-deftest claude-repl-test-ws-merged-into-target-p-nil-when-same-branch ()
-  "Returns nil when WS and target resolve to the same branch (defensive)."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :project-dir "/tmp/ws")
-    (cl-letf (((symbol-function 'claude-repl--git-string)
-               (lambda (&rest _args) "same-branch")))
-      (should (null (claude-repl--ws-merged-into-target-p "ws" "/tmp/target"))))))
-
-(ert-deftest claude-repl-test-ws-merged-into-target-p-true-when-all-cherry-minus ()
-  "Returns non-nil when `git cherry' output is all `-' lines."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :project-dir "/tmp/ws")
-    (let ((calls 0))
-      (cl-letf (((symbol-function 'claude-repl--git-string)
-                 (lambda (&rest args)
-                   (cl-incf calls)
-                   (cond
-                    ((member "rev-parse" args)
-                     (if (equal (nth 1 args) "/tmp/ws") "feature-foo" "master"))
-                    ((member "cherry" args) "- abc123\n- def456")))))
-        (should (claude-repl--ws-merged-into-target-p "ws" "/tmp/target"))))))
-
-(ert-deftest claude-repl-test-ws-merged-into-target-p-nil-when-cherry-has-plus ()
-  "Returns nil when `git cherry' output contains a `+' line (unmerged commit)."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :project-dir "/tmp/ws")
-    (cl-letf (((symbol-function 'claude-repl--git-string)
-               (lambda (&rest args)
-                 (cond
-                  ((member "rev-parse" args)
-                   (if (equal (nth 1 args) "/tmp/ws") "feature-foo" "master"))
-                  ((member "cherry" args) "- abc123\n+ def456")))))
-      (should (null (claude-repl--ws-merged-into-target-p "ws" "/tmp/target"))))))
-
-(ert-deftest claude-repl-test-ws-merged-into-target-p-nil-on-cherry-fatal ()
-  "Returns nil when `git cherry' emits a `fatal:' line."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :project-dir "/tmp/ws")
-    (cl-letf (((symbol-function 'claude-repl--git-string)
-               (lambda (&rest args)
-                 (cond
-                  ((member "rev-parse" args)
-                   (if (equal (nth 1 args) "/tmp/ws") "feature-foo" "master"))
-                  ((member "cherry" args) "fatal: bad revision")))))
-      (should (null (claude-repl--ws-merged-into-target-p "ws" "/tmp/target"))))))
 
 ;;;; ---- Tests: merge-target-name ----
 
