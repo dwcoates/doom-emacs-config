@@ -266,7 +266,8 @@ user's real snapshot during ERT runs."
          (claude-repl-debug nil)
          (claude-repl-workspace-snapshot-file
           (expand-file-name (format "claude-snap-%s" (random)) temporary-file-directory))
-         (claude-repl--snapshot-archived-this-run nil))
+         (claude-repl--snapshot-archived-this-run nil)
+         (claude-repl--restored-workspaces nil))
      (unwind-protect
          (progn ,@body)
        (when (file-exists-p claude-repl-workspace-snapshot-file)

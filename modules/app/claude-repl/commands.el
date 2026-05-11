@@ -432,6 +432,12 @@ the post-condition: after the call returns \(or throws), WS is not in
     (condition-case err
         (claude-repl--ws-del ws)
       (error (claude-repl--log ws "nuke-one-workspace: ws-del error: %S" err)))
+    ;; WHY: keep `claude-repl--restored-workspaces' consistent with the
+    ;; live hash — a ws that's been nuked is no longer a restore-batch
+    ;; member, so a follow-up `nuke-restored-workspaces' won't try to
+    ;; re-tear-down a stale name.
+    (setq claude-repl--restored-workspaces
+          (delete ws claude-repl--restored-workspaces))
     ;; Kill every remaining buffer (and attached process) that belongs to
     ;; the persp before tearing down the persp itself.  `kill-session'
     ;; only handles the vterm/input panels it tracks in the hashmap;
@@ -486,6 +492,33 @@ Prompts once with the count before proceeding."
       (claude-repl--nuke-one-workspace ws))
     (force-mode-line-update t)
     (message "Nuked %d workspace(s)" count)))
+
+(defun claude-repl-nuke-restored-workspaces ()
+  "Tear down every workspace that was restored this session.
+Tears down only the workspaces tracked in
+`claude-repl--restored-workspaces' (those established by
+`claude-repl-load-workspace-snapshot', including the
+from-archive entry point); workspaces the user created manually
+before or after the restore are left alone.  Persisted state.el for
+each project is preserved.  Prompts once with the count before
+proceeding.  Same per-workspace teardown as
+`claude-repl-nuke-workspace'."
+  (interactive)
+  (let* ((restored (cl-remove-if-not
+                    (lambda (ws) (claude-repl--ws-get ws :project-dir))
+                    claude-repl--restored-workspaces))
+         (count (length restored)))
+    (unless restored
+      (user-error "No restored claude-repl workspaces to nuke"))
+    (unless (y-or-n-p (format "Nuke %d restored claude-repl workspace(s)? This kills processes and buffers but preserves on-disk state. "
+                              count))
+      (user-error "Aborted"))
+    (claude-repl--log (+workspace-current-name)
+                      "nuke-restored-workspaces: count=%d" count)
+    (dolist (ws restored)
+      (claude-repl--nuke-one-workspace ws))
+    (force-mode-line-update t)
+    (message "Nuked %d restored workspace(s)" count)))
 
 (defun claude-repl-kill-workspace ()
   "Tear down a claude-repl workspace and preserve its persisted state.
@@ -684,6 +717,16 @@ this session.  The save path checks this to refuse clobbering a richer
 on-disk roster with the freshly started live roster (which only holds
 the workspaces the user has visited manually so far).  Set to t at the
 end of a successful load; reset by Emacs restart.")
+
+(defvar claude-repl--restored-workspaces nil
+  "List of workspace names established by snapshot-restore in this session.
+Populated incrementally as each entry of the snapshot loader (either the
+current file or an archived file via `claude-repl-load-workspace-snapshot-from-archive')
+successfully calls `claude-repl--establish-workspace'.  Used by
+`claude-repl-nuke-restored-workspaces' to nuke only the restored
+workspaces while sparing any workspaces the user created manually before
+or after the restore.  Entries are removed when their workspace is
+nuked individually via `claude-repl--nuke-one-workspace'.")
 
 (defun claude-repl--snapshot-save-safe-p (live-count)
   "Return non-nil when save may proceed with LIVE-COUNT entries.
@@ -1079,6 +1122,13 @@ the error-routing `condition-case'."
               (setq claude-repl--snapshot-load-state
                     (plist-put claude-repl--snapshot-load-state :loaded
                                (1+ (plist-get claude-repl--snapshot-load-state :loaded))))
+              ;; WHY: tag this ws as restored-this-session so the user can
+              ;; later nuke only the restore-batch via
+              ;; `claude-repl-nuke-restored-workspaces' without touching
+              ;; workspaces they created by hand.  Accumulates across
+              ;; multiple loads (incl. from-archive) so subsequent restores
+              ;; expand — never shrink — the set.
+              (cl-pushnew ws claude-repl--restored-workspaces :test #'equal)
               (cond
                ((claude-repl--snapshot-load-ws-ready-p ws)
                 ;; Already ready (e.g. re-load, or claude was already up) —

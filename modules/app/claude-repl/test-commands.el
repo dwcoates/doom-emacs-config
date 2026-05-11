@@ -984,6 +984,84 @@ Reversing the order would make the buffer sweep a no-op because
         (ignore-errors (claude-repl-nuke-all-workspaces))
         (should (string-match-p "ALL 2" seen-prompt))))))
 
+;;;; ---- claude-repl-nuke-restored-workspaces ----
+
+(ert-deftest claude-repl-cmd-test-nuke-restored/no-restored ()
+  "nuke-restored-workspaces errors when the restored set is empty."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (should-error (claude-repl-nuke-restored-workspaces) :type 'user-error)))
+
+(ert-deftest claude-repl-cmd-test-nuke-restored/aborts-on-deny ()
+  "nuke-restored-workspaces does nothing when user answers no."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (push "ws1" claude-repl--restored-workspaces)
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) nil)))
+      (should-error (claude-repl-nuke-restored-workspaces) :type 'user-error)
+      (should (claude-repl--ws-get "ws1" :project-dir)))))
+
+(ert-deftest claude-repl-cmd-test-nuke-restored/only-restored-are-torn-down ()
+  "nuke-restored-workspaces tears down only restored workspaces, sparing manual ones."
+  (claude-repl-test--with-clean-state
+    (dolist (n '("restored1" "restored2" "manual"))
+      (claude-repl--ws-put n :project-dir (format "/tmp/%s" n)))
+    (setq claude-repl--restored-workspaces '("restored1" "restored2"))
+    (let ((torn-down nil)
+          (persp-mode nil))
+      (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                ((symbol-function 'claude-repl--kill-session)
+                 (lambda (ws) (push ws torn-down)))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-nuke-restored-workspaces)
+        (should (= 2 (length torn-down)))
+        (should (member "restored1" torn-down))
+        (should (member "restored2" torn-down))
+        (should-not (member "manual" torn-down))
+        (should (claude-repl--ws-get "manual" :project-dir))
+        (should-not (claude-repl--ws-get "restored1" :project-dir))
+        (should-not (claude-repl--ws-get "restored2" :project-dir))))))
+
+(ert-deftest claude-repl-cmd-test-nuke-restored/prompt-includes-count ()
+  "nuke-restored-workspaces' confirmation prompt includes the restored count."
+  (claude-repl-test--with-clean-state
+    (dolist (n '("a" "b" "c"))
+      (claude-repl--ws-put n :project-dir (format "/tmp/%s" n)))
+    (setq claude-repl--restored-workspaces '("a" "b" "c"))
+    (let ((seen-prompt nil))
+      (cl-letf (((symbol-function 'y-or-n-p)
+                 (lambda (prompt) (setq seen-prompt prompt) nil)))
+        (ignore-errors (claude-repl-nuke-restored-workspaces))
+        (should (string-match-p "3 restored" seen-prompt))))))
+
+(ert-deftest claude-repl-cmd-test-nuke-restored/skips-stale-names ()
+  "nuke-restored-workspaces ignores names in the restored list with no live ws.
+Avoids a user-error on the unprompted path when a name was removed from
+the live hash (e.g., by individual nuke) but stayed on the list."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "live" :project-dir "/tmp/live")
+    (setq claude-repl--restored-workspaces '("live" "stale"))
+    (let ((torn-down nil)
+          (persp-mode nil))
+      (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                ((symbol-function 'claude-repl--kill-session)
+                 (lambda (ws) (push ws torn-down)))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-nuke-restored-workspaces)
+        (should (equal torn-down '("live")))))))
+
+(ert-deftest claude-repl-cmd-test-nuke-one/drops-from-restored-list ()
+  "Individual nuke removes the ws from `claude-repl--restored-workspaces'."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+    (setq claude-repl--restored-workspaces '("ws1" "ws2"))
+    (let ((persp-mode nil))
+      (cl-letf (((symbol-function 'claude-repl--kill-session) #'ignore)
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl--nuke-one-workspace "ws1")
+        (should (equal claude-repl--restored-workspaces '("ws2")))))))
+
 ;;;; ---- claude-repl-kill-workspace ----
 
 (ert-deftest claude-repl-cmd-test-kill-workspace/no-workspaces ()
@@ -1274,6 +1352,75 @@ once per existing entry, passing the snapshot's `ws' name."
               (should (= 2 (length established)))
               (should (member "ws-a" established))
               (should (member "ws-b" established))))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)))))
+
+(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/tracks-restored-workspaces ()
+  "load-workspace-snapshot records each successfully established entry on
+`claude-repl--restored-workspaces' so a later
+`claude-repl-nuke-restored-workspaces' can target only the restore batch."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (dir-a (make-temp-file "claude-proj-a-" t))
+          (dir-b (make-temp-file "claude-proj-b-" t)))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("ws-a" . ,dir-a)
+                                            ("ws-b" . ,dir-b)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t)))
+              (claude-repl-load-workspace-snapshot)
+              (should (member "ws-a" claude-repl--restored-workspaces))
+              (should (member "ws-b" claude-repl--restored-workspaces))))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)))))
+
+(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/skipped-not-tracked ()
+  "A snapshot entry whose project-dir is gone is NOT added to the restored list.
+Only entries the loader actually established (`:loaded') are tracked —
+skipped entries (`:skipped' branch) must not pollute the set, otherwise
+`nuke-restored-workspaces' would try to tear down ghosts."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (real-dir (make-temp-file "claude-proj-real-" t)))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("ws-real" . ,real-dir)
+                                            ("ws-gone" . "/nonexistent/path")))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t)))
+              (claude-repl-load-workspace-snapshot)
+              (should (member "ws-real" claude-repl--restored-workspaces))
+              (should-not (member "ws-gone" claude-repl--restored-workspaces))))
+        (delete-file snapshot-file)
+        (delete-directory real-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/accumulates-across-loads ()
+  "Successive snapshot loads union (not replace) `claude-repl--restored-workspaces'.
+Loading from-archive after a normal load must not drop the first batch's
+restored names — both batches are restore-origin and the nuke-restored
+path needs to see both."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (dir-a (make-temp-file "claude-proj-a-" t))
+          (dir-b (make-temp-file "claude-proj-b-" t)))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t)))
+              (claude-repl--write-sexp-file snapshot-file `(("ws-a" . ,dir-a)))
+              (claude-repl-load-workspace-snapshot)
+              (claude-repl--write-sexp-file snapshot-file `(("ws-b" . ,dir-b)))
+              (claude-repl-load-workspace-snapshot)
+              (should (member "ws-a" claude-repl--restored-workspaces))
+              (should (member "ws-b" claude-repl--restored-workspaces))))
         (delete-file snapshot-file)
         (delete-directory dir-a t)
         (delete-directory dir-b t)))))
