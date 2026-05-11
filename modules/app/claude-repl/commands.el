@@ -881,25 +881,29 @@ the entire load."
           (plist-put claude-repl--snapshot-load-state :timeout-timer nil))))
 
 (defun claude-repl--snapshot-load-finish ()
-  "Finalize the recursive load: detach hook, return to origin, message."
-  (remove-hook 'claude-repl-after-ready-functions
-               #'claude-repl--snapshot-load-on-ready)
-  (claude-repl--snapshot-load-cancel-timer)
-  (let* ((state claude-repl--snapshot-load-state)
-         (origin (plist-get state :origin))
-         (loaded (plist-get state :loaded))
-         (skipped (plist-get state :skipped)))
-    (when (and origin
-               (fboundp '+workspace-exists-p)
-               (+workspace-exists-p origin)
-               (fboundp 'persp-frame-switch))
-      (persp-frame-switch origin))
-    (force-mode-line-update t)
-    (setq claude-repl--snapshot-loaded-p t)
-    (claude-repl--log nil "snapshot-load: END loaded=%d skipped=%d returned-to=%s"
-                      loaded skipped (or origin "nil"))
-    (message "Loaded %d workspace(s), skipped %d" loaded skipped))
-  (setq claude-repl--snapshot-load-state nil))
+  "Finalize the recursive load: detach hook, return to origin, message.
+Idempotent: re-entry with `claude-repl--snapshot-load-state' already
+nil is a no-op so the error-recovery path in `--snapshot-load-step'
+can call finish without worrying whether a normal finish already ran."
+  (when claude-repl--snapshot-load-state
+    (remove-hook 'claude-repl-after-ready-functions
+                 #'claude-repl--snapshot-load-on-ready)
+    (claude-repl--snapshot-load-cancel-timer)
+    (let* ((state claude-repl--snapshot-load-state)
+           (origin (plist-get state :origin))
+           (loaded (plist-get state :loaded))
+           (skipped (plist-get state :skipped)))
+      (when (and origin
+                 (fboundp '+workspace-exists-p)
+                 (+workspace-exists-p origin)
+                 (fboundp 'persp-frame-switch))
+        (persp-frame-switch origin))
+      (force-mode-line-update t)
+      (setq claude-repl--snapshot-loaded-p t)
+      (claude-repl--log nil "snapshot-load: END loaded=%d skipped=%d returned-to=%s"
+                        loaded skipped (or origin "nil"))
+      (message "Loaded %d workspace(s), skipped %d" loaded skipped))
+    (setq claude-repl--snapshot-load-state nil)))
 
 (defun claude-repl--snapshot-load-on-ready (ws)
   "After-ready hook: advance the snapshot load queue iff WS is awaited."
@@ -925,7 +929,25 @@ the entire load."
 
 (defun claude-repl--snapshot-load-step ()
   "Process the next entry in the snapshot-load queue.
-Called both at start and from the after-ready hook / timeout callback."
+Called both at start and from the after-ready hook / timeout callback.
+
+The body is wrapped in `condition-case' that routes any uncaught error
+to `--snapshot-load-finish' — without this, a signal from
+`--snapshot-load-ws-ready-p', `run-with-timer', a plist mutation, etc.,
+would leave `claude-repl-after-ready-functions' attached and
+`claude-repl--snapshot-load-state' non-nil, turning a future
+`session_start' event into a zombie-loader resume from a corrupt queue."
+  (condition-case err
+      (claude-repl--snapshot-load-step--unsafe)
+    (error
+     (claude-repl--log nil "snapshot-load: STEP ERROR err=%S — finishing early" err)
+     (message "[claude-repl] snapshot-load step error: %S — aborting load" err)
+     (claude-repl--snapshot-load-finish))))
+
+(defun claude-repl--snapshot-load-step--unsafe ()
+  "Unguarded implementation of `--snapshot-load-step'.
+Public callers should use `--snapshot-load-step', which wraps this in
+the error-routing `condition-case'."
   (let* ((state claude-repl--snapshot-load-state)
          (queue (plist-get state :queue))
          (total (plist-get state :total))

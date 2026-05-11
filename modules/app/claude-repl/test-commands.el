@@ -1866,6 +1866,46 @@ from `claude-repl-after-ready-functions'."
         (delete-directory dir-a t)
         (delete-directory dir-b t)))))
 
+(ert-deftest claude-repl-cmd-test-snapshot-load/top-level-error-finishes ()
+  "An error inside `--snapshot-load-step' (outside establish-workspace) is
+routed to `--snapshot-load-finish' so the hook detaches and state clears
+instead of leaving a zombie loader."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (dir-a (make-temp-file "claude-proj-a-" t)))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file `(("ws-a" . ,dir-a)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
+                      ;; Force a signal from the ready check — covers the path
+                      ;; where neither establish-workspace nor finish itself
+                      ;; raised, but a helper between them did.
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) (error "ready-check boom")))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (claude-repl-load-workspace-snapshot)
+              (should-not claude-repl--snapshot-load-state)
+              (should-not (memq #'claude-repl--snapshot-load-on-ready
+                                claude-repl-after-ready-functions))
+              (should claude-repl--snapshot-loaded-p)))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load-finish/idempotent ()
+  "Calling `--snapshot-load-finish' twice is harmless: the second call
+sees nil state and short-circuits without printing bogus counters."
+  (claude-repl-test--with-clean-state
+    (setq claude-repl--snapshot-load-state
+          (list :queue nil :origin nil :awaiting nil
+                :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
+    (claude-repl--snapshot-load-finish)
+    (should-not claude-repl--snapshot-load-state)
+    ;; Second call must not error and must not re-set --snapshot-loaded-p
+    ;; from a synthetic state (no state, no message).
+    (claude-repl--snapshot-load-finish)
+    (should-not claude-repl--snapshot-load-state)))
+
 ;;;; ---- claude-repl--hydrate-priority-from-state ----
 
 (ert-deftest claude-repl-cmd-test-hydrate-priority/sets-priority-from-state-file ()
