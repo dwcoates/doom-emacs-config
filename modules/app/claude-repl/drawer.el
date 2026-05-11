@@ -1471,30 +1471,44 @@ identity compare) so safe as a global `post-command-hook'."
             #'claude-repl-drawer--sync-cursor-to-current-ws))
 
 (defun claude-repl-drawer--ensure-visible-on-persp-switch (&rest _)
-  "Re-display the drawer in the newly activated workspace if the global flag is set.
+  "Reconcile drawer visibility with the global flag on workspace switch.
+
+When `--global-visible-p' is non-nil and the drawer is not currently
+visible, re-display it.  When the flag is nil but the drawer *is*
+visible (because persp-mode just restored a saved window
+configuration that contained the drawer), delete the drawer window
+so hiding the drawer in one workspace truly hides it across all.
+
 Does NOT select the drawer window or reposition point — the drawer
 behaves as a frame-level UI element, persistent across workspace
-switches with no cursor disruption.  No-op when the flag is nil or
-the drawer is already visible in the current frame's window tree."
-  (when (and claude-repl-drawer--global-visible-p
-             (not (and (get-buffer claude-repl-drawer-buffer-name)
-                       (get-buffer-window claude-repl-drawer-buffer-name))))
-    (let* ((buf (claude-repl-drawer--get-or-create-buffer))
-           (win (display-buffer buf claude-repl-drawer--display-action)))
-      (with-current-buffer buf
-        (add-hook 'post-command-hook
-                  #'claude-repl-drawer--post-command nil t)
-        (setq-local cursor-type nil
-                    truncate-lines nil
-                    word-wrap t)
-        (claude-repl-drawer--apply-background))
-      (when win
-        ;; Same drawer recipe as `claude-repl-drawer-show' — dedicate +
-        ;; fringes 0/0.  `no-delete-other-windows' comes from the
-        ;; display-action's `window-parameters'.
-        (claude-repl-window--harden win :dedicate t :fringes 0)
-        (claude-repl-drawer--apply-width win)
-        (set-window-point win (with-current-buffer buf (point)))))))
+switches with no cursor disruption."
+  (let* ((buf (get-buffer claude-repl-drawer-buffer-name))
+         (win (and buf (get-buffer-window buf))))
+    (cond
+     ;; Flag says show, drawer missing → display it.
+     ((and claude-repl-drawer--global-visible-p (not win))
+      (let* ((buf (claude-repl-drawer--get-or-create-buffer))
+             (win (display-buffer buf claude-repl-drawer--display-action)))
+        (with-current-buffer buf
+          (add-hook 'post-command-hook
+                    #'claude-repl-drawer--post-command nil t)
+          (setq-local cursor-type nil
+                      truncate-lines nil
+                      word-wrap t)
+          (claude-repl-drawer--apply-background))
+        (when win
+          ;; Same drawer recipe as `claude-repl-drawer-show' — dedicate +
+          ;; fringes 0/0.  `no-delete-other-windows' comes from the
+          ;; display-action's `window-parameters'.
+          (claude-repl-window--harden win :dedicate t :fringes 0)
+          (claude-repl-drawer--apply-width win)
+          (set-window-point win (with-current-buffer buf (point))))))
+     ;; Flag says hide, persp restored a stale drawer window → delete it.
+     ((and (not claude-repl-drawer--global-visible-p) win)
+      (dolist (w (get-buffer-window-list buf nil t))
+        (when (window-live-p w)
+          (set-window-dedicated-p w nil)))
+      (claude-repl-window--delete-buffer-windows buf)))))
 
 (with-eval-after-load 'persp-mode
   (add-hook 'persp-activated-functions

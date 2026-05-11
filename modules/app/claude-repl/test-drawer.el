@@ -440,6 +440,24 @@ the 1Hz status poll when the drawer is not the selected window)."
     (claude-repl-drawer-hide)
     (should-not claude-repl-drawer--global-visible-p)))
 
+(ert-deftest claude-repl-drawer-test-ensure-hidden-when-flag-nil-and-window-visible ()
+  "`--ensure-visible-on-persp-switch' deletes the drawer window when the
+flag is nil but persp-mode restored a stale drawer window — making the
+drawer truly global so hiding in one workspace hides in all."
+  (let* ((claude-repl-drawer--global-visible-p nil)
+         (buf (get-buffer-create claude-repl-drawer-buffer-name))
+         (delete-called-with nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window)
+                   (lambda (&rest _) 'fake-win))
+                  ((symbol-function 'get-buffer-window-list)
+                   (lambda (&rest _) '()))
+                  ((symbol-function 'claude-repl-window--delete-buffer-windows)
+                   (lambda (b &rest _) (setq delete-called-with b))))
+          (claude-repl-drawer--ensure-visible-on-persp-switch)
+          (should (eq delete-called-with buf)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
 ;;;; ---- Global dispatch + auto-revert ----
 
 (ert-deftest claude-repl-drawer-test-global-next-dispatches-to-drawer ()
