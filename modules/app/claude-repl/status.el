@@ -934,14 +934,18 @@ claude-state remains visible at a glance."
   "Render a single tab entry for workspace NAME.
 CURRENT-NAME is the active workspace name.  INDEX is the 1-based
 tab position.  The display state (from `claude-repl--ws-display-state')
-drives the label and name face.  The appearance spec is resolved via
+drives the name face.  The appearance spec is resolved via
 `claude-repl--tab-spec' when display-state is non-nil; when display-state
 is nil but `claude-repl--ws-bracket-state' returns a state (i.e., panels
 dismissed for a workspace that still has claude-state), the spec is
 built via `claude-repl--tab-spec-bracket-only' so only the [N] bracket
-keeps the state's color.  When the workspace's `:flashing' flag is set
-\(see `claude-repl-flash-tab'\), the spec and name face are overridden
-to a uniform pulse so the tab stands out."
+keeps the state's color.  The bracket label is driven by bracket-state
+when display-state is suppressed, so palette `:label' glyphs (❓ for
+:permission, ❌ for :dead, ⚠ for :stop-failed) render even on
+workspaces whose Claude panels are closed — only the full-tab
+background requires panels to be open.  When the workspace's
+`:flashing' flag is set \(see `claude-repl-flash-tab'\), the spec and
+name face are overridden to a uniform pulse so the tab stands out."
   (let* ((selected      (equal current-name name))
          (flashing      (claude-repl--ws-flashing-p name))
          (display-state (claude-repl--ws-display-state name))
@@ -953,7 +957,8 @@ to a uniform pulse so the tab stands out."
                                          bracket-state selected))
                          (t             (claude-repl--tab-spec
                                          display-state selected))))
-         (label         (claude-repl--tab-label display-state index))
+         (label         (claude-repl--tab-label
+                         (or display-state bracket-state) index))
          (face          (if flashing
                             'claude-repl-tab-flash
                           (claude-repl--tab-face display-state selected)))

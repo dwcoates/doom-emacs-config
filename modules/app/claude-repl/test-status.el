@@ -532,15 +532,44 @@ The ❓ glyph in the bracket (not the name background) signals permission."
         (should (equal claude-repl--color-thinking-red
                        (plist-get bracket-face :background)))))))
 
-(ert-deftest claude-repl-test-tabline-panels-closed-bracket-label-is-plain ()
-  "Panels closed for :permission — bracket label should be the plain index, not 'N❓'."
+(ert-deftest claude-repl-test-tabline-panels-closed-permission-bracket-keeps-glyph ()
+  "Panels closed for :permission — bracket label keeps the ❓ glyph
+even when the full-tab background is suppressed."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "bg-ws" :permission)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
               ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) nil)))
       (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
-        (should (string-match-p "\\[2\\]" result))
-        (should-not (string-match-p "2❓" result))))))
+        (should (string-match-p "\\[2❓\\]" result))))))
+
+(ert-deftest claude-repl-test-tabline-panels-closed-dead-bracket-keeps-glyph ()
+  "Panels closed for :dead — bracket label keeps the ❌ glyph."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "bg-ws" :claude-state nil)
+    (claude-repl--ws-set-repl-state "bg-ws" :dead)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+              ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) nil)))
+      (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
+        (should (string-match-p "\\[2❌\\]" result))))))
+
+(ert-deftest claude-repl-test-tabline-panels-closed-stop-failed-bracket-keeps-glyph ()
+  "Panels closed for :stop-failed — bracket label keeps the ⚠ glyph."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "bg-ws" :stop-failed)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+              ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) nil)))
+      (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
+        (should (string-match-p "\\[2⚠\\]" result))))))
+
+(ert-deftest claude-repl-test-tabline-panels-closed-thinking-bracket-stays-plain ()
+  "Panels closed for :thinking — bracket label has no glyph
+\(:thinking has no `:label' in the palette, so the index stands alone\)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "bg-ws" :thinking)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
+              ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) nil)))
+      (let ((result (claude-repl--tabline-advice '("current-ws" "bg-ws"))))
+        (should (string-match-p "\\[2\\]" result))))))
 
 (ert-deftest claude-repl-test-tabline-panels-closed-permission-bracket-stays-green ()
   "Panels closed for :permission — bracket bg should be the done-green."
@@ -549,7 +578,7 @@ The ❓ glyph in the bracket (not the name background) signals permission."
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
               ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) nil)))
       (let* ((result (claude-repl--tabline-advice '("current-ws" "bg-ws")))
-             (bracket-pos (string-match "\\[2\\]" result))
+             (bracket-pos (string-match "\\[2❓\\]" result))
              (bracket-face (and bracket-pos (get-text-property bracket-pos 'face result))))
         (should bracket-pos)
         (should (equal claude-repl--color-done-green
