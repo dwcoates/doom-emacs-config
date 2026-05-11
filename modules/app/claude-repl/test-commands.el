@@ -1919,6 +1919,78 @@ from `claude-repl-after-ready-functions'."
         (delete-directory dir-a t)
         (delete-directory dir-b t)))))
 
+(ert-deftest claude-repl-cmd-test-snapshot-load/captures-origin-window-config ()
+  "Loader captures `current-window-configuration' into the load state
+at start, so finish can restore the pre-load layout verbatim."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (real-dir (make-temp-file "claude-proj-" t))
+          (captured nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file `(("ws-a" . ,real-dir)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+                       (lambda (&rest _)
+                         (setq captured
+                               (plist-get claude-repl--snapshot-load-state
+                                          :origin-window-config))))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (claude-repl-load-workspace-snapshot)
+              (should (window-configuration-p captured))))
+        (delete-file snapshot-file)
+        (delete-directory real-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/restores-origin-window-config-on-finish ()
+  "Finish calls `set-window-configuration' on the captured config when
+origin still exists."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (real-dir (make-temp-file "claude-proj-" t))
+          (restored-with nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file `(("ws-a" . ,real-dir)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil))
+                      ((symbol-function '+workspace-exists-p) (lambda (_n) t))
+                      ((symbol-function 'persp-frame-switch) #'ignore)
+                      ((symbol-function 'set-window-configuration)
+                       (lambda (wc) (setq restored-with wc))))
+              (claude-repl-load-workspace-snapshot)
+              (should (window-configuration-p restored-with))))
+        (delete-file snapshot-file)
+        (delete-directory real-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/skips-window-config-restore-when-origin-missing ()
+  "If origin persp no longer exists, finish does not call
+`set-window-configuration' (would land the layout in the wrong persp)."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (real-dir (make-temp-file "claude-proj-" t))
+          (restore-called nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file `(("ws-a" . ,real-dir)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil))
+                      ((symbol-function '+workspace-exists-p) (lambda (_n) nil))
+                      ((symbol-function 'persp-frame-switch) #'ignore)
+                      ((symbol-function 'set-window-configuration)
+                       (lambda (_wc) (setq restore-called t))))
+              (claude-repl-load-workspace-snapshot)
+              (should-not restore-called)))
+        (delete-file snapshot-file)
+        (delete-directory real-dir t)))))
+
 (ert-deftest claude-repl-cmd-test-snapshot-load/top-level-error-finishes ()
   "An error inside `--snapshot-load-step' (outside establish-workspace) is
 routed to `--snapshot-load-finish' so the hook detaches and state clears

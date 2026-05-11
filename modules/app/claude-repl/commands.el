@@ -905,13 +905,22 @@ can call finish without worrying whether a normal finish already ran."
     (claude-repl--snapshot-load-cancel-timer)
     (let* ((state claude-repl--snapshot-load-state)
            (origin (plist-get state :origin))
+           (origin-wconf (plist-get state :origin-window-config))
            (loaded (plist-get state :loaded))
            (skipped (plist-get state :skipped)))
       (when (and origin
                  (fboundp '+workspace-exists-p)
                  (+workspace-exists-p origin)
                  (fboundp 'persp-frame-switch))
-        (persp-frame-switch origin))
+        (persp-frame-switch origin)
+        ;; persp-frame-switch alone leaves whatever windows the last-loaded
+        ;; ws ended with — restoring the captured pre-load config gives
+        ;; the origin persp back its original layout instead of inheriting
+        ;; the last loaded ws's panels.  Frame may have died (rare); the
+        ;; ignore-errors keeps finish from itself crashing the recovery
+        ;; path that calls it.
+        (when (and origin-wconf (window-configuration-p origin-wconf))
+          (ignore-errors (set-window-configuration origin-wconf))))
       (force-mode-line-update t)
       (setq claude-repl--snapshot-loaded-p t)
       (claude-repl--log nil "snapshot-load: END loaded=%d skipped=%d returned-to=%s"
@@ -1042,10 +1051,19 @@ Returns to the workspace that was active when the load began."
       (user-error "No workspace snapshot at %s" file))
     (let ((queue (mapcar #'claude-repl--snapshot-entry-normalize snapshot))
           (origin-ws (and (fboundp '+workspace-current-name)
-                          (ignore-errors (+workspace-current-name)))))
+                          (ignore-errors (+workspace-current-name))))
+          ;; Capture the frame's window-configuration BEFORE any
+          ;; persp-frame-switch so finish can restore the pre-load layout
+          ;; verbatim instead of inheriting the last-loaded ws's panels.
+          ;; Name-only restore (persp-frame-switch origin) relies on
+          ;; persp-mode having a saved window-config for origin — which it
+          ;; doesn't if origin is a freshly-initialized persp (typical at
+          ;; startup before the user has interacted).
+          (origin-wconf (ignore-errors (current-window-configuration))))
       (setq claude-repl--snapshot-load-state
             (list :queue queue
                   :origin origin-ws
+                  :origin-window-config origin-wconf
                   :awaiting nil
                   :loaded 0
                   :skipped 0
