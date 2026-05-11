@@ -682,19 +682,23 @@ end of a successful load; reset by Emacs restart.")
   "Return non-nil when save may proceed with LIVE-COUNT entries.
 Safe iff loader already ran this session (`claude-repl--snapshot-loaded-p'
 is t) OR the on-disk roster is no larger than LIVE-COUNT.  The latter
-covers the fresh-install case where no prior file exists or it has
-fewer entries than the live state — there's nothing to lose."
+covers the fresh-install case where no prior file exists, is empty, or
+is unreadable as a sexp — there's nothing to lose."
   (or claude-repl--snapshot-loaded-p
       (let* ((file claude-repl-workspace-snapshot-file)
              (on-disk (and (file-exists-p file)
-                           (claude-repl--read-sexp-file-if-exists file))))
+                           (condition-case _
+                               (claude-repl--read-sexp-file-if-exists file)
+                             (error nil)))))
         (or (null on-disk)
             (<= (length on-disk) live-count)))))
 
 (defun claude-repl--snapshot-entry-normalize (entry)
   "Normalize a snapshot ENTRY to (NAME . PLIST).
-Accepts the legacy `(NAME . DIR-STRING)' shape and the current
-`(NAME :project-dir DIR :priority PRI)' plist shape."
+Accepts the legacy `(NAME . DIR-STRING)' shape, the deprecated
+`(NAME :project-dir DIR :priority PRI)' plist shape (priority ignored —
+authoritative source is `<dir>/.claude/emacs/state.el'), and the
+current `(NAME :project-dir DIR)' plist shape."
   (let ((name (car entry))
         (payload (cdr entry)))
     (cons name
@@ -705,8 +709,14 @@ Accepts the legacy `(NAME . DIR-STRING)' shape and the current
 
 (defun claude-repl-save-workspace-snapshot ()
   "Save the current set of claude-repl workspaces to a hidden file.
-Writes a list of (NAME :project-dir DIR :priority PRI) entries sourced
-from `claude-repl--workspaces' (the live hash).
+Writes a list of (NAME :project-dir DIR) entries sourced from
+`claude-repl--workspaces' (the live hash).
+
+`:priority' is deliberately NOT included here — it lives in each
+project's `<root>/.claude/emacs/state.el' (written by
+`claude-repl--state-save', read by `claude-repl--initialize-ws-env'
+and the fast-path `claude-repl--hydrate-priority-from-state').  Saving
+it in the roster too would create two sources of truth.
 
 Called interactively prints a confirmation; called from
 `claude-repl--state-save' (the common path) stays silent so the
@@ -715,10 +725,7 @@ roster-piggyback save doesn't spam the echo area on every state mutation."
   (let ((entries (make-hash-table :test 'equal)))
     (maphash (lambda (ws _plist)
                (when-let ((dir (claude-repl--ws-get ws :project-dir)))
-                 (puthash ws
-                          (list :project-dir dir
-                                :priority (claude-repl--ws-get ws :priority))
-                          entries)))
+                 (puthash ws (list :project-dir dir) entries)))
              claude-repl--workspaces)
     (let (snapshot)
       (maphash (lambda (ws plist) (push (cons ws plist) snapshot))
@@ -744,7 +751,7 @@ roster-piggyback save doesn't spam the echo area on every state mutation."
           (message "Saved %d workspace(s) to %s"
                    (length snapshot) claude-repl-workspace-snapshot-file))))))
 
-(defun claude-repl--establish-workspace (ws dir priority)
+(defun claude-repl--establish-workspace (ws dir)
   "Synchronously create + activate + fully set up workspace WS for DIR.
 Mirrors what `+dwc/switch-to-project' would do on an interactive
 `SPC p p' but bypasses `+workspaces-switch-to-project-h' to avoid the
@@ -764,7 +771,9 @@ Each call:
   auto-opens magit when the persp has no real buffers),
 - opens the most-recent project file via `find-file' when one exists
   in `recentf-list',
-- hydrates `:project-dir' / `:priority' into `claude-repl--workspaces',
+- hydrates `:project-dir' into `claude-repl--workspaces' and
+  rehydrates `:priority' from the per-project state file via
+  `claude-repl--hydrate-priority-from-state',
 - starts claude (`claude-repl--initialize-claude') unless already
   running."
   (claude-repl--with-error-logging (format "establish-workspace[%s]" ws)
@@ -787,8 +796,8 @@ Each call:
         (when (file-exists-p recent-file)
           (find-file recent-file))))
     (claude-repl--ws-put ws :project-dir dir)
-    (when priority
-      (claude-repl--ws-put ws :priority priority))
+    (when (fboundp 'claude-repl--hydrate-priority-from-state)
+      (claude-repl--hydrate-priority-from-state dir))
     (when (and (fboundp 'claude-repl--initialize-claude)
                (fboundp 'claude-repl--claude-running-p)
                (not (claude-repl--claude-running-p ws)))
@@ -886,8 +895,7 @@ Called both at start and from the after-ready hook / timeout callback."
       (let* ((entry (car queue))
              (ws (car entry))
              (plist (cdr entry))
-             (dir (plist-get plist :project-dir))
-             (priority (plist-get plist :priority)))
+             (dir (plist-get plist :project-dir)))
         ;; Pop this entry off the queue immediately so we don't double-process.
         (setq claude-repl--snapshot-load-state
               (plist-put state :queue (cdr queue)))
@@ -905,7 +913,7 @@ Called both at start and from the after-ready hook / timeout callback."
           (setq claude-repl--snapshot-load-state
                 (plist-put claude-repl--snapshot-load-state :awaiting ws))
           (condition-case err
-              (claude-repl--establish-workspace ws dir priority)
+              (claude-repl--establish-workspace ws dir)
             (error
              (claude-repl--log nil "snapshot-load: establish-workspace err ws=%s err=%S" ws err)
              (message "[claude-repl] establish failed ws=%s — advancing" ws)))

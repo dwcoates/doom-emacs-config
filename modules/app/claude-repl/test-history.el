@@ -603,7 +603,8 @@ survives Emacs restart."
 
 (ert-deftest claude-repl-test-state-save-piggybacks-snapshot ()
   "state-save also rewrites the workspace snapshot file so the roster
-survives a crash that beats kill-emacs-hook."
+survives a crash that beats kill-emacs-hook.  Roster carries only
+`:project-dir' — `:priority' lives in the per-project state file."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-" t))
           (snapshot-file (make-temp-file "claude-snap-")))
@@ -617,7 +618,7 @@ survives a crash that beats kill-emacs-hook."
             (claude-repl--state-save "ws")
             (let ((data (claude-repl--read-sexp-file snapshot-file)))
               (should (equal (plist-get (cdr (assoc "ws" data)) :project-dir) tmpdir))
-              (should (equal (plist-get (cdr (assoc "ws" data)) :priority) "p3"))))
+              (should-not (plist-member (cdr (assoc "ws" data)) :priority))))
         (delete-file snapshot-file)
         (delete-directory tmpdir t)))))
 

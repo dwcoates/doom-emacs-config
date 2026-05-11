@@ -1045,7 +1045,7 @@ kill so the workspace can be re-opened with its identity intact."
 ;;;; ---- Tests: workspace snapshot save/load ----
 
 (ert-deftest claude-repl-cmd-test-save-workspace-snapshot/writes-entries ()
-  "save-workspace-snapshot writes `(NAME :project-dir DIR :priority PRI)' entries."
+  "save-workspace-snapshot writes `(NAME :project-dir DIR)' entries."
   (claude-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "claude-snap-")))
       (unwind-protect
@@ -1094,7 +1094,7 @@ once per existing entry, passing the snapshot's `ws' name."
                                           `(("ws-a" . ,dir-a)
                                             ("ws-b" . ,dir-b)))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (ws _dir _pri) (push ws established)))
+                       (lambda (ws _dir) (push ws established)))
                       ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
                        (lambda (_ws) t)))
               (claude-repl-load-workspace-snapshot)
@@ -1117,7 +1117,7 @@ once per existing entry, passing the snapshot's `ws' name."
                                           `(("ws-real" . ,real-dir)
                                             ("ws-gone" . "/nonexistent/path")))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (ws _dir _pri) (push ws established)))
+                       (lambda (ws _dir) (push ws established)))
                       ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
                        (lambda (_ws) t)))
               (claude-repl-load-workspace-snapshot)
@@ -1315,17 +1315,19 @@ Older entries (lexicographically earliest filenames) are pruned."
     (should (null (plist-get (cdr n) :priority)))))
 
 (ert-deftest claude-repl-cmd-test-snapshot-entry-normalize/plist-shape ()
-  "Plist entries are passed through unchanged."
+  "Plist entries are passed through unchanged (priority retained for
+back-compat reads of older snapshot files even though new saves omit it)."
   (let ((n (claude-repl--snapshot-entry-normalize
             '("ws" :project-dir "/tmp/proj" :priority "p2"))))
     (should (equal (car n) "ws"))
     (should (equal (plist-get (cdr n) :project-dir) "/tmp/proj"))
     (should (equal (plist-get (cdr n) :priority) "p2"))))
 
-;;;; ---- Tests: save-workspace-snapshot (plist format + merge) ----
+;;;; ---- Tests: save-workspace-snapshot (plist format) ----
 
-(ert-deftest claude-repl-cmd-test-save-workspace-snapshot/writes-plist-with-priority ()
-  "Save writes plist-per-entry including the workspace's :priority."
+(ert-deftest claude-repl-cmd-test-save-workspace-snapshot/omits-priority ()
+  "Save deliberately omits :priority from saved entries — the per-project
+state file (`<root>/.claude/emacs/state.el') is the authoritative source."
   (claude-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "claude-snap-")))
       (unwind-protect
@@ -1337,7 +1339,7 @@ Older entries (lexicographically earliest filenames) are pruned."
                    (entry (assoc "ws-a" data)))
               (should entry)
               (should (equal (plist-get (cdr entry) :project-dir) "/tmp/a"))
-              (should (equal (plist-get (cdr entry) :priority) "p1"))))
+              (should-not (plist-member (cdr entry) :priority))))
         (delete-file snapshot-file)))))
 
 (ert-deftest claude-repl-cmd-test-save-workspace-snapshot/one-entry-per-line ()
@@ -1376,7 +1378,7 @@ Older entries (lexicographically earliest filenames) are pruned."
           (let ((claude-repl-workspace-snapshot-file snapshot-file))
             (claude-repl--write-sexp-file snapshot-file `(("ws-legacy" . ,real-dir)))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (ws dir _pri)
+                       (lambda (ws dir)
                          (push (cons ws dir) established)
                          (claude-repl--ws-put ws :project-dir dir)))
                       ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
@@ -1387,23 +1389,24 @@ Older entries (lexicographically earliest filenames) are pruned."
         (delete-file snapshot-file)
         (delete-directory real-dir t)))))
 
-(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/passes-priority-to-establish ()
-  "Loader forwards `:priority' to `claude-repl--establish-workspace'."
+(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/ignores-legacy-priority ()
+  "Loader does NOT pass `:priority' to establish — priority is now
+sourced from each project's state file, not the snapshot roster."
   (claude-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "claude-snap-"))
           (real-dir (make-temp-file "claude-proj-" t))
-          (captured-priority nil))
+          (call-arity nil))
       (unwind-protect
           (let ((claude-repl-workspace-snapshot-file snapshot-file))
             (claude-repl--write-sexp-file
              snapshot-file
              `(("ws-pri" :project-dir ,real-dir :priority "p1")))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (_ws _dir pri) (setq captured-priority pri)))
+                       (lambda (&rest args) (setq call-arity (length args))))
                       ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
                        (lambda (_ws) t)))
               (claude-repl-load-workspace-snapshot)
-              (should (equal captured-priority "p1"))))
+              (should (= call-arity 2))))
         (delete-file snapshot-file)
         (delete-directory real-dir t)))))
 
@@ -1442,7 +1445,7 @@ Older entries (lexicographically earliest filenames) are pruned."
                     ((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore))
-            (claude-repl--establish-workspace "test-ws" tmp-dir nil)
+            (claude-repl--establish-workspace "test-ws" tmp-dir)
             (should (equal started-for "test-ws")))
         (delete-directory tmp-dir t)))))
 
@@ -1458,7 +1461,7 @@ Older entries (lexicographically earliest filenames) are pruned."
                     ((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore))
-            (claude-repl--establish-workspace "test-ws" tmp-dir nil)
+            (claude-repl--establish-workspace "test-ws" tmp-dir)
             (should-not started))
         (delete-directory tmp-dir t)))))
 
@@ -1475,7 +1478,7 @@ Older entries (lexicographically earliest filenames) are pruned."
                       ((symbol-function 'persp-add-new) #'ignore)
                       ((symbol-function 'persp-frame-switch) #'ignore)
                       ((symbol-function 'projectile-add-known-project) #'ignore))
-              (claude-repl--establish-workspace "test-ws" tmp-dir nil)
+              (claude-repl--establish-workspace "test-ws" tmp-dir)
               (should (equal (file-name-as-directory called-with) tmp-dir))))
         (delete-directory tmp-dir t)))))
 
@@ -1497,7 +1500,7 @@ Older entries (lexicographically earliest filenames) are pruned."
                       ((symbol-function 'persp-add-new) #'ignore)
                       ((symbol-function 'persp-frame-switch) #'ignore)
                       ((symbol-function 'projectile-add-known-project) #'ignore))
-              (claude-repl--establish-workspace "test-ws" tmp-dir nil)
+              (claude-repl--establish-workspace "test-ws" tmp-dir)
               (should (equal opened tmp-file))))
         (delete-directory tmp-dir t)))))
 
@@ -1516,8 +1519,26 @@ Older entries (lexicographically earliest filenames) are pruned."
                     ((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore))
-            (claude-repl--establish-workspace "test-ws" tmp-dir nil)
+            (claude-repl--establish-workspace "test-ws" tmp-dir)
             (should-not find-file-called))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-establish-workspace/rehydrates-priority-from-state ()
+  "establish-workspace calls `--hydrate-priority-from-state' so the badge
+restores from the per-project state file rather than the roster."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-est-pri-" t)))
+           (hydrated-with nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'persp-add-new) #'ignore)
+                    ((symbol-function 'persp-frame-switch) #'ignore)
+                    ((symbol-function 'projectile-add-known-project) #'ignore)
+                    ((symbol-function 'claude-repl--initialize-claude) #'ignore)
+                    ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil))
+                    ((symbol-function 'claude-repl--hydrate-priority-from-state)
+                     (lambda (d) (setq hydrated-with d))))
+            (claude-repl--establish-workspace "test-ws" tmp-dir)
+            (should (equal (file-name-as-directory hydrated-with) tmp-dir)))
         (delete-directory tmp-dir t)))))
 
 (ert-deftest claude-repl-cmd-test-establish-workspace/activates-persp ()
@@ -1533,7 +1554,7 @@ so persp-mode begins capturing a window configuration for that persp."
                     ((symbol-function 'projectile-add-known-project) #'ignore)
                     ((symbol-function 'claude-repl--initialize-claude) #'ignore)
                     ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil)))
-            (claude-repl--establish-workspace "DC/CV-494738/worker-suite" tmp-dir nil)
+            (claude-repl--establish-workspace "DC/CV-494738/worker-suite" tmp-dir)
             (should (equal switched-to "DC/CV-494738/worker-suite")))
         (delete-directory tmp-dir t)))))
 
@@ -1557,7 +1578,7 @@ so persp-mode begins capturing a window configuration for that persp."
             (claude-repl--write-sexp-file snapshot-file
                                           `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (ws _dir _pri) (push ws established)))
+                       (lambda (ws _dir) (push ws established)))
                       ;; Don't short-circuit on already-ready — force the
                       ;; hook-driven path.
                       ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
@@ -1592,7 +1613,7 @@ so persp-mode begins capturing a window configuration for that persp."
             (claude-repl--write-sexp-file snapshot-file
                                           `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (ws _dir _pri) (push ws established)))
+                       (lambda (ws _dir) (push ws established)))
                       ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
                        (lambda (_ws) nil))
                       ((symbol-function 'run-with-timer)
@@ -1620,7 +1641,7 @@ without waiting for a hook fire."
             (claude-repl--write-sexp-file snapshot-file
                                           `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (ws _dir _pri) (push ws established)))
+                       (lambda (ws _dir) (push ws established)))
                       ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
                        (lambda (_ws) t))
                       ((symbol-function 'run-with-timer)
@@ -1645,7 +1666,7 @@ without waiting for a hook fire."
              `(("ws-gone" . "/nonexistent/path")
                ("ws-real" . ,real-dir)))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (ws _dir _pri) (push ws established)))
+                       (lambda (ws _dir) (push ws established)))
                       ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
                        (lambda (_ws) t))
                       ((symbol-function 'run-with-timer)
@@ -1670,7 +1691,7 @@ without waiting for a hook fire."
             (claude-repl--write-sexp-file snapshot-file
                                           `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (ws _dir _pri) (push ws established)))
+                       (lambda (ws _dir) (push ws established)))
                       ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
                        (lambda (_ws) nil))
                       ((symbol-function 'run-with-timer)
@@ -1721,7 +1742,7 @@ from `claude-repl-after-ready-functions'."
             (claude-repl--write-sexp-file snapshot-file
                                           `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace)
-                       (lambda (ws _dir _pri)
+                       (lambda (ws _dir)
                          (push ws attempts)
                          (when (equal ws "ws-a")
                            (error "boom"))))
