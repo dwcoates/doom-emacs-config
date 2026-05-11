@@ -361,18 +361,16 @@ with everything the caller needs for logging and mode-line setup."
 
 ;;;; Session startup
 
-(defun claude-repl--merge-target-name (ws)
-  "Return the basename of the workspace `SPC TAB M' would merge WS into.
-Mirrors the resolution logic in `claude-repl--workspace-merge-into-source':
-prefers WS's `:source-ws-dir' as the parent, then asks
-`claude-repl--resolve-merge-into-source-target' whether to redirect to
-the master worktree (when the parent's branch is already on master via
-patch-id equivalence).
+(defun claude-repl--resolve-merge-target-dir (ws)
+  "Return the resolved merge-target directory for WS, or nil.
+Mirrors the resolution in `claude-repl--workspace-merge-into-source':
+prefers WS's `:source-ws-dir' as the recorded parent, then applies
+`claude-repl--resolve-merge-into-source-target' to redirect to master
+when the parent's branch is already on master via patch-id.
 
-Returns nil when WS has no `:project-dir' (unknown workspace), or when
-the resolved target equals WS's own dir (nothing to merge into).  This
-is a snapshot at call time — the `git cherry' check runs once when the
-mode-line is constructed, not on every redisplay."
+Returns nil when WS has no `:project-dir' or when the resolved target
+equals WS's own dir (nothing to merge into — typically because WS is
+the master worktree)."
   (when-let* ((source-dir (claude-repl--ws-get ws :project-dir)))
     (let* ((recorded (claude-repl--ws-get ws :source-ws-dir))
            (parent-dir (or (and recorded (file-directory-p recorded) recorded)
@@ -382,62 +380,103 @@ mode-line is constructed, not on every redisplay."
       (when (and target-dir
                  (not (string= (claude-repl--path-canonical target-dir)
                                (claude-repl--path-canonical source-dir))))
-        (file-name-nondirectory (directory-file-name target-dir))))))
+        target-dir))))
 
-(defun claude-repl--parent-label (parent-name merge-name)
-  "Return (GREEN-STR YELLOW-STR) for the parent mode-line label, or nil.
-PARENT-NAME is the basename of `:source-ws-dir' (the recorded parent
-worktree, or nil if none).  MERGE-NAME is the basename of the
-workspace `SPC TAB M' would target (or nil if none).
+(defun claude-repl--merge-target-name (ws)
+  "Return the basename of the workspace `SPC TAB M' would merge WS into.
+Thin wrapper over `claude-repl--resolve-merge-target-dir' that returns
+the trailing directory name.  Returns nil when no merge target is
+resolvable."
+  (when-let* ((target-dir (claude-repl--resolve-merge-target-dir ws)))
+    (file-name-nondirectory (directory-file-name target-dir))))
 
-GREEN-STR is the always-green leading part (\" <parent>\" or empty when
-no parent).  YELLOW-STR is the parens-wrapped merge target with a
-leading space (\" (<merge>)\"), or nil when the merge target is absent
-or matches the parent (parens omitted to avoid the redundant
-\" foo (foo)\" form).  Returns nil overall when both inputs are nil —
-caller should render an empty segment.
+(defun claude-repl--ws-merged-into-target-p (ws target-dir)
+  "Return non-nil when WS's branch is already fully on TARGET-DIR's branch.
+Uses `git cherry TARGET-BRANCH WS-BRANCH' from WS's worktree: when
+every output line begins with `-' (patch-id already on target), WS's
+commits are considered fully merged and `SPC TAB M' would be a no-op.
 
-The split is so callers can propertize each part with a different face
-\(green for the parent, yellow for the (...) suffix) without having to
-parse a single composed string.  The label has no textual prefix; the
-green/yellow coloring is the sole signal that the segment denotes the
-parent/merge-target relationship."
-  (cond
-   ((and (null parent-name) (null merge-name)) nil)
-   ((null parent-name) (list "" (format " (%s)" merge-name)))
-   ((or (null merge-name) (string= parent-name merge-name))
-    (list (format " %s" parent-name) nil))
-   (t (list (format " %s" parent-name) (format " (%s)" merge-name)))))
+Returns nil defensively when either branch can't be resolved, when
+the branches are equal, or when `git cherry' errors — callers treat
+nil as \"still has work to land\" (green), so erring on that side
+keeps the indicator conservative."
+  (when-let* ((ws-dir (claude-repl--ws-get ws :project-dir))
+              (ws-branch (claude-repl--git-string
+                          "-C" ws-dir "rev-parse" "--abbrev-ref" "HEAD"))
+              (target-branch (claude-repl--git-string
+                              "-C" target-dir "rev-parse" "--abbrev-ref" "HEAD")))
+    (and (not (string-empty-p ws-branch))
+         (not (string-prefix-p "fatal" ws-branch))
+         (not (string-empty-p target-branch))
+         (not (string-prefix-p "fatal" target-branch))
+         (not (string= ws-branch target-branch))
+         (let ((cherry-out (claude-repl--git-string
+                            "-C" ws-dir "cherry" target-branch ws-branch)))
+           (and cherry-out
+                (not (string-prefix-p "fatal" cherry-out))
+                (not (string-prefix-p "error" cherry-out))
+                (cl-every (lambda (line)
+                            (not (string-prefix-p "+" line)))
+                          (split-string cherry-out "\n" t)))))))
+
+(defun claude-repl--parent-label (display-name orig-parent-name)
+  "Return (MAIN-STR PAREN-STR) for the merge-target mode-line label, or nil.
+DISPLAY-NAME is the basename of the resolved merge target (the
+workspace `SPC TAB M' would actually land WS's commits in, possibly
+redirected to master).  ORIG-PARENT-NAME is the basename of the
+originally-recorded parent from `:source-ws-dir'.
+
+MAIN-STR is the leading \" <display>\" segment.  PAREN-STR is
+\" (<orig-parent>)\" only when ORIG-PARENT-NAME is non-nil and
+differs from DISPLAY-NAME — surfaces the original parent when the
+merge target was redirected; omitted otherwise to avoid the redundant
+\" foo (foo)\" form.
+
+Returns nil when DISPLAY-NAME is nil — caller renders an empty
+segment.  Both parts are returned separately so the caller can
+propertize them with one shared color (green/yellow encodes whether
+WS's commits are already on the displayed target)."
+  (when display-name
+    (list (format " %s" display-name)
+          (when (and orig-parent-name
+                     (not (string= orig-parent-name display-name)))
+            (format " (%s)" orig-parent-name)))))
 
 (defun claude-repl--workspace-mode-line (ws)
   "Return a mode-line format list for workspace WS's vterm.
 Segments, in order:
-  1. Composed parent label: green ` <parent>' followed by a yellow
-     ` (<merge-target>)' suffix when `SPC TAB M' would redirect to a
-     different workspace than the recorded parent (typically master).
-     When the merge target equals the parent, the yellow suffix is
-     omitted.  Empty when WS has neither a recorded parent nor a
-     resolvable merge target.  The green/yellow coloring is the sole
-     signal that the segment denotes the parent/merge-target
-     relationship — there is no textual prefix.
+  1. Merge-target label: ` <target>' optionally followed by
+     ` (<orig-parent>)' when the merge target was redirected away
+     from the recorded parent (e.g. parent's branch is already on
+     master).  Both parts share one color: yellow when WS's commits
+     are already fully on the target's branch (`SPC TAB M' would be
+     a no-op), green otherwise.  Empty when WS has no resolvable
+     merge target (e.g. WS is master).
   2. `:eval' segment that renders the last-prompt summary (see
      `claude-repl--prompt-summary-segment') and recomputes on every
      mode-line redisplay.
 
-The parent segment is computed once when the vterm is initialized; it
-is not reactive to later state changes."
+The parent segment is computed once at vterm init; the color is a
+snapshot of merge status at that moment and does not auto-update."
   (let* ((source-dir (claude-repl--ws-get ws :source-ws-dir))
-         (parent-name (when (and source-dir (not (string-empty-p source-dir)))
-                        (file-name-nondirectory (directory-file-name source-dir))))
-         (merge-name (claude-repl--merge-target-name ws))
-         (parts (claude-repl--parent-label parent-name merge-name))
-         (green (car parts))
-         (yellow (cadr parts)))
+         (orig-parent-name (when (and source-dir (not (string-empty-p source-dir)))
+                             (file-name-nondirectory (directory-file-name source-dir))))
+         (target-dir (claude-repl--resolve-merge-target-dir ws))
+         (display-name (when target-dir
+                         (file-name-nondirectory (directory-file-name target-dir))))
+         (parts (claude-repl--parent-label display-name orig-parent-name))
+         (main (car parts))
+         (paren (cadr parts))
+         (color (if (and target-dir
+                         (claude-repl--ws-merged-into-target-p ws target-dir))
+                    "yellow"
+                  "green"))
+         (face `(:foreground ,color :weight bold)))
     (list (cond
            ((null parts) "")
-           (yellow (concat (propertize green 'face '(:foreground "green" :weight bold))
-                           (propertize yellow 'face '(:foreground "yellow" :weight bold))))
-           (t (propertize green 'face '(:foreground "green" :weight bold))))
+           (paren (concat (propertize main 'face face)
+                          (propertize paren 'face face)))
+           (t (propertize main 'face face)))
           '(:eval (claude-repl--prompt-summary-segment)))))
 
 (defun claude-repl--log-session-start (ws start-info)
