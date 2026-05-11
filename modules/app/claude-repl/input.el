@@ -183,12 +183,24 @@ input line.  On failure, logs and surfaces an error (no silent fallback)."
 Always sends a raw Ctrl-C to Claude (clearing its current input line) and,
 if the local input buffer has any content (including whitespace-only),
 also discards its contents.  Previously used `string-blank-p' which left
-whitespace-only buffers uncleared after C-c C-c."
+whitespace-only buffers uncleared after C-c C-c.
+
+When slash mode is active (direct-send path), the input buffer is
+empty by construction but the slash-stack holds an in-flight command
+that the raw Ctrl-C has just aborted on Claude's end — exit slash mode
+explicitly so our record of direct sends matches Claude's now-empty
+prompt line.  Without this, the next keystroke would continue
+forwarding to vterm and the next slash-return posthooks would see
+stale accumulated input."
   (interactive)
-  (claude-repl--log (+workspace-current-name) "discard-or-send-interrupt: clearing Claude prompt + local buffer (local-empty=%s)"
-                    (zerop (buffer-size)))
-  (unless (zerop (buffer-size))
+  (claude-repl--log (+workspace-current-name) "discard-or-send-interrupt: clearing Claude prompt + local buffer (local-empty=%s slash-active=%s)"
+                    (zerop (buffer-size))
+                    (bound-and-true-p claude-slash-input-mode))
+  (cond
+   ((not (zerop (buffer-size)))
     (claude-repl-discard-input))
+   ((bound-and-true-p claude-slash-input-mode)
+    (claude-repl--exit-slash-mode)))
   (claude-repl--vterm-send-raw-ctrl-c))
 
 ;;; Arrow key forwarding (insert-mode terminal navigation)
@@ -363,7 +375,8 @@ ignoring trailing whitespace."
     result))
 
 (defvar claude-repl-send-posthooks
-  '(("^/clear$" . claude-repl--posthook-reset-prefix-counter))
+  '(("^/clear$" . claude-repl--posthook-reset-prefix-counter)
+    ("^/clear$" . claude-repl--posthook-mark-done))
   "Alist of (PATTERN . FUNCTION) posthooks run after input is sent.
 PATTERN is a string or regexp matched against the raw input (trimmed).
 FUNCTION is called with (WS RAW) where WS is the workspace name and RAW is the input.")
@@ -373,6 +386,13 @@ FUNCTION is called with (WS RAW) where WS is the workspace name and RAW is the i
 Resets to 1 (just past the firing point) so the next send does not
 immediately re-trigger the metaprompt."
   (claude-repl--ws-put ws :prefix-counter 1))
+
+(defun claude-repl--posthook-mark-done (ws _raw)
+  "Mark workspace WS's claude-state as :done.
+Used by the /clear posthook: clearing Claude's context ends the current
+work cycle, so the tab should immediately reflect \"finished\" rather
+than linger on whatever state preceded the clear."
+  (claude-repl--mark-claude-done ws))
 
 (defun claude-repl--run-send-posthooks (ws raw)
   "Run posthooks matching RAW input for workspace WS."
@@ -810,16 +830,25 @@ cannot produce a valid git_root without it."
 For /wor commands, injects a [source-ws:NAME] tag before return so
 workspace-generation and workspace-update skills know the originating workspace.
 Exits the mode regardless of send outcome — being stuck in slash mode when
-vterm is gone is strictly worse than having one unforwarded RET."
+vterm is gone is strictly worse than having one unforwarded RET.
+
+Runs `claude-repl--run-send-posthooks' against the accumulated
+slash-stack (reconstructed via `claude-repl--slash-command-string',
+which already reflects backspace pops) so direct-send `/clear' fires
+the same posthooks as a buffered-and-sent `/clear'.  Posthooks run
+before `claude-repl--exit-slash-mode' clears the stack."
   (interactive)
   (claude-repl--log (+workspace-current-name) "slash-return: exiting slash mode")
   (claude-repl--slash-maybe-inject-source-ws)
-  (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
-      (progn
-        (claude-repl--log (+workspace-current-name) "slash-return: sending <return> to vterm=%s" (buffer-name vterm-buf))
-        (with-current-buffer vterm-buf
-          (vterm-send-return)))
-    (claude-repl--slash-no-vterm-error "return" nil))
+  (let ((ws (+workspace-current-name))
+        (cmd (claude-repl--slash-command-string)))
+    (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
+        (progn
+          (claude-repl--log ws "slash-return: sending <return> to vterm=%s cmd=%S" (buffer-name vterm-buf) cmd)
+          (with-current-buffer vterm-buf
+            (vterm-send-return)))
+      (claude-repl--slash-no-vterm-error "return" nil))
+    (claude-repl--run-send-posthooks ws cmd))
   (claude-repl--exit-slash-mode))
 
 ;; Use remaps throughout so evil keymap priority is irrelevant -- remaps are

@@ -597,6 +597,20 @@
     (claude-repl--run-send-posthooks "ws1" "/clear  ")
     (should (= (claude-repl--ws-get "ws1" :prefix-counter) 1))))
 
+(ert-deftest claude-repl-test-posthook-mark-done-sets-done ()
+  "`claude-repl--posthook-mark-done' sets :claude-state :done for WS."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :idle)
+    (claude-repl--posthook-mark-done "ws1" "/clear")
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :done))))
+
+(ert-deftest claude-repl-test-run-send-posthooks-clear-marks-done ()
+  "`/clear' through the posthook runner marks :claude-state :done."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :idle)
+    (claude-repl--run-send-posthooks "ws1" "/clear")
+    (should (eq (claude-repl--ws-get "ws1" :claude-state) :done))))
+
 ;;;; ---- Tests: do-send ----
 
 (ert-deftest claude-repl-test-do-send-increments-counter ()
@@ -726,6 +740,27 @@ Previously `string-blank-p' treated whitespace-only as empty and skipped
             (claude-repl-discard-or-send-interrupt)
             (should (equal (buffer-string) ""))
             (should evil-called)
+            (should (equal sent-bytes '((fake-proc . "\C-c"))))))))))
+
+(ert-deftest claude-repl-test-discard-or-send-interrupt-empty-in-slash-mode-clears-stack ()
+  "When in slash mode (empty buffer, stack populated), C-c C-c exits slash mode.
+The raw Ctrl-C clears Claude's prompt line; our record of direct sends
+must follow so subsequent keystrokes don't continue forwarding and the
+next slash-return doesn't see stale accumulated input."
+  (claude-repl-test--with-clean-state
+    (let ((sent-bytes nil))
+      (claude-repl-test--with-temp-buffer "*claude-panel-discard-slash*"
+        (setq-local vterm--process 'fake-proc)
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (claude-repl-test--with-temp-buffer " *test-input-slash-active*"
+          (setq-local claude-repl--slash-stack '("r" "a" "e" "l" "c" "/"))
+          (claude-slash-input-mode 1)
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'process-send-string)
+                     (lambda (proc bytes) (push (cons proc bytes) sent-bytes))))
+            (claude-repl-discard-or-send-interrupt)
+            (should (null claude-repl--slash-stack))
+            (should-not claude-slash-input-mode)
             (should (equal sent-bytes '((fake-proc . "\C-c"))))))))))
 
 ;;;; ---- Tests: send-vterm-key ----
@@ -1080,6 +1115,64 @@ must not accumulate phantom entries that trap the user in slash mode."
               (should return-called)
               (should (null claude-repl--slash-stack))
               (should-not claude-slash-input-mode))))))))
+
+(ert-deftest claude-repl-test-slash-return-runs-posthooks-on-accumulated-input ()
+  "`slash-return' runs posthooks against the reconstructed slash command.
+Stack is in reverse order (most recent push first); the runner sees the
+concatenated forward-order string, so `/clear' typed via direct send
+fires the same posthooks as a buffered-and-sent `/clear'."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-slash-return-posthooks*"
+      ;; Stack stores reversed pushes: typed "/clear" → ("r" "a" "e" "l" "c" "/")
+      (setq-local claude-repl--slash-stack '("r" "a" "e" "l" "c" "/"))
+      (claude-slash-input-mode 1)
+      (let ((posthook-args nil))
+        (claude-repl-test--with-temp-buffer "*claude-panel-slash-posthook-vterm*"
+          (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'vterm-send-return) #'ignore)
+                    ((symbol-function 'claude-repl--run-send-posthooks)
+                     (lambda (ws raw) (setq posthook-args (list ws raw)))))
+            (with-current-buffer " *test-slash-return-posthooks*"
+              (claude-repl--slash-return)
+              (should (equal posthook-args '("test-ws" "/clear"))))))))))
+
+(ert-deftest claude-repl-test-slash-return-clear-marks-done ()
+  "Direct send `/clear' via slash-return marks claude-state :done.
+Covers the end-to-end path: slash-stack accumulated, RET in slash mode
+fires posthooks, the /clear posthook marks :done."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-slash-return-clear-done*"
+      (setq-local claude-repl--slash-stack '("r" "a" "e" "l" "c" "/"))
+      (claude-slash-input-mode 1)
+      (claude-repl-test--with-temp-buffer "*claude-panel-slash-clear-done-vterm*"
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (claude-repl--ws-set-claude-state "test-ws" :idle)
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'vterm-send-return) #'ignore))
+          (with-current-buffer " *test-slash-return-clear-done*"
+            (claude-repl--slash-return)
+            (should (eq (claude-repl--ws-get "test-ws" :claude-state) :done))))))))
+
+(ert-deftest claude-repl-test-slash-return-backspaced-input-runs-posthooks-on-remaining ()
+  "After backspaces, slash-return's posthooks see only the remaining stack.
+Reconstructed command should reflect post-backspace state, so `/cle' typed
+then truncated to `/c' fires no /clear hook."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-slash-bs-posthooks*"
+      ;; Stack reflects user typing "/c" (after backspaces) — top is "c", bottom is "/"
+      (setq-local claude-repl--slash-stack '("c" "/"))
+      (claude-slash-input-mode 1)
+      (let ((posthook-args nil))
+        (claude-repl-test--with-temp-buffer "*claude-panel-slash-bs-vterm*"
+          (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'vterm-send-return) #'ignore)
+                    ((symbol-function 'claude-repl--run-send-posthooks)
+                     (lambda (ws raw) (setq posthook-args (list ws raw)))))
+            (with-current-buffer " *test-slash-bs-posthooks*"
+              (claude-repl--slash-return)
+              (should (equal posthook-args '("test-ws" "/c"))))))))))
 
 (ert-deftest claude-repl-test-exit-slash-mode-clears-state ()
   "`claude-repl--exit-slash-mode' clears stack and disables the minor mode."
