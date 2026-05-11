@@ -53,6 +53,28 @@ all others use `claude-repl-personal-permission-flag'."
   :type 'number
   :group 'claude-repl)
 
+(defcustom claude-repl-prompt-delivery-verify-seconds 4.0
+  "Seconds to wait after a preemptive prompt before verifying delivery.
+A preemptive prompt is considered acknowledged when `:claude-state'
+transitions away from `:idle' (the `UserPromptSubmit' hook fires and
+`--on-prompt-submit-event' flips state to `:thinking').  When the state
+is still `:idle' after this window, the bracketed paste is assumed to
+have raced Claude's TUI input-area paint and is resent — see
+`claude-repl-prompt-delivery-max-retries'."
+  :type 'number
+  :group 'claude-repl)
+
+(defcustom claude-repl-prompt-delivery-max-retries 2
+  "Maximum resend attempts when a preemptive prompt is not acknowledged.
+A preemptive prompt is considered acknowledged when `:claude-state'
+moves away from `:idle' within `claude-repl-prompt-delivery-verify-seconds'.
+If the state is still `:idle' after the verify window, the prompt is
+resent.  After this many resends have all failed to elicit a state
+transition, the delivery is abandoned with a user-visible warning
+rather than looping forever."
+  :type 'integer
+  :group 'claude-repl)
+
 (defcustom claude-repl-ready-timeout-seconds 30.0
   "Maximum seconds to wait for Claude to signal readiness before giving up."
   :type 'number
@@ -561,22 +583,84 @@ not pass `--continue'."
 
 ;;;; Readiness and pending prompt handling
 
-(defun claude-repl--deliver-pending-prompts (vterm-buf pending ws)
+(defun claude-repl--prompt-acknowledged-p (ws)
+  "Return non-nil when WS's `:claude-state' indicates Claude received a prompt.
+Acknowledged states are `:thinking' (the `UserPromptSubmit' hook flipped
+state via `--on-prompt-submit-event'), `:permission' (Claude paused to
+ask for permission), or `:done' (a fast turn already finished).
+Returns nil for `:idle' / `:init' / nil — i.e. when the prompt does
+not appear to have reached Claude."
+  (memq (claude-repl--ws-claude-state ws)
+        '(:thinking :permission :done)))
+
+(defun claude-repl--deliver-pending-prompts (vterm-buf pending ws &optional retries)
   "Deliver PENDING prompts to WS if VTERM-BUF is still live.
-Each prompt is sent via `claude-repl--send'.  When there are
-multiple prompts, each send's ON-SETTLE callback triggers the next
-send — guaranteeing the previous send's deferred Return has completed
-before the next prompt arrives."
-  (claude-repl--log ws "deliver-pending-prompts: ws=%s count=%d" ws (length pending))
+Sends the first prompt via `claude-repl--send' with an ON-SETTLE that
+schedules `claude-repl--maybe-retry-or-continue' after
+`claude-repl-prompt-delivery-verify-seconds'.  That verify step
+confirms Claude actually saw the paste (state advanced past `:idle')
+before draining the next prompt, and resends the current prompt up
+to `claude-repl-prompt-delivery-max-retries' times when the verify
+fails — closing the race between `SessionStart' (which flips Emacs
+to ready) and Claude's TUI input-area becoming interactive.
+
+RETRIES is the number of resends already performed for the prompt at
+the head of PENDING; nil/0 on the first attempt."
+  (claude-repl--log ws "deliver-pending-prompts: ws=%s count=%d retries=%d"
+                    ws (length pending) (or retries 0))
   (unless (buffer-live-p vterm-buf)
     (error "claude-repl--deliver-pending-prompts: vterm buffer is dead for ws=%s — %d prompt(s) lost"
            ws (length pending)))
   (when pending
-    (claude-repl--send
-     (car pending) ws nil
-     (when (cdr pending)
+    (let ((retries (or retries 0)))
+      (claude-repl--send
+       (car pending) ws nil
        (lambda ()
-         (claude-repl--deliver-pending-prompts vterm-buf (cdr pending) ws))))))
+         (run-at-time
+          claude-repl-prompt-delivery-verify-seconds nil
+          #'claude-repl--maybe-retry-or-continue
+          vterm-buf pending ws retries))))))
+
+(defun claude-repl--maybe-retry-or-continue (vterm-buf pending ws retries)
+  "Verify the current preemptive prompt was acknowledged; retry or continue.
+Called by a timer scheduled in `claude-repl--deliver-pending-prompts'
+after the send's `on-settle' fires.  Inspects `:claude-state' on WS
+via `claude-repl--prompt-acknowledged-p':
+
+- Acknowledged: drain the next pending prompt (if any) with a fresh
+  retry count.
+- Not acknowledged AND RETRIES below the cap: resend the same prompt
+  (head of PENDING) with RETRIES + 1.
+- Not acknowledged AND cap reached: abandon the delivery with a
+  user-visible warning and stop — better than looping forever, and
+  the prompt is still in input history for the user to resend
+  manually.
+
+When the vterm buffer has died in the meantime, abandons silently."
+  (cond
+   ((not (buffer-live-p vterm-buf))
+    (claude-repl--log ws
+                      "deliver-verify: vterm dead for ws=%s — abandoning %d prompt(s)"
+                      ws (length pending)))
+   ((claude-repl--prompt-acknowledged-p ws)
+    (claude-repl--log ws
+                      "deliver-verify: ws=%s prompt acknowledged after %d retries — continuing"
+                      ws retries)
+    (when (cdr pending)
+      (claude-repl--deliver-pending-prompts vterm-buf (cdr pending) ws 0)))
+   ((< retries claude-repl-prompt-delivery-max-retries)
+    (let ((next-retries (1+ retries)))
+      (claude-repl--log ws
+                        "deliver-verify: ws=%s NOT acknowledged after %.1fs — retry %d/%d"
+                        ws claude-repl-prompt-delivery-verify-seconds
+                        next-retries claude-repl-prompt-delivery-max-retries)
+      (claude-repl--deliver-pending-prompts vterm-buf pending ws next-retries)))
+   (t
+    (claude-repl--log ws
+                      "deliver-verify: ws=%s GIVING UP after %d retries — prompt may be lost"
+                      ws retries)
+    (message "[claude-repl] WARNING: preemptive prompt for ws=%s not acknowledged after %d retries — Claude may not have seen it"
+             ws retries))))
 
 (defun claude-repl--drain-pending-prompts (ws)
   "Drain queued prompts for workspace WS after Claude becomes ready.

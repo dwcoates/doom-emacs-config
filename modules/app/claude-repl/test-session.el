@@ -709,64 +709,119 @@ default-directory matches the workspace."
               (should-not (claude-repl--ws-get "ws1" :pending-prompts))))
         (kill-buffer fake-buf)))))
 
-(ert-deftest claude-repl-test-deliver-pending-prompts-live-buf ()
-  "deliver-pending-prompts sends first prompt and passes on-settle for next."
-  (let ((sent nil)
-        (on-settle-cb nil)
-        (fake-buf (generate-new-buffer " *test-deliver*")))
-    (unwind-protect
-        (cl-letf (((symbol-function 'claude-repl--send)
-                   (lambda (p _ws _force-meta on-settle)
-                     (push p sent)
-                     (setq on-settle-cb on-settle))))
-          (claude-repl--deliver-pending-prompts fake-buf '("a" "b") "ws1")
-          ;; First prompt sent immediately
-          (should (equal sent '("a")))
-          ;; on-settle callback was provided (for chaining to "b")
-          (should on-settle-cb)
-          ;; Simulate the settle: invoke the callback to deliver "b"
-          (funcall on-settle-cb)
-          (should (equal (reverse sent) '("a" "b"))))
-      (kill-buffer fake-buf))))
+;; Test helper: install mocks that capture sends into SEND-SLOT (a cons
+;; cell; the caller reads (car send-slot) for the reverse-chronological
+;; list of prompts) and capture the scheduled verify-timer thunk into
+;; TIMER-SLOT (a cons cell whose car is the most recent thunk).  Returns
+;; nothing; callers invoke the body inside the cl-letf via the macro form.
+(defmacro claude-repl-test--with-deliver-mocks (send-slot timer-slot &rest body)
+  "Run BODY with `claude-repl--send' and `run-at-time' mocked.
+SEND-SLOT is a cons cell; each send pushes its prompt onto (car SEND-SLOT).
+TIMER-SLOT is a cons cell; the most recent scheduled thunk is stored at
+(car TIMER-SLOT) for synchronous firing."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'claude-repl--send)
+              (lambda (p _ws _force-meta on-settle)
+                (setcar ,send-slot (cons p (car ,send-slot)))
+                (when on-settle (funcall on-settle))))
+             ((symbol-function 'run-at-time)
+              (lambda (_delay _repeat fn &rest args)
+                (setcar ,timer-slot (lambda () (apply fn args))))))
+     ,@body))
 
-(ert-deftest claude-repl-test-deliver-pending-prompts-single-no-callback ()
-  "deliver-pending-prompts with one prompt sends immediately, no on-settle."
-  (let ((sent nil)
-        (on-settle-cb nil)
-        (fake-buf (generate-new-buffer " *test-deliver-single*")))
-    (unwind-protect
-        (cl-letf (((symbol-function 'claude-repl--send)
-                   (lambda (p _ws _force-meta on-settle)
-                     (push p sent)
-                     (setq on-settle-cb on-settle))))
-          (claude-repl--deliver-pending-prompts fake-buf '("only") "ws1")
-          (should (equal sent '("only")))
-          ;; No more prompts → no callback
-          (should-not on-settle-cb))
-      (kill-buffer fake-buf))))
+(ert-deftest claude-repl-test-deliver-pending-prompts-sends-first ()
+  "deliver-pending-prompts sends the first prompt immediately."
+  (claude-repl-test--with-clean-state
+    (let ((sent (list nil))
+          (timer-slot (list nil))
+          (fake-buf (generate-new-buffer " *test-deliver*")))
+      (unwind-protect
+          (progn
+            (claude-repl-test--with-deliver-mocks sent timer-slot
+              (claude-repl--deliver-pending-prompts fake-buf '("a" "b") "ws1"))
+            (should (equal (car sent) '("a"))))
+        (kill-buffer fake-buf)))))
 
-(ert-deftest claude-repl-test-deliver-pending-prompts-three-chains ()
-  "deliver-pending-prompts with three prompts chains via on-settle callbacks."
-  (let ((sent nil)
-        (callbacks nil)
-        (fake-buf (generate-new-buffer " *test-deliver-three*")))
-    (unwind-protect
-        (cl-letf (((symbol-function 'claude-repl--send)
-                   (lambda (p _ws _force-meta on-settle)
-                     (push p sent)
-                     (push on-settle callbacks))))
-          (claude-repl--deliver-pending-prompts fake-buf '("a" "b" "c") "ws1")
-          ;; Only "a" sent so far
-          (should (equal sent '("a")))
-          ;; Simulate settle for "a" → triggers "b"
-          (funcall (car callbacks))
-          (should (equal (reverse sent) '("a" "b")))
-          ;; Simulate settle for "b" → triggers "c"
-          (funcall (car callbacks))
-          (should (equal (reverse sent) '("a" "b" "c")))
-          ;; "c" is the last — no callback
-          (should-not (car callbacks)))
-      (kill-buffer fake-buf))))
+(ert-deftest claude-repl-test-deliver-pending-prompts-schedules-verify ()
+  "deliver-pending-prompts schedules a verify timer via on-settle."
+  (claude-repl-test--with-clean-state
+    (let ((sent (list nil))
+          (timer-slot (list nil))
+          (fake-buf (generate-new-buffer " *test-deliver-verify*")))
+      (unwind-protect
+          (progn
+            (claude-repl-test--with-deliver-mocks sent timer-slot
+              (claude-repl--deliver-pending-prompts fake-buf '("a") "ws1"))
+            (should (functionp (car timer-slot))))
+        (kill-buffer fake-buf)))))
+
+(ert-deftest claude-repl-test-deliver-pending-prompts-chains-on-ack ()
+  "When the verify step sees an acknowledged state, the next prompt is sent."
+  (claude-repl-test--with-clean-state
+    (let ((sent (list nil))
+          (timer-slot (list nil))
+          (fake-buf (generate-new-buffer " *test-deliver-chain*")))
+      (unwind-protect
+          (claude-repl-test--with-deliver-mocks sent timer-slot
+            (claude-repl--deliver-pending-prompts fake-buf '("a" "b") "ws1")
+            (should (equal (car sent) '("a")))
+            ;; Simulate `prompt_submit' arrival between paste and verify.
+            (claude-repl--ws-put "ws1" :claude-state :thinking)
+            (funcall (car timer-slot))
+            (should (equal (reverse (car sent)) '("a" "b"))))
+        (kill-buffer fake-buf)))))
+
+(ert-deftest claude-repl-test-deliver-pending-prompts-resends-when-not-acked ()
+  "When verify sees :idle (no ack), the same prompt is resent."
+  (claude-repl-test--with-clean-state
+    (let ((sent (list nil))
+          (timer-slot (list nil))
+          (fake-buf (generate-new-buffer " *test-deliver-resend*")))
+      (unwind-protect
+          (claude-repl-test--with-deliver-mocks sent timer-slot
+            (claude-repl--deliver-pending-prompts fake-buf '("a") "ws1")
+            (should (equal (car sent) '("a")))
+            ;; State remains :idle — Claude never saw the paste.
+            (claude-repl--ws-put "ws1" :claude-state :idle)
+            (funcall (car timer-slot))
+            ;; Same prompt resent.
+            (should (equal (car sent) '("a" "a"))))
+        (kill-buffer fake-buf)))))
+
+(ert-deftest claude-repl-test-deliver-pending-prompts-gives-up-after-max-retries ()
+  "After `claude-repl-prompt-delivery-max-retries' failed resends, give up
+without sending again."
+  (claude-repl-test--with-clean-state
+    (let ((sent (list nil))
+          (timer-slot (list nil))
+          (fake-buf (generate-new-buffer " *test-deliver-giveup*"))
+          (claude-repl-prompt-delivery-max-retries 2))
+      (unwind-protect
+          (claude-repl-test--with-deliver-mocks sent timer-slot
+            (claude-repl--ws-put "ws1" :claude-state :idle)
+            (claude-repl--deliver-pending-prompts fake-buf '("a") "ws1")
+            ;; First send + 2 retries = 3 total.
+            (funcall (car timer-slot))   ; retry 1
+            (funcall (car timer-slot))   ; retry 2
+            (funcall (car timer-slot))   ; give up — no further send
+            (should (equal (car sent) '("a" "a" "a"))))
+        (kill-buffer fake-buf)))))
+
+(ert-deftest claude-repl-test-deliver-pending-prompts-abandons-on-dead-vterm-at-verify ()
+  "If the vterm buffer dies between send and verify, abandon silently."
+  (claude-repl-test--with-clean-state
+    (let ((sent (list nil))
+          (timer-slot (list nil))
+          (fake-buf (generate-new-buffer " *test-deliver-dead-verify*")))
+      (claude-repl-test--with-deliver-mocks sent timer-slot
+        (claude-repl--deliver-pending-prompts fake-buf '("a" "b") "ws1")
+        (should (equal (car sent) '("a")))
+        ;; Kill the buffer before verify fires.
+        (kill-buffer fake-buf)
+        (claude-repl--ws-put "ws1" :claude-state :thinking)
+        (funcall (car timer-slot))
+        ;; "b" was never sent — vterm-buf is dead.
+        (should (equal (car sent) '("a")))))))
 
 (ert-deftest claude-repl-test-deliver-pending-prompts-dead-buf ()
   "deliver-pending-prompts should signal an error when buffer is dead."
@@ -774,6 +829,33 @@ default-directory matches the workspace."
     (kill-buffer fake-buf)
     (should-error (claude-repl--deliver-pending-prompts fake-buf '("a") "ws1")
                   :type 'error)))
+
+(ert-deftest claude-repl-test-prompt-acknowledged-p-states ()
+  "prompt-acknowledged-p recognizes thinking/permission/done as ack'd."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :claude-state :thinking)
+    (should (claude-repl--prompt-acknowledged-p "ws1"))
+    (claude-repl--ws-put "ws1" :claude-state :permission)
+    (should (claude-repl--prompt-acknowledged-p "ws1"))
+    (claude-repl--ws-put "ws1" :claude-state :done)
+    (should (claude-repl--prompt-acknowledged-p "ws1"))))
+
+(ert-deftest claude-repl-test-prompt-acknowledged-p-idle-not-acked ()
+  "prompt-acknowledged-p returns nil for :idle (the race state)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :claude-state :idle)
+    (should-not (claude-repl--prompt-acknowledged-p "ws1"))))
+
+(ert-deftest claude-repl-test-prompt-acknowledged-p-init-not-acked ()
+  "prompt-acknowledged-p returns nil for :init (pre-ready)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :claude-state :init)
+    (should-not (claude-repl--prompt-acknowledged-p "ws1"))))
+
+(ert-deftest claude-repl-test-prompt-acknowledged-p-nil-not-acked ()
+  "prompt-acknowledged-p returns nil when :claude-state is nil."
+  (claude-repl-test--with-clean-state
+    (should-not (claude-repl--prompt-acknowledged-p "ws1"))))
 
 (ert-deftest claude-repl-test-show-panels-or-defer-current-ws ()
   "show-panels-or-defer should show panels when WS is current."
