@@ -111,6 +111,30 @@
                               (buffer-substring-no-properties
                                (point-min) (point-max)))))))
 
+(ert-deftest claude-repl-drawer-test-render-repositions-current-entry-overlay ()
+  "`--render' repositions the current-entry overlay so the arrow persists
+across renders triggered without a corresponding `post-command-hook' (e.g.
+the 1Hz status poll when the drawer is not the selected window)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      ;; Simulate a poll-driven re-render — buffer current, no command
+      ;; running in this buffer, so the buffer-local post-command-hook
+      ;; would NOT fire.  The overlay must still be set up.
+      (claude-repl-drawer--render)
+      (should (overlayp claude-repl-drawer--current-entry-overlay))
+      (let* ((ov claude-repl-drawer--current-entry-overlay)
+             (disp (overlay-get ov 'display)))
+        ;; Overlay must span at least one char (not collapsed at the
+        ;; head of the buffer where erase-buffer left it).
+        (should (> (overlay-end ov) (overlay-start ov)))
+        ;; And it must carry the arrow as its `display' override.
+        (should (stringp disp))
+        (should (string-match-p (regexp-quote claude-repl-drawer-current-arrow)
+                                disp))))))
+
 ;;;; ---- Expand-detail ----
 
 (ert-deftest claude-repl-drawer-test-toggle-expand-adds-and-removes ()

@@ -744,7 +744,12 @@ Empty sections render the `(none)' placeholder under the header."
        (format "MERGED (%d)" (length mergeds)) mergeds current :merged))
     (goto-char (point-min))
     (forward-line (1- saved-line))
-    (move-to-column saved-col)))
+    (move-to-column saved-col)
+    ;; `erase-buffer' above collapses the current-entry overlay to (1,1).
+    ;; Reposition it here so the arrow persists across 1Hz status-poll
+    ;; renders, when the drawer's buffer-local post-command-hook is not
+    ;; firing (drawer not selected).
+    (claude-repl-drawer--update-current-entry-overlay)))
 
 ;;;; Navigation -------------------------------------------------------------
 
