@@ -1212,5 +1212,128 @@ already-bound symbols and palette tweaks would require an Emacs restart."
     (should (equal (claude-repl-drawer--state-glyph "busy")
                    (alist-get :thinking claude-repl-drawer-state-icons)))))
 
+;;;; ---- Tests: keyboard-inaccessibility bounce ----
+
+(ert-deftest claude-repl-drawer-test-buffer-p-matches-drawer-name ()
+  "`--buffer-p' returns non-nil for a buffer whose name matches `claude-repl-drawer-buffer-name'."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer claude-repl-drawer-buffer-name
+      (should (claude-repl-drawer--buffer-p (current-buffer))))))
+
+(ert-deftest claude-repl-drawer-test-buffer-p-rejects-other-buffer ()
+  "`--buffer-p' returns nil for a buffer whose name does not match the drawer name."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*not-the-drawer*"
+      (should-not (claude-repl-drawer--buffer-p (current-buffer))))))
+
+(ert-deftest claude-repl-drawer-test-bounce-from-drawer-non-drawer-buffer ()
+  "`--bounce-from-drawer' is a no-op when the selected window shows a non-drawer buffer.
+Mirrors the vterm bounce's `non-vterm-buffer' baseline test — the predicate
+must not fire on unrelated buffers."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*bounce-noop-regular*"
+      (let ((orig-win (selected-window)))
+        (set-window-buffer orig-win (current-buffer))
+        (claude-repl-drawer--bounce-from-drawer nil)
+        (should (eq (selected-window) orig-win))))))
+
+(ert-deftest claude-repl-drawer-test-bounce-from-drawer-keyboard-redirects ()
+  "Keyboard-driven selection of the drawer window is redirected to the MRU non-drawer window."
+  (claude-repl-test--with-clean-state
+    (let ((drawer-buf (get-buffer-create claude-repl-drawer-buffer-name))
+          (other-buf  (get-buffer-create "*bounce-target*"))
+          (other-win  nil))
+      (unwind-protect
+          (progn
+            ;; Put another buffer in a sibling window first so it
+            ;; becomes the MRU non-selected window, then select the
+            ;; drawer window so the bounce has a destination.
+            (setq other-win (split-window))
+            (set-window-buffer other-win other-buf)
+            (set-window-buffer (selected-window) drawer-buf)
+            (select-window other-win)
+            (let ((drawer-win (split-window)))
+              (set-window-buffer drawer-win drawer-buf)
+              (select-window drawer-win)
+              (let ((last-input-event ?a))
+                (claude-repl-drawer--bounce-from-drawer nil)
+                (should-not (eq (window-buffer (selected-window)) drawer-buf)))))
+        (when (and other-win (window-live-p other-win))
+          (ignore-errors (delete-window other-win)))
+        (when (buffer-live-p drawer-buf) (kill-buffer drawer-buf))
+        (when (buffer-live-p other-buf) (kill-buffer other-buf))))))
+
+(ert-deftest claude-repl-drawer-test-bounce-from-drawer-mouse-does-not-redirect ()
+  "Mouse-driven selection of the drawer window stays put — user wants to operate entries via click."
+  (claude-repl-test--with-clean-state
+    (let ((drawer-buf (get-buffer-create claude-repl-drawer-buffer-name))
+          (other-buf  (get-buffer-create "*bounce-mouse-other*"))
+          (other-win  nil))
+      (unwind-protect
+          (progn
+            (let ((drawer-win (selected-window)))
+              (set-window-buffer drawer-win drawer-buf)
+              (setq other-win (split-window))
+              (set-window-buffer other-win other-buf)
+              ;; Simulate a mouse event as last-input-event — bounce should
+              ;; treat selection as user-intended and leave it alone.
+              (let ((last-input-event '(mouse-1 (nil 0 . 0))))
+                (claude-repl-drawer--bounce-from-drawer nil)
+                (should (eq (selected-window) drawer-win)))))
+        (when (and other-win (window-live-p other-win))
+          (ignore-errors (delete-window other-win)))
+        (when (buffer-live-p drawer-buf) (kill-buffer drawer-buf))
+        (when (buffer-live-p other-buf) (kill-buffer other-buf))))))
+
+(ert-deftest claude-repl-drawer-test-bounce-from-drawer-warns-when-no-other-window ()
+  "When the drawer is the only window, the bounce emits a user-facing warning.
+Parallels `bounce-from-vterm-warns-when-no-input-win' — surfacing the stuck
+state is preferable to silently leaving point stranded in the drawer."
+  (claude-repl-test--with-clean-state
+    (let ((drawer-buf (get-buffer-create claude-repl-drawer-buffer-name))
+          (messages   nil))
+      (unwind-protect
+          (progn
+            ;; Reduce the frame to a single window showing the drawer so
+            ;; `get-mru-window' with NOT-SELECTED has nothing to return.
+            (delete-other-windows)
+            (set-window-buffer (selected-window) drawer-buf)
+            (cl-letf (((symbol-function 'message)
+                       (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+              (let ((last-input-event ?a))
+                (claude-repl-drawer--bounce-from-drawer nil)))
+            (should (cl-some (lambda (m) (string-match-p "no other window is available" m))
+                             messages)))
+        (when (buffer-live-p drawer-buf) (kill-buffer drawer-buf))))))
+
+(ert-deftest claude-repl-drawer-test-show-does-not-select-drawer-window ()
+  "`claude-repl-drawer-show' must NOT select the drawer window.
+Keyboard-inaccessibility policy: the drawer is reachable only via mouse,
+so even an explicit `show' command must leave selection where it was."
+  (claude-repl-test--with-clean-state
+    (let ((other-buf (get-buffer-create "*show-no-select-other*"))
+          (drawer-buf nil))
+      (unwind-protect
+          (progn
+            (set-window-buffer (selected-window) other-buf)
+            (let ((orig-win (selected-window)))
+              ;; Stub `display-buffer' so this test doesn't depend on the
+              ;; full side-window machinery; just put the drawer into a
+              ;; freshly-split window and return it.  All we care about is
+              ;; that `drawer-show' did not call `select-window' on it.
+              (cl-letf (((symbol-function 'display-buffer)
+                         (lambda (buf &rest _)
+                           (setq drawer-buf buf)
+                           (let ((win (split-window)))
+                             (set-window-buffer win buf)
+                             win)))
+                        ((symbol-function 'claude-repl-window--harden) #'ignore)
+                        ((symbol-function 'claude-repl-drawer--apply-width) #'ignore))
+                (claude-repl-drawer-show)
+                (should (eq (selected-window) orig-win)))))
+        (when (buffer-live-p other-buf) (kill-buffer other-buf))
+        (when (and drawer-buf (buffer-live-p drawer-buf))
+          (kill-buffer drawer-buf))))))
+
 (provide 'test-drawer)
 ;;; test-drawer.el ends here

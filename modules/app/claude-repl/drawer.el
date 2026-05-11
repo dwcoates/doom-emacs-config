@@ -1273,8 +1273,11 @@ artifact.")
 
 (defun claude-repl-drawer-show ()
   "Show the workspace drawer in a left-side window.
-Selects the drawer window and positions the cursor on the currently
-selected workspace (falling back to the first entry).  Sets the
+Positions the drawer cursor on the currently selected workspace
+(falling back to the first entry) WITHOUT selecting the drawer
+window — the drawer mirrors the claude-output (vterm) panel's
+keyboard-inaccessible policy, so callers stay where they are and
+must mouse-click into the drawer to operate it directly.  Sets the
 global visible-flag so the drawer follows the user across workspace
 switches.  Self-heals if an existing drawer buffer pre-dates the
 current mode init by ensuring the overlay-driving post-command hook
@@ -1294,23 +1297,23 @@ immediately, not after the next command."
       (setq-local truncate-lines nil
                   word-wrap t)
       (claude-repl-drawer--apply-background)
-      (claude-repl-drawer--render))
+      (claude-repl-drawer--render)
+      ;; Position cursor on current-ws (or first entry) without
+      ;; selecting the drawer window — the bounce hook would redirect
+      ;; us away anyway, so do it directly via `set-window-point'.
+      (or (and current-ws
+               (claude-repl-drawer--goto-workspace-line current-ws))
+          (claude-repl-drawer--goto-first-workspace))
+      (when (and win (window-live-p win))
+        (set-window-point win (point)))
+      (claude-repl-drawer--post-command))
     (when win
       ;; Drawer hardening recipe: dedicated (no display-buffer repurpose);
       ;; fringes 0/0 to suppress the wrap-continuation arrow.
       ;; `no-delete-other-windows' is set declaratively via the
       ;; display-action's `window-parameters', so it isn't repeated here.
       (claude-repl-window--harden win :dedicate t :fringes 0)
-      (claude-repl-drawer--apply-width win)
-      (select-window win)
-      ;; Position AFTER select-window so the window-point and buffer
-      ;; point are synced — `set-window-point' before selection can be
-      ;; clobbered by Emacs's display-buffer-time window-point capture.
-      (or (and current-ws
-               (claude-repl-drawer--goto-workspace-line current-ws))
-          (claude-repl-drawer--goto-first-workspace))
-      (set-window-point win (point))
-      (claude-repl-drawer--post-command))
+      (claude-repl-drawer--apply-width win))
     (setq claude-repl-drawer--global-visible-p t)
     win))
 
@@ -1496,6 +1499,55 @@ the drawer is already visible in the current frame's window tree."
 (with-eval-after-load 'persp-mode
   (add-hook 'persp-activated-functions
             #'claude-repl-drawer--ensure-visible-on-persp-switch))
+
+;;;; Keyboard-inaccessibility bounce ----------------------------------------
+;;
+;; Mirrors `claude-repl--bounce-from-vterm' (panels.el).  Same mechanism,
+;; different target buffer and bounce destination: the vterm bounce
+;; redirects to the workspace's input window (a well-known per-workspace
+;; target); the drawer bounce has no comparable single target, so it
+;; redirects to the most-recently-used non-drawer window — i.e. wherever
+;; the user came from before keyboard nav landed in the drawer.
+;;
+;; Mouse clicks are exempt (checked via `last-input-event') so the user
+;; can still click into the drawer to operate entries via RET/j/k/etc.;
+;; only keyboard-driven selection (`windmove', `other-window', the
+;; `select-window' previously inside `claude-repl-drawer-show', ...) is
+;; redirected away.
+
+(defun claude-repl-drawer--buffer-p (&optional buf)
+  "Return non-nil if BUF (default: current buffer) is the drawer buffer.
+Buffer-identity match against `claude-repl-drawer-buffer-name'."
+  (let ((name (buffer-name (or buf (current-buffer)))))
+    (and name (string= name claude-repl-drawer-buffer-name))))
+
+(defun claude-repl-drawer--bounce-from-drawer (_frame)
+  "If the selected window shows the drawer, redirect to the previous window.
+Allows mouse-initiated selection through (checked via `mouse-event-p'
+on `last-input-event') so clicking entries to visit a workspace works.
+When no other live window exists on the frame, emits a warning via
+`message' rather than leaving point stranded silently.
+
+Predicate is buffer-identity (`claude-repl-drawer--buffer-p'), mirroring
+the vterm bounce — buffer-name match is cheap and unambiguous since the
+drawer buffer name is a defcustom-controlled singleton.
+
+Hook target is `window-selection-change-functions', so this fires
+during redisplay after a selection change rather than synchronously
+on every `select-window' — body wrappers like `with-selected-window'
+that select-and-restore the drawer for size adjustments don't
+trigger spurious bounces because the net selected window after the
+body is the original caller's window, not the drawer."
+  (let ((win (selected-window)))
+    (if (and (claude-repl-drawer--buffer-p (window-buffer win))
+             (not (mouse-event-p last-input-event)))
+        (let ((target (get-mru-window nil nil t)))
+          (if (and target (window-live-p target))
+              (select-window target)
+            (message "[claude-repl] keyboard navigation landed in the drawer but no other window is available — click out or open another window")))
+      nil)))
+
+(add-hook 'window-selection-change-functions #'claude-repl-drawer--bounce-from-drawer)
 
 (defun claude-repl-drawer-toggle ()
   "Toggle visibility of the workspace drawer."
