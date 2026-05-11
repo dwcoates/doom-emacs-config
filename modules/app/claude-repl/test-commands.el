@@ -1359,7 +1359,9 @@ once per existing entry, passing the snapshot's `ws' name."
 (ert-deftest claude-repl-cmd-test-load-workspace-snapshot/tracks-restored-workspaces ()
   "load-workspace-snapshot records each successfully established entry on
 `claude-repl--restored-workspaces' so a later
-`claude-repl-nuke-restored-workspaces' can target only the restore batch."
+`claude-repl-nuke-restored-workspaces' can target only the restore batch.
+Workspaces that go through the actually-establish branch (NOT the
+already-ready short-circuit) must be tagged."
   (claude-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "claude-snap-"))
           (dir-a (make-temp-file "claude-proj-a-" t))
@@ -1370,14 +1372,58 @@ once per existing entry, passing the snapshot's `ws' name."
                                           `(("ws-a" . ,dir-a)
                                             ("ws-b" . ,dir-b)))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
+                      ;; Force the establishing branch (not already-ready).
                       ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
-                       (lambda (_ws) t)))
+                       (lambda (_ws) nil))
+                      ;; Stub the watchdog so loader doesn't actually wait.
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
               (claude-repl-load-workspace-snapshot)
               (should (member "ws-a" claude-repl--restored-workspaces))
+              ;; ws-b is awaited; advance it manually via the fully-loaded hook
+              ;; to confirm the establishing-branch path tags it too.
+              (run-hook-with-args 'claude-repl-ws-fully-loaded-functions "ws-a" nil)
+              (run-hook-with-args 'claude-repl-ws-fully-loaded-functions "ws-b" nil)
               (should (member "ws-b" claude-repl--restored-workspaces))))
         (delete-file snapshot-file)
         (delete-directory dir-a t)
         (delete-directory dir-b t)))))
+
+(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/already-ready-not-tracked ()
+  "A snapshot entry that hits the `already-ready' short-circuit must NOT be
+tagged as restored.  Such workspaces were already alive before the loader
+ran (the origin ws the user was sitting in, or any other ws claude was
+already up in before the 2s idle loader fired).  Tagging them would make
+`nuke-restored-workspaces' incorrectly sweep the user's pre-existing
+workspace."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (dir-origin (make-temp-file "claude-proj-origin-" t))
+          (dir-new (make-temp-file "claude-proj-new-" t))
+          (ready-table (make-hash-table :test 'equal)))
+      (puthash "ws-origin" t ready-table)
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("ws-origin" . ,dir-origin)
+                                            ("ws-new" . ,dir-new)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
+                      ;; ws-origin hits the already-ready short-circuit;
+                      ;; ws-new goes through the establishing branch.
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (ws) (gethash ws ready-table)))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (claude-repl-load-workspace-snapshot)
+              ;; Origin (already-ready) NOT tagged.
+              (should-not (member "ws-origin" claude-repl--restored-workspaces))
+              ;; Drive the establishing-branch entry to completion.
+              (run-hook-with-args 'claude-repl-ws-fully-loaded-functions "ws-new" nil)
+              ;; ws-new (actually established) IS tagged.
+              (should (member "ws-new" claude-repl--restored-workspaces))))
+        (delete-file snapshot-file)
+        (delete-directory dir-origin t)
+        (delete-directory dir-new t)))))
 
 (ert-deftest claude-repl-cmd-test-load-workspace-snapshot/skipped-not-tracked ()
   "A snapshot entry whose project-dir is gone is NOT added to the restored list.
@@ -1393,9 +1439,14 @@ skipped entries (`:skipped' branch) must not pollute the set, otherwise
                                           `(("ws-real" . ,real-dir)
                                             ("ws-gone" . "/nonexistent/path")))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
+                      ;; Force the establishing branch (not already-ready).
                       ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
-                       (lambda (_ws) t)))
+                       (lambda (_ws) nil))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
               (claude-repl-load-workspace-snapshot)
+              ;; Advance ws-real via the fully-loaded hook.
+              (run-hook-with-args 'claude-repl-ws-fully-loaded-functions "ws-real" nil)
               (should (member "ws-real" claude-repl--restored-workspaces))
               (should-not (member "ws-gone" claude-repl--restored-workspaces))))
         (delete-file snapshot-file)
@@ -1413,12 +1464,18 @@ path needs to see both."
       (unwind-protect
           (let ((claude-repl-workspace-snapshot-file snapshot-file))
             (cl-letf (((symbol-function 'claude-repl--establish-workspace) #'ignore)
+                      ;; Force the establishing branch (not already-ready)
+                      ;; so the loader actually tags both workspaces.
                       ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
-                       (lambda (_ws) t)))
+                       (lambda (_ws) nil))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
               (claude-repl--write-sexp-file snapshot-file `(("ws-a" . ,dir-a)))
               (claude-repl-load-workspace-snapshot)
+              (run-hook-with-args 'claude-repl-ws-fully-loaded-functions "ws-a" nil)
               (claude-repl--write-sexp-file snapshot-file `(("ws-b" . ,dir-b)))
               (claude-repl-load-workspace-snapshot)
+              (run-hook-with-args 'claude-repl-ws-fully-loaded-functions "ws-b" nil)
               (should (member "ws-a" claude-repl--restored-workspaces))
               (should (member "ws-b" claude-repl--restored-workspaces))))
         (delete-file snapshot-file)

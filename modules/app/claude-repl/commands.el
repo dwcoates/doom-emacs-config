@@ -1122,20 +1122,26 @@ the error-routing `condition-case'."
               (setq claude-repl--snapshot-load-state
                     (plist-put claude-repl--snapshot-load-state :loaded
                                (1+ (plist-get claude-repl--snapshot-load-state :loaded))))
-              ;; WHY: tag this ws as restored-this-session so the user can
-              ;; later nuke only the restore-batch via
-              ;; `claude-repl-nuke-restored-workspaces' without touching
-              ;; workspaces they created by hand.  Accumulates across
-              ;; multiple loads (incl. from-archive) so subsequent restores
-              ;; expand — never shrink — the set.
-              (cl-pushnew ws claude-repl--restored-workspaces :test #'equal)
               (cond
                ((claude-repl--snapshot-load-ws-ready-p ws)
-                ;; Already ready (e.g. re-load, or claude was already up) —
-                ;; advance immediately without ever setting `:awaiting'.
+                ;; Already ready (e.g. the origin ws the user was sitting
+                ;; in when load began, or any other ws claude was already
+                ;; up in before the 2s idle loader fired).  Do NOT tag as
+                ;; restored — this ws wasn't actually established by the
+                ;; loader, it was already alive.  Tagging it would make
+                ;; `claude-repl-nuke-restored-workspaces' incorrectly
+                ;; sweep the user's pre-existing workspace.
                 (claude-repl--log ws "snapshot-load: ws=%s already ready — advancing without waiting" ws)
                 (claude-repl--snapshot-load-step))
                (t
+                ;; WHY: tag this ws as restored-this-session so the user
+                ;; can later nuke only the restore-batch via
+                ;; `claude-repl-nuke-restored-workspaces' without
+                ;; touching workspaces they created by hand or were
+                ;; already in.  Accumulates across multiple loads (incl.
+                ;; from-archive) so subsequent restores expand — never
+                ;; shrink — the set.
+                (cl-pushnew ws claude-repl--restored-workspaces :test #'equal)
                 ;; Now — after establish has fully returned — mark `:awaiting'
                 ;; and arm the watchdog.  The ws-fully-loaded hook (or the
                 ;; watchdog) will call --snapshot-load-step again.
