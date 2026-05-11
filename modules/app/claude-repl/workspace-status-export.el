@@ -40,12 +40,22 @@ a jq consumer would have to know to strip."
    ((stringp val) val)
    (t (format "%s" val))))
 
+(defun claude-repl--json-null-if-nil (val)
+  "Return VAL, or `json-null' when VAL is nil.
+Needed because `json-encode' treats a bare nil as an empty alist (and
+serializes it to `{}'), which would mis-render absent optional fields
+like `priority' or `last_prompt_summary'.  Substituting the
+`json-null' sentinel routes those through `json-encode-keyword' so
+they emit as `null'."
+  (if (null val) json-null val))
+
 (defun claude-repl--workspace-status-entry (ws)
   "Return an alist of JSON-serializable status fields for workspace WS.
 Fields mirror the plist keys most useful to a peer consumer: the two
 state axes, the project locations, the user-set priority, the latest
 prompt summary, the cached git-clean status, and the done-acked flag.
-Nil values are emitted as JSON null (via `json-null')."
+Nil values are routed through `claude-repl--json-null-if-nil' so they
+serialize as JSON `null' instead of `{}'."
   (let ((priority (claude-repl--ws-get ws :priority))
         (summary  (claude-repl--ws-get ws :last-prompt-summary))
         (proj     (claude-repl--ws-get ws :project-dir))
@@ -57,13 +67,13 @@ Nil values are emitted as JSON null (via `json-null')."
         (git      (claude-repl--ws-keyword-to-string
                    (claude-repl--ws-get ws :git-clean)))
         (acked    (if (claude-repl--ws-get ws :done-acked) t json-false)))
-    `(("claude_state"        . ,claude)
-      ("repl_state"          . ,repl)
-      ("project_dir"         . ,proj)
-      ("source_ws_dir"       . ,src)
-      ("priority"            . ,priority)
-      ("last_prompt_summary" . ,summary)
-      ("git_clean"           . ,git)
+    `(("claude_state"        . ,(claude-repl--json-null-if-nil claude))
+      ("repl_state"          . ,(claude-repl--json-null-if-nil repl))
+      ("project_dir"         . ,(claude-repl--json-null-if-nil proj))
+      ("source_ws_dir"       . ,(claude-repl--json-null-if-nil src))
+      ("priority"            . ,(claude-repl--json-null-if-nil priority))
+      ("last_prompt_summary" . ,(claude-repl--json-null-if-nil summary))
+      ("git_clean"           . ,(claude-repl--json-null-if-nil git))
       ("done_acked"          . ,acked))))
 
 (defun claude-repl--workspace-status-snapshot ()
@@ -103,11 +113,17 @@ when ENTRIES is empty — an empty hash table always serializes to `{}'."
 Writes to `claude-repl-workspace-status-file', creating the parent
 directory if it does not exist.  Errors are caught and logged via
 `claude-repl--with-error-logging' so a serialization failure cannot
-break the 1-Hz poll loop that drives this."
+break the 1-Hz poll loop that drives this.
+
+`json-null' is rebound to `:null' BEFORE the snapshot is built so the
+substitution inside `claude-repl--json-null-if-nil' uses the same
+sentinel value that `json-encode' will later route through
+`json-encode-keyword'.  Binding only after the snapshot would leave
+the substitution a no-op (the default `json-null' is plain nil)."
   (claude-repl--with-error-logging "write-workspace-status"
-    (let* ((snapshot (claude-repl--workspace-status-snapshot))
+    (let* ((json-null :null)
+           (snapshot (claude-repl--workspace-status-snapshot))
            (json-encoding-pretty-print t)
-           (json-null :null)
            (file claude-repl-workspace-status-file)
            (dir  (file-name-directory file)))
       (when (and dir (not (file-directory-p dir)))

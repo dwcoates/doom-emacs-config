@@ -62,14 +62,22 @@
       (should (eq    (cdr (assoc "done_acked" entry)) t)))))
 
 (ert-deftest claude-repl-test-workspace-status-entry-empty-ws ()
-  "An unseen workspace surfaces nil for every field and json-false for done-acked."
+  "An unseen workspace surfaces `json-null' for every absent field and
+`json-false' for done-acked."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :project-dir nil)
     (let ((entry (claude-repl--workspace-status-entry "ws1")))
-      (should (null (cdr (assoc "claude_state" entry))))
-      (should (null (cdr (assoc "repl_state" entry))))
-      (should (null (cdr (assoc "priority" entry))))
-      (should (eq   (cdr (assoc "done_acked" entry)) json-false)))))
+      (should (eq (cdr (assoc "claude_state" entry)) json-null))
+      (should (eq (cdr (assoc "repl_state"   entry)) json-null))
+      (should (eq (cdr (assoc "priority"     entry)) json-null))
+      (should (eq (cdr (assoc "done_acked"   entry)) json-false)))))
+
+(ert-deftest claude-repl-test-json-null-if-nil ()
+  "`claude-repl--json-null-if-nil' substitutes the sentinel for nil and
+leaves non-nil values alone."
+  (should (eq (claude-repl--json-null-if-nil nil)   json-null))
+  (should (equal (claude-repl--json-null-if-nil "x") "x"))
+  (should (eq (claude-repl--json-null-if-nil t)     t)))
 
 ;;;; ---- Tests: snapshot collects all workspaces ----
 
@@ -136,6 +144,24 @@
               (should ws)
               (should (equal "permission" (cdr (assoc 'claude_state ws))))
               (should (equal "p2" (cdr (assoc 'priority ws))))))
+        (when (file-exists-p tmp) (delete-file tmp))))))
+
+(ert-deftest claude-repl-test-write-workspace-status-nil-fields-serialize-as-null ()
+  "Absent optional fields render as JSON null, not `{}'.  Regression
+guard for `json-encode' treating bare nil as an empty alist."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp (make-temp-file "claude-repl-status-" nil ".json"))
+           (claude-repl-workspace-status-file tmp))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-set-claude-state "ws-null" :idle)
+            (claude-repl--write-workspace-status)
+            (with-temp-buffer
+              (insert-file-contents tmp)
+              (let ((raw (buffer-string)))
+                (should (string-match-p "\"priority\": null" raw))
+                (should (string-match-p "\"last_prompt_summary\": null" raw))
+                (should-not (string-match-p "\"priority\": {}" raw)))))
         (when (file-exists-p tmp) (delete-file tmp))))))
 
 (ert-deftest claude-repl-test-write-workspace-status-creates-parent-dir ()
