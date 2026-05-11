@@ -842,6 +842,15 @@ Each call:
   (claude-repl--with-error-logging (format "establish-workspace[%s]" ws)
     (when (fboundp 'persp-add-new)
       (persp-add-new ws))
+    ;; WHY: this switch is load-bearing for `--snapshot-load-finish' in
+    ;; addition to its primary purpose.  persp-mode auto-saves the
+    ;; previous persp's window-configuration on switch-away, and finish
+    ;; relies on that saved wconf when it does `persp-frame-switch
+    ;; origin' at end-of-load — without this call here on the first
+    ;; queue entry, origin would have no saved wconf and finish would
+    ;; land in whatever windows the last-loaded ws ended with.  If this
+    ;; is ever reordered or replaced with a setup-without-switch, the
+    ;; snapshot loader's return-to-origin layout silently regresses.
     (when (fboundp 'persp-frame-switch)
       (persp-frame-switch ws))
     ;; Strip any window-configuration bleed-over from the prior persp before

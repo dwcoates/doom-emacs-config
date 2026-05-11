@@ -73,6 +73,18 @@ Never maintain two mechanisms for the same thing. Redundancy adds complexity, ob
 
 Example: Claude Code hooks (`session_start`, `stop`, `prompt_submit`) are the sole source of session IDs and lifecycle events. Do not also scan `~/.claude/sessions/` files, watch terminal titles for readiness, or poll for state that hooks already deliver. One mechanism, one source of truth.
 
+## Comment Non-Obvious Code
+
+**ALWAYS comment any change whose reasoning isn't immediately obvious from the code itself — even if it's only slightly non-obvious.** The bar is low on purpose: if a future reader (or a future you) would have to re-derive *why* the line is shaped the way it is, leave a comment that says why. Examples that always warrant a `WHY:` comment:
+
+- Load-bearing side effects of a call (e.g. a function called primarily for one purpose whose secondary effect is depended on elsewhere — name the dependent site).
+- Reliance on an external package's undocumented or implicit behavior.
+- Ordering constraints between statements that are not enforced by data flow.
+- A choice between two plausible approaches where the rejected alternative has a subtle failure mode.
+- A guard, fallback, or `ignore-errors` whose absence would cause a specific concrete bug — name the bug.
+
+The comment must explain *why*, not *what*. "Calls foo before bar" describes the code; "foo must run first because bar reads state foo writes via hook X" is the comment. If you can delete the comment without losing information a reader needs, it shouldn't have been written; if a reader would have to git-blame or grep to understand the line, the comment is required.
+
 ## Git
 
 When asked to make changes, commit your work when done. Commit freely and often. **Never** rebase, pull, merge, push, or run any other mutating git commands without explicit instruction from the user.
