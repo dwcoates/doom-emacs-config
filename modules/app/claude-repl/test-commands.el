@@ -1919,6 +1919,63 @@ from `claude-repl-after-ready-functions'."
         (delete-directory dir-a t)
         (delete-directory dir-b t)))))
 
+(ert-deftest claude-repl-cmd-test-snapshot-load/establish-error-bumps-load-error-not-loaded ()
+  "An establish failure increments `:load-error', NOT `:loaded'."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (dir-a (make-temp-file "claude-proj-a-" t))
+          (dir-b (make-temp-file "claude-proj-b-" t))
+          finish-state)
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+                       (lambda (ws _dir)
+                         (when (equal ws "ws-a") (error "boom"))))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'claude-repl--snapshot-load-finish)
+                       (lambda ()
+                         (setq finish-state (copy-sequence claude-repl--snapshot-load-state))
+                         (setq claude-repl--snapshot-load-state nil))))
+              (claude-repl-load-workspace-snapshot)
+              (should (= 1 (plist-get finish-state :loaded)))
+              (should (= 1 (plist-get finish-state :load-error)))
+              (should (= 0 (plist-get finish-state :skipped)))))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/establish-error-skips-watchdog ()
+  "An establish failure must NOT arm the per-entry watchdog timer —
+no ws is alive to wait on, advance immediately."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (dir-a (make-temp-file "claude-proj-a-" t))
+          (dir-b (make-temp-file "claude-proj-b-" t))
+          (timer-calls 0))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+                       (lambda (ws _dir)
+                         (when (equal ws "ws-a") (error "boom"))))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) (cl-incf timer-calls) 'fake-timer)))
+              (claude-repl-load-workspace-snapshot)
+              ;; Watchdog should NOT have been armed for ws-a (failure path)
+              ;; and ws-b takes the already-ready short-circuit, so 0 timers.
+              (should (= 0 timer-calls))))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)))))
+
 (ert-deftest claude-repl-cmd-test-snapshot-load/captures-origin-window-config ()
   "Loader captures `current-window-configuration' into the load state
 at start, so finish can restore the pre-load layout verbatim."
