@@ -992,13 +992,18 @@ If Claude isn't running, start it (same as `claude-repl')."
           (evil-insert-state)))))))
 
 (defun claude-repl--delete-non-panel-windows (vterm-buf input-buf)
-  "Delete all windows not showing VTERM-BUF or INPUT-BUF."
-  (claude-repl--log (+workspace-current-name) "delete-non-panel-windows: window-count=%d" (length (window-list)))
-  (dolist (win (window-list))
-    (unless (memq (window-buffer win) (list vterm-buf input-buf))
-      (condition-case err
-          (delete-window win)
-        (error (message "[claude-repl] could not close non-panel window: %S" err))))))
+  "Delete every window NOT showing VTERM-BUF or INPUT-BUF.
+Side windows (e.g. the workspace drawer) are preserved — they are
+frame-level UI elements that should survive panel-layout resets.
+Pre-consolidation this function walked `window-list' directly and
+killed the drawer on `SPC g g'; the side-window skip lives inside
+`claude-repl-window--delete-where' now."
+  (claude-repl--log (+workspace-current-name)
+                    "delete-non-panel-windows: window-count=%d"
+                    (length (window-list)))
+  (claude-repl-window--delete-where
+   (lambda (win)
+     (not (memq (window-buffer win) (list vterm-buf input-buf))))))
 
 (defun claude-repl-toggle-fullscreen ()
   "Toggle fullscreen for the Claude REPL vterm and input windows.

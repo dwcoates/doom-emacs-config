@@ -49,6 +49,7 @@
 (claude-repl--load-module "commands")
 (claude-repl--load-module "session")
 (claude-repl--load-module "prompt-summary")
+(claude-repl--load-module "window")
 (claude-repl--load-module "panels")
 (claude-repl--load-module "worktree")
 (claude-repl--load-module "drawer")
