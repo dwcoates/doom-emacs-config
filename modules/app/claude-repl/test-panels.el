@@ -1681,6 +1681,72 @@ latest one."
         (claude-repl--maybe-autoselect-input "test-ws")
         (should (eq (selected-window) orig-win))))))
 
+(ert-deftest claude-repl-test-panels-maybe-autoselect-input-vterm-center-hack ()
+  "maybe-autoselect-input briefly selects the vterm window before input."
+  (claude-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*autoselect-input-hack*"))
+          (vterm-buf (get-buffer-create "*autoselect-vterm-hack*"))
+          (vterm-win nil)
+          (input-win nil)
+          (selections nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+            (setq input-win (split-window))
+            (set-window-buffer input-win input-buf)
+            (setq vterm-win (split-window))
+            (set-window-buffer vterm-win vterm-buf)
+            (select-window (car (window-list)))
+            (let ((claude-repl-autoselect-input-on-workspace-switch t)
+                  (orig-select-window (symbol-function 'select-window)))
+              (cl-letf (((symbol-function 'select-window)
+                         (lambda (win &optional norecord)
+                           (push win selections)
+                           (funcall orig-select-window win norecord))))
+                (claude-repl--maybe-autoselect-input "test-ws"))
+              (setq selections (nreverse selections))
+              ;; vterm must be selected first, then input — the hack's whole
+              ;; point is the transient vterm selection before the final input.
+              (should (equal selections (list vterm-win input-win)))
+              (should (eq (selected-window) input-win))))
+        (when (and vterm-win (window-live-p vterm-win))
+          (ignore-errors (delete-window vterm-win)))
+        (when (and input-win (window-live-p input-win))
+          (ignore-errors (delete-window input-win)))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
+(ert-deftest claude-repl-test-panels-maybe-autoselect-input-no-vterm-hack-when-hidden ()
+  "maybe-autoselect-input skips the vterm hack when vterm is not displayed."
+  (claude-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*autoselect-input-no-vterm*"))
+          (vterm-buf (get-buffer-create "*autoselect-vterm-hidden*"))
+          (input-win nil)
+          (selections nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+            (setq input-win (split-window))
+            (set-window-buffer input-win input-buf)
+            ;; vterm-buf intentionally not displayed in any window
+            (select-window (car (window-list)))
+            (let ((claude-repl-autoselect-input-on-workspace-switch t)
+                  (orig-select-window (symbol-function 'select-window)))
+              (cl-letf (((symbol-function 'select-window)
+                         (lambda (win &optional norecord)
+                           (push win selections)
+                           (funcall orig-select-window win norecord))))
+                (claude-repl--maybe-autoselect-input "test-ws"))
+              (setq selections (nreverse selections))
+              ;; Only the input selection should happen.
+              (should (equal selections (list input-win)))))
+        (when (and input-win (window-live-p input-win))
+          (ignore-errors (delete-window input-win)))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
 ;;;; ---- Tests: non-claude-panel-window-p with Claude buffers ----
 
 (ert-deftest claude-repl-test-panels-non-claude-panel-window-p-vterm-buffer ()

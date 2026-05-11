@@ -273,9 +273,21 @@ the caller's workspace."
 (defun claude-repl--maybe-autoselect-input (ws)
   "Select the Claude input window for WS if visible and autoselect is enabled.
 Respects `claude-repl-autoselect-input-on-workspace-switch'.
-Window lookup delegates to `claude-repl-window--panel-window'."
+Window lookup delegates to `claude-repl-window--panel-window'.
+
+HACK: when the vterm output window is also visible, point is moved
+into it transiently before being moved to the input window.  vterm
+only recenters its display on the cursor as a side effect of being
+the selected window, so without this momentary stop the output panel
+can render stale scroll position after a workspace switch.  The two
+`select-window' calls are synchronous (no redisplay runs between
+them), so the user never observes point sitting in vterm — the
+intermediate selection exists purely to trigger vterm's recenter."
   (when claude-repl-autoselect-input-on-workspace-switch
     (when-let ((win (claude-repl-window--panel-window :input ws)))
+      (when-let ((vterm-win (claude-repl-window--panel-window :vterm ws)))
+        (claude-repl--log ws "maybe-autoselect-input: vterm-center hack via vterm-win=%s" vterm-win)
+        (select-window vterm-win))
       (claude-repl--log ws "maybe-autoselect-input: selecting input-win=%s" win)
       (select-window win))))
 
