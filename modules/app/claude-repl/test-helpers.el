@@ -174,6 +174,8 @@
   (defvar magit-diff-visit-previous-blob nil "Stub."))
 (unless (boundp 'magit-section-initial-visibility-alist)
   (defvar magit-section-initial-visibility-alist nil "Stub."))
+(unless (boundp 'magit-display-buffer-function)
+  (defvar magit-display-buffer-function nil "Stub."))
 
 ;; magit keymap stubs — `define-key' in `(after! magit-diff ...)'
 ;; executes eagerly under the test shim, so these must exist.

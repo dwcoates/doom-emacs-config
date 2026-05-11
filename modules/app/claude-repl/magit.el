@@ -129,95 +129,39 @@ associated with the current branch."
 
 ;;;; --- magit-status-workspace ---------------------------------------------
 
-(defun claude-repl--existing-magit-status-window (&optional frame)
-  "Return a live, non-side window in FRAME displaying a `magit-status-mode'
-buffer, or nil.  FRAME defaults to the selected frame.  Side windows
-are skipped so the left-side workspace drawer can never be
-misidentified as a magit window.  Used by
-`+dwc/magit-status-workspace' to detect an already-visible magit
-window and refresh it in place rather than opening a second one
-adjacent to the drawer."
-  (cl-find-if (lambda (win)
-                (and (window-live-p win)
-                     (not (claude-repl-window--side-window-p win))
-                     (let ((buf (window-buffer win)))
-                       (and (buffer-live-p buf)
-                            (with-current-buffer buf
-                              (derived-mode-p 'magit-status-mode))))))
-              (window-list frame)))
-
-(defun claude-repl--magit-split-base-window ()
-  "Return the window to split when opening magit on the left.
-Prefers `window-main-window' (Emacs 27+) so the split happens inside
-the non-side area of the frame — guaranteeing the new magit window
-never lands as a sibling of the drawer side window.  Falls back to
-`frame-root-window' on older Emacs."
-  (if (fboundp 'window-main-window)
-      (window-main-window)
-    (frame-root-window)))
+(defun claude-repl--magit-display-buffer-same-window (buffer)
+  "Display BUFFER in the selected window.
+Used as a let-bound override for `magit-display-buffer-function' so
+the top-level `magit-status' call from `+dwc/magit-status-workspace'
+replaces the current buffer rather than splitting or popping up a
+new window.  Returns the window magit should select."
+  (display-buffer buffer '(display-buffer-same-window)))
 
 (defun +dwc/magit-status-workspace ()
-  "Open magit-status with the canonical magit-left/claude-right layout.
-Reuses an existing magit-status window when one is already visible
-in the frame (refreshing it in place — no new window is created, so
-nothing pops up next to the drawer).  Otherwise, when claude panels
-are present, first reduces the frame to claude panels only and then
-splits the frame's MAIN window (side windows excluded) from the
-left, opening magit-status in the new left window.  The saved
-`:fullscreen-config' is cleared since claude is no longer fullscreen
-once magit shares the frame.
+  "Open magit-status for the workspace in the SELECTED window.
+Always replaces the current buffer with the workspace's magit-status
+— no splits, no window reuse — regardless of the prior layout or
+claude-repl panel state.  Forces same-window display by let-binding
+`magit-display-buffer-function' for this call only, so other magit
+buffers (diffs, logs, etc.) keep their normal display behavior.
 
-Falls back to a plain `magit-status' when no claude panels exist for
-the workspace (nothing to anchor the layout against)."
+If the selected window is a side window (e.g., the workspace
+drawer), first pops to the frame's main window so magit replaces the
+main buffer rather than failing on the dedicated side window.
+
+Clears the saved `:fullscreen-config' since claude is no longer
+fullscreen once magit replaces the current window."
   (interactive)
+  (when (window-parameter (selected-window) 'window-side)
+    (select-window (window-main-window)))
   (let* ((ws (+workspace-current-name))
-         (claude-fs (claude-repl--ws-get ws :fullscreen-config))
-         (vterm-buf (claude-repl--ws-get ws :vterm-buffer))
-         (input-buf (claude-repl--ws-get ws :input-buffer))
-         (panels-visible (and (buffer-live-p vterm-buf)
-                              (buffer-live-p input-buf)
-                              (get-buffer-window vterm-buf)
-                              (get-buffer-window input-buf)))
-         (existing-magit-win (claude-repl--existing-magit-status-window)))
+         (dir (claude-repl--ws-dir ws))
+         (magit-display-buffer-function
+          #'claude-repl--magit-display-buffer-same-window))
     (when (fboundp 'claude-repl--log)
-      (claude-repl--log ws
-                        "magit-status-workspace: ENTER windows=%d claude-fs=%s panels-visible=%s existing-magit=%s"
-                        (length (window-list))
-                        (if claude-fs "yes" "no")
-                        (if panels-visible "yes" "no")
-                        (if existing-magit-win "yes" "no")))
-    (cond
-     ;; Reuse an existing magit window — refresh in place, no split.
-     ;; Takes priority over the panels/fullscreen branches so the user
-     ;; never sees a second magit window appear next to the drawer.
-     (existing-magit-win
-      (when (fboundp 'claude-repl--log)
-        (claude-repl--log ws "magit-status-workspace: BRANCH=reuse-existing dir=%s"
-                          (claude-repl--ws-dir ws)))
-      (select-window existing-magit-win)
-      (magit-status (claude-repl--ws-dir ws)))
-     ((or claude-fs panels-visible)
-      (when (fboundp 'claude-repl--log)
-        (claude-repl--log ws "magit-status-workspace: BRANCH=split-left dir=%s"
-                          (claude-repl--ws-dir ws)))
-      ;; Step 1: ensure only claude panels are visible so the split is
-      ;; deterministic.  No-op when claude is already fullscreen.
-      (when (and panels-visible (not claude-fs))
-        (claude-repl--delete-non-panel-windows vterm-buf input-buf))
-      ;; Step 2: claude is no longer fullscreen once magit lands on the left.
-      (claude-repl--ws-put ws :fullscreen-config nil)
-      ;; Step 3: split the MAIN window (side windows excluded) from the
-      ;; left and open magit there — guarantees the new window never
-      ;; lands adjacent to the drawer.
-      (let ((left-win (split-window (claude-repl--magit-split-base-window)
-                                    nil 'left)))
-        (select-window left-win)
-        (magit-status (claude-repl--ws-dir ws))))
-     (t
-      (when (fboundp 'claude-repl--log)
-        (claude-repl--log ws "magit-status-workspace: BRANCH=fallback-no-panels dir=%s"
-                          (claude-repl--ws-dir ws)))
-      (magit-status (claude-repl--ws-dir ws))))))
+      (claude-repl--log ws "magit-status-workspace: same-window dir=%s" dir))
+    (claude-repl--ws-put ws :fullscreen-config nil)
+    (magit-status dir)))
 
 ;;;; --- Hide Claude panels before magit-status RET actions -----------------
 
