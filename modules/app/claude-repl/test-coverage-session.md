@@ -40,13 +40,6 @@
 (Session startup was merged into `claude-repl--initialize-claude` in panels.el; see
 `test-coverage-panels.md`.)
 
-### Loading Placeholder
-
-| Function | Covered | Tests |
-|----------|---------|-------|
-| `claude-repl--swap-placeholder-into-windows` | Yes | live buf, dead buf |
-| `claude-repl--swap-placeholder` | Yes | indirectly via handle-first-ready idempotent test |
-
 ### Session Completion Handling
 
 | Function | Covered | Tests |

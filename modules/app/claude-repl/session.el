@@ -451,34 +451,6 @@ is not reactive to later state changes."
                       ws session-id fork-session-id worktree-str active-env cmd
                       (claude-repl--ws-get ws :project-dir))))
 
-;;;; Loading placeholder
-
-(defun claude-repl--swap-placeholder-into-windows (buf placeholder)
-  "Replace PLACEHOLDER windows with BUF and kill PLACEHOLDER.
-Only acts when BUF is still live.  Each window showing PLACEHOLDER is
-un-dedicated, switched to BUF, and re-dedicated."
-  (when (buffer-live-p buf)
-    (let ((wins (get-buffer-window-list placeholder nil t))
-          (ws (buffer-local-value 'claude-repl--owning-workspace buf)))
-      (claude-repl--log ws "swap-placeholder-into-windows: swapping %d window(s) buf=%s"
-                        (length wins) (buffer-name buf))
-      (dolist (win wins)
-        (set-window-dedicated-p win nil)
-        (set-window-buffer win buf)
-        (set-window-dedicated-p win t))
-      (kill-buffer placeholder))))
-
-(defun claude-repl--swap-placeholder (buf)
-  "Replace the loading placeholder window with the real vterm buffer BUF.
-Called once when Claude becomes ready (via session_start hook)."
-  (claude-repl--log (and buf (buffer-local-value 'claude-repl--owning-workspace buf))
-                    "swap-placeholder buf=%s" (if buf (buffer-name buf) "nil"))
-  (let ((placeholder (get-buffer " *claude-loading*")))
-    (when placeholder
-      (run-at-time 0 nil
-                   #'claude-repl--swap-placeholder-into-windows
-                   buf placeholder))))
-
 ;;;; Session completion handling
 
 (defun claude-repl--maybe-notify-finished (ws)
@@ -621,12 +593,10 @@ so the terminal has time to settle."
 (defun claude-repl--show-panels-or-defer (ws)
   "Open panels if WS is the current workspace, otherwise defer until switch.
 `claude-repl--on-workspace-switch' checks :pending-show-panels.
-Skip if the loading placeholder is still visible — `--swap-placeholder'
-handles the visual transition and showing panels here would
-trigger `--show-existing-panels' with the wrong selected window."
+Skip if the loading placeholder is still visible — showing panels
+here would trigger `--show-existing-panels' with the wrong selected
+window."
   (if (claude-repl--current-ws-p ws)
-      ;; Skip if the loading placeholder is still visible — --swap-placeholder
-      ;; handles the visual transition via run-at-time 0.
       (unless (claude-repl--loading-placeholder-visible-p)
         (claude-repl--log ws "show-panels-or-defer: current ws=%s — showing panels" ws)
         (claude-repl--show-hidden-panels))

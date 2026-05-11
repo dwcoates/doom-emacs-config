@@ -879,33 +879,6 @@ they want to see the result; hide-mode is overridden."
         (claude-repl--open-panels-after-ready "ws1")
         (should shown)))))
 
-;;;; ---- Tests: Loading placeholder ----
-
-(ert-deftest claude-repl-test-swap-placeholder-into-windows-live ()
-  "swap-placeholder-into-windows should replace placeholder and kill it."
-  (let ((real-buf (generate-new-buffer " *test-real-buf*"))
-        (placeholder (generate-new-buffer " *test-placeholder*")))
-    (unwind-protect
-        (progn
-          ;; No windows in batch mode, so just verify placeholder is killed
-          (cl-letf (((symbol-function 'get-buffer-window-list)
-                     (lambda (_buf _minibuf _all-frames) nil)))
-            (claude-repl--swap-placeholder-into-windows real-buf placeholder)
-            (should-not (buffer-live-p placeholder))))
-      (when (buffer-live-p real-buf) (kill-buffer real-buf))
-      (when (buffer-live-p placeholder) (kill-buffer placeholder)))))
-
-(ert-deftest claude-repl-test-swap-placeholder-into-windows-dead-buf ()
-  "swap-placeholder-into-windows should not kill placeholder when buf is dead."
-  (let ((real-buf (generate-new-buffer " *test-dead-real*"))
-        (placeholder (generate-new-buffer " *test-placeholder-2*")))
-    (kill-buffer real-buf)
-    (unwind-protect
-        (progn
-          (claude-repl--swap-placeholder-into-windows real-buf placeholder)
-          (should (buffer-live-p placeholder)))
-      (when (buffer-live-p placeholder) (kill-buffer placeholder)))))
-
 ;;;; ---- Tests: Process state predicates ----
 
 (ert-deftest claude-repl-test-vterm-process-alive-no-buffer ()

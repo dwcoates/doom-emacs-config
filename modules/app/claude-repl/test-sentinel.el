@@ -1382,7 +1382,6 @@ the module does not manage."
             (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
             (cl-letf (((symbol-function 'claude-repl--cancel-ready-timer)
                        (lambda (_ws) (setq timer-cancelled t)))
-                      ((symbol-function 'claude-repl--swap-placeholder) #'ignore)
                       ((symbol-function 'claude-repl--open-panels-after-ready)
                        (lambda (_ws) (setq panels-opened t))))
               (claude-repl--on-session-start-event "ws1" "/some/dir")
@@ -1493,7 +1492,6 @@ must surface, not be silently swallowed."
           (progn
             (claude-repl--ws-put "ws1" :vterm-buffer fake-buf)
             (cl-letf (((symbol-function 'claude-repl--cancel-ready-timer) #'ignore)
-                      ((symbol-function 'claude-repl--swap-placeholder) #'ignore)
                       ((symbol-function 'claude-repl--open-panels-after-ready) #'ignore))
               (claude-repl--on-session-start-event "ws1" "/some/dir")
               (should (eq (claude-repl--ws-claude-state "ws1") :idle))))
