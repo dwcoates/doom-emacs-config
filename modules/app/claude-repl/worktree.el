@@ -1092,12 +1092,15 @@ annotation must not error out the whole batch."
 
 (defun claude-repl--handle-merge-command (cmd)
   "Handle a \"merge\" workspace command CMD.
-Performs the equivalent of `SPC TAB M' on the named workspace: merges
-that workspace's commits into its source workspace via
-`claude-repl--workspace-merge-into-source'."
+Performs the equivalent of `SPC TAB M' on the named workspace, but in
+SILENT mode: the cherry-pick happens against the resolved target
+directory without switching the user's active workspace or popping
+magit.  This keeps skill-invoked (`/workspace-merge') merges from
+yanking focus away from whatever the user is doing — only the
+interactive entry points (`SPC TAB m' / `SPC TAB M') change focus."
   (let ((ws (alist-get 'workspace cmd)))
-    (claude-repl--log ws "workspace-commands-file merge: ws=%s" ws)
-    (claude-repl--workspace-merge-into-source ws)))
+    (claude-repl--log ws "workspace-commands-file merge: ws=%s (silent)" ws)
+    (claude-repl--workspace-merge-into-source ws t)))
 
 (defun claude-repl--dispatch-workspace-command (cmd create-delay)
   "Dispatch a single workspace command CMD with current CREATE-DELAY.
@@ -1261,10 +1264,10 @@ mentioning TARGET-WS."
 
 (defun claude-repl--show-and-refresh-magit-status (project-root)
   "Open magit-status for PROJECT-ROOT, select its window, and refresh it.
-Used at the end of `claude-repl--workspace-merge-do' to guarantee the
-post-merge window the user lands on is the magit-status buffer for the
-just-merged worktree, freshly refreshed.  `magit-status' alone usually
-selects the new window but the behavior depends on
+Used at the end of `claude-repl--workspace-merge-do' (non-silent) to
+guarantee the post-merge window the user lands on is the magit-status
+buffer for the just-merged worktree, freshly refreshed.  `magit-status'
+alone usually selects the new window but the behavior depends on
 `magit-display-buffer-function'; this helper makes the window-selection
 and refresh explicit so the merge flow is independent of user-tunable
 magit display settings."
@@ -1301,7 +1304,7 @@ succeeded; a tag-write failure shouldn't undo that."
       (message "[claude-repl] WARNING: failed to create tag %s (exit %d)"
                tag exit-code))))
 
-(defun claude-repl--workspace-merge-do (target-ws &optional project-root-override)
+(defun claude-repl--workspace-merge-do (target-ws &optional project-root-override silent)
   "Cherry-pick TARGET-WS's branch commits onto the current branch.
 Replays each commit from the target branch (since it diverged from master)
 individually. Aborts cleanly if any commit conflicts.
@@ -1313,11 +1316,18 @@ lands in the parent worktree (or master, when re-routed) regardless of
 how Doom resolved the post-switch workspace name.
 
 After a successful cherry-pick, tags HEAD as `merge/TARGET-WS' so the
-final commit of the merged-in workspace is recoverable by name."
+final commit of the merged-in workspace is recoverable by name.
+
+When SILENT is non-nil, the post-merge magit-status pop is suppressed
+\(the merge does not steal user focus).  Interactive entry points pass
+nil so SPC TAB m / SPC TAB M still surface the magit view; the
+skill-invoked path (`claude-repl--handle-merge-command') passes t so
+background-triggered merges never interrupt whatever the user is
+doing."
   (let* ((current-ws (+workspace-current-name))
          (target-branch (claude-repl--workspace-branch target-ws)))
-    (claude-repl--log current-ws "workspace-merge-do current-ws=%s target-ws=%s target-branch=%s project-root-override=%s"
-                      current-ws target-ws target-branch (or project-root-override "nil"))
+    (claude-repl--log current-ws "workspace-merge-do current-ws=%s target-ws=%s target-branch=%s project-root-override=%s silent=%s"
+                      current-ws target-ws target-branch (or project-root-override "nil") silent)
     (unless target-branch
       (user-error "Cannot resolve branch for workspace '%s'" target-ws))
     (let* ((project-root (or project-root-override
@@ -1334,7 +1344,8 @@ final commit of the merged-in workspace is recoverable by name."
       (claude-repl--finish-workspace target-ws)
       (message "Merged workspace '%s' -> '%s'." target-ws current-ws)
       (load-file claude-repl--config-file)
-      (claude-repl--show-and-refresh-magit-status project-root))))
+      (unless silent
+        (claude-repl--show-and-refresh-magit-status project-root)))))
 
 (defalias '+dwc/workspace-merge--do #'claude-repl--workspace-merge-do)
 
@@ -1594,7 +1605,7 @@ parents, the resolver returns the great-grandparent (or master)."
                         parent-dir master-dir depth target)
       target))))
 
-(defun claude-repl--workspace-merge-into-source (source-ws)
+(defun claude-repl--workspace-merge-into-source (source-ws &optional silent)
   "Merge SOURCE-WS's commits into its source workspace.
 The source workspace is the one `SPC TAB n' was called from when
 SOURCE-WS was created (recorded as `:source-ws-dir').  When that
@@ -1607,13 +1618,17 @@ is already fully merged into master,
 the master worktree — landing the changes directly in master and
 selecting the master workspace afterwards.
 
-Switches to the target workspace via `claude-repl-switch-to-project'
-\(which creates a perspective for the project if none is open) and
-cherry-picks SOURCE-WS's commits onto its branch.  The resolved target
-directory is passed explicitly to `--workspace-merge-do' so cherry-picks
-always land in the directory we just switched to, even if Doom's
-project-name -> workspace mapping doesn't recover the original parent's
-`:project-dir' lookup.
+When SILENT is nil (the interactive default, used by `SPC TAB M'),
+switches to the target workspace via `claude-repl-switch-to-project'
+\(which creates a perspective for the project if none is open) and the
+cherry-pick is followed by a magit-status pop.
+
+When SILENT is non-nil (used by `claude-repl--handle-merge-command' for
+skill-invoked merges), neither the workspace switch nor the magit pop
+occurs — the merge runs entirely in the background and does not steal
+the user's focus.  The resolved target directory is always passed
+explicitly to `--workspace-merge-do' so the cherry-pick lands there
+regardless of which workspace is currently active.
 
 Signals `user-error' if SOURCE-WS is unknown — checked explicitly via
 `claude-repl--ws-get' rather than `claude-repl--ws-dir' (which raises a
@@ -1628,9 +1643,9 @@ generic `error') so command-file dispatch surfaces user-facing errors."
            (master-dir (claude-repl--master-worktree-path source-dir))
            (target-dir (claude-repl--resolve-merge-into-source-target parent-dir master-dir)))
       (claude-repl--log source-ws
-                        "workspace-merge-into-source: source-ws=%s source-dir=%s recorded=%s parent-dir=%s master-dir=%s target-dir=%s"
+                        "workspace-merge-into-source: source-ws=%s source-dir=%s recorded=%s parent-dir=%s master-dir=%s target-dir=%s silent=%s"
                         source-ws source-dir (or recorded "nil")
-                        (or parent-dir "nil") (or master-dir "nil") (or target-dir "nil"))
+                        (or parent-dir "nil") (or master-dir "nil") (or target-dir "nil") silent)
       (unless target-dir
         (user-error "Cannot determine merge target for '%s': no recorded source and no '%s' worktree found"
                     source-ws claude-repl-master-branch-name))
@@ -1639,14 +1654,15 @@ generic `error') so command-file dispatch surfaces user-facing errors."
         (user-error "Already on the source workspace — nothing to merge"))
       ;; Guard: uncommitted changes would interfere with cherry-pick.
       (claude-repl--assert-clean-worktree source-ws source-dir)
-      (claude-repl-switch-to-project target-dir)
-      ;; After switching, default-directory may still point at the source ws —
-      ;; bind it to the target so cherry-pick paths resolve there. Pass
-      ;; target-dir explicitly to --workspace-merge-do so the cherry-pick lands
-      ;; in the worktree we just selected, not in whatever :project-dir the
-      ;; post-switch current-ws happens to carry.
+      (unless silent
+        (claude-repl-switch-to-project target-dir))
+      ;; After (the optional) switch, default-directory may still point at the
+      ;; source ws — bind it to the target so cherry-pick paths resolve there.
+      ;; Pass target-dir explicitly to --workspace-merge-do so the cherry-pick
+      ;; lands in the resolved target, not in whatever :project-dir the
+      ;; current-ws happens to carry.
       (let ((default-directory (file-name-as-directory target-dir)))
-        (claude-repl--workspace-merge-do source-ws target-dir)))))
+        (claude-repl--workspace-merge-do source-ws target-dir silent)))))
 
 (defun claude-repl-workspace-merge-current-into-source ()
   "Merge the current workspace's commits into its source workspace.

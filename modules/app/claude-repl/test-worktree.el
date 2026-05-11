@@ -473,7 +473,7 @@ Returns the full SHA of the new commit."
   "handle-merge-command forwards the workspace name to workspace-merge-into-source."
   (let ((received :unset))
     (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
-               (lambda (ws) (setq received ws))))
+               (lambda (ws &optional _silent) (setq received ws))))
       (claude-repl--handle-merge-command '((type . "merge") (workspace . "DWC/feature-one")))
       (should (equal received "DWC/feature-one")))))
 
@@ -483,9 +483,20 @@ normalization is the responsibility of workspace-merge-into-source so
 both interactive and command-file callers get identical handling."
   (let ((received :unset))
     (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
-               (lambda (ws) (setq received ws))))
+               (lambda (ws &optional _silent) (setq received ws))))
       (claude-repl--handle-merge-command '((type . "merge") (workspace . "feature-one")))
       (should (equal received "feature-one")))))
+
+(ert-deftest claude-repl-test-handle-merge-command-runs-silently ()
+  "Skill-invoked merges (`/workspace-merge') must pass SILENT=t to
+workspace-merge-into-source so the merge does not steal user focus.
+Interactive entries (`SPC TAB m'/`SPC TAB M') leave SILENT nil and
+retain the old switch-to-project + magit pop behavior."
+  (let ((silent-arg :unset))
+    (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+               (lambda (_ws &optional silent) (setq silent-arg silent))))
+      (claude-repl--handle-merge-command '((type . "merge") (workspace . "feature-one")))
+      (should (eq silent-arg t)))))
 
 ;;;; ---- Tests: process-workspace-commands-file ----
 
@@ -2748,13 +2759,12 @@ Covers the full call the interactive `SPC TAB n' path builds up."
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
                ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
-               ((symbol-function 'load-file) (lambda (f) (setq loaded-file f)))
-               ((symbol-function 'magit-status) #'ignore))
+               ((symbol-function 'load-file) (lambda (f) (setq loaded-file f))))
       (claude-repl--workspace-merge-do "other-ws")
       (should (equal loaded-file claude-repl--config-file)))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-reloads-before-magit ()
-  "workspace-merge-do reloads config before opening magit-status."
+  "Non-silent workspace-merge-do reloads config before popping magit-status."
   (let ((call-order nil))
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
                ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
@@ -2770,7 +2780,7 @@ Covers the full call the interactive `SPC TAB n' path builds up."
       (should (equal (nreverse call-order) '(reload magit))))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-magit-receives-project-dir ()
-  "workspace-merge-do passes the current workspace's project directory to magit helper."
+  "Non-silent workspace-merge-do passes the project directory to the magit helper."
   (let ((magit-dir nil))
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
                ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
@@ -2784,6 +2794,24 @@ Covers the full call the interactive `SPC TAB n' path builds up."
                 (lambda (dir) (setq magit-dir dir))))
       (claude-repl--workspace-merge-do "other-ws")
       (should (equal magit-dir "/tmp/fake")))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-silent-skips-magit ()
+  "When SILENT is non-nil, workspace-merge-do must NOT call the
+magit-status helper.  This is the path used for skill-invoked merges
+\(`/workspace-merge') so they don't yank user focus."
+  (let ((magit-called nil))
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
+               ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
+               ((symbol-function 'load-file) #'ignore)
+               ((symbol-function 'claude-repl--show-and-refresh-magit-status)
+                (lambda (&rest _) (setq magit-called t))))
+      (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+      (should-not magit-called))))
 
 ;;;; ---- Tests: tag-merge-completion ----
 
@@ -2831,7 +2859,6 @@ cherry-pick, with the project-root and source workspace name."
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
                ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
                ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
                ((symbol-function 'claude-repl--tag-merge-completion)
                 (lambda (root ws) (setq tagged (cons root ws)))))
       (claude-repl--workspace-merge-do "other-ws")
@@ -2851,7 +2878,6 @@ all-incorporated), tag-merge-completion is NOT invoked."
                   (user-error "All commits already incorporated")))
                ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
                ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
                ((symbol-function 'claude-repl--tag-merge-completion)
                 (lambda (_root _ws) (setq tagged t))))
       (should-error (claude-repl--workspace-merge-do "other-ws") :type 'user-error)
@@ -2994,7 +3020,7 @@ all-incorporated), tag-merge-completion is NOT invoked."
                        (lambda (&rest args) (setq merge-do-args args))))
               (claude-repl-workspace-merge-current-into-source)
               (should (equal target-arg tmpdir))
-              (should (equal merge-do-args (list "wt-ws" tmpdir)))))
+              (should (equal merge-do-args (list "wt-ws" tmpdir nil)))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-test-merge-into-source-falls-back-to-master-when-recorded-dir-gone ()
@@ -3029,6 +3055,33 @@ all-incorporated), tag-merge-completion is NOT invoked."
                 ((symbol-function 'claude-repl--workspace-merge-do) #'ignore))
         (claude-repl-workspace-merge-current-into-source)
         (should (equal target-arg "/tmp/master-fallback/"))))))
+
+(ert-deftest claude-repl-test-merge-into-source-silent-skips-switch-to-project ()
+  "When SILENT is non-nil, --workspace-merge-into-source must NOT call
+`claude-repl-switch-to-project'.  This is the path used by
+`claude-repl--handle-merge-command' for skill-invoked merges so that
+background-triggered /workspace-merge does not yank the user's focus."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-merge-silent-no-switch-" t))
+          (switch-called nil)
+          (merge-do-args :unset))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
+            (claude-repl--ws-put "wt-ws" :source-ws-dir tmpdir)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
+                      ((symbol-function 'claude-repl--master-worktree-path)
+                       (lambda (_root) nil))
+                      ((symbol-function 'claude-repl--assert-clean-worktree)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'claude-repl-switch-to-project)
+                       (lambda (&rest _) (setq switch-called t)))
+                      ((symbol-function 'claude-repl--workspace-merge-do)
+                       (lambda (&rest args) (setq merge-do-args args))))
+              (claude-repl--workspace-merge-into-source "wt-ws" t)
+              (should-not switch-called)
+              (should (equal merge-do-args (list "wt-ws" tmpdir t)))))
+        (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-test-merge-into-source-errors-when-no-source-and-no-master ()
   "user-errors when neither a recorded source nor a master worktree can be found."
@@ -3076,7 +3129,7 @@ all-incorporated), tag-merge-completion is NOT invoked."
                        (lambda (&rest args) (setq merge-do-args args))))
               (claude-repl--workspace-merge-into-source "named-ws")
               (should (equal target-arg tmpdir))
-              (should (equal merge-do-args (list "named-ws" tmpdir)))))
+              (should (equal merge-do-args (list "named-ws" tmpdir nil)))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-test-workspace-merge-into-source-normalizes-branchy-name ()
@@ -3399,7 +3452,7 @@ on workspace switch in repos with many worktrees."
                        (lambda (&rest args) (setq merge-do-args args))))
               (claude-repl-workspace-merge-current-into-source)
               (should (equal target-arg master-dir))
-              (should (equal merge-do-args (list "wt-ws" master-dir)))))
+              (should (equal merge-do-args (list "wt-ws" master-dir nil)))))
         (delete-directory parent-dir t)
         (delete-directory master-dir t)))))
 
@@ -3427,7 +3480,7 @@ on workspace switch in repos with many worktrees."
                        (lambda (&rest args) (setq merge-do-args args))))
               (claude-repl-workspace-merge-current-into-source)
               (should (equal target-arg parent-dir))
-              (should (equal merge-do-args (list "wt-ws" parent-dir)))))
+              (should (equal merge-do-args (list "wt-ws" parent-dir nil)))))
         (delete-directory parent-dir t)
         (delete-directory master-dir t)))))
 
@@ -3446,7 +3499,8 @@ on workspace switch in repos with many worktrees."
                 (lambda (dir _ws _base _br) (setq cherry-pick-dir dir)))
                ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
                ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'magit-status) (lambda (dir) (setq magit-dir dir))))
+               ((symbol-function 'claude-repl--show-and-refresh-magit-status)
+                (lambda (dir) (setq magit-dir dir))))
       (claude-repl--workspace-merge-do "other-ws" "/explicit/target/")
       (should (equal cherry-pick-dir "/explicit/target/"))
       (should (equal magit-dir "/explicit/target/")))))
