@@ -10,6 +10,8 @@
 
 ;;; Code:
 
+(defvar recentf-list)
+
 (load (expand-file-name "test-helpers.el" (file-name-directory
                                             (or load-file-name buffer-file-name)))
       nil t)
@@ -1678,7 +1680,7 @@ depend on it).  After the hook returns it's restored."
       (unwind-protect
           (progn
             (with-temp-file tmp-file (insert ";; placeholder"))
-            (cl-letf (((symbol-function '+dwc/get-most-recent-file-in-project)
+            (cl-letf (((symbol-function 'claude-repl--most-recent-project-file)
                        (lambda (_d) tmp-file))
                       ((symbol-function 'find-file)
                        (lambda (f) (setq opened f)))
@@ -1697,7 +1699,7 @@ depend on it).  After the hook returns it's restored."
     (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-est-" t)))
            (find-file-called nil))
       (unwind-protect
-          (cl-letf (((symbol-function '+dwc/get-most-recent-file-in-project)
+          (cl-letf (((symbol-function 'claude-repl--most-recent-project-file)
                      (lambda (_d) "/nonexistent/gone.el"))
                     ((symbol-function 'find-file)
                      (lambda (&rest _) (setq find-file-called t)))
@@ -2219,7 +2221,7 @@ sees nil state and short-circuits without printing bogus counters."
 ;;;; ---- claude-repl-switch-to-project ----
 
 (ert-deftest claude-repl-cmd-test-switch-to-project/switches-then-hydrates ()
-  "switch-to-project calls +dwc/switch-to-project, then hydrates priority."
+  "switch-to-project switches via projectile, then hydrates priority."
   (claude-repl-test--with-clean-state
     (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-switch-" t)))
           switched-with)
@@ -2228,8 +2230,10 @@ sees nil state and short-circuits without printing bogus counters."
             (claude-repl-test--seed-file
              (claude-repl--state-file tmp-dir)
              (prin1-to-string '(:priority "p2")))
-            (cl-letf (((symbol-function '+dwc/switch-to-project)
+            (cl-letf (((symbol-function 'projectile-switch-project-by-name)
                        (lambda (project) (setq switched-with project)))
+                      ((symbol-function 'claude-repl--most-recent-project-file)
+                       (lambda (_d) nil))
                       ((symbol-function '+workspace-current-name)
                        (lambda () "switched-ws"))
                       ((symbol-function 'force-mode-line-update)
@@ -2247,7 +2251,10 @@ sees nil state and short-circuits without printing bogus counters."
     (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-switch-" t)))
           flashed-ws)
       (unwind-protect
-          (cl-letf (((symbol-function '+dwc/switch-to-project) (lambda (_p) nil))
+          (cl-letf (((symbol-function 'projectile-switch-project-by-name)
+                     (lambda (_p) nil))
+                    ((symbol-function 'claude-repl--most-recent-project-file)
+                     (lambda (_d) nil))
                     ((symbol-function '+workspace-current-name)
                      (lambda () "switched-ws"))
                     ((symbol-function 'force-mode-line-update)
@@ -2257,6 +2264,98 @@ sees nil state and short-circuits without printing bogus counters."
             (claude-repl-switch-to-project tmp-dir)
             (should (equal flashed-ws "switched-ws")))
         (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-project/opens-most-recent-file ()
+  "switch-to-project opens the most-recent project file when it exists."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-switch-" t)))
+           (tmp-file (expand-file-name "hello.el" tmp-dir))
+           (opened nil))
+      (unwind-protect
+          (progn
+            (with-temp-file tmp-file (insert ";; placeholder"))
+            (cl-letf (((symbol-function 'projectile-switch-project-by-name)
+                       (lambda (_p) nil))
+                      ((symbol-function 'claude-repl--most-recent-project-file)
+                       (lambda (_d) tmp-file))
+                      ((symbol-function 'find-file)
+                       (lambda (f) (setq opened f)))
+                      ((symbol-function '+workspace-current-name)
+                       (lambda () "switched-ws"))
+                      ((symbol-function 'force-mode-line-update)
+                       (lambda (&optional _all) nil))
+                      ((symbol-function 'claude-repl-flash-tab)
+                       (lambda (&rest _) nil)))
+              (claude-repl-switch-to-project tmp-dir)
+              (should (equal opened tmp-file))))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-project/skips-most-recent-when-gone ()
+  "switch-to-project skips find-file when the most-recent path doesn't exist."
+  (claude-repl-test--with-clean-state
+    (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-switch-" t)))
+          (find-file-called nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'projectile-switch-project-by-name)
+                     (lambda (_p) nil))
+                    ((symbol-function 'claude-repl--most-recent-project-file)
+                     (lambda (_d) "/nonexistent/gone.el"))
+                    ((symbol-function 'find-file)
+                     (lambda (&rest _) (setq find-file-called t)))
+                    ((symbol-function '+workspace-current-name)
+                     (lambda () "switched-ws"))
+                    ((symbol-function 'force-mode-line-update)
+                     (lambda (&optional _all) nil))
+                    ((symbol-function 'claude-repl-flash-tab)
+                     (lambda (&rest _) nil)))
+            (claude-repl-switch-to-project tmp-dir)
+            (should-not find-file-called))
+        (delete-directory tmp-dir t)))))
+
+;;;; ---- claude-repl--most-recent-project-file ----
+
+(ert-deftest claude-repl-cmd-test-most-recent-project-file/returns-first-under-root ()
+  "Returns the first `recentf-list' entry that lives under PROJECT-ROOT."
+  (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-recent-" t)))
+         (in1  (expand-file-name "a.el" tmp-dir))
+         (in2  (expand-file-name "b.el" tmp-dir))
+         (out  (expand-file-name "elsewhere.el" temporary-file-directory)))
+    (unwind-protect
+        (progn
+          (with-temp-file in1 (insert ""))
+          (with-temp-file in2 (insert ""))
+          (with-temp-file out (insert ""))
+          (let ((recentf-list (list out in1 in2)))
+            (should (equal (claude-repl--most-recent-project-file tmp-dir) in1))))
+      (delete-directory tmp-dir t)
+      (when (file-exists-p out) (delete-file out)))))
+
+(ert-deftest claude-repl-cmd-test-most-recent-project-file/nil-when-none-match ()
+  "Returns nil when no `recentf-list' entry lives under PROJECT-ROOT."
+  (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-recent-" t)))
+         (out     (expand-file-name "elsewhere.el" temporary-file-directory)))
+    (unwind-protect
+        (progn
+          (with-temp-file out (insert ""))
+          (let ((recentf-list (list out)))
+            (should-not (claude-repl--most-recent-project-file tmp-dir))))
+      (delete-directory tmp-dir t)
+      (when (file-exists-p out) (delete-file out)))))
+
+(ert-deftest claude-repl-cmd-test-most-recent-project-file/boundary-safe ()
+  "Does not mis-match `/p/foo' entries against project root `/p/foo-bar'."
+  (let* ((parent  (file-name-as-directory (make-temp-file "claude-repl-recent-" t)))
+         (foo     (file-name-as-directory (expand-file-name "foo" parent)))
+         (foo-bar (file-name-as-directory (expand-file-name "foo-bar" parent)))
+         (sibling (expand-file-name "x.el" foo)))
+    (unwind-protect
+        (progn
+          (make-directory foo)
+          (make-directory foo-bar)
+          (with-temp-file sibling (insert ""))
+          (let ((recentf-list (list sibling)))
+            (should-not (claude-repl--most-recent-project-file foo-bar))))
+      (delete-directory parent t))))
 
 ;;;; ---- Tests: snapshot archive picker ----
 

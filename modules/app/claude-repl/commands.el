@@ -809,11 +809,12 @@ persp routing."
 
 (defun claude-repl--establish-workspace (ws dir)
   "Synchronously create + activate + fully set up workspace WS for DIR.
-Mirrors what `+dwc/switch-to-project' would do on an interactive
-`SPC p p' but bypasses `+workspaces-switch-to-project-h' to avoid the
-rename-on-empty collapse: persp is added directly via `persp-add-new'
-and activated via `persp-frame-switch' keyed by the snapshot's `ws'
-name (not the project basename Doom would otherwise derive).
+Mirrors what `claude-repl-switch-to-project' would do on an
+interactive `SPC p p' but bypasses `+workspaces-switch-to-project-h'
+to avoid the rename-on-empty collapse: persp is added directly via
+`persp-add-new' and activated via `persp-frame-switch' keyed by the
+snapshot's `ws' name (not the project basename Doom would otherwise
+derive).
 
 Each call:
 
@@ -869,10 +870,9 @@ Each call:
         (when (and fb (buffer-live-p fb) orig-dir)
           (with-current-buffer fb
             (setq default-directory orig-dir)))))
-    (when (fboundp '+dwc/get-most-recent-file-in-project)
-      (when-let ((recent-file (+dwc/get-most-recent-file-in-project dir)))
-        (when (file-exists-p recent-file)
-          (find-file recent-file))))
+    (when-let ((recent-file (claude-repl--most-recent-project-file dir)))
+      (when (file-exists-p recent-file)
+        (find-file recent-file)))
     (claude-repl--ws-put ws :project-dir dir)
     (when (fboundp 'claude-repl--hydrate-priority-from-state)
       (claude-repl--hydrate-priority-from-state dir))
@@ -1212,21 +1212,51 @@ file is missing, malformed, or carries no `:priority'."
     (claude-repl--ws-put ws :priority priority)
     (force-mode-line-update t)))
 
+(defvar recentf-list)
+
+(defun claude-repl--most-recent-project-file (project-root)
+  "Return the most-recently-accessed file under PROJECT-ROOT, or nil.
+Uses `file-in-directory-p' (boundary-aware) rather than
+`string-prefix-p' — the latter would mis-match `/p/foo' against a
+file under `/p/foo-bar/' because the prefix isn't terminated at a
+path separator.
+
+Returns nil if `recentf-list' is unbound (recentf not loaded yet) or
+contains no live file under PROJECT-ROOT.  Callers must still verify
+the returned path exists before opening — `recentf-list' lags
+filesystem deletions."
+  (seq-find (lambda (file)
+              (and (file-exists-p file)
+                   (file-in-directory-p file project-root)))
+            (bound-and-true-p recentf-list)))
+
 (defun claude-repl-switch-to-project (&optional project)
   "Switch to PROJECT and hydrate the workspace's priority badge.
-Thin wrapper around `+dwc/switch-to-project' that, after switching,
-reads the per-project state file from the project root (see
-`claude-repl--state-file-for-read') and applies any saved
-`:priority' to the new workspace, so the tabline badge appears
-immediately on `SPC p p' instead of only after Claude starts.  Also
-pulses the activated workspace's tab via `claude-repl-flash-tab' so
-the user can spot the slot they just landed in — same flash semantic
-as the close-deprio and reopen paths."
+PROJECT is a project root path; when nil, prompt via
+`projectile-completing-read'.
+
+Switches via `projectile-switch-project-by-name' (which fires Doom's
+`+workspaces-switch-to-project-h' to create/activate the persp keyed
+on the project basename), then opens the most-recently-accessed file
+under PROJECT via `claude-repl--most-recent-project-file', hydrates
+the saved `:priority' from the per-project state file (so the
+tabline badge appears immediately on `SPC p p' instead of only once
+Claude starts), and flashes the activated tab.
+
+Distinct from `claude-repl--switch-to-workspace': that primitive is
+name-keyed and assumes the persp already exists; this one is
+project-keyed and creates the persp via the Doom hook.  Both differ
+from `claude-repl--establish-workspace', which is a snapshot-restore
+path that bypasses the Doom hook to preserve the snapshot's exact ws
+name."
   (interactive)
-  (let ((project (or project
-                     (projectile-completing-read "Switch to project: "
-                                                 (projectile-relevant-known-projects)))))
-    (+dwc/switch-to-project project)
+  (let* ((project (or project
+                      (projectile-completing-read "Switch to project: "
+                                                  (projectile-relevant-known-projects)))))
+    (projectile-switch-project-by-name project)
+    (when-let ((recent-file (claude-repl--most-recent-project-file project)))
+      (when (file-exists-p recent-file)
+        (find-file recent-file)))
     (claude-repl--hydrate-priority-from-state project)
     (claude-repl--flash-current-tab)))
 
