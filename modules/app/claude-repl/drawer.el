@@ -1296,10 +1296,12 @@ immediately, not after the next command."
       (claude-repl-drawer--apply-background)
       (claude-repl-drawer--render))
     (when win
-      (set-window-dedicated-p win t)
+      ;; Drawer hardening recipe: dedicated (no display-buffer repurpose);
+      ;; fringes 0/0 to suppress the wrap-continuation arrow.
+      ;; `no-delete-other-windows' is set declaratively via the
+      ;; display-action's `window-parameters', so it isn't repeated here.
+      (claude-repl-window--harden win :dedicate t :fringes 0)
       (claude-repl-drawer--apply-width win)
-      ;; Kill the wrap-continuation fringe arrow.  Both fringes 0-width.
-      (set-window-fringes win 0 0 nil)
       (select-window win)
       ;; Position AFTER select-window so the window-point and buffer
       ;; point are synced — `set-window-point' before selection can be
@@ -1475,9 +1477,11 @@ the drawer is already visible in the current frame's window tree."
                     word-wrap t)
         (claude-repl-drawer--apply-background))
       (when win
-        (set-window-dedicated-p win t)
+        ;; Same drawer recipe as `claude-repl-drawer-show' — dedicate +
+        ;; fringes 0/0.  `no-delete-other-windows' comes from the
+        ;; display-action's `window-parameters'.
+        (claude-repl-window--harden win :dedicate t :fringes 0)
         (claude-repl-drawer--apply-width win)
-        (set-window-fringes win 0 0 nil)
         (set-window-point win (with-current-buffer buf (point)))))))
 
 (with-eval-after-load 'persp-mode

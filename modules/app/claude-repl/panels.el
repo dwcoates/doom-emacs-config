@@ -81,10 +81,11 @@ window is selected so the user can start typing immediately."
 
 (defun claude-repl--configure-vterm-window (win)
   "Configure WIN as a dedicated, width-locked, protected vterm window.
-Marks the window as dedicated (so `display-buffer' can't repurpose it),
-locks its width to prevent resize-triggered reflow in vterm, and sets
-`no-delete-other-windows' so commands like `magit-status' that call
-`delete-other-windows' cannot kill the panel.
+Recipe (delegated to `claude-repl-window--harden'):
+
+  • Dedicated — `display-buffer' can't repurpose the window.
+  • `window-size-fixed: width' — prevents resize-triggered vterm reflow.
+  • `no-delete-other-windows' — `delete-other-windows' can't kill it.
 
 Keyboard-navigation isolation is handled dynamically by
 `claude-repl--bounce-from-vterm' rather than by a static
@@ -92,9 +93,10 @@ Keyboard-navigation isolation is handled dynamically by
 vterm, but any non-mouse selection gets auto-corrected back to the
 input panel (or a warning if the input isn't displayed)."
   (claude-repl--log (+workspace-current-name) "configure-vterm-window: win=%s" win)
-  (set-window-dedicated-p win t)
-  (set-window-parameter win 'window-size-fixed 'width)
-  (set-window-parameter win 'no-delete-other-windows t))
+  (claude-repl-window--harden win
+                              :dedicate       t
+                              :size-fix       'width
+                              :delete-protect t))
 
 ;; Manual window layout: vterm on the right (full height), input below vterm.
 (defun claude-repl--show-panels ()
@@ -118,14 +120,17 @@ are not split from a bottom popup (e.g. a regular vterm)."
       (set-window-buffer vterm-win vterm-buf)
       (set-window-buffer input-win input-buf)
       (claude-repl--configure-vterm-window vterm-win)
-      (set-window-dedicated-p input-win t)
-      (set-window-parameter input-win 'window-size-fixed 'height)
-      (set-window-parameter input-win 'no-delete-other-windows t)
-      ;; `window-size-fixed' alone is bypassed by `window--resize-mini-window'
-      ;; (ignore=t), so a multi-line echo area shrinks the input.  The
-      ;; preserved-size parameter is only bypassed by ignore='preserved', so
-      ;; preserving here steers mini-window shrink onto vterm/work-win instead.
-      (window-preserve-size input-win nil t)))
+      ;; Input window recipe: dedicated, height-locked, delete-protected,
+      ;; AND height-preserved.  `window-size-fixed' alone is bypassed by
+      ;; `window--resize-mini-window' (ignore=t), so a multi-line echo
+      ;; area shrinks the input.  The preserved-size parameter is only
+      ;; bypassed by ignore='preserved', so preserving here steers
+      ;; mini-window shrink onto vterm/work-win instead.
+      (claude-repl-window--harden input-win
+                                  :dedicate       t
+                                  :size-fix       'height
+                                  :delete-protect t
+                                  :preserve-size  'height)))
   (claude-repl--update-all-workspace-states))
 
 (defun claude-repl--focus-input-panel ()

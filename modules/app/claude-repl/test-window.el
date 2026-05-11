@@ -57,6 +57,94 @@ against a stale window reference after teardown."
       (kill-buffer buf)
       (should-not (claude-repl-window--side-window-p win)))))
 
+;;;; ---- Hardening ----
+
+(ert-deftest claude-repl-window-test-harden-dedicate-sets-dedicated ()
+  "`--harden :dedicate t' marks the window as dedicated."
+  (claude-repl-window-test--with-temp-frame
+    (let ((win (selected-window)))
+      (set-window-dedicated-p win nil)
+      (claude-repl-window--harden win :dedicate t)
+      (should (window-dedicated-p win)))))
+
+(ert-deftest claude-repl-window-test-harden-no-keys-is-noop ()
+  "`--harden' with no recipe keys mutates nothing — invariants from
+prior calls survive a recipe-free invocation."
+  (claude-repl-window-test--with-temp-frame
+    (let ((win (selected-window)))
+      (set-window-dedicated-p win nil)
+      (set-window-parameter win 'window-size-fixed nil)
+      (set-window-parameter win 'no-delete-other-windows nil)
+      (claude-repl-window--harden win)
+      (should-not (window-dedicated-p win))
+      (should-not (window-parameter win 'window-size-fixed))
+      (should-not (window-parameter win 'no-delete-other-windows)))))
+
+(ert-deftest claude-repl-window-test-harden-size-fix-sets-parameter ()
+  "`--harden :size-fix VALUE' writes `window-size-fixed' to VALUE.
+This is the window-parameter form (not the buffer-local variable) so
+the lock is per-window even when the same buffer is displayed
+elsewhere."
+  (claude-repl-window-test--with-temp-frame
+    (let ((win (selected-window)))
+      (set-window-parameter win 'window-size-fixed nil)
+      (claude-repl-window--harden win :size-fix 'width)
+      (should (eq (window-parameter win 'window-size-fixed) 'width))
+      (claude-repl-window--harden win :size-fix 'height)
+      (should (eq (window-parameter win 'window-size-fixed) 'height)))))
+
+(ert-deftest claude-repl-window-test-harden-delete-protect-sets-parameter ()
+  "`--harden :delete-protect t' sets `no-delete-other-windows'."
+  (claude-repl-window-test--with-temp-frame
+    (let ((win (selected-window)))
+      (set-window-parameter win 'no-delete-other-windows nil)
+      (claude-repl-window--harden win :delete-protect t)
+      (should (window-parameter win 'no-delete-other-windows)))))
+
+(ert-deftest claude-repl-window-test-harden-no-other-window-sets-parameter ()
+  "`--harden :no-other-window t' sets the `no-other-window' parameter
+so keyboard `other-window' navigation skips this window."
+  (claude-repl-window-test--with-temp-frame
+    (let ((win (selected-window)))
+      (set-window-parameter win 'no-other-window nil)
+      (claude-repl-window--harden win :no-other-window t)
+      (should (window-parameter win 'no-other-window)))))
+
+(ert-deftest claude-repl-window-test-harden-fringes-integer-sets-both ()
+  "`--harden :fringes N' sets both left and right fringes to N px."
+  (claude-repl-window-test--with-temp-frame
+    (let ((win (selected-window)))
+      (claude-repl-window--harden win :fringes 0)
+      (let ((f (window-fringes win)))
+        ;; `window-fringes' returns (LEFT-WIDTH RIGHT-WIDTH OUTSIDE-MARGINS).
+        (should (= (nth 0 f) 0))
+        (should (= (nth 1 f) 0))))))
+
+(ert-deftest claude-repl-window-test-harden-fringes-cons-passes-l-and-r ()
+  "`--harden :fringes (L . R)' calls `set-window-fringes' with L and R as
+the left/right widths.  Asserted via call interception because batch
+frames may round/quantize the actual stored values."
+  (claude-repl-window-test--with-temp-frame
+    (let ((win (selected-window))
+          (recorded nil))
+      (cl-letf (((symbol-function 'set-window-fringes)
+                 (lambda (w l r outside) (setq recorded (list w l r outside)))))
+        (claude-repl-window--harden win :fringes (cons 3 7)))
+      (should (equal recorded (list win 3 7 nil))))))
+
+(ert-deftest claude-repl-window-test-harden-dead-window-no-error ()
+  "`--harden' on a dead window is a silent no-op — defensive for callers
+who race against a teardown."
+  (claude-repl-window-test--with-temp-frame
+    (let* ((main (selected-window))
+           (extra (split-window main)))
+      (delete-window extra)
+      ;; Each branch should be guarded; no error.
+      (claude-repl-window--harden
+       extra :dedicate t :size-fix 'width :delete-protect t
+       :no-other-window t :preserve-size 'height :fringes 0)
+      (should-not (window-live-p extra)))))
+
 ;;;; ---- Subset deletion ----
 
 (ert-deftest claude-repl-window-test-delete-where-deletes-matching ()

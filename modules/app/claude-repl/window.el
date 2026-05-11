@@ -69,6 +69,83 @@ frame-level UI elements like the workspace drawer."
   (and (window-live-p win)
        (window-parameter win 'window-side)))
 
+;;;; --- Per-window hardening ----------------------------------------------
+
+(cl-defun claude-repl-window--harden
+    (win &key
+         dedicate
+         size-fix
+         delete-protect
+         preserve-size
+         no-other-window
+         fringes)
+  "Apply a hardening recipe to WIN.
+
+Centralizes the dedicate/size-fix/delete-protect/preserve-size
+combinations that panel-style windows (vterm, input, drawer) all
+need.  Before this helper existed, the same four-line recipe was
+inlined into 3+ call sites with subtle drift.
+
+Each keyword is independent and may be omitted:
+
+  :DEDICATE        non-nil → `set-window-dedicated-p WIN t'.
+
+  :SIZE-FIX        Symbol passed to `set-window-parameter WIN
+                   'window-size-fixed'.  Accepted values match
+                   Emacs's `window-size-fixed' contract: `width',
+                   `height', or `t' (both).  Window parameter (not
+                   buffer-local) so the lock is per-window even
+                   when the same buffer appears elsewhere.
+
+  :DELETE-PROTECT  non-nil → sets `no-delete-other-windows' window
+                   parameter so `delete-other-windows' refuses to
+                   remove WIN.  Note: this is NOT enough on its
+                   own — direct `delete-window' calls bypass this
+                   parameter; the side-window-aware `--delete-where'
+                   covers the rest.
+
+  :PRESERVE-SIZE   Symbol controlling `window-preserve-size'.
+                   Accepted values: `width', `height', `t' (both).
+                   This is the only way to defend a window's size
+                   against `window--resize-mini-window' (which
+                   ignores `window-size-fixed' alone — see
+                   `panels.el' input-panel comment for the gory
+                   detail).
+
+  :NO-OTHER-WINDOW non-nil → sets the `no-other-window' parameter
+                   so `other-window' (keyboard nav) skips WIN.
+
+  :FRINGES         nil (leave alone) | integer N (both fringes to
+                   N px) | cons cell (LEFT . RIGHT).  Common
+                   shorthand: pass 0 to hide both fringes (used by
+                   the drawer to suppress the wrap-continuation
+                   glyph)."
+  (when (and (window-live-p win) dedicate)
+    (set-window-dedicated-p win t))
+  (when (and (window-live-p win) size-fix)
+    (set-window-parameter win 'window-size-fixed size-fix))
+  (when (and (window-live-p win) delete-protect)
+    (set-window-parameter win 'no-delete-other-windows t))
+  (when (and (window-live-p win) no-other-window)
+    (set-window-parameter win 'no-other-window t))
+  (when (and (window-live-p win) preserve-size)
+    (cond
+     ((eq preserve-size 'width)
+      (window-preserve-size win t t))
+     ((eq preserve-size 'height)
+      (window-preserve-size win nil t))
+     ((eq preserve-size t)
+      (window-preserve-size win t t)
+      (window-preserve-size win nil t))))
+  (when (and (window-live-p win) fringes)
+    (cond
+     ((integerp fringes)
+      (set-window-fringes win fringes fringes nil))
+     ((and (consp fringes)
+           (integerp (car fringes))
+           (integerp (cdr fringes)))
+      (set-window-fringes win (car fringes) (cdr fringes) nil)))))
+
 ;;;; --- Subset deletion ---------------------------------------------------
 
 (cl-defun claude-repl-window--delete-where
