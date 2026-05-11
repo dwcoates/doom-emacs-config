@@ -3159,6 +3159,37 @@ child as merged.  The helper must bail before that point."
                (lambda (_) "/master/dir/")))
       (should (equal (claude-repl--ws-merge-parent-dir "ws") "/master/dir/")))))
 
+(ert-deftest claude-repl-test-ws-merge-parent-dir-caches-positive-result ()
+  "Second call returns the cached path without re-invoking master-worktree-path."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :project-dir "/some/repo/")
+    (let ((call-count 0))
+      (cl-letf (((symbol-function 'claude-repl--ws-dir)
+                 (lambda (_) "/some/repo/"))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_) (cl-incf call-count) "/master/dir/")))
+        (claude-repl--ws-merge-parent-dir "ws")
+        (claude-repl--ws-merge-parent-dir "ws")
+        (should (= call-count 1))))))
+
+(ert-deftest claude-repl-test-ws-merge-parent-dir-caches-negative-result ()
+  "Nil resolution is cached as `unresolved' so master-worktree-path is not re-shelled.
+Regression: with no `:source-ws-dir' and a nil-returning master fallback,
+the prior implementation skipped the cache write and re-shelled
+`git worktree list --porcelain' on every poll tick — the dominant cost
+on workspace switch in repos with many worktrees."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :project-dir "/some/repo/")
+    (let ((call-count 0))
+      (cl-letf (((symbol-function 'claude-repl--ws-dir)
+                 (lambda (_) "/some/repo/"))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_) (cl-incf call-count) nil)))
+        (should (null (claude-repl--ws-merge-parent-dir "ws")))
+        (should (null (claude-repl--ws-merge-parent-dir "ws")))
+        (should (= call-count 1))
+        (should (eq (claude-repl--ws-get "ws" :merge-parent-dir) 'unresolved))))))
+
 (ert-deftest claude-repl-test-branch-merge-sentinel-merged-on-zero-exit ()
   "Sentinel records `merged' when git merge-base exits 0."
   (claude-repl-test--with-clean-state

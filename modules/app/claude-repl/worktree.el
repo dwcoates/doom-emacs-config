@@ -1359,21 +1359,29 @@ defensively (`ignore-errors') so workspaces without a recorded
 `:project-dir' (test fixtures, half-initialized stubs) don't crash
 the poll-driven cache refresh.
 
-Caches the resolved path on `:merge-parent-dir' on first computation.
-The fallback path runs `claude-repl--master-worktree-path' which is
-expensive (shells out to git worktree list), and the result is stable
-per workspace once recorded — caching saves N git invocations per
-poll cycle in multi-workspace setups."
-  (or (claude-repl--ws-get ws :merge-parent-dir)
-      (let ((recorded (claude-repl--ws-get ws :source-ws-dir))
-            (ws-dir (ignore-errors (claude-repl--ws-dir ws))))
-        (let ((resolved
-               (cond
-                ((and recorded (file-directory-p recorded)) recorded)
-                (ws-dir (claude-repl--master-worktree-path ws-dir)))))
-          (when resolved
-            (claude-repl--ws-put ws :merge-parent-dir resolved))
-          resolved))))
+Caches both outcomes on `:merge-parent-dir':
+- A positive path string when resolution succeeds.
+- The sentinel symbol `unresolved' when resolution fails.
+
+Caching the negative result matters: `claude-repl--master-worktree-path'
+shells out to `git worktree list --porcelain' (O(N) in number of
+worktrees, can be hundreds), and a workspace with no recorded
+`:source-ws-dir' and no resolvable master fallback would otherwise
+re-shell every poll cycle forever.  The failure is stable for the
+session (no parent dir exists to find), so the sentinel is safe."
+  (let ((cached (claude-repl--ws-get ws :merge-parent-dir)))
+    (cond
+     ((eq cached 'unresolved) nil)
+     (cached cached)
+     (t
+      (let* ((recorded (claude-repl--ws-get ws :source-ws-dir))
+             (ws-dir (ignore-errors (claude-repl--ws-dir ws)))
+             (resolved
+              (cond
+               ((and recorded (file-directory-p recorded)) recorded)
+               (ws-dir (claude-repl--master-worktree-path ws-dir)))))
+        (claude-repl--ws-put ws :merge-parent-dir (or resolved 'unresolved))
+        resolved)))))
 
 (defun claude-repl--branch-merge-check-in-progress-p (ws)
   "Return non-nil when an `:branch-merged' refresh process is live for WS."
