@@ -835,6 +835,52 @@ Previously `string-blank-p' treated whitespace-only as empty and skipped
           (claude-repl--send nil "ws1")
           (should-not do-send-called))))))
 
+(ert-deftest claude-repl-test-send-noop-when-input-buffer-empty ()
+  "`claude-repl--send' is a no-op when the input buffer is empty.
+Regression: RET in an empty input buffer used to dispatch a metaprompt-only
+send whenever the prefix counter aligned with the period."
+  (claude-repl-test--with-clean-state
+    (let ((do-send-called nil))
+      (claude-repl-test--with-temp-buffer " *test-send-empty-input*"
+        ;; Input buffer registered, but contains "".
+        (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+        (claude-repl-test--with-temp-buffer "*claude-panel-empty-vterm*"
+          (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                    ((symbol-function 'claude-repl--do-send)
+                     (lambda (&rest _) (setq do-send-called t))))
+            (claude-repl--send nil "ws1")
+            (should-not do-send-called)))))))
+
+(ert-deftest claude-repl-test-send-noop-when-input-buffer-whitespace-only ()
+  "`claude-repl--send' is a no-op when the input buffer holds only whitespace."
+  (claude-repl-test--with-clean-state
+    (let ((do-send-called nil))
+      (claude-repl-test--with-temp-buffer " *test-send-whitespace-input*"
+        (insert "  \n\t  \n")
+        (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+        (claude-repl-test--with-temp-buffer "*claude-panel-whitespace-vterm*"
+          (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                    ((symbol-function 'claude-repl--do-send)
+                     (lambda (&rest _) (setq do-send-called t))))
+            (claude-repl--send nil "ws1")
+            (should-not do-send-called)))))))
+
+(ert-deftest claude-repl-test-send-noop-when-explicit-prompt-empty ()
+  "`claude-repl--send' is a no-op when an empty PROMPT is passed explicitly."
+  (claude-repl-test--with-clean-state
+    (let ((do-send-called nil))
+      (claude-repl-test--with-temp-buffer "*claude-panel-empty-prompt-vterm*"
+        (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                  ((symbol-function 'claude-repl--do-send)
+                   (lambda (&rest _) (setq do-send-called t))))
+          (claude-repl--send "" "ws1")
+          (should-not do-send-called)
+          (claude-repl--send "   \n  " "ws1")
+          (should-not do-send-called))))))
+
 ;;;; ---- Tests: bracketed paste pipeline ----
 
 ;;;; ---- Tests: vterm-send-return-logged ----
