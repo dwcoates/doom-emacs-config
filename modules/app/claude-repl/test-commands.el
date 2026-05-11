@@ -415,6 +415,59 @@
       (claude-repl-interrupt)
       (should-not escape-called))))
 
+(ert-deftest claude-repl-cmd-test-interrupt/marks-claude-state-done-when-vterm-live ()
+  "interrupt sets the workspace's :claude-state to :done after sending escape."
+  (claude-repl-test--with-clean-state
+    (let ((fake-vterm-buf (get-buffer-create " *test-interrupt-done-vterm*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :vterm-buffer fake-vterm-buf)
+            (claude-repl--ws-set-claude-state "test-ws" :thinking)
+            (cl-letf (((symbol-function '+workspace-current-name)
+                       (lambda () "test-ws"))
+                      ((symbol-function 'claude-repl--send-interrupt-escape)
+                       (lambda (_ws _buf) nil))
+                      ((symbol-function 'run-at-time)
+                       (lambda (_time _repeat _fn _arg) nil)))
+              (claude-repl-interrupt)
+              (should (eq (claude-repl--ws-get "test-ws" :claude-state) :done))))
+        (kill-buffer fake-vterm-buf)))))
+
+(ert-deftest claude-repl-cmd-test-interrupt/clears-stop-tracking-when-vterm-live ()
+  "interrupt clears :stop-received and :pending-subagents after sending escape.
+The interrupted turn will never see a Stop hook, so leftover tracking
+state from the previous turn must be reset by Emacs."
+  (claude-repl-test--with-clean-state
+    (let ((fake-vterm-buf (get-buffer-create " *test-interrupt-clear-vterm*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :vterm-buffer fake-vterm-buf)
+            (claude-repl--ws-set-stop-received "test-ws" t)
+            (claude-repl--ws-incf-pending-subagents "test-ws")
+            (cl-letf (((symbol-function '+workspace-current-name)
+                       (lambda () "test-ws"))
+                      ((symbol-function 'claude-repl--send-interrupt-escape)
+                       (lambda (_ws _buf) nil))
+                      ((symbol-function 'run-at-time)
+                       (lambda (_time _repeat _fn _arg) nil)))
+              (claude-repl-interrupt)
+              (should-not (claude-repl--ws-stop-received-p "test-ws"))
+              (should (= 0 (claude-repl--ws-pending-subagents "test-ws")))))
+        (kill-buffer fake-vterm-buf)))))
+
+(ert-deftest claude-repl-cmd-test-interrupt/does-not-mark-done-when-vterm-not-live ()
+  "interrupt does not mark :done when vterm is not live.
+No interrupt was actually delivered, so the state should not change."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :vterm-buffer nil)
+    (claude-repl--ws-set-claude-state "test-ws" :thinking)
+    (cl-letf (((symbol-function '+workspace-current-name)
+               (lambda () "test-ws"))
+              ((symbol-function 'claude-repl--send-interrupt-escape)
+               (lambda (_ws _buf) nil)))
+      (claude-repl-interrupt)
+      (should (eq (claude-repl--ws-get "test-ws" :claude-state) :thinking)))))
+
 ;;;; ---- claude-repl-update-pr ----
 
 (ert-deftest claude-repl-cmd-test-update-pr/sends-prompt ()

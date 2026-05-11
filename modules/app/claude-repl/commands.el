@@ -315,7 +315,14 @@ Sends Escape to stop the current operation, then automatically sends
 \"i\" after `claude-repl-interrupt-reinsert-delay' seconds to return
 to insert mode.  Defaults to the current workspace when WS is nil
 (matches the interactive `SPC o x' behavior); the drawer passes the
-entry-at-point so interrupts target the selected entry."
+entry-at-point so interrupts target the selected entry.
+
+After issuing the escape, marks the workspace's claude-state as
+`:done' and clears the Stop / SubagentStop tracking — interrupting
+terminates the in-flight turn, so the tab should immediately reflect
+\"finished\" rather than linger on `:thinking' until a stray hook
+arrives.  No Stop hook will fire for the interrupted turn, so Emacs
+is the sole observer here."
   (interactive)
   (let* ((ws (or ws (+workspace-current-name)))
          (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
@@ -323,6 +330,8 @@ entry-at-point so interrupts target the selected entry."
     (if (and vterm-buf (buffer-live-p vterm-buf))
         (progn
           (claude-repl--send-interrupt-escape ws vterm-buf)
+          (claude-repl--ws-clear-stop-tracking ws)
+          (claude-repl--mark-claude-done ws)
           (run-at-time claude-repl-interrupt-reinsert-delay nil
                        #'claude-repl--enter-insert-mode vterm-buf))
       (claude-repl--log ws "interrupt: vterm not live, skipping"))))
