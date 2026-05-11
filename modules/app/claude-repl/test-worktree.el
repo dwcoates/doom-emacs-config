@@ -1328,6 +1328,95 @@ Reorder must run after `apply-workspace-properties' so the new workspace's
          "/tmp/new-wt" "new-ws" nil "p1" nil nil nil nil)
         (should (equal reorder-called-with '("new-ws" . "p1")))))))
 
+;;;; ---- Tests: inherit-priority-from-source ----
+
+(ert-deftest claude-repl-test-inherit-priority-explicit-wins ()
+  "When PRIORITY is non-nil, it is returned unchanged regardless of SOURCE-DIR."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (claude-repl--ws-put "parent" :priority "p1")
+    (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+      (should (equal (claude-repl--inherit-priority-from-source "p2" "/tmp/parent/")
+                     "p2")))))
+
+(ert-deftest claude-repl-test-inherit-priority-nil-source-dir ()
+  "When SOURCE-DIR is nil, returns nil even with no priority set."
+  (should-not (claude-repl--inherit-priority-from-source nil nil)))
+
+(ert-deftest claude-repl-test-inherit-priority-unknown-source-dir ()
+  "When SOURCE-DIR does not resolve to any workspace, returns nil."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+      (should-not (claude-repl--inherit-priority-from-source nil "/tmp/nowhere/")))))
+
+(ert-deftest claude-repl-test-inherit-priority-source-without-priority ()
+  "Source workspace exists but has no :priority — returns nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+      (should-not (claude-repl--inherit-priority-from-source nil "/tmp/parent/")))))
+
+(ert-deftest claude-repl-test-inherit-priority-source-has-priority ()
+  "Source workspace has :priority — returns it when PRIORITY is nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (claude-repl--ws-put "parent" :priority "p05")
+    (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+      (should (equal (claude-repl--inherit-priority-from-source nil "/tmp/parent/")
+                     "p05")))))
+
+;;;; ---- Tests: finalize-worktree-workspace child inherits parent priority ----
+
+(ert-deftest claude-repl-test-finalize-child-inherits-parent-priority ()
+  "When PRIORITY is nil and SOURCE-DIR points at a workspace, child inherits its priority."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (claude-repl--ws-put "parent" :priority "p1")
+    (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+               (lambda (&rest _) nil))
+              ((symbol-function '+workspace-new) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--setup-worktree-session)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--path-canonical) #'identity))
+      (claude-repl--finalize-worktree-workspace
+       "/tmp/new-wt" "child-ws" nil nil nil nil nil "/tmp/parent/")
+      (should (equal (claude-repl--ws-get "child-ws" :priority) "p1")))))
+
+(ert-deftest claude-repl-test-finalize-child-explicit-priority-wins ()
+  "When PRIORITY is provided, it overrides any source workspace priority."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (claude-repl--ws-put "parent" :priority "p1")
+    (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+               (lambda (&rest _) nil))
+              ((symbol-function '+workspace-new) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--setup-worktree-session)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--path-canonical) #'identity))
+      (claude-repl--finalize-worktree-workspace
+       "/tmp/new-wt" "child-ws" nil "p3" nil nil nil "/tmp/parent/")
+      (should (equal (claude-repl--ws-get "child-ws" :priority) "p3")))))
+
+(ert-deftest claude-repl-test-finalize-no-parent-priority-stays-nil ()
+  "When PRIORITY is nil and source workspace has no priority, child has no priority."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+               (lambda (&rest _) nil))
+              ((symbol-function '+workspace-new) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--setup-worktree-session)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--path-canonical) #'identity))
+      (claude-repl--finalize-worktree-workspace
+       "/tmp/new-wt" "child-ws" nil nil nil nil nil "/tmp/parent/")
+      (should-not (claude-repl--ws-get "child-ws" :priority)))))
+
 ;;;; ---- Tests: setup-worktree-session ----
 
 (ert-deftest claude-repl-test-setup-worktree-session-passes-sandbox-hint-when-forced ()

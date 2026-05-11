@@ -523,6 +523,17 @@ Sets :pending-show-panels so panels open after switching to WS."
         (claude-repl--ws-put ws :pending-show-panels t))
     (claude-repl--log ws "enqueue-preemptive-prompt: ws=%s prompt empty, skipping" ws)))
 
+(defun claude-repl--inherit-priority-from-source (priority source-dir)
+  "Return PRIORITY when non-nil; otherwise the `:priority' of SOURCE-DIR's workspace.
+Used by `claude-repl--finalize-worktree-workspace' so a newly spawned
+child workspace inherits its parent's priority when the create command
+did not specify one of its own.  Returns nil when SOURCE-DIR is nil, does
+not resolve to a known workspace, or that workspace has no priority."
+  (or priority
+      (when source-dir
+        (when-let ((src-ws (claude-repl--ws-name-for-dir source-dir)))
+          (claude-repl--ws-get src-ws :priority)))))
+
 (defun claude-repl--finalize-worktree-workspace (path dirname preemptive-prompt
                                                        priority fork-session-id force-sandbox
                                                        callback &optional source-dir)
@@ -534,6 +545,9 @@ environment), and invokes CALLBACK with (PATH DIRNAME) when done.
 SOURCE-DIR, when non-nil, is the canonical project-dir of the workspace
 this worktree was created from; stored under `:source-ws-dir' so
 `SPC TAB M' can route the merge back to its source.
+When PRIORITY is nil and SOURCE-DIR resolves to a known workspace, the
+new workspace inherits that source workspace's `:priority' (see
+`claude-repl--inherit-priority-from-source').
 Sets `:pending-magit' on the new workspace so `magit-status' opens in
 its own window layout the first time the user activates it, rather than
 splitting the caller's window.  Likewise sets `:pending-initial-buffers'
@@ -544,14 +558,15 @@ perspective rather than the caller's."
   (claude-repl--register-projectile-project path dirname)
   (let* ((canonical (claude-repl--path-canonical path))
          (ws-id (substring (md5 canonical) 0 claude-repl-workspace-id-length))
-         (ws dirname))
-    (claude-repl--log ws "worktree creating workspace %s" ws)
+         (ws dirname)
+         (effective-priority (claude-repl--inherit-priority-from-source priority source-dir)))
+    (claude-repl--log ws "worktree creating workspace %s effective-priority=%s" ws (or effective-priority "nil"))
     (+workspace-new ws)
     (claude-repl--ws-put ws :pending-magit t)
     (claude-repl--ws-put ws :pending-initial-buffers t)
     (claude-repl--enqueue-preemptive-prompt ws preemptive-prompt)
     (claude-repl--apply-workspace-properties ws
-      :priority priority
+      :priority effective-priority
       :fork-session-id fork-session-id
       :source-ws-dir source-dir)
     (claude-repl--reorder-workspace-by-priority ws)
