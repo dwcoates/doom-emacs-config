@@ -1589,6 +1589,59 @@ sourced from each project's state file, not the snapshot roster."
               (should (equal (file-name-as-directory called-with) tmp-dir))))
         (delete-directory tmp-dir t)))))
 
+(ert-deftest claude-repl-cmd-test-establish-workspace/restores-fallback-default-directory ()
+  "establish-workspace must not permanently mutate the shared fallback
+buffer's `default-directory'.  The buffer is visible from every persp,
+so a permanent mutation makes scratch report the last-loaded ws's project
+root from every persp (a cross-persp bleed)."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-est-" t)))
+           (fb (get-buffer-create " *test-fb-default-dir*"))
+           (sentinel-dir "/sentinel-original-dir/"))
+      (unwind-protect
+          (cl-letf (((symbol-function 'doom-fallback-buffer) (lambda () fb))
+                    ((symbol-function 'claude-repl--initialize-claude) #'ignore)
+                    ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil))
+                    ((symbol-function 'persp-add-new) #'ignore)
+                    ((symbol-function 'persp-frame-switch) #'ignore)
+                    ((symbol-function 'projectile-add-known-project) #'ignore))
+            (with-current-buffer fb
+              (setq default-directory sentinel-dir))
+            (claude-repl--establish-workspace "test-ws" tmp-dir)
+            (should (equal (buffer-local-value 'default-directory fb)
+                           sentinel-dir)))
+        (when (buffer-live-p fb) (kill-buffer fb))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-establish-workspace/fallback-default-dir-visible-during-hook ()
+  "While `+workspaces-switch-project-function' runs, the fallback buffer's
+`default-directory' must reflect the project root (some Doom hooks
+depend on it).  After the hook returns it's restored."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-est-" t)))
+           (fb (get-buffer-create " *test-fb-default-dir-hook*"))
+           (sentinel-dir "/sentinel-original-dir/")
+           (observed-dir nil))
+      (unwind-protect
+          (let ((+workspaces-switch-project-function
+                 (lambda (_dir)
+                   (setq observed-dir
+                         (buffer-local-value 'default-directory fb)))))
+            (cl-letf (((symbol-function 'doom-fallback-buffer) (lambda () fb))
+                      ((symbol-function 'claude-repl--initialize-claude) #'ignore)
+                      ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil))
+                      ((symbol-function 'persp-add-new) #'ignore)
+                      ((symbol-function 'persp-frame-switch) #'ignore)
+                      ((symbol-function 'projectile-add-known-project) #'ignore))
+              (with-current-buffer fb
+                (setq default-directory sentinel-dir))
+              (claude-repl--establish-workspace "test-ws" tmp-dir)
+              (should (equal observed-dir tmp-dir))
+              (should (equal (buffer-local-value 'default-directory fb)
+                             sentinel-dir))))
+        (when (buffer-live-p fb) (kill-buffer fb))
+        (delete-directory tmp-dir t)))))
+
 (ert-deftest claude-repl-cmd-test-establish-workspace/opens-recent-file ()
   "establish-workspace opens the most-recent file via `find-file' when one exists."
   (claude-repl-test--with-clean-state

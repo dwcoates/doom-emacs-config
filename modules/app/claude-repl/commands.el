@@ -803,9 +803,12 @@ Each call:
   `claude-repl--clean-frame-foreign-windows' (dedicated panels from
   the previous workspace would otherwise survive into WS's frame),
 - registers the project with projectile,
-- sets `default-directory' on the fallback buffer + loads dir-locals,
-- runs `+workspaces-switch-project-function' (the user lambda that
-  auto-opens magit when the persp has no real buffers),
+- temporarily sets `default-directory' on the fallback buffer + loads
+  dir-locals, runs `+workspaces-switch-project-function' (the user
+  lambda that auto-opens magit when the persp has no real buffers),
+  then restores the fallback buffer's original `default-directory'
+  (the buffer is shared across persps, so permanent mutation would
+  make scratch report the last-loaded ws's dir from every persp),
 - opens the most-recent project file via `find-file' when one exists
   in `recentf-list',
 - hydrates `:project-dir' into `claude-repl--workspaces' and
@@ -825,14 +828,25 @@ Each call:
     (claude-repl--clean-frame-foreign-windows ws)
     (when (fboundp 'projectile-add-known-project)
       (projectile-add-known-project dir))
-    (when (fboundp 'doom-fallback-buffer)
-      (with-current-buffer (doom-fallback-buffer)
-        (setq default-directory (file-name-as-directory dir))
-        (when (fboundp 'hack-dir-local-variables-non-file-buffer)
-          (hack-dir-local-variables-non-file-buffer))))
-    (when (and (boundp '+workspaces-switch-project-function)
-               +workspaces-switch-project-function)
-      (funcall +workspaces-switch-project-function dir))
+    ;; The fallback buffer is SHARED across persps — permanently rewriting
+    ;; its `default-directory' makes scratch report the last-loaded ws's
+    ;; project root from every persp.  Save/restore the original so the
+    ;; side effect lives only for the duration of the project-switch hook.
+    (let* ((fb (and (fboundp 'doom-fallback-buffer) (doom-fallback-buffer)))
+           (orig-dir (and fb (buffer-live-p fb)
+                          (buffer-local-value 'default-directory fb))))
+      (when fb
+        (with-current-buffer fb
+          (setq default-directory (file-name-as-directory dir))
+          (when (fboundp 'hack-dir-local-variables-non-file-buffer)
+            (hack-dir-local-variables-non-file-buffer))))
+      (unwind-protect
+          (when (and (boundp '+workspaces-switch-project-function)
+                     +workspaces-switch-project-function)
+            (funcall +workspaces-switch-project-function dir))
+        (when (and fb (buffer-live-p fb) orig-dir)
+          (with-current-buffer fb
+            (setq default-directory orig-dir)))))
     (when (fboundp '+dwc/get-most-recent-file-in-project)
       (when-let ((recent-file (+dwc/get-most-recent-file-in-project dir)))
         (when (file-exists-p recent-file)
