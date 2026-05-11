@@ -759,38 +759,53 @@ roster-piggyback save doesn't spam the echo area on every state mutation."
                    (length snapshot) claude-repl-workspace-snapshot-file))))))
 
 (defun claude-repl--clean-frame-foreign-windows (ws)
-  "Delete frame windows whose buffer isn't in persp WS's buffer set.
+  "Delete frame windows whose buffer is owned by a different workspace.
+A window is foreign iff its buffer's `claude-repl--owning-workspace'
+buffer-local is non-nil AND not `equal' to WS.  Buffers with no owning
+workspace (regular files, dashboard, scratch, fallback) are treated as
+allowed, since they are workspace-agnostic.
+
 Strips `no-delete-other-windows' and dedication from foreign windows
-first so prior persps' claude-repl panel windows (which are marked
+first so prior workspaces' claude-repl panel windows (which are marked
 dedicated + `no-delete-other-windows') can be torn down.  When every
 frame window is foreign, deletes all but one and swaps that one's
-buffer to `doom-fallback-buffer' so the new persp starts with a clean
-single-window layout instead of inheriting the previous persp's
-window-configuration.  No-op when persp APIs are unavailable or the
-persp has no recorded buffer set (test environments)."
-  (when (and (fboundp 'persp-get-by-name)
-             (fboundp 'persp-buffers))
-    (let* ((persp (persp-get-by-name ws))
-           (allowed (and persp (not (symbolp persp)) (persp-buffers persp)))
-           (fallback (and (fboundp 'doom-fallback-buffer) (doom-fallback-buffer)))
-           (all (window-list nil 'nomini))
-           (foreign (cl-remove-if (lambda (w) (memq (window-buffer w) allowed)) all))
-           (any-native (cl-some (lambda (w) (memq (window-buffer w) allowed)) all)))
-      (when foreign
-        (claude-repl--log ws "clean-frame-foreign-windows: ws=%s removing=%d total=%d"
-                          ws (length foreign) (length all))
+buffer to `doom-fallback-buffer' so the new workspace starts with a
+clean single-window layout instead of inheriting the previous
+workspace's window-configuration.
+
+Prior implementation used `persp-buffers' as the allowed set, which
+was fragile: for a freshly-created persp the allowed set is empty so
+all windows got scrubbed (correct by accident), but persp-mode can
+auto-add the currently-selected buffer to the activated persp during
+`persp-frame-switch' — that buffer (potentially a prior workspace's
+Claude panel) then lands in the new persp's allowed set and the
+predicate fails to scrub it.  Owning-workspace is set on the buffer
+at creation time by `claude-repl--create-buffer' and is immune to
+persp routing."
+  (let* ((fallback (and (fboundp 'doom-fallback-buffer) (doom-fallback-buffer)))
+         (all (window-list nil 'nomini))
+         (foreign-p (lambda (w)
+                      (let ((owner (buffer-local-value
+                                    'claude-repl--owning-workspace
+                                    (window-buffer w))))
+                        (and owner (not (equal owner ws))))))
+         (foreign (cl-remove-if-not foreign-p all))
+         (any-native (< (length foreign) (length all))))
+    (when foreign
+      (claude-repl--log ws "clean-frame-foreign-windows: ws=%s removing=%d total=%d"
+                        ws (length foreign) (length all))
+      (dolist (win foreign)
+        (set-window-parameter win 'no-delete-other-windows nil)
+        (set-window-dedicated-p win nil))
+      (cond
+       (any-native
         (dolist (win foreign)
-          (set-window-parameter win 'no-delete-other-windows nil)
-          (set-window-dedicated-p win nil))
-        (cond
-         (any-native
-          (dolist (win foreign)
-            (ignore-errors (delete-window win))))
-         (t
-          (dolist (win (cdr foreign))
-            (ignore-errors (delete-window win)))
-          (when (and fallback (car foreign) (window-live-p (car foreign)))
-            (set-window-buffer (car foreign) fallback))))))))
+          (ignore-errors (delete-window win))))
+       (t
+        (dolist (win (cdr foreign))
+          (ignore-errors (delete-window win)))
+        (when (and fallback (car foreign) (window-live-p (car foreign)))
+          (set-window-buffer (car foreign) fallback)))))))
 
 (defun claude-repl--establish-workspace (ws dir)
   "Synchronously create + activate + fully set up workspace WS for DIR.
