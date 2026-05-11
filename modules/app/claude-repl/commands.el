@@ -880,6 +880,10 @@ Each call:
 - hydrates `:project-dir' into `claude-repl--workspaces' and
   rehydrates `:priority' from the per-project state file via
   `claude-repl--hydrate-priority-from-state',
+- reorders the ws in `persp-names-cache' by its hydrated `:priority'
+  via `claude-repl--reorder-workspace-by-priority' so restored
+  workspaces appear in priority order, matching what
+  `claude-repl-set-priority' does for user-driven changes,
 - starts claude (`claude-repl--initialize-claude') unless already
   running."
   (claude-repl--with-error-logging (format "establish-workspace[%s]" ws)
@@ -928,6 +932,16 @@ Each call:
     (claude-repl--ws-put ws :project-dir dir)
     (when (fboundp 'claude-repl--hydrate-priority-from-state)
       (claude-repl--hydrate-priority-from-state dir))
+    ;; WHY: snapshot entries are establish'd in file order, so
+    ;; `persp-add-new' above appends each new ws at the cache tail in
+    ;; that order — priority badges hydrate after the persp is already
+    ;; placed.  Mirror what `claude-repl-set-priority' does after a
+    ;; user-driven priority change: re-splice this ws into its rank-
+    ;; correct slot.  Without this, restored workspaces sit in
+    ;; snapshot-file order instead of priority order.  Guarded on
+    ;; fboundp so a partial-load test environment doesn't crash here.
+    (when (fboundp 'claude-repl--reorder-workspace-by-priority)
+      (claude-repl--reorder-workspace-by-priority ws))
     (when (and (fboundp 'claude-repl--initialize-claude)
                (fboundp 'claude-repl--claude-running-p)
                (not (claude-repl--claude-running-p ws)))

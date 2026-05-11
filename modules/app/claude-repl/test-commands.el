@@ -1971,6 +1971,33 @@ restores from the per-project state file rather than the roster."
             (should (equal (file-name-as-directory hydrated-with) tmp-dir)))
         (delete-directory tmp-dir t)))))
 
+(ert-deftest claude-repl-cmd-test-establish-workspace/reorders-by-priority ()
+  "establish-workspace calls `--reorder-workspace-by-priority' AFTER priority
+hydration so restored workspaces appear in priority order, matching the
+behavior of `claude-repl-set-priority'.  Without this, snapshot entries
+sit in file order even when state.el carries priorities."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-est-reorder-" t)))
+           (events nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'persp-add-new) #'ignore)
+                    ((symbol-function 'persp-frame-switch) #'ignore)
+                    ((symbol-function 'projectile-add-known-project) #'ignore)
+                    ((symbol-function 'claude-repl--initialize-claude) #'ignore)
+                    ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil))
+                    ((symbol-function 'claude-repl--hydrate-priority-from-state)
+                     (lambda (_d) (push 'hydrate events)))
+                    ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+                     (lambda (_ws) (push 'reorder events))))
+            (claude-repl--establish-workspace "test-ws" tmp-dir)
+            (let ((ordered (reverse events)))
+              (should (memq 'hydrate ordered))
+              (should (memq 'reorder ordered))
+              ;; Reorder must come after hydrate so it reads a real priority.
+              (should (< (cl-position 'hydrate ordered)
+                         (cl-position 'reorder ordered)))))
+        (delete-directory tmp-dir t)))))
+
 (ert-deftest claude-repl-cmd-test-establish-workspace/activates-persp ()
   "establish-workspace calls `persp-frame-switch' with the snapshot's ws name
 so persp-mode begins capturing a window configuration for that persp."
