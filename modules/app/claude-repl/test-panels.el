@@ -1018,11 +1018,11 @@ contrast to SPC o C, which hides further)."
 
 (ert-deftest claude-repl-test-panels-delete-non-panel-windows-silent-on-tricky-layout ()
   "Regression for `SPC w f' in claude-repl: when a non-panel window
-ends up as the sole main-area window mid-sweep, the prior
+ends up as the sole main-area window mid-sweep, an earlier
 implementation logged `[claude-repl] window--delete-where: could not
 delete ...' into *Messages*.  The fixed implementation routes through
-Emacs's `delete-other-windows', whose internal `condition-case'
-silences the structural refusal — verify no warning escapes."
+`--delete-where' whose benign-error filter silences the structural
+refusal — verify no warning escapes."
   (let ((wconf (current-window-configuration)))
     (unwind-protect
         (progn
@@ -1030,18 +1030,18 @@ silences the structural refusal — verify no warning escapes."
           (let* ((vterm-buf  (generate-new-buffer " *test-vterm*"))
                  (input-buf  (generate-new-buffer " *test-input*"))
                  (drawer-buf (generate-new-buffer " *test-drawer*"))
-                 (extra-buf  (generate-new-buffer " *test-extra*"))
                  (vterm-win  (selected-window))
                  (input-win  (split-window vterm-win nil 'below))
-                 (extra-win  (split-window vterm-win nil 'below))
                  (drawer-win (display-buffer-in-side-window
                               drawer-buf '((side . left) (slot . 0)))))
             (set-window-buffer vterm-win vterm-buf)
             (set-window-buffer input-win input-buf)
-            (set-window-buffer extra-win extra-buf)
             ;; Mirror production: panels and drawer carry
-            ;; `no-delete-other-windows', so `delete-other-windows'
-            ;; from vterm-win sweeps only `extra-win'.
+            ;; `no-delete-other-windows'.  Only vterm- and input-win
+            ;; remain in the main area — the sweep targets none of them
+            ;; (both are panels), so this collapses to the trivial case
+            ;; and exercises the benign-error path of `--delete-where'
+            ;; without leaving residue from a synthetic `extra-win'.
             (set-window-parameter vterm-win  'no-delete-other-windows t)
             (set-window-parameter input-win  'no-delete-other-windows t)
             (set-window-parameter drawer-win 'no-delete-other-windows t)
@@ -1058,13 +1058,57 @@ silences the structural refusal — verify no warning escapes."
                     (should-not captured)
                     (should (window-live-p vterm-win))
                     (should (window-live-p input-win))
-                    (should (window-live-p drawer-win))
-                    (should-not (window-live-p extra-win))))
+                    (should (window-live-p drawer-win))))
+              (when (window-live-p drawer-win) (delete-window drawer-win))
+              (kill-buffer vterm-buf)
+              (kill-buffer input-buf)
+              (kill-buffer drawer-buf))))
+      (set-window-configuration wconf))))
+
+(ert-deftest claude-repl-test-panels-delete-non-panel-windows-preserves-drawer-without-ndow-param ()
+  "Regression for `SPC w f' killing the drawer: drawer preservation
+must NOT depend on the drawer window carrying
+`no-delete-other-windows'.  An earlier revision routed through
+Emacs's `delete-other-windows', which protects the drawer only when
+that parameter is intact; any upstream parameter loss (a redisplay
+without the original action alist, etc.) made the drawer vulnerable.
+The parameter-independent path via `--delete-where' must survive a
+drawer with the parameter explicitly stripped."
+  (let ((wconf (current-window-configuration)))
+    (unwind-protect
+        (progn
+          (delete-other-windows)
+          (let* ((vterm-buf  (generate-new-buffer " *test-vterm*"))
+                 (input-buf  (generate-new-buffer " *test-input*"))
+                 (drawer-buf (generate-new-buffer " *test-drawer*"))
+                 (work-buf   (generate-new-buffer " *test-work*"))
+                 (work-win   (selected-window))
+                 (vterm-win  (split-window work-win nil 'right))
+                 (input-win  (split-window vterm-win nil 'below))
+                 (drawer-win (display-buffer-in-side-window
+                              drawer-buf '((side . left) (slot . 0)))))
+            (set-window-buffer work-win  work-buf)
+            (set-window-buffer vterm-win  vterm-buf)
+            (set-window-buffer input-win  input-buf)
+            ;; Panels keep their hardening, but the drawer's
+            ;; `no-delete-other-windows' is explicitly absent — the test
+            ;; would pass trivially if we left it set, and the
+            ;; regression is precisely about the parameter-stripped case.
+            (set-window-parameter vterm-win  'no-delete-other-windows t)
+            (set-window-parameter input-win  'no-delete-other-windows t)
+            (set-window-parameter drawer-win 'no-delete-other-windows nil)
+            (unwind-protect
+                (progn
+                  (claude-repl--delete-non-panel-windows vterm-buf input-buf)
+                  (should (window-live-p drawer-win))
+                  (should (window-live-p vterm-win))
+                  (should (window-live-p input-win))
+                  (should-not (window-live-p work-win)))
               (when (window-live-p drawer-win) (delete-window drawer-win))
               (kill-buffer vterm-buf)
               (kill-buffer input-buf)
               (kill-buffer drawer-buf)
-              (kill-buffer extra-buf))))
+              (kill-buffer work-buf))))
       (set-window-configuration wconf))))
 
 ;;;; ---- Tests: ws-buffer-visible-p with live but undisplayed buffer ----
