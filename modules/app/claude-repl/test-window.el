@@ -57,6 +57,84 @@ against a stale window reference after teardown."
       (kill-buffer buf)
       (should-not (claude-repl-window--side-window-p win)))))
 
+;;;; ---- Panel finders ----
+
+(ert-deftest claude-repl-window-test-panel-buffer-vterm-returns-ws-buffer ()
+  "`--panel-buffer :vterm WS' returns the buffer stored under `:vterm-buffer'
+in WS's workspace plist."
+  (claude-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *test-panel-vterm*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :vterm-buffer buf)
+            (should (eq (claude-repl-window--panel-buffer :vterm "ws") buf)))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-window-test-panel-buffer-input-returns-ws-buffer ()
+  "`--panel-buffer :input WS' returns the buffer stored under `:input-buffer'
+in WS's workspace plist."
+  (claude-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *test-panel-input*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :input-buffer buf)
+            (should (eq (claude-repl-window--panel-buffer :input "ws") buf)))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-window-test-panel-buffer-drawer-returns-singleton ()
+  "`--panel-buffer :drawer' returns the drawer buffer (frame-scoped
+singleton, WS arg ignored).  Returns nil when the drawer buffer has
+not been created."
+  (let ((claude-repl-drawer-buffer-name "*claude-test-drawer*"))
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name)))
+      (unwind-protect
+          (progn
+            (should (eq (claude-repl-window--panel-buffer :drawer) buf))
+            ;; WS arg is ignored for :drawer.
+            (should (eq (claude-repl-window--panel-buffer :drawer "anything") buf)))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-window-test-panel-buffer-unknown-kind-errors ()
+  "`--panel-buffer' on an unknown KIND signals an error — typos surface
+at call time."
+  (should-error (claude-repl-window--panel-buffer :bogus "ws")
+                :type 'error))
+
+(ert-deftest claude-repl-window-test-panel-window-returns-displaying-window ()
+  "`--panel-window' returns the live window displaying the panel buffer."
+  (claude-repl-test--with-clean-state
+    (let* ((buf (generate-new-buffer " *test-panel-win-vterm*"))
+           (wconf (current-window-configuration)))
+      (unwind-protect
+          (progn
+            (delete-other-windows)
+            (claude-repl--ws-put "ws" :vterm-buffer buf)
+            (let ((win (display-buffer buf)))
+              (should (eq (claude-repl-window--panel-window :vterm "ws") win))))
+        (set-window-configuration wconf)
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-window-test-panel-window-nil-when-buffer-not-shown ()
+  "`--panel-window' returns nil when the panel buffer exists but is not
+displayed in any window."
+  (claude-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *test-panel-win-hidden*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :vterm-buffer buf)
+            (should-not (claude-repl-window--panel-window :vterm "ws")))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-window-test-panel-window-nil-when-buffer-killed ()
+  "`--panel-window' returns nil when the workspace plist holds a stale
+buffer reference (killed buffer) — defensive for races against
+teardown that nils plist entries after killing buffers."
+  (claude-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *test-panel-win-killed*")))
+      (claude-repl--ws-put "ws" :vterm-buffer buf)
+      (kill-buffer buf)
+      (should-not (claude-repl-window--panel-window :vterm "ws")))))
+
 ;;;; ---- Hardening ----
 
 (ert-deftest claude-repl-window-test-harden-dedicate-sets-dedicated ()

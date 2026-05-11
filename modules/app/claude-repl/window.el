@@ -56,6 +56,47 @@
 ;;              :width-fn   claude-repl-drawer--window-width
 ;;              :harden (dedicate delete-protect)))
 
+;;;; --- Panel finders -----------------------------------------------------
+
+(defun claude-repl-window--panel-buffer (kind &optional ws)
+  "Return the buffer for panel KIND in workspace WS.
+
+KIND ∈ (:vterm :input :drawer).  WS defaults to the current
+workspace; for the frame-scoped `:drawer' panel WS is ignored.
+
+Returns the buffer object regardless of liveness — callers needing
+liveness must check `buffer-live-p' (matches the historical lookup
+pattern this helper replaces).  Returns nil when the panel has not
+been initialized (or `:drawer' when the drawer buffer has never been
+created).  Signals an error for an unknown KIND so typos surface at
+call time."
+  (pcase kind
+    (:vterm
+     (claude-repl--ws-get (or ws (and (fboundp '+workspace-current-name)
+                                      (+workspace-current-name)))
+                          :vterm-buffer))
+    (:input
+     (claude-repl--ws-get (or ws (and (fboundp '+workspace-current-name)
+                                      (+workspace-current-name)))
+                          :input-buffer))
+    (:drawer
+     (and (boundp 'claude-repl-drawer-buffer-name)
+          (get-buffer claude-repl-drawer-buffer-name)))
+    (_ (error "claude-repl-window--panel-buffer: unknown KIND %S" kind))))
+
+(defun claude-repl-window--panel-window (kind &optional ws frame)
+  "Return the live window displaying panel KIND, or nil.
+
+KIND ∈ (:vterm :input :drawer).  WS defaults to the current
+workspace; ignored for `:drawer'.  FRAME is passed through to
+`get-buffer-window' (nil = selected frame, t = all frames, a frame
+value = that frame).
+
+Guards on `buffer-live-p' so a stale buffer reference returns nil
+rather than tripping `get-buffer-window' with a dead buffer."
+  (let ((buf (claude-repl-window--panel-buffer kind ws)))
+    (and buf (buffer-live-p buf) (get-buffer-window buf frame))))
+
 ;;;; --- Side-window awareness ---------------------------------------------
 
 (defun claude-repl-window--side-window-p (win)

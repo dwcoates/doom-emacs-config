@@ -137,17 +137,20 @@ are not split from a bottom popup (e.g. a regular vterm)."
 (defun claude-repl--focus-input-panel ()
   "Focus the input panel window and enter insert state.
 Signals an error if the input buffer or its window cannot be found —
-callers should ensure panels are displayed before calling this."
+callers should ensure panels are displayed before calling this.
+Buffer/window resolution delegates to
+`claude-repl-window--panel-buffer' and `--panel-window'."
   (claude-repl--log (+workspace-current-name) "focus-input-panel")
-  (let ((ws (+workspace-current-name)))
-    (let ((buf (claude-repl--ws-get ws :input-buffer)))
-      (unless buf
-        (error "claude-repl--focus-input-panel: no :input-buffer for workspace %s" ws))
-      (let ((win (get-buffer-window buf)))
-        (unless win
-          (error "claude-repl--focus-input-panel: input buffer %s is not displayed in any window" (buffer-name buf)))
-        (select-window win)
-        (evil-insert-state)))))
+  (let* ((ws (+workspace-current-name))
+         (buf (claude-repl-window--panel-buffer :input ws)))
+    (unless buf
+      (error "claude-repl--focus-input-panel: no :input-buffer for workspace %s" ws))
+    (let ((win (claude-repl-window--panel-window :input ws)))
+      (unless win
+        (error "claude-repl--focus-input-panel: input buffer %s is not displayed in any window"
+               (buffer-name buf)))
+      (select-window win)
+      (evil-insert-state))))
 
 (defun claude-repl--show-panels-and-focus ()
   "Display both Claude panels and focus the input panel.
@@ -263,10 +266,10 @@ the caller's workspace."
 ;; Refresh vterm on workspace switch
 (defun claude-repl--maybe-autoselect-input (ws)
   "Select the Claude input window for WS if visible and autoselect is enabled.
-Respects `claude-repl-autoselect-input-on-workspace-switch'."
+Respects `claude-repl-autoselect-input-on-workspace-switch'.
+Window lookup delegates to `claude-repl-window--panel-window'."
   (when claude-repl-autoselect-input-on-workspace-switch
-    (when-let ((buf (claude-repl--ws-get ws :input-buffer))
-               (win (and (buffer-live-p buf) (get-buffer-window buf))))
+    (when-let ((win (claude-repl-window--panel-window :input ws)))
       (claude-repl--log ws "maybe-autoselect-input: selecting input-win=%s" win)
       (select-window win))))
 
