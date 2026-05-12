@@ -337,18 +337,40 @@ marked `:hidden' (via `SPC o C') are persp-killed when hide-mode is on
   "Return non-nil if window W does not display a Claude panel buffer."
   (not (claude-repl--claude-panel-buffer-p (window-buffer w))))
 
+(defun claude-repl--save-target-window-p (w)
+  "Return non-nil when W is a safe selected-window for persp save.
+
+\"Safe\" means a later `switch-to-buffer' (e.g. Doom's `+workspace/kill'
+fallback path) can repurpose the window in-place rather than splitting
+a new one.  Excludes Claude panel buffers, side windows, dedicated
+windows, and the minibuffer."
+  (and (window-live-p w)
+       (not (window-minibuffer-p w))
+       (not (window-parameter w 'window-side))
+       (not (window-dedicated-p w))
+       (not (claude-repl--claude-panel-buffer-p (window-buffer w)))))
+
 (defun claude-repl--redirect-from-claude-before-save ()
-  "If the selected window shows a Claude buffer, select a real window instead.
-Called before persp saves window state so the saved config has a non-claude
-buffer selected. This prevents Doom's `+workspace/kill' from trying to display
-its fallback buffer in a dedicated window on workspace restore, which would
-otherwise split the first real window (e.g. a repl) and show a doom buffer.
-Skips redirect if claude is the only window (fullscreen case)."
-  (when (claude-repl--claude-panel-buffer-p (window-buffer (selected-window)))
-    (when-let ((target (cl-find-if
-                        #'claude-repl--non-claude-panel-window-p
-                        (window-list))))
-      (select-window target))))
+  "Select a redirect-safe window before persp saves window state.
+
+Redirects when the selected window is unsuitable as a future
+`switch-to-buffer' target: a Claude panel buffer, a side window
+(e.g. the drawer), or a dedicated window.  Persp saves the selected
+window into the workspace's restored layout; if that window is a
+side/dedicated/panel window, Doom's `+workspace/kill' fallback
+`(switch-to-buffer (doom-fallback-buffer))' cannot repurpose it and
+instead splits a new window showing the doom splash buffer.
+
+Picks the first window that satisfies `claude-repl--save-target-window-p'.
+No-op when no safe target exists (fullscreen-claude or drawer-only)."
+  (let ((sel (selected-window)))
+    (when (or (claude-repl--claude-panel-buffer-p (window-buffer sel))
+              (window-parameter sel 'window-side)
+              (window-dedicated-p sel))
+      (when-let ((target (cl-find-if
+                          #'claude-repl--save-target-window-p
+                          (window-list))))
+        (select-window target)))))
 
 (defun claude-repl--before-persp-deactivate (&rest _)
   "Save window state before perspective deactivation.

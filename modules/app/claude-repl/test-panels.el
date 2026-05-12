@@ -2582,6 +2582,175 @@ initialize-ws-env.  Models the worktree-creation / new-workspace paths."
         (switch-to-buffer "*scratch*")
         (when (buffer-live-p claude-buf) (kill-buffer claude-buf))))))
 
+;;;; ---- Tests: redirect-from-claude-before-save side/dedicated windows ----
+
+(ert-deftest claude-repl-test-panels-redirect-from-side-window ()
+  "Redirect fires when selected window is a side window (e.g. the drawer).
+
+Regression: a side window selected at persp save time would otherwise be
+restored as the selected window, causing `+workspace/kill's fallback
+`switch-to-buffer' to split a new window for the doom splash buffer."
+  (claude-repl-test--with-clean-state
+    (delete-other-windows)
+    (let* ((regular-buf (get-buffer-create "*regular-buf*"))
+           (side-buf    (get-buffer-create "*side-buf*"))
+           (main-win    (selected-window))
+           (side-win    nil))
+      (unwind-protect
+          (progn
+            (set-window-buffer main-win regular-buf)
+            (setq side-win
+                  (display-buffer-in-side-window side-buf '((side . right))))
+            (should (window-live-p side-win))
+            (select-window side-win)
+            (claude-repl--redirect-from-claude-before-save)
+            (should (eq (selected-window) main-win))
+            (should (eq (window-buffer (selected-window)) regular-buf)))
+        (when (and side-win (window-live-p side-win))
+          (ignore-errors (delete-window side-win)))
+        (set-window-buffer (selected-window) "*scratch*")
+        (when (buffer-live-p regular-buf) (kill-buffer regular-buf))
+        (when (buffer-live-p side-buf) (kill-buffer side-buf))))))
+
+(ert-deftest claude-repl-test-panels-redirect-from-dedicated-window ()
+  "Redirect fires when selected window is dedicated.
+
+Dedicated windows cause `switch-to-buffer' to fall back to pop-up
+behavior and split, which is what produced the spurious splash buffer
+window after a nuke."
+  (claude-repl-test--with-clean-state
+    (let* ((regular-buf (get-buffer-create "*regular-buf*"))
+           (dedicated-buf (get-buffer-create "*dedicated-buf*"))
+           (main-win (selected-window))
+           (extra-win nil))
+      (unwind-protect
+          (progn
+            (set-window-buffer main-win regular-buf)
+            (setq extra-win (split-window))
+            (set-window-buffer extra-win dedicated-buf)
+            (set-window-dedicated-p extra-win t)
+            (select-window extra-win)
+            (claude-repl--redirect-from-claude-before-save)
+            (should (eq (selected-window) main-win))
+            (should (eq (window-buffer (selected-window)) regular-buf)))
+        (when (and extra-win (window-live-p extra-win))
+          (set-window-dedicated-p extra-win nil)
+          (ignore-errors (delete-window extra-win)))
+        (set-window-buffer (selected-window) "*scratch*")
+        (when (buffer-live-p regular-buf) (kill-buffer regular-buf))
+        (when (buffer-live-p dedicated-buf) (kill-buffer dedicated-buf))))))
+
+(ert-deftest claude-repl-test-panels-redirect-skips-side-window-as-target ()
+  "Redirect target must skip side windows even when selected is a Claude panel.
+
+Regression: the previous predicate `non-claude-panel-window-p' returned
+t for the drawer (a non-Claude side window), so `cl-find-if' could
+pick the drawer as the redirect destination — defeating the purpose
+of the redirect."
+  (claude-repl-test--with-clean-state
+    (delete-other-windows)
+    (let* ((claude-buf (get-buffer-create "*claude-panel-abcd1234*"))
+           (regular-buf (get-buffer-create "*regular-buf*"))
+           (side-buf    (get-buffer-create "*side-buf*"))
+           (claude-win (selected-window))
+           (regular-win nil)
+           (side-win nil))
+      (unwind-protect
+          (progn
+            (set-window-buffer claude-win claude-buf)
+            (setq regular-win (split-window claude-win nil 'below))
+            (set-window-buffer regular-win regular-buf)
+            (setq side-win
+                  (display-buffer-in-side-window side-buf '((side . right))))
+            (should (window-live-p side-win))
+            (select-window claude-win)
+            (claude-repl--redirect-from-claude-before-save)
+            (should (eq (selected-window) regular-win))
+            (should (eq (window-buffer (selected-window)) regular-buf)))
+        (when (and side-win (window-live-p side-win))
+          (ignore-errors (delete-window side-win)))
+        (when (and regular-win (window-live-p regular-win))
+          (ignore-errors (delete-window regular-win)))
+        (set-window-buffer (selected-window) "*scratch*")
+        (when (buffer-live-p claude-buf) (kill-buffer claude-buf))
+        (when (buffer-live-p regular-buf) (kill-buffer regular-buf))
+        (when (buffer-live-p side-buf) (kill-buffer side-buf))))))
+
+(ert-deftest claude-repl-test-panels-redirect-skips-dedicated-as-target ()
+  "Redirect target must skip dedicated windows."
+  (claude-repl-test--with-clean-state
+    (delete-other-windows)
+    (let* ((claude-buf (get-buffer-create "*claude-panel-abcd1234*"))
+           (regular-buf (get-buffer-create "*regular-buf*"))
+           (ded-buf (get-buffer-create "*ded-buf*"))
+           (claude-win (selected-window))
+           (regular-win nil)
+           (ded-win nil))
+      (unwind-protect
+          (progn
+            (set-window-buffer claude-win claude-buf)
+            (setq ded-win (split-window claude-win nil 'right))
+            (set-window-buffer ded-win ded-buf)
+            (set-window-dedicated-p ded-win t)
+            (setq regular-win (split-window claude-win nil 'below))
+            (set-window-buffer regular-win regular-buf)
+            (select-window claude-win)
+            (claude-repl--redirect-from-claude-before-save)
+            (should (eq (selected-window) regular-win))
+            (should (eq (window-buffer (selected-window)) regular-buf)))
+        (when (and ded-win (window-live-p ded-win))
+          (set-window-dedicated-p ded-win nil)
+          (ignore-errors (delete-window ded-win)))
+        (when (and regular-win (window-live-p regular-win))
+          (ignore-errors (delete-window regular-win)))
+        (set-window-buffer (selected-window) "*scratch*")
+        (when (buffer-live-p claude-buf) (kill-buffer claude-buf))
+        (when (buffer-live-p regular-buf) (kill-buffer regular-buf))
+        (when (buffer-live-p ded-buf) (kill-buffer ded-buf))))))
+
+;;;; ---- Tests: save-target-window-p ----
+
+(ert-deftest claude-repl-test-panels-save-target-window-p-regular ()
+  "save-target-window-p returns non-nil for a plain window."
+  (claude-repl-test--with-clean-state
+    (should (claude-repl--save-target-window-p (selected-window)))))
+
+(ert-deftest claude-repl-test-panels-save-target-window-p-claude-panel ()
+  "save-target-window-p returns nil for a window showing a Claude panel."
+  (claude-repl-test--with-clean-state
+    (let ((claude-buf (get-buffer-create "*claude-panel-abcd1234*")))
+      (unwind-protect
+          (progn
+            (set-window-buffer (selected-window) claude-buf)
+            (should-not (claude-repl--save-target-window-p (selected-window))))
+        (set-window-buffer (selected-window) "*scratch*")
+        (when (buffer-live-p claude-buf) (kill-buffer claude-buf))))))
+
+(ert-deftest claude-repl-test-panels-save-target-window-p-side-window ()
+  "save-target-window-p returns nil for a side window."
+  (claude-repl-test--with-clean-state
+    (delete-other-windows)
+    (let* ((side-buf (get-buffer-create "*side-buf*"))
+           (side-win (display-buffer-in-side-window side-buf '((side . right)))))
+      (unwind-protect
+          (should-not (claude-repl--save-target-window-p side-win))
+        (when (and side-win (window-live-p side-win))
+          (ignore-errors (delete-window side-win)))
+        (when (buffer-live-p side-buf) (kill-buffer side-buf))))))
+
+(ert-deftest claude-repl-test-panels-save-target-window-p-dedicated ()
+  "save-target-window-p returns nil for a dedicated window."
+  (claude-repl-test--with-clean-state
+    (delete-other-windows)
+    (let ((extra (split-window)))
+      (unwind-protect
+          (progn
+            (set-window-dedicated-p extra t)
+            (should-not (claude-repl--save-target-window-p extra)))
+        (when (window-live-p extra)
+          (set-window-dedicated-p extra nil)
+          (ignore-errors (delete-window extra)))))))
+
 ;;;; ---- Tests: fullscreen-and-focus ----
 
 (ert-deftest claude-repl-test-panels-fullscreen-and-focus-calls-toggle ()
