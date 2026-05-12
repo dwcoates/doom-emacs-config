@@ -1300,6 +1300,118 @@ selection to the frame's main window when invoked from a side window."
         ;; Indent-per-level = 2.  Bonus = 2 × 2 = 4.  Total = 24.
         (should (= (claude-repl-drawer--window-width 'fake-window) 24))))))
 
+(ert-deftest claude-repl-drawer-test-persisted-cols-overrides-fraction ()
+  "When `--persisted-cols' is non-nil it overrides fraction-based width."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-drawer-width-fraction 0.20)
+          (claude-repl-drawer--persisted-cols 73))
+      (cl-letf (((symbol-function 'window-frame) (lambda (_) 'fake-frame))
+                ((symbol-function 'frame-width)  (lambda (_) 200)))
+        ;; Fraction would give 40; persisted-cols wins.
+        (should (= (claude-repl-drawer--window-width 'fake-window) 73))))))
+
+(ert-deftest claude-repl-drawer-test-persisted-cols-nil-falls-back-to-fraction ()
+  "When `--persisted-cols' is nil, fraction-based computation drives width."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-drawer-width-fraction 0.20)
+          (claude-repl-drawer--persisted-cols nil))
+      (cl-letf (((symbol-function 'window-frame) (lambda (_) 'fake-frame))
+                ((symbol-function 'frame-width)  (lambda (_) 200)))
+        (should (= (claude-repl-drawer--window-width 'fake-window) 40))))))
+
+(ert-deftest claude-repl-drawer-test-persisted-cols-floors-at-one ()
+  "Persisted-cols clamps at 1 even if a zero/negative slipped in."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-drawer--persisted-cols 0))
+      (should (= (claude-repl-drawer--window-width 'fake-window) 1)))))
+
+(ert-deftest claude-repl-drawer-test-capture-resize-pins-width-on-diverge ()
+  "`--capture-resize' pins `--persisted-cols' when actual ≠ expected.
+Simulates a manual user resize: after `--apply-width' set expected=40,
+the user dragged the side window to 55; the size-change hook should
+treat the new value as user intent and pin it."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
+          (claude-repl-drawer--persisted-cols nil)
+          (claude-repl-drawer--expected-cols 40))
+      (unwind-protect
+          (cl-letf (((symbol-function 'get-buffer-window)
+                     (lambda (b &optional _f) (and (eq b buf) 'fake-win)))
+                    ((symbol-function 'window-total-width)
+                     (lambda (_) 55)))
+            (claude-repl-drawer--capture-resize 'fake-frame)
+            (should (= claude-repl-drawer--persisted-cols 55))
+            (should (= claude-repl-drawer--expected-cols 55)))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest claude-repl-drawer-test-capture-resize-noop-when-matches-expected ()
+  "`--capture-resize' is a no-op when actual matches expected.
+Simulates persp-restore + our reapply: net width = expected, so no
+spurious capture overwrites a previously-pinned width."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
+          (claude-repl-drawer--persisted-cols 73)
+          (claude-repl-drawer--expected-cols 73))
+      (unwind-protect
+          (cl-letf (((symbol-function 'get-buffer-window)
+                     (lambda (b &optional _f) (and (eq b buf) 'fake-win)))
+                    ((symbol-function 'window-total-width)
+                     (lambda (_) 73)))
+            (claude-repl-drawer--capture-resize 'fake-frame)
+            (should (= claude-repl-drawer--persisted-cols 73)))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest claude-repl-drawer-test-capture-resize-noop-without-expected ()
+  "`--capture-resize' is a no-op until `--apply-width' has set expected.
+Guards against the size-change hook persisting spurious widths during
+the bootstrap period before the drawer has ever been displayed."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
+          (claude-repl-drawer--persisted-cols nil)
+          (claude-repl-drawer--expected-cols nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'get-buffer-window)
+                     (lambda (b &optional _f) (and (eq b buf) 'fake-win)))
+                    ((symbol-function 'window-total-width)
+                     (lambda (_) 99)))
+            (claude-repl-drawer--capture-resize 'fake-frame)
+            (should-not claude-repl-drawer--persisted-cols))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest claude-repl-drawer-test-capture-resize-noop-when-no-window ()
+  "`--capture-resize' is a no-op when the drawer buffer has no window."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-drawer--persisted-cols nil)
+          (claude-repl-drawer--expected-cols 40))
+      (cl-letf (((symbol-function 'get-buffer-window)
+                 (lambda (&rest _) nil)))
+        (claude-repl-drawer--capture-resize 'fake-frame)
+        (should-not claude-repl-drawer--persisted-cols)))))
+
+(ert-deftest claude-repl-drawer-test-reset-width-clears-persisted ()
+  "`claude-repl-drawer-reset-width' clears `--persisted-cols'."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-drawer--persisted-cols 73))
+      (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil)))
+        (claude-repl-drawer-reset-width)
+        (should-not claude-repl-drawer--persisted-cols)))))
+
+(ert-deftest claude-repl-drawer-test-ensure-visible-reapplies-width-when-already-visible ()
+  "`--ensure-visible-on-persp-switch' reapplies width when drawer is already
+visible — overriding whatever stale width persp's window-state-put
+just restored from the destination workspace's saved config."
+  (let ((claude-repl-drawer--global-visible-p t)
+        (apply-called nil)
+        (buf (get-buffer-create claude-repl-drawer-buffer-name)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window)
+                   (lambda (&rest _) 'fake-win))
+                  ((symbol-function 'claude-repl-drawer--apply-width)
+                   (lambda (w) (setq apply-called w))))
+          (claude-repl-drawer--ensure-visible-on-persp-switch)
+          (should (eq apply-called 'fake-win)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
 (ert-deftest claude-repl-drawer-test-max-depth-walks-chain ()
   "`--max-depth' returns the longest source-chain hop count."
   (claude-repl-test--with-clean-state
