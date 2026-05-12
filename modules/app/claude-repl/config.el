@@ -58,6 +58,7 @@
 (claude-repl--load-module "keybindings")
 (claude-repl--load-module "magit")
 (claude-repl--load-module "emoji")
+(claude-repl--load-module "prevent-select")
 
 (if claude-repl--load-errors
     (progn
