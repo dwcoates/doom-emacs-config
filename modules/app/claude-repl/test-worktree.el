@@ -2892,8 +2892,8 @@ is re-signaled to the caller."
 
 (ert-deftest claude-repl-test-workspace-merge-do-sets-merge-completed-on-success ()
   "After a successful cherry-pick, `:merge-completed' t is recorded on
-the target workspace so the drawer's MERGED bucket reflects the
-completion of the explicit merge command."
+the target workspace before the auto-finish tear-down runs.  Stubs
+`--finish-workspace' so the plist entry survives the assertion."
   (claude-repl-test--with-clean-state
     (puthash "other-ws" '() claude-repl--workspaces)
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
@@ -2903,21 +2903,20 @@ completion of the explicit merge command."
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+               ((symbol-function 'claude-repl--finish-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore)
                ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
       (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
       (should (eq (claude-repl--ws-get "other-ws" :merge-completed) t)))))
 
-(ert-deftest claude-repl-test-workspace-merge-do-does-not-finish-workspace-on-success ()
-  "Successful merge no longer auto-tears-down the workspace.  The user
-now sees it surface in MERGED rather than disappear; cleanup is
-explicit (via `+workspace/kill' or a `finish' command).  This protects
-against the old bug where MERGED was empty in practice because
-successful merges removed their workspace before the bucket could
-show them."
+(ert-deftest claude-repl-test-workspace-merge-do-finishes-workspace-on-success ()
+  "Successful merge auto-finishes the target workspace — the cherry-pick
+has landed on the parent so the source branch has served its purpose,
+and leaving it around forces the user to manually clean up a workspace
+that no longer carries any unique state."
   (claude-repl-test--with-clean-state
     (puthash "other-ws" '() claude-repl--workspaces)
-    (let ((finished nil))
+    (let ((finished-ws nil))
       (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
                  ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
                  ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
@@ -2928,9 +2927,9 @@ show them."
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
                  ((symbol-function 'claude-repl--finish-workspace)
-                  (lambda (_ws) (setq finished t))))
+                  (lambda (ws) (setq finished-ws ws))))
         (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
-        (should-not finished)))))
+        (should (equal finished-ws "other-ws"))))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-marks-dead-on-cherry-pick-error ()
   "Cherry-pick failure flips the target workspace to `:repl-state :dead'

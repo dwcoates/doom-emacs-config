@@ -1354,12 +1354,10 @@ lands in the parent worktree (or master, when re-routed) regardless of
 how Doom resolved the post-switch workspace name.
 
 After a successful cherry-pick, tags HEAD as `merge/TARGET-WS' so the
-final commit of the merged-in workspace is recoverable by name, and
-records `:merge-completed t' on TARGET-WS so the drawer surfaces it in
-the MERGED section.  The workspace is *not* auto-finished — leaving
-the perspective + vterm + worktree intact lets the user inspect the
-post-merge state and clean up explicitly via `+workspace/kill' or a
-`finish' command.
+final commit of the merged-in workspace is recoverable by name,
+records `:merge-completed t' on TARGET-WS, and auto-finishes the
+workspace (kills its perspective + vterm + worktree) — the cherry-pick
+has landed on the parent so the source branch has served its purpose.
 
 When the cherry-pick fails (conflict opened in magit, or all commits
 already incorporated), TARGET-WS is marked `:repl-state :dead' via
@@ -1396,6 +1394,7 @@ doing."
             (claude-repl--ws-put target-ws :merge-completed t)
             (claude-repl--log target-ws "workspace-merge-do: ws=%s -> :merge-completed t" target-ws)
             (claude-repl--tag-merge-completion project-root target-ws)
+            (claude-repl--finish-workspace target-ws)
             (message "Merged workspace '%s' -> '%s'." target-ws current-ws)
             (load-file claude-repl--config-file)
             (unless silent
