@@ -856,30 +856,54 @@ claude-repl sub-modules depend on hooks being registered at load time."
 ;;;; ---- skill-link helpers ----
 
 (defun test-install--make-skills-tmp ()
-  "Build a temp-dir pair (SRC . DEST) for skill-link tests.
-Creates SRC/<managed-skill-names> as real directories so the symlink
-target resolves, and DEST as an empty directory ready for links."
+  "Build a temp-dir trio (SRC LOCAL-SRC . DEST) for skill-link tests.
+Creates SRC/<managed-skill-names> and LOCAL-SRC/<managed-local-skill-names>
+as real directories so the symlink targets resolve, and DEST as an empty
+directory ready for links."
   (let* ((root (make-temp-file "claude-repl-skill-test-" t))
          (src (expand-file-name "src/" root))
+         (local-src (expand-file-name "local-src/" root))
          (dest (expand-file-name "dest/" root)))
     (make-directory src t)
+    (make-directory local-src t)
     (make-directory dest t)
     (dolist (name claude-repl--managed-skills)
       (make-directory (expand-file-name name src) t))
-    (cons src dest)))
+    (dolist (name claude-repl--managed-local-skills)
+      (make-directory (expand-file-name name local-src) t))
+    (list src local-src dest)))
 
 (defmacro test-install--with-skill-dirs (bindings &rest body)
-  "Run BODY with SRC/DEST dirs materialized and the defcustoms pointed at them.
+  "Run BODY with SRC/LOCAL-SRC/DEST dirs materialized and defcustoms pointed at them.
 BINDINGS is ignored — provided so future test helpers can extend."
   (declare (indent 1))
   (ignore bindings)
-  `(let* ((pair (test-install--make-skills-tmp))
-          (src (car pair))
-          (dest (cdr pair)))
+  `(let* ((trio (test-install--make-skills-tmp))
+          (src (nth 0 trio))
+          (local-src (nth 1 trio))
+          (dest (nth 2 trio)))
      (let ((claude-repl-skills-src-dir src)
+           (claude-repl-local-skills-src-dir local-src)
            (claude-repl--skills-dest-dir dest))
        (unwind-protect (progn ,@body)
          (delete-directory (file-name-directory (directory-file-name src)) t)))))
+
+(defun test-install--link-all-skills ()
+  "Create symlinks at the test DEST for every managed (external + local) skill.
+Use after `test-install--with-skill-dirs' has set up the temp dirs and
+the defcustoms.  Returns the list of dests created."
+  (let (created)
+    (dolist (name claude-repl--managed-skills)
+      (let ((d (claude-repl--skill-dest-path name)))
+        (make-symbolic-link (claude-repl--skill-src-path name) d)
+        (push d created)))
+    (dolist (name claude-repl--managed-local-skills)
+      (let ((d (claude-repl--skill-dest-path name)))
+        (make-symbolic-link
+         (claude-repl--skill-src-path name claude-repl-local-skills-src-dir)
+         d)
+        (push d created)))
+    (nreverse created)))
 
 (ert-deftest claude-repl-test-skill-link-ok-correct ()
   "skill-link-ok-p returns t when dest is a symlink to the expected src."
@@ -904,26 +928,25 @@ BINDINGS is ignored — provided so future test helpers can extend."
       (should-not (claude-repl--skill-link-ok-p name)))))
 
 (ert-deftest claude-repl-test-check-skill-links-missing ()
-  "Missing symlink produces one warn per managed skill."
+  "Missing symlinks produce one warn per managed skill (external + local)."
   (test-install--with-skill-dirs ()
-    (let ((issues (list nil)))
+    (let ((issues (list nil))
+          (expected (+ (length claude-repl--managed-skills)
+                       (length claude-repl--managed-local-skills))))
       (claude-repl--check-skill-links issues)
-      (should (= (length (car issues))
-                 (length claude-repl--managed-skills)))
+      (should (= (length (car issues)) expected))
       (should (cl-every (lambda (i) (eq (car i) 'warn)) (car issues))))))
 
 (ert-deftest claude-repl-test-check-skill-links-all-ok ()
-  "All skills linked correctly produces no issues."
+  "All skills linked correctly (external + local) produces no issues."
   (test-install--with-skill-dirs ()
-    (dolist (name claude-repl--managed-skills)
-      (make-symbolic-link (claude-repl--skill-src-path name)
-                          (claude-repl--skill-dest-path name)))
+    (test-install--link-all-skills)
     (let ((issues (list nil)))
       (claude-repl--check-skill-links issues)
       (should (null (car issues))))))
 
 (ert-deftest claude-repl-test-check-skill-links-foreign ()
-  "A foreign file at the dest path is flagged as warn."
+  "A foreign file at one dest path is flagged as `points elsewhere'."
   (test-install--with-skill-dirs ()
     (let ((name (car claude-repl--managed-skills)))
       (write-region "" nil (claude-repl--skill-dest-path name))
@@ -934,5 +957,67 @@ BINDINGS is ignored — provided so future test helpers can extend."
                        (lambda (i) (string-match-p "points elsewhere"
                                                     (cdr i)))
                        (car issues)))))))))
+
+;;;; ---- local-skill specific tests ----
+
+(ert-deftest claude-repl-test-managed-local-skills-nonempty ()
+  "Repo-local skills list must include `debug-logs' (regression guard)."
+  (should (member "debug-logs" claude-repl--managed-local-skills)))
+
+(ert-deftest claude-repl-test-local-skills-src-dir-default ()
+  "Default `claude-repl-local-skills-src-dir' points at this module's
+checked-in `skills/' directory when install.el is loaded from a file."
+  ;; The defcustom default is computed from `load-file-name'; when
+  ;; install.el was loaded normally, the path should end in the
+  ;; module-local `skills/' segment.
+  (when claude-repl-local-skills-src-dir
+    (should (string-match-p
+             "modules/app/claude-repl/skills/?$"
+             (directory-file-name
+              (expand-file-name claude-repl-local-skills-src-dir))))))
+
+(ert-deftest claude-repl-test-skill-link-ok-uses-local-src ()
+  "skill-link-ok-p honors the SRC-DIR argument for local skills."
+  (test-install--with-skill-dirs ()
+    (let ((name (car claude-repl--managed-local-skills)))
+      (make-symbolic-link
+       (claude-repl--skill-src-path name claude-repl-local-skills-src-dir)
+       (claude-repl--skill-dest-path name))
+      ;; Correct when called with the local src-dir.
+      (should (claude-repl--skill-link-ok-p
+               name claude-repl-local-skills-src-dir))
+      ;; Wrong when called with the external src-dir (different target).
+      (should-not (claude-repl--skill-link-ok-p name)))))
+
+(ert-deftest claude-repl-test-check-skill-links-local-missing ()
+  "A missing local-skill symlink contributes its own warn entry."
+  (test-install--with-skill-dirs ()
+    ;; Link only the external skills; leave local-skill dests missing.
+    (dolist (name claude-repl--managed-skills)
+      (make-symbolic-link (claude-repl--skill-src-path name)
+                          (claude-repl--skill-dest-path name)))
+    (let ((issues (list nil)))
+      (claude-repl--check-skill-links issues)
+      (should (= (length (car issues))
+                 (length claude-repl--managed-local-skills)))
+      (should (cl-every (lambda (i)
+                          (string-match-p "Skill symlink missing" (cdr i)))
+                        (car issues))))))
+
+(ert-deftest claude-repl-test-debug-logs-skill-file-exists ()
+  "The checked-in debug-logs SKILL.md must exist with required frontmatter.
+Regression guard so the file is not silently moved or deleted —
+`/debug-logs' depends on it being discoverable at install time."
+  (let* ((src-dir (expand-file-name
+                   (or claude-repl-local-skills-src-dir
+                       (error "claude-repl-local-skills-src-dir is unset"))))
+         (skill-md (expand-file-name "debug-logs/SKILL.md" src-dir)))
+    (should (file-exists-p skill-md))
+    (with-temp-buffer
+      (insert-file-contents skill-md)
+      (goto-char (point-min))
+      (should (looking-at "^---\n"))
+      (should (re-search-forward "^name: debug-logs$" nil t))
+      (should (re-search-forward "^description: " nil t)))))
 
 ;;; test-install.el ends here

@@ -63,6 +63,15 @@ SKILLS=(
   "workspace-update"
 )
 
+# Skills checked into THIS repo (under modules/app/claude-repl/skills/).
+# Installed via symlink — same idempotency rules as $SKILLS, but sourced
+# from this tree instead of $SKILLS_SRC so the skill content is the
+# single source of truth and edits go live without a reinstall.
+LOCAL_SKILLS_SRC="$SCRIPT_DIR/../modules/app/claude-repl/skills"
+LOCAL_SKILLS=(
+  "debug-logs"
+)
+
 # --- Helpers ---
 
 show_help() {
@@ -169,6 +178,29 @@ do_install() {
     done
   fi
 
+  # Repo-local managed skills (under modules/app/claude-repl/skills/).
+  # Symlinked into $SKILLS_DIR so edits to checked-in SKILL.md go live
+  # immediately; no copy step required.
+  if [ ! -d "$LOCAL_SKILLS_SRC" ]; then
+    echo "[install] WARNING: local skills source dir not found: $LOCAL_SKILLS_SRC"
+    echo "[install] Local skill symlinks will be skipped."
+  else
+    for name in "${LOCAL_SKILLS[@]}"; do
+      src="$LOCAL_SKILLS_SRC/$name"
+      dest="$SKILLS_DIR/$name"
+      if [ ! -e "$src" ] && [ ! -L "$src" ]; then
+        echo "[install] WARNING: local skill source missing: $src (skipped)"
+        continue
+      fi
+      if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$src" ]; then
+        echo "[install] Local skill already linked: $name (skipped)"
+        continue
+      fi
+      ln -sfn "$src" "$dest"
+      echo "[install] Linked local skill: $dest -> $src"
+    done
+  fi
+
   echo "[install] Done. Hooks registered in $SETTINGS"
 }
 
@@ -217,6 +249,16 @@ do_uninstall() {
     if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$expected" ]; then
       rm -f "$dest"
       echo "[uninstall] Removed skill link: $dest"
+    fi
+  done
+
+  # Remove repo-local skill symlinks (only ours, pointing at LOCAL_SKILLS_SRC).
+  for name in "${LOCAL_SKILLS[@]}"; do
+    dest="$SKILLS_DIR/$name"
+    expected="$LOCAL_SKILLS_SRC/$name"
+    if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$expected" ]; then
+      rm -f "$dest"
+      echo "[uninstall] Removed local skill link: $dest"
     fi
   done
 

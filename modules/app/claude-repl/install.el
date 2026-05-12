@@ -95,6 +95,23 @@ Must match the `SKILLS_SRC' default in `.claude/install.sh' (or the
   :type 'directory
   :group 'claude-repl)
 
+(defconst claude-repl--managed-local-skills
+  '("debug-logs")
+  "Bare names for repo-local managed skills.
+Sourced from `claude-repl-local-skills-src-dir' (this repo's
+`modules/app/claude-repl/skills/').  Must match the `LOCAL_SKILLS'
+array in `.claude/install.sh'.")
+
+(defcustom claude-repl-local-skills-src-dir
+  (when load-file-name
+    (file-name-as-directory
+     (expand-file-name "skills" (file-name-directory load-file-name))))
+  "Source directory for repo-local managed skill targets.
+Defaults to `modules/app/claude-repl/skills/' alongside this file.
+Must match the `LOCAL_SKILLS_SRC' value in `.claude/install.sh'."
+  :type '(choice (const :tag "Unset" nil) directory)
+  :group 'claude-repl)
+
 ;;;; ---- Sandbox detection ------------------------------------------------
 
 (defun claude-repl--in-sandbox-p ()
@@ -332,38 +349,48 @@ CMD is of the form \"~/.claude/hooks/<name>.sh\"."
   "Absolute install destination for skill NAME."
   (expand-file-name name (expand-file-name claude-repl--skills-dest-dir)))
 
-(defun claude-repl--skill-src-path (name)
-  "Absolute canonical source target for skill NAME."
-  (expand-file-name name (expand-file-name claude-repl-skills-src-dir)))
+(defun claude-repl--skill-src-path (name &optional src-dir)
+  "Absolute canonical source target for skill NAME.
+SRC-DIR defaults to `claude-repl-skills-src-dir' (external source);
+pass `claude-repl-local-skills-src-dir' for repo-local skills."
+  (expand-file-name name (expand-file-name (or src-dir claude-repl-skills-src-dir))))
 
-(defun claude-repl--skill-link-ok-p (name)
+(defun claude-repl--skill-link-ok-p (name &optional src-dir)
   "Return non-nil when the host-level symlink for skill NAME is correct.
 \"Correct\" means DEST is a symlink whose immediate target (via
 `file-symlink-p', not dereferenced) resolves to the expected source
 path.  This ensures we only flag *ours* as healthy — foreign files at
-the same path are treated as problems."
+the same path are treated as problems.  SRC-DIR selects which source
+directory the expected target is computed from."
   (let* ((dest (claude-repl--skill-dest-path name))
          (target (file-symlink-p dest))
-         (expected (claude-repl--skill-src-path name)))
+         (expected (claude-repl--skill-src-path name src-dir)))
     (and target
          (equal (expand-file-name target (file-name-directory dest))
                 expected))))
 
 (defun claude-repl--check-skill-links (issues-cell)
-  "Populate ISSUES-CELL with problems for managed skill symlinks."
-  (dolist (name claude-repl--managed-skills)
-    (let ((dest (claude-repl--skill-dest-path name)))
-      (cond
-       ((not (file-exists-p dest))
-        (claude-repl--push-issue
-         issues-cell 'warn
-         (format "Skill symlink missing: %s — run M-x claude-repl-install-hooks"
-                 dest)))
-       ((not (claude-repl--skill-link-ok-p name))
-        (claude-repl--push-issue
-         issues-cell 'warn
-         (format "Skill symlink points elsewhere: %s — run M-x claude-repl-reinstall-hooks"
-                 dest)))))))
+  "Populate ISSUES-CELL with problems for managed skill symlinks.
+Covers both external skills (`claude-repl--managed-skills') and
+repo-local skills (`claude-repl--managed-local-skills')."
+  (dolist (pair (list (cons claude-repl--managed-skills nil)
+                      (cons claude-repl--managed-local-skills
+                            claude-repl-local-skills-src-dir)))
+    (let ((names   (car pair))
+          (src-dir (cdr pair)))
+      (dolist (name names)
+        (let ((dest (claude-repl--skill-dest-path name)))
+          (cond
+           ((not (file-exists-p dest))
+            (claude-repl--push-issue
+             issues-cell 'warn
+             (format "Skill symlink missing: %s — run M-x claude-repl-install-hooks"
+                     dest)))
+           ((not (claude-repl--skill-link-ok-p name src-dir))
+            (claude-repl--push-issue
+             issues-cell 'warn
+             (format "Skill symlink points elsewhere: %s — run M-x claude-repl-reinstall-hooks"
+                     dest)))))))))
 
 (defun claude-repl--doctor-issues ()
   "Return a list of (LEVEL . MESSAGE) describing hook-install problems.
