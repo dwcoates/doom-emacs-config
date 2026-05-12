@@ -1253,18 +1253,27 @@ Resolves via :project-dir stored in `claude-repl--workspaces'."
 (defun claude-repl--cherry-pick-commits (root target-ws base-branch target-branch)
   "Cherry-pick commits BASE-BRANCH..TARGET-BRANCH in repo at ROOT.
 TARGET-WS is used only for error messages.
-Signals `user-error' if all commits are already incorporated or if a
-conflict is detected (after opening magit)."
+Returns `already-incorporated' (sentinel) when the range is empty —
+the workspace's contribution is already on the parent, so the merge
+is a successful no-op and the caller should proceed with auto-finish.
+Returns nil otherwise.  Signals `user-error' on a cherry-pick conflict
+(after opening magit)."
   (let* ((range (format "%s..%s" base-branch target-branch))
          (range-count (claude-repl--git-string
                        "-C" root "rev-list" "--count" range)))
-    (when (string= range-count "0")
-      (user-error "All commits from workspace '%s' are already incorporated" target-ws))
-    (claude-repl--log target-ws "cherry-pick-commits target-ws=%s target-branch=%s base=%s range=%s"
-                      target-ws target-branch base-branch range)
-    (let ((exit-code (claude-repl--git-exit-code root "cherry-pick" "-x" range)))
-      (claude-repl--log target-ws "cherry-pick-commits exit-code=%s" exit-code))
-    (claude-repl--check-cherry-pick-conflict target-ws root target-ws)))
+    (cond
+     ((string= range-count "0")
+      (claude-repl--log target-ws
+                        "cherry-pick-commits target-ws=%s range=%s already-incorporated"
+                        target-ws range)
+      'already-incorporated)
+     (t
+      (claude-repl--log target-ws "cherry-pick-commits target-ws=%s target-branch=%s base=%s range=%s"
+                        target-ws target-branch base-branch range)
+      (let ((exit-code (claude-repl--git-exit-code root "cherry-pick" "-x" range)))
+        (claude-repl--log target-ws "cherry-pick-commits exit-code=%s" exit-code))
+      (claude-repl--check-cherry-pick-conflict target-ws root target-ws)
+      nil))))
 
 (defun claude-repl--check-cherry-pick-conflict (ws root target-ws)
   "Check if a cherry-pick conflict exists in repo at ROOT.
@@ -1385,17 +1394,23 @@ doing."
       (unless (claude-repl--git-branch-exists-p project-root target-branch)
         (user-error "Branch '%s' not found in repo %s" target-branch project-root))
       (condition-case err
-          (progn
-            (let ((base (claude-repl--cherry-pick-base project-root target-branch)))
-              (claude-repl--cherry-pick-commits project-root target-ws base target-branch))
-            ;; Cherry-pick succeeded — record success state before any
-            ;; user-visible side effects so the MERGED bucket reflects
-            ;; reality even if a later step (tag/load/magit) fails.
+          (let* ((base (claude-repl--cherry-pick-base project-root target-branch))
+                 (result (claude-repl--cherry-pick-commits
+                          project-root target-ws base target-branch))
+                 (already (eq result 'already-incorporated)))
+            ;; Cherry-pick succeeded (or was a no-op) — record success
+            ;; state before any user-visible side effects so the MERGED
+            ;; bucket reflects reality even if a later step (tag/load/
+            ;; magit) fails.
             (claude-repl--ws-put target-ws :merge-completed t)
-            (claude-repl--log target-ws "workspace-merge-do: ws=%s -> :merge-completed t" target-ws)
+            (claude-repl--log target-ws "workspace-merge-do: ws=%s -> :merge-completed t already=%S"
+                              target-ws already)
             (claude-repl--tag-merge-completion project-root target-ws)
             (claude-repl--finish-workspace target-ws)
-            (message "Merged workspace '%s' -> '%s'." target-ws current-ws)
+            (if already
+                (message "Workspace '%s' was already merged into '%s' — finished."
+                         target-ws current-ws)
+              (message "Merged workspace '%s' -> '%s'." target-ws current-ws))
             (load-file claude-repl--config-file)
             (unless silent
               (claude-repl--show-and-refresh-magit-status project-root)))

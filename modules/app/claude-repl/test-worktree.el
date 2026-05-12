@@ -815,14 +815,17 @@ existing worktree."
 
 ;;;; ---- Tests: cherry-pick-commits ----
 
-(ert-deftest claude-repl-test-cherry-pick-commits-empty-range ()
-  "When range is empty (0 commits), signals user-error."
+(ert-deftest claude-repl-test-cherry-pick-commits-empty-range-returns-sentinel ()
+  "When range is empty (0 commits), returns `already-incorporated'
+instead of erroring — the workspace's commits are already on the
+parent, so the merge is a successful no-op and the caller can proceed
+to auto-finish."
   (claude-repl-test--with-temp-git-repo repo
     (claude-repl-test--git-commit repo "M" "base")
     (claude-repl-test--git-checkout repo "feature" t)
     ;; HEAD and feature are at the same commit; range HEAD..feature is empty
-    (should-error (claude-repl--cherry-pick-commits repo "feature" "HEAD" "feature")
-                  :type 'user-error)))
+    (should (eq (claude-repl--cherry-pick-commits repo "feature" "HEAD" "feature")
+                'already-incorporated))))
 
 (ert-deftest claude-repl-test-cherry-pick-commits-success ()
   "Successful cherry-pick with no conflicts."
@@ -2867,9 +2870,11 @@ cherry-pick, with the project-root and source workspace name."
       (should (equal tagged (cons "/tmp/fake" "other-ws"))))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-skips-tag-on-cherry-pick-error ()
-  "When cherry-pick-commits signals user-error (e.g., conflict or
-all-incorporated), tag-merge-completion is NOT invoked and the error
-is re-signaled to the caller."
+  "When cherry-pick-commits signals user-error (e.g., a conflict),
+tag-merge-completion is NOT invoked and the error is re-signaled to
+the caller.  The empty-range case no longer goes through this path —
+it returns the `already-incorporated' sentinel and proceeds to the
+tag + finish steps (see `…-already-incorporated-still-finishes')."
   (claude-repl-test--with-clean-state
     (puthash "other-ws" '() claude-repl--workspaces)
     (let ((tagged nil))
@@ -2880,7 +2885,7 @@ is re-signaled to the caller."
                  ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'claude-repl--cherry-pick-commits)
                   (lambda (_dir _ws _base _br)
-                    (user-error "All commits already incorporated")))
+                    (user-error "Conflict cherry-picking — resolve in magit")))
                  ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'claude-repl--tag-merge-completion)
@@ -2908,6 +2913,33 @@ the target workspace before the auto-finish tear-down runs.  Stubs
                ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
       (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
       (should (eq (claude-repl--ws-get "other-ws" :merge-completed) t)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-already-incorporated-still-finishes ()
+  "When cherry-pick-commits returns `already-incorporated' (commits
+already on the parent), workspace-merge-do treats it as a no-op
+success: tag-merge-completion + finish-workspace still run so a
+stranded already-merged workspace gets cleaned up by re-running
+`SPC TAB M' on it."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (let ((tagged nil)
+          (finished-ws nil))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits)
+                  (lambda (_dir _ws _base _br) 'already-incorporated))
+                 ((symbol-function 'claude-repl--tag-merge-completion)
+                  (lambda (_root _ws) (setq tagged t)))
+                 ((symbol-function 'claude-repl--finish-workspace)
+                  (lambda (ws) (setq finished-ws ws)))
+                 ((symbol-function 'load-file) #'ignore)
+                 ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+        (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+        (should tagged)
+        (should (equal finished-ws "other-ws"))))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-finishes-workspace-on-success ()
   "Successful merge auto-finishes the target workspace — the cherry-pick
