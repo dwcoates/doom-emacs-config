@@ -1492,9 +1492,24 @@ hiding genuinely wants to delete a side window."
 
 ;;;; Global drawer-mirror dispatch -----------------------------------------
 
-(defun claude-repl-drawer--call-in-drawer (fn)
+(defun claude-repl-drawer--call-in-drawer (fn &optional preserve-cursor)
   "Call FN with the drawer buffer current; sync window-point + overlay
 afterward without selecting the drawer window.
+
+When PRESERVE-CURSOR is non-nil, snapshots the workspace at point
+before FN runs and re-positions the cursor onto that same workspace
+afterward.  Without this, side effects of FN can move the drawer
+cursor off the user's navigated entry: `+workspace-switch' triggers
+`--sync-cursor-to-current-ws' which snaps to the newly-active ws;
+persp's window-config restoration can install a fresh drawer window
+with a stale `window-point' from the saved config; a re-render whose
+`saved-ws' anchor is no longer present in the buffer falls back to a
+line-number heuristic that may land outside any entry.  Preservation
+makes all non-navigational C-S-<key> dispatchers (visit, nuke, kill,
+toggle-hidden, …) keep the drawer cursor where the user pointed it.
+When the snapshot workspace no longer exists in the buffer after FN
+(e.g. after `claude-repl-drawer-nuke'), the cursor is left wherever
+FN naturally placed it.
 
 We deliberately avoid `with-selected-window' here.  Selecting and then
 unselecting the drawer window for every keystroke fires window-selection
@@ -1511,13 +1526,19 @@ the actual command is running in the caller's buffer, not the drawer).
 
 Errors if no drawer buffer exists — caller can recover by toggling
 the drawer open with `SPC o d' first."
-  (let* ((buf (or (get-buffer claude-repl-drawer-buffer-name)
-                  (user-error "Drawer not open — `SPC o d' first")))
-         (win (get-buffer-window buf t)))
+  (let ((buf (or (get-buffer claude-repl-drawer-buffer-name)
+                 (user-error "Drawer not open — `SPC o d' first"))))
     (with-current-buffer buf
-      (funcall fn)
+      (let ((pre-ws (and preserve-cursor
+                         (claude-repl-drawer--workspace-at-point))))
+        (funcall fn)
+        (when pre-ws
+          (claude-repl-drawer--goto-workspace-line pre-ws)))
       (claude-repl-drawer--post-command)
-      (when (window-live-p win)
+      ;; Re-query the drawer window after FN: persp's window-config
+      ;; restoration during a workspace switch can replace it with a
+      ;; fresh window, leaving any pre-fn handle dead.
+      (when-let ((win (get-buffer-window buf t)))
         (set-window-point win (point))))))
 
 (defun claude-repl-drawer-global-next ()
@@ -1533,57 +1554,57 @@ the drawer open with `SPC o d' first."
 (defun claude-repl-drawer-global-visit ()
   "Visit (switch to) the workspace at the drawer cursor."
   (interactive)
-  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-visit))
+  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-visit t))
 
 (defun claude-repl-drawer-global-nuke ()
   "Nuke the workspace at the drawer cursor."
   (interactive)
-  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-nuke))
+  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-nuke t))
 
 (defun claude-repl-drawer-global-kill ()
   "Kill the workspace at the drawer cursor."
   (interactive)
-  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-kill))
+  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-kill t))
 
 (defun claude-repl-drawer-global-send-prompt ()
   "Read a prompt and send to the workspace at the drawer cursor."
   (interactive)
-  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-send-prompt))
+  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-send-prompt t))
 
 (defun claude-repl-drawer-global-merge-into-master ()
   "Merge the workspace at the drawer cursor into its source/master."
   (interactive)
-  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-merge-into-master))
+  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-merge-into-master t))
 
 (defun claude-repl-drawer-global-new-fork ()
   "Fork the workspace at the drawer cursor into a new worktree."
   (interactive)
-  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-new-fork))
+  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-new-fork t))
 
 (defun claude-repl-drawer-global-toggle-hidden ()
   "Toggle hidden state of the workspace at the drawer cursor."
   (interactive)
-  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-toggle-hidden))
+  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-toggle-hidden t))
 
 (defun claude-repl-drawer-global-toggle-mark ()
   "Toggle the mark on the workspace at the drawer cursor."
   (interactive)
-  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-toggle-mark))
+  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-toggle-mark t))
 
 (defun claude-repl-drawer-global-clear-marks ()
   "Clear all drawer marks."
   (interactive)
-  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-clear-marks))
+  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-clear-marks t))
 
 (defun claude-repl-drawer-global-priority-up ()
   "Cycle priority of the workspace at the drawer cursor up (toward p05)."
   (interactive)
-  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-priority-up))
+  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-priority-up t))
 
 (defun claude-repl-drawer-global-priority-down ()
   "Cycle priority of the workspace at the drawer cursor down (toward nil)."
   (interactive)
-  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-priority-down))
+  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-priority-down t))
 
 ;;;; Auto-revert: drawer cursor follows current workspace -------------------
 

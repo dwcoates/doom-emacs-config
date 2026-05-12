@@ -572,6 +572,80 @@ local j/k.  Asserts the selected window is unchanged across the call."
     (kill-buffer b))
   (should-error (claude-repl-drawer-global-next) :type 'user-error))
 
+(ert-deftest claude-repl-drawer-test-call-in-drawer-preserves-cursor ()
+  "`--call-in-drawer' with PRESERVE-CURSOR=t restores the cursor to the
+workspace at point before FN, overriding any cursor move FN's side
+effects would otherwise leave behind (persp auto-sync, render fallback).
+Simulates this by giving FN a body that yanks the cursor onto a
+different entry — the wrapper must put it back."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--register "beta"  :priority "p2")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (claude-repl-drawer-mode)
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-workspace-line "beta"))
+            (claude-repl-drawer--call-in-drawer
+             (lambda ()
+               ;; Simulate a side-effect that moves the cursor away
+               ;; (e.g. `--sync-cursor-to-current-ws' after a persp
+               ;; switch landing on a different active workspace).
+               (claude-repl-drawer--goto-workspace-line "alpha"))
+             t)
+            (with-current-buffer buf
+              (should (equal (claude-repl-drawer--workspace-at-point) "beta"))))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-drawer-test-call-in-drawer-no-preserve-keeps-fn-cursor ()
+  "`--call-in-drawer' without PRESERVE-CURSOR keeps the cursor wherever FN
+left it — required for the navigational dispatchers (`global-next' /
+`global-prev') whose entire purpose is to move the cursor."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--register "beta"  :priority "p2")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (claude-repl-drawer-mode)
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-workspace-line "beta"))
+            (claude-repl-drawer--call-in-drawer
+             (lambda ()
+               (claude-repl-drawer--goto-workspace-line "alpha")))
+            (with-current-buffer buf
+              (should (equal (claude-repl-drawer--workspace-at-point) "alpha"))))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-drawer-test-call-in-drawer-preserve-falls-back-when-ws-gone ()
+  "When the preserved workspace no longer exists after FN (e.g. nuked),
+`--call-in-drawer' leaves the cursor wherever FN naturally placed it
+instead of erroring or jumping to point-min."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--register "beta"  :priority "p2")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (claude-repl-drawer-mode)
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-workspace-line "beta"))
+            (claude-repl-drawer--call-in-drawer
+             (lambda ()
+               ;; Simulate nuke: remove the preserved ws + re-render +
+               ;; land cursor on the surviving entry.
+               (remhash "beta" claude-repl--workspaces)
+               (claude-repl-drawer--render)
+               (claude-repl-drawer--goto-workspace-line "alpha"))
+             t)
+            (with-current-buffer buf
+              (should (equal (claude-repl-drawer--workspace-at-point) "alpha"))))
+        (kill-buffer buf)))))
+
 (ert-deftest claude-repl-drawer-test-sync-cursor-to-current-ws ()
   "`--sync-cursor-to-current-ws' positions point on the current ws's entry."
   (claude-repl-test--with-clean-state
