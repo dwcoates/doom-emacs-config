@@ -1530,6 +1530,15 @@ doing."
             ;; removes the worktree).  The worktree directory on disk
             ;; is intentionally preserved here.
             (claude-repl--nuke-one-workspace target-ws 'preserve-entry)
+            ;; Re-fetch the drawer's `:detail-*' cache for the merged
+            ;; workspace so the MERGED bucket's expanded view reflects
+            ;; post-merge git state (ahead-master/source, dirty count,
+            ;; last commit) instead of values cached pre-merge.  The
+            ;; hash entry survives via `preserve-entry' and the worktree
+            ;; dir on disk is preserved, so the synchronous git calls
+            ;; in `--refresh-detail-cache' still resolve.
+            (when (fboundp 'claude-repl-drawer--refresh-detail-cache)
+              (claude-repl-drawer--refresh-detail-cache target-ws))
             (if already
                 (message "Workspace '%s' was already merged into '%s' — merged."
                          target-ws current-ws)

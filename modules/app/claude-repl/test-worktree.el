@@ -3363,6 +3363,100 @@ earlier partial success."
         (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t))
       (should-not (claude-repl--ws-get "other-ws" :merge-completed)))))
 
+(ert-deftest claude-repl-test-workspace-merge-do-refreshes-detail-cache-on-success ()
+  "After a successful merge, the drawer's `:detail-*' cache for the
+target workspace is refreshed.  The cache populated pre-merge (e.g.,
+`:detail-master-ahead' showing the soon-to-be-merged commit count)
+would otherwise linger in the MERGED bucket's expanded view — the
+post-merge refresh ensures the rendered values reflect current git
+state, not stale pre-merge snapshots."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '(:detail-master-ahead 99) claude-repl--workspaces)
+    (let ((refreshed-ws nil))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
+                 ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+                 ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
+                 ((symbol-function 'load-file) #'ignore)
+                 ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
+                 ((symbol-function 'claude-repl-drawer--refresh-detail-cache)
+                  (lambda (ws) (setq refreshed-ws ws))))
+        (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+        (should (equal refreshed-ws "other-ws"))))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-refreshes-detail-cache-after-nuke ()
+  "The post-merge `:detail-*' refresh runs after `--nuke-one-workspace'
+so the cache reflects the fully settled MERGED-bucket state — the nuke
+preserves the hash entry and the worktree on disk, so the refresh's
+synchronous git calls still resolve."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (let ((call-order nil))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
+                 ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+                 ((symbol-function 'load-file) #'ignore)
+                 ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
+                 ((symbol-function 'claude-repl--nuke-one-workspace)
+                  (lambda (&rest _) (push 'nuke call-order)))
+                 ((symbol-function 'claude-repl-drawer--refresh-detail-cache)
+                  (lambda (_ws) (push 'refresh call-order))))
+        (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+        (should (equal (nreverse call-order) '(nuke refresh)))))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-skips-detail-refresh-when-unbound ()
+  "The post-merge cache refresh is guarded by `fboundp' so a load-order
+oddity (drawer not yet loaded) cannot break the merge.  Verifies the
+merge completes normally when `--refresh-detail-cache' is unbound."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
+               ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+               ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
+               ((symbol-function 'load-file) #'ignore)
+               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
+               ((symbol-function 'fboundp)
+                (lambda (sym) (not (eq sym 'claude-repl-drawer--refresh-detail-cache)))))
+      ;; Should complete without error and still record :merge-completed.
+      (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+      (should (eq (claude-repl--ws-get "other-ws" :merge-completed) t)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-skips-detail-refresh-on-failure ()
+  "A failed cherry-pick must NOT refresh the detail cache — the merge
+didn't complete, so there's no fresh post-merge state to capture, and
+running the refresh on a workspace headed for `:dead' just wastes git
+calls."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (let ((refresh-called nil))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits)
+                  (lambda (_dir _ws _base _br) (user-error "Conflict")))
+                 ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
+                 ((symbol-function 'load-file) #'ignore)
+                 ((symbol-function 'claude-repl-drawer--refresh-detail-cache)
+                  (lambda (_ws) (setq refresh-called t))))
+        (ignore-errors
+          (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t))
+        (should-not refresh-called)))))
+
 (ert-deftest claude-repl-test-workspace-merge-do-clears-merging-on-success ()
   "After a successful cherry-pick, `:merging' is cleared on the target
 workspace.  Asserts the in-flight workflow flag does not linger past
