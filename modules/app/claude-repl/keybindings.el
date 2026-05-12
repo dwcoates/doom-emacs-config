@@ -678,7 +678,8 @@ global drawer-mirror bindings win in vterm buffers."
 ;; SPC j -- Tell Claude to do a predefined thing
 (map! :leader
       (:prefix ("j" . "claude")
-       :desc "One-shot doom edit"       "o" #'claude-repl-create-doom-oneshot-workspace
+       :desc "One-shot doom edit (from master)"        "o" #'claude-repl-create-doom-oneshot-workspace
+       :desc "One-shot doom edit (from current branch)" "O" #'claude-repl-create-doom-oneshot-workspace-from-current-branch
        :desc "Kill workspace"           "d" #'claude-repl-kill-workspace
        :desc "Update GitHub PR description"  "r" #'claude-repl-update-pr
        :desc "Nuke workspace"           "x" #'claude-repl-nuke-workspace

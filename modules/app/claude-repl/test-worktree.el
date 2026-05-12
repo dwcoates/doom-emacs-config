@@ -4099,4 +4099,97 @@ spell that out so the spawned agent doesn't merge half-finished work."
   (should (string-match-p "tests" claude-repl--oneshot-merge-suffix))
   (should (string-match-p "[Cc]ommit" claude-repl--oneshot-merge-suffix)))
 
+;;;; ---- Tests: claude-repl-create-doom-oneshot-workspace-from-current-branch ----
+
+(ert-deftest claude-repl-test-create-doom-oneshot-from-current-branch-uses-head-base ()
+  "doom-oneshot-from-current-branch branches off HEAD (current branch of
+the doom-config repo) rather than `master', so the one-shot builds on
+top of in-flight doom-config work."
+  (claude-repl-test--with-clean-state
+    (let ((captured-base :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root base _fork-from)
+                   (setq captured-base base))))
+        (claude-repl-create-doom-oneshot-workspace-from-current-branch)
+        (should (equal captured-base "HEAD"))))))
+
+(ert-deftest claude-repl-test-create-doom-oneshot-from-current-branch-pins-git-root-to-doom-config ()
+  "The current-branch variant still pins git-root to `~/.config/doom'
+regardless of the calling workspace's project — only the base ref
+changes from `master' to HEAD."
+  (claude-repl-test--with-clean-state
+    (let ((captured-git-root :unset))
+      (cl-letf (((symbol-function '+workspace-current-name)
+                 (lambda () "unrelated-ws"))
+                ((symbol-function 'claude-repl--ws-dir)
+                 (lambda (_ws) "/tmp/unrelated-repo/"))
+                ((symbol-function 'read-string)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed git-root _base _fork-from)
+                   (setq captured-git-root git-root))))
+        (claude-repl-create-doom-oneshot-workspace-from-current-branch)
+        (should (equal captured-git-root claude-repl--doom-config-dir))))))
+
+(ert-deftest claude-repl-test-create-doom-oneshot-from-current-branch-appends-merge-suffix ()
+  "The current-branch variant must also append the merge-on-success suffix
+to the prefixed prompt — the spawned agent still needs to know to invoke
+`/workspace-merge' after a successful implementation."
+  (claude-repl-test--with-clean-state
+    (let ((captured-prefixed :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw prefixed _git-root _base _fork-from)
+                   (setq captured-prefixed prefixed))))
+        (claude-repl-create-doom-oneshot-workspace-from-current-branch)
+        (should (string-match-p "/workspace-merge" captured-prefixed))
+        (should (string-match-p
+                 (regexp-quote claude-repl--oneshot-merge-suffix)
+                 captured-prefixed))))))
+
+(ert-deftest claude-repl-test-create-doom-oneshot-from-current-branch-keeps-raw-prompt-clean ()
+  "The merge suffix must not pollute the raw prompt used for slug
+generation — same constraint as the master variant."
+  (claude-repl-test--with-clean-state
+    (let ((captured-raw :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (raw _prefixed _git-root _base _fork-from)
+                   (setq captured-raw raw))))
+        (claude-repl-create-doom-oneshot-workspace-from-current-branch)
+        (should (equal captured-raw "tweak the modeline"))
+        (should-not (string-match-p "/workspace-merge" captured-raw))))))
+
+(ert-deftest claude-repl-test-create-doom-oneshot-from-current-branch-rejects-empty-prompt ()
+  "An empty/whitespace prompt is rejected for the current-branch variant
+too — there is nothing to slug or implement."
+  (claude-repl-test--with-clean-state
+    (let ((spawned nil))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "   "))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (&rest _) (setq spawned t))))
+        (should-error
+         (claude-repl-create-doom-oneshot-workspace-from-current-branch)
+         :type 'user-error)
+        (should-not spawned)))))
+
+(ert-deftest claude-repl-test-create-doom-oneshot-default-base-is-master ()
+  "Calling the parent function with no BASE arg still defaults to `master'
+— preserves backwards compatibility for the existing `SPC j o' binding
+and existing call sites that pass no arguments."
+  (claude-repl-test--with-clean-state
+    (let ((captured-base :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root base _fork-from)
+                   (setq captured-base base))))
+        (claude-repl-create-doom-oneshot-workspace)
+        (should (equal captured-base "master"))))))
+
 ;;; test-worktree.el ends here

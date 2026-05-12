@@ -825,7 +825,7 @@ the JSON file lands and the file-watcher dispatches it."
       (claude-repl--spawn-workspace-generation
        raw-prompt prefixed-prompt git-root base-commit nil))))
 
-(defun claude-repl-create-doom-oneshot-workspace ()
+(defun claude-repl-create-doom-oneshot-workspace (&optional base)
   "Create a one-shot worktree workspace rooted in `~/.config/doom'.
 Equivalent of `SPC TAB N' but pinned to the doom-config repo regardless
 of the calling workspace, and with an instruction appended to the
@@ -833,26 +833,48 @@ spawned agent's first message asking it to invoke `/workspace-merge'
 once the change is implemented, tested, and committed (or to stop and
 surface on genuine ambiguity).
 
+BASE selects the git ref the new branch is created from.  It is a
+symbol key in `claude-repl--worktree-base-commits':
+  `master' (default) — branch off LOCAL `master' of the doom-config
+                       repo, mirroring `SPC TAB N'.
+  `head'             — branch off the doom-config repo's current HEAD
+                       (whatever branch is checked out at
+                       `~/.config/doom').  Use when iterating on a
+                       doom-config branch and you want the one-shot to
+                       build on top of in-flight work.
+
 The merge instruction is added to the PREFIXED PROMPT (the spawned
 agent's first message) but NOT to the raw description used for slug
 generation, so the workspace name stays clean.  The headless `claude'
 that runs `/workspace-generation' itself MUST NOT invoke
 `/workspace-merge' — the prompt builder makes that explicit."
   (interactive)
-  (let* ((git-root claude-repl--doom-config-dir)
-         (base-commit (claude-repl--resolve-worktree-base 'master))
+  (let* ((base (or base 'master))
+         (git-root claude-repl--doom-config-dir)
+         (base-commit (claude-repl--resolve-worktree-base base))
          (raw-prompt (read-string "One-shot doom prompt: ")))
     (when (string-empty-p (string-trim (or raw-prompt "")))
       (user-error "Preemptive prompt is required"))
     (let* ((suffixed-raw (concat raw-prompt claude-repl--oneshot-merge-suffix))
            (prefixed-prompt (concat claude-repl--autonomous-prompt-prefix
                                     suffixed-raw)))
-      (claude-repl--log nil "create-doom-oneshot-workspace: git-root=%s base-commit=%s"
-                        git-root base-commit)
+      (claude-repl--log nil "create-doom-oneshot-workspace: base=%s git-root=%s base-commit=%s"
+                        base git-root base-commit)
       (message "Generating doom-oneshot workspace name via `claude -p --model %s'..."
                claude-repl-workspace-generation-model)
       (claude-repl--spawn-workspace-generation
        raw-prompt prefixed-prompt git-root base-commit nil))))
+
+(defun claude-repl-create-doom-oneshot-workspace-from-current-branch ()
+  "Create a one-shot doom-config worktree branched off HEAD.
+Variant of `claude-repl-create-doom-oneshot-workspace' that branches off
+the doom-config repo's current branch (whatever is checked out at
+`~/.config/doom') instead of `master'.  Same as the master variant in
+every other respect: git-root is pinned to the doom-config repo
+regardless of the calling workspace, and the spawned agent receives the
+`/workspace-merge'-on-success instruction."
+  (interactive)
+  (claude-repl-create-doom-oneshot-workspace 'head))
 
 (defun claude-repl-create-worktree-workspace-from-origin-master (&optional source-ws)
   "Create a new worktree workspace branched from local `master'.
