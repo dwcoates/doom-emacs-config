@@ -1128,14 +1128,55 @@ Claude panels to fill the frame.  Calling again restores the layout."
 Set when `claude-repl-fullscreen-and-focus' maximizes a non-Claude window,
 cleared on restore.")
 
+(defun claude-repl--fullscreen-leave-side-window ()
+  "Move out of a side window before fullscreening.
+
+When `claude-repl-fullscreen-and-focus' is invoked from inside a side
+window (e.g. the workspace drawer), `selected-window' is the side
+window itself.  The non-Claude branch would then treat the drawer as
+the window to KEEP and sweep every main-area window — leaving the
+user's actual work window (or Claude panels) destroyed and only the
+drawer alongside an arbitrary survivor from `delete-window's benign
+sole-main-window error.
+
+Pre-selecting a real main-area leaf window sidesteps the path: the
+subsequent branch dispatch reads the buffer of a real main-area
+window and the delete sweep keeps that window instead of the
+drawer.
+
+`window-main-window' returns an internal container window when the
+main area has been split, so we descend the tree to a live leaf
+before `select-window'.
+
+No-op when `selected-window' is not a side window."
+  (when (claude-repl-window--side-window-p (selected-window))
+    (when-let* ((main (and (fboundp 'window-main-window) (window-main-window)))
+                (leaf (claude-repl--first-live-leaf main)))
+      (select-window leaf))))
+
+(defun claude-repl--first-live-leaf (win)
+  "Return the first live leaf window beneath WIN.
+A live leaf is one that displays a buffer (`window-live-p').  If WIN
+is itself live, returns WIN.  Otherwise descends `window-child' until
+a leaf is reached.  Returns nil if no leaf is found."
+  (cond
+   ((null win) nil)
+   ((window-live-p win) win)
+   (t (claude-repl--first-live-leaf (window-child win)))))
+
 (defun claude-repl-fullscreen-and-focus ()
   "Toggle fullscreen for Claude panels and focus the input window.
 When in a Claude panel buffer, maximizes both Claude windows and moves
 point to the input buffer, or restores the layout.
 When not in a Claude panel buffer, maximizes the current window within
 the non-side area (preserving the workspace drawer) and saves the
-layout; calling again restores it."
+layout; calling again restores it.
+When invoked from a side window (e.g. the workspace drawer), first
+moves point to the frame's main window so the fullscreen target is a
+real main-area window — see
+`claude-repl--fullscreen-leave-side-window'."
   (interactive)
+  (claude-repl--fullscreen-leave-side-window)
   (if (claude-repl--claude-panel-buffer-p)
       (progn
         (claude-repl-toggle-fullscreen)

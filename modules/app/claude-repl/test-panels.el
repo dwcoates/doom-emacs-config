@@ -2909,6 +2909,141 @@ of the redirect."
         (setq claude-repl--window-fullscreen-config nil)
         (when (get-buffer "*other*") (kill-buffer "*other*"))))))
 
+;;;; ---- Tests: --first-live-leaf ----
+
+(ert-deftest claude-repl-test-panels-first-live-leaf-nil ()
+  "`claude-repl--first-live-leaf' returns nil for nil input."
+  (should-not (claude-repl--first-live-leaf nil)))
+
+(ert-deftest claude-repl-test-panels-first-live-leaf-on-leaf ()
+  "`claude-repl--first-live-leaf' returns WIN when WIN is already a live leaf."
+  (claude-repl-test--with-clean-state
+    (let ((leaf (selected-window)))
+      (should (eq (claude-repl--first-live-leaf leaf) leaf)))))
+
+(ert-deftest claude-repl-test-panels-first-live-leaf-descends-container ()
+  "`claude-repl--first-live-leaf' descends an internal container window
+to find a live leaf.  Real-world trigger: `window-main-window' returns
+an internal container when the main area has been split."
+  (claude-repl-test--with-clean-state
+    (let ((main-buf (get-buffer-create "*fs-leaf-main*"))
+          (extra-buf (get-buffer-create "*fs-leaf-extra*"))
+          (drawer-buf (get-buffer-create "*fs-leaf-drawer*")))
+      (unwind-protect
+          (progn
+            (switch-to-buffer main-buf)
+            (let* ((main-win (selected-window))
+                   (extra-win (split-window-below)))
+              (set-window-buffer extra-win extra-buf)
+              (display-buffer-in-side-window drawer-buf '((side . left) (slot . 0)))
+              (let* ((root (window-main-window))
+                     (leaf (claude-repl--first-live-leaf root)))
+                (should-not (window-live-p root))
+                (should (window-live-p leaf))
+                (should (memq leaf (list main-win extra-win))))))
+        (dolist (buf (list drawer-buf extra-buf main-buf))
+          (when (buffer-live-p buf) (kill-buffer buf)))))))
+
+;;;; ---- Tests: --fullscreen-leave-side-window ----
+
+(ert-deftest claude-repl-test-panels-fullscreen-leave-side-window-noop-on-main ()
+  "`claude-repl--fullscreen-leave-side-window' does NOT change selection
+when the selected window is already a non-side main-area window."
+  (claude-repl-test--with-clean-state
+    (let ((other-buf (get-buffer-create "*fs-leave-side-noop*")))
+      (unwind-protect
+          (progn
+            (switch-to-buffer other-buf)
+            (let ((orig (selected-window)))
+              (claude-repl--fullscreen-leave-side-window)
+              (should (eq (selected-window) orig))))
+        (when (buffer-live-p other-buf) (kill-buffer other-buf))))))
+
+(ert-deftest claude-repl-test-panels-fullscreen-leave-side-window-from-drawer ()
+  "`claude-repl--fullscreen-leave-side-window' selects the frame's main
+window when invoked from a side window."
+  (claude-repl-test--with-clean-state
+    (let ((main-buf (get-buffer-create "*fs-leave-side-main*"))
+          (drawer-buf (get-buffer-create "*fs-leave-side-drawer*")))
+      (unwind-protect
+          (progn
+            (switch-to-buffer main-buf)
+            (let* ((main-win (selected-window))
+                   (drawer-win (display-buffer-in-side-window
+                                drawer-buf
+                                '((side . left) (slot . 0)))))
+              (select-window drawer-win)
+              (should (claude-repl-window--side-window-p (selected-window)))
+              (claude-repl--fullscreen-leave-side-window)
+              (should-not (claude-repl-window--side-window-p (selected-window)))
+              (should (eq (selected-window) main-win))))
+        (dolist (buf (list drawer-buf main-buf))
+          (when (buffer-live-p buf) (kill-buffer buf)))))))
+
+;;;; ---- Tests: fullscreen-and-focus side-window redirect ----
+
+(ert-deftest claude-repl-test-panels-fullscreen-and-focus-from-drawer-preserves-main ()
+  "When invoked from inside the drawer side window with several main
+windows visible, `claude-repl-fullscreen-and-focus' leaves the
+originally-focused main window's siblings swept and the drawer alive —
+crucially, the originating main window survives instead of being
+sacrificed because the drawer was the `keep' anchor."
+  (claude-repl-test--with-clean-state
+    (let ((main-buf (get-buffer-create "*fs-from-drawer-main*"))
+          (extra-buf (get-buffer-create "*fs-from-drawer-extra*"))
+          (drawer-buf (get-buffer-create "*fs-from-drawer-drawer*"))
+          (claude-repl--window-fullscreen-config nil))
+      (unwind-protect
+          (progn
+            (switch-to-buffer main-buf)
+            (let* ((main-win (selected-window))
+                   (extra-win (split-window-below)))
+              (set-window-buffer extra-win extra-buf)
+              (let ((drawer-win (display-buffer-in-side-window
+                                 drawer-buf
+                                 '((side . left) (slot . 0)))))
+                (select-window drawer-win)
+                (claude-repl-fullscreen-and-focus)
+                ;; Drawer (side window) survives.
+                (should (window-live-p drawer-win))
+                ;; The originating main window survives — without the
+                ;; side-window redirect it would be deleted because the
+                ;; drawer was `keep' and the predicate matches it.
+                (should (window-live-p main-win))
+                ;; The other main-area window is swept.
+                (should-not (window-live-p extra-win)))))
+        (setq claude-repl--window-fullscreen-config nil)
+        (dolist (buf (list drawer-buf extra-buf main-buf))
+          (when (buffer-live-p buf) (kill-buffer buf)))))))
+
+(ert-deftest claude-repl-test-panels-fullscreen-and-focus-from-drawer-routes-to-claude-branch ()
+  "When the drawer is selected but the main window contains a Claude
+panel buffer, the side-window redirect lands on the Claude buffer and
+the function takes the Claude branch (delegates to toggle-fullscreen)."
+  (claude-repl-test--with-clean-state
+    (let ((vterm-buf (get-buffer-create "*claude-panel-fs-redir*"))
+          (drawer-buf (get-buffer-create "*fs-redir-drawer*"))
+          (toggle-called nil))
+      (unwind-protect
+          (progn
+            (switch-to-buffer vterm-buf)
+            (let* ((vterm-win (selected-window))
+                   (drawer-win (display-buffer-in-side-window
+                                drawer-buf
+                                '((side . left) (slot . 0)))))
+              (select-window drawer-win)
+              (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen)
+                         (lambda () (setq toggle-called t)))
+                        ((symbol-function '+workspace-current-name)
+                         (lambda () "test-ws")))
+                (claude-repl-fullscreen-and-focus))
+              ;; The redirect moved point onto the Claude panel main window,
+              ;; so the Claude branch fired.
+              (should toggle-called)
+              (should (window-live-p vterm-win))))
+        (dolist (buf (list drawer-buf vterm-buf))
+          (when (buffer-live-p buf) (kill-buffer buf)))))))
+
 ;;;; ---- Tests: unhide-workspace ----
 
 (ert-deftest claude-repl-test-unhide-workspace-flips-hidden-to-active ()
