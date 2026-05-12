@@ -1822,6 +1822,76 @@ Reorder must run after `apply-workspace-properties' so the new workspace's
         (should-not timer-scheduled)
         (should (equal resolve-calls 0))))))
 
+(ert-deftest claude-repl-test-handle-create-command-missing-name-refuses ()
+  "handle-create-command with no `name' key must refuse — a missing name
+would otherwise leak a phantom \"none\" / \"nil\" workspace into the
+registry once `--bare-workspace-name' is called on it downstream."
+  (claude-repl-test--with-clean-state
+    (let ((timer-scheduled nil))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat _fn &rest _args)
+                   (setq timer-scheduled t))))
+        (claude-repl--handle-create-command
+         '((type . "create") (git_root . "/fake/root"))
+         0)
+        (should-not timer-scheduled)))))
+
+(ert-deftest claude-repl-test-handle-create-command-null-name-refuses ()
+  "handle-create-command with JSON `null' name (parsed as `:null') must refuse."
+  (claude-repl-test--with-clean-state
+    (let ((timer-scheduled nil))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat _fn &rest _args)
+                   (setq timer-scheduled t))))
+        (claude-repl--handle-create-command
+         '((type . "create") (name . :null) (git_root . "/fake/root"))
+         0)
+        (should-not timer-scheduled)))))
+
+(ert-deftest claude-repl-test-handle-create-command-empty-name-refuses ()
+  "handle-create-command with an empty-string `name' must refuse."
+  (claude-repl-test--with-clean-state
+    (let ((timer-scheduled nil))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat _fn &rest _args)
+                   (setq timer-scheduled t))))
+        (claude-repl--handle-create-command
+         '((type . "create") (name . "") (git_root . "/fake/root"))
+         0)
+        (should-not timer-scheduled)))))
+
+(ert-deftest claude-repl-test-handle-create-command-persp-nil-name-refuses ()
+  "handle-create-command with a bare `name' equal to `persp-nil-name' must
+refuse.  The headless `/workspace-generation' flow occasionally emits
+\"none\" (or \"DWC/none\") when there is no slug material; without this
+guard, the downstream `+workspace-new' would collide with the
+nil-perspective sentinel and the entry would surface in the drawer and
+nuke prompts as a stray \"none\" workspace."
+  (claude-repl-test--with-clean-state
+    (let ((timer-scheduled nil)
+          (persp-nil-name "none"))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat _fn &rest _args)
+                   (setq timer-scheduled t))))
+        (claude-repl--handle-create-command
+         '((type . "create") (name . "none") (git_root . "/fake/root"))
+         0)
+        (should-not timer-scheduled)))))
+
+(ert-deftest claude-repl-test-handle-create-command-dwc-persp-nil-name-refuses ()
+  "handle-create-command must refuse a `DWC/none' name because the bare
+form collides with `persp-nil-name'."
+  (claude-repl-test--with-clean-state
+    (let ((timer-scheduled nil)
+          (persp-nil-name "none"))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat _fn &rest _args)
+                   (setq timer-scheduled t))))
+        (claude-repl--handle-create-command
+         '((type . "create") (name . "DWC/none") (git_root . "/fake/root"))
+         0)
+        (should-not timer-scheduled)))))
+
 (ert-deftest claude-repl-test-handle-create-command-passes-base-commit-when-given ()
   "handle-create-command threads a non-empty `base_commit' field through to the
 timer callback — letting the workspace-generation flow request HEAD without forking."

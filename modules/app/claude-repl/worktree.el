@@ -1020,6 +1020,14 @@ it is used verbatim after `expand-file-name'.  If \"git_root\" is missing or
 empty, the workspace is NOT created — callers must emit git_root explicitly
 rather than relying on the ambient Emacs context.
 
+CMD MUST also contain a non-empty string \"name\" field whose bare form
+\(after `claude-repl--bare-workspace-name') is not `persp-nil-name'
+\(default \"none\").  A missing/`null'/empty name — or one that resolves
+to the nil-perspective sentinel — would otherwise leak a phantom
+\"none\" entry into `claude-repl--workspaces' and surface in the drawer
+and nuke prompts.  Headless `/workspace-generation' occasionally emits
+such payloads when the model has no slug material to work with.
+
 CMD may contain an optional \"base_commit\" field naming the git ref the
 new branch is created from (e.g. \"HEAD\", \"master\").  When absent or
 empty, the default applies (HEAD for forks,
@@ -1033,6 +1041,10 @@ empty, the default applies (HEAD for forks,
          (base-commit (and (stringp cmd-base-commit)
                            (not (string-empty-p cmd-base-commit))
                            cmd-base-commit))
+         (nil-name (and (boundp 'persp-nil-name) persp-nil-name))
+         (bare-name (and (stringp name)
+                         (not (string-empty-p name))
+                         (claude-repl--bare-workspace-name name)))
          (fork-session-id
           (condition-case err
               (claude-repl--resolve-fork-session-id fork-from)
@@ -1046,6 +1058,21 @@ empty, the default applies (HEAD for forks,
      ((and fork-from (null fork-session-id))
       (claude-repl--log name "handle-create-command: SKIPPED workspace '%s' (fork_from=%s failed, refusing silent fallback)"
                         name fork-from))
+     ;; name is mandatory — must be a non-empty string and not resolve
+     ;; to `persp-nil-name'.  Without this guard a malformed
+     ;; workspace-generation payload (missing name, JSON `null', empty
+     ;; string, or literal "none") would leak a phantom entry into
+     ;; `claude-repl--workspaces' that surfaces in the drawer / nuke
+     ;; prompts as a stray "none" workspace.
+     ((or (not (stringp name)) (string-empty-p name))
+      (claude-repl--log nil "handle-create-command: SKIPPED workspace (missing/empty/non-string name=%S)" name)
+      (message "[claude-repl] ERROR: cannot create workspace — `name' is required and must be a non-empty string (got %S)"
+               name))
+     ((and nil-name (equal bare-name nil-name))
+      (claude-repl--log name "handle-create-command: SKIPPED workspace '%s' (bare name '%s' equals persp-nil-name '%s')"
+                        name bare-name nil-name)
+      (message "[claude-repl] ERROR: cannot create workspace '%s' — bare name '%s' collides with `persp-nil-name'"
+               name bare-name))
      ;; git_root is mandatory — no ambient fallback.
      ((or (null cmd-git-root) (string-empty-p cmd-git-root))
       (claude-repl--log name "handle-create-command: SKIPPED workspace '%s' (missing/empty git_root, refusing silent fallback)"
