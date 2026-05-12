@@ -1662,12 +1662,12 @@ just restored from the destination workspace's saved config."
   "Reload-after-defcustom-change forces the latest palette to apply.
 Without the explicit force-reset, defcustom would keep prior values for
 already-bound symbols and palette tweaks would require an Emacs restart."
-  (should (equal (alist-get :done       claude-repl-drawer-state-icons) "💙"))
-  (should (equal (alist-get :thinking   claude-repl-drawer-state-icons) "💙"))
-  (should (equal (alist-get :idle       claude-repl-drawer-state-icons) "💙"))
-  (should (equal (alist-get :init       claude-repl-drawer-state-icons) "💙"))
-  (should (equal (alist-get :stop-failed claude-repl-drawer-state-icons) "💙"))
-  (should (equal (alist-get :dead       claude-repl-drawer-state-icons) "💙")))
+  (should (equal (alist-get :done       claude-repl-drawer-state-icons) "✅"))
+  (should (equal (alist-get :thinking   claude-repl-drawer-state-icons) "⌛"))
+  (should (equal (alist-get :idle       claude-repl-drawer-state-icons) "💤"))
+  (should (equal (alist-get :init       claude-repl-drawer-state-icons) "⏳"))
+  (should (equal (alist-get :stop-failed claude-repl-drawer-state-icons) "❗"))
+  (should (equal (alist-get :dead       claude-repl-drawer-state-icons) "❌")))
 
 ;;;; ---- State glyph ----
 
