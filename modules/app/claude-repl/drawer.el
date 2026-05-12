@@ -1613,14 +1613,22 @@ the drawer open with `SPC o d' first."
 No-op when the drawer buffer doesn't exist or no current workspace
 can be resolved.  Used by `persp-activated-functions' and the global
 post-command hook to keep the drawer cursor sync'd with the active
-workspace whenever the user isn't actively navigating the drawer."
+workspace whenever the user isn't actively navigating the drawer.
+
+Also repositions the current-entry arrow overlay synchronously so the
+arrow snaps to the active workspace immediately, not after the next
+1Hz status-poll re-render.  The buffer-local `post-command-hook'
+doesn't fire here because the actual command is running in a
+different buffer (or via a persp-mode hook), so we mirror its
+overlay-refresh action explicitly."
   (when-let* ((buf (get-buffer claude-repl-drawer-buffer-name))
               (current-ws (and (fboundp '+workspace-current-name)
                                (+workspace-current-name))))
     (let ((win (get-buffer-window buf t)))
       (with-current-buffer buf
         (when (claude-repl-drawer--goto-workspace-line current-ws)
-          (when win (set-window-point win (point))))))))
+          (when win (set-window-point win (point)))
+          (claude-repl-drawer--update-current-entry-overlay))))))
 
 (defvar claude-repl-drawer--last-was-drawer nil
   "Tracks whether the last command ran with the drawer buffer current.

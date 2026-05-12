@@ -665,6 +665,46 @@ instead of erroring or jumping to point-min."
               (should (equal (claude-repl-drawer--workspace-at-point) "beta"))))
         (kill-buffer buf)))))
 
+(ert-deftest claude-repl-drawer-test-sync-cursor-refreshes-overlay-synchronously ()
+  "`--sync-cursor-to-current-ws' repositions the current-entry overlay
+synchronously so the arrow snaps to the active workspace immediately,
+not after the next 1Hz render — fixes the perceived flash-then-disappear
+on workspace switch when the drawer's buffer-local post-command-hook
+doesn't fire (e.g. focus elsewhere or persp-mode-driven sync)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--register "beta"  :priority "p2")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (claude-repl-drawer-mode)
+              (claude-repl-drawer--render)
+              ;; Park the arrow on alpha (the old "current" workspace).
+              (claude-repl-drawer--goto-workspace-line "alpha")
+              (claude-repl-drawer--update-current-entry-overlay)
+              (let* ((ov claude-repl-drawer--current-entry-overlay)
+                     (start (and (overlayp ov) (overlay-start ov))))
+                (should (equal (get-text-property
+                                start 'claude-repl-drawer-workspace)
+                               "alpha"))))
+            ;; Simulate a persp-activated sync to beta (without an
+            ;; intervening render, which is the lag the user observed).
+            (cl-letf (((symbol-function '+workspace-current-name)
+                       (lambda () "beta")))
+              (claude-repl-drawer--sync-cursor-to-current-ws))
+            (with-current-buffer buf
+              ;; Arrow must already track beta, not still be on alpha
+              ;; (waiting for the next 1Hz render to catch up).
+              (let* ((ov claude-repl-drawer--current-entry-overlay)
+                     (start (and (overlayp ov) (overlay-start ov))))
+                (should (overlayp ov))
+                (should (overlay-buffer ov))
+                (should (equal (get-text-property
+                                start 'claude-repl-drawer-workspace)
+                               "beta")))))
+        (kill-buffer buf)))))
+
 (ert-deftest claude-repl-drawer-test-global-post-command-fires-sync-on-leave ()
   "`--global-post-command' calls sync when transitioning out of the drawer."
   (claude-repl-test--with-clean-state
