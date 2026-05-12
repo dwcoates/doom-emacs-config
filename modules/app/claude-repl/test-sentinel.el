@@ -1618,6 +1618,84 @@ This is the stall fix: a swallowed duplicate must not block loader advance."
                 (should (eq (claude-repl--ws-get "ws1" :claude-ready) t)))))
         (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
 
+;;;; ---- Tests: permission-notify.sh message filtering ----
+;;
+;; Claude Code's Notification hook fires for two distinct semantics under
+;; the same notification_type=permission_prompt — real permission/approval
+;; prompts AND a 60s-idle "needs your attention" nudge.  The hook filters
+;; on .message so only real prompts write the sentinel file; otherwise the
+;; idle nudge would (mis)set :permission well after the user is already
+;; done.  These tests drive the actual shell script end-to-end.
+
+(defconst claude-repl-test--permission-hook-path
+  ;; Captured at load time — `load-file-name' is nil inside ERT test bodies.
+  (expand-file-name
+   "hooks/permission-notify.sh"
+   (file-name-directory (or load-file-name buffer-file-name)))
+  "Absolute path to the checked-in permission-notify.sh script.")
+
+(defun claude-repl-test--run-permission-hook (json-input)
+  "Run permission-notify.sh under an isolated HOME and return the result plist.
+Returns (:exit CODE :sentinel-exists BOOL :sentinel-content STRING)."
+  (let* ((tmp-home (make-temp-file "claude-repl-permission-hook-" t))
+         (script claude-repl-test--permission-hook-path)
+         (sentinel (expand-file-name
+                    ".claude/workspace-notifications/permission_prompt"
+                    tmp-home))
+         (process-environment (cons (format "HOME=%s" tmp-home)
+                                    process-environment))
+         (default-directory tmp-home)
+         (exit (with-temp-buffer
+                 (insert json-input)
+                 (call-process-region (point-min) (point-max)
+                                      "bash" nil nil nil script)))
+         (exists (file-exists-p sentinel))
+         (content (when exists
+                    (with-temp-buffer
+                      (insert-file-contents sentinel)
+                      (buffer-string)))))
+    (ignore-errors (delete-directory tmp-home t))
+    (list :exit exit :sentinel-exists exists :sentinel-content content)))
+
+(ert-deftest claude-repl-test-permission-hook-bash-permission-writes-sentinel ()
+  "A real \"Claude needs your permission to use Bash\" message writes the sentinel."
+  (let* ((input "{\"cwd\":\"/some/dir\",\"session_id\":\"sess-1\",\"message\":\"Claude needs your permission to use Bash\",\"notification_type\":\"permission_prompt\"}")
+         (result (claude-repl-test--run-permission-hook input)))
+    (should (= 0 (plist-get result :exit)))
+    (should (plist-get result :sentinel-exists))
+    (should (string-match-p "/some/dir" (plist-get result :sentinel-content)))
+    (should (string-match-p "sess-1" (plist-get result :sentinel-content)))))
+
+(ert-deftest claude-repl-test-permission-hook-plan-approval-writes-sentinel ()
+  "A \"Claude Code needs your approval for the plan\" message writes the sentinel."
+  (let* ((input "{\"cwd\":\"/d\",\"session_id\":\"s\",\"message\":\"Claude Code needs your approval for the plan\",\"notification_type\":\"permission_prompt\"}")
+         (result (claude-repl-test--run-permission-hook input)))
+    (should (= 0 (plist-get result :exit)))
+    (should (plist-get result :sentinel-exists))))
+
+(ert-deftest claude-repl-test-permission-hook-skill-permission-writes-sentinel ()
+  "\"Claude needs your permission to use Skill\" message writes the sentinel."
+  (let* ((input "{\"cwd\":\"/d\",\"session_id\":\"s\",\"message\":\"Claude needs your permission to use Skill\",\"notification_type\":\"permission_prompt\"}")
+         (result (claude-repl-test--run-permission-hook input)))
+    (should (= 0 (plist-get result :exit)))
+    (should (plist-get result :sentinel-exists))))
+
+(ert-deftest claude-repl-test-permission-hook-idle-attention-skips ()
+  "The 60s-idle \"Claude Code needs your attention\" message must NOT write the sentinel.
+This is the regression guard for the bug where the tab's ❓ appeared after
+the user was already done — see the hook script header for context."
+  (let* ((input "{\"cwd\":\"/d\",\"session_id\":\"s\",\"message\":\"Claude Code needs your attention\",\"notification_type\":\"permission_prompt\"}")
+         (result (claude-repl-test--run-permission-hook input)))
+    (should (= 0 (plist-get result :exit)))
+    (should-not (plist-get result :sentinel-exists))))
+
+(ert-deftest claude-repl-test-permission-hook-empty-message-skips ()
+  "An empty or missing .message field is not a recognized real prompt and is skipped."
+  (let* ((input "{\"cwd\":\"/d\",\"session_id\":\"s\",\"notification_type\":\"permission_prompt\"}")
+         (result (claude-repl-test--run-permission-hook input)))
+    (should (= 0 (plist-get result :exit)))
+    (should-not (plist-get result :sentinel-exists))))
+
 (provide 'test-sentinel)
 
 ;;; test-sentinel.el ends here
