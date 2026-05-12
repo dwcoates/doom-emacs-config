@@ -2,6 +2,8 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+
 ;; Cancel all previously registered timers on re-eval so we don't accumulate.
 (defvar claude-repl--timers nil
   "List of active timers created by claude-repl.
@@ -36,12 +38,31 @@ high-frequency events (window changes, resolve-root)."
   :group 'claude-repl)
 
 (defcustom claude-repl-log-to-file t
-  "When non-nil, append all log output to `~/.claude/emacs/doom-claude-repl.log'.
-Logging to file occurs independently of `claude-repl-debug' — messages are
-written to the file whenever they pass through `claude-repl--do-log',
-regardless of the current debug level.  Use
-`claude-repl-debug/toggle-log-to-file' to toggle at runtime."
+  "Master kill-switch for file-writing of claude-repl log lines.
+When non-nil (the default), every call to `claude-repl--log',
+`claude-repl--log-verbose', `claude-repl--do-log', or `claude-repl--error'
+appends its formatted line to `claude-repl-log-file-name' — REGARDLESS
+of `claude-repl-debug'.  The `claude-repl-debug' toggle only controls
+whether the line is ALSO emitted to the minibuffer / *Messages* buffer.
+Use `claude-repl-debug/toggle-log-to-file' to toggle at runtime."
   :type 'boolean
+  :group 'claude-repl)
+
+(defcustom claude-repl-log-size-cap-bytes (* 1024 1024 1024)
+  "Hard cap on the log file size in bytes.  Default 1 GiB.
+Checked every `claude-repl-log-size-check-interval' writes (not on every
+write — `file-attributes' on a multi-GB file is cheap but not free).
+When the cap is exceeded, the first 80% of the file is dropped
+(line-aligned) and a WARNING line is appended noting the truncation."
+  :type 'integer
+  :group 'claude-repl)
+
+(defcustom claude-repl-log-size-check-interval 1000
+  "Number of file-writes between size-cap checks.
+Lower values catch overruns sooner but pay more `file-attributes' calls;
+the default of 1000 keeps the check effectively free for typical usage
+(one stat per ~1000 log lines)."
+  :type 'integer
   :group 'claude-repl)
 
 (defcustom claude-repl-workspace-id-length 8
@@ -185,60 +206,131 @@ The parent directory is created if it does not exist."
       (make-directory dir t))
     path))
 
+(defvar claude-repl--log-write-counter 0
+  "Monotonic counter of successful log-file writes.
+Used by `claude-repl--do-log-to-file' to decide when to size-check.")
+
+(defun claude-repl--log-truncate (path size)
+  "Drop the first 80% of PATH (SIZE bytes) and append a WARNING line.
+Reads the last 20% of the file as raw bytes, aligns to the next
+newline (so we don't keep a partial first line), atomically replaces
+PATH, then appends a single line noting the truncation.
+
+Pure side-effect — no logging facilities are called here so we cannot
+re-enter `claude-repl--do-log-to-file' and recurse."
+  (let* ((keep-bytes (max 1 (- size (floor (* 0.8 size)))))
+         (start (- size keep-bytes))
+         (tmp (concat path ".trunc-tmp")))
+    (with-temp-buffer
+      (set-buffer-multibyte nil)
+      (let ((coding-system-for-read 'no-conversion)
+            (coding-system-for-write 'no-conversion))
+        (insert-file-contents-literally path nil start size)
+        ;; Drop the partial first line (everything up to and including the
+        ;; first newline) so the resulting file starts on a clean line.
+        (goto-char (point-min))
+        (when (search-forward "\n" nil t)
+          (delete-region (point-min) (point)))
+        (write-region (point-min) (point-max) tmp nil 'silent)))
+    (rename-file tmp path t)
+    (let ((warning (format
+                    "%s [claude-repl] WARNING: log truncated — file exceeded cap=%d bytes (was %d bytes); dropped first 80%%, kept last %d bytes"
+                    (format-time-string "%H:%M:%S.%3N")
+                    claude-repl-log-size-cap-bytes size keep-bytes)))
+      (let ((coding-system-for-write 'no-conversion))
+        (write-region (concat warning "\n") nil path t 'silent)))))
+
+(defun claude-repl--log-maybe-truncate (path)
+  "Truncate PATH when it exceeds `claude-repl-log-size-cap-bytes'.
+Called periodically from `claude-repl--do-log-to-file'."
+  (let ((attrs (file-attributes path)))
+    (when attrs
+      (let ((size (file-attribute-size attrs)))
+        (when (and size (> size claude-repl-log-size-cap-bytes))
+          (condition-case err
+              (claude-repl--log-truncate path size)
+            (error
+             (message "[claude-repl] WARNING: log truncate failed for %s: %S"
+                      path err))))))))
+
 (defun claude-repl--do-log-to-file (text)
   "Append TEXT as a line to the logfile when `claude-repl-log-to-file' is non-nil.
 No-ops when the logfile path cannot be determined.  Displays a warning
 if a write error occurs (e.g. read-only filesystem) but does not signal
-an error — logging must not break the caller."
+an error — logging must not break the caller.
+
+Increments `claude-repl--log-write-counter' on every successful write
+and runs `claude-repl--log-maybe-truncate' once every
+`claude-repl-log-size-check-interval' writes."
   (when claude-repl-log-to-file
     (when-let ((path (claude-repl--logfile-path)))
       (condition-case err
-          (write-region (concat text "\n") nil path t 'silent)
+          (progn
+            (write-region (concat text "\n") nil path t 'silent)
+            (cl-incf claude-repl--log-write-counter)
+            (when (and (> claude-repl-log-size-check-interval 0)
+                       (zerop (mod claude-repl--log-write-counter
+                                   claude-repl-log-size-check-interval)))
+              (claude-repl--log-maybe-truncate path)))
         (error (message "[claude-repl] WARNING: log write failed to %s: %S" path err))))))
 
+(defun claude-repl--build-log-text (ws fmt args)
+  "Build the formatted log line for WS / FMT / ARGS.
+Shared by `claude-repl--do-log' and its message-gated wrappers so the
+file-write path and the message-emit path always agree on the exact
+text.  Handles the non-string-FMT bug-capture in one place."
+  (if (stringp fmt)
+      (let ((msg  (apply #'format fmt args))
+            (ts   (format-time-string "%H:%M:%S.%3N"))
+            (meta (claude-repl--format-ws-metadata ws)))
+        (format "%s [claude-repl] %s%s" ts msg meta))
+    (claude-repl--log-format-capture-bug fmt)
+    (format "%s [claude-repl] [BUG non-string-fmt=%S]%s"
+            (format-time-string "%H:%M:%S.%3N")
+            fmt
+            (claude-repl--format-ws-metadata ws))))
+
 (defun claude-repl--do-log (ws fmt args &optional error-p)
-  "Internal: emit FMT + ARGS via `message' with a timestamp prefix and trailing WS metadata.
-The message body comes immediately after the [claude-repl] tag, with workspace
-metadata appended at the end for readability.  Workspace metadata is concatenated
-after formatting, so any `%' characters in metadata are treated as data, not
-format directives.
+  "Unconditional log entry: ALWAYS write to file AND emit to message/error.
+WS is the workspace name for context (or nil).  When ERROR-P is non-nil,
+signals the formatted line via `error' instead of `message' — the
+file-write still happens first so the line is captured before unwinding.
 
-When ERROR-P is non-nil, signals the formatted line via `error' instead of
-`message'.  The logfile write happens first so the line is still captured
-before execution unwinds.
-
-When FMT isn't a string (a caller bug), captures a backtrace to
-*claude-repl-log-bug* on the first occurrence, then logs a safe
-[BUG non-string-fmt=...] line without interpreting caller ARGS."
-  (let ((text (if (stringp fmt)
-                  (let ((msg (apply #'format fmt args))
-                        (ts  (format-time-string "%H:%M:%S.%3N"))
-                        (meta (claude-repl--format-ws-metadata ws)))
-                    (format "%s [claude-repl] %s%s" ts msg meta))
-                (claude-repl--log-format-capture-bug fmt)
-                (format "%s [claude-repl] [BUG non-string-fmt=%S]%s"
-                        (format-time-string "%H:%M:%S.%3N")
-                        fmt
-                        (claude-repl--format-ws-metadata ws)))))
+This is the entry point for log calls that MUST be captured regardless
+of `claude-repl-debug' — errors, invariant violations, and the
+STUB-CREATE warnings.  Gated callers (`claude-repl--log',
+`claude-repl--log-verbose') use the file-write path directly and
+conditionally call `message' themselves."
+  (let ((text (claude-repl--build-log-text ws fmt args)))
     (claude-repl--do-log-to-file text)
     (if error-p
         (error "%s" text)
       (message "%s" text))))
 
 (defun claude-repl--log (ws fmt &rest args)
-  "Log a timestamped debug message when `claude-repl-debug' is non-nil.
-WS is the workspace name for context (or nil for workspace-free contexts).
-FMT and ARGS are passed to `message', prefixed with timestamp, [claude-repl]
-tag, and full workspace metadata."
-  (when claude-repl-debug
-    (claude-repl--do-log ws fmt args)))
+  "Log a timestamped message for WS, always to file, conditionally to *Messages*.
+File write happens whenever `claude-repl-log-to-file' is non-nil (the
+default) — REGARDLESS of `claude-repl-debug'.  The `message' call only
+fires when `claude-repl-debug' is non-nil, so the minibuffer stays quiet
+unless the user opts in.
+FMT and ARGS use the same format conventions as `message'."
+  (let ((text (claude-repl--build-log-text ws fmt args)))
+    (claude-repl--do-log-to-file text)
+    (when claude-repl-debug
+      (message "%s" text))))
 
 (defun claude-repl--log-verbose (ws fmt &rest args)
-  "Log a timestamped debug message only when `claude-repl-debug' is \\='verbose.
-WS is the workspace name for context (or nil).
-Used for high-frequency, low-signal events."
-  (when (eq claude-repl-debug 'verbose)
-    (claude-repl--do-log ws fmt args)))
+  "Log a high-frequency message for WS, always to file, gated for *Messages*.
+File write happens whenever `claude-repl-log-to-file' is non-nil.  The
+`message' call only fires when `claude-repl-debug' is `verbose' — so
+hot-path callbacks (timer ticks, window changes, resolve-root, async git
+sentinels) can be enabled selectively without flooding the minibuffer.
+The 1 GiB size cap (`claude-repl-log-size-cap-bytes') bounds the file
+growth even with verbose calls always landing on disk."
+  (let ((text (claude-repl--build-log-text ws fmt args)))
+    (claude-repl--do-log-to-file text)
+    (when (eq claude-repl-debug 'verbose)
+      (message "%s" text))))
 
 (defun claude-repl--error (ws fmt &rest args)
   "Signal an error with a [claude-repl] tag, timestamp, and workspace metadata.
@@ -250,6 +342,28 @@ captured regardless of whether debug logging is on.
 Unlike `claude-repl--log', this fires regardless of `claude-repl-debug' —
 errors are not gated on the debug flag."
   (claude-repl--do-log ws fmt args t))
+
+(defun claude-repl--rotate-log-on-startup ()
+  "Rename an existing log file to `<path>.prev', preserving one prior session.
+Idempotent: clobbers any existing `.prev'.  No-op when the current log
+file does not exist or `claude-repl-log-to-file' is nil.  Errors are
+caught and surfaced as a message — the rollover must not block startup."
+  (when claude-repl-log-to-file
+    (condition-case err
+        (let* ((path (expand-file-name claude-repl-log-file-name))
+               (prev (concat path ".prev")))
+          (when (file-exists-p path)
+            (when (file-exists-p prev) (delete-file prev))
+            (rename-file path prev)
+            ;; Reset the write counter — size accounting is per-file.
+            (setq claude-repl--log-write-counter 0)))
+      (error (message "[claude-repl] WARNING: log rotate failed: %S" err)))))
+
+;; Run inline at load so each Emacs session begins with a fresh log file.
+;; Guarded against `noninteractive' so ERT batch runs don't trash the user's
+;; real log on every test invocation.
+(unless noninteractive
+  (claude-repl--rotate-log-on-startup))
 
 ;;; Git and workspace identity
 

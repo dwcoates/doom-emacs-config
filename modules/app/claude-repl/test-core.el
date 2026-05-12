@@ -1433,6 +1433,225 @@ format string\" seen when running `claude-repl-reset-sentinel-watchers'."
       (claude-repl--log nil 'stopped)
       (should t))))
 
+;;;; ---- Tests: file-write decoupled from debug gate ----
+
+(defmacro claude-repl-test--with-temp-logfile (sym &rest body)
+  "Bind a fresh per-test logfile path to SYM and route claude-repl writes to it.
+The temp file is deleted after BODY runs.  `claude-repl-log-to-file' is
+forced on inside BODY (test-helpers globally turns it off to keep other
+tests pollution-free), and the write counter is reset so size-cap tests
+do not pick up state from earlier tests."
+  (declare (indent 1))
+  `(let ((,sym (make-temp-file "claude-repl-test-log-")))
+     (unwind-protect
+         (let ((claude-repl-log-to-file t)
+               (claude-repl-log-file-name ,sym)
+               (claude-repl--log-write-counter 0))
+           ,@body)
+       (when (file-exists-p ,sym) (delete-file ,sym))
+       (when (file-exists-p (concat ,sym ".prev"))
+         (delete-file (concat ,sym ".prev")))
+       (when (file-exists-p (concat ,sym ".trunc-tmp"))
+         (delete-file (concat ,sym ".trunc-tmp"))))))
+
+(ert-deftest claude-repl-test-log-always-writes-file-when-debug-off ()
+  "`claude-repl--log' must write to file even when `claude-repl-debug' is nil.
+This is the core decoupling guarantee — the file is the canonical
+record; `claude-repl-debug' now only gates the *Messages* emit."
+  (claude-repl-test--with-temp-logfile path
+    (cl-letf (((symbol-function 'message) #'ignore))
+      (let ((claude-repl-debug nil))
+        (claude-repl--log nil "debug-off line")
+        (should (file-exists-p path))
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should (string-match-p "debug-off line" (buffer-string))))))))
+
+(ert-deftest claude-repl-test-log-still-suppresses-message-when-debug-off ()
+  "`claude-repl--log' must NOT call `message' when `claude-repl-debug' is nil."
+  (claude-repl-test--with-temp-logfile _
+    (let ((message-called nil))
+      (cl-letf (((symbol-function 'message)
+                 (lambda (&rest _) (setq message-called t))))
+        (let ((claude-repl-debug nil))
+          (claude-repl--log nil "test")
+          (should-not message-called))))))
+
+(ert-deftest claude-repl-test-log-verbose-always-writes-file-when-debug-off ()
+  "`claude-repl--log-verbose' must write to file even when debug is off."
+  (claude-repl-test--with-temp-logfile path
+    (cl-letf (((symbol-function 'message) #'ignore))
+      (let ((claude-repl-debug nil))
+        (claude-repl--log-verbose nil "verbose-line")
+        (should (file-exists-p path))
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should (string-match-p "verbose-line" (buffer-string))))))))
+
+(ert-deftest claude-repl-test-log-verbose-still-suppresses-message-when-debug-t ()
+  "`claude-repl--log-verbose' must NOT call `message' when debug is t (only verbose).
+Regression guard: the file-write decoupling must not collapse the
+verbose-vs-standard distinction at the message-emit layer."
+  (claude-repl-test--with-temp-logfile _
+    (let ((message-called nil))
+      (cl-letf (((symbol-function 'message)
+                 (lambda (&rest _) (setq message-called t))))
+        (let ((claude-repl-debug t))
+          (claude-repl--log-verbose nil "test")
+          (should-not message-called))))))
+
+(ert-deftest claude-repl-test-log-no-file-write-when-log-to-file-nil ()
+  "`claude-repl--log' must not touch the disk when `claude-repl-log-to-file' is nil.
+The master kill-switch overrides the always-on file-write decoupling."
+  (let ((path (make-temp-file "claude-repl-test-log-")))
+    (unwind-protect
+        (let ((claude-repl-log-to-file nil)
+              (claude-repl-log-file-name path)
+              (initial-size (nth 7 (file-attributes path))))
+          (cl-letf (((symbol-function 'message) #'ignore))
+            (let ((claude-repl-debug nil))
+              (claude-repl--log nil "should-not-land"))
+            (should (= initial-size (nth 7 (file-attributes path))))))
+      (when (file-exists-p path) (delete-file path)))))
+
+;;;; ---- Tests: startup rollover ----
+
+(ert-deftest claude-repl-test-rotate-renames-existing-log-to-prev ()
+  "Rollover renames an existing logfile to `<path>.prev'."
+  (claude-repl-test--with-temp-logfile path
+    (write-region "old session line\n" nil path)
+    (claude-repl--rotate-log-on-startup)
+    (let ((prev (concat path ".prev")))
+      (should (file-exists-p prev))
+      (should-not (file-exists-p path))
+      (with-temp-buffer
+        (insert-file-contents prev)
+        (should (string-match-p "old session line" (buffer-string)))))))
+
+(ert-deftest claude-repl-test-rotate-overwrites-existing-prev ()
+  "Rollover clobbers an existing `<path>.prev' (only one prior session is kept)."
+  (claude-repl-test--with-temp-logfile path
+    (let ((prev (concat path ".prev")))
+      (write-region "ancient prev\n" nil prev)
+      (write-region "current session\n" nil path)
+      (claude-repl--rotate-log-on-startup)
+      (should (file-exists-p prev))
+      (with-temp-buffer
+        (insert-file-contents prev)
+        ;; The ancient one is gone; the rotated one is the new content.
+        (should-not (string-match-p "ancient prev" (buffer-string)))
+        (should (string-match-p "current session" (buffer-string)))))))
+
+(ert-deftest claude-repl-test-rotate-noop-when-log-absent ()
+  "Rollover is a no-op when the current logfile does not exist yet."
+  (claude-repl-test--with-temp-logfile path
+    (delete-file path)
+    (let ((prev (concat path ".prev")))
+      ;; Should not error and should not create prev out of nothing.
+      (claude-repl--rotate-log-on-startup)
+      (should-not (file-exists-p prev))
+      (should-not (file-exists-p path)))))
+
+(ert-deftest claude-repl-test-rotate-resets-write-counter ()
+  "Rollover resets the write counter so size accounting starts fresh."
+  (claude-repl-test--with-temp-logfile path
+    (write-region "x\n" nil path)
+    (setq claude-repl--log-write-counter 12345)
+    (claude-repl--rotate-log-on-startup)
+    (should (zerop claude-repl--log-write-counter))))
+
+(ert-deftest claude-repl-test-rotate-noop-when-log-to-file-off ()
+  "Rollover does nothing when `claude-repl-log-to-file' is nil."
+  (let ((path (make-temp-file "claude-repl-test-log-")))
+    (unwind-protect
+        (let ((claude-repl-log-to-file nil)
+              (claude-repl-log-file-name path))
+          (write-region "stays-put\n" nil path)
+          (claude-repl--rotate-log-on-startup)
+          (should (file-exists-p path))
+          (should-not (file-exists-p (concat path ".prev"))))
+      (when (file-exists-p path) (delete-file path)))))
+
+;;;; ---- Tests: size cap and truncation ----
+
+(ert-deftest claude-repl-test-truncate-keeps-last-20-percent-line-aligned ()
+  "`claude-repl--log-truncate' keeps the last ~20% of the file, aligned to a newline."
+  (claude-repl-test--with-temp-logfile path
+    ;; Build a file with 100 fixed-width lines so we can assert which survive.
+    (with-temp-buffer
+      (dotimes (i 100)
+        (insert (format "line-%03d-padding-to-make-it-wider\n" i)))
+      (write-region (point-min) (point-max) path))
+    (let ((size (nth 7 (file-attributes path))))
+      (claude-repl--log-truncate path size)
+      (with-temp-buffer
+        (insert-file-contents path)
+        (let ((content (buffer-string)))
+          ;; First lines must be gone.
+          (should-not (string-match-p "line-000-" content))
+          (should-not (string-match-p "line-010-" content))
+          ;; Last lines must survive.
+          (should (string-match-p "line-099-" content))
+          ;; A WARNING line was appended.
+          (should (string-match-p "WARNING: log truncated" content))
+          ;; The file must start on a clean line boundary, not mid-line.
+          (should (string-match-p "\\`line-[0-9][0-9][0-9]-" content)))))))
+
+(ert-deftest claude-repl-test-truncate-appends-warning ()
+  "Truncation appends a WARNING entry naming the cap and observed size."
+  (claude-repl-test--with-temp-logfile path
+    (write-region (make-string 5000 ?x) nil path)
+    (let ((size (nth 7 (file-attributes path))))
+      (claude-repl--log-truncate path size)
+      (with-temp-buffer
+        (insert-file-contents path)
+        (let ((content (buffer-string)))
+          (should (string-match-p "WARNING: log truncated" content))
+          (should (string-match-p "cap=" content))
+          (should (string-match-p "kept last" content)))))))
+
+(ert-deftest claude-repl-test-size-check-fires-every-interval ()
+  "`--do-log-to-file' invokes `--log-maybe-truncate' on the Nth write."
+  (claude-repl-test--with-temp-logfile path
+    (let ((check-calls 0)
+          (claude-repl-log-size-check-interval 5))
+      (cl-letf (((symbol-function 'claude-repl--log-maybe-truncate)
+                 (lambda (_p) (cl-incf check-calls))))
+        (dotimes (_ 12)
+          (claude-repl--do-log-to-file "line"))
+        ;; 12 writes with interval=5 → checks at 5 and 10 → 2 fires.
+        (should (= 2 check-calls))))))
+
+(ert-deftest claude-repl-test-size-check-noop-when-under-cap ()
+  "`--log-maybe-truncate' is a no-op when the file is under the cap."
+  (claude-repl-test--with-temp-logfile path
+    (write-region "small file\n" nil path)
+    (let ((claude-repl-log-size-cap-bytes (* 1024 1024)))
+      (let ((truncate-called nil))
+        (cl-letf (((symbol-function 'claude-repl--log-truncate)
+                   (lambda (&rest _) (setq truncate-called t))))
+          (claude-repl--log-maybe-truncate path)
+          (should-not truncate-called))))))
+
+(ert-deftest claude-repl-test-size-check-triggers-truncate-when-over-cap ()
+  "`--log-maybe-truncate' fires `--log-truncate' when the file exceeds the cap."
+  (claude-repl-test--with-temp-logfile path
+    (write-region (make-string 4096 ?x) nil path)
+    (let ((claude-repl-log-size-cap-bytes 1024)
+          (truncate-args nil))
+      (cl-letf (((symbol-function 'claude-repl--log-truncate)
+                 (lambda (p size) (setq truncate-args (list p size)))))
+        (claude-repl--log-maybe-truncate path)
+        (should (equal (car truncate-args) path))
+        (should (>= (cadr truncate-args) 4096))))))
+
+(ert-deftest claude-repl-test-write-counter-increments-per-write ()
+  "Every successful file-write bumps `claude-repl--log-write-counter'."
+  (claude-repl-test--with-temp-logfile _
+    (dotimes (_ 7)
+      (claude-repl--do-log-to-file "x"))
+    (should (= 7 claude-repl--log-write-counter))))
+
 (provide 'test-core)
 
 ;;; test-core.el ends here

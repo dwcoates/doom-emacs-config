@@ -262,6 +262,14 @@
 ;; Restore file-notify-add-watch after loading
 (advice-remove 'file-notify-add-watch #'file-notify-add-watch--test-stub)
 
+;; Disable file-logging during tests so the unconditional file-write path
+;; (always-on after the core.el log refactor) does not append every
+;; test-emitted line to the user's real `~/.claude/emacs/doom-claude-repl.log'.
+;; Tests that specifically exercise the file-write path bind this back
+;; locally and redirect `claude-repl-log-file-name' to a temp path.
+(when (boundp 'claude-repl-log-to-file)
+  (setq claude-repl-log-to-file nil))
+
 ;;;; ---- Test utilities ----
 
 (defmacro claude-repl-test--with-clean-state (&rest body)

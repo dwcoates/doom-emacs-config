@@ -9,13 +9,16 @@ The doom claude-repl module writes a single rolling log file. Use it as your fir
 
 ## 1. Where the log lives
 
-- Path: `~/.claude/emacs/doom-claude-repl.log`
+- Path: `~/.claude/emacs/doom-claude-repl.log` (current Emacs session)
+- Prior session: `~/.claude/emacs/doom-claude-repl.log.prev` (one session retained — clobbered on each startup)
 - Configured by `claude-repl-log-file-name` (defcustom in `modules/app/claude-repl/core.el`)
 - Writing is ON by default (`claude-repl-log-to-file` defaults to `t`)
+- Rollover: at Emacs startup the current log is renamed to `.prev`, so the active file always reflects the current session only
+- Size cap: 1 GiB (`claude-repl-log-size-cap-bytes`); checked every 1000 writes; over-cap files have their first 80% dropped with a `WARNING: log truncated` line appended
 - The parent directory `~/.claude/emacs/` is created on demand by `claude-repl--logfile-path`
 - Toggle at runtime with `M-x claude-repl-debug/toggle-log-to-file`
 
-If the file is missing entirely, the user has either turned `claude-repl-log-to-file` off or no claude-repl event has yet passed through `claude-repl--do-log` in this Emacs session. Reproducing the bug after re-enabling will populate it.
+If the active log is empty, no event has fired yet this session — check `.prev` for the previous session's events.
 
 ## 2. Line format
 
@@ -49,17 +52,15 @@ A trailing `-` for a key means "not set / not applicable".
 
 ## 3. What is logged automatically vs. gated
 
-`claude-repl-log-to-file` does NOT itself unlock all events. It controls whether messages that pass through `claude-repl--do-log` get appended to disk. WHICH messages pass through is gated separately:
+**File writes are unconditional.** Every call to `claude-repl--log`, `claude-repl--log-verbose`, `claude-repl--do-log`, and `claude-repl--error` appends to the logfile whenever `claude-repl-log-to-file` is non-nil (the default). The `claude-repl-debug` toggle only controls whether the line is ALSO emitted to the minibuffer / `*Messages*` buffer:
 
-- **Always logged (no toggle needed):**
-  - Errors signalled via `claude-repl--error`
-  - `claude-repl--ws-put` STUB-CREATE warnings (workspace entry created without `:project-dir` — the "(no repo)" drawer-bucket trap)
-- **Logged only when `claude-repl-debug` is non-nil:**
-  - Every `claude-repl--log` call site (the majority of the module — `commands.el`, `panels.el`, `input.el`, `keybindings.el`, `history.el`, etc.)
-- **Logged only when `claude-repl-debug` is `'verbose`:**
-  - Every `claude-repl--log-verbose` call site — high-frequency events (timer ticks, window changes, git-diff sentinels, `resolve-root`)
+- **`claude-repl-debug` is nil (default):** file gets everything; minibuffer is quiet (except for unconditional `--do-log` / `--error` calls, which always also `message`).
+- **`claude-repl-debug` is `t`:** file gets everything; `--log` calls also emit to minibuffer.
+- **`claude-repl-debug` is `'verbose`:** file gets everything; `--log` AND `--log-verbose` calls emit to minibuffer (high-frequency events become visible).
 
-If the user is reproducing a bug live, **ask whether `claude-repl-debug` is on**. Toggle with `M-x claude-repl-debug/toggle-logging` (prefix arg for verbose).
+Implication for diagnosis: the log file is the source of truth regardless of debug level. You do NOT need to ask the user to enable debug before reading historical evidence — it is already there.
+
+The 1 GiB size cap (truncate-first-80%-on-overflow) is the safety valve that lets us keep verbose writes always-on.
 
 ## 4. How to read it
 
@@ -72,12 +73,14 @@ Useful bash recipes:
 - Time-window: `awk '$1 >= "14:32:00" && $1 < "14:35:00"' ~/.claude/emacs/doom-claude-repl.log`
 - Top message prefixes (find hot code paths): `grep '\[claude-repl\]' ~/.claude/emacs/doom-claude-repl.log | sed -E 's/^[^[]+\[claude-repl\] ([a-z-]+).*/\1/' | sort | uniq -c | sort -rn | head -30`
 - File size sanity: `wc -l ~/.claude/emacs/doom-claude-repl.log; ls -lh ~/.claude/emacs/doom-claude-repl.log`
+- Previous session: `tail -n 200 ~/.claude/emacs/doom-claude-repl.log.prev`
+- Confirm truncation has fired: `grep -E 'WARNING: log truncated' ~/.claude/emacs/doom-claude-repl.log`
 
 The companion buffer `*claude-repl-log-bug*` (inside Emacs) captures the first backtrace whenever `claude-repl--log-format` receives a non-string FMT. Ask the user to surface its contents if logging looks malformed.
 
 ## 5. When the log is too sparse — SUGGEST INSTRUMENTATION EMPHATICALLY
 
-The single most common pitfall in this codebase: a bug is reported in a code path that has **no `claude-repl--log` calls**, the log shows nothing useful, and Claude proceeds to speculate. **Do not do that.** If you find yourself reading the log around the timestamp of the bug and cannot find any line that corresponds to the suspect function or branch, stop and surface this emphatically.
+Since file writes are now unconditional, the only way the log can be uninformative is if the suspect code path has **no `claude-repl--log` calls at all**. When that happens, Claude tends to fill the silence with speculation. **Do not do that.** If you find yourself reading the log around the timestamp of the bug and cannot find any line that corresponds to the suspect function or branch, stop and surface this emphatically.
 
 Required user-facing message in that case:
 
