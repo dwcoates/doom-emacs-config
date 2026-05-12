@@ -273,6 +273,110 @@ overlay.  Tests the workspace-anchored restoration path."
           (claude-repl-drawer-kill))
         (should (equal arg "target"))))))
 
+(ert-deftest claude-repl-drawer-test-nuke-on-merged-dispatches-to-finish ()
+  "`claude-repl-drawer-nuke' on a `:merge-completed' entry routes to
+`--finish-workspace' (which removes the worktree) rather than the
+standard `claude-repl-nuke-workspace' path (which preserves it).  This
+is the only way to drop a workspace out of the drawer's MERGED bucket."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "merged" :merge-completed t)
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((finished-with :unset)
+            (nuke-called nil))
+        (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+                  ((symbol-function 'claude-repl--finish-workspace)
+                   (lambda (ws) (setq finished-with ws)))
+                  ((symbol-function 'claude-repl-nuke-workspace)
+                   (lambda (&rest _) (setq nuke-called t))))
+          (claude-repl-drawer-nuke))
+        (should (equal finished-with "merged"))
+        (should-not nuke-called)))))
+
+(ert-deftest claude-repl-drawer-test-nuke-on-merged-aborts-on-deny ()
+  "Drawer `x' on a MERGED entry prompts; answering no skips finish."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "merged" :merge-completed t)
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((finish-called nil))
+        (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) nil))
+                  ((symbol-function 'claude-repl--finish-workspace)
+                   (lambda (&rest _) (setq finish-called t))))
+          (claude-repl-drawer-nuke))
+        (should-not finish-called)))))
+
+(ert-deftest claude-repl-drawer-test-kill-on-merged-errors ()
+  "`d' (drawer-kill) refuses to act on a MERGED entry — `x' is the only
+removal path for merged workspaces."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "merged" :merge-completed t)
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((kill-called nil))
+        (cl-letf (((symbol-function 'claude-repl-kill-workspace)
+                   (lambda (&rest _) (setq kill-called t))))
+          (should-error (claude-repl-drawer-kill) :type 'user-error))
+        (should-not kill-called)))))
+
+(ert-deftest claude-repl-drawer-test-send-prompt-on-merged-errors ()
+  "`i' (drawer-send-prompt) refuses on a MERGED entry — the Claude
+session has been torn down so there's no one to receive the prompt."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "merged" :merge-completed t)
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((sent nil))
+        (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "hi"))
+                  ((symbol-function 'claude-repl--send)
+                   (lambda (&rest _) (setq sent t))))
+          (should-error (claude-repl-drawer-send-prompt) :type 'user-error))
+        (should-not sent)))))
+
+(ert-deftest claude-repl-drawer-test-merge-into-master-on-merged-errors ()
+  "`M' (drawer-merge-into-master) refuses on a MERGED entry — the
+workspace has already been merged and its session torn down."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "merged" :merge-completed t)
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (should-error (claude-repl-drawer-merge-into-master) :type 'user-error))))
+
+(ert-deftest claude-repl-drawer-test-merge-child-on-merged-errors ()
+  "`m' (drawer-merge-child) refuses on a MERGED entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "merged" :merge-completed t)
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (should-error (claude-repl-drawer-merge-child) :type 'user-error))))
+
+(ert-deftest claude-repl-drawer-test-new-child-on-merged-errors ()
+  "`n' (drawer-new-child) refuses to branch from a MERGED entry —
+branching from a merged-and-torn-down workspace would resurrect a
+stale tree."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "merged" :merge-completed t)
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (should-error (claude-repl-drawer-new-child) :type 'user-error))))
+
+(ert-deftest claude-repl-drawer-test-new-fork-on-merged-errors ()
+  "`f' (drawer-new-fork) refuses on a MERGED entry — the source claude
+session has been torn down."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "merged" :merge-completed t)
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (should-error (claude-repl-drawer-new-fork) :type 'user-error))))
+
 (ert-deftest claude-repl-drawer-test-interrupt-dispatches-to-entry ()
   "`claude-repl-drawer-interrupt' invokes `claude-repl-interrupt' with the entry."
   (claude-repl-test--with-clean-state

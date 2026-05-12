@@ -975,6 +975,18 @@ duplicate keybindings for bulk versions."
       (hash-table-keys claude-repl-drawer--marked-set)
     (list (claude-repl-drawer--require-ws-at-point))))
 
+(defun claude-repl-drawer--reject-merged-targets (targets action)
+  "Signal `user-error' if any TARGETS workspace is in the MERGED section.
+ACTION is a short noun naming the rejected operation (used in the
+error message).  MERGED entries are removed only via the drawer `x'
+key, which dispatches to `--finish-workspace'."
+  (when-let ((merged (cl-remove-if-not
+                      (lambda (ws)
+                        (eq (claude-repl-drawer--workspace-section ws) :merged))
+                      targets)))
+    (user-error "Cannot %s a MERGED workspace (%s) — press `x' to finish it instead"
+                action (mapconcat #'identity merged ", "))))
+
 (defun claude-repl-drawer-toggle-mark ()
   "Toggle the mark on the entry at point.
 Marked entries render with a red `●' in the gutter and become the
@@ -999,18 +1011,34 @@ entry as a quality-of-life convenience."
 (defun claude-repl-drawer-nuke ()
   "Nuke the target workspaces.
 Targets the marked-set when non-empty, otherwise the entry at point.
-Mirrors `SPC j x' (`claude-repl-nuke-workspace') per target."
+Mirrors `SPC j x' (`claude-repl-nuke-workspace') per target.
+
+Routes per-entry by section: MERGED entries dispatch to
+`claude-repl--finish-workspace' (the only way to drop a workspace out
+of the MERGED bucket — removes the git worktree and the hash entry).
+Non-MERGED entries take the standard `claude-repl-nuke-workspace'
+path (preserves the worktree)."
   (interactive)
   (dolist (ws (claude-repl-drawer--target-workspaces))
-    (claude-repl-nuke-workspace ws)))
+    (if (eq (claude-repl-drawer--workspace-section ws) :merged)
+        (when (y-or-n-p
+               (format "Finish merged workspace '%s'? This removes the worktree directory and the hash entry. "
+                       ws))
+          (claude-repl--finish-workspace ws))
+      (claude-repl-nuke-workspace ws))))
 
 (defun claude-repl-drawer-kill ()
   "Kill the target workspaces.
 Targets the marked-set when non-empty, otherwise the entry at point.
-Mirrors `SPC j d' (`claude-repl-kill-workspace') per target."
+Mirrors `SPC j d' (`claude-repl-kill-workspace') per target.
+
+Refuses to act on MERGED entries — `x' is the sole removal path for
+those (and dispatches to `--finish-workspace')."
   (interactive)
-  (dolist (ws (claude-repl-drawer--target-workspaces))
-    (claude-repl-kill-workspace ws)))
+  (let ((targets (claude-repl-drawer--target-workspaces)))
+    (claude-repl-drawer--reject-merged-targets targets "kill")
+    (dolist (ws targets)
+      (claude-repl-kill-workspace ws))))
 
 (defun claude-repl-drawer-interrupt ()
   "Interrupt Claude in the target workspaces.
@@ -1026,9 +1054,12 @@ Targets the marked-set when non-empty, otherwise the entry at point.
 Mirrors the normal claude send (`claude-repl--send'), including
 history logging.  After send, each target's summary transitions to
 `:last-prompt-summary-pending' and renders as `…' until the haiku
-summarizer returns the new aiTitle."
+summarizer returns the new aiTitle.
+
+Refuses to act on MERGED entries (no live Claude to receive the prompt)."
   (interactive)
   (let* ((targets (claude-repl-drawer--target-workspaces))
+         (_       (claude-repl-drawer--reject-merged-targets targets "send to"))
          (prompt  (read-string
                    (if (= 1 (length targets))
                        (format "Send to %s: " (car targets))
@@ -1062,32 +1093,44 @@ restore doesn't clobber the destination workspace's panel state."
 Targets the marked-set when non-empty, otherwise the entry at point.
 Mirrors `SPC TAB M' (`claude-repl-workspace-merge-current-into-source')
 per target.  Each target requires temporarily switching to that
-workspace before invoking the public function."
+workspace before invoking the public function.
+
+Refuses to act on MERGED entries — they have no live persp to switch
+into and have already been merged."
   (interactive)
-  (dolist (ws (claude-repl-drawer--target-workspaces))
-    (claude-repl-drawer--with-temp-current-ws
-     ws #'claude-repl-workspace-merge-current-into-source)))
+  (let ((targets (claude-repl-drawer--target-workspaces)))
+    (claude-repl-drawer--reject-merged-targets targets "merge")
+    (dolist (ws targets)
+      (claude-repl-drawer--with-temp-current-ws
+       ws #'claude-repl-workspace-merge-current-into-source))))
 
 (defun claude-repl-drawer-merge-child ()
   "Merge a child workspace into the entry at point.
 Mirrors `SPC TAB m' (`claude-repl-workspace-merge').  The public
 function uses the current workspace as the merge destination and
 prompts for the child to merge in, so we temporarily switch to the
-entry-at-point before invoking it."
+entry-at-point before invoking it.
+
+Refuses when the entry at point is in the MERGED section."
   (interactive)
-  (claude-repl-drawer--with-temp-current-ws
-   (claude-repl-drawer--require-ws-at-point)
-   #'claude-repl-workspace-merge))
+  (let ((ws (claude-repl-drawer--require-ws-at-point)))
+    (claude-repl-drawer--reject-merged-targets (list ws) "merge into")
+    (claude-repl-drawer--with-temp-current-ws
+     ws #'claude-repl-workspace-merge)))
 
 (defun claude-repl-drawer-new-child ()
   "Create a new worktree branched from the entry at point.
 Mirrors `SPC TAB n' (`claude-repl-create-worktree-workspace') with
 BASE = `head' and SOURCE-WS = entry-at-point.  The public function
 prompts for the preemptive prompt and dispatches to the async
-workspace-generation skill."
+workspace-generation skill.
+
+Refuses when the entry at point is in the MERGED section — branching
+from a merged-and-torn-down workspace would re-resurrect a stale tree."
   (interactive)
-  (claude-repl-create-worktree-workspace
-   'head (claude-repl-drawer--require-ws-at-point)))
+  (let ((ws (claude-repl-drawer--require-ws-at-point)))
+    (claude-repl-drawer--reject-merged-targets (list ws) "create child from")
+    (claude-repl-create-worktree-workspace 'head ws)))
 
 (defcustom claude-repl-drawer-priority-cycle
   '("p05" "p1" "p2" "p3" nil)
@@ -1142,10 +1185,14 @@ so the entry moves between MAIN and HIDDEN sections."
 (defun claude-repl-drawer-new-fork ()
   "Fork the claude session of the entry at point into a new worktree.
 Mirrors `SPC TAB f' (`claude-repl-fork-worktree-workspace') with
-SOURCE-WS = entry-at-point."
+SOURCE-WS = entry-at-point.
+
+Refuses when the entry at point is in the MERGED section — the source
+session has been torn down by the merge, so there's nothing to fork."
   (interactive)
-  (claude-repl-fork-worktree-workspace
-   (claude-repl-drawer--require-ws-at-point)))
+  (let ((ws (claude-repl-drawer--require-ws-at-point)))
+    (claude-repl-drawer--reject-merged-targets (list ws) "fork from")
+    (claude-repl-fork-worktree-workspace ws)))
 
 (defun claude-repl-drawer--refresh-if-visible ()
   "Refresh the drawer if its buffer exists and is shown in some window.
