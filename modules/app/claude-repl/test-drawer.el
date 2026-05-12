@@ -1120,6 +1120,51 @@ This is the success path for an explicit merge command."
       (should (equal (car parts) '("vis")))
       (should (equal (cdr parts) '("gone"))))))
 
+;;;; ---- nil-perspective filter ----
+
+(ert-deftest claude-repl-drawer-test-visible-keys-filters-persp-nil-name ()
+  "`--visible-workspace-keys' drops the key whose name equals `persp-nil-name'."
+  (claude-repl-test--with-clean-state
+    (let ((persp-nil-name "none"))
+      (claude-repl-drawer-test--register "real" :priority "p1")
+      (claude-repl-drawer-test--register "none" :priority "p1")
+      (let ((keys (claude-repl-drawer--visible-workspace-keys)))
+        (should (member "real" keys))
+        (should-not (member "none" keys))))))
+
+(ert-deftest claude-repl-drawer-test-visible-keys-filters-bare-none ()
+  "`--visible-workspace-keys' drops keys whose bare name equals `persp-nil-name'."
+  (claude-repl-test--with-clean-state
+    (let ((persp-nil-name "none"))
+      (claude-repl-drawer-test--register "DWC/real" :priority "p1")
+      (claude-repl-drawer-test--register "DWC/none" :priority "p1")
+      (let ((keys (claude-repl-drawer--visible-workspace-keys)))
+        (should (member "DWC/real" keys))
+        (should-not (member "DWC/none" keys))))))
+
+(ert-deftest claude-repl-drawer-test-render-omits-none-workspace ()
+  "Render does not surface a workspace whose name equals `persp-nil-name'."
+  (claude-repl-test--with-clean-state
+    (let ((persp-nil-name "none"))
+      (claude-repl-drawer-test--register "real" :priority "p1")
+      (claude-repl-drawer-test--register "none" :priority "p1")
+      (claude-repl-drawer-test--with-buffer
+        (claude-repl-drawer--render)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          (should (string-match-p "real" text))
+          ;; "none" only appears as the empty-section placeholder, never as a
+          ;; workspace entry — assert no workspace line carries it as its
+          ;; `claude-repl-drawer-workspace' text property.
+          (goto-char (point-min))
+          (let (found-none)
+            (while (and (not found-none) (not (eobp)))
+              (when (equal (get-text-property (point)
+                                              'claude-repl-drawer-workspace)
+                           "none")
+                (setq found-none t))
+              (forward-line 1))
+            (should-not found-none)))))))
+
 ;;;; ---- Render ----
 
 (ert-deftest claude-repl-drawer-test-render-empty-shows-both-sections ()

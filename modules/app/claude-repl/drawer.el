@@ -390,6 +390,21 @@ buffer-local and doesn't leak into the workspace's other windows."
 
 ;;;; Sorting + selection helpers --------------------------------------------
 
+(defun claude-repl-drawer--visible-workspace-keys ()
+  "Return workspace keys from `claude-repl--workspaces' minus the nil perspective.
+Filters any key whose name (or bare name) equals `persp-nil-name'
+\(default \"none\") so the persp-mode sentinel never surfaces in the
+drawer.  Workspace creation already refuses bare names that collide
+with `persp-nil-name', but the sentinel can still leak in via stray
+status syncs — this is the drawer-side safety net so it never renders."
+  (let ((nil-name (and (boundp 'persp-nil-name) persp-nil-name)))
+    (cl-remove-if
+     (lambda (ws)
+       (and nil-name
+            (or (equal ws nil-name)
+                (equal (claude-repl--bare-workspace-name ws) nil-name))))
+     (hash-table-keys claude-repl--workspaces))))
+
 (defun claude-repl-drawer--workspace-hidden-p (ws)
   "Return non-nil if workspace WS is in the `:hidden' repl-state."
   (eq (claude-repl--ws-get ws :repl-state) :hidden))
@@ -803,7 +818,7 @@ in-progress (MAIN/HIDDEN) → changes-ready (MERGING) → completed
          (saved-ws   (claude-repl-drawer--workspace-at-point))
          (current    (claude-repl-drawer--current-ws))
          (sections   (claude-repl-drawer--partition-by-section
-                      (hash-table-keys claude-repl--workspaces))))
+                      (claude-repl-drawer--visible-workspace-keys))))
     (erase-buffer)
     (insert "\n")
     (let ((mains    (alist-get :main    sections))
@@ -1351,15 +1366,13 @@ Slight overestimate when merged ancestors exist (the rendered tree
 flattens through them, but this counts raw chain hops) — acceptable;
 the drawer ends up a couple cols wider than strictly needed."
   (let ((maxd 0))
-    (maphash
-     (lambda (ws _)
-       (let ((d 0)
-             (cur (claude-repl-drawer--source-ws-name ws)))
-         (while (and cur (< d claude-repl-drawer-tree-max-depth))
-           (setq d (1+ d))
-           (setq cur (claude-repl-drawer--source-ws-name cur)))
-         (when (> d maxd) (setq maxd d))))
-     claude-repl--workspaces)
+    (dolist (ws (claude-repl-drawer--visible-workspace-keys))
+      (let ((d 0)
+            (cur (claude-repl-drawer--source-ws-name ws)))
+        (while (and cur (< d claude-repl-drawer-tree-max-depth))
+          (setq d (1+ d))
+          (setq cur (claude-repl-drawer--source-ws-name cur)))
+        (when (> d maxd) (setq maxd d))))
     maxd))
 
 (defun claude-repl-drawer--window-width (window)
