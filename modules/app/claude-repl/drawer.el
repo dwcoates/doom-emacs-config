@@ -822,6 +822,26 @@ Returns non-nil on success."
 
 ;;;; Commands ---------------------------------------------------------------
 
+(defun claude-repl-drawer--leave-side-window-before-switch ()
+  "Move out of the drawer side window before a persp switch.
+
+Persp-mode's `persp-restore-window-conf' calls `persp-delete-other-windows'
+with `ignore-window-parameters t' on the destination workspace.  When
+the selected window is a side window (e.g. the drawer), persp picks an
+arbitrary non-side fallback to anchor the sweep, then the subsequent
+`window-state-put' restores the saved tree from that anchor.  In
+practice the destination workspace's Claude panel windows can be
+clobbered by the sweep before the put has a chance to restore them.
+
+Pre-selecting a non-side main-area window sidesteps that path entirely
+— the sweep+put happens with a normal anchor and the destination's
+saved panels come back intact.
+
+No-op when the selected window is not a side window."
+  (when (window-parameter (selected-window) 'window-side)
+    (when-let ((main (and (fboundp 'window-main-window) (window-main-window))))
+      (select-window main))))
+
 (defun claude-repl-drawer-visit ()
   "Switch to the workspace at point."
   (interactive)
@@ -829,6 +849,7 @@ Returns non-nil on success."
     (unless ws
       (user-error "No workspace at point"))
     (claude-repl--log ws "drawer-visit: ws=%s" ws)
+    (claude-repl-drawer--leave-side-window-before-switch)
     (+workspace-switch ws)))
 
 (defun claude-repl-drawer-refresh ()
@@ -950,13 +971,19 @@ summarizer returns the new aiTitle."
 Used to dispatch merge commands for the entry at point — the merge
 public functions read `(+workspace-current-name)' internally and
 switch perspectives themselves, so we must temporarily inhabit the
-target workspace before invoking them."
+target workspace before invoking them.
+
+Leaves the drawer side window before each switch (see
+`claude-repl-drawer--leave-side-window-before-switch') so persp's
+restore doesn't clobber the destination workspace's panel state."
   (let ((prev (and (fboundp '+workspace-current-name)
                    (+workspace-current-name))))
+    (claude-repl-drawer--leave-side-window-before-switch)
     (+workspace-switch ws)
     (unwind-protect
         (funcall fn)
       (when (and prev (not (equal prev (+workspace-current-name))))
+        (claude-repl-drawer--leave-side-window-before-switch)
         (+workspace-switch prev)))))
 
 (defun claude-repl-drawer-merge-into-master ()

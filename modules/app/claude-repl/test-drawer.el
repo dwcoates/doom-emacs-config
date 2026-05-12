@@ -982,6 +982,108 @@ local j/k.  Asserts the selected window is unchanged across the call."
       (goto-char (point-min))
       (should-error (claude-repl-drawer-visit) :type 'user-error))))
 
+(ert-deftest claude-repl-drawer-test-visit-redirects-from-side-window-before-switch ()
+  "`claude-repl-drawer-visit' leaves a side-window selection before calling
+`+workspace-switch'.  Persp's `persp-delete-other-windows' uses
+`ignore-window-parameters t' on restore, and with a side window
+selected its fallback anchor can clobber the destination workspace's
+Claude panel windows — pre-selecting a main-area window sidesteps that."
+  (let ((wconf (current-window-configuration)))
+    (unwind-protect
+        (progn
+          (delete-other-windows)
+          (claude-repl-test--with-clean-state
+            (claude-repl-drawer-test--register "target" :priority "p1")
+            (let* ((drawer-buf (get-buffer-create claude-repl-drawer-buffer-name))
+                   (drawer-win (display-buffer-in-side-window
+                                drawer-buf '((side . left) (slot . 0)))))
+              (unwind-protect
+                  (progn
+                    (with-current-buffer drawer-buf
+                      (claude-repl-drawer-mode)
+                      (claude-repl-drawer--render))
+                    (select-window drawer-win)
+                    ;; Set point AFTER selecting the window — `select-window'
+                    ;; resets buffer-point to the window's `window-point',
+                    ;; so a pre-select goto would be clobbered.
+                    (claude-repl-drawer--goto-first-workspace)
+                    ;; Sanity: we are actually in a side window now and
+                    ;; positioned on a workspace entry.
+                    (should (window-parameter (selected-window) 'window-side))
+                    (should (claude-repl-drawer--workspace-at-point))
+                    (let ((sel-at-switch nil))
+                      (cl-letf (((symbol-function '+workspace-switch)
+                                 (lambda (_ws &rest _)
+                                   (setq sel-at-switch (selected-window)))))
+                        (claude-repl-drawer-visit))
+                      (should sel-at-switch)
+                      (should-not (window-parameter sel-at-switch 'window-side))))
+                (when (window-live-p drawer-win) (delete-window drawer-win))
+                (when (buffer-live-p drawer-buf) (kill-buffer drawer-buf))))))
+      (set-window-configuration wconf))))
+
+(ert-deftest claude-repl-drawer-test-visit-no-redirect-when-not-in-side-window ()
+  "When the selected window is not a side window, `claude-repl-drawer-visit'
+leaves the selection untouched — the redirect is conditional on a
+side-window selection."
+  (let ((wconf (current-window-configuration)))
+    (unwind-protect
+        (progn
+          (delete-other-windows)
+          (claude-repl-test--with-clean-state
+            (claude-repl-drawer-test--register "target" :priority "p1")
+            (claude-repl-drawer-test--with-buffer
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-first-workspace)
+              ;; Selected window is the test runner's main window — not a
+              ;; side window — even though current-buffer is the drawer
+              ;; buffer here.
+              (let ((sel-before (selected-window))
+                    (sel-at-switch nil))
+                (should-not (window-parameter sel-before 'window-side))
+                (cl-letf (((symbol-function '+workspace-switch)
+                           (lambda (_ws &rest _)
+                             (setq sel-at-switch (selected-window)))))
+                  (claude-repl-drawer-visit))
+                (should (eq sel-at-switch sel-before))))))
+      (set-window-configuration wconf))))
+
+(ert-deftest claude-repl-drawer-test-leave-side-window-helper-noop-when-not-side ()
+  "`claude-repl-drawer--leave-side-window-before-switch' is a no-op when
+the selected window has no `window-side' parameter."
+  (let ((wconf (current-window-configuration)))
+    (unwind-protect
+        (progn
+          (delete-other-windows)
+          (let ((sel-before (selected-window)))
+            (claude-repl-drawer--leave-side-window-before-switch)
+            (should (eq (selected-window) sel-before))))
+      (set-window-configuration wconf))))
+
+(ert-deftest claude-repl-drawer-test-leave-side-window-helper-selects-main ()
+  "`claude-repl-drawer--leave-side-window-before-switch' moves the
+selection to the frame's main window when invoked from a side window."
+  (let ((wconf (current-window-configuration)))
+    (unwind-protect
+        (progn
+          (delete-other-windows)
+          (let* ((main-buf (generate-new-buffer " *test-main*"))
+                 (main-win (selected-window))
+                 (side-buf (generate-new-buffer " *test-side*"))
+                 (side-win (display-buffer-in-side-window
+                            side-buf '((side . left) (slot . 0)))))
+            (set-window-buffer main-win main-buf)
+            (unwind-protect
+                (progn
+                  (select-window side-win)
+                  (should (window-parameter (selected-window) 'window-side))
+                  (claude-repl-drawer--leave-side-window-before-switch)
+                  (should-not (window-parameter (selected-window) 'window-side)))
+              (when (window-live-p side-win) (delete-window side-win))
+              (when (buffer-live-p main-buf) (kill-buffer main-buf))
+              (when (buffer-live-p side-buf) (kill-buffer side-buf)))))
+      (set-window-configuration wconf))))
+
 ;;;; ---- Current-entry overlay + cursor ----
 
 (ert-deftest claude-repl-drawer-test-entry-bounds-spans-block ()
