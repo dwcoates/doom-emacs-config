@@ -469,34 +469,103 @@ Returns the full SHA of the new commit."
 
 ;;;; ---- Tests: handle-merge-command ----
 
-(ert-deftest claude-repl-test-handle-merge-command-calls-merge-into-source ()
-  "handle-merge-command forwards the workspace name to workspace-merge-into-source."
-  (let ((received :unset))
-    (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
-               (lambda (ws &optional _silent) (setq received ws))))
-      (claude-repl--handle-merge-command '((type . "merge") (workspace . "DWC/feature-one")))
-      (should (equal received "DWC/feature-one")))))
+(ert-deftest claude-repl-test-handle-merge-command-literal-match ()
+  "Literal workspace name with a registered :project-dir is forwarded as-is."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "feature-one" :project-dir "/tmp/feature-one")
+    (let ((received :unset))
+      (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+                 (lambda (ws &optional _silent) (setq received ws))))
+        (claude-repl--handle-merge-command
+         '((type . "merge") (workspace . "feature-one")))
+        (should (equal received "feature-one"))))))
 
-(ert-deftest claude-repl-test-handle-merge-command-passes-bare-name-through ()
-  "handle-merge-command does not normalize the workspace name itself —
-normalization is the responsibility of workspace-merge-into-source so
-both interactive and command-file callers get identical handling."
-  (let ((received :unset))
-    (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
-               (lambda (ws &optional _silent) (setq received ws))))
-      (claude-repl--handle-merge-command '((type . "merge") (workspace . "feature-one")))
-      (should (equal received "feature-one")))))
+(ert-deftest claude-repl-test-handle-merge-command-falls-back-to-tail ()
+  "Branch-style \"DWC/foo\" falls back to \"foo\" when only \"foo\" is registered.
+Resolves the bare tail after the last `/' so the spawning agent can send
+its branch name verbatim without pre-stripping it."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "foo" :project-dir "/tmp/foo")
+    (let ((received :unset))
+      (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+                 (lambda (ws &optional _silent) (setq received ws))))
+        (claude-repl--handle-merge-command
+         '((type . "merge") (workspace . "DWC/foo")))
+        (should (equal received "foo"))))))
+
+(ert-deftest claude-repl-test-handle-merge-command-unknown-name-no-crash ()
+  "Unknown name (neither literal nor tail registered) does not invoke
+the merge and does not crash."
+  (claude-repl-test--with-clean-state
+    (let ((called nil))
+      (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+                 (lambda (&rest _) (setq called t))))
+        ;; Must not error.
+        (claude-repl--handle-merge-command
+         '((type . "merge") (workspace . "bar/baz")))
+        (should-not called)))))
+
+(ert-deftest claude-repl-test-handle-merge-command-unknown-name-logs ()
+  "Unknown workspace triggers an `unknown workspace' log line that
+includes both the literal name and the tail that was tried."
+  (claude-repl-test--with-clean-state
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'claude-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logged)))
+                ((symbol-function 'claude-repl--workspace-merge-into-source)
+                 (lambda (&rest _) nil)))
+        (claude-repl--handle-merge-command
+         '((type . "merge") (workspace . "bar/baz")))
+        (should (cl-some (lambda (s)
+                           (and (string-match-p "unknown workspace: bar/baz" s)
+                                (string-match-p "also tried tail baz" s)))
+                         logged))))))
 
 (ert-deftest claude-repl-test-handle-merge-command-runs-silently ()
   "Skill-invoked merges (`/workspace-merge') must pass SILENT=t to
 workspace-merge-into-source so the merge does not steal user focus.
 Interactive entries (`SPC TAB m'/`SPC TAB M') leave SILENT nil and
 retain the old switch-to-project + magit pop behavior."
-  (let ((silent-arg :unset))
-    (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
-               (lambda (_ws &optional silent) (setq silent-arg silent))))
-      (claude-repl--handle-merge-command '((type . "merge") (workspace . "feature-one")))
-      (should (eq silent-arg t)))))
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "feature-one" :project-dir "/tmp/feature-one")
+    (let ((silent-arg :unset))
+      (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+                 (lambda (_ws &optional silent) (setq silent-arg silent))))
+        (claude-repl--handle-merge-command
+         '((type . "merge") (workspace . "feature-one")))
+        (should (eq silent-arg t))))))
+
+;;;; ---- Tests: resolve-merge-workspace-name ----
+
+(ert-deftest claude-repl-test-resolve-merge-workspace-name-literal ()
+  "Literal name with a :project-dir entry returns the literal name."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "foo" :project-dir "/tmp/foo")
+    (should (equal (claude-repl--resolve-merge-workspace-name "foo") "foo"))))
+
+(ert-deftest claude-repl-test-resolve-merge-workspace-name-tail-fallback ()
+  "Branch-style name returns the tail when only the tail is registered."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "foo" :project-dir "/tmp/foo")
+    (should (equal (claude-repl--resolve-merge-workspace-name "DWC/foo") "foo"))))
+
+(ert-deftest claude-repl-test-resolve-merge-workspace-name-literal-wins-over-tail ()
+  "When both the literal name and the tail are registered, literal wins."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "DWC/foo" :project-dir "/tmp/DWC-foo")
+    (claude-repl--ws-put "foo" :project-dir "/tmp/foo")
+    (should (equal (claude-repl--resolve-merge-workspace-name "DWC/foo") "DWC/foo"))))
+
+(ert-deftest claude-repl-test-resolve-merge-workspace-name-miss ()
+  "Returns nil when neither the literal name nor the tail is registered."
+  (claude-repl-test--with-clean-state
+    (should (null (claude-repl--resolve-merge-workspace-name "bar/baz")))))
+
+(ert-deftest claude-repl-test-resolve-merge-workspace-name-no-slash-miss ()
+  "Returns nil for an unregistered bare name (no `/' to fall back from)."
+  (claude-repl-test--with-clean-state
+    (should (null (claude-repl--resolve-merge-workspace-name "nope")))))
 
 ;;;; ---- Tests: process-workspace-commands-file ----
 

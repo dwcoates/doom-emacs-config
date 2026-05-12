@@ -1168,6 +1168,23 @@ annotation must not error out the whole batch."
                ws (length text)
                (if note (format ": %s" note) ""))))))
 
+(defun claude-repl--resolve-merge-workspace-name (ws)
+  "Resolve WS to a registered workspace name for merge dispatch.
+
+Tries WS literally first; if that has no `:project-dir' AND WS contains
+a `/', retries with the substring after the last `/' (the branch tail).
+Returns the matched name on success, or nil if neither lookup hits.
+
+Branch-style workspace names (e.g. \"DWC/foo\") arrive from
+/workspace-merge command-file dispatch when the spawning agent
+stringifies its branch back into branch form.  The registry is keyed by
+bare names, so the tail fallback bridges the two."
+  (cond
+   ((and (stringp ws) (claude-repl--ws-get ws :project-dir)) ws)
+   ((and (stringp ws) (string-match-p "/" ws))
+    (let ((tail (claude-repl--bare-workspace-name ws)))
+      (when (claude-repl--ws-get tail :project-dir) tail)))))
+
 (defun claude-repl--handle-merge-command (cmd)
   "Handle a \"merge\" workspace command CMD.
 Performs the equivalent of `SPC TAB M' on the named workspace, but in
@@ -1175,10 +1192,29 @@ SILENT mode: the cherry-pick happens against the resolved target
 directory without switching the user's active workspace or popping
 magit.  This keeps skill-invoked (`/workspace-merge') merges from
 yanking focus away from whatever the user is doing — only the
-interactive entry points (`SPC TAB m' / `SPC TAB M') change focus."
-  (let ((ws (alist-get 'workspace cmd)))
-    (claude-repl--log ws "workspace-commands-file merge: ws=%s (silent)" ws)
-    (claude-repl--workspace-merge-into-source ws t)))
+interactive entry points (`SPC TAB m' / `SPC TAB M') change focus.
+
+Resolves the JSON `workspace' field via
+`claude-repl--resolve-merge-workspace-name' so a branch-style value
+like \"DWC/foo\" matches a registry keyed by the bare name \"foo\".
+When neither the literal name nor the tail matches, logs an
+`unknown workspace' line (so the failure is debuggable) and returns —
+no error is raised, since a missing workspace is not actionable here."
+  (let* ((ws (alist-get 'workspace cmd))
+         (resolved (claude-repl--resolve-merge-workspace-name ws)))
+    (cond
+     (resolved
+      (claude-repl--log ws
+                        "workspace-commands-file merge: ws=%s resolved=%s (silent)"
+                        ws resolved)
+      (claude-repl--workspace-merge-into-source resolved t))
+     (t
+      (let ((tail (and (stringp ws) (string-match-p "/" ws)
+                       (claude-repl--bare-workspace-name ws))))
+        (claude-repl--log ws
+                          "workspace-commands-file merge: unknown workspace: %s%s — skipping"
+                          ws
+                          (if tail (format " (also tried tail %s)" tail) "")))))))
 
 (defun claude-repl--dispatch-workspace-command (cmd create-delay)
   "Dispatch a single workspace command CMD with current CREATE-DELAY.
