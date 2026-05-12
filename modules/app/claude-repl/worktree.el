@@ -1521,6 +1521,13 @@ doing."
             (claude-repl--ws-put target-ws :merge-completed t)
             (claude-repl--ws-put target-ws :merge-completed-at
                                  (float-time))
+            ;; Flip the repl-state to :merged so the 🔀 badge replaces
+            ;; the ❌ that would otherwise appear post-nuke when
+            ;; `--mark-dead-vterm' runs on the (now-vterm-less)
+            ;; preserved hash entry.  The guard in `--mark-dead-vterm'
+            ;; protects this value from being clobbered.
+            (claude-repl--ws-put target-ws :repl-state :merged)
+            (claude-repl--ws-put target-ws :claude-state nil)
             (claude-repl--log target-ws "workspace-merge-do: ws=%s -> :merge-completed t already=%S"
                               target-ws already)
             (claude-repl--tag-merge-completion project-root target-ws)

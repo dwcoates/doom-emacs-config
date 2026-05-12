@@ -273,6 +273,10 @@ state-save.  Callers already guard on `claude-repl--claude-running-p'."
       (claude-repl--ws-put ws :worktree-p t))
     (when (and saved (eq (plist-get saved :merge-completed) t))
       (claude-repl--ws-put ws :merge-completed t)
+      ;; Restore the `:merged' repl-state alongside `:merge-completed'
+      ;; so the 🔀 badge re-appears post-restart instead of falling
+      ;; through to `:dead' (or whatever the poll resolves).
+      (claude-repl--ws-put ws :repl-state :merged)
       (when-let ((mca (plist-get saved :merge-completed-at)))
         (claude-repl--ws-put ws :merge-completed-at mca)))
     (dolist (key claude-repl--environment-keys)

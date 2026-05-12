@@ -3227,6 +3227,25 @@ the target workspace before the auto-finish tear-down runs.  Stubs
       (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
       (should (eq (claude-repl--ws-get "other-ws" :merge-completed) t)))))
 
+(ert-deftest claude-repl-test-workspace-merge-do-sets-repl-state-merged-on-success ()
+  "After a successful cherry-pick, `:repl-state' is set to `:merged'
+so the 🔀 badge survives the post-nuke poll cycle that would
+otherwise mark the (now-vterm-less) workspace `:dead'."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
+               ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+               ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
+               ((symbol-function 'load-file) #'ignore)
+               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+      (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+      (should (eq (claude-repl--ws-get "other-ws" :repl-state) :merged)))))
+
 (ert-deftest claude-repl-test-workspace-merge-do-already-incorporated-still-tears-down ()
   "When cherry-pick-commits returns `already-incorporated' (commits
 already on the parent), workspace-merge-do still tags and tears down

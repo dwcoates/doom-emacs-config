@@ -73,11 +73,15 @@ the indent change — no other knobs needed."
     (:idle        . "💤")
     (:permission  . "❓")
     (:stop-failed . "❗")
-    (:dead        . "❌"))
+    (:dead        . "❌")
+    (:merged      . "🔀"))
   "Alist mapping claude-state keyword to an indicator glyph.
 The :dead entry is used when `:repl-state' is `:dead' (overrides
-:claude-state).  Unrecognized values fall through to a single middot
-placeholder, used for workspaces registered but with no live session."
+:claude-state).  The :merged entry is used when `:repl-state' is
+`:merged' and takes precedence over `:dead' (so a merged workspace
+whose vterm has since died still reads as merged).  Unrecognized
+values fall through to a single middot placeholder, used for
+workspaces registered but with no live session."
   :type '(alist :key-type symbol :value-type string)
   :group 'claude-repl)
 
@@ -565,10 +569,14 @@ CHILDREN is a list of trees.  Roots and siblings are sorted by
 ;;;; Render -----------------------------------------------------------------
 
 (defun claude-repl-drawer--state-glyph (ws)
-  "Return the indicator glyph for workspace WS."
+  "Return the indicator glyph for workspace WS.
+`:repl-state' `:merged' takes precedence over `:dead' (so a merged
+workspace whose vterm has since died still shows the 🔀 badge)."
   (let ((repl-state (claude-repl--ws-get ws :repl-state))
         (claude-state (claude-repl--ws-get ws :claude-state)))
-    (or (and (eq repl-state :dead)
+    (or (and (eq repl-state :merged)
+             (alist-get :merged claude-repl-drawer-state-icons))
+        (and (eq repl-state :dead)
              (alist-get :dead claude-repl-drawer-state-icons))
         (alist-get claude-state claude-repl-drawer-state-icons)
         claude-repl-drawer-state-icon-default)))
@@ -587,12 +595,13 @@ workspaces don't carry a phantom space."
 
 (defun claude-repl-drawer--name-face (ws)
   "Return the face spec for WS's name, colored by claude-state.
-:dead falls through to the default workspace-name face (the existing
-hidden/dim treatment provides the muting).  Unrecognized states render
-as plain bold."
+:dead and :merged fall through to the default workspace-name face
+(the existing hidden/dim treatment provides the muting).
+Unrecognized states render as plain bold."
   (let* ((repl-state   (claude-repl--ws-get ws :repl-state))
          (claude-state (claude-repl--ws-get ws :claude-state))
          (color (cond
+                 ((eq repl-state :merged)      nil)
                  ((eq repl-state :dead)        nil)
                  ((eq claude-state :init)      claude-repl--color-init-blue)
                  ((eq claude-state :thinking)  claude-repl--color-thinking-red)

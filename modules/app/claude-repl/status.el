@@ -226,6 +226,12 @@ STATE is one of:
                workspace-switch handler.  The on-disk state file is
                always preserved by `--nuke-one-workspace' so the
                workspace can be re-opened later via project-switch.
+  :merged    — workspace's branch has been merged into its source.
+               Set by `claude-repl--workspace-merge-do' on success
+               (alongside `:merge-completed t').  Takes precedence
+               over `:dead' so the 🔀 badge survives the post-merge
+               nuke-and-poll cycle that would otherwise mark the
+               (now-vterm-less) workspace dead.
   :dead      — vterm process gone
 
 The orthogonal `:done-acked' boolean tracks whether the user has seen
@@ -540,6 +546,13 @@ process has died.")
 StopFailure hook fired (turn ended on an API error, but the vterm
 session is still alive and re-promptable).")
 
+(defconst claude-repl--label-merged           "🔀"
+  "Bracket label shown adjacent to the numeric index when the
+workspace's branch has been merged into its source (`:repl-state'
+`:merged').  Takes precedence over the `:dead' badge so a merged
+workspace whose vterm has since died still reads as merged, not
+dead.")
+
 (defconst claude-repl--tab-weight             'bold
   "Font weight applied to every tab face.")
 
@@ -642,7 +655,9 @@ Distributed evenly across `claude-repl-flash-count' on/off cycles."
                   :bracket-fg ,claude-repl--color-light
                   :weight ,claude-repl--tab-weight))
     (:dead
-     :label      ,claude-repl--label-dead))
+     :label      ,claude-repl--label-dead)
+    (:merged
+     :label      ,claude-repl--label-merged))
   "Per-state tab-appearance palette.
 Each entry fully describes both selected and unselected looks for a
 claude-state keyword via nested `:unselected' and `:selected' plists.
@@ -856,10 +871,12 @@ For unselected tabs, uses the palette row's `:face' or falls back to
 
 (defun claude-repl--composed-state (claude repl &optional ws)
   "Project CLAUDE and REPL onto the palette's display key.
-Tab color is primarily a function of `:claude-state'.  The one
-`:repl-state' value that contributes is `:dead' — when the vterm
-process has died (`:claude-state' nil, `:repl-state' :dead), the tab
-shows an ❌ badge.
+Tab color is primarily a function of `:claude-state'.  Two
+`:repl-state' values contribute: `:merged' (workspace's branch has
+been merged into its source, shows the 🔀 badge) and `:dead' (vterm
+died, shows the ❌ badge).  `:merged' takes precedence over `:dead'
+so a merged workspace whose vterm has since died still reads as
+merged.
 
 Optional WS is threaded through for diagnostic logging only; it does
 not affect the mapping.
@@ -874,6 +891,7 @@ Rule:
   :done        → :done                     (green — unacknowledged work)
   :idle        → :idle                     (orange)
   :stop-failed → :stop-failed              (magenta + ⚠ — turn errored)
+  nil + :merged → :merged                  (default + 🔀)
   nil + :dead  → :dead                     (default + ❌)
   nil          → nil                       (no session / unborn)"
   (cond
@@ -883,6 +901,7 @@ Rule:
    ((eq claude :done)        :done)
    ((eq claude :idle)        :idle)
    ((eq claude :stop-failed) :stop-failed)
+   ((and (null claude) (eq repl :merged)) :merged)
    ((and (null claude) (eq repl :dead)) :dead)
    ((null claude)           nil)
    (t
@@ -1196,13 +1215,17 @@ documented lifecycle-cleanup exception to the sentinel-only writer
 rule: no hook will ever fire again for a dead process, so Emacs is
 the only observer that can reset state.
 
-No-op in two cases:
+No-op in three cases:
 - `:repl-state' is already `:dead' (idempotent on the poll path).
+- `:repl-state' is `:merged' — the workspace was nuked after a
+  successful merge and `:merged' takes precedence over `:dead'.
+  Without this guard, the next poll would clobber the merge badge.
 - `:claude-state' is `:init' — Claude is starting, the vterm process
   may not have reached running state yet, and observing no process
   does not mean dead.  The session-start hook will transition away
   from `:init' shortly; until then the timer leaves things alone."
   (unless (or (eq (claude-repl--ws-repl-state ws) :dead)
+              (eq (claude-repl--ws-repl-state ws) :merged)
               (eq (claude-repl--ws-claude-state ws) :init))
     (claude-repl--log ws "mark-dead-vterm: ws=%s claude-state=%s -> :dead"
                       ws (claude-repl--ws-claude-state ws))

@@ -181,6 +181,10 @@ default at restart and shouldn't pin behavior."
   "Composed (:thinking, :dead) → :thinking — claude-state dominates repl-state."
   (should (eq :thinking (claude-repl--composed-state :thinking :dead))))
 
+(ert-deftest claude-repl-test-composed-nil-merged ()
+  "Composed (nil, :merged) → :merged — branch merged into source, show 🔀 badge."
+  (should (eq :merged (claude-repl--composed-state nil :merged))))
+
 (ert-deftest claude-repl-test-composed-unknown-returns-nil ()
   "DIAGNOSTIC: unknown claude-state currently logs + returns nil (temporary —
 to be reverted to should-error once the leaking writer is found)."
@@ -334,6 +338,14 @@ to be reverted to should-error once the leaking writer is found)."
     (should-not (claude-repl--ws-get "ws1" :claude-state))
     (should (eq (claude-repl--ws-get "ws1" :repl-state) :dead))))
 
+(ert-deftest claude-repl-test-mark-dead-vterm-preserves-merged ()
+  "mark-dead-vterm is a no-op when :repl-state is already :merged.
+The post-merge poll otherwise clobbers the 🔀 badge with ❌."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :repl-state :merged)
+    (claude-repl--mark-dead-vterm "ws1")
+    (should (eq (claude-repl--ws-get "ws1" :repl-state) :merged))))
+
 ;;;; ---- Tests: Workspace state accessors (ws-set, ws-clear, ws-state) ----
 
 (ert-deftest claude-repl-test-ws-set-and-state ()
@@ -437,6 +449,19 @@ to be reverted to should-error once the leaking writer is found)."
               ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) t)))
       (let ((result (claude-repl--tabline-advice '("test-ws"))))
         (should (string-match-p "1❌" result))))))
+
+(ert-deftest claude-repl-test-tabline-merged-label ()
+  "Tabline shows index and 🔀 for a merged workspace (bracket-only,
+panels closed) — :merged uses the same palette `:label' mechanism as
+:dead but emits the merge glyph instead."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :claude-state nil)
+    (claude-repl--ws-put "test-ws" :repl-state :merged)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
+              ((symbol-function '+workspace-list-names) (lambda () '("test-ws")))
+              ((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) nil)))
+      (let ((result (claude-repl--tabline-advice '("test-ws"))))
+        (should (string-match-p "1🔀" result))))))
 
 (ert-deftest claude-repl-test-tabline-done-face ()
   "A background tab with :done should use `claude-repl-tab-done' face (panels visible)."

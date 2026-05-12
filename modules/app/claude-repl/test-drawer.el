@@ -1846,7 +1846,8 @@ already-bound symbols and palette tweaks would require an Emacs restart."
   (should (equal (alist-get :idle       claude-repl-drawer-state-icons) "💤"))
   (should (equal (alist-get :init       claude-repl-drawer-state-icons) "⏳"))
   (should (equal (alist-get :stop-failed claude-repl-drawer-state-icons) "❗"))
-  (should (equal (alist-get :dead       claude-repl-drawer-state-icons) "❌")))
+  (should (equal (alist-get :dead       claude-repl-drawer-state-icons) "❌"))
+  (should (equal (alist-get :merged     claude-repl-drawer-state-icons) "🔀")))
 
 ;;;; ---- State glyph ----
 
@@ -1865,6 +1866,30 @@ already-bound symbols and palette tweaks would require an Emacs restart."
     (claude-repl-drawer-test--register "busy" :claude-state :thinking)
     (should (equal (claude-repl-drawer--state-glyph "busy")
                    (alist-get :thinking claude-repl-drawer-state-icons)))))
+
+(ert-deftest claude-repl-drawer-test-state-glyph-merged-overrides-claude-state ()
+  ":repl-state :merged takes precedence over :claude-state for the glyph."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "merged-ws"
+                                       :claude-state :thinking
+                                       :repl-state :merged)
+    (should (equal (claude-repl-drawer--state-glyph "merged-ws")
+                   (alist-get :merged claude-repl-drawer-state-icons)))))
+
+(ert-deftest claude-repl-drawer-test-state-glyph-merged-overrides-dead ()
+  ":repl-state :merged would normally not coexist with :dead, but if
+both somehow appear in a stale plist, :merged wins so the merge badge
+isn't masked by a post-nuke dead reading."
+  (claude-repl-test--with-clean-state
+    ;; Single :repl-state slot can't hold both — the test simulates the
+    ;; precedence rule by setting :merged and confirming it's chosen
+    ;; over the :dead icon-lookup path.
+    (claude-repl-drawer-test--register "merged-not-dead"
+                                       :repl-state :merged)
+    (should (equal (claude-repl-drawer--state-glyph "merged-not-dead")
+                   (alist-get :merged claude-repl-drawer-state-icons)))
+    (should-not (equal (claude-repl-drawer--state-glyph "merged-not-dead")
+                       (alist-get :dead claude-repl-drawer-state-icons)))))
 
 ;;;; ---- Tests: keyboard-inaccessibility bounce ----
 
