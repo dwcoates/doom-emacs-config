@@ -857,6 +857,58 @@ environments without notification tools (terminal-notifier or osascript)."
     (should (equal (claude-repl--ws-get "ws1" :priority) "p1"))
     (should (equal (claude-repl--ws-get "ws1" :counter) 42))))
 
+(ert-deftest claude-repl-test-ws-put-stub-create-emits-noisy-log ()
+  "ws-put that creates a fresh entry with a non-:project-dir key should
+emit a noisy unconditional log via `claude-repl--do-log'."
+  (claude-repl-test--with-clean-state
+    (let ((log-calls nil))
+      (cl-letf (((symbol-function 'claude-repl--do-log)
+                 (lambda (ws fmt args &optional _err)
+                   (push (list ws fmt args) log-calls))))
+        (claude-repl--ws-put "stub-ws" :priority "p1"))
+      (should (= 1 (length log-calls)))
+      (should (string-match-p "STUB-CREATE" (nth 1 (car log-calls)))))))
+
+(ert-deftest claude-repl-test-ws-put-project-dir-first-no-log ()
+  "ws-put that creates an entry by setting :project-dir as the first key
+should not emit the stub-create log."
+  (claude-repl-test--with-clean-state
+    (let ((log-calls nil))
+      (cl-letf (((symbol-function 'claude-repl--do-log)
+                 (lambda (ws fmt args &optional _err)
+                   (push (list ws fmt args) log-calls))))
+        (claude-repl--ws-put "good-ws" :project-dir "/some/dir"))
+      (should (null log-calls)))))
+
+(ert-deftest claude-repl-test-ws-put-existing-entry-no-log ()
+  "ws-put on an existing entry should not emit the stub-create log
+even when writing a non-:project-dir key on an entry that itself
+has no :project-dir (no new entry is being created)."
+  (claude-repl-test--with-clean-state
+    ;; Seed an entry via :project-dir first so it exists.
+    (claude-repl--ws-put "ws1" :project-dir "/some/dir")
+    (let ((log-calls nil))
+      (cl-letf (((symbol-function 'claude-repl--do-log)
+                 (lambda (ws fmt args &optional _err)
+                   (push (list ws fmt args) log-calls))))
+        (claude-repl--ws-put "ws1" :priority "p1"))
+      (should (null log-calls)))))
+
+(ert-deftest claude-repl-test-ws-put-stub-log-includes-caller-trace ()
+  "Stub-create log payload should include a caller-trace string so the
+producer of the leak can be identified from the message alone."
+  (claude-repl-test--with-clean-state
+    (let ((log-calls nil))
+      (cl-letf (((symbol-function 'claude-repl--do-log)
+                 (lambda (ws fmt args &optional _err)
+                   (push (list ws fmt args) log-calls))))
+        (claude-repl--ws-put "stub-ws" :priority "p1"))
+      (should (= 1 (length log-calls)))
+      (let* ((args (nth 2 (car log-calls)))
+             (trace (car (last args))))
+        (should (stringp trace))
+        (should (> (length trace) 0))))))
+
 ;;;; ---- Tests: ws-del ----
 
 (ert-deftest claude-repl-test-ws-del-existing ()

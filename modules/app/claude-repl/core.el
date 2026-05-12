@@ -360,11 +360,52 @@ Keys: :vterm-buffer :input-buffer
   "Get KEY from workspace WS's plist."
   (plist-get (gethash ws claude-repl--workspaces) key))
 
+(defun claude-repl--ws-put-caller-trace ()
+  "Return a short caller chain string for diagnostic logging.
+Used by `claude-repl--ws-put' to identify the producer of stub-create
+calls (entries written without `:project-dir').  Filters
+`backtrace-frames' to function-call frames only (the `EVALD' slot is
+t for fully-evaluated function calls, nil for special-form / macro
+frames), so the trace is named-function symbols rather than
+`let'/`and'/`if' noise.  Returns at most 8 frames joined with ` <- `.
+Wrapped in `ignore-errors' at the call site so any failure here
+cannot break `--ws-put' itself."
+  (let ((frames (and (fboundp 'backtrace-frames) (backtrace-frames)))
+        (collected nil))
+    (dolist (frame frames)
+      (let ((evald (nth 0 frame))
+            (fn    (nth 1 frame)))
+        (when (and evald
+                   (symbolp fn)
+                   (not (memq fn '(claude-repl--ws-put-caller-trace
+                                   claude-repl--ws-put
+                                   backtrace-frames)))
+                   (< (length collected) 8))
+          (push fn collected))))
+    (if collected
+        (mapconcat #'symbol-name (nreverse collected) " <- ")
+      "<no-trace>")))
+
 (defun claude-repl--ws-put (ws key val)
   "Set KEY to VAL in workspace WS's plist in `claude-repl--workspaces'.
-Internally uses plist-put (which returns a new list) threaded into puthash."
-  (puthash ws (plist-put (gethash ws claude-repl--workspaces) key val)
-           claude-repl--workspaces))
+Internally uses plist-put (which returns a new list) threaded into puthash.
+
+Emits an unconditional log line (via `claude-repl--do-log', bypassing
+`claude-repl-debug') when this call CREATES a fresh hash entry whose
+plist will lack `:project-dir' — the shape that leaks workspaces into
+the drawer's `(no repo)' bucket.  Includes a caller trace so the
+producer can be identified without first turning debug logging on."
+  (let ((stub-create (and (null (gethash ws claude-repl--workspaces))
+                          (not (eq key :project-dir)))))
+    (puthash ws (plist-put (gethash ws claude-repl--workspaces) key val)
+             claude-repl--workspaces)
+    (when stub-create
+      (let ((trace (or (ignore-errors (claude-repl--ws-put-caller-trace))
+                       "<trace-failed>")))
+        (claude-repl--do-log
+         ws
+         "ws-put: STUB-CREATE ws=%s key=%s val=%S — entry created without :project-dir (will appear under drawer \"(no repo)\" bucket). caller-trace=%s"
+         (list ws key val trace))))))
 
 (defun claude-repl--ws-del (ws)
   "Remove all state for workspace WS.
