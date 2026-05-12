@@ -1174,6 +1174,84 @@ then truncated to `/c' fires no /clear hook."
               (claude-repl--slash-return)
               (should (equal posthook-args '("test-ws" "/c"))))))))))
 
+(ert-deftest claude-repl-test-slash-return-sends-pasted-input-buffer ()
+  "When input buffer has pasted text, slash-return sends it via bracketed paste.
+Pasted text bypasses slash-mode's self-insert-command remap and lands in the
+input buffer; slash-return must forward it to vterm so it concatenates with the
+already-forwarded direct-insert chars on Claude's prompt line."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-slash-return-paste*"
+      (setq-local claude-repl--slash-stack '("c" "/"))
+      (claude-slash-input-mode 1)
+      (insert "pasted-content")
+      (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
+      (let ((send-args nil)
+            (return-called nil))
+        (claude-repl-test--with-temp-buffer "*claude-panel-slash-paste-vterm*"
+          (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                    ((symbol-function 'claude-repl--send-input-to-vterm)
+                     (lambda (buf input &optional _on-settle)
+                       (setq send-args (list buf input))))
+                    ((symbol-function 'vterm-send-return)
+                     (lambda () (setq return-called t))))
+            (with-current-buffer " *test-slash-return-paste*"
+              (claude-repl--slash-return)
+              (should send-args)
+              (should (equal (nth 1 send-args) "pasted-content"))
+              (should-not return-called)
+              (should (zerop (buffer-size)))
+              (should-not claude-slash-input-mode))))))))
+
+(ert-deftest claude-repl-test-slash-return-empty-buffer-sends-bare-return ()
+  "When input buffer is empty, slash-return sends only RET (no bracketed paste).
+Preserves the pre-existing behavior for the typical direct-send path
+\(empty buffer + slash command typed char-by-char + RET)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-slash-return-empty*"
+      (setq-local claude-repl--slash-stack '("c" "/"))
+      (claude-slash-input-mode 1)
+      (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
+      (let ((send-called nil)
+            (return-called nil))
+        (claude-repl-test--with-temp-buffer "*claude-panel-slash-empty-vterm*"
+          (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                    ((symbol-function 'claude-repl--send-input-to-vterm)
+                     (lambda (&rest _) (setq send-called t)))
+                    ((symbol-function 'vterm-send-return)
+                     (lambda () (setq return-called t))))
+            (with-current-buffer " *test-slash-return-empty*"
+              (claude-repl--slash-return)
+              (should return-called)
+              (should-not send-called))))))))
+
+(ert-deftest claude-repl-test-slash-return-whitespace-only-buffer-sends-pasted ()
+  "Whitespace-only buffer is treated as pasted content (non-empty after `string-empty-p').
+Whitespace can be meaningful in Claude prompts; slash-return must not silently
+drop it.  Verifies the empty/non-empty check uses `string-empty-p' on raw
+buffer-string, not a trimmed view."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-slash-return-ws*"
+      (setq-local claude-repl--slash-stack '("c" "/"))
+      (claude-slash-input-mode 1)
+      (insert "   ")
+      (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
+      (let ((send-args nil))
+        (claude-repl-test--with-temp-buffer "*claude-panel-slash-ws-vterm*"
+          (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                    ((symbol-function 'claude-repl--send-input-to-vterm)
+                     (lambda (buf input &optional _on-settle)
+                       (setq send-args (list buf input))))
+                    ((symbol-function 'vterm-send-return) #'ignore))
+            (with-current-buffer " *test-slash-return-ws*"
+              (claude-repl--slash-return)
+              (should (equal (nth 1 send-args) "   ")))))))))
+
 (ert-deftest claude-repl-test-exit-slash-mode-clears-state ()
   "`claude-repl--exit-slash-mode' clears stack and disables the minor mode."
   (claude-repl-test--with-temp-buffer " *test-exit-slash*"

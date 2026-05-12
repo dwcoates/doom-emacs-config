@@ -838,6 +838,14 @@ workspace-generation and workspace-update skills know the originating workspace.
 Exits the mode regardless of send outcome — being stuck in slash mode when
 vterm is gone is strictly worse than having one unforwarded RET.
 
+If the input buffer is non-empty (e.g. text pasted in while in slash
+mode — paste bypasses the `self-insert-command' remap and lands in the
+buffer rather than being forwarded char-by-char), the buffer contents
+are sent via bracketed paste to vterm BEFORE RET, so the pasted text is
+concatenated with the already-forwarded direct-insert characters on
+Claude's prompt line and submitted together by the trailing RET.  The
+input buffer is cleared after sending.
+
 Runs `claude-repl--run-send-posthooks' against the accumulated
 slash-stack (reconstructed via `claude-repl--slash-command-string',
 which already reflects backspace pops) so direct-send `/clear' fires
@@ -852,13 +860,22 @@ green-❓ until Stop fires."
   (interactive)
   (claude-repl--log (+workspace-current-name) "slash-return: exiting slash mode")
   (claude-repl--slash-maybe-inject-source-ws)
-  (let ((ws (+workspace-current-name))
-        (cmd (claude-repl--slash-command-string)))
+  (let* ((ws (+workspace-current-name))
+         (cmd (claude-repl--slash-command-string))
+         (input-buf (claude-repl--ws-get ws :input-buffer))
+         (pasted (when (and input-buf (buffer-live-p input-buf))
+                   (with-current-buffer input-buf (buffer-string))))
+         (has-pasted (and pasted (not (string-empty-p pasted)))))
     (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
         (progn
-          (claude-repl--log ws "slash-return: sending <return> to vterm=%s cmd=%S" (buffer-name vterm-buf) cmd)
-          (with-current-buffer vterm-buf
-            (vterm-send-return))
+          (claude-repl--log ws "slash-return: sending <return> to vterm=%s cmd=%S has-pasted=%s pasted-len=%d"
+                            (buffer-name vterm-buf) cmd has-pasted (length (or pasted "")))
+          (if has-pasted
+              (progn
+                (claude-repl--send-input-to-vterm vterm-buf pasted)
+                (with-current-buffer input-buf (erase-buffer)))
+            (with-current-buffer vterm-buf
+              (vterm-send-return)))
           (when (eq (claude-repl--ws-claude-state ws) :permission)
             (claude-repl--mark-ws-thinking ws)))
       (claude-repl--slash-no-vterm-error "return" nil))
