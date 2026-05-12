@@ -25,7 +25,7 @@
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-drawer-width-fraction 0.25
+(defcustom claude-repl-drawer-width-fraction 0.20
   "Fraction of the frame width the drawer should occupy.
 Computed against `frame-width' at display time so the drawer scales
 with the frame.  Capped at 20% by default — the drawer is meant to

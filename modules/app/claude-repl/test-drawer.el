@@ -1169,6 +1169,12 @@ selection to the frame's main window when invoked from a side window."
 
 ;;;; ---- Window width ----
 
+(ert-deftest claude-repl-drawer-test-width-fraction-default-is-0.20 ()
+  "Default `claude-repl-drawer-width-fraction' is 0.20."
+  (should (= 0.20
+             (eval (car (get 'claude-repl-drawer-width-fraction
+                             'standard-value))))))
+
 (ert-deftest claude-repl-drawer-test-window-width-is-fraction-of-frame ()
   "`claude-repl-drawer--window-width' returns the configured fraction of frame-width."
   (claude-repl-test--with-clean-state
