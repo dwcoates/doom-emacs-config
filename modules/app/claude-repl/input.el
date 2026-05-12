@@ -263,18 +263,30 @@ stale accumulated input."
 (defun claude-repl--scroll-vterm-output (lines)
   "Scroll the Claude vterm output window by LINES.
 Positive LINES scrolls forward (toward newer output); negative scrolls
-backward (toward older output).  Scrolls by adjusting `window-start'
-directly — does NOT select the vterm window.
+backward (toward older output).  Adjusts `window-start' AND
+`window-point' of the vterm window — does NOT select it.
+
+Moving `window-point' into the new visible range is what makes upward
+scroll go all the way to `point-min'.  Without it, redisplay snaps
+`window-start' back down so the WINDOW's point (which mirrors vterm's
+bottom-anchored buffer point until otherwise set) remains visible,
+capping upward scroll at roughly `(buffer-point - window-height)'.
+`NOFORCE' alone does not prevent this — redisplay still re-chooses
+`window-start' when the recorded `window-point' is off-screen.  Mouse
+wheel events delivered to the vterm window directly do not hit this
+cap because `mwheel-scroll' / `scroll-down' move the selected buffer's
+point along with `window-start'.
+
+Uses `set-window-point' rather than moving vterm's buffer point so
+vterm's prompt cursor stays where vterm expects it; the next vterm
+output that calls `vterm-reset-cursor-point' + `set-window-point'
+re-synchronizes the window with the prompt as usual.
 
 Selecting vterm even briefly (the old `with-selected-window' approach)
 fires `window-selection-change-functions', which schedules
-`claude-repl--reset-vterm-cursors' on the next idle tick.  That reset
-runs `vterm-reset-cursor-point' + `set-window-point' on every visible
-non-selected vterm window — snapping vterm back to its prompt cursor
-at the bottom and undoing the user's scroll a moment later.  Going
-through `set-window-start' avoids the selection-change entirely, and
-the NOFORCE arg keeps the new start position even though vterm's point
-remains at the bottom of the buffer."
+`claude-repl--bounce-from-vterm' that bounces selection back to the
+input window and disturbs redisplay.  Going through `set-window-start'
++ `set-window-point' avoids the selection-change entirely."
   (claude-repl--log (+workspace-current-name) "scroll-vterm-output: lines=%d" lines)
   (claude-repl--with-vterm-buf
    (when-let ((vterm-win (get-buffer-window vterm-buf)))
@@ -283,7 +295,8 @@ remains at the bottom of the buffer."
                           (goto-char (window-start vterm-win))
                           (forward-line lines)
                           (point)))))
-       (set-window-start vterm-win new-start t)))))
+       (set-window-start vterm-win new-start t)
+       (set-window-point vterm-win new-start)))))
 
 (defun claude-repl-scroll-output-up ()
   "Scroll the Claude vterm output window up (toward older output)."

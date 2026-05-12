@@ -1558,6 +1558,41 @@ from the previous start, computed in the vterm buffer."
           (claude-repl--scroll-vterm-output 10)
           (should-not set-start-called))))))
 
+;;; scroll-vterm-output: must also move window-point so upward scroll
+;;; can pass vterm's bottom-anchored buffer point.  Without this,
+;;; redisplay snaps window-start back down to keep the recorded
+;;; window-point visible, capping how far up the user can scroll.
+
+(ert-deftest claude-repl-test-scroll-vterm-output-moves-window-point ()
+  "`claude-repl--scroll-vterm-output' must call `set-window-point' on the
+vterm window with the new start position, so redisplay does not snap
+`window-start' back to keep vterm's bottom-anchored point visible."
+  (claude-repl-test--with-clean-state
+    (let ((set-point-args nil))
+      (claude-repl-test--with-temp-buffer "*claude-panel-scroll-point*"
+        (insert (mapconcat (lambda (i) (format "line %d" i))
+                           (number-sequence 1 50) "\n"))
+        (goto-char (point-min))
+        (forward-line 30)
+        (let ((seed-start (point)))
+          (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                    ((symbol-function 'get-buffer-window)
+                     (lambda (&rest _) (selected-window)))
+                    ((symbol-function 'window-start)
+                     (lambda (&rest _) seed-start))
+                    ((symbol-function 'set-window-start) (lambda (&rest _) nil))
+                    ((symbol-function 'set-window-point)
+                     (lambda (win pos) (setq set-point-args (list win pos)))))
+            (claude-repl--scroll-vterm-output -5)
+            (let ((expected (with-current-buffer (current-buffer)
+                              (save-excursion (goto-char seed-start)
+                                              (forward-line -5)
+                                              (point)))))
+              (should set-point-args)
+              (should (equal (nth 1 set-point-args) expected)))))))))
+
 ;;; scroll-vterm-output: must NOT select the vterm window (the bug fix).
 ;;; Selecting vterm even briefly fires window-selection-change-functions,
 ;;; which schedules reset-vterm-cursors that snaps vterm back to its
