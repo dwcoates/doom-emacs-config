@@ -164,7 +164,13 @@ solaire-mode remap the default face."
     (if (and (claude-repl--default-background-request-p index args)
              (claude-repl--claude-buffer-p))
         (let ((override (claude-repl--grey-hex claude-repl--vterm-background-grey)))
-          (claude-repl--log-verbose (+workspace-current-name) "vterm-color-advice: claude buffer background override color=%s" override)
+          ;; WHY: vterm--get-color fires per cell on every redraw — historical
+          ;; log analysis showed this single call site emitted ~88% of all
+          ;; log lines (~134k entries per 56M log).  `claude-repl--log-verbose'
+          ;; still writes to file unconditionally, so gate the call itself on
+          ;; verbose mode to keep the file quiet when verbose is off.
+          (when (eq claude-repl-debug 'verbose)
+            (claude-repl--log-verbose (+workspace-current-name) "vterm-color-advice: claude buffer background override color=%s" override))
           override)
       result)))
 

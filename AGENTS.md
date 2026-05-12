@@ -129,6 +129,8 @@ When facing a bug that resists immediate root-cause identification, **do not spe
 6. **Toggling logging at runtime.**
    Use `M-x claude-repl-debug/toggle-logging` to cycle standard logging on/off. With a prefix argument (`C-u M-x claude-repl-debug/toggle-logging`), it toggles verbose mode instead. Verbose mode includes high-frequency events (1-second timer ticks, git-diff sentinels, window changes, resolve-root). Standard mode logs only meaningful state transitions and user-initiated actions.
 
+   **Suggest verbose mode to the user when investigating hot-path issues** (vterm redraws, overlay churn, mode-line refresh, window-config changes, async refresh ticks). Some call sites are *fully* gated on verbose (file write and echo both skipped) because they fire too often to leave on by default — notably `vterm-color-advice` in `overlay.el`, which previously emitted ~88% of the entire logfile. If the log appears silent for a suspected hot path, that gating is usually why; ask the user to enable verbose with `C-u M-x claude-repl-debug/toggle-logging` and reproduce.
+
 7. **Persistent logfile (`~/.claude/doom-claude-repl.log`).**
    By default, all log output is also appended to `~/.claude/doom-claude-repl.log`. This file persists across Emacs sessions and is the primary artifact for debugging and coordinating with the user. When investigating a bug or answering a user question about recent behavior, **read `~/.claude/doom-claude-repl.log` first** — it contains the full timestamped trace of claude-repl activity. Use `M-x claude-repl-debug/toggle-log-to-file` to disable or re-enable file logging at runtime. Ensure that the user is cognizant of it's existence during tricky debug problems, and of how to enable/disable it. 
 

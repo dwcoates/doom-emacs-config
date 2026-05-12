@@ -603,6 +603,36 @@
        0)
       (should original-called))))
 
+(ert-deftest claude-repl-test-vterm-color-advice-no-log-when-debug-off ()
+  "vterm-color-advice in a claude buffer must NOT emit a log line when `claude-repl-debug' is nil."
+  (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+    (let ((claude-repl-debug nil)
+          (log-calls 0))
+      (cl-letf (((symbol-function 'claude-repl--log-verbose)
+                 (lambda (&rest _args) (cl-incf log-calls))))
+        (claude-repl--vterm-color-advice (lambda (_idx &rest _args) "#ffffff") -1))
+      (should (= log-calls 0)))))
+
+(ert-deftest claude-repl-test-vterm-color-advice-no-log-when-debug-t ()
+  "vterm-color-advice must NOT emit a log line when `claude-repl-debug' is t (only verbose enables it)."
+  (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+    (let ((claude-repl-debug t)
+          (log-calls 0))
+      (cl-letf (((symbol-function 'claude-repl--log-verbose)
+                 (lambda (&rest _args) (cl-incf log-calls))))
+        (claude-repl--vterm-color-advice (lambda (_idx &rest _args) "#ffffff") -1))
+      (should (= log-calls 0)))))
+
+(ert-deftest claude-repl-test-vterm-color-advice-logs-when-verbose ()
+  "vterm-color-advice in a claude buffer must emit a log line when `claude-repl-debug' is \\='verbose."
+  (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+    (let ((claude-repl-debug 'verbose)
+          (log-calls 0))
+      (cl-letf (((symbol-function 'claude-repl--log-verbose)
+                 (lambda (&rest _args) (cl-incf log-calls))))
+        (claude-repl--vterm-color-advice (lambda (_idx &rest _args) "#ffffff") -1))
+      (should (= log-calls 1)))))
+
 (provide 'test-overlay)
 
 ;;; test-overlay.el ends here
