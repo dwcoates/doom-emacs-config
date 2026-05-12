@@ -1506,81 +1506,106 @@ buffer-string, not a trimmed view."
         (claude-repl-scroll-up)
         (should-not called)))))
 
-;;; scroll-vterm-output: scrolls by claude-repl-scroll-lines with visible window
+;;; scroll-vterm-output: sets window-start LINES away from the current start
 
-(ert-deftest claude-repl-test-scroll-vterm-output-uses-scroll-lines ()
-  "`claude-repl--scroll-vterm-output' calls SCROLL-FN with `claude-repl-scroll-lines'."
+(ert-deftest claude-repl-test-scroll-vterm-output-shifts-window-start ()
+  "`claude-repl--scroll-vterm-output' moves `window-start' by LINES via
+`set-window-start'.  Asserts the new start matches `forward-line LINES'
+from the previous start, computed in the vterm buffer."
   (claude-repl-test--with-clean-state
-    (let ((scroll-arg nil)
-          (claude-repl-scroll-lines 20))
+    (let ((set-start-args nil))
       (claude-repl-test--with-temp-buffer "*claude-panel-scroll-output*"
-        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                  ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
-                  ((symbol-function 'get-buffer-window)
-                   (lambda (&rest _) (selected-window)))
-                  ((symbol-function 'with-selected-window)
-                   (lambda (_win &rest _) nil)))
-          ;; Call directly with a lambda that captures the arg
-          (cl-letf (((symbol-function 'get-buffer-window)
-                     (lambda (&rest _) (selected-window))))
-            (claude-repl--scroll-vterm-output
-             (lambda (n) (setq scroll-arg n)))
-            (should (= scroll-arg 20))))))))
+        ;; Seed the buffer with enough content to make forward-line meaningful.
+        (insert (mapconcat (lambda (i) (format "line %d" i))
+                           (number-sequence 1 50) "\n"))
+        (goto-char (point-min))
+        (forward-line 30)
+        (let ((seed-start (point)))
+          (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                    ((symbol-function 'get-buffer-window)
+                     (lambda (&rest _) (selected-window)))
+                    ((symbol-function 'window-start)
+                     (lambda (&rest _) seed-start))
+                    ((symbol-function 'set-window-start)
+                     (lambda (win pos &optional noforce)
+                       (setq set-start-args (list win pos noforce)))))
+            (claude-repl--scroll-vterm-output -5)
+            (let ((expected (with-current-buffer (current-buffer)
+                              (save-excursion (goto-char seed-start)
+                                              (forward-line -5)
+                                              (point)))))
+              (should (equal (nth 1 set-start-args) expected))
+              ;; NOFORCE must be non-nil so vterm's bottom-cursor point
+              ;; doesn't auto-recenter the window back to the prompt.
+              (should (nth 2 set-start-args)))))))))
 
 ;;; scroll-vterm-output: no vterm window is a no-op
 
 (ert-deftest claude-repl-test-scroll-vterm-output-no-window-noop ()
   "`claude-repl--scroll-vterm-output' is a no-op when vterm has no visible window."
   (claude-repl-test--with-clean-state
-    (let ((scroll-called nil))
+    (let ((set-start-called nil))
       (claude-repl-test--with-temp-buffer "*claude-panel-scroll-nowin*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                   ((symbol-function 'get-buffer-window)
-                   (lambda (&rest _) nil)))
-          (claude-repl--scroll-vterm-output
-           (lambda (_n) (setq scroll-called t)))
-          (should-not scroll-called))))))
+                   (lambda (&rest _) nil))
+                  ((symbol-function 'set-window-start)
+                   (lambda (&rest _) (setq set-start-called t))))
+          (claude-repl--scroll-vterm-output 10)
+          (should-not set-start-called))))))
 
-;;; scroll-output-up calls scroll-down (counterintuitive naming)
+;;; scroll-vterm-output: must NOT select the vterm window (the bug fix).
+;;; Selecting vterm even briefly fires window-selection-change-functions,
+;;; which schedules reset-vterm-cursors that snaps vterm back to its
+;;; bottom-cursor — undoing the user's scroll a moment later.
 
-(ert-deftest claude-repl-test-scroll-output-up-calls-scroll-down ()
-  "`claude-repl-scroll-output-up' calls `scroll-down' (not `scroll-up')."
+(ert-deftest claude-repl-test-scroll-vterm-output-does-not-select-vterm ()
+  "`claude-repl--scroll-vterm-output' never calls `select-window' on the
+vterm window.  The fix replaces a `with-selected-window' approach with
+direct `set-window-start' so no selection-change hook fires."
   (claude-repl-test--with-clean-state
-    (let ((fn-called nil))
-      (claude-repl-test--with-temp-buffer "*claude-panel-scroll-up-test*"
+    (let ((selected nil))
+      (claude-repl-test--with-temp-buffer "*claude-panel-scroll-noselect*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                   ((symbol-function 'get-buffer-window)
                    (lambda (&rest _) (selected-window)))
-                  ((symbol-function 'scroll-down)
-                   (lambda (n) (setq fn-called (list 'scroll-down n))))
-                  ((symbol-function 'scroll-up)
-                   (lambda (_n) (setq fn-called 'wrong))))
-          (claude-repl-scroll-output-up)
-          (should (equal fn-called (list 'scroll-down claude-repl-scroll-lines))))))))
+                  ((symbol-function 'select-window)
+                   (lambda (win &optional _norecord) (push win selected)))
+                  ((symbol-function 'set-window-start) (lambda (&rest _) nil)))
+          (claude-repl--scroll-vterm-output -5)
+          (should-not selected))))))
 
-;;; scroll-output-down calls scroll-up
+;;; scroll-output-up scrolls by negative claude-repl-scroll-lines (older content)
 
-(ert-deftest claude-repl-test-scroll-output-down-calls-scroll-up ()
-  "`claude-repl-scroll-output-down' calls `scroll-up' (not `scroll-down')."
+(ert-deftest claude-repl-test-scroll-output-up-uses-negative-lines ()
+  "`claude-repl-scroll-output-up' delegates with `(- claude-repl-scroll-lines)'
+so the vterm window scrolls backward toward older output."
   (claude-repl-test--with-clean-state
-    (let ((fn-called nil))
-      (claude-repl-test--with-temp-buffer "*claude-panel-scroll-down-test*"
-        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                  ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
-                  ((symbol-function 'get-buffer-window)
-                   (lambda (&rest _) (selected-window)))
-                  ((symbol-function 'scroll-up)
-                   (lambda (n) (setq fn-called (list 'scroll-up n))))
-                  ((symbol-function 'scroll-down)
-                   (lambda (_n) (setq fn-called 'wrong))))
-          (claude-repl-scroll-output-down)
-          (should (equal fn-called (list 'scroll-up claude-repl-scroll-lines))))))))
+    (let ((delegated nil)
+          (claude-repl-scroll-lines 15))
+      (cl-letf (((symbol-function 'claude-repl--scroll-vterm-output)
+                 (lambda (lines) (setq delegated lines))))
+        (claude-repl-scroll-output-up)
+        (should (equal delegated -15))))))
+
+;;; scroll-output-down scrolls by positive claude-repl-scroll-lines (newer content)
+
+(ert-deftest claude-repl-test-scroll-output-down-uses-positive-lines ()
+  "`claude-repl-scroll-output-down' delegates with `claude-repl-scroll-lines'
+so the vterm window scrolls forward toward newer output."
+  (claude-repl-test--with-clean-state
+    (let ((delegated nil)
+          (claude-repl-scroll-lines 15))
+      (cl-letf (((symbol-function 'claude-repl--scroll-vterm-output)
+                 (lambda (lines) (setq delegated lines))))
+        (claude-repl-scroll-output-down)
+        (should (equal delegated 15))))))
 
 ;;; C-S-n / C-S-p must NOT be bound in the input map — the global
 ;;; drawer-nav bindings need to fall through to global-map.  S-<up>

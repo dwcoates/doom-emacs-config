@@ -260,25 +260,40 @@ stale accumulated input."
   :type 'integer
   :group 'claude-repl)
 
-(defun claude-repl--scroll-vterm-output (scroll-fn)
-  "Scroll the Claude vterm output window using SCROLL-FN.
-SCROLL-FN is called with a line count (e.g. `scroll-up' or `scroll-down')."
-  (claude-repl--log (+workspace-current-name) "scroll-vterm-output: fn=%s" scroll-fn)
+(defun claude-repl--scroll-vterm-output (lines)
+  "Scroll the Claude vterm output window by LINES.
+Positive LINES scrolls forward (toward newer output); negative scrolls
+backward (toward older output).  Scrolls by adjusting `window-start'
+directly — does NOT select the vterm window.
+
+Selecting vterm even briefly (the old `with-selected-window' approach)
+fires `window-selection-change-functions', which schedules
+`claude-repl--reset-vterm-cursors' on the next idle tick.  That reset
+runs `vterm-reset-cursor-point' + `set-window-point' on every visible
+non-selected vterm window — snapping vterm back to its prompt cursor
+at the bottom and undoing the user's scroll a moment later.  Going
+through `set-window-start' avoids the selection-change entirely, and
+the NOFORCE arg keeps the new start position even though vterm's point
+remains at the bottom of the buffer."
+  (claude-repl--log (+workspace-current-name) "scroll-vterm-output: lines=%d" lines)
   (claude-repl--with-vterm-buf
-   (let ((vterm-win (get-buffer-window vterm-buf)))
-     (when vterm-win
-       (with-selected-window vterm-win
-         (funcall scroll-fn claude-repl-scroll-lines))))))
+   (when-let ((vterm-win (get-buffer-window vterm-buf)))
+     (let ((new-start (with-current-buffer vterm-buf
+                        (save-excursion
+                          (goto-char (window-start vterm-win))
+                          (forward-line lines)
+                          (point)))))
+       (set-window-start vterm-win new-start t)))))
 
 (defun claude-repl-scroll-output-up ()
   "Scroll the Claude vterm output window up (toward older output)."
   (interactive)
-  (claude-repl--scroll-vterm-output #'scroll-down))
+  (claude-repl--scroll-vterm-output (- claude-repl-scroll-lines)))
 
 (defun claude-repl-scroll-output-down ()
   "Scroll the Claude vterm output window down (toward newer output)."
   (interactive)
-  (claude-repl--scroll-vterm-output #'scroll-up))
+  (claude-repl--scroll-vterm-output claude-repl-scroll-lines))
 
 ;; Wheel handlers are identical to scroll-output -- alias them.
 (defalias 'claude-repl--input-wheel-up   #'claude-repl-scroll-output-up)
