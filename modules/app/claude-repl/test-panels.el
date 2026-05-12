@@ -1827,9 +1827,68 @@ latest one."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function 'claude-repl--sync-panels)
                (lambda () (error "sync failed")))
-              ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
-              ((symbol-function 'claude-repl--reset-vterm-cursors) #'ignore))
+              ((symbol-function 'claude-repl--update-hide-overlay) #'ignore))
       (should-error (claude-repl--on-window-change) :type 'error))))
+
+;;;; ---- Tests: cursor reset is workspace-switch-only ----
+
+(ert-deftest claude-repl-test-panels-on-window-change-does-not-reset-cursors ()
+  "`--on-window-change' must NOT call `--reset-vterm-cursors'.
+Resetting on every window-config change snaps vterm back to the bottom
+and undoes user scrolls (e.g. via `C-S-k')."
+  (claude-repl-test--with-clean-state
+    (let ((reset-called nil))
+      (cl-letf (((symbol-function 'claude-repl--sync-panels) #'ignore)
+                ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
+                ((symbol-function 'claude-repl--reset-vterm-cursors)
+                 (lambda () (setq reset-called t))))
+        (claude-repl--on-window-change)
+        (should-not reset-called)))))
+
+(ert-deftest claude-repl-test-panels-no-cursor-reset-on-selection-change ()
+  "No claude-repl cursor-reset handler is installed on
+`window-selection-change-functions'.  If one is, every focus change
+schedules `--reset-vterm-cursors', which snaps vterm to the bottom and
+undoes user scrolls."
+  (should-not
+   (cl-find-if
+    (lambda (fn)
+      (and (symbolp fn)
+           (string-prefix-p "claude-repl--" (symbol-name fn))
+           (string-match-p "cursor-reset\\|reset-vterm" (symbol-name fn))))
+    window-selection-change-functions)))
+
+(ert-deftest claude-repl-test-panels-no-cursor-reset-on-buffer-list-update ()
+  "No claude-repl cursor-reset handler is installed on
+`buffer-list-update-hook'.  If one is, normal buffer activity
+schedules `--reset-vterm-cursors', which snaps vterm to the bottom and
+undoes user scrolls."
+  (should-not
+   (cl-find-if
+    (lambda (fn)
+      (and (symbolp fn)
+           (string-prefix-p "claude-repl--" (symbol-name fn))
+           (string-match-p "cursor-reset\\|reset-vterm" (symbol-name fn))))
+    buffer-list-update-hook)))
+
+(ert-deftest claude-repl-test-panels-on-workspace-switch-still-resets-cursors ()
+  "Workspace switch is the one place that DOES reset vterm cursors.
+This preserves the recenter-after-switch behavior while the broader
+hooks are gone."
+  (claude-repl-test--with-clean-state
+    (let ((reset-called nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'claude-repl--maybe-sweep-hidden-on-switch) #'ignore)
+                ((symbol-function 'claude-repl--update-all-workspace-states) #'ignore)
+                ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+                ((symbol-function 'claude-repl--reset-vterm-cursors)
+                 (lambda () (setq reset-called t)))
+                ((symbol-function 'claude-repl--drain-pending-magit) #'ignore)
+                ((symbol-function 'claude-repl--drain-pending-initial-buffers) #'ignore)
+                ((symbol-function 'claude-repl--drain-pending-show-panels) #'ignore)
+                ((symbol-function 'claude-repl--maybe-autoselect-input) #'ignore))
+        (claude-repl--on-workspace-switch "ws1")
+        (should reset-called)))))
 
 ;;;; ---- Tests: bounce-from-vterm ----
 

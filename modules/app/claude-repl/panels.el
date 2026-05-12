@@ -621,16 +621,21 @@ Resets cursor, redraws, and syncs window point."
 (defvar claude-repl--sync-timer nil
   "Timer for debounced window-change handler.")
 
-(defvar claude-repl--cursor-reset-timer nil
-  "Timer for debounced cursor reset.")
-
 (defun claude-repl--on-window-change ()
   "Deferred handler for window configuration changes.
-Syncs orphaned panels, refreshes overlay, and resets cursors."
+Syncs orphaned panels and refreshes overlay.
+
+Does NOT reset vterm cursors.  `claude-repl--reset-vterm-cursors'
+calls `vterm-reset-cursor-point' + `set-window-point' on every visible
+non-selected Claude vterm window; that pulls window-start back to the
+bottom of the buffer, undoing any user scroll-up (e.g. via `C-S-k').
+The reset is only useful right after a workspace switch (to recenter
+the new vterm on its prompt), so it lives in
+`claude-repl--on-workspace-switch' alone — not on every window-config
+change, selection change, or buffer-list update."
   (claude-repl--log-verbose (+workspace-current-name) "on-window-change")
   (claude-repl--sync-panels)
-  (claude-repl--update-hide-overlay)
-  (claude-repl--reset-vterm-cursors))
+  (claude-repl--update-hide-overlay))
 
 (defmacro claude-repl--deferred (timer-var fn)
   "Return a lambda that debounces calls to FN via TIMER-VAR.
@@ -645,16 +650,8 @@ Cancels any pending timer and schedules FN to run at next idle."
   "Debounced handler for `window-configuration-change-hook'.
 Cancels any pending timer and schedules `claude-repl--on-window-change'.")
 
-(defalias 'claude-repl--debounced-cursor-reset
-  (claude-repl--deferred claude-repl--cursor-reset-timer #'claude-repl--reset-vterm-cursors)
-  "Debounced handler for cursor reset hooks.
-Cancels any pending timer and schedules `claude-repl--reset-vterm-cursors'.")
-
 (add-hook 'window-configuration-change-hook
           #'claude-repl--debounced-on-window-change)
-
-(add-hook 'window-selection-change-functions #'claude-repl--debounced-cursor-reset)
-(add-hook 'buffer-list-update-hook #'claude-repl--debounced-cursor-reset)
 
 ;; Redirect keyboard navigation away from the vterm output window.
 ;; Mouse clicks (checked via last-input-event) are allowed through so the

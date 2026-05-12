@@ -275,7 +275,6 @@ user's real snapshot during ERT runs."
          (claude-repl-after-ready-functions nil)
          (claude-repl--fullscreen-config nil)
          (claude-repl--sync-timer nil)
-         (claude-repl--cursor-reset-timer nil)
          (claude-repl--hide-overlay-refcount 0)
          (claude-repl-debug nil)
          (claude-repl-workspace-snapshot-file

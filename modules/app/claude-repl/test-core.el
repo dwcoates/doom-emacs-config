@@ -205,10 +205,6 @@ When t, it should call `message'."
 
 ;;;; ---- Bug regression tests ----
 
-(ert-deftest claude-repl-test-bug1-cursor-reset-timer-defvar ()
-  "Bug 1: claude-repl--cursor-reset-timer should be defined (not void)."
-  (should (boundp 'claude-repl--cursor-reset-timer)))
-
 (ert-deftest claude-repl-test-bug9-paste-delay-configurable ()
   "Bug 9: claude-repl-paste-delay should be a configurable variable."
   (should (boundp 'claude-repl-paste-delay))
