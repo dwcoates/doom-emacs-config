@@ -2242,6 +2242,8 @@ as a freshness gesture, but the new branch is rooted in local master."
     (let ((captured-base nil))
       (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
                  (lambda () "/tmp/repo/"))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_root) nil))
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
@@ -2249,6 +2251,87 @@ as a freshness gesture, but the new branch is rooted in local master."
                    (setq captured-base base))))
         (claude-repl-create-worktree-workspace 'master)
         (should (equal captured-base "master"))))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-master-base-reanchors-git-root ()
+  "BASE = `master' re-anchors git-root to the master worktree path.
+The drawer nests new workspaces under whatever directory ends up as
+`:source-ws-dir' (== git-root through the commands flow), so for a
+worktree branched off master the parent must be master itself — NOT the
+calling workspace.  Otherwise the drawer would nest the new ws under a
+parent that shares no commits with it."
+  (claude-repl-test--with-clean-state
+    (let ((captured-git-root :unset)
+          (master-path-lookup-root :unset))
+      (cl-letf (((symbol-function '+workspace-current-name)
+                 (lambda () "calling-ws"))
+                ((symbol-function 'claude-repl--ws-dir)
+                 (lambda (ws)
+                   (if (equal ws "calling-ws") "/tmp/calling-ws/"
+                     (error "unexpected ws: %s" ws))))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (root)
+                   (setq master-path-lookup-root root)
+                   "/tmp/master/"))
+                ((symbol-function 'read-string)
+                 (lambda (&rest _) "do the thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed git-root _base _fork-from)
+                   (setq captured-git-root git-root))))
+        (claude-repl-create-worktree-workspace 'master)
+        (should (equal master-path-lookup-root "/tmp/calling-ws/"))
+        (should (equal captured-git-root "/tmp/master/"))))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-master-base-fallback-on-nil-master ()
+  "BASE = `master' falls back to source-ws git-root when master path is unresolvable.
+`claude-repl--master-worktree-path' shells out and can legitimately return
+nil (e.g. test fixtures, detached HEAD, no checked-out master).  Falling
+back to the calling-ws root preserves the prior behavior in that edge
+case rather than passing nil into spawn."
+  (claude-repl-test--with-clean-state
+    (let ((captured-git-root :unset))
+      (cl-letf (((symbol-function '+workspace-current-name)
+                 (lambda () "calling-ws"))
+                ((symbol-function 'claude-repl--ws-dir)
+                 (lambda (ws)
+                   (if (equal ws "calling-ws") "/tmp/calling-ws/"
+                     (error "unexpected ws: %s" ws))))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_root) nil))
+                ((symbol-function 'read-string)
+                 (lambda (&rest _) "do the thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed git-root _base _fork-from)
+                   (setq captured-git-root git-root))))
+        (claude-repl-create-worktree-workspace 'master)
+        (should (equal captured-git-root "/tmp/calling-ws/"))))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-head-base-does-not-reanchor ()
+  "BASE = `head' leaves git-root pointing at the calling ws (not master).
+`SPC TAB n' is a child-of-current operation: the new branch is rooted in
+the calling ws's HEAD, so its drawer parent must be the calling ws.  The
+master-worktree-path resolver MUST NOT be consulted for HEAD-base
+creates — doing so would break the same-as-pre-fix `head' semantics."
+  (claude-repl-test--with-clean-state
+    (let ((captured-git-root :unset)
+          (master-path-called nil))
+      (cl-letf (((symbol-function '+workspace-current-name)
+                 (lambda () "calling-ws"))
+                ((symbol-function 'claude-repl--ws-dir)
+                 (lambda (ws)
+                   (if (equal ws "calling-ws") "/tmp/calling-ws/"
+                     (error "unexpected ws: %s" ws))))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_root)
+                   (setq master-path-called t)
+                   "/tmp/master/"))
+                ((symbol-function 'read-string)
+                 (lambda (&rest _) "do the thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed git-root _base _fork-from)
+                   (setq captured-git-root git-root))))
+        (claude-repl-create-worktree-workspace 'head)
+        (should-not master-path-called)
+        (should (equal captured-git-root "/tmp/calling-ws/"))))))
 
 (ert-deftest claude-repl-test-create-worktree-workspace-passes-no-fork-from ()
   "Plain create (non-fork) passes FORK-FROM = nil."

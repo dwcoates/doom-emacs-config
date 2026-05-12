@@ -781,11 +781,18 @@ picks up to actually create the worktree.
 BASE selects the git ref the new branch is created from.  It is a
 symbol key in `claude-repl--worktree-base-commits':
   `head'   — branch off the current worktree's HEAD (default; edits
-             in-flight here carry over).
+             in-flight here carry over).  The new workspace's
+             `:source-ws-dir' is the calling workspace, so the drawer
+             nests it as a child.
   `master' — branch off LOCAL `master'.  A `git fetch origin master'
              still runs first so `origin/master' stays current, but the
              new branch is rooted in local `master' so any local-only
-             commits on master carry over.
+             commits on master carry over.  The new workspace's
+             `:source-ws-dir' is the master worktree path (resolved via
+             `claude-repl--master-worktree-path'), NOT the calling
+             workspace — so drawer parentage matches the actual branch
+             base.  Falls back to the calling-ws root when no master
+             worktree can be resolved.
 
 SOURCE-WS, when non-nil, names the workspace whose repository the new
 worktree is rooted in (instead of the ambient workspace).  Interactively,
@@ -798,13 +805,21 @@ the JSON file lands and the file-watcher dispatches it."
   (let* ((base-commit (claude-repl--resolve-worktree-base base))
          (effective-source-ws (or source-ws (+workspace-current-name)))
          (source-dir (ignore-errors (claude-repl--ws-dir effective-source-ws)))
-         (git-root (or source-dir (claude-repl--resolve-current-git-root)))
+         (source-ws-git-root (or source-dir (claude-repl--resolve-current-git-root)))
+         ;; When BASE is `master', the new worktree's logical source is the
+         ;; master worktree, not the calling workspace.  Re-anchor git-root so
+         ;; the recorded `:source-ws-dir' (used by the drawer to nest workspaces
+         ;; under their parent) matches the actual branch base.  Falls back to
+         ;; the calling-ws root when no master worktree can be resolved.
+         (git-root (or (and (eq base 'master)
+                            (claude-repl--master-worktree-path source-ws-git-root))
+                       source-ws-git-root))
          (raw-prompt (read-string "Preemptive prompt: ")))
     (when (string-empty-p (string-trim (or raw-prompt "")))
       (user-error "Preemptive prompt is required"))
     (let ((prefixed-prompt (concat claude-repl--autonomous-prompt-prefix raw-prompt)))
-      (claude-repl--log nil "create-worktree-workspace: base=%s base-commit=%s source-ws=%s git-root=%s"
-                        base base-commit (or source-ws "nil") git-root)
+      (claude-repl--log nil "create-worktree-workspace: base=%s base-commit=%s source-ws=%s source-ws-git-root=%s git-root=%s"
+                        base base-commit (or source-ws "nil") source-ws-git-root git-root)
       (message "Generating workspace name via `claude -p --model %s'..."
                claude-repl-workspace-generation-model)
       (claude-repl--spawn-workspace-generation
