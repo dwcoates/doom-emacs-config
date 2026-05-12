@@ -459,22 +459,28 @@ Reverse-lookups `:source-ws-dir' through `claude-repl--ws-name-for-dir'."
 
 (defun claude-repl-drawer--ws-flattenable-ancestor-p (ws)
   "Return non-nil when WS should be skipped when flattening parent chains.
-Both ancestry-detected (`:branch-merged' = `merged') and
-explicit-merge-completed (`:merge-completed' t) ancestors represent
-\"this work is in its parent\" — chains should flatten through either
-so MAIN/HIDDEN trees do not show a stale link through a workspace
-whose work has effectively landed."
-  (or (claude-repl--ws-merged-p ws)
-      (claude-repl--ws-merge-completed-p ws)))
+Driven exclusively by git ancestry (`:branch-merged' = `merged'): if
+the work in WS has landed in its parent according to git, MAIN/HIDDEN
+trees flatten through WS so the user does not see a stale link to a
+workspace whose work has effectively landed.
+
+Workflow state (`:merge-completed t', `:merging t') deliberately does
+NOT count here.  Flattening exists to mirror git reality — the same
+reality that guides `--resolve-merge-into-source-target' — not the
+user-visible workflow lifecycle.  In practice a successful workspace
+merge yields `:branch-merged' = `merged' on the next ancestry poll,
+so the two converge; isolating the predicate ensures workflow-flag
+oddities (e.g., `:merge-completed t' but git rolled back) can never
+mis-flatten the tree."
+  (claude-repl--ws-merged-p ws))
 
 (defun claude-repl-drawer--effective-parent (ws section-set)
   "Return WS's effective parent in SECTION-SET (a list of workspace names).
 Walks the source-ws chain skipping ancestors flagged as flattenable
-by `claude-repl-drawer--ws-flattenable-ancestor-p' (either
-ancestry-detected merged or explicit-merge-completed).  Returns the
-first non-flattenable ancestor that lives in SECTION-SET, or nil when
-no ancestor qualifies (WS is a root in this section).  Cycle-capped
-via `claude-repl-drawer-tree-max-depth'."
+by `claude-repl-drawer--ws-flattenable-ancestor-p' (git-ancestry-detected
+merged only).  Returns the first non-flattenable ancestor that lives in
+SECTION-SET, or nil when no ancestor qualifies (WS is a root in this
+section).  Cycle-capped via `claude-repl-drawer-tree-max-depth'."
   (let ((candidate (claude-repl-drawer--source-ws-name ws))
         (depth 0)
         (result nil)

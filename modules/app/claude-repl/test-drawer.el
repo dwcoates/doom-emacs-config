@@ -873,15 +873,33 @@ through other flattenable ancestors."
                       "c" '("p" "c"))
                      "p")))))
 
-(ert-deftest claude-repl-drawer-test-effective-parent-flattens-through-merge-completed ()
-  "MAIN/HIDDEN trees flatten through `:merge-completed' ancestors too.
-Both ancestry-detected and explicit-completed merges represent \"work
-landed in parent\" — chains must skip both so the visible tree
-matches the intuitive model of un-merged ancestors only."
+(ert-deftest claude-repl-drawer-test-effective-parent-does-not-flatten-through-merge-completed ()
+  "MAIN/HIDDEN trees do NOT flatten through `:merge-completed' alone.
+Flattening is git-ancestry-only (`--ws-flattenable-ancestor-p' reads
+`:branch-merged' = `merged' exclusively), so a workflow-completed
+ancestor without the ancestry cache must remain in the chain.  In
+practice the async poll will follow shortly and converge the two; this
+test guards against workflow-state leaking into tree topology."
   (claude-repl-test--with-clean-state
     (puthash "gp" '(:project-dir "/gp/") claude-repl--workspaces)
     (puthash "p"  '(:project-dir "/p/"  :source-ws-dir "/gp/"
                     :merge-completed t)
+             claude-repl--workspaces)
+    (puthash "c"  '(:project-dir "/c/"  :source-ws-dir "/p/")
+             claude-repl--workspaces)
+    (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+      ;; "p" is not flattenable, so "c"'s effective parent search
+      ;; through ("gp" "c") finds no candidate and returns nil.
+      (should (null (claude-repl-drawer--effective-parent "c" '("gp" "c")))))))
+
+(ert-deftest claude-repl-drawer-test-effective-parent-flattens-through-branch-merged ()
+  "MAIN/HIDDEN trees flatten through ancestors with `:branch-merged' = `merged'.
+This is the sole flattening signal under the new semantics: git
+ancestry alone, not workflow state."
+  (claude-repl-test--with-clean-state
+    (puthash "gp" '(:project-dir "/gp/") claude-repl--workspaces)
+    (puthash "p"  '(:project-dir "/p/"  :source-ws-dir "/gp/"
+                    :branch-merged merged)
              claude-repl--workspaces)
     (puthash "c"  '(:project-dir "/c/"  :source-ws-dir "/p/")
              claude-repl--workspaces)
