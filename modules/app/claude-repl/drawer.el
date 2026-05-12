@@ -406,11 +406,23 @@ Legacy two-section partition; tree-aware sectioning lives in
 ;;;; Section + tree helpers -------------------------------------------------
 
 (defun claude-repl-drawer--workspace-section (ws)
-  "Return :main, :hidden, or :merged for WS based on its plist state.
-Merged dominates hidden — a merged+hidden workspace lands in MERGED."
+  "Return :main, :hidden, :merging, or :merged for WS based on its plist state.
+Precedence (highest first): :merged → :merging → :hidden → :main.
+- :merged is reserved for workspaces whose explicit merge command
+  completed successfully (`:merge-completed' set on WS).
+- :merging is the asynchronous-ancestry signal — the workspace's
+  branch is already an ancestor of its parent's branch, but no
+  explicit merge has completed yet.  This is the bucket that
+  previously masqueraded as :merged and triggered the bug where a
+  workspace appeared merged at command initiation.
+- :hidden / :main are unchanged.
+
+A completed merge dominates everything else; an ancestry-detected
+merge dominates hidden, matching the prior precedence order."
   (cond
-   ((claude-repl--ws-merged-p ws)                        :merged)
-   ((eq (claude-repl--ws-get ws :repl-state) :hidden)    :hidden)
+   ((claude-repl--ws-merge-completed-p ws)            :merged)
+   ((claude-repl--ws-merged-p ws)                     :merging)
+   ((eq (claude-repl--ws-get ws :repl-state) :hidden) :hidden)
    (t :main)))
 
 (defun claude-repl-drawer--source-ws-name (ws)
@@ -424,12 +436,24 @@ Reverse-lookups `:source-ws-dir' through `claude-repl--ws-name-for-dir'."
   :type 'integer
   :group 'claude-repl)
 
+(defun claude-repl-drawer--ws-flattenable-ancestor-p (ws)
+  "Return non-nil when WS should be skipped when flattening parent chains.
+Both ancestry-detected (`:branch-merged' = `merged') and
+explicit-merge-completed (`:merge-completed' t) ancestors represent
+\"this work is in its parent\" — chains should flatten through either
+so MAIN/HIDDEN trees do not show a stale link through a workspace
+whose work has effectively landed."
+  (or (claude-repl--ws-merged-p ws)
+      (claude-repl--ws-merge-completed-p ws)))
+
 (defun claude-repl-drawer--effective-parent (ws section-set)
   "Return WS's effective parent in SECTION-SET (a list of workspace names).
-Walks the source-ws chain skipping ancestors whose `:branch-merged'
-is `merged'.  Returns the first unmerged ancestor that lives in
-SECTION-SET, or nil when no ancestor qualifies (WS is a root in this
-section).  Cycle-capped via `claude-repl-drawer-tree-max-depth'."
+Walks the source-ws chain skipping ancestors flagged as flattenable
+by `claude-repl-drawer--ws-flattenable-ancestor-p' (either
+ancestry-detected merged or explicit-merge-completed).  Returns the
+first non-flattenable ancestor that lives in SECTION-SET, or nil when
+no ancestor qualifies (WS is a root in this section).  Cycle-capped
+via `claude-repl-drawer-tree-max-depth'."
   (let ((candidate (claude-repl-drawer--source-ws-name ws))
         (depth 0)
         (result nil)
@@ -438,30 +462,39 @@ section).  Cycle-capped via `claude-repl-drawer-tree-max-depth'."
                 (< depth claude-repl-drawer-tree-max-depth))
       (setq depth (1+ depth))
       (cond
-       ((claude-repl--ws-merged-p candidate)
+       ((claude-repl-drawer--ws-flattenable-ancestor-p candidate)
         (setq candidate (claude-repl-drawer--source-ws-name candidate)))
        ((member candidate section-set)
         (setq result candidate done t))
        (t (setq done t))))
     result))
 
-(defun claude-repl-drawer--effective-parent-in-merged (ws merged-set)
-  "Return WS's parent in the MERGED section: source-ws if also merged, else nil.
-Preserves original topology — no flattening."
+(defun claude-repl-drawer--effective-parent-in-section (ws section-set)
+  "Return WS's parent in a same-section tree: source-ws if also in SECTION-SET, else nil.
+Used by MERGING and MERGED, which preserve original topology rather
+than flattening through merged ancestors — both sections want to show
+the parent/child structure between their own members."
   (when-let ((src (claude-repl-drawer--source-ws-name ws)))
-    (when (member src merged-set) src)))
+    (when (member src section-set) src)))
+
+(defalias 'claude-repl-drawer--effective-parent-in-merged
+  #'claude-repl-drawer--effective-parent-in-section
+  "Back-compat alias.  Old name retained so external callers / tests
+don't break; the implementation is now shared with MERGING.")
 
 (defun claude-repl-drawer--partition-by-section (workspaces)
-  "Partition WORKSPACES into (:main :hidden :merged) buckets."
-  (let (main hidden merged)
+  "Partition WORKSPACES into (:main :hidden :merging :merged) buckets."
+  (let (main hidden merging merged)
     (dolist (ws workspaces)
       (pcase (claude-repl-drawer--workspace-section ws)
-        (:main   (push ws main))
-        (:hidden (push ws hidden))
-        (:merged (push ws merged))))
-    `((:main   . ,main)
-      (:hidden . ,hidden)
-      (:merged . ,merged))))
+        (:main    (push ws main))
+        (:hidden  (push ws hidden))
+        (:merging (push ws merging))
+        (:merged  (push ws merged))))
+    `((:main    . ,main)
+      (:hidden  . ,hidden)
+      (:merging . ,merging)
+      (:merged  . ,merged))))
 
 (defun claude-repl-drawer--build-tree (workspaces parent-fn)
   "Build a forest of trees from WORKSPACES using PARENT-FN to resolve parents.
@@ -611,8 +644,10 @@ content (rather than back to column 0).  HIDDEN dims the block."
 
 (defun claude-repl-drawer--render-subtree (tree depth current section)
   "Render TREE (a `(WS . CHILDREN)' cell) at DEPTH.
-SECTION is :main, :hidden, or :merged — only :hidden propagates the
-dim treatment via the HIDDEN flag passed to `--render-workspace'.
+SECTION is :main, :hidden, :merging, or :merged — only :hidden
+propagates the dim treatment via the HIDDEN flag passed to
+`--render-workspace'.  :merging and :merged render normally so the
+operational state (badge, prompt summary) remains legible.
 When the entry is in the expanded-set, additional detail lines are
 appended under the standard 2-line render.  Children render
 contiguously (no inter-child blank); blank-between-roots is the
@@ -696,12 +731,13 @@ line) marks the boundary so multi-repo drawers stay scannable."
 
 (defun claude-repl-drawer--parent-fn-for-section (workspaces section)
   "Return a parent-resolution function for SECTION.
-:main and :hidden flatten through merged ancestors; :merged preserves
-original topology."
+:main and :hidden flatten through merged/completed ancestors;
+:merging and :merged preserve original topology so their internal
+parent/child structure stays intact."
   (lambda (ws)
     (cond
-     ((eq section :merged)
-      (claude-repl-drawer--effective-parent-in-merged ws workspaces))
+     ((memq section '(:merged :merging))
+      (claude-repl-drawer--effective-parent-in-section ws workspaces))
      (t
       (claude-repl-drawer--effective-parent ws workspaces)))))
 
@@ -709,8 +745,9 @@ original topology."
   "Render a section titled LABEL.
 WORKSPACES is the list of names belonging to this section.  CURRENT
 is the currently selected workspace (per persp).  SECTION is :main,
-:hidden, or :merged — controls parent-resolution and dim treatment.
-Empty sections render the `(none)' placeholder under the header."
+:hidden, :merging, or :merged — controls parent-resolution and dim
+treatment.  Empty sections render the `(none)' placeholder under the
+header."
   (claude-repl-drawer--insert-section-header label)
   (if (null workspaces)
       (insert (propertize (format "  %s\n"
@@ -722,7 +759,10 @@ Empty sections render the `(none)' placeholder under the header."
       (claude-repl-drawer--render-trees trees current section))))
 
 (defun claude-repl-drawer--render ()
-  "Render the drawer: MAIN, HIDDEN, MERGED, in that order, each as a tree."
+  "Render the drawer: MAIN, HIDDEN, MERGING, MERGED, in that order.
+MERGING precedes MERGED so the user reads the lifecycle top-to-bottom:
+in-progress (MAIN/HIDDEN) → changes-ready (MERGING) → completed
+(MERGED)."
   (let* ((inhibit-read-only t)
          (saved-line (line-number-at-pos))
          (saved-col  (current-column))
@@ -739,17 +779,21 @@ Empty sections render the `(none)' placeholder under the header."
                       (hash-table-keys claude-repl--workspaces))))
     (erase-buffer)
     (insert "\n")
-    (let ((mains   (alist-get :main   sections))
-          (hiddens (alist-get :hidden sections))
-          (mergeds (alist-get :merged sections)))
+    (let ((mains    (alist-get :main    sections))
+          (hiddens  (alist-get :hidden  sections))
+          (mergings (alist-get :merging sections))
+          (mergeds  (alist-get :merged  sections)))
       (claude-repl-drawer--insert-section
-       (format "MAIN (%d)" (length mains))     mains   current :main)
+       (format "MAIN (%d)" (length mains))      mains    current :main)
       (insert "\n")
       (claude-repl-drawer--insert-section
-       (format "HIDDEN (%d)" (length hiddens)) hiddens current :hidden)
+       (format "HIDDEN (%d)" (length hiddens))  hiddens  current :hidden)
       (insert "\n")
       (claude-repl-drawer--insert-section
-       (format "MERGED (%d)" (length mergeds)) mergeds current :merged))
+       (format "MERGING (%d)" (length mergings)) mergings current :merging)
+      (insert "\n")
+      (claude-repl-drawer--insert-section
+       (format "MERGED (%d)" (length mergeds))  mergeds  current :merged))
     (unless (and saved-ws
                  (claude-repl-drawer--goto-workspace-line saved-ws))
       (goto-char (point-min))

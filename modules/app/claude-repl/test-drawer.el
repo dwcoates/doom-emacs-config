@@ -656,12 +656,33 @@ local j/k.  Asserts the selected window is unchanged across the call."
 
 ;;;; ---- Section partition + tree ----
 
-(ert-deftest claude-repl-drawer-test-workspace-section-merged-dominates ()
-  "Merged-branch workspaces land in :merged regardless of hidden state."
+(ert-deftest claude-repl-drawer-test-workspace-section-merging-dominates-hidden ()
+  "Ancestry-detected merged workspaces (`:branch-merged' 'merged) land in
+:merging — even when also flagged hidden.  This is the renamed bucket
+that used to mascarade as :merged before the bug fix that split
+ancestry detection from explicit-completion."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "ws"
                                        :branch-merged 'merged
                                        :repl-state    :hidden)
+    (should (eq (claude-repl-drawer--workspace-section "ws") :merging))))
+
+(ert-deftest claude-repl-drawer-test-workspace-section-merge-completed-routes-to-merged ()
+  "Workspaces with `:merge-completed' t land in :merged.
+This is the sole path into the MERGED bucket — async ancestry polling
+no longer feeds it."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :merge-completed t)
+    (should (eq (claude-repl-drawer--workspace-section "ws") :merged))))
+
+(ert-deftest claude-repl-drawer-test-workspace-section-merge-completed-dominates-merging ()
+  "`:merge-completed' t wins over `:branch-merged' 'merged.
+A workspace whose explicit merge has completed must surface in MERGED
+even if the async ancestry cache also flags it merged."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws"
+                                       :merge-completed t
+                                       :branch-merged 'merged)
     (should (eq (claude-repl-drawer--workspace-section "ws") :merged))))
 
 (ert-deftest claude-repl-drawer-test-workspace-section-hidden ()
@@ -700,7 +721,10 @@ local j/k.  Asserts the selected window is unchanged across the call."
       (should (null (claude-repl-drawer--effective-parent "c" '("c")))))))
 
 (ert-deftest claude-repl-drawer-test-effective-parent-in-merged-direct-only ()
-  "MERGED-section parent is direct source-ws when also in merged-set."
+  "MERGED-section parent is direct source-ws when also in merged-set.
+The generalized `--effective-parent-in-section' powers this; the old
+`--effective-parent-in-merged' name is preserved as an alias and so
+is still exercised here."
   (claude-repl-test--with-clean-state
     (puthash "p" '(:project-dir "/p/") claude-repl--workspaces)
     (puthash "c" '(:project-dir "/c/" :source-ws-dir "/p/")
@@ -709,6 +733,36 @@ local j/k.  Asserts the selected window is unchanged across the call."
       (should (equal (claude-repl-drawer--effective-parent-in-merged
                       "c" '("p" "c"))
                      "p")))))
+
+(ert-deftest claude-repl-drawer-test-effective-parent-in-section-merging-direct-only ()
+  "MERGING-section topology uses the same direct-source-ws rule.
+Both MERGING and MERGED route through `--effective-parent-in-section'
+so their internal parent/child relationships render without flattening
+through other flattenable ancestors."
+  (claude-repl-test--with-clean-state
+    (puthash "p" '(:project-dir "/p/") claude-repl--workspaces)
+    (puthash "c" '(:project-dir "/c/" :source-ws-dir "/p/")
+             claude-repl--workspaces)
+    (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+      (should (equal (claude-repl-drawer--effective-parent-in-section
+                      "c" '("p" "c"))
+                     "p")))))
+
+(ert-deftest claude-repl-drawer-test-effective-parent-flattens-through-merge-completed ()
+  "MAIN/HIDDEN trees flatten through `:merge-completed' ancestors too.
+Both ancestry-detected and explicit-completed merges represent \"work
+landed in parent\" — chains must skip both so the visible tree
+matches the intuitive model of un-merged ancestors only."
+  (claude-repl-test--with-clean-state
+    (puthash "gp" '(:project-dir "/gp/") claude-repl--workspaces)
+    (puthash "p"  '(:project-dir "/p/"  :source-ws-dir "/gp/"
+                    :merge-completed t)
+             claude-repl--workspaces)
+    (puthash "c"  '(:project-dir "/c/"  :source-ws-dir "/p/")
+             claude-repl--workspaces)
+    (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+      (should (equal (claude-repl-drawer--effective-parent "c" '("gp" "c"))
+                     "gp")))))
 
 (ert-deftest claude-repl-drawer-test-build-tree-roots-and-children ()
   "`--build-tree' returns sorted forest with sorted children."
@@ -721,47 +775,73 @@ local j/k.  Asserts the selected window is unchanged across the call."
       (should (equal (mapcar #'car (cdr (car forest))) '("kid"))))))
 
 (ert-deftest claude-repl-drawer-test-section-headers-include-counts ()
-  "Section header labels show entry counts."
+  "Section header labels show entry counts across all four buckets.
+`:branch-merged' 'merged routes to MERGING; `:merge-completed' t
+routes to MERGED — they are independent buckets."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "main-a")
     (claude-repl-drawer-test--register "main-b")
     (claude-repl-drawer-test--register "hid"     :repl-state    :hidden)
-    (claude-repl-drawer-test--register "merged"  :branch-merged 'merged)
+    (claude-repl-drawer-test--register "merging" :branch-merged 'merged)
+    (claude-repl-drawer-test--register "merged"  :merge-completed t)
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
       (let ((text (buffer-substring-no-properties (point-min) (point-max))))
-        (should (string-match-p "MAIN (2)"   text))
-        (should (string-match-p "HIDDEN (1)" text))
-        (should (string-match-p "MERGED (1)" text))))))
+        (should (string-match-p "MAIN (2)"    text))
+        (should (string-match-p "HIDDEN (1)"  text))
+        (should (string-match-p "MERGING (1)" text))
+        (should (string-match-p "MERGED (1)"  text))))))
 
-(ert-deftest claude-repl-drawer-test-render-three-sections ()
-  "Render emits MAIN, HIDDEN, and MERGED headers in that order."
+(ert-deftest claude-repl-drawer-test-render-four-sections ()
+  "Render emits MAIN, HIDDEN, MERGING, and MERGED headers in that order."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "main-ws")
-    (claude-repl-drawer-test--register "hidden-ws" :repl-state :hidden)
-    (claude-repl-drawer-test--register "merged-ws" :branch-merged 'merged)
+    (claude-repl-drawer-test--register "hidden-ws"  :repl-state :hidden)
+    (claude-repl-drawer-test--register "merging-ws" :branch-merged 'merged)
+    (claude-repl-drawer-test--register "merged-ws"  :merge-completed t)
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
       (let ((text (buffer-substring-no-properties (point-min) (point-max))))
         (should (string-match-p "MAIN" text))
         (should (string-match-p "HIDDEN" text))
+        (should (string-match-p "MERGING" text))
         (should (string-match-p "MERGED" text))
-        ;; MAIN must precede HIDDEN, HIDDEN must precede MERGED
+        ;; MAIN < HIDDEN < MERGING < MERGED
         (should (< (string-match "MAIN" text)
                    (string-match "HIDDEN" text)))
         (should (< (string-match "HIDDEN" text)
+                   (string-match "MERGING" text)))
+        (should (< (string-match "MERGING" text)
                    (string-match "MERGED" text)))))))
 
-(ert-deftest claude-repl-drawer-test-render-merged-ws-only-in-merged-section ()
-  "A merged workspace appears in MERGED, not MAIN."
+(ert-deftest claude-repl-drawer-test-render-ancestry-detected-ws-lands-in-merging ()
+  "A workspace flagged by async ancestry polling lands under MERGING.
+This is the regression guard for the original bug: such a workspace
+must NOT appear in MERGED before an explicit merge has completed."
   (claude-repl-test--with-clean-state
-    (claude-repl-drawer-test--register "merged-ws" :branch-merged 'merged)
+    (claude-repl-drawer-test--register "merging-ws" :branch-merged 'merged)
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (let* ((text (buffer-substring-no-properties (point-min) (point-max)))
+             (merging-pos (string-match "MERGING" text))
+             (merged-pos  (string-match "MERGED" text))
+             (ws-pos      (string-match "merging-ws" text)))
+        ;; merging-ws must appear AFTER MERGING but BEFORE MERGED.
+        (should (and merging-pos merged-pos ws-pos
+                     (> ws-pos merging-pos)
+                     (< ws-pos merged-pos)))))))
+
+(ert-deftest claude-repl-drawer-test-render-merge-completed-ws-lands-in-merged ()
+  "A workspace with `:merge-completed' t lands under MERGED.
+This is the success path for an explicit merge command."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "completed-ws" :merge-completed t)
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
       (let* ((text (buffer-substring-no-properties (point-min) (point-max)))
              (merged-pos (string-match "MERGED" text))
-             (ws-pos     (string-match "merged-ws" text)))
-        ;; merged-ws appears AFTER the MERGED header (not in MAIN above it)
+             (ws-pos     (string-match "completed-ws" text)))
+        ;; completed-ws appears AFTER the MERGED header (not above it).
         (should (and merged-pos ws-pos (> ws-pos merged-pos)))))))
 
 ;;;; ---- Sort + partition ----
