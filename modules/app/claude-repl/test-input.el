@@ -2298,6 +2298,60 @@ The char was never sent, so the permission prompt is still active."
       (claude-repl-send-char "y"))
     (should (eq (claude-repl--ws-claude-state "test-ws") :permission))))
 
+(ert-deftest claude-repl-test-slash-return-transitions-permission-to-thinking ()
+  "`claude-repl--slash-return' transitions :permission -> :thinking after sending.
+Empty input buffer + digit press enters slash mode (passthrough); the
+RET finalize then runs through slash-return.  Without this transition,
+answering a permission prompt via the digit-passthrough path leaves the
+tab stuck at green-❓."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-slash-return-perm*"
+      (setq-local claude-repl--slash-stack '("1"))
+      (claude-slash-input-mode 1)
+      (claude-repl-test--with-temp-buffer "*claude-panel-slash-return-perm-vterm*"
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (claude-repl--ws-set-claude-state "test-ws" :permission)
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                  ((symbol-function 'vterm-send-return) #'ignore)
+                  ((symbol-function 'claude-repl--run-send-posthooks) #'ignore))
+          (with-current-buffer " *test-slash-return-perm*"
+            (claude-repl--slash-return))))
+      (should (eq (claude-repl--ws-claude-state "test-ws") :thinking)))))
+
+(ert-deftest claude-repl-test-slash-return-does-not-touch-non-permission-state ()
+  "`claude-repl--slash-return' only transitions :permission, not other states."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-slash-return-think*"
+      (setq-local claude-repl--slash-stack '("/" "c" "l" "e" "a" "r"))
+      (claude-slash-input-mode 1)
+      (claude-repl-test--with-temp-buffer "*claude-panel-slash-return-think-vterm*"
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (claude-repl--ws-set-claude-state "test-ws" :thinking)
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                  ((symbol-function 'vterm-send-return) #'ignore)
+                  ((symbol-function 'claude-repl--run-send-posthooks) #'ignore))
+          (with-current-buffer " *test-slash-return-think*"
+            (claude-repl--slash-return))))
+      (should (eq (claude-repl--ws-claude-state "test-ws") :thinking)))))
+
+(ert-deftest claude-repl-test-slash-return-no-vterm-keeps-permission ()
+  "`claude-repl--slash-return' does not transition when no vterm exists.
+The return was never sent, so the permission prompt is still active."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-slash-return-no-vterm*"
+      (setq-local claude-repl--slash-stack '("1"))
+      (claude-slash-input-mode 1)
+      (claude-repl--ws-put "test-ws" :vterm-buffer nil)
+      (claude-repl--ws-set-claude-state "test-ws" :permission)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--current-ws-live-vterm) (lambda () nil))
+                ((symbol-function 'claude-repl--run-send-posthooks) #'ignore))
+        (with-current-buffer " *test-slash-return-no-vterm*"
+          (claude-repl--slash-return)))
+      (should (eq (claude-repl--ws-claude-state "test-ws") :permission)))))
+
 (provide 'test-input)
 
 ;;; test-input.el ends here

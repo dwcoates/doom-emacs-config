@@ -837,7 +837,13 @@ Runs `claude-repl--run-send-posthooks' against the accumulated
 slash-stack (reconstructed via `claude-repl--slash-command-string',
 which already reflects backspace pops) so direct-send `/clear' fires
 the same posthooks as a buffered-and-sent `/clear'.  Posthooks run
-before `claude-repl--exit-slash-mode' clears the stack."
+before `claude-repl--exit-slash-mode' clears the stack.
+
+Transitions `:permission' → `:thinking' when return is actually sent —
+see `claude-repl--do-send' docstring for rationale.  The slash-mode
+passthrough path is the dominant way users answer permission prompts
+(empty input buffer + digit + RET), so without this the tab stays
+green-❓ until Stop fires."
   (interactive)
   (claude-repl--log (+workspace-current-name) "slash-return: exiting slash mode")
   (claude-repl--slash-maybe-inject-source-ws)
@@ -847,7 +853,9 @@ before `claude-repl--exit-slash-mode' clears the stack."
         (progn
           (claude-repl--log ws "slash-return: sending <return> to vterm=%s cmd=%S" (buffer-name vterm-buf) cmd)
           (with-current-buffer vterm-buf
-            (vterm-send-return)))
+            (vterm-send-return))
+          (when (eq (claude-repl--ws-claude-state ws) :permission)
+            (claude-repl--mark-ws-thinking ws)))
       (claude-repl--slash-no-vterm-error "return" nil))
     (claude-repl--run-send-posthooks ws cmd))
   (claude-repl--exit-slash-mode))
