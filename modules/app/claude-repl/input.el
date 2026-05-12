@@ -303,7 +303,12 @@ SCROLL-FN is called with a line count (e.g. `scroll-up' or `scroll-down')."
       :ni "S-RET"     #'newline
       :i  "/"         #'claude-repl--slash-start
       :ni "C-RET"     #'claude-repl-send-with-postfix
-      :ni "C-S-RET"   #'claude-repl-send-with-metaprompt
+      ;; `C-S-RET' is intentionally NOT bound here -- the global drawer-visit
+      ;; override (`claude-repl--install-drawer-visit-override') needs the
+      ;; chord to reach `claude-repl-drawer-global-visit' from inside the
+      ;; Claude input buffer.  Metaprompt-send stays reachable on macOS via
+      ;; `S-s-RET' (Doom's `:gn' binding) caught by the
+      ;; `[remap +default/newline-above]' entry below.
       [remap +default/newline-below] #'claude-repl-send-with-postfix
       [remap +default/newline-above] #'claude-repl-send-with-metaprompt
       :ni "C-c C-k"   #'claude-repl-interrupt

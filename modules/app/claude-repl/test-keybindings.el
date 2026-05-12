@@ -1520,4 +1520,63 @@ binding without erroring."
     (should (eq (lookup-key general-override-mode-map (kbd "C-S-j"))
                 'claude-repl-scroll-output-down))))
 
+;;;; ---- Tests: drawer-visit override install ----
+
+;;; `C-S-<return>' must win lookup above Doom default's `:gi/:gn
+;;; "C-S-RET"' -> `+default/newline-above' (evil global aux maps) and
+;;; above `claude-input-mode-map's `:ni "C-S-RET"' major-mode aux that
+;;; previously routed the chord to `claude-repl-send-with-metaprompt'.
+;;; A plain `(map! ... )' global-map entry loses to both.
+
+(ert-deftest claude-repl-test-drawer-visit-chord-binds-csret-to-global-visit ()
+  "`claude-repl--drawer-visit-chord' must map `C-S-<return>' to
+`claude-repl-drawer-global-visit' -- the entry the override install
+plants into `general-override-mode-map'."
+  (should (assoc "C-S-<return>" claude-repl--drawer-visit-chord))
+  (should (eq (cdr (assoc "C-S-<return>" claude-repl--drawer-visit-chord))
+              'claude-repl-drawer-global-visit)))
+
+(ert-deftest claude-repl-test-install-drawer-visit-override-installs-top-level ()
+  "`--install-drawer-visit-override' must populate `general-override-mode-map'
+at top level so the chord works in non-evil contexts and wins above
+any other minor-mode-map binding."
+  (let ((general-override-mode-map (make-sparse-keymap)))
+    (cl-letf (((symbol-function 'evil-get-auxiliary-keymap)
+               (lambda (&rest _) (make-sparse-keymap))))
+      (claude-repl--install-drawer-visit-override))
+    (should (eq (lookup-key general-override-mode-map (kbd "C-S-<return>"))
+                'claude-repl-drawer-global-visit))))
+
+(ert-deftest claude-repl-test-install-drawer-visit-override-installs-intercept-aux ()
+  "`--install-drawer-visit-override' must populate the evil intercept
+aux map of `general-override-mode-map' for every state in
+`claude-repl--scroll-output-intercept-states' -- this is what beats
+both Doom default's evil-state aux binding for `C-S-RET' and any
+major-mode aux like `claude-input-mode-map's `:ni'."
+  (let* ((general-override-mode-map (make-sparse-keymap))
+         (aux-maps nil))
+    (cl-letf (((symbol-function 'evil-get-auxiliary-keymap)
+               (lambda (_keymap state &rest _)
+                 (or (cdr (assq state aux-maps))
+                     (let ((m (make-sparse-keymap)))
+                       (push (cons state m) aux-maps)
+                       m)))))
+      (claude-repl--install-drawer-visit-override))
+    (dolist (state claude-repl--scroll-output-intercept-states)
+      (let ((aux (cdr (assq state aux-maps))))
+        (should aux)
+        (should (eq (lookup-key aux (kbd "C-S-<return>"))
+                    'claude-repl-drawer-global-visit))))))
+
+(ert-deftest claude-repl-test-install-drawer-visit-override-skips-aux-without-evil ()
+  "When `evil-get-auxiliary-keymap' is unbound (evil not loaded),
+`--install-drawer-visit-override' must still install the top-level
+binding without erroring."
+  (let ((general-override-mode-map (make-sparse-keymap)))
+    (cl-letf (((symbol-function 'fboundp)
+               (lambda (sym) (not (eq sym 'evil-get-auxiliary-keymap)))))
+      (claude-repl--install-drawer-visit-override))
+    (should (eq (lookup-key general-override-mode-map (kbd "C-S-<return>"))
+                'claude-repl-drawer-global-visit))))
+
 ;;; test-keybindings.el ends here

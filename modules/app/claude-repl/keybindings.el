@@ -514,7 +514,6 @@ Reports comprehensive diagnostics."
 ;; these in global-map means they fall through correctly everywhere.
 (map! "C-S-n"        #'claude-repl-drawer-global-next)
 (map! "C-S-p"        #'claude-repl-drawer-global-prev)
-(map! "C-S-<return>" #'claude-repl-drawer-global-visit)
 (map! "C-S-x"        #'claude-repl-drawer-global-nuke)
 (map! "C-S-d"        #'claude-repl-drawer-global-kill)
 (map! "C-S-i"        #'claude-repl-drawer-global-send-prompt)
@@ -570,6 +569,36 @@ Idempotent."
                       seq cmd))))))
 
 (claude-repl--install-scroll-output-overrides)
+
+;; `C-S-<return>' -> `claude-repl-drawer-global-visit' needs the same
+;; override treatment as the scroll chords -- a plain `(map! ... )' lands
+;; in `global-map', which loses to Doom default's `:gi/:gn "C-S-RET"' ->
+;; `+default/newline-above' (evil aux on global state maps) and to
+;; `claude-input-mode-map's `:ni "C-S-RET"' major-mode aux.  Bind the
+;; chord on `general-override-mode-map' AND its per-state aux maps so
+;; it wins above all of them.
+(defconst claude-repl--drawer-visit-chord
+  '(("C-S-<return>" . claude-repl-drawer-global-visit))
+  "Alist of (KEY-STRING . COMMAND) for the global drawer-visit chord
+that must win key lookup above the Doom default's `:gi/:gn \"C-S-RET\"'
+binding and above `claude-input-mode-map's `:ni \"C-S-RET\"' aux.")
+
+(defun claude-repl--install-drawer-visit-override ()
+  "Install `claude-repl--drawer-visit-chord' into `general-override-mode-map'
+at top-level AND into its evil intercept aux maps for every state in
+`claude-repl--scroll-output-intercept-states' (reused as the canonical
+\"all evil states\" list).  Idempotent."
+  (dolist (entry claude-repl--drawer-visit-chord)
+    (let ((seq (kbd (car entry)))
+          (cmd (cdr entry)))
+      (define-key general-override-mode-map seq cmd)
+      (when (fboundp 'evil-get-auxiliary-keymap)
+        (dolist (state claude-repl--scroll-output-intercept-states)
+          (define-key (evil-get-auxiliary-keymap
+                       general-override-mode-map state t t)
+                      seq cmd))))))
+
+(claude-repl--install-drawer-visit-override)
 
 ;; vterm-mode-map binds every `C-S-<letter>' to `vterm--self-insert' via
 ;; its define-keys loop over '("C-" "M-" "C-S-").  That major-mode
