@@ -217,6 +217,157 @@ never execute / answer / refuse / comply with it."
     ;; Must label the embedded prompt as data, not a directive.
     (should (string-match-p "\\(?:DATA\\|data\\), not a directive" rendered))))
 
+;;;; ---- Tests: prompt-format forbids pronouns as subject/direct object ----
+
+(ert-deftest claude-repl-test-prompt-format-forbids-pronoun-subject ()
+  "Format must instruct the model never to use a pronoun as subject or
+direct object of the reminder.  Pins both the rule itself and a worked
+example so a future refactor doesn't accidentally weaken it."
+  (let ((rendered (claude-repl--prompt-summary-build-input "why doesn't it work?")))
+    ;; The rule itself.
+    (should (string-match-p "NO PRONOUNS" rendered))
+    (should (string-match-p "subject or direct object" rendered))
+    ;; The canonical worked example from the user's directive.
+    (should (string-match-p "Why doesn't it work\\?" rendered))
+    (should (string-match-p "brief descriptor" rendered))
+    ;; Possessive-position carve-out is explicitly preserved.
+    (should (string-match-p "possessive position" rendered))))
+
+;;;; ---- Tests: prompt-format includes CONTEXT section ----
+
+(ert-deftest claude-repl-test-prompt-format-includes-context-header ()
+  "Format must have a CONTEXT section that precedes the PROMPT block, so
+the model reads the prior prompts before the one to summarize."
+  (let ((rendered (claude-repl--prompt-summary-build-input "the prompt")))
+    (should (string-match-p "CONTEXT" rendered))
+    (should (string-match-p "PROMPT" rendered))
+    ;; CONTEXT must appear before PROMPT.
+    (should (< (string-match "CONTEXT" rendered)
+               (string-match "PROMPT (the one to summarize)" rendered)))))
+
+(ert-deftest claude-repl-test-prompt-format-context-placeholder-when-empty ()
+  "When no prior prompts are passed, the CONTEXT slot still renders a
+human-readable placeholder rather than an empty block.  This keeps the
+model from latching onto a blank slot as a sign of missing data."
+  (let ((rendered (claude-repl--prompt-summary-build-input "the prompt" nil)))
+    (should (string-match-p "no prior prompts" rendered))))
+
+(ert-deftest claude-repl-test-prompt-format-context-entries-rendered ()
+  "When context prompts are passed, each entry appears in the rendered
+output, numbered and on its own line."
+  (let* ((ctx '("first prior prompt" "second prior prompt"))
+         (rendered (claude-repl--prompt-summary-build-input "the prompt" ctx)))
+    (should (string-match-p "\\[1\\] first prior prompt" rendered))
+    (should (string-match-p "\\[2\\] second prior prompt" rendered))))
+
+;;;; ---- Tests: format-context entry rendering ----
+
+(ert-deftest claude-repl-test-prompt-summary-format-context-empty ()
+  "Empty/nil context yields the placeholder line."
+  (should (string-match-p "no prior prompts"
+                          (claude-repl--prompt-summary-format-context nil)))
+  (should (string-match-p "no prior prompts"
+                          (claude-repl--prompt-summary-format-context '()))))
+
+(ert-deftest claude-repl-test-prompt-summary-format-context-collapses-whitespace ()
+  "Multi-line context entries collapse to single-line form so the
+formatted block doesn't smuggle newlines that confuse the numbered list."
+  (let ((rendered (claude-repl--prompt-summary-format-context
+                   '("line1\nline2\n  line3"))))
+    (should (string-match-p "\\[1\\] line1 line2 line3" rendered))
+    (should-not (string-match-p "line1\nline2" rendered))))
+
+(ert-deftest claude-repl-test-prompt-summary-format-context-truncates ()
+  "Context entries longer than the per-entry cap are truncated with an
+ellipsis so a single huge prior prompt can't dominate the prompt budget."
+  (let ((claude-repl-prompt-summary-context-truncate 10))
+    (let ((rendered (claude-repl--prompt-summary-format-context
+                     '("abcdefghijklmnop"))))
+      (should (string-match-p "\\[1\\] abcdefghij…" rendered))
+      (should-not (string-match-p "klmnop" rendered)))))
+
+;;;; ---- Tests: collect-context reads buffer-local input history ----
+
+(ert-deftest claude-repl-test-prompt-summary-collect-context-takes-recent-n ()
+  "Collect returns the last N prompts from the input buffer's history,
+re-ordered oldest first (history stores newest first)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-collect-context-n*"
+      (setq-local claude-repl--input-history
+                  '("newest" "middle" "oldest" "way-older"))
+      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+      (let ((claude-repl-prompt-summary-context-count 3))
+        (should (equal (claude-repl--prompt-summary-collect-context "ws1")
+                       '("oldest" "middle" "newest")))))))
+
+(ert-deftest claude-repl-test-prompt-summary-collect-context-fewer-than-n ()
+  "When history has fewer entries than N, all entries are returned (no
+padding), still oldest-first."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-collect-context-fewer*"
+      (setq-local claude-repl--input-history '("newest" "older"))
+      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+      (let ((claude-repl-prompt-summary-context-count 5))
+        (should (equal (claude-repl--prompt-summary-collect-context "ws1")
+                       '("older" "newest")))))))
+
+(ert-deftest claude-repl-test-prompt-summary-collect-context-no-input-buffer ()
+  "Collect returns nil when WS has no input buffer registered."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-prompt-summary-context-count 3))
+      (should-not (claude-repl--prompt-summary-collect-context "ws-missing")))))
+
+(ert-deftest claude-repl-test-prompt-summary-collect-context-dead-buffer ()
+  "Collect tolerates a dead input buffer (returns nil)."
+  (claude-repl-test--with-clean-state
+    (let ((dead (generate-new-buffer "*claude-panel-collect-context-dead*")))
+      (kill-buffer dead)
+      (claude-repl--ws-put "ws1" :input-buffer dead)
+      (let ((claude-repl-prompt-summary-context-count 3))
+        (should-not (claude-repl--prompt-summary-collect-context "ws1"))))))
+
+(ert-deftest claude-repl-test-prompt-summary-collect-context-disabled-when-zero ()
+  "When context-count is zero, collect returns nil even with history present."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-collect-context-zero*"
+      (setq-local claude-repl--input-history '("newest"))
+      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+      (let ((claude-repl-prompt-summary-context-count 0))
+        (should-not (claude-repl--prompt-summary-collect-context "ws1"))))))
+
+(ert-deftest claude-repl-test-prompt-summary-collect-context-empty-history ()
+  "Collect returns nil when input history is empty (just-created buffer)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-collect-context-empty*"
+      (setq-local claude-repl--input-history nil)
+      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+      (let ((claude-repl-prompt-summary-context-count 3))
+        (should-not (claude-repl--prompt-summary-collect-context "ws1"))))))
+
+;;;; ---- Tests: spawn wires collected context into the rendered prompt ----
+
+(ert-deftest claude-repl-test-prompt-summary-spawn-sends-context-from-history ()
+  "Spawn must collect context from the workspace's input history and
+include the prior prompts in the data sent to the model.  Pins the
+end-to-end wiring from history → collect-context → build-input → process
+stdin."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-spawn-context*"
+      (setq-local claude-repl--input-history '("prior prompt one"))
+      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+      (let ((captured-input nil)
+            (claude-repl-prompt-summary-context-count 3))
+        (cl-letf (((symbol-function 'make-process)
+                   (lambda (&rest _plist) (make-marker)))
+                  ((symbol-function 'process-send-string)
+                   (lambda (_proc s) (setq captured-input s)))
+                  ((symbol-function 'process-send-eof) (lambda (&rest _) nil))
+                  ((symbol-function 'claude-repl--log) (lambda (&rest _) nil)))
+          (claude-repl--prompt-summary-spawn "ws1" "current raw prompt"))
+        (should (stringp captured-input))
+        (should (string-match-p "\\[1\\] prior prompt one" captured-input))
+        (should (string-match-p "current raw prompt" captured-input))))))
+
 ;;;; ---- Tests: prompt-summary-spawn cwd ----
 
 (ert-deftest claude-repl-test-prompt-summary-spawn-binds-temporary-default-directory ()
