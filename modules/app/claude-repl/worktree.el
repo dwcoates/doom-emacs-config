@@ -1447,13 +1447,15 @@ succeeded; a tag-write failure shouldn't undo that."
 Sets `:repl-state :dead' and clears `:claude-state' — the same state
 shape used by vterm-death detection — so the drawer surfaces the ❌
 badge.  Also marks `:merge-completed' nil so the workspace cannot land
-in the MERGED bucket on the strength of a partial earlier success.
+in the MERGED bucket on the strength of a partial earlier success, and
+clears `:merging' so it exits the MERGING bucket too.
 
 A failed merge is the only path that flips a workspace dead via the
 merge flow; the success path uses `:merge-completed' instead."
   (claude-repl--log target-ws
                     "workspace-merge-do: merge failed ws=%s err=%S -> :repl-state :dead"
                     target-ws err)
+  (claude-repl--ws-put target-ws :merging nil)
   (claude-repl--ws-put target-ws :merge-completed nil)
   (claude-repl--ws-put target-ws :claude-state nil)
   (claude-repl--ws-put target-ws :repl-state :dead))
@@ -1500,6 +1502,12 @@ doing."
       (claude-repl--log current-ws "workspace-merge-do project-root=%s (for ws=%s)" project-root current-ws)
       (unless (claude-repl--git-branch-exists-p project-root target-branch)
         (user-error "Branch '%s' not found in repo %s" target-branch project-root))
+      ;; Flip the workflow flag before the cherry-pick so the drawer's
+      ;; MERGING bucket reflects "merge in flight" for the duration of
+      ;; the attempt.  Cleared on either branch below.
+      (claude-repl--ws-put target-ws :merging t)
+      (claude-repl--log target-ws "workspace-merge-do: ws=%s -> :merging t"
+                        target-ws)
       (condition-case err
           (let* ((base (claude-repl--cherry-pick-base project-root target-branch))
                  (result (claude-repl--cherry-pick-commits
@@ -1509,6 +1517,7 @@ doing."
             ;; state before any user-visible side effects so the MERGED
             ;; bucket reflects reality even if a later step (tag/load/
             ;; magit) fails.
+            (claude-repl--ws-put target-ws :merging nil)
             (claude-repl--ws-put target-ws :merge-completed t)
             (claude-repl--log target-ws "workspace-merge-do: ws=%s -> :merge-completed t already=%S"
                               target-ws already)
@@ -1599,10 +1608,24 @@ Reads the cached `:branch-merged' value populated asynchronously by
 `:merge-parent-dir' (recorded `:source-ws-dir' or the master worktree
 fallback).  Returns nil on cache miss — the next poll fills it in.
 
-This is the ancestry-detected signal that feeds the drawer's MERGING
-section.  For the \"explicit merge has completed\" signal that feeds
-the MERGED section, see `claude-repl--ws-merge-completed-p'."
+This is the git-ancestry signal, now reserved for tree-topology
+flattening via `claude-repl-drawer--ws-flattenable-ancestor-p'.  It no
+longer drives bucket placement — for the in-flight merge bucket see
+`claude-repl--ws-merge-in-progress-p' (MERGING), and for the
+completed bucket see `claude-repl--ws-merge-completed-p' (MERGED)."
   (eq (claude-repl--ws-get ws :branch-merged) 'merged))
+
+(defun claude-repl--ws-merge-in-progress-p (ws)
+  "Return non-nil when WS has a workspace-merge command in flight.
+Reads the `:merging' plist key, set by `claude-repl--workspace-merge-do'
+at the start of the merge attempt and cleared on success (alongside
+`:merge-completed t') or failure (alongside `--mark-merge-failed').
+
+This is the workflow-state signal that feeds the drawer's MERGING
+section — distinct from `claude-repl--ws-merged-p', which is the
+git-ancestry signal reserved for tree flattening.  The lifecycle is
+explicit: nil → t (on merge start) → nil (on success/failure)."
+  (eq (claude-repl--ws-get ws :merging) t))
 
 (defun claude-repl--ws-merge-completed-p (ws)
   "Return non-nil when WS's explicit merge command completed successfully.

@@ -771,15 +771,25 @@ doesn't fire (e.g. focus elsewhere or persp-mode-driven sync)."
 ;;;; ---- Section partition + tree ----
 
 (ert-deftest claude-repl-drawer-test-workspace-section-merging-dominates-hidden ()
-  "Ancestry-detected merged workspaces (`:branch-merged' 'merged) land in
-:merging — even when also flagged hidden.  This is the renamed bucket
-that used to mascarade as :merged before the bug fix that split
-ancestry detection from explicit-completion."
+  "In-flight workflow (`:merging' t) lands in :merging even when also
+flagged hidden.  Asserts the workflow-state signal — not git ancestry
+— drives the MERGING bucket, and that it outranks :hidden in the
+precedence chain."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "ws"
-                                       :branch-merged 'merged
-                                       :repl-state    :hidden)
+                                       :merging    t
+                                       :repl-state :hidden)
     (should (eq (claude-repl-drawer--workspace-section "ws") :merging))))
+
+(ert-deftest claude-repl-drawer-test-workspace-section-ancestry-no-longer-buckets-merging ()
+  "`:branch-merged' 'merged alone does NOT route to MERGING.
+Regression guard: ancestry was the old bucket gate and produced
+false MERGING entries when an empty child's parent advanced past it.
+Ancestry is now reserved for flattening only; without a workflow flag
+the workspace must fall through to :main."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :branch-merged 'merged)
+    (should (eq (claude-repl-drawer--workspace-section "ws") :main))))
 
 (ert-deftest claude-repl-drawer-test-workspace-section-merge-completed-routes-to-merged ()
   "Workspaces with `:merge-completed' t land in :merged.
@@ -790,13 +800,14 @@ no longer feeds it."
     (should (eq (claude-repl-drawer--workspace-section "ws") :merged))))
 
 (ert-deftest claude-repl-drawer-test-workspace-section-merge-completed-dominates-merging ()
-  "`:merge-completed' t wins over `:branch-merged' 'merged.
-A workspace whose explicit merge has completed must surface in MERGED
-even if the async ancestry cache also flags it merged."
+  "`:merge-completed' t wins over `:merging' t.
+Covers the brief transition window between setting completed and
+clearing the in-flight flag — the workspace must surface in MERGED,
+not MERGING."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "ws"
                                        :merge-completed t
-                                       :branch-merged 'merged)
+                                       :merging         t)
     (should (eq (claude-repl-drawer--workspace-section "ws") :merged))))
 
 (ert-deftest claude-repl-drawer-test-workspace-section-hidden ()
@@ -890,13 +901,13 @@ matches the intuitive model of un-merged ancestors only."
 
 (ert-deftest claude-repl-drawer-test-section-headers-include-counts ()
   "Section header labels show entry counts across all four buckets.
-`:branch-merged' 'merged routes to MERGING; `:merge-completed' t
-routes to MERGED — they are independent buckets."
+`:merging' t routes to MERGING; `:merge-completed' t routes to MERGED
+— they are independent workflow-state buckets."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "main-a")
     (claude-repl-drawer-test--register "main-b")
-    (claude-repl-drawer-test--register "hid"     :repl-state    :hidden)
-    (claude-repl-drawer-test--register "merging" :branch-merged 'merged)
+    (claude-repl-drawer-test--register "hid"     :repl-state :hidden)
+    (claude-repl-drawer-test--register "merging" :merging    t)
     (claude-repl-drawer-test--register "merged"  :merge-completed t)
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
@@ -911,7 +922,7 @@ routes to MERGED — they are independent buckets."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "main-ws")
     (claude-repl-drawer-test--register "hidden-ws"  :repl-state :hidden)
-    (claude-repl-drawer-test--register "merging-ws" :branch-merged 'merged)
+    (claude-repl-drawer-test--register "merging-ws" :merging    t)
     (claude-repl-drawer-test--register "merged-ws"  :merge-completed t)
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
@@ -928,12 +939,13 @@ routes to MERGED — they are independent buckets."
         (should (< (string-match "MERGING" text)
                    (string-match "MERGED" text)))))))
 
-(ert-deftest claude-repl-drawer-test-render-ancestry-detected-ws-lands-in-merging ()
-  "A workspace flagged by async ancestry polling lands under MERGING.
-This is the regression guard for the original bug: such a workspace
-must NOT appear in MERGED before an explicit merge has completed."
+(ert-deftest claude-repl-drawer-test-render-in-flight-ws-lands-in-merging ()
+  "A workspace flagged `:merging' t lands under MERGING.
+Regression guard: ancestry alone (`:branch-merged' = `merged') must
+NOT route here under the new semantics — only the explicit workflow
+flag set by `claude-repl--workspace-merge-do' qualifies."
   (claude-repl-test--with-clean-state
-    (claude-repl-drawer-test--register "merging-ws" :branch-merged 'merged)
+    (claude-repl-drawer-test--register "merging-ws" :merging t)
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
       (let* ((text (buffer-substring-no-properties (point-min) (point-max)))

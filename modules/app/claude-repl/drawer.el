@@ -428,19 +428,21 @@ Legacy two-section partition; tree-aware sectioning lives in
   "Return :main, :hidden, :merging, or :merged for WS based on its plist state.
 Precedence (highest first): :merged → :merging → :hidden → :main.
 - :merged is reserved for workspaces whose explicit merge command
-  completed successfully (`:merge-completed' set on WS).
-- :merging is the asynchronous-ancestry signal — the workspace's
-  branch is already an ancestor of its parent's branch, but no
-  explicit merge has completed yet.  This is the bucket that
-  previously masqueraded as :merged and triggered the bug where a
-  workspace appeared merged at command initiation.
+  completed successfully (`:merge-completed' t).
+- :merging is the in-flight workflow signal — set when
+  `claude-repl--workspace-merge-do' begins a merge attempt and
+  cleared on success (alongside `:merge-completed t') or failure
+  (alongside `--mark-merge-failed').  Git ancestry no longer drives
+  this bucket: an empty child whose parent advanced past it used to
+  mis-bucket here, and ancestry is now reserved for tree flattening.
 - :hidden / :main are unchanged.
 
-A completed merge dominates everything else; an ancestry-detected
-merge dominates hidden, matching the prior precedence order."
+A completed merge dominates an in-flight one (transition state
+during the brief window between setting `:merge-completed t' and
+clearing `:merging') and both dominate hidden."
   (cond
    ((claude-repl--ws-merge-completed-p ws)            :merged)
-   ((claude-repl--ws-merged-p ws)                     :merging)
+   ((claude-repl--ws-merge-in-progress-p ws)          :merging)
    ((eq (claude-repl--ws-get ws :repl-state) :hidden) :hidden)
    (t :main)))
 

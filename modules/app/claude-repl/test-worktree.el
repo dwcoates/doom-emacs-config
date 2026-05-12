@@ -3315,6 +3315,94 @@ earlier partial success."
         (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t))
       (should-not (claude-repl--ws-get "other-ws" :merge-completed)))))
 
+(ert-deftest claude-repl-test-workspace-merge-do-clears-merging-on-success ()
+  "After a successful cherry-pick, `:merging' is cleared on the target
+workspace.  Asserts the in-flight workflow flag does not linger past
+the success transition — the workspace must leave the MERGING bucket
+and enter MERGED in the same operation."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
+               ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+               ((symbol-function 'claude-repl--finish-workspace) #'ignore)
+               ((symbol-function 'load-file) #'ignore)
+               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+      (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+      (should-not (claude-repl--ws-get "other-ws" :merging)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-clears-merging-on-failure ()
+  "A failed cherry-pick must leave `:merging' nil so the workspace
+exits the MERGING bucket — the dead/❌ badge from
+`--mark-merge-failed' takes over, and the in-flight flag must not
+linger and falsely suggest the merge is still running."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits)
+                (lambda (_dir _ws _base _br) (user-error "Conflict")))
+               ((symbol-function 'claude-repl--finish-workspace) #'ignore)
+               ((symbol-function 'load-file) #'ignore))
+      (ignore-errors
+        (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t))
+      (should-not (claude-repl--ws-get "other-ws" :merging)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-sets-merging-during-cherry-pick ()
+  "`:merging' t is observable on the target workspace while the
+cherry-pick is running.  Probed via a stubbed cherry-pick that
+captures the plist mid-flight — asserts the flag is set before the
+cherry-pick begins, not after."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (let ((merging-mid-flight nil))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits)
+                  (lambda (_dir _ws _base _br)
+                    (setq merging-mid-flight
+                          (claude-repl--ws-get "other-ws" :merging))
+                    nil))
+                 ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+                 ((symbol-function 'claude-repl--finish-workspace) #'ignore)
+                 ((symbol-function 'load-file) #'ignore)
+                 ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+        (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+        (should (eq merging-mid-flight t))))))
+
+;;;; ---- Tests: ws-merge-in-progress-p ----
+
+(ert-deftest claude-repl-test-ws-merge-in-progress-p-true-when-set ()
+  "Returns t when `:merging' is explicitly t."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" '(:merging t) claude-repl--workspaces)
+    (should (claude-repl--ws-merge-in-progress-p "ws"))))
+
+(ert-deftest claude-repl-test-ws-merge-in-progress-p-nil-when-absent ()
+  "Returns nil when `:merging' is not set — workspace must default
+away from MERGING."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" '() claude-repl--workspaces)
+    (should-not (claude-repl--ws-merge-in-progress-p "ws"))))
+
+(ert-deftest claude-repl-test-ws-merge-in-progress-p-nil-when-other-truthy ()
+  "Only the symbol t qualifies as in-flight.  Guards against a future
+caller storing a truthy-but-non-t value (e.g. a start timestamp) and
+unintentionally placing the workspace into MERGING."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" '(:merging "1970") claude-repl--workspaces)
+    (should-not (claude-repl--ws-merge-in-progress-p "ws"))))
+
 ;;;; ---- Tests: ws-merge-completed-p ----
 
 (ert-deftest claude-repl-test-ws-merge-completed-p-true-when-set ()
