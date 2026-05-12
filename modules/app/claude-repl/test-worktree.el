@@ -1955,6 +1955,124 @@ timer callback — letting the workspace-generation flow request HEAD without fo
          "/tmp/cmd-repo/" "name" "prompt" 5 nil nil)
         (should (null captured-base))))))
 
+(ert-deftest claude-repl-test-create-worktree-from-command-master-base-uses-master-worktree-as-source-dir ()
+  "BASE-COMMIT = `master' resolves source-dir via `--master-worktree-path'.
+For `SPC TAB N', the new workspace's `:source-ws-dir' must be the master
+worktree of the repo, not the calling workspace — otherwise the drawer
+nests it under a parent that shares no commits with it."
+  (claude-repl-test--with-clean-state
+    (let ((captured-source-dir :unset)
+          (master-lookup-root :unset)
+          (claude-repl-master-branch-name "master"))
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (root)
+                   (setq master-lookup-root root)
+                   "/tmp/master/"))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir)
+                   (setq captured-source-dir source-dir))))
+        (claude-repl--create-worktree-from-command
+         "/tmp/calling-ws/" "name" "prompt" 5 nil "master")
+        (should (equal master-lookup-root "/tmp/calling-ws/"))
+        (should (equal captured-source-dir "/tmp/master/"))))))
+
+(ert-deftest claude-repl-test-create-worktree-from-command-master-base-nil-master-yields-nil-source-dir ()
+  "BASE-COMMIT = `master' with no master worktree yields nil `:source-ws-dir'.
+When the repo has no worktree on master (e.g. main checkout itself is on
+a feature branch), the new workspace must not fall back to the calling
+workspace as its parent.  Nil leaves it parentless in the drawer — the
+correct outcome since `SPC TAB N' branches off master, not the caller."
+  (claude-repl-test--with-clean-state
+    (let ((captured-source-dir :unset)
+          (claude-repl-master-branch-name "master"))
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_root) nil))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir)
+                   (setq captured-source-dir source-dir))))
+        (claude-repl--create-worktree-from-command
+         "/tmp/calling-ws/" "name" "prompt" 5 nil "master")
+        (should (null captured-source-dir))))))
+
+(ert-deftest claude-repl-test-create-worktree-from-command-head-base-uses-git-root-as-source-dir ()
+  "BASE-COMMIT = `HEAD' yields source-dir == git-root (calling workspace).
+`SPC TAB n' is a child-of-current operation; its drawer parent must be
+the calling workspace, captured as GIT-ROOT at enqueue time."
+  (claude-repl-test--with-clean-state
+    (let ((captured-source-dir :unset)
+          (master-path-called nil))
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_root)
+                   (setq master-path-called t)
+                   "/tmp/master/"))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir)
+                   (setq captured-source-dir source-dir))))
+        (claude-repl--create-worktree-from-command
+         "/tmp/calling-ws/" "name" "prompt" 5 nil "HEAD")
+        (should-not master-path-called)
+        (should (equal captured-source-dir "/tmp/calling-ws/"))))))
+
+(ert-deftest claude-repl-test-create-worktree-from-command-nil-base-commit-uses-git-root-as-source-dir ()
+  "Absent BASE-COMMIT yields source-dir == git-root.
+With no base hint, source-dir defaults to the calling workspace dir —
+the master special case only kicks in for an explicit `master' value."
+  (claude-repl-test--with-clean-state
+    (let ((captured-source-dir :unset)
+          (master-path-called nil))
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_root)
+                   (setq master-path-called t)
+                   "/tmp/master/"))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir)
+                   (setq captured-source-dir source-dir))))
+        (claude-repl--create-worktree-from-command
+         "/tmp/calling-ws/" "name" "prompt" 5 nil nil)
+        (should-not master-path-called)
+        (should (equal captured-source-dir "/tmp/calling-ws/"))))))
+
+(ert-deftest claude-repl-test-create-worktree-from-command-origin-master-base-uses-git-root-as-source-dir ()
+  "BASE-COMMIT = `origin/master' (or any non-master ref) yields source-dir == git-root.
+Only the literal `claude-repl-master-branch-name' triggers master-worktree
+lookup; arbitrary refs like `origin/master' or a SHA route through the
+default path so the parent is the originating workspace."
+  (claude-repl-test--with-clean-state
+    (let ((captured-source-dir :unset)
+          (master-path-called nil)
+          (claude-repl-master-branch-name "master"))
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_root)
+                   (setq master-path-called t)
+                   "/tmp/master/"))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir)
+                   (setq captured-source-dir source-dir))))
+        (claude-repl--create-worktree-from-command
+         "/tmp/calling-ws/" "name" "prompt" 5 nil "origin/master")
+        (should-not master-path-called)
+        (should (equal captured-source-dir "/tmp/calling-ws/"))))))
+
+(ert-deftest claude-repl-test-create-worktree-from-command-master-base-honors-custom-branch-name ()
+  "Source-dir resolution honors a custom `claude-repl-master-branch-name'.
+When the trunk is named `trunk' rather than `master', BASE-COMMIT = `trunk'
+triggers the master-worktree lookup."
+  (claude-repl-test--with-clean-state
+    (let ((captured-source-dir :unset)
+          (master-path-called nil)
+          (claude-repl-master-branch-name "trunk"))
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_root)
+                   (setq master-path-called t)
+                   "/tmp/trunk/"))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir)
+                   (setq captured-source-dir source-dir))))
+        (claude-repl--create-worktree-from-command
+         "/tmp/calling-ws/" "name" "prompt" 5 nil "trunk")
+        (should master-path-called)
+        (should (equal captured-source-dir "/tmp/trunk/"))))))
+
 ;;;; ---- Tests: workspace-generation prompt construction ----
 
 (ert-deftest claude-repl-test-workspace-generation-prompt-includes-raw-and-prefixed ()
@@ -2252,16 +2370,17 @@ as a freshness gesture, but the new branch is rooted in local master."
         (claude-repl-create-worktree-workspace 'master)
         (should (equal captured-base "master"))))))
 
-(ert-deftest claude-repl-test-create-worktree-workspace-master-base-reanchors-git-root ()
-  "BASE = `master' re-anchors git-root to the master worktree path.
-The drawer nests new workspaces under whatever directory ends up as
-`:source-ws-dir' (== git-root through the commands flow), so for a
-worktree branched off master the parent must be master itself — NOT the
-calling workspace.  Otherwise the drawer would nest the new ws under a
-parent that shares no commits with it."
+(ert-deftest claude-repl-test-create-worktree-workspace-master-base-does-not-anchor-spawn-git-root ()
+  "BASE = `master' passes the calling-ws git-root to spawn (no master anchoring).
+Source-dir resolution now happens at receive time in
+`claude-repl--create-worktree-from-command' based on BASE-COMMIT, so the
+spawn-side no longer special-cases `master' for the git-root.  Keeping
+git-root anchored to calling-ws means the JSON command file's `git_root'
+reflects the user's actual context, with no master-worktree-path lookup
+to fail."
   (claude-repl-test--with-clean-state
     (let ((captured-git-root :unset)
-          (master-path-lookup-root :unset))
+          (master-path-called nil))
       (cl-letf (((symbol-function '+workspace-current-name)
                  (lambda () "calling-ws"))
                 ((symbol-function 'claude-repl--ws-dir)
@@ -2269,8 +2388,8 @@ parent that shares no commits with it."
                    (if (equal ws "calling-ws") "/tmp/calling-ws/"
                      (error "unexpected ws: %s" ws))))
                 ((symbol-function 'claude-repl--master-worktree-path)
-                 (lambda (root)
-                   (setq master-path-lookup-root root)
+                 (lambda (_root)
+                   (setq master-path-called t)
                    "/tmp/master/"))
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
@@ -2278,39 +2397,11 @@ parent that shares no commits with it."
                  (lambda (_raw _prefixed git-root _base _fork-from)
                    (setq captured-git-root git-root))))
         (claude-repl-create-worktree-workspace 'master)
-        (should (equal master-path-lookup-root "/tmp/calling-ws/"))
-        (should (equal captured-git-root "/tmp/master/"))))))
-
-(ert-deftest claude-repl-test-create-worktree-workspace-master-base-fallback-on-nil-master ()
-  "BASE = `master' falls back to source-ws git-root when master path is unresolvable.
-`claude-repl--master-worktree-path' shells out and can legitimately return
-nil (e.g. test fixtures, detached HEAD, no checked-out master).  Falling
-back to the calling-ws root preserves the prior behavior in that edge
-case rather than passing nil into spawn."
-  (claude-repl-test--with-clean-state
-    (let ((captured-git-root :unset))
-      (cl-letf (((symbol-function '+workspace-current-name)
-                 (lambda () "calling-ws"))
-                ((symbol-function 'claude-repl--ws-dir)
-                 (lambda (ws)
-                   (if (equal ws "calling-ws") "/tmp/calling-ws/"
-                     (error "unexpected ws: %s" ws))))
-                ((symbol-function 'claude-repl--master-worktree-path)
-                 (lambda (_root) nil))
-                ((symbol-function 'read-string)
-                 (lambda (&rest _) "do the thing"))
-                ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
-                   (setq captured-git-root git-root))))
-        (claude-repl-create-worktree-workspace 'master)
+        (should-not master-path-called)
         (should (equal captured-git-root "/tmp/calling-ws/"))))))
 
-(ert-deftest claude-repl-test-create-worktree-workspace-head-base-does-not-reanchor ()
-  "BASE = `head' leaves git-root pointing at the calling ws (not master).
-`SPC TAB n' is a child-of-current operation: the new branch is rooted in
-the calling ws's HEAD, so its drawer parent must be the calling ws.  The
-master-worktree-path resolver MUST NOT be consulted for HEAD-base
-creates — doing so would break the same-as-pre-fix `head' semantics."
+(ert-deftest claude-repl-test-create-worktree-workspace-head-base-passes-calling-ws-git-root ()
+  "BASE = `head' passes calling-ws git-root and never consults master resolver."
   (claude-repl-test--with-clean-state
     (let ((captured-git-root :unset)
           (master-path-called nil))

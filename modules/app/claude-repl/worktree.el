@@ -788,11 +788,11 @@ symbol key in `claude-repl--worktree-base-commits':
              still runs first so `origin/master' stays current, but the
              new branch is rooted in local `master' so any local-only
              commits on master carry over.  The new workspace's
-             `:source-ws-dir' is the master worktree path (resolved via
-             `claude-repl--master-worktree-path'), NOT the calling
-             workspace — so drawer parentage matches the actual branch
-             base.  Falls back to the calling-ws root when no master
-             worktree can be resolved.
+             `:source-ws-dir' is the master worktree path, resolved at
+             receive time in `claude-repl--create-worktree-from-command'
+             from BASE-COMMIT.  When no worktree is on master, the new
+             workspace has no `:source-ws-dir' (drawer root) — never
+             the calling workspace.
 
 SOURCE-WS, when non-nil, names the workspace whose repository the new
 worktree is rooted in (instead of the ambient workspace).  Interactively,
@@ -805,21 +805,13 @@ the JSON file lands and the file-watcher dispatches it."
   (let* ((base-commit (claude-repl--resolve-worktree-base base))
          (effective-source-ws (or source-ws (+workspace-current-name)))
          (source-dir (ignore-errors (claude-repl--ws-dir effective-source-ws)))
-         (source-ws-git-root (or source-dir (claude-repl--resolve-current-git-root)))
-         ;; When BASE is `master', the new worktree's logical source is the
-         ;; master worktree, not the calling workspace.  Re-anchor git-root so
-         ;; the recorded `:source-ws-dir' (used by the drawer to nest workspaces
-         ;; under their parent) matches the actual branch base.  Falls back to
-         ;; the calling-ws root when no master worktree can be resolved.
-         (git-root (or (and (eq base 'master)
-                            (claude-repl--master-worktree-path source-ws-git-root))
-                       source-ws-git-root))
+         (git-root (or source-dir (claude-repl--resolve-current-git-root)))
          (raw-prompt (read-string "Preemptive prompt: ")))
     (when (string-empty-p (string-trim (or raw-prompt "")))
       (user-error "Preemptive prompt is required"))
     (let ((prefixed-prompt (concat claude-repl--autonomous-prompt-prefix raw-prompt)))
-      (claude-repl--log nil "create-worktree-workspace: base=%s base-commit=%s source-ws=%s source-ws-git-root=%s git-root=%s"
-                        base base-commit (or source-ws "nil") source-ws-git-root git-root)
+      (claude-repl--log nil "create-worktree-workspace: base=%s base-commit=%s source-ws=%s git-root=%s"
+                        base base-commit (or source-ws "nil") git-root)
       (message "Generating workspace name via `claude -p --model %s'..."
                claude-repl-workspace-generation-model)
       (claude-repl--spawn-workspace-generation
@@ -1027,17 +1019,32 @@ silently degrade to the default base when forking was explicitly requested."
 GIT-ROOT is the repository captured at enqueue time (in
 `claude-repl--handle-create-command'); it is threaded through so the
 resolved root reflects the user's context at command-receipt rather than
-whatever workspace happens to be active when the timer fires.  GIT-ROOT
-is also recorded as `:source-ws-dir' on the new workspace so a later
-`SPC TAB M' can route the merge back to the originating repo.
+whatever workspace happens to be active when the timer fires.
 When FORK-SESSION-ID is non-nil, the new worktree branches from HEAD and
 resumes the fork source's Claude session.
 BASE-COMMIT, when non-nil, overrides the default base ref (which is
-\"HEAD\" for forks and `claude-repl-worktree-default-base' otherwise)."
-  (claude-repl--log name "create-worktree-from-command: name=%s git-root=%s priority=%s fork-session-id=%s base-commit=%s"
-                    name git-root priority fork-session-id (or base-commit "nil"))
-  (claude-repl--do-create-worktree-workspace
-   name nil fork-session-id prompt nil priority base-commit git-root git-root))
+\"HEAD\" for forks and `claude-repl-worktree-default-base' otherwise).
+
+The new workspace's `:source-ws-dir' is derived from BASE-COMMIT:
+- When BASE-COMMIT equals `claude-repl-master-branch-name', the parent
+  is the master worktree of the repo containing GIT-ROOT, resolved via
+  `claude-repl--master-worktree-path'.  Returns nil when no worktree is
+  on master, leaving the new workspace parentless in the drawer rather
+  than nesting it under the calling workspace.  This is the `SPC TAB N'
+  contract: a worktree branched off local master shares no commits with
+  the calling workspace, so the drawer parent must be master (or
+  nothing) — never the calling workspace.
+- Otherwise (HEAD, forks, custom refs) the parent is GIT-ROOT, which
+  represents the originating workspace's repo dir.  This is the
+  `SPC TAB n' / fork contract."
+  (let ((source-dir
+         (if (and base-commit (equal base-commit claude-repl-master-branch-name))
+             (claude-repl--master-worktree-path git-root)
+           git-root)))
+    (claude-repl--log name "create-worktree-from-command: name=%s git-root=%s priority=%s fork-session-id=%s base-commit=%s source-dir=%s"
+                      name git-root priority fork-session-id (or base-commit "nil") (or source-dir "nil"))
+    (claude-repl--do-create-worktree-workspace
+     name nil fork-session-id prompt nil priority base-commit git-root source-dir)))
 
 (defcustom claude-repl-worktree-stagger-seconds 5
   "Seconds between staggered worktree creation timers.
