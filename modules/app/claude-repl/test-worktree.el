@@ -2868,22 +2868,131 @@ cherry-pick, with the project-root and source workspace name."
 
 (ert-deftest claude-repl-test-workspace-merge-do-skips-tag-on-cherry-pick-error ()
   "When cherry-pick-commits signals user-error (e.g., conflict or
-all-incorporated), tag-merge-completion is NOT invoked."
-  (let ((tagged nil))
+all-incorporated), tag-merge-completion is NOT invoked and the error
+is re-signaled to the caller."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (let ((tagged nil))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits)
+                  (lambda (_dir _ws _base _br)
+                    (user-error "All commits already incorporated")))
+                 ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
+                 ((symbol-function 'load-file) #'ignore)
+                 ((symbol-function 'claude-repl--tag-merge-completion)
+                  (lambda (_root _ws) (setq tagged t))))
+        (should-error (claude-repl--workspace-merge-do "other-ws") :type 'user-error)
+        (should-not tagged)))))
+
+;;;; ---- Tests: workspace-merge-do success/failure plist effects ----
+
+(ert-deftest claude-repl-test-workspace-merge-do-sets-merge-completed-on-success ()
+  "After a successful cherry-pick, `:merge-completed' t is recorded on
+the target workspace so the drawer's MERGED bucket reflects the
+completion of the explicit merge command."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
+               ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+               ((symbol-function 'load-file) #'ignore)
+               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+      (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+      (should (eq (claude-repl--ws-get "other-ws" :merge-completed) t)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-does-not-finish-workspace-on-success ()
+  "Successful merge no longer auto-tears-down the workspace.  The user
+now sees it surface in MERGED rather than disappear; cleanup is
+explicit (via `+workspace/kill' or a `finish' command).  This protects
+against the old bug where MERGED was empty in practice because
+successful merges removed their workspace before the bucket could
+show them."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (let ((finished nil))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
+                 ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+                 ((symbol-function 'load-file) #'ignore)
+                 ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
+                 ((symbol-function 'claude-repl--finish-workspace)
+                  (lambda (_ws) (setq finished t))))
+        (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+        (should-not finished)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-marks-dead-on-cherry-pick-error ()
+  "Cherry-pick failure flips the target workspace to `:repl-state :dead'
+\(and clears `:claude-state') so the drawer shows the ❌ badge.  The
+error is still re-signaled to the caller."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '(:claude-state :thinking) claude-repl--workspaces)
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
                ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
                ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
                ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits)
-                (lambda (_dir _ws _base _br)
-                  (user-error "All commits already incorporated")))
-               ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
-               ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'claude-repl--tag-merge-completion)
-                (lambda (_root _ws) (setq tagged t))))
-      (should-error (claude-repl--workspace-merge-do "other-ws") :type 'user-error)
-      (should-not tagged))))
+                (lambda (_dir _ws _base _br) (user-error "Conflict")))
+               ((symbol-function 'claude-repl--finish-workspace) #'ignore)
+               ((symbol-function 'load-file) #'ignore))
+      (should-error (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+                    :type 'user-error)
+      (should (eq (claude-repl--ws-get "other-ws" :repl-state) :dead))
+      (should (null (claude-repl--ws-get "other-ws" :claude-state))))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-does-not-set-merge-completed-on-error ()
+  "A failed cherry-pick must leave `:merge-completed' nil so the
+workspace cannot accidentally surface in MERGED on the strength of an
+earlier partial success."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '(:merge-completed nil) claude-repl--workspaces)
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits)
+                (lambda (_dir _ws _base _br) (user-error "Conflict")))
+               ((symbol-function 'claude-repl--finish-workspace) #'ignore)
+               ((symbol-function 'load-file) #'ignore))
+      (ignore-errors
+        (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t))
+      (should-not (claude-repl--ws-get "other-ws" :merge-completed)))))
+
+;;;; ---- Tests: ws-merge-completed-p ----
+
+(ert-deftest claude-repl-test-ws-merge-completed-p-true-when-set ()
+  "Returns t when `:merge-completed' is explicitly t."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" '(:merge-completed t) claude-repl--workspaces)
+    (should (claude-repl--ws-merge-completed-p "ws"))))
+
+(ert-deftest claude-repl-test-ws-merge-completed-p-nil-when-absent ()
+  "Returns nil on cache miss — drawer must default such workspaces away
+from MERGED."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" '() claude-repl--workspaces)
+    (should-not (claude-repl--ws-merge-completed-p "ws"))))
+
+(ert-deftest claude-repl-test-ws-merge-completed-p-nil-when-other-truthy ()
+  "Only the symbol t qualifies as completed.  This blocks a future
+caller from mistakenly storing a truthy-but-non-t marker (e.g. a
+timestamp) and getting an accidental MERGED bucket placement."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" '(:merge-completed "1970") claude-repl--workspaces)
+    (should-not (claude-repl--ws-merge-completed-p "ws"))))
 
 ;;;; ---- Tests: show-and-refresh-magit-status ----
 

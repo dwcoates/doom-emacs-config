@@ -1157,6 +1157,13 @@ the caller skips dispatch cleanly."
 Create commands are staggered by `claude-repl-worktree-stagger-seconds' to
 avoid concurrent Claude startup writes corrupting ~/.claude.json.
 
+Each dispatched command runs inside its own `condition-case' so a
+failure (e.g. a merge whose cherry-pick conflicts) is logged and
+surfaced as a message but does not abort sibling commands in the
+batch — sibling create/prompt/finish operations were issued by a
+distinct upstream intent and must not be lost because an earlier
+merge failed.
+
 Tolerates both the documented JSON-array form and a bare JSON object —
 the headless workspace-generation flow occasionally emits the latter."
   (if (not (file-exists-p file))
@@ -1168,7 +1175,15 @@ the headless workspace-generation flow occasionally emits the latter."
       (claude-repl--log nil "workspace-commands-file normalized: %d command(s)"
                         (length commands))
       (dolist (cmd commands)
-        (setq create-delay (claude-repl--dispatch-workspace-command cmd create-delay))))
+        (condition-case err
+            (setq create-delay
+                  (claude-repl--dispatch-workspace-command cmd create-delay))
+          (error
+           (claude-repl--log nil
+                             "workspace-commands-file dispatch error cmd=%S err=%S"
+                             cmd err)
+           (message "[claude-repl] Workspace command failed: %s"
+                    (error-message-string err))))))
     (delete-file file)
     (claude-repl--log nil "workspace-commands-file deleted: %s" file)))
 
@@ -1311,6 +1326,22 @@ succeeded; a tag-write failure shouldn't undo that."
       (message "[claude-repl] WARNING: failed to create tag %s (exit %d)"
                tag exit-code))))
 
+(defun claude-repl--mark-merge-failed (target-ws err)
+  "Mark TARGET-WS as dead because its merge attempt failed with ERR.
+Sets `:repl-state :dead' and clears `:claude-state' — the same state
+shape used by vterm-death detection — so the drawer surfaces the ❌
+badge.  Also marks `:merge-completed' nil so the workspace cannot land
+in the MERGED bucket on the strength of a partial earlier success.
+
+A failed merge is the only path that flips a workspace dead via the
+merge flow; the success path uses `:merge-completed' instead."
+  (claude-repl--log target-ws
+                    "workspace-merge-do: merge failed ws=%s err=%S -> :repl-state :dead"
+                    target-ws err)
+  (claude-repl--ws-put target-ws :merge-completed nil)
+  (claude-repl--ws-put target-ws :claude-state nil)
+  (claude-repl--ws-put target-ws :repl-state :dead))
+
 (defun claude-repl--workspace-merge-do (target-ws &optional project-root-override silent)
   "Cherry-pick TARGET-WS's branch commits onto the current branch.
 Replays each commit from the target branch (since it diverged from master)
@@ -1323,7 +1354,20 @@ lands in the parent worktree (or master, when re-routed) regardless of
 how Doom resolved the post-switch workspace name.
 
 After a successful cherry-pick, tags HEAD as `merge/TARGET-WS' so the
-final commit of the merged-in workspace is recoverable by name.
+final commit of the merged-in workspace is recoverable by name, and
+records `:merge-completed t' on TARGET-WS so the drawer surfaces it in
+the MERGED section.  The workspace is *not* auto-finished — leaving
+the perspective + vterm + worktree intact lets the user inspect the
+post-merge state and clean up explicitly via `+workspace/kill' or a
+`finish' command.
+
+When the cherry-pick fails (conflict opened in magit, or all commits
+already incorporated), TARGET-WS is marked `:repl-state :dead' via
+`claude-repl--mark-merge-failed' so the drawer shows the ❌ badge,
+and the error is re-signaled so callers (interactive `SPC TAB M' and
+the workspace-commands dispatch loop) see the original message.  The
+dispatch loop wraps each command in its own error handler so a
+re-signaled failure here does not abort sibling commands.
 
 When SILENT is non-nil, the post-merge magit-status pop is suppressed
 \(the merge does not steal user focus).  Interactive entry points pass
@@ -1342,17 +1386,23 @@ doing."
       (claude-repl--log current-ws "workspace-merge-do project-root=%s (for ws=%s)" project-root current-ws)
       (unless (claude-repl--git-branch-exists-p project-root target-branch)
         (user-error "Branch '%s' not found in repo %s" target-branch project-root))
-      (let ((base (claude-repl--cherry-pick-base project-root target-branch)))
-        (claude-repl--cherry-pick-commits project-root target-ws base target-branch))
-      ;; Cherry-pick succeeded (any conflict above would have signaled
-      ;; user-error and aborted before we got here); tag the final
-      ;; cherry-picked commit so the merged ws is recoverable by name.
-      (claude-repl--tag-merge-completion project-root target-ws)
-      (claude-repl--finish-workspace target-ws)
-      (message "Merged workspace '%s' -> '%s'." target-ws current-ws)
-      (load-file claude-repl--config-file)
-      (unless silent
-        (claude-repl--show-and-refresh-magit-status project-root)))))
+      (condition-case err
+          (progn
+            (let ((base (claude-repl--cherry-pick-base project-root target-branch)))
+              (claude-repl--cherry-pick-commits project-root target-ws base target-branch))
+            ;; Cherry-pick succeeded — record success state before any
+            ;; user-visible side effects so the MERGED bucket reflects
+            ;; reality even if a later step (tag/load/magit) fails.
+            (claude-repl--ws-put target-ws :merge-completed t)
+            (claude-repl--log target-ws "workspace-merge-do: ws=%s -> :merge-completed t" target-ws)
+            (claude-repl--tag-merge-completion project-root target-ws)
+            (message "Merged workspace '%s' -> '%s'." target-ws current-ws)
+            (load-file claude-repl--config-file)
+            (unless silent
+              (claude-repl--show-and-refresh-magit-status project-root)))
+        (error
+         (claude-repl--mark-merge-failed target-ws err)
+         (signal (car err) (cdr err)))))))
 
 (defalias '+dwc/workspace-merge--do #'claude-repl--workspace-merge-do)
 
@@ -1422,13 +1472,26 @@ session (no parent dir exists to find), so the sentinel is safe."
     (process-live-p proc)))
 
 (defun claude-repl--ws-merged-p (ws)
-  "Return non-nil when WS's branch is merged into its immediate parent.
-Single source of truth for the \"is this workspace merged?\" question.
+  "Return non-nil when WS's branch is detected as merged into its immediate parent.
 Reads the cached `:branch-merged' value populated asynchronously by
 `claude-repl--async-refresh-branch-merged' against WS's
 `:merge-parent-dir' (recorded `:source-ws-dir' or the master worktree
-fallback).  Returns nil on cache miss — the next poll fills it in."
+fallback).  Returns nil on cache miss — the next poll fills it in.
+
+This is the ancestry-detected signal that feeds the drawer's MERGING
+section.  For the \"explicit merge has completed\" signal that feeds
+the MERGED section, see `claude-repl--ws-merge-completed-p'."
   (eq (claude-repl--ws-get ws :branch-merged) 'merged))
+
+(defun claude-repl--ws-merge-completed-p (ws)
+  "Return non-nil when WS's explicit merge command completed successfully.
+Reads the `:merge-completed' plist key, set by
+`claude-repl--workspace-merge-do' only after a successful cherry-pick.
+This is the source of truth for the drawer's MERGED section — a
+workspace lands there exclusively because a `SPC TAB M' /
+`/workspace-merge' invocation completed successfully, never as a
+side-effect of asynchronous ancestry polling."
+  (eq (claude-repl--ws-get ws :merge-completed) t))
 
 (defun claude-repl--branch-merge-sentinel (ws proc _event)
   "Process sentinel for the async `:branch-merged' refresh of WS.
