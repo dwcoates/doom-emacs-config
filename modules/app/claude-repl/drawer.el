@@ -67,13 +67,13 @@ the indent change — no other knobs needed."
       (eval (car (get 'claude-repl-drawer-width-fraction 'standard-value))))
 
 (defcustom claude-repl-drawer-state-icons
-  '((:init        . "⏳")
-    (:thinking    . "⌛")
-    (:done        . "✅")
-    (:idle        . "💤")
-    (:permission  . "❓")
-    (:stop-failed . "❗")
-    (:dead        . "❌"))
+  '((:init        . "💙")
+    (:thinking    . "💙")
+    (:done        . "💙")
+    (:idle        . "💙")
+    (:permission  . "💙")
+    (:stop-failed . "💙")
+    (:dead        . "💙"))
   "Alist mapping claude-state keyword to an indicator glyph.
 The :dead entry is used when `:repl-state' is `:dead' (overrides
 :claude-state).  Unrecognized values fall through to a single middot
