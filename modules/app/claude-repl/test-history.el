@@ -601,6 +601,45 @@ survives Emacs restart."
               (should (equal (plist-get data :last-prompt-summary) "fix login bug"))))
         (delete-directory tmpdir t)))))
 
+(ert-deftest claude-repl-test-state-save-includes-merge-completed ()
+  "state-save serializes `:merge-completed' so a merged ws auto-reappears
+in the drawer's MERGED bucket after an Emacs restart, until the user
+explicitly `x's it (which routes to `--finish-workspace')."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-merged-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :merge-completed t)
+            (claude-repl--ws-put "ws" :merge-completed-at 1234567890.0)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (claude-repl--state-file tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (eq (plist-get data :merge-completed) t))
+              (should (= (plist-get data :merge-completed-at) 1234567890.0))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-state-save-includes-worktree-p ()
+  "state-save serializes `:worktree-p' so a post-restart MERGED entry's
+`x' (-> `--finish-workspace') still knows to remove the git worktree."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-wtp-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :worktree-p t)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (claude-repl--state-file tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (eq (plist-get data :worktree-p) t))))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest claude-repl-test-state-save-includes-repl-state ()
   "state-save serializes `:repl-state' so panel-visibility survives restart."
   (claude-repl-test--with-clean-state

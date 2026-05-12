@@ -1519,12 +1519,19 @@ doing."
             ;; magit) fails.
             (claude-repl--ws-put target-ws :merging nil)
             (claude-repl--ws-put target-ws :merge-completed t)
+            (claude-repl--ws-put target-ws :merge-completed-at
+                                 (float-time))
             (claude-repl--log target-ws "workspace-merge-do: ws=%s -> :merge-completed t already=%S"
                               target-ws already)
             (claude-repl--tag-merge-completion project-root target-ws)
-            (claude-repl--finish-workspace target-ws)
+            ;; Tear down session/persp/buffers but keep the hash entry so
+            ;; the drawer's MERGED bucket can render this ws until the
+            ;; user explicitly `x' (which runs `--finish-workspace' and
+            ;; removes the worktree).  The worktree directory on disk
+            ;; is intentionally preserved here.
+            (claude-repl--nuke-one-workspace target-ws 'preserve-entry)
             (if already
-                (message "Workspace '%s' was already merged into '%s' — finished."
+                (message "Workspace '%s' was already merged into '%s' — merged."
                          target-ws current-ws)
               (message "Merged workspace '%s' -> '%s'." target-ws current-ws))
             (load-file claude-repl--config-file)

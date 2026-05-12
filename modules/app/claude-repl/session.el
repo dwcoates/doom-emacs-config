@@ -265,6 +265,16 @@ state-save.  Callers already guard on `claude-repl--claude-running-p'."
     ;; the apply-summary path on the next prompt.
     (when-let ((summary (and saved (plist-get saved :last-prompt-summary))))
       (claude-repl--ws-put ws :last-prompt-summary summary))
+    ;; Worktree-flag + merge-completed: survive restart so the drawer's
+    ;; MERGED bucket reappears and `--finish-workspace' can still remove
+    ;; the worktree when the user presses `x' on a post-restart MERGED
+    ;; entry.  `:merge-completed-at' rides alongside for display only.
+    (when (and saved (eq (plist-get saved :worktree-p) t))
+      (claude-repl--ws-put ws :worktree-p t))
+    (when (and saved (eq (plist-get saved :merge-completed) t))
+      (claude-repl--ws-put ws :merge-completed t)
+      (when-let ((mca (plist-get saved :merge-completed-at)))
+        (claude-repl--ws-put ws :merge-completed-at mca)))
     (dolist (key claude-repl--environment-keys)
       (claude-repl--ws-put ws key
                            (claude-repl--make-instantiation-from-plist

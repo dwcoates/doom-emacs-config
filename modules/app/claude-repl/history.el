@@ -227,7 +227,10 @@ same granularity as per-project state."
                               :saved-tab-index ,(claude-repl--ws-get ws :saved-tab-index)
                               :fork-session-id ,(claude-repl--ws-get ws :fork-session-id)
                               :last-prompt-summary ,(claude-repl--ws-get ws :last-prompt-summary)
-                              :last-prompt-time ,(claude-repl--ws-get ws :last-prompt-time))
+                              :last-prompt-time ,(claude-repl--ws-get ws :last-prompt-time)
+                              :worktree-p ,(claude-repl--ws-get ws :worktree-p)
+                              :merge-completed ,(claude-repl--ws-get ws :merge-completed)
+                              :merge-completed-at ,(claude-repl--ws-get ws :merge-completed-at))
                            (claude-repl--collect-env-state ws))))
         (claude-repl--with-error-logging "state-save"
           (claude-repl--write-sexp-file file state)

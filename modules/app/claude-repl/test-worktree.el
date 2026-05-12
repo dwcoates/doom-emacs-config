@@ -3076,7 +3076,7 @@ Covers the full call the interactive `SPC TAB n' path builds up."
                ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
-               ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
+               ((symbol-function 'claude-repl--nuke-one-workspace) (lambda (&rest _) nil))
                ((symbol-function 'load-file) (lambda (f) (setq loaded-file f))))
       (claude-repl--workspace-merge-do "other-ws")
       (should (equal loaded-file claude-repl--config-file)))))
@@ -3090,7 +3090,7 @@ Covers the full call the interactive `SPC TAB n' path builds up."
                ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
-               ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
+               ((symbol-function 'claude-repl--nuke-one-workspace) (lambda (&rest _) nil))
                ((symbol-function 'load-file) (lambda (_f) (push 'reload call-order)))
                ((symbol-function 'claude-repl--show-and-refresh-magit-status)
                 (lambda (_dir) (push 'magit call-order))))
@@ -3106,7 +3106,7 @@ Covers the full call the interactive `SPC TAB n' path builds up."
                ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
-               ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
+               ((symbol-function 'claude-repl--nuke-one-workspace) (lambda (&rest _) nil))
                ((symbol-function 'load-file) #'ignore)
                ((symbol-function 'claude-repl--show-and-refresh-magit-status)
                 (lambda (dir) (setq magit-dir dir))))
@@ -3124,7 +3124,7 @@ magit-status helper.  This is the path used for skill-invoked merges
                ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
-               ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
+               ((symbol-function 'claude-repl--nuke-one-workspace) (lambda (&rest _) nil))
                ((symbol-function 'load-file) #'ignore)
                ((symbol-function 'claude-repl--show-and-refresh-magit-status)
                 (lambda (&rest _) (setq magit-called t))))
@@ -3175,7 +3175,7 @@ cherry-pick, with the project-root and source workspace name."
                ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
-               ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
+               ((symbol-function 'claude-repl--nuke-one-workspace) (lambda (&rest _) nil))
                ((symbol-function 'load-file) #'ignore)
                ((symbol-function 'claude-repl--tag-merge-completion)
                 (lambda (root ws) (setq tagged (cons root ws)))))
@@ -3199,7 +3199,7 @@ tag + finish steps (see `…-already-incorporated-still-finishes')."
                  ((symbol-function 'claude-repl--cherry-pick-commits)
                   (lambda (_dir _ws _base _br)
                     (user-error "Conflict cherry-picking — resolve in magit")))
-                 ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
+                 ((symbol-function 'claude-repl--nuke-one-workspace) (lambda (&rest _) nil))
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'claude-repl--tag-merge-completion)
                   (lambda (_root _ws) (setq tagged t))))
@@ -3221,22 +3221,23 @@ the target workspace before the auto-finish tear-down runs.  Stubs
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
-               ((symbol-function 'claude-repl--finish-workspace) #'ignore)
+               ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore)
                ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
       (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
       (should (eq (claude-repl--ws-get "other-ws" :merge-completed) t)))))
 
-(ert-deftest claude-repl-test-workspace-merge-do-already-incorporated-still-finishes ()
+(ert-deftest claude-repl-test-workspace-merge-do-already-incorporated-still-tears-down ()
   "When cherry-pick-commits returns `already-incorporated' (commits
-already on the parent), workspace-merge-do treats it as a no-op
-success: tag-merge-completion + finish-workspace still run so a
-stranded already-merged workspace gets cleaned up by re-running
-`SPC TAB M' on it."
+already on the parent), workspace-merge-do still tags and tears down
+via `--nuke-one-workspace' with `preserve-entry' so the drawer's
+MERGED bucket picks it up.  `--finish-workspace' is intentionally
+NOT called — that runs only when the user explicitly presses `x'."
   (claude-repl-test--with-clean-state
     (puthash "other-ws" '() claude-repl--workspaces)
     (let ((tagged nil)
-          (finished-ws nil))
+          (nuked-ws nil)
+          (nuked-preserve nil))
       (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
                  ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
                  ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
@@ -3246,22 +3247,26 @@ stranded already-merged workspace gets cleaned up by re-running
                   (lambda (_dir _ws _base _br) 'already-incorporated))
                  ((symbol-function 'claude-repl--tag-merge-completion)
                   (lambda (_root _ws) (setq tagged t)))
-                 ((symbol-function 'claude-repl--finish-workspace)
-                  (lambda (ws) (setq finished-ws ws)))
+                 ((symbol-function 'claude-repl--nuke-one-workspace)
+                  (lambda (ws &optional preserve)
+                    (setq nuked-ws ws)
+                    (setq nuked-preserve preserve)))
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
         (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
         (should tagged)
-        (should (equal finished-ws "other-ws"))))))
+        (should (equal nuked-ws "other-ws"))
+        (should nuked-preserve)))))
 
-(ert-deftest claude-repl-test-workspace-merge-do-finishes-workspace-on-success ()
-  "Successful merge auto-finishes the target workspace — the cherry-pick
-has landed on the parent so the source branch has served its purpose,
-and leaving it around forces the user to manually clean up a workspace
-that no longer carries any unique state."
+(ert-deftest claude-repl-test-workspace-merge-do-tears-down-on-success ()
+  "Successful merge nukes the target workspace's session/persp/buffers
+with `preserve-entry' so the hash entry survives for the drawer's
+MERGED bucket.  The git worktree on disk is left in place — only an
+explicit drawer `x' (`--finish-workspace') removes it."
   (claude-repl-test--with-clean-state
     (puthash "other-ws" '() claude-repl--workspaces)
-    (let ((finished-ws nil))
+    (let ((nuked-ws nil)
+          (nuked-preserve nil))
       (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
                  ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
                  ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
@@ -3271,10 +3276,53 @@ that no longer carries any unique state."
                  ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
-                 ((symbol-function 'claude-repl--finish-workspace)
-                  (lambda (ws) (setq finished-ws ws))))
+                 ((symbol-function 'claude-repl--nuke-one-workspace)
+                  (lambda (ws &optional preserve)
+                    (setq nuked-ws ws)
+                    (setq nuked-preserve preserve))))
         (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
-        (should (equal finished-ws "other-ws"))))))
+        (should (equal nuked-ws "other-ws"))
+        (should nuked-preserve)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-does-not-call-finish-workspace ()
+  "Successful merge must NOT call `--finish-workspace' — that's reserved
+for the drawer `x' path and removes the git worktree, which is exactly
+what we want to defer until the user explicitly chooses."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (let ((finish-called nil))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
+                 ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+                 ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
+                 ((symbol-function 'load-file) #'ignore)
+                 ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
+                 ((symbol-function 'claude-repl--finish-workspace)
+                  (lambda (&rest _) (setq finish-called t))))
+        (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+        (should-not finish-called)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-records-merge-completed-at ()
+  "Successful merge stamps `:merge-completed-at' on the target so the
+drawer can render an age/timestamp once that surfaces in the UI."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
+               ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+               ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
+               ((symbol-function 'load-file) #'ignore)
+               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+      (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+      (should (numberp (claude-repl--ws-get "other-ws" :merge-completed-at))))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-marks-dead-on-cherry-pick-error ()
   "Cherry-pick failure flips the target workspace to `:repl-state :dead'
@@ -3289,7 +3337,7 @@ error is still re-signaled to the caller."
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits)
                 (lambda (_dir _ws _base _br) (user-error "Conflict")))
-               ((symbol-function 'claude-repl--finish-workspace) #'ignore)
+               ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
       (should-error (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
                     :type 'user-error)
@@ -3309,7 +3357,7 @@ earlier partial success."
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits)
                 (lambda (_dir _ws _base _br) (user-error "Conflict")))
-               ((symbol-function 'claude-repl--finish-workspace) #'ignore)
+               ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
       (ignore-errors
         (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t))
@@ -3329,7 +3377,7 @@ and enter MERGED in the same operation."
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
-               ((symbol-function 'claude-repl--finish-workspace) #'ignore)
+               ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore)
                ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
       (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
@@ -3349,7 +3397,7 @@ linger and falsely suggest the merge is still running."
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits)
                 (lambda (_dir _ws _base _br) (user-error "Conflict")))
-               ((symbol-function 'claude-repl--finish-workspace) #'ignore)
+               ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
       (ignore-errors
         (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t))
@@ -3374,7 +3422,7 @@ cherry-pick begins, not after."
                           (claude-repl--ws-get "other-ws" :merging))
                     nil))
                  ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
-                 ((symbol-function 'claude-repl--finish-workspace) #'ignore)
+                 ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
         (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
@@ -4040,7 +4088,7 @@ on workspace switch in repos with many worktrees."
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits)
                 (lambda (dir _ws _base _br) (setq cherry-pick-dir dir)))
-               ((symbol-function 'claude-repl--finish-workspace) (lambda (_ws) nil))
+               ((symbol-function 'claude-repl--nuke-one-workspace) (lambda (&rest _) nil))
                ((symbol-function 'load-file) #'ignore)
                ((symbol-function 'claude-repl--show-and-refresh-magit-status)
                 (lambda (dir) (setq magit-dir dir))))

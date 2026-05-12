@@ -1115,6 +1115,96 @@ the live hash (e.g., by individual nuke) but stayed on the list."
         (claude-repl--nuke-one-workspace "ws1")
         (should (equal claude-repl--restored-workspaces '("ws2")))))))
 
+(ert-deftest claude-repl-cmd-test-nuke-one/preserve-entry-keeps-hash ()
+  "Calling `--nuke-one-workspace' with PRESERVE-ENTRY non-nil retains
+the hash entry so the drawer's MERGED bucket can render it.  Every
+other teardown step still runs."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "merged-ws" :project-dir "/tmp/merged-ws")
+    (claude-repl--ws-put "merged-ws" :merge-completed t)
+    (let ((persp-mode nil))
+      (cl-letf (((symbol-function 'claude-repl--kill-session) #'ignore)
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl--nuke-one-workspace "merged-ws" 'preserve-entry)
+        (should (gethash "merged-ws" claude-repl--workspaces))
+        (should (eq (claude-repl--ws-get "merged-ws" :merge-completed) t))))))
+
+(ert-deftest claude-repl-cmd-test-nuke-one/no-preserve-removes-hash ()
+  "Default `--nuke-one-workspace' (no PRESERVE-ENTRY) still removes the
+hash entry.  Guards against an accidental flip of the default that
+would leak ws plists into the live hash."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (let ((persp-mode nil))
+      (cl-letf (((symbol-function 'claude-repl--kill-session) #'ignore)
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl--nuke-one-workspace "ws1")
+        (should-not (gethash "ws1" claude-repl--workspaces))))))
+
+;;;; ---- register-merged-workspace + state-merge-completed-p ----
+
+(ert-deftest claude-repl-cmd-test-register-merged-workspace/populates-hash ()
+  "`--register-merged-workspace' creates a hash entry with
+`:project-dir' and `:merge-completed' t even when the on-disk state
+file is absent — the snapshot loader uses this to surface MERGED
+entries from a snapshot whose state.el was deleted out-of-band."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--state-file-for-read)
+               (lambda (_) "/nonexistent/state.el")))
+      (claude-repl--register-merged-workspace "merged-ws" "/tmp/merged")
+      (should (gethash "merged-ws" claude-repl--workspaces))
+      (should (equal (claude-repl--ws-get "merged-ws" :project-dir) "/tmp/merged"))
+      (should (eq (claude-repl--ws-get "merged-ws" :merge-completed) t)))))
+
+(ert-deftest claude-repl-cmd-test-register-merged-workspace/hydrates-from-state ()
+  "`--register-merged-workspace' pulls per-ws fields from state.el when
+present: priority, worktree-p, merge-completed-at, etc., so the
+post-restart MERGED entry shows the same metadata it had before quit."
+  (claude-repl-test--with-clean-state
+    (let ((tmp (make-temp-file "claude-repl-state-" nil ".el")))
+      (unwind-protect
+          (progn
+            (with-temp-file tmp
+              (prin1 '(:project-dir "/tmp/merged"
+                       :priority "p1"
+                       :worktree-p t
+                       :merge-completed t
+                       :merge-completed-at 1234567890.0
+                       :last-prompt-summary "did the thing")
+                     (current-buffer)))
+            (cl-letf (((symbol-function 'claude-repl--state-file-for-read)
+                       (lambda (_) tmp)))
+              (claude-repl--register-merged-workspace "merged-ws" "/tmp/merged")
+              (should (equal (claude-repl--ws-get "merged-ws" :priority) "p1"))
+              (should (eq (claude-repl--ws-get "merged-ws" :worktree-p) t))
+              (should (eq (claude-repl--ws-get "merged-ws" :merge-completed) t))
+              (should (= (claude-repl--ws-get "merged-ws" :merge-completed-at)
+                         1234567890.0))
+              (should (equal (claude-repl--ws-get "merged-ws" :last-prompt-summary)
+                             "did the thing"))))
+        (delete-file tmp)))))
+
+(ert-deftest claude-repl-cmd-test-state-merge-completed-p/detects-flag ()
+  "`--state-merge-completed-p' returns t when state.el carries
+`:merge-completed' t and nil otherwise.  Powers the snapshot loader's
+route-to-register-merged branch."
+  (let ((tmp-merged (make-temp-file "claude-repl-state-" nil ".el"))
+        (tmp-plain  (make-temp-file "claude-repl-state-" nil ".el")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmp-merged
+            (prin1 '(:project-dir "/x" :merge-completed t) (current-buffer)))
+          (with-temp-file tmp-plain
+            (prin1 '(:project-dir "/x") (current-buffer)))
+          (cl-letf (((symbol-function 'claude-repl--state-file-for-read)
+                     (lambda (d) (cond ((equal d "/merged") tmp-merged)
+                                       ((equal d "/plain")  tmp-plain)
+                                       (t nil)))))
+            (should (claude-repl--state-merge-completed-p "/merged"))
+            (should-not (claude-repl--state-merge-completed-p "/plain"))))
+      (delete-file tmp-merged)
+      (delete-file tmp-plain))))
+
 ;;;; ---- claude-repl-kill-workspace ----
 
 (ert-deftest claude-repl-cmd-test-kill-workspace/no-workspaces ()

@@ -394,7 +394,7 @@ before the prompt is sent."
   (interactive)
   (claude-repl-create-or-update-pr '(no-self-certified)))
 
-(defun claude-repl--nuke-one-workspace (ws)
+(defun claude-repl--nuke-one-workspace (ws &optional preserve-entry)
   "Tear down a single claude-repl workspace WS without prompting.
 Kills any in-flight git-diff process, tears down the vterm session
 and buffers, removes WS from `claude-repl--workspaces', kills every
@@ -404,6 +404,13 @@ workspace via `+workspace/kill'.  Designed to be reusable from
 `claude-repl-nuke-workspace' (one-shot),
 `claude-repl-nuke-all-workspaces' (loop), and
 `claude-repl-kill-workspace'.
+
+When PRESERVE-ENTRY is non-nil, the `claude-repl--workspaces' hashmap
+entry is retained — every other teardown step runs as usual (vterm,
+buffers, persp), but the ws plist survives so the drawer's MERGED
+section can keep rendering the entry until the user explicitly
+`finish'es it.  This is the merge-completed teardown path; standard
+nuke/kill callers pass nil and the entry is dropped.
 
 Persisted state (`<project>/.claude/emacs/state.el', including the
 captured per-environment session-id) is ALWAYS preserved — nuke is
@@ -417,9 +424,10 @@ so it always happens, even when kill-session errors partway through.
 The persp kill is the very last step so all internal state is already
 cleaned up before the UI workspace disappears.  Callers can rely on
 the post-condition: after the call returns \(or throws), WS is not in
-`claude-repl--workspaces' and its on-disk state.el is up-to-date."
-  (claude-repl--log ws "nuke-one-workspace: ENTRY ws=%s cache=%S"
-                    ws
+`claude-repl--workspaces' (unless PRESERVE-ENTRY was non-nil) and its
+on-disk state.el is up-to-date."
+  (claude-repl--log ws "nuke-one-workspace: ENTRY ws=%s preserve-entry=%s cache=%S"
+                    ws (if preserve-entry "t" "nil")
                     (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
   ;; Save first, before any teardown touches the ws plist or risks
   ;; erroring.  The teardown path also calls state-save, but wrapping
@@ -441,11 +449,13 @@ the post-condition: after the call returns \(or throws), WS is not in
             (claude-repl--kill-session ws)
           (error (claude-repl--log ws "nuke-one-workspace: kill-session error: %S" err))))
     ;; Cleanup: always remove the hashmap entry regardless of any error
-    ;; in the steps above.  Persisted state.el is intentionally NOT
-    ;; touched here — see the docstring.
-    (condition-case err
-        (claude-repl--ws-del ws)
-      (error (claude-repl--log ws "nuke-one-workspace: ws-del error: %S" err)))
+    ;; in the steps above (unless PRESERVE-ENTRY was requested).
+    ;; Persisted state.el is intentionally NOT touched here — see the
+    ;; docstring.
+    (unless preserve-entry
+      (condition-case err
+          (claude-repl--ws-del ws)
+        (error (claude-repl--log ws "nuke-one-workspace: ws-del error: %S" err))))
     ;; WHY: keep `claude-repl--restored-workspaces' consistent with the
     ;; live hash — a ws that's been nuked is no longer a restore-batch
     ;; member, so a follow-up `nuke-restored-workspaces' won't try to
@@ -1169,6 +1179,20 @@ the error-routing `condition-case'."
                 (plist-put claude-repl--snapshot-load-state :skipped
                            (1+ (plist-get claude-repl--snapshot-load-state :skipped))))
           (claude-repl--snapshot-load-step))
+         ;; Merged-completed entries: register data-only and advance.
+         ;; The drawer's MERGED bucket renders these; `--finish-workspace'
+         ;; (invoked via drawer `x') is the only way out.
+         ((claude-repl--state-merge-completed-p dir)
+          (claude-repl--log nil "snapshot-load iter=%d/%d ws=%s dir=%s register-merged"
+                            iter total ws dir)
+          (condition-case err
+              (claude-repl--register-merged-workspace ws dir)
+            (error
+             (claude-repl--log nil "snapshot-load: register-merged err ws=%s err=%S" ws err)))
+          (setq claude-repl--snapshot-load-state
+                (plist-put claude-repl--snapshot-load-state :loaded
+                           (1+ (plist-get claude-repl--snapshot-load-state :loaded))))
+          (claude-repl--snapshot-load-step))
          (t
           (claude-repl--log nil "snapshot-load iter=%d/%d ws=%s dir=%s establishing"
                             iter total ws dir)
@@ -1342,6 +1366,59 @@ explicitly (skips the configured-vs-legacy resolver)."
     (when file
       (claude-repl--log nil "load-workspace-snapshot-from-archive: file=%s" file)
       (claude-repl-load-workspace-snapshot file))))
+
+;;;; Merge-completed restore
+
+(defun claude-repl--state-merge-completed-p (dir)
+  "Return non-nil when the state.el under DIR has :merge-completed t.
+Used by the snapshot loader to route merged-completed workspaces away
+from `--establish-workspace' (which would re-create a persp and start
+Claude) and into the lightweight `--register-merged-workspace' path.
+Errors during the state-file read return nil so a malformed file
+falls through to the normal establish path rather than blocking
+startup."
+  (when-let* ((state-file (and dir (claude-repl--state-file-for-read dir))))
+    (and (file-exists-p state-file)
+         (condition-case err
+             (eq (plist-get (claude-repl--read-sexp-file state-file)
+                            :merge-completed)
+                 t)
+           (error
+            (claude-repl--log nil "state-merge-completed-p: read err file=%s err=%S"
+                              state-file err)
+            nil)))))
+
+(defun claude-repl--register-merged-workspace (ws dir)
+  "Register WS as a merged-completed workspace from on-disk state.
+Reads DIR's state.el and populates `claude-repl--workspaces' with
+just enough state for the drawer's MERGED bucket to render WS and for
+`--finish-workspace' to later remove the worktree.  Does NOT create a
+Doom persp and does NOT start Claude — the workspace is data-only
+until the user presses `x' on its drawer entry.
+
+Idempotent: a subsequent call overwrites the relevant plist fields.
+Keys populated when present in the state file:
+  :project-dir, :priority, :source-ws-dir, :last-prompt-summary,
+  :last-prompt-time, :worktree-p, :merge-completed,
+  :merge-completed-at."
+  (claude-repl--with-error-logging (format "register-merged-workspace[%s]" ws)
+    (let* ((state-file (claude-repl--state-file-for-read dir))
+           (saved (and state-file
+                       (file-exists-p state-file)
+                       (condition-case err
+                           (claude-repl--read-sexp-file state-file)
+                         (error
+                          (claude-repl--log ws "register-merged: state-read err err=%S" err)
+                          nil)))))
+      (claude-repl--log ws "register-merged: ws=%s dir=%s saved=%s"
+                        ws dir (if saved "yes" "no"))
+      (claude-repl--ws-put ws :project-dir dir)
+      (claude-repl--ws-put ws :merge-completed t)
+      (when saved
+        (dolist (key '(:priority :source-ws-dir :last-prompt-summary
+                       :last-prompt-time :worktree-p :merge-completed-at))
+          (when-let ((v (plist-get saved key)))
+            (claude-repl--ws-put ws key v)))))))
 
 ;;;; Project-switch wrapper
 
