@@ -1441,6 +1441,38 @@ make no edits when uncertain."
     (should (string-match-p "CONCEPTUALLY ORTHOGONAL" p))
     (should (string-match-p "make NO edits" p))))
 
+;;;; ---- Tests: auto-resolve-conflicts-extra-args default ----
+
+(ert-deftest claude-repl-test-auto-resolve-extra-args-includes-dangerously-skip-permissions ()
+  "Default extra-args contain `--dangerously-skip-permissions' so the
+resolver cannot stall on a permission prompt even when
+`bypassPermissions' mode is insufficient."
+  (should (member "--dangerously-skip-permissions"
+                  (default-value 'claude-repl-auto-resolve-conflicts-extra-args))))
+
+(ert-deftest claude-repl-test-invoke-auto-resolve-claude-passes-extra-args ()
+  "`--invoke-auto-resolve-claude' includes the configured extra-args
+(including `--dangerously-skip-permissions') in the spawned command,
+after the base `-p --model MODEL' args."
+  (let* ((captured-cmd nil)
+         (real-start (symbol-function 'start-process)))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name _buf &rest cmd)
+                 (setq captured-cmd cmd)
+                 ;; Run a trivially-succeeding process so the live-p
+                 ;; poll loop terminates immediately without spawning
+                 ;; the real `claude' binary.
+                 (funcall real-start "claude-auto-resolve-stub"
+                          (generate-new-buffer " *stub*") "true")))
+              ((symbol-function 'process-send-string) (lambda (&rest _) nil))
+              ((symbol-function 'process-send-eof) (lambda (&rest _) nil)))
+      (claude-repl--invoke-auto-resolve-claude "/tmp" "prompt"))
+    (should (member "--dangerously-skip-permissions" captured-cmd))
+    (should (equal (cl-subseq captured-cmd 0 4)
+                   (list claude-repl-auto-resolve-conflicts-program
+                         "-p" "--model"
+                         claude-repl-auto-resolve-conflicts-model)))))
+
 ;;;; ---- Tests: auto-resolve-cherry-pick-conflict ----
 
 (ert-deftest claude-repl-test-auto-resolve-returns-nil-when-no-conflicted-files ()

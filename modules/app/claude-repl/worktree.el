@@ -1571,14 +1571,18 @@ rather than `haiku' for that reason."
   :group 'claude-repl)
 
 (defcustom claude-repl-auto-resolve-conflicts-extra-args
-  '("--permission-mode" "bypassPermissions"
+  '("--dangerously-skip-permissions"
+    "--permission-mode" "bypassPermissions"
     "--allowedTools" "Read,Edit,Glob,Grep")
   "Extra arguments appended to the headless `claude -p' resolver invocation.
 Defaults whitelist read/edit tools and bypass the permission prompt so
 the resolver can edit working-tree files in `-p' mode without an
-interactive approval.  Bash is intentionally omitted from
-`--allowedTools' so the resolver cannot run any git command — the
-caller (Emacs) is the only thing allowed to advance the cherry-pick."
+interactive approval.  `--dangerously-skip-permissions' is included so
+the resolver cannot stall on a permission prompt even when
+`bypassPermissions' mode is insufficient.  Bash is intentionally
+omitted from `--allowedTools' so the resolver cannot run any git
+command — the caller (Emacs) is the only thing allowed to advance the
+cherry-pick."
   :type '(repeat string)
   :group 'claude-repl)
 
