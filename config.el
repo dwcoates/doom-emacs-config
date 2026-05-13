@@ -438,9 +438,11 @@ this trick is necessary.")
   (defun +dwc/workspace-tabline-formatted ()
     "Format workspace list for tab-bar display.
 Packs entries into lines no wider than `frame-width' so the tab-bar
-wraps only between entries (never mid-name), then centers each line
-independently.  Appends a toggled trailing space tied to
-`+dwc/tab-bar-refresh-toggle' so the left-aligned tab-bar segment's
+wraps only between entries (never mid-name), centers each line
+independently, and joins them via `claude-repl--join-tabline-rows' so
+the per-row face extension does not paint the selected tab's
+background to the right edge.  Appends a toggled trailing space tied
+to `+dwc/tab-bar-refresh-toggle' so the left-aligned tab-bar segment's
 string content actually changes across refresh ticks (the
 alternating-space trick — see the block comment above).  Without the
 toggle, face-only status transitions (e.g. :thinking -> :done) stay
@@ -452,10 +454,13 @@ invisible until a workspace switch."
            (lines (if (fboundp 'claude-repl--pack-tabline-entries)
                       (claude-repl--pack-tabline-entries entries width)
                     (list (mapconcat #'identity entries " "))))
-           (centered (mapconcat (lambda (line)
-                                  (+doom-dashboard--center width line))
-                                lines "\n")))
-      (concat centered
+           (centered-lines (mapcar (lambda (line)
+                                     (+doom-dashboard--center width line))
+                                   lines))
+           (joined (if (fboundp 'claude-repl--join-tabline-rows)
+                       (claude-repl--join-tabline-rows centered-lines)
+                     (mapconcat #'identity centered-lines " \n"))))
+      (concat joined
               (if +dwc/tab-bar-refresh-toggle " " ""))))
 
   (defun +dwc/current-workspace-name ()

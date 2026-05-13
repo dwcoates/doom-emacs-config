@@ -1025,11 +1025,11 @@ strings, where adjacent entries on the same line are joined with a
 single space.  A single entry wider than WIDTH still occupies its own
 line — packing never breaks an entry mid-string.
 
-The result is suitable for joining with \"\\n\" so the tab-bar wraps
-only at entry boundaries.  WIDTH is treated as a character count
-(`length' of propertized strings), which is approximate for entries
-containing display-property images but close enough that wrap points
-remain at entry boundaries."
+The result is suitable for `claude-repl--join-tabline-rows' so the
+tab-bar wraps only at entry boundaries.  WIDTH is treated as a
+character count (`length' of propertized strings), which is approximate
+for entries containing display-property images but close enough that
+wrap points remain at entry boundaries."
   (if (null entries)
       (list "")
     (let ((lines '())
@@ -1048,6 +1048,23 @@ remain at entry boundaries."
                   current-w (+ current-w 1 ew))))))
       (when current (push current lines))
       (nreverse lines))))
+
+(defun claude-repl--join-tabline-rows (lines)
+  "Join LINES (pre-centered tab-bar rows) with row separators.
+
+Each adjacent pair of LINES is separated by a single unfaced space
+followed by a newline; the newline alone would let the previous row's
+last glyph paint its background across the rest of the row.  The
+tab-bar's per-row redisplay (`display_tab_bar_line' in src/xdisp.c)
+unconditionally calls `extend_face_to_end_of_line', which paints the
+last glyph's face to the right edge of the row regardless of the
+face's `:extend' attribute.  Since each rendered tab-entry ends with a
+faced name-padding space (see `claude-repl--render-tab'), the selected
+tab's background would otherwise visibly stretch to the frame's right
+edge whenever the selected tab landed at the end of a wrapped row.
+Terminating each row with an unfaced space breaks the face run so the
+extension paints the default tab-bar face instead."
+  (mapconcat #'identity lines " \n"))
 
 (cl-defun claude-repl--tabline-advice (&optional (names nil names-supplied-p))
   "Override for `+workspace--tabline' to color tabs by Claude status.

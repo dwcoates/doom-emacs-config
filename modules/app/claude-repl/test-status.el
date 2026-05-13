@@ -2279,6 +2279,53 @@ states — only `:hidden' is filtered."
       (should (equal (substring-no-properties result)
                      (substring-no-properties expected))))))
 
+;;;; ---- Tests: tabline row join (face-extension guard) ----
+
+(ert-deftest claude-repl-test-join-tabline-rows-empty ()
+  "Joining an empty list returns an empty string."
+  (should (equal (claude-repl--join-tabline-rows nil) "")))
+
+(ert-deftest claude-repl-test-join-tabline-rows-single ()
+  "A single line is returned unchanged (no separator appended)."
+  (should (equal (claude-repl--join-tabline-rows '("only")) "only")))
+
+(ert-deftest claude-repl-test-join-tabline-rows-multi-uses-space-newline ()
+  "Adjacent rows are separated by ` \\n', not bare `\\n'."
+  (should (equal (claude-repl--join-tabline-rows '("a" "b" "c"))
+                 "a \nb \nc")))
+
+(ert-deftest claude-repl-test-join-tabline-rows-non-final-rows-end-with-unfaced-space ()
+  "The character immediately before each newline is an unfaced space.
+This is what stops the tab-bar's per-row face extension from painting
+the last entry's face to the row's right edge — if the char before
+`\\n' carried a face, the extension would paint that face across the
+gap.  We assert: (a) every char preceding a newline is a space, and
+(b) none of those spaces carry a face text-property."
+  (let* ((faced-a (propertize "alpha" 'face '+workspace-tab-selected-face))
+         (faced-b (propertize "beta"  'face '+workspace-tab-face))
+         (faced-c (propertize "gamma" 'face '+workspace-tab-selected-face))
+         (joined  (claude-repl--join-tabline-rows
+                   (list faced-a faced-b faced-c)))
+         (newline-positions
+          (cl-loop for i from 0 below (length joined)
+                   when (eq (aref joined i) ?\n)
+                   collect i)))
+    (should (= (length newline-positions) 2))
+    (dolist (pos newline-positions)
+      (let ((prev (1- pos)))
+        (should (>= prev 0))
+        (should (eq (aref joined prev) ?\s))
+        (should-not (get-text-property prev 'face joined))))))
+
+(ert-deftest claude-repl-test-join-tabline-rows-preserves-row-faces ()
+  "Joining does not strip text properties from the original row content."
+  (let* ((faced (propertize "abc" 'face '+workspace-tab-selected-face))
+         (joined (claude-repl--join-tabline-rows (list faced "def"))))
+    (should (eq (get-text-property 0 'face joined)
+                '+workspace-tab-selected-face))
+    (should (eq (get-text-property 2 'face joined)
+                '+workspace-tab-selected-face))))
+
 (provide 'test-status)
 
 ;;; test-status.el ends here
