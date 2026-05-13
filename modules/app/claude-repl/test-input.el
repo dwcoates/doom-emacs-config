@@ -217,6 +217,101 @@
         (should (equal (buffer-string) ""))
         (should evil-called)))))
 
+;;;; ---- Tests: Deferred prompt queue (C-S-M-RET) ----
+
+(ert-deftest claude-repl-test-queue-deferred-prompt-appends-to-queue ()
+  "`claude-repl-queue-deferred-prompt' appends input buffer text to `:deferred-prompts'."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-queue-deferred-1*"
+      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+      (claude-repl--ws-put "ws1" :claude-state :thinking)
+      (insert "queued one")
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'claude-repl--history-save) #'ignore))
+        (claude-repl-queue-deferred-prompt)
+        (should (equal (claude-repl--ws-get "ws1" :deferred-prompts)
+                       '("queued one")))))))
+
+(ert-deftest claude-repl-test-queue-deferred-prompt-fifo-order ()
+  "Successive `queue-deferred-prompt' calls preserve FIFO order."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-queue-deferred-2*"
+      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+      (claude-repl--ws-put "ws1" :claude-state :thinking)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'claude-repl--history-save) #'ignore))
+        (insert "first")
+        (claude-repl-queue-deferred-prompt)
+        (insert "second")
+        (claude-repl-queue-deferred-prompt)
+        (insert "third")
+        (claude-repl-queue-deferred-prompt)
+        (should (equal (claude-repl--ws-get "ws1" :deferred-prompts)
+                       '("first" "second" "third")))))))
+
+(ert-deftest claude-repl-test-queue-deferred-prompt-clears-input-buffer ()
+  "Enqueue clears the input buffer after capturing its contents."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-queue-deferred-3*"
+      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+      (claude-repl--ws-put "ws1" :claude-state :thinking)
+      (insert "clear me")
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'claude-repl--history-save) #'ignore))
+        (claude-repl-queue-deferred-prompt)
+        (should (equal (buffer-string) ""))))))
+
+(ert-deftest claude-repl-test-queue-deferred-prompt-empty-input-noop ()
+  "Enqueue is a no-op (no queue mutation) when the input buffer is empty or whitespace."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-queue-deferred-4*"
+      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+      (claude-repl--ws-put "ws1" :claude-state :thinking)
+      (claude-repl--ws-put "ws1" :deferred-prompts nil)
+      ;; Buffer is empty
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'claude-repl--history-save) #'ignore))
+        (claude-repl-queue-deferred-prompt)
+        (should (null (claude-repl--ws-get "ws1" :deferred-prompts)))
+        ;; Whitespace-only also a no-op
+        (insert "   \n  ")
+        (claude-repl-queue-deferred-prompt)
+        (should (null (claude-repl--ws-get "ws1" :deferred-prompts)))))))
+
+(ert-deftest claude-repl-test-queue-deferred-prompt-drains-when-idle ()
+  "When state is `:idle` at enqueue time, the queue drains immediately."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-queue-deferred-5*"
+      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+      (claude-repl--ws-put "ws1" :claude-state :idle)
+      (insert "fire now")
+      (let ((sent nil))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                  ((symbol-function 'claude-repl--history-save) #'ignore)
+                  ((symbol-function 'claude-repl--send)
+                   (lambda (prompt ws &rest _) (setq sent (list prompt ws)))))
+          (claude-repl-queue-deferred-prompt)
+          (should (equal sent '("fire now" "ws1")))
+          ;; Drain popped the head, queue should be empty after.
+          (should (null (claude-repl--ws-get "ws1" :deferred-prompts))))))))
+
+(ert-deftest claude-repl-test-queue-deferred-prompt-no-drain-when-thinking ()
+  "When state is `:thinking` at enqueue time, the queue is NOT drained — the prompt waits."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-queue-deferred-6*"
+      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+      (claude-repl--ws-put "ws1" :claude-state :thinking)
+      (insert "wait for it")
+      (let ((sent nil))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                  ((symbol-function 'claude-repl--history-save) #'ignore)
+                  ((symbol-function 'claude-repl--send)
+                   (lambda (prompt ws &rest _) (setq sent (list prompt ws)))))
+          (claude-repl-queue-deferred-prompt)
+          (should (null sent))
+          (should (equal (claude-repl--ws-get "ws1" :deferred-prompts)
+                         '("wait for it"))))))))
+
 ;;;; ---- Tests: Paste to vterm (migrated) ----
 
 (ert-deftest claude-repl-test-paste-to-vterm ()

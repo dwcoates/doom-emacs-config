@@ -562,8 +562,9 @@ sentinel firing after kill cleared state) that we surface rather than
 silently absorb.  Otherwise: marks claude-state as :done, refreshes the
 vterm display if the buffer is still live, refreshes any open
 magit-status buffer for the workspace's repo, notifies the user if the
-frame is unfocused, and emits a finished-in-workspace message when the
-current workspace is different."
+frame is unfocused, emits a finished-in-workspace message when the
+current workspace is different, and drains any deferred-prompt queue
+\(see `claude-repl--drain-deferred-prompts')."
   (unless (gethash ws claude-repl--workspaces)
     (error "claude-repl--handle-claude-finished: ws=%S not registered in claude-repl--workspaces" ws))
   (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
@@ -574,7 +575,64 @@ current workspace is different."
     (claude-repl--refresh-magit-status ws)
     (claude-repl--maybe-notify-finished ws)
     (unless (claude-repl--current-ws-p ws)
-      (message "Claude finished in workspace: %s" ws))))
+      (message "Claude finished in workspace: %s" ws))
+    (claude-repl--drain-deferred-prompts ws)))
+
+;;;; Deferred prompt queue
+;;
+;; Distinct from `:pending-prompts' (the at-startup queue drained when
+;; the session_start hook arrives — see `--drain-pending-prompts').
+;; `:deferred-prompts' is a runtime FIFO seeded by the input-buffer
+;; command `claude-repl-queue-deferred-prompt' (bound to `C-S-M-RET'):
+;; the user keeps typing prompts while Claude is busy, and each one
+;; is held until Claude reaches `:done' / `:idle', at which point the
+;; head of the queue is sent.  Subsequent prompts drain one per
+;; finished turn.  The queue is arbitrarily long.
+
+(defun claude-repl--deferred-drain-eligible-p (ws)
+  "Return non-nil if WS's claude-state permits a deferred-queue drain.
+Drains are only permitted from `:done' or `:idle' — sending mid-turn
+would defeat the whole point of the deferral.  Returns nil for any
+other state (or nil)."
+  (memq (claude-repl--ws-claude-state ws) '(:done :idle)))
+
+(defun claude-repl--pop-deferred-prompt (ws)
+  "Pop and return the head of WS's `:deferred-prompts' queue, or nil.
+Mutates the workspace plist in place.  Logs the pop with the resulting
+queue depth so drains are easy to trace."
+  (let* ((q (claude-repl--ws-get ws :deferred-prompts))
+         (head (car q))
+         (rest (cdr q)))
+    (when head
+      (claude-repl--ws-put ws :deferred-prompts rest)
+      (claude-repl--log ws "pop-deferred-prompt: ws=%s len-after=%d head-len=%d"
+                        ws (length rest) (length head)))
+    head))
+
+(defun claude-repl--drain-deferred-prompts (ws)
+  "Send the next deferred prompt for WS if the state and queue allow.
+Called from `claude-repl--handle-claude-finished' (`:thinking → :done'
+turn boundary) and from `claude-repl-queue-deferred-prompt' (so a
+prompt enqueued while WS is already `:done'/`:idle' fires immediately).
+
+Sends exactly one prompt per call.  Sending re-enters Claude into
+`:thinking' via the `UserPromptSubmit' hook; the next `handle-claude-
+finished' for this workspace will re-trigger the drain and pop the
+next queued prompt.  This keeps the deferred queue strictly serialized
+with Claude's turn boundaries — the whole point of using the queue
+over Claude's native paste-while-thinking buffering."
+  (cond
+   ((null (claude-repl--ws-get ws :deferred-prompts))
+    (claude-repl--log-verbose ws "drain-deferred-prompts: ws=%s queue empty" ws))
+   ((not (claude-repl--deferred-drain-eligible-p ws))
+    (claude-repl--log ws "drain-deferred-prompts: ws=%s skipped — state=%s not :done/:idle"
+                      ws (claude-repl--ws-claude-state ws)))
+   (t
+    (let ((prompt (claude-repl--pop-deferred-prompt ws)))
+      (claude-repl--log ws "drain-deferred-prompts: ws=%s sending head len=%d remaining=%d"
+                        ws (length prompt)
+                        (length (claude-repl--ws-get ws :deferred-prompts)))
+      (claude-repl--send prompt ws)))))
 
 ;;;; Session ID management
 

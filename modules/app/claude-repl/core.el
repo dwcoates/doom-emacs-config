@@ -136,11 +136,12 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                (rtimer   (plist-get plist :ready-timer))
                (pri      (plist-get plist :priority))
                (pprompts (plist-get plist :pending-prompts))
-               (pshow    (plist-get plist :pending-show-panels)))
+               (pshow    (plist-get plist :pending-show-panels))
+               (dprompts (plist-get plist :deferred-prompts)))
           (format (concat " {ws=%s id=%s dir=%s cst=%s rst=%s env=%s"
                           " vt=%s in=%s cnt=%s"
                           " git=%s gproc=%s wt=%s fork=%s"
-                          " rtmr=%s pri=%s pend=%s pshow=%s}")
+                          " rtmr=%s pri=%s pend=%s pshow=%s defq=%s}")
                   ws
                   (or id "-")
                   (or dir "-")
@@ -157,7 +158,8 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                   (if rtimer "t" "-")
                   (or pri "-")
                   (if pprompts (length pprompts) "-")
-                  (if pshow "t" "-")))))))
+                  (if pshow "t" "-")
+                  (if dprompts (length dprompts) "-")))))))
 
 (defvar claude-repl--log-format-bug-captured nil
   "Set to t once a non-string FMT has been captured by `claude-repl--log-format'.
@@ -466,7 +468,7 @@ Keys: :vterm-buffer :input-buffer
       :git-clean :git-proc :worktree-p :project-dir
       :active-env :sandbox :bare-metal :fork-session-id
       :ready-timer :priority
-      :pending-prompts :pending-show-panels
+      :pending-prompts :pending-show-panels :deferred-prompts
 :active-env is :sandbox or :bare-metal; :sandbox and :bare-metal are
 `claude-repl-instantiation' structs holding per-environment session state.")
 

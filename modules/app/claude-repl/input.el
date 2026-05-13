@@ -344,6 +344,8 @@ input window and disturbs redisplay.  Going through `set-window-start'
       :ni "S-RET"     #'newline
       :i  "/"         #'claude-repl--slash-start
       :ni "C-RET"     #'claude-repl-send-with-postfix
+      :ni "C-S-M-RET" #'claude-repl-queue-deferred-prompt
+      :ni "C-M-S-RET" #'claude-repl-queue-deferred-prompt
       ;; `C-S-RET' is intentionally NOT bound here -- the global drawer-visit
       ;; override (`claude-repl--install-drawer-visit-override') needs the
       ;; chord to reach `claude-repl-drawer-global-visit' from inside the
@@ -695,6 +697,47 @@ Handles input preparation, sending, history, and persistence."
   (claude-repl--log (+workspace-current-name) "send-with-postfix")
   (claude-repl--append-to-input-buffer claude-repl-send-postfix)
   (claude-repl--send))
+
+(defun claude-repl-queue-deferred-prompt ()
+  "Queue the current input buffer contents for delivery when Claude is idle.
+
+Claude's native UI already buffers paste-while-thinking input, but
+those buffered keystrokes interleave with whatever else the user
+types before Claude finishes its turn — there is no guarantee the
+queued text will fire as its own discrete prompt.  This command
+provides that guarantee: the input buffer text is captured into
+WS's `:deferred-prompts' FIFO and held until Claude reaches `:done'
+\(turn finished, Stop hook resolved) or `:idle' (decayed), at which
+point `claude-repl--drain-deferred-prompts' pops the head and
+delivers it as a standalone prompt.  The queue is arbitrarily long;
+each subsequent finished turn drains one entry.
+
+If WS is already `:done' / `:idle' when this command runs, the
+enqueue is followed by an immediate drain so a lone queued prompt
+fires right away instead of sitting until the next state change.
+
+The input buffer is cleared and the captured text is pushed onto
+the input-history ring (the same as a regular send), so the user
+can recall it via the history keys."
+  (interactive)
+  (let* ((ws (+workspace-current-name))
+         (input-buf (claude-repl--ws-get ws :input-buffer))
+         (raw (claude-repl--read-input-buffer ws))
+         (raw-empty (or (null raw) (string-empty-p (string-trim raw)))))
+    (cond
+     (raw-empty
+      (claude-repl--log ws "queue-deferred-prompt: ws=%s empty input — no-op" ws)
+      (message "[claude-repl] no input to queue"))
+     (t
+      (let* ((prior (claude-repl--ws-get ws :deferred-prompts))
+             (new   (append prior (list raw))))
+        (claude-repl--ws-put ws :deferred-prompts new)
+        (claude-repl--log ws "queue-deferred-prompt: ws=%s enqueued len=%d queue-depth=%d"
+                          ws (length raw) (length new))
+        (claude-repl--commit-input-buffer ws input-buf raw t)
+        (message "[claude-repl] queued prompt #%d for %s (fires when :done/:idle)"
+                 (length new) ws)
+        (claude-repl--drain-deferred-prompts ws))))))
 
 (defun claude-repl-send-char (char)
   "Send a single character to Claude.

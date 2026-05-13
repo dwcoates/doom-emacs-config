@@ -107,6 +107,117 @@ by vterm-buf presence; the :done write is not."
         (claude-repl--handle-claude-finished "ws1")
         (should (equal done-set "ws1"))))))
 
+;;;; ---- Tests: Deferred prompt drain ----
+
+(ert-deftest claude-repl-test-drain-deferred-empty-queue-noop ()
+  "`claude-repl--drain-deferred-prompts' on an empty queue does nothing."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :claude-state :done)
+    (claude-repl--ws-put "ws1" :deferred-prompts nil)
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'claude-repl--send)
+                 (lambda (&rest args) (push args sent))))
+        (claude-repl--drain-deferred-prompts "ws1")
+        (should (null sent))))))
+
+(ert-deftest claude-repl-test-drain-deferred-pops-and-sends-when-done ()
+  "Drain pops the head and sends it via `claude-repl--send' when state is `:done'."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :claude-state :done)
+    (claude-repl--ws-put "ws1" :deferred-prompts '("alpha" "beta" "gamma"))
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'claude-repl--send)
+                 (lambda (prompt ws &rest _) (setq sent (list prompt ws)))))
+        (claude-repl--drain-deferred-prompts "ws1")
+        (should (equal sent '("alpha" "ws1")))
+        (should (equal (claude-repl--ws-get "ws1" :deferred-prompts)
+                       '("beta" "gamma")))))))
+
+(ert-deftest claude-repl-test-drain-deferred-pops-and-sends-when-idle ()
+  "Drain also fires when state is `:idle' (decayed from `:done')."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :claude-state :idle)
+    (claude-repl--ws-put "ws1" :deferred-prompts '("only-one"))
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'claude-repl--send)
+                 (lambda (prompt ws &rest _) (setq sent (list prompt ws)))))
+        (claude-repl--drain-deferred-prompts "ws1")
+        (should (equal sent '("only-one" "ws1")))
+        (should (null (claude-repl--ws-get "ws1" :deferred-prompts)))))))
+
+(ert-deftest claude-repl-test-drain-deferred-skipped-when-thinking ()
+  "Drain does NOT pop or send when state is `:thinking', even with a non-empty queue."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :claude-state :thinking)
+    (claude-repl--ws-put "ws1" :deferred-prompts '("hold-me"))
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'claude-repl--send)
+                 (lambda (&rest args) (push args sent))))
+        (claude-repl--drain-deferred-prompts "ws1")
+        (should (null sent))
+        (should (equal (claude-repl--ws-get "ws1" :deferred-prompts)
+                       '("hold-me")))))))
+
+(ert-deftest claude-repl-test-drain-deferred-skipped-when-permission ()
+  "Drain does NOT fire while Claude is at a `:permission' prompt."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :claude-state :permission)
+    (claude-repl--ws-put "ws1" :deferred-prompts '("hold-me"))
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'claude-repl--send)
+                 (lambda (&rest args) (push args sent))))
+        (claude-repl--drain-deferred-prompts "ws1")
+        (should (null sent))
+        (should (equal (claude-repl--ws-get "ws1" :deferred-prompts)
+                       '("hold-me")))))))
+
+(ert-deftest claude-repl-test-drain-deferred-skipped-when-init ()
+  "Drain does NOT fire while Claude is still initializing (`:init')."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :claude-state :init)
+    (claude-repl--ws-put "ws1" :deferred-prompts '("hold-me"))
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'claude-repl--send)
+                 (lambda (&rest args) (push args sent))))
+        (claude-repl--drain-deferred-prompts "ws1")
+        (should (null sent))))))
+
+(ert-deftest claude-repl-test-handle-claude-finished-drains-deferred ()
+  "`claude-repl--handle-claude-finished' drains the deferred queue at the end."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/fake")
+    (claude-repl--ws-put "ws1" :deferred-prompts '("first-deferred" "second"))
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'claude-repl--do-refresh) #'ignore)
+                ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
+                ((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
+                ((symbol-function 'claude-repl--refresh-magit-status) #'ignore)
+                ((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'claude-repl--send)
+                 (lambda (prompt ws &rest _) (setq sent (list prompt ws)))))
+        ;; handle-claude-finished marks state :done first, then drains.
+        (claude-repl--handle-claude-finished "ws1")
+        (should (equal sent '("first-deferred" "ws1")))
+        ;; One drained, one remains for the next turn.
+        (should (equal (claude-repl--ws-get "ws1" :deferred-prompts)
+                       '("second")))))))
+
+(ert-deftest claude-repl-test-handle-claude-finished-no-deferred-noop ()
+  "`handle-claude-finished' with an empty deferred queue does not call `--send'."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/fake")
+    (claude-repl--ws-put "ws1" :deferred-prompts nil)
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'claude-repl--do-refresh) #'ignore)
+                ((symbol-function 'claude-repl--update-hide-overlay) #'ignore)
+                ((symbol-function 'claude-repl--maybe-notify-finished) #'ignore)
+                ((symbol-function 'claude-repl--refresh-magit-status) #'ignore)
+                ((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'claude-repl--send)
+                 (lambda (&rest args) (push args sent))))
+        (claude-repl--handle-claude-finished "ws1")
+        (should (null sent))))))
+
 ;;;; ---- Tests: Sandbox configuration ----
 
 (ert-deftest claude-repl-test-find-sandbox-script-prefers-path ()
