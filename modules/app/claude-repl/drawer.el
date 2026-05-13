@@ -328,11 +328,27 @@ Searches that pull point mid-line make the cursor reappear; j/k snap
 back to col 0 and re-hide it."
   (setq-local cursor-type (if (zerop (current-column)) nil 'box)))
 
+(defun claude-repl-drawer--center-selection (&optional buf)
+  "Vertically center the drawer cursor in every window showing BUF.
+BUF defaults to the singleton drawer buffer.  Calls `recenter' in
+each live window so the highlighted workspace line lands on the
+window's middle line.  Near the top/bottom of the workspace list,
+Emacs clamps `window-start' at `point-min'/`point-max', so the
+cursor drifts off-center naturally rather than revealing blank space
+— giving the file-manager-style \"selection-stays-centered when
+there's content off-screen\" behavior."
+  (when-let* ((buf (or buf (get-buffer claude-repl-drawer-buffer-name))))
+    (dolist (win (get-buffer-window-list buf nil t))
+      (when (window-live-p win)
+        (with-selected-window win
+          (recenter))))))
+
 (defun claude-repl-drawer--post-command ()
   "Refresh the current-entry overlay and cursor visibility.
 Runs after every command in the drawer buffer."
   (claude-repl-drawer--update-current-entry-overlay)
-  (claude-repl-drawer--update-cursor))
+  (claude-repl-drawer--update-cursor)
+  (claude-repl-drawer--center-selection))
 
 (defun claude-repl-drawer--apply-background ()
   "Remap the buffer's `default' face to the drawer background color.
@@ -1848,7 +1864,8 @@ overlay-refresh action explicitly."
       (with-current-buffer buf
         (when (claude-repl-drawer--goto-workspace-line current-ws)
           (when win (set-window-point win (point)))
-          (claude-repl-drawer--update-current-entry-overlay))))))
+          (claude-repl-drawer--update-current-entry-overlay)
+          (claude-repl-drawer--center-selection buf))))))
 
 (defvar claude-repl-drawer--last-was-drawer nil
   "Tracks whether the last command ran with the drawer buffer current.

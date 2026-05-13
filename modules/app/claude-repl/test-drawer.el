@@ -2433,5 +2433,79 @@ thinking/done glyph."
     (should (equal (claude-repl-drawer--state-glyph "ws")
                    (alist-get :merged claude-repl-drawer-state-icons)))))
 
+;;;; ---- Tests: center-selection ----
+
+(ert-deftest claude-repl-drawer-test-center-selection-calls-recenter ()
+  "`--center-selection' calls `recenter' on every window showing the
+drawer buffer.  Establishes one displayed window, stubs `recenter' to
+record the count, and asserts exactly one invocation — the always-on
+center-cursor contract."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
+          (calls 0))
+      (unwind-protect
+          (progn
+            (set-window-buffer (selected-window) buf)
+            (cl-letf (((symbol-function 'recenter)
+                       (lambda (&rest _) (cl-incf calls))))
+              (claude-repl-drawer--center-selection buf))
+            (should (= calls 1)))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest claude-repl-drawer-test-center-selection-noop-when-no-window ()
+  "Helper is a no-op when the drawer buffer is not displayed in any
+live window."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
+          (called nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'recenter)
+                     (lambda (&rest _) (setq called t))))
+            (claude-repl-drawer--center-selection buf)
+            (should-not called))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest claude-repl-drawer-test-center-selection-noop-when-no-buffer ()
+  "Helper is a no-op (no error) when no drawer buffer exists at all.
+Exercises the default-arg path: `when-let*' on `(get-buffer ...)'
+short-circuits to nil."
+  (claude-repl-test--with-clean-state
+    (when-let ((b (get-buffer claude-repl-drawer-buffer-name)))
+      (kill-buffer b))
+    (should-not (claude-repl-drawer--center-selection))))
+
+(ert-deftest claude-repl-drawer-test-post-command-calls-center-selection ()
+  "`--post-command' must invoke `--center-selection' so every j/k move
+re-centers the cursor."
+  (claude-repl-test--with-clean-state
+    (let ((called nil))
+      (cl-letf (((symbol-function 'claude-repl-drawer--center-selection)
+                 (lambda (&optional _buf) (setq called t)))
+                ((symbol-function 'claude-repl-drawer--update-current-entry-overlay)
+                 #'ignore)
+                ((symbol-function 'claude-repl-drawer--update-cursor)
+                 #'ignore))
+        (claude-repl-drawer--post-command)
+        (should called)))))
+
+(ert-deftest claude-repl-drawer-test-sync-cursor-calls-center-selection ()
+  "`--sync-cursor-to-current-ws' must also center — persp-driven cursor
+moves should keep the active workspace centered, not just user j/k."
+  (claude-repl-test--with-clean-state
+    (let* ((buf (get-buffer-create claude-repl-drawer-buffer-name))
+           (called nil))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name)
+                     (lambda () "ws"))
+                    ((symbol-function 'claude-repl-drawer--goto-workspace-line)
+                     (lambda (_ws) t))
+                    ((symbol-function 'claude-repl-drawer--update-current-entry-overlay)
+                     #'ignore)
+                    ((symbol-function 'claude-repl-drawer--center-selection)
+                     (lambda (&optional _buf) (setq called t))))
+            (claude-repl-drawer--sync-cursor-to-current-ws)
+            (should called))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
 (provide 'test-drawer)
 ;;; test-drawer.el ends here
