@@ -1303,15 +1303,21 @@ Resolves the JSON `workspace' field via
 like \"DWC/foo\" matches a registry keyed by the bare name \"foo\".
 When neither the literal name nor the tail matches, logs an
 `unknown workspace' line (so the failure is debuggable) and returns —
-no error is raised, since a missing workspace is not actionable here."
+no error is raised, since a missing workspace is not actionable here.
+
+Passes AUTO-RESOLVE=t so cherry-pick conflicts attempt a headless
+`claude -p' resolution before falling back to the existing magit +
+`:merge-failed' path.  Skill-invoked merges run in the background
+without a human watching magit, so the auto-resolver is the only
+chance for orthogonal one-shot edits to land cleanly."
   (let* ((ws (alist-get 'workspace cmd))
          (resolved (claude-repl--resolve-merge-workspace-name ws)))
     (cond
      (resolved
       (claude-repl--log ws
-                        "workspace-commands-file merge: ws=%s resolved=%s (silent)"
+                        "workspace-commands-file merge: ws=%s resolved=%s (silent, auto-resolve)"
                         ws resolved)
-      (claude-repl--workspace-merge-into-source resolved t))
+      (claude-repl--workspace-merge-into-source resolved t t))
      (t
       (let ((tail (and (stringp ws) (string-match-p "/" ws)
                        (claude-repl--bare-workspace-name ws))))
@@ -1464,7 +1470,8 @@ Resolves via :project-dir stored in `claude-repl--workspaces'."
 
 (defalias '+dwc/workspace->branch #'claude-repl--workspace-branch)
 
-(defun claude-repl--cherry-pick-commits (root target-ws base-branch target-branch)
+(defun claude-repl--cherry-pick-commits (root target-ws base-branch target-branch
+                                              &optional auto-resolve)
   "Cherry-pick commits BASE-BRANCH..TARGET-BRANCH in repo at ROOT.
 TARGET-WS is used only for error messages.
 Returns `already-incorporated' (sentinel) when the range is empty —
@@ -1474,7 +1481,16 @@ Returns `failed' (sentinel) when `git cherry-pick' exits non-zero but
 no CHERRY_PICK_HEAD remains — the commits did not land on the target
 and there is no in-progress conflict to resolve (a silent failure).
 Returns nil on a clean cherry-pick.  Signals `user-error' on a
-cherry-pick conflict (after opening magit)."
+cherry-pick conflict (after opening magit).
+
+When AUTO-RESOLVE is non-nil and a CHERRY_PICK_HEAD is left behind,
+delegates to `claude-repl--auto-resolve-cherry-pick-conflict' to
+attempt an LLM-based file-level resolution.  On success, stages the
+resolved files and runs `git cherry-pick --continue', looping if a
+subsequent commit in the range produces another conflict.  On
+failure, falls through to the existing magit + user-error path.
+AUTO-RESOLVE is set by skill-invoked (silent) merges; interactive
+`SPC TAB m'/`SPC TAB M' leave it nil so the user resolves in magit."
   (let* ((range (format "%s..%s" base-branch target-branch))
          (range-count (claude-repl--git-string
                        "-C" root "rev-list" "--count" range)))
@@ -1485,18 +1501,40 @@ cherry-pick conflict (after opening magit)."
                         target-ws range)
       'already-incorporated)
      (t
-      (claude-repl--log target-ws "cherry-pick-commits target-ws=%s target-branch=%s base=%s range=%s"
-                        target-ws target-branch base-branch range)
+      (claude-repl--log target-ws "cherry-pick-commits target-ws=%s target-branch=%s base=%s range=%s auto-resolve=%s"
+                        target-ws target-branch base-branch range (if auto-resolve "t" "nil"))
       (let ((exit-code (claude-repl--git-exit-code root "cherry-pick" "-x" range)))
         (claude-repl--log target-ws "cherry-pick-commits exit-code=%s" exit-code)
-        (claude-repl--check-cherry-pick-conflict target-ws root target-ws)
-        ;; Conflict path signaled above.  Non-zero exit without a
-        ;; CHERRY_PICK_HEAD means git aborted before producing a
-        ;; conflict file (e.g. dirty tree, empty-after-empty commits,
-        ;; -x rejection) — the commits never landed, so surface a
+        ;; Auto-resolution loop: while a CHERRY_PICK_HEAD lingers, try
+        ;; to clear it via `--auto-resolve-cherry-pick-conflict' + `git
+        ;; cherry-pick --continue'.  When auto-resolve is off or the
+        ;; resolver declines, `--check-cherry-pick-conflict' signals
+        ;; user-error (existing behavior).  The loop body either
+        ;; advances state or exits via signal, so it cannot spin.
+        (while (claude-repl--cherry-pick-in-progress-p root)
+          (cond
+           ((and auto-resolve
+                 (claude-repl--auto-resolve-cherry-pick-conflict target-ws root))
+            (setq exit-code
+                  (claude-repl--continue-cherry-pick-after-resolve target-ws root)))
+           (t
+            (claude-repl--check-cherry-pick-conflict target-ws root target-ws))))
+        ;; No CHERRY_PICK_HEAD remains.  Non-zero exit without conflict
+        ;; means git aborted before producing a conflict file (dirty
+        ;; tree, empty-after-empty commits, -x rejection) — surface a
         ;; `failed' sentinel for the caller to flip the workspace into
         ;; the :merge-failed bucket.
         (if (= 0 exit-code) nil 'failed))))))
+
+(defun claude-repl--cherry-pick-in-progress-p (root)
+  "Return non-nil when a cherry-pick is in flight in repo at ROOT.
+Checks for the presence of CHERRY_PICK_HEAD in the resolved git dir.
+Used by `--cherry-pick-commits' to drive the auto-resolution loop and
+by `--check-cherry-pick-conflict' to gate the magit pop."
+  (let* ((git-dir (claude-repl--git-string
+                   "-C" root "rev-parse" "--absolute-git-dir"))
+         (cherry-pick-head (expand-file-name "CHERRY_PICK_HEAD" git-dir)))
+    (file-exists-p cherry-pick-head)))
 
 (defun claude-repl--check-cherry-pick-conflict (ws root target-ws)
   "Check if a cherry-pick conflict exists in repo at ROOT.
@@ -1515,6 +1553,230 @@ mentioning TARGET-WS."
                                  "rev-parse" "--short" "CHERRY_PICK_HEAD")))
         (magit-status)
         (user-error "Conflict cherry-picking %s from '%s' — resolve in magit" conflicting-commit target-ws)))))
+
+;;; Auto-resolution of cherry-pick conflicts (skill-invoked merges only)
+
+(defcustom claude-repl-auto-resolve-conflicts-program "claude"
+  "Executable used to attempt auto-resolution of cherry-pick conflicts.
+Invoked with `-p --model MODEL' and the resolution prompt on stdin."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-auto-resolve-conflicts-model "sonnet"
+  "Model alias passed to `--model' when auto-resolving cherry-pick conflicts.
+The resolver needs strong reasoning over code semantics to decide whether
+two conflicting hunks are conceptually orthogonal; defaulting to `sonnet'
+rather than `haiku' for that reason."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-auto-resolve-conflicts-extra-args
+  '("--permission-mode" "bypassPermissions"
+    "--allowedTools" "Read,Edit,Glob,Grep")
+  "Extra arguments appended to the headless `claude -p' resolver invocation.
+Defaults whitelist read/edit tools and bypass the permission prompt so
+the resolver can edit working-tree files in `-p' mode without an
+interactive approval.  Bash is intentionally omitted from
+`--allowedTools' so the resolver cannot run any git command — the
+caller (Emacs) is the only thing allowed to advance the cherry-pick."
+  :type '(repeat string)
+  :group 'claude-repl)
+
+(defcustom claude-repl-auto-resolve-conflicts-timeout 180
+  "Seconds to wait for the auto-resolution `claude -p' invocation.
+Hard-coded upper bound so a hung resolver cannot block the merge
+indefinitely.  On timeout the resolver is killed and resolution is
+treated as failed (falls through to the existing magit + user-error
+path)."
+  :type 'integer
+  :group 'claude-repl)
+
+(defun claude-repl--cherry-pick-conflicted-files (root)
+  "Return the list of conflicted file paths in repo at ROOT.
+Reads `git diff --name-only --diff-filter=U' so the list reflects the
+in-progress index state.  Paths are relative to ROOT."
+  (let ((raw (claude-repl--git-string
+              "-C" root "diff" "--name-only" "--diff-filter=U")))
+    (if (string-empty-p raw)
+        nil
+      (split-string raw "\n" t))))
+
+(defun claude-repl--file-has-conflict-markers-p (path)
+  "Return non-nil when PATH contains git conflict markers.
+Scans for a `<<<<<<<' line-start marker — the canonical signal that an
+unresolved conflict region remains.  Returns nil if PATH is unreadable."
+  (and (file-readable-p path)
+       (with-temp-buffer
+         (insert-file-contents path)
+         (goto-char (point-min))
+         (re-search-forward "^<<<<<<< " nil t))))
+
+(defun claude-repl--all-conflicts-resolved-p (root files)
+  "Return non-nil when none of FILES (relative to ROOT) contain conflict markers.
+Empty FILES is treated as resolved — there is nothing left to clear."
+  (cl-every (lambda (rel)
+              (not (claude-repl--file-has-conflict-markers-p
+                    (expand-file-name rel root))))
+            files))
+
+(defun claude-repl--build-auto-resolve-prompt (target-ws conflicting-commit files)
+  "Build the prompt sent to `claude -p' for auto-resolving conflicts.
+TARGET-WS is the workspace name being cherry-picked.  CONFLICTING-COMMIT
+is the short SHA of the commit that produced the conflict.  FILES is the
+list of conflicted file paths (relative to the worktree root).
+
+The prompt is deliberately strict: instructs the resolver to (a) judge
+whether the conflicting hunks are conceptually orthogonal, (b) edit
+files in-place only when they are, (c) make no edits and exit silently
+otherwise, and (d) never run any git command.  Emacs verifies the
+outcome by scanning the listed files for conflict markers, so a model
+that ignores instructions still cannot advance the merge — only a clean
+working tree allows `git cherry-pick --continue' to fire."
+  (concat
+   "You are being asked to resolve a git cherry-pick conflict in this working directory.\n"
+   "\n"
+   (format "CONTEXT:\n")
+   (format "- Workspace '%s' has commits being cherry-picked onto another branch.\n" target-ws)
+   (format "- Cherry-picking commit %s produced merge conflicts.\n" conflicting-commit)
+   "- The following file(s) contain unresolved conflict markers (<<<<<<<, =======, >>>>>>>):\n"
+   (mapconcat (lambda (f) (concat "    - " f)) files "\n")
+   "\n"
+   "\n"
+   "YOUR ONLY JOB:\n"
+   "1. Read each conflicted file.\n"
+   "2. Examine each `<<<<<<<` / `=======` / `>>>>>>>` region.\n"
+   "3. Decide whether the two conflicting hunks are CONCEPTUALLY ORTHOGONAL — i.e. they affect independent concerns and the combined result is unambiguous, not requiring you to pick a winner or guess intent.\n"
+   "4. If yes for every conflict region in every file: edit the files in-place to merge both sides, removing the conflict markers. The resolution must preserve the intent of BOTH sides.\n"
+   "5. If no, or if you are uncertain about any region: make NO edits to any file. Exit silently. Do not attempt a partial resolution.\n"
+   "\n"
+   "STRICT CONSTRAINTS (these are non-negotiable):\n"
+   "- NEVER run ANY git command. No `git add`, no `git cherry-pick --continue`, no `git status`, no `git diff`, no `git log`. The Bash tool is NOT available to you — use Read/Glob/Grep for inspection only.\n"
+   "- NEVER commit anything.\n"
+   "- NEVER modify any file under `.git/`.\n"
+   "- NEVER create new files. Only edit the conflicted files listed above.\n"
+   "- ONLY edit the conflicted files' contents in the working tree. Nothing else.\n"
+   "- If ANY conflict region is ambiguous, make NO edits anywhere. All-or-nothing.\n"
+   "\n"
+   "The caller (Emacs) will programmatically detect whether you resolved the conflicts by scanning the listed files for conflict markers. If any markers remain, the caller will abort the merge cleanly and surface the failure for the human user. You do not need to report your decision; the file contents are the contract.\n"))
+
+(defun claude-repl--invoke-auto-resolve-claude (root prompt)
+  "Synchronously invoke the auto-resolution `claude -p' in repo at ROOT.
+PROMPT is the resolver prompt sent on stdin.  Returns the process exit
+status (integer) on completion, or the symbol `timeout' when the
+configured timeout elapsed without the process exiting.
+
+Runs synchronously because the cherry-pick path is itself synchronous —
+the merge flow waits for the working tree to settle before advancing.
+The hard timeout (`claude-repl-auto-resolve-conflicts-timeout') guards
+against a hung resolver blocking the merge indefinitely.
+
+Factored out as its own function so tests can stub the headless call
+without spawning an actual `claude' process."
+  (let* ((cmd (append (list claude-repl-auto-resolve-conflicts-program
+                            "-p" "--model" claude-repl-auto-resolve-conflicts-model)
+                      claude-repl-auto-resolve-conflicts-extra-args))
+         (out-buf (generate-new-buffer " *claude-auto-resolve*"))
+         (default-directory (file-name-as-directory root))
+         (proc (apply #'start-process
+                      "claude-auto-resolve" out-buf cmd)))
+    (set-process-query-on-exit-flag proc nil)
+    (process-send-string proc prompt)
+    (process-send-eof proc)
+    (let ((deadline (+ (float-time) claude-repl-auto-resolve-conflicts-timeout))
+          (timed-out nil))
+      (while (and (process-live-p proc) (not timed-out))
+        (accept-process-output proc 0.2)
+        (when (> (float-time) deadline)
+          (setq timed-out t)
+          (delete-process proc)))
+      (unwind-protect
+          (if timed-out
+              'timeout
+            (process-exit-status proc))
+        (when (buffer-live-p out-buf) (kill-buffer out-buf))))))
+
+(defun claude-repl--auto-resolve-cherry-pick-conflict (target-ws root)
+  "Attempt LLM-based resolution of the in-progress cherry-pick conflict.
+TARGET-WS is the workspace being cherry-picked (for logging + the
+resolver prompt).  ROOT is the worktree directory where the conflict
+lives.
+
+Enumerates conflicted files via `git diff --name-only --diff-filter=U',
+builds a strict resolver prompt, invokes `claude -p' synchronously,
+then scans the listed files for residual conflict markers.  Returns t
+ONLY when zero markers remain across all conflicted files — the model
+either resolved everything orthogonally or declined and left the files
+untouched (markers intact → return nil).
+
+Returns nil on any of: empty conflicted-file list (nothing to resolve),
+resolver timeout, non-zero resolver exit, or any conflicted file that
+still contains a `<<<<<<<` marker after the resolver returns.  The
+verification is file-based, not exit-code-based, so a misbehaving
+resolver cannot advance the merge — only a clean working tree allows
+the caller to run `git cherry-pick --continue'."
+  (let ((files (claude-repl--cherry-pick-conflicted-files root)))
+    (cond
+     ((null files)
+      (claude-repl--log target-ws
+                        "auto-resolve: target-ws=%s no conflicted files — declining"
+                        target-ws)
+      nil)
+     (t
+      (let* ((conflicting-commit (claude-repl--git-string
+                                  "-C" root
+                                  "rev-parse" "--short" "CHERRY_PICK_HEAD"))
+             (prompt (claude-repl--build-auto-resolve-prompt
+                      target-ws conflicting-commit files)))
+        (claude-repl--log target-ws
+                          "auto-resolve: target-ws=%s commit=%s files=%S — invoking claude -p"
+                          target-ws conflicting-commit files)
+        (let ((result (claude-repl--invoke-auto-resolve-claude root prompt)))
+          (claude-repl--log target-ws
+                            "auto-resolve: target-ws=%s claude-p result=%S"
+                            target-ws result)
+          (cond
+           ((eq result 'timeout)
+            (claude-repl--log target-ws
+                              "auto-resolve: target-ws=%s timed out — declining"
+                              target-ws)
+            nil)
+           ((not (and (numberp result) (zerop result)))
+            (claude-repl--log target-ws
+                              "auto-resolve: target-ws=%s non-zero exit=%S — declining"
+                              target-ws result)
+            nil)
+           ((claude-repl--all-conflicts-resolved-p root files)
+            (claude-repl--log target-ws
+                              "auto-resolve: target-ws=%s all markers cleared — accepting"
+                              target-ws)
+            t)
+           (t
+            (claude-repl--log target-ws
+                              "auto-resolve: target-ws=%s markers remain — declining"
+                              target-ws)
+            nil))))))))
+
+(defun claude-repl--continue-cherry-pick-after-resolve (target-ws root)
+  "Stage resolved files and run `git cherry-pick --continue' in ROOT.
+TARGET-WS is used only for logging.  Returns the exit code of the
+`git cherry-pick --continue' invocation.  The caller's loop decides
+whether to keep going (another conflict landed) or finish (clean tree).
+
+The commit message is taken from CHERRY_PICK_MSG (git's default for
+`--continue'), which preserves the original commit's message including
+the `-x' annotation that the parent cherry-pick was invoked with."
+  (let ((add-ec (claude-repl--git-exit-code root "add" "-u"))
+        ;; --no-edit keeps the original commit message verbatim so the
+        ;; (cherry picked from commit SHA) annotation that `-x' added
+        ;; survives the auto-resolution.  Without it git would open
+        ;; $EDITOR, which has no terminal in a headless merge.
+        (continue-ec (claude-repl--git-exit-code
+                      root "-c" "core.editor=true"
+                      "cherry-pick" "--continue" "--no-edit")))
+    (claude-repl--log target-ws
+                      "auto-resolve: target-ws=%s git add -u exit=%d, cherry-pick --continue exit=%d"
+                      target-ws add-ec continue-ec)
+    continue-ec))
 
 (defun claude-repl--show-and-refresh-magit-status (project-root)
   "Open magit-status for PROJECT-ROOT, select its window, and refresh it.
@@ -1576,7 +1838,7 @@ merge flow; the success path uses `:merge-completed' instead."
   (claude-repl--ws-put target-ws :claude-state nil)
   (claude-repl--ws-put target-ws :repl-state :dead))
 
-(defun claude-repl--workspace-merge-do (target-ws &optional project-root-override silent)
+(defun claude-repl--workspace-merge-do (target-ws &optional project-root-override silent auto-resolve)
   "Cherry-pick TARGET-WS's branch commits onto the current branch.
 Replays each commit from the target branch (since it diverged from master)
 individually. Aborts cleanly if any commit conflicts.
@@ -1606,11 +1868,17 @@ When SILENT is non-nil, the post-merge magit-status pop is suppressed
 nil so SPC TAB m / SPC TAB M still surface the magit view; the
 skill-invoked path (`claude-repl--handle-merge-command') passes t so
 background-triggered merges never interrupt whatever the user is
-doing."
+doing.
+
+When AUTO-RESOLVE is non-nil, cherry-pick conflicts are first sent to
+`claude -p' for an attempt at file-level resolution (see
+`claude-repl--auto-resolve-cherry-pick-conflict').  Only the
+skill-invoked path passes t — interactive merges leave the resolver
+off so the user resolves in magit directly."
   (let* ((current-ws (+workspace-current-name))
          (target-branch (claude-repl--workspace-branch target-ws)))
-    (claude-repl--log current-ws "workspace-merge-do current-ws=%s target-ws=%s target-branch=%s project-root-override=%s silent=%s"
-                      current-ws target-ws target-branch (or project-root-override "nil") silent)
+    (claude-repl--log current-ws "workspace-merge-do current-ws=%s target-ws=%s target-branch=%s project-root-override=%s silent=%s auto-resolve=%s"
+                      current-ws target-ws target-branch (or project-root-override "nil") silent (if auto-resolve "t" "nil"))
     (unless target-branch
       (user-error "Cannot resolve branch for workspace '%s'" target-ws))
     (let* ((project-root (or project-root-override
@@ -1627,7 +1895,8 @@ doing."
       (condition-case err
           (let* ((base (claude-repl--cherry-pick-base project-root target-branch))
                  (result (claude-repl--cherry-pick-commits
-                          project-root target-ws base target-branch))
+                          project-root target-ws base target-branch
+                          auto-resolve))
                  (already (eq result 'already-incorporated))
                  (failed  (eq result 'failed)))
             ;; Cherry-pick completed without signaling — record bucket
@@ -2048,7 +2317,7 @@ parents, the resolver returns the great-grandparent (or master)."
                         parent-dir master-dir depth target)
       target))))
 
-(defun claude-repl--workspace-merge-into-source (source-ws &optional silent)
+(defun claude-repl--workspace-merge-into-source (source-ws &optional silent auto-resolve)
   "Merge SOURCE-WS's commits into its source workspace.
 The source workspace is the one `SPC TAB n' was called from when
 SOURCE-WS was created (recorded as `:source-ws-dir').  When that
@@ -2105,7 +2374,7 @@ generic `error') so command-file dispatch surfaces user-facing errors."
       ;; lands in the resolved target, not in whatever :project-dir the
       ;; current-ws happens to carry.
       (let ((default-directory (file-name-as-directory target-dir)))
-        (claude-repl--workspace-merge-do source-ws target-dir silent)))))
+        (claude-repl--workspace-merge-do source-ws target-dir silent auto-resolve)))))
 
 (defun claude-repl-workspace-merge-current-into-source ()
   "Merge the current workspace's commits into its source workspace.
