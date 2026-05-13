@@ -458,6 +458,71 @@
             (should (string-match-p "Question: the question" (buffer-string)))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
+(ert-deftest claude-repl-cmd-test-explain-config-format-header/includes-emoji-and-question ()
+  "Header banner includes the robot emoji, question mark emoji, and the prompt."
+  (let ((header (claude-repl--explain-config-format-header "the question")))
+    (should (string-match-p "🤖" header))
+    (should (string-match-p "❓" header))
+    (should (string-match-p "📜" header))
+    (should (string-match-p "Question: the question" header))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-format-header/applies-face-properties ()
+  "Header text carries face properties so the buffer renders in color."
+  (let* ((header (claude-repl--explain-config-format-header "anything"))
+         (q-pos (string-match "Question:" header))
+         (face (and q-pos (get-text-property q-pos 'face header))))
+    (should q-pos)
+    (should face)
+    (should (eq (plist-get face :weight) 'bold))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-format-header/box-drawing-rule ()
+  "Header uses unicode box-drawing characters for the top rule, not ASCII dashes."
+  (let ((header (claude-repl--explain-config-format-header "anything")))
+    (should (string-match-p "━" header))
+    (should-not (string-match-p "^--- response" header))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-format-footer/success-uses-check-emoji ()
+  "Footer for status=0 includes the check emoji and a success phrase."
+  (let ((footer (claude-repl--explain-config-format-footer 0)))
+    (should (string-match-p "✅" footer))
+    (should (string-match-p "exited cleanly" footer))
+    (should (string-match-p "status 0" footer))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-format-footer/failure-uses-cross-emoji ()
+  "Footer for non-zero status uses the cross emoji and reports the code."
+  (let ((footer (claude-repl--explain-config-format-footer 137)))
+    (should (string-match-p "❌" footer))
+    (should (string-match-p "exited with errors" footer))
+    (should (string-match-p "status 137" footer))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-format-footer/success-and-failure-have-distinct-colors ()
+  "Success and failure footers carry distinct foreground colors."
+  (let* ((ok (claude-repl--explain-config-format-footer 0))
+         (bad (claude-repl--explain-config-format-footer 1))
+         (ok-pos (string-match "claude" ok))
+         (bad-pos (string-match "claude" bad))
+         (ok-face (get-text-property ok-pos 'face ok))
+         (bad-face (get-text-property bad-pos 'face bad)))
+    (should (plist-get ok-face :foreground))
+    (should (plist-get bad-face :foreground))
+    (should-not (equal (plist-get ok-face :foreground)
+                       (plist-get bad-face :foreground)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-sentinel/inserts-rich-footer-on-exit ()
+  "Sentinel inserts the rich footer (emoji + status) when the process exits."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-config-footer*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name))
+         (proc (make-symbol "fake-proc")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'process-status) (lambda (_p) 'exit))
+                  ((symbol-function 'process-exit-status) (lambda (_p) 0))
+                  ((symbol-function 'process-buffer) (lambda (_p) buf)))
+          (claude-repl--explain-config-sentinel proc "finished\n")
+          (with-current-buffer buf
+            (should (string-match-p "✅" (buffer-string)))
+            (should (string-match-p "status 0" (buffer-string)))))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
 ;;;; ---- claude-repl--send-interrupt-escape ----
 
 (ert-deftest claude-repl-cmd-test-send-interrupt-escape/sends-two-escapes ()

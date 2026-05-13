@@ -367,6 +367,64 @@ contract for this entry point -- edit with care."
   "Wrap RAW with the explain-config preamble for sending to claude."
   (format claude-repl-explain-config-preamble raw))
 
+(defconst claude-repl--explain-config-orange "#FF8C42"
+  "Claude-orange accent used in the explain-config buffer chrome.")
+
+(defconst claude-repl--explain-config-blue "#7FBFFF"
+  "Question-label accent in the explain-config buffer chrome.")
+
+(defconst claude-repl--explain-config-green "#8DE08D"
+  "Response/success accent in the explain-config buffer chrome.")
+
+(defconst claude-repl--explain-config-red "#FF7F7F"
+  "Failure accent for non-zero exit statuses in the explain-config footer.")
+
+(defconst claude-repl--explain-config-muted "#888888"
+  "Muted accent for subtitles and rules in the explain-config chrome.")
+
+(defun claude-repl--explain-config-format-header (prompt)
+  "Return the propertized banner inserted at the top of the buffer.
+PROMPT is the user's question.  The literal substring \"Question: PROMPT\"
+is preserved so downstream tooling can scrape it."
+  (let* ((rule (propertize (make-string 72 ?━)
+                           'face `(:foreground ,claude-repl--explain-config-orange)))
+         (title (propertize "🤖 Claude · Doom Config Q&A"
+                            'face `(:foreground ,claude-repl--explain-config-orange
+                                    :weight bold)))
+         (badge (propertize "🔒 read-only"
+                            'face `(:foreground ,claude-repl--explain-config-muted
+                                    :slant italic)))
+         (q-label (propertize "❓ Question: "
+                              'face `(:foreground ,claude-repl--explain-config-blue
+                                      :weight bold)))
+         (q-body (propertize prompt 'face '(:slant italic)))
+         (r-label (propertize "📜 Response"
+                              'face `(:foreground ,claude-repl--explain-config-green
+                                      :weight bold)))
+         (r-tag (propertize " (streaming…)"
+                            'face `(:foreground ,claude-repl--explain-config-muted
+                                    :slant italic)))
+         (r-rule (propertize (concat " " (make-string 50 ?─))
+                             'face `(:foreground ,claude-repl--explain-config-green))))
+    (concat rule "\n"
+            "  " title "   " badge "\n"
+            rule "\n\n"
+            q-label q-body "\n\n"
+            r-label r-tag r-rule "\n\n")))
+
+(defun claude-repl--explain-config-format-footer (status)
+  "Return the propertized footer for an explain-config run ending with STATUS."
+  (let* ((success (zerop status))
+         (emoji (if success "✅" "❌"))
+         (color (if success
+                    claude-repl--explain-config-green
+                  claude-repl--explain-config-red))
+         (verb (if success "exited cleanly" "exited with errors"))
+         (rule (propertize (make-string 50 ?─) 'face `(:foreground ,color)))
+         (body (propertize (format "%s claude %s (status %d)" emoji verb status)
+                           'face `(:foreground ,color :weight bold))))
+    (concat "\n\n" rule "\n" body "\n")))
+
 (defun claude-repl--explain-config-sentinel (proc _event)
   "Process sentinel for `claude-repl-explain-config'.
 Appends an exit-status footer to PROC's buffer when the process exits."
@@ -377,8 +435,7 @@ Appends an exit-status footer to PROC's buffer when the process exits."
         (with-current-buffer buf
           (let ((inhibit-read-only t))
             (goto-char (point-max))
-            (insert (format "\n\n--- claude exited (status %d) ---\n"
-                            status))))))))
+            (insert (claude-repl--explain-config-format-footer status))))))))
 
 (defun claude-repl--explain-config-init-buffer (prompt)
   "Prepare the explain-config output buffer for a fresh run.
@@ -387,8 +444,7 @@ Erases prior contents, inserts the question header, returns the buffer."
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (insert (format "Question: %s\n\n--- response (streaming) ---\n\n"
-                        prompt))))
+        (insert (claude-repl--explain-config-format-header prompt))))
     buf))
 
 (defun claude-repl--explain-config-spawn (prompt)
@@ -423,7 +479,10 @@ Prompts for PROMPT, then spawns `claude -p
 read-only preamble forbidding any mutating action -- this entry
 point is for clarification and explanation only.  Output streams to
 `claude-repl-explain-config-buffer-name'."
-  (interactive (list (read-string "Explain config: ")))
+  (interactive
+   (list (read-string (propertize "🤖 Explain config: "
+                                  'face `(:foreground ,claude-repl--explain-config-orange
+                                          :weight bold)))))
   (let ((trimmed (string-trim (or prompt ""))))
     (when (string-empty-p trimmed)
       (user-error "Empty prompt"))
