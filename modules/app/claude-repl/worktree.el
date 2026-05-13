@@ -385,6 +385,14 @@ execute, and commit autonomously without waiting for confirmation.")
 of the calling workspace's project, so a single keystroke from anywhere
 can dispatch a doom-only edit.")
 
+(defconst claude-repl--explanation-engine-dir
+  (file-name-as-directory
+   (expand-file-name "~/workspace/ChessCom/explanation-engine"))
+  "Absolute path of the ChessCom explanation-engine repository, used by
+the SPC-j-O one-shot flow.  The new worktree is rooted here regardless
+of the calling workspace's project, mirroring the doom-config pin in
+`claude-repl--doom-config-dir' but for the explanation-engine repo.")
+
 (defconst claude-repl--oneshot-merge-suffix
   (concat
    "\n\n"
@@ -395,6 +403,27 @@ can dispatch a doom-only edit.")
 flow.  Tells the spawned workspace agent (NOT the headless claude that
 runs `/workspace-generation') to invoke `/workspace-merge' on success,
 or stop and surface on genuine ambiguity.")
+
+(defconst claude-repl--oneshot-create-pr-command
+  "/create-or-update-pr --patch --add-to-merge-queue --skip-tests"
+  "Slash command the explanation-engine one-shot agent invokes on success
+instead of `/workspace-merge'.  The PR-creation flow pushes the branch
+and queues it for merge directly, so there's no host-side cherry-pick or
+config reload (which makes sense for doom-config but not for a service
+repo).")
+
+(defconst claude-repl--oneshot-create-pr-suffix
+  (concat
+   "\n\n"
+   "When you have successfully implemented the requested change AND written and run the corresponding tests AND committed, invoke `"
+   claude-repl--oneshot-create-pr-command
+   "` to push and queue this branch for merge.\n"
+   "\n"
+   "Only invoke `" claude-repl--oneshot-create-pr-command "` when implementation, tests, and commits are all complete and successful. If you cannot accomplish that — for example, due to genuine prompt ambiguity that you cannot reasonably resolve, or because the implementation cannot be completed — STOP and surface the situation to the user instead of pushing on with a faulty implementation. You have artistic license to resolve minor ambiguity by making best-guess judgments, but if there is genuine ambiguity that materially affects the implementation, prefer to stop and surface it.")
+  "Suffix appended to the user's preemptive prompt for the
+explanation-engine one-shot flow.  Tells the spawned agent to invoke
+`claude-repl--oneshot-create-pr-command' on success instead of
+`/workspace-merge'.")
 
 ;;; Async workspace-name generation via headless `claude -p'
 
@@ -948,6 +977,43 @@ regardless of the calling workspace, and the spawned agent receives the
 `/workspace-merge'-on-success instruction."
   (interactive)
   (claude-repl-create-doom-oneshot-workspace 'head))
+
+(defun claude-repl-create-explanation-engine-oneshot-workspace ()
+  "Create a one-shot worktree workspace rooted in the explanation-engine
+repo (`~/workspace/ChessCom/explanation-engine').
+
+Analogous to `claude-repl-create-doom-oneshot-workspace' but with two
+deviations:
+  1. Git root is pinned to `claude-repl--explanation-engine-dir' instead
+     of the doom-config dir, so the keystroke spawns work in the
+     explanation-engine repo regardless of the calling workspace.
+  2. The spawned agent is instructed to invoke
+     `claude-repl--oneshot-create-pr-command' on success (push the
+     branch and queue it for merge) instead of `/workspace-merge' (host
+     cherry-pick + reload).  The cherry-pick/reload procedure makes
+     sense for doom-config but not for a service repo where the change
+     should land via the normal PR flow.
+
+Branches off local `master' (with the usual `git fetch origin master'
+fast-forward when safe).  Like the doom variant, the merge instruction
+is appended to the PREFIXED prompt but NOT to the raw description used
+for slug generation, so the workspace name stays clean."
+  (interactive)
+  (let* ((git-root claude-repl--explanation-engine-dir)
+         (base-commit (claude-repl--resolve-worktree-base 'master))
+         (raw-prompt (read-string "One-shot explanation-engine prompt: ")))
+    (when (string-empty-p (string-trim (or raw-prompt "")))
+      (user-error "Preemptive prompt is required"))
+    (let* ((suffixed-raw (concat raw-prompt
+                                 claude-repl--oneshot-create-pr-suffix))
+           (prefixed-prompt (concat claude-repl--autonomous-prompt-prefix
+                                    suffixed-raw)))
+      (claude-repl--log nil "create-explanation-engine-oneshot-workspace: git-root=%s base-commit=%s"
+                        git-root base-commit)
+      (message "Generating explanation-engine-oneshot workspace name via `claude -p --model %s'..."
+               claude-repl-workspace-generation-model)
+      (claude-repl--spawn-workspace-generation
+       raw-prompt prefixed-prompt git-root base-commit nil))))
 
 (defun claude-repl-create-worktree-workspace-from-origin-master (&optional source-ws)
   "Create a new worktree workspace branched from local `master'.

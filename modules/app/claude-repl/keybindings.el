@@ -680,7 +680,7 @@ global drawer-mirror bindings win in vterm buffers."
       (:prefix ("j" . "claude")
        :desc "Enqueue input as deferred prompt"        "RET" #'claude-repl-queue-deferred-prompt
        :desc "One-shot doom edit (from master)"        "o" #'claude-repl-create-doom-oneshot-workspace
-       :desc "One-shot doom edit (from current branch)" "O" #'claude-repl-create-doom-oneshot-workspace-from-current-branch
+       :desc "One-shot explanation-engine edit (PR on success)" "O" #'claude-repl-create-explanation-engine-oneshot-workspace
        :desc "Kill workspace"           "d" #'claude-repl-kill-workspace
        :desc "Update GitHub PR description"  "r" #'claude-repl-update-pr
        :desc "Rebase branch onto origin/master" "b" #'claude-repl-rebase-onto-origin-master

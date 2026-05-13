@@ -6527,4 +6527,168 @@ merge request is parked on the queue rather than running."
               (should (eq (claude-repl--ws-get "ws-pending" :repl-state)
                           :merge-queued)))))))))
 
+;;;; ---- Tests: claude-repl-create-explanation-engine-oneshot-workspace ----
+
+(ert-deftest claude-repl-test-explanation-engine-oneshot-pins-git-root-to-explanation-engine ()
+  "The explanation-engine one-shot pins git-root to
+`~/workspace/ChessCom/explanation-engine' regardless of the calling
+workspace's project, so SPC j O always dispatches into that repo."
+  (claude-repl-test--with-clean-state
+    (let ((captured-git-root :unset))
+      (cl-letf (((symbol-function '+workspace-current-name)
+                 (lambda () "unrelated-ws"))
+                ((symbol-function 'claude-repl--ws-dir)
+                 (lambda (_ws) "/tmp/unrelated-repo/"))
+                ((symbol-function 'read-string)
+                 (lambda (&rest _) "add caching to thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed git-root _base _fork-from)
+                   (setq captured-git-root git-root))))
+        (claude-repl-create-explanation-engine-oneshot-workspace)
+        (should (equal captured-git-root
+                       claude-repl--explanation-engine-dir))
+        (should (equal captured-git-root
+                       (file-name-as-directory
+                        (expand-file-name
+                         "~/workspace/ChessCom/explanation-engine"))))))))
+
+(ert-deftest claude-repl-test-explanation-engine-oneshot-uses-master-base ()
+  "The explanation-engine one-shot branches off local `master'
+(equivalent to `SPC TAB N' in that repo)."
+  (claude-repl-test--with-clean-state
+    (let ((captured-base :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "add caching to thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root base _fork-from)
+                   (setq captured-base base))))
+        (claude-repl-create-explanation-engine-oneshot-workspace)
+        (should (equal captured-base "master"))))))
+
+(ert-deftest claude-repl-test-explanation-engine-oneshot-appends-create-pr-suffix-to-prefixed ()
+  "The create-PR-on-success suffix is included in the PREFIXED prompt so
+the spawned agent knows to invoke
+`claude-repl--oneshot-create-pr-command' on success — this replaces the
+`/workspace-merge' instruction used by the doom one-shot."
+  (claude-repl-test--with-clean-state
+    (let ((captured-prefixed :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "add caching to thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw prefixed _git-root _base _fork-from)
+                   (setq captured-prefixed prefixed))))
+        (claude-repl-create-explanation-engine-oneshot-workspace)
+        (should (string-match-p
+                 (regexp-quote claude-repl--oneshot-create-pr-command)
+                 captured-prefixed))
+        (should (string-match-p
+                 (regexp-quote claude-repl--oneshot-create-pr-suffix)
+                 captured-prefixed))))))
+
+(ert-deftest claude-repl-test-explanation-engine-oneshot-does-not-use-workspace-merge ()
+  "The explanation-engine one-shot must NOT instruct the agent to invoke
+`/workspace-merge' — that's the doom one-shot's flow.  This variant
+pushes the branch via the PR command instead."
+  (claude-repl-test--with-clean-state
+    (let ((captured-prefixed :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "add caching to thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw prefixed _git-root _base _fork-from)
+                   (setq captured-prefixed prefixed))))
+        (claude-repl-create-explanation-engine-oneshot-workspace)
+        (should-not (string-match-p "/workspace-merge"
+                                    captured-prefixed))))))
+
+(ert-deftest claude-repl-test-explanation-engine-oneshot-keeps-raw-prompt-clean ()
+  "The create-PR suffix is NOT appended to the raw prompt — raw is used
+purely for slug generation and should not get polluted with slash
+commands like `/create-or-update-pr', which would derail the slug."
+  (claude-repl-test--with-clean-state
+    (let ((captured-raw :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "add caching to thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (raw _prefixed _git-root _base _fork-from)
+                   (setq captured-raw raw))))
+        (claude-repl-create-explanation-engine-oneshot-workspace)
+        (should (equal captured-raw "add caching to thing"))
+        (should-not (string-match-p "/create-or-update-pr"
+                                    captured-raw))))))
+
+(ert-deftest claude-repl-test-explanation-engine-oneshot-prefixed-includes-autonomous-prefix ()
+  "The prefixed prompt still starts with the standard autonomous-prompt
+prefix so the spawned agent runs autonomously without waiting."
+  (claude-repl-test--with-clean-state
+    (let ((captured-prefixed :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "add caching to thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw prefixed _git-root _base _fork-from)
+                   (setq captured-prefixed prefixed))))
+        (claude-repl-create-explanation-engine-oneshot-workspace)
+        (should (string-prefix-p claude-repl--autonomous-prompt-prefix
+                                 captured-prefixed))))))
+
+(ert-deftest claude-repl-test-explanation-engine-oneshot-rejects-empty-prompt ()
+  "An empty/whitespace prompt is rejected — there is nothing to slug or
+implement, and we do not want to spawn a useless workspace."
+  (claude-repl-test--with-clean-state
+    (let ((spawned nil))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "   "))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (&rest _) (setq spawned t))))
+        (should-error
+         (claude-repl-create-explanation-engine-oneshot-workspace)
+         :type 'user-error)
+        (should-not spawned)))))
+
+(ert-deftest claude-repl-test-explanation-engine-oneshot-passes-no-fork-from ()
+  "The explanation-engine one-shot is not a fork — fork-from must be nil
+so the new workspace starts a fresh Claude session rather than resuming
+someone else's."
+  (claude-repl-test--with-clean-state
+    (let ((captured-fork-from :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "add caching to thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root _base fork-from)
+                   (setq captured-fork-from fork-from))))
+        (claude-repl-create-explanation-engine-oneshot-workspace)
+        (should (null captured-fork-from))))))
+
+(ert-deftest claude-repl-test-oneshot-create-pr-command-has-expected-flags ()
+  "The PR command string must match exactly what the user specified for
+the explanation-engine one-shot: `/create-or-update-pr --patch
+--add-to-merge-queue --skip-tests' (no --self-certified, no `commit'
+subcommand)."
+  (should (equal claude-repl--oneshot-create-pr-command
+                 "/create-or-update-pr --patch --add-to-merge-queue --skip-tests")))
+
+(ert-deftest claude-repl-test-oneshot-create-pr-suffix-mentions-stop-on-ambiguity ()
+  "The create-PR suffix tells the spawned agent to STOP (not push on)
+when it hits genuine ambiguity it cannot resolve — same safety property
+as the doom-oneshot merge suffix, so a faulty implementation isn't
+auto-PRed."
+  (should (string-match-p "STOP" claude-repl--oneshot-create-pr-suffix))
+  (should (string-match-p "ambiguity"
+                          claude-repl--oneshot-create-pr-suffix)))
+
+(ert-deftest claude-repl-test-oneshot-create-pr-suffix-mentions-tests-and-commits ()
+  "PR creation is gated on implementation, tests, AND commits — the
+suffix must spell that out so the spawned agent doesn't PR half-finished
+work."
+  (should (string-match-p "tests"
+                          claude-repl--oneshot-create-pr-suffix))
+  (should (string-match-p "[Cc]ommit"
+                          claude-repl--oneshot-create-pr-suffix)))
+
+(ert-deftest claude-repl-test-explanation-engine-dir-points-to-chesscom-explanation-engine ()
+  "Sanity check: the explanation-engine dir constant resolves to
+`~/workspace/ChessCom/explanation-engine' with a trailing slash."
+  (should (equal claude-repl--explanation-engine-dir
+                 (file-name-as-directory
+                  (expand-file-name
+                   "~/workspace/ChessCom/explanation-engine")))))
 ;;; test-worktree.el ends here
