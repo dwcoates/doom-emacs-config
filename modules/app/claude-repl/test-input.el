@@ -763,6 +763,75 @@ next slash-return doesn't see stale accumulated input."
             (should-not claude-slash-input-mode)
             (should (equal sent-bytes '((fake-proc . "\C-c"))))))))))
 
+(ert-deftest claude-repl-test-discard-or-send-interrupt-thinking-nonempty-suppresses-ctrl-c ()
+  "When Claude is :thinking AND input buffer is non-empty, C-c C-c clears
+the local buffer + saves history but DOES NOT send raw Ctrl-C to vterm.
+This lets the user draft a message while Claude works and discard the
+draft without interrupting Claude's in-flight response."
+  (claude-repl-test--with-clean-state
+    (let ((sent-bytes nil)
+          (evil-called nil))
+      (claude-repl-test--with-temp-buffer "*claude-panel-thinking-nonempty*"
+        (setq-local vterm--process 'fake-proc)
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (claude-repl--ws-set-claude-state "test-ws" :thinking)
+        (claude-repl-test--with-temp-buffer " *test-input-thinking-nonempty*"
+          (setq-local claude-repl--input-history nil)
+          (setq-local claude-repl--history-index 0)
+          (setq-local claude-repl--history-navigating nil)
+          (insert "draft while claude works")
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'evil-insert-state)
+                     (lambda () (setq evil-called t)))
+                    ((symbol-function 'claude-repl--history-save) #'ignore)
+                    ((symbol-function 'process-send-string)
+                     (lambda (proc bytes) (push (cons proc bytes) sent-bytes))))
+            (claude-repl-discard-or-send-interrupt)
+            (should (equal (buffer-string) ""))
+            (should evil-called)
+            (should (null sent-bytes))))))))
+
+(ert-deftest claude-repl-test-discard-or-send-interrupt-thinking-empty-still-sends-ctrl-c ()
+  "When Claude is :thinking but the input buffer is empty, C-c C-c still
+sends raw Ctrl-C to vterm — the suppression only applies when there is
+local content to discard."
+  (claude-repl-test--with-clean-state
+    (let ((sent-bytes nil))
+      (claude-repl-test--with-temp-buffer "*claude-panel-thinking-empty*"
+        (setq-local vterm--process 'fake-proc)
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (claude-repl--ws-set-claude-state "test-ws" :thinking)
+        (claude-repl-test--with-temp-buffer " *test-input-thinking-empty*"
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'process-send-string)
+                     (lambda (proc bytes) (push (cons proc bytes) sent-bytes))))
+            (claude-repl-discard-or-send-interrupt)
+            (should (equal sent-bytes '((fake-proc . "\C-c"))))))))))
+
+(ert-deftest claude-repl-test-discard-or-send-interrupt-idle-nonempty-sends-ctrl-c ()
+  "When Claude is :idle (not :thinking) AND input buffer is non-empty,
+C-c C-c sends raw Ctrl-C AND clears the buffer — the historical full-reset
+behavior is preserved outside the :thinking state."
+  (claude-repl-test--with-clean-state
+    (let ((sent-bytes nil))
+      (claude-repl-test--with-temp-buffer "*claude-panel-idle-nonempty*"
+        (setq-local vterm--process 'fake-proc)
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (claude-repl--ws-set-claude-state "test-ws" :idle)
+        (claude-repl-test--with-temp-buffer " *test-input-idle-nonempty*"
+          (setq-local claude-repl--input-history nil)
+          (setq-local claude-repl--history-index 0)
+          (setq-local claude-repl--history-navigating nil)
+          (insert "some text")
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'evil-insert-state) #'ignore)
+                    ((symbol-function 'claude-repl--history-save) #'ignore)
+                    ((symbol-function 'process-send-string)
+                     (lambda (proc bytes) (push (cons proc bytes) sent-bytes))))
+            (claude-repl-discard-or-send-interrupt)
+            (should (equal (buffer-string) ""))
+            (should (equal sent-bytes '((fake-proc . "\C-c"))))))))))
+
 ;;;; ---- Tests: send-vterm-key ----
 
 (ert-deftest claude-repl-test-send-vterm-key-forwards-key ()

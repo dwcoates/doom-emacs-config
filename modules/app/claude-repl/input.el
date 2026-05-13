@@ -180,10 +180,16 @@ input line.  On failure, logs and surfaces an error (no silent fallback)."
 
 (defun claude-repl-discard-or-send-interrupt ()
   "Clear Claude's prompt AND the local input buffer.
-Always sends a raw Ctrl-C to Claude (clearing its current input line) and,
+Sends a raw Ctrl-C to Claude (clearing its current input line) and,
 if the local input buffer has any content (including whitespace-only),
 also discards its contents.  Previously used `string-blank-p' which left
 whitespace-only buffers uncleared after C-c C-c.
+
+Exception: when Claude is `:thinking' AND the local input buffer is
+non-empty, the raw Ctrl-C is suppressed — only the local buffer is
+discarded (and saved to history).  This lets the user draft a message
+while Claude is working and clear that draft with C-c C-c without
+interrupting Claude's in-flight response.
 
 When slash mode is active (direct-send path), the input buffer is
 empty by construction but the slash-stack holds an in-flight command
@@ -193,15 +199,22 @@ prompt line.  Without this, the next keystroke would continue
 forwarding to vterm and the next slash-return posthooks would see
 stale accumulated input."
   (interactive)
-  (claude-repl--log (+workspace-current-name) "discard-or-send-interrupt: clearing Claude prompt + local buffer (local-empty=%s slash-active=%s)"
-                    (zerop (buffer-size))
-                    (bound-and-true-p claude-slash-input-mode))
-  (cond
-   ((not (zerop (buffer-size)))
-    (claude-repl-discard-input))
-   ((bound-and-true-p claude-slash-input-mode)
-    (claude-repl--exit-slash-mode)))
-  (claude-repl--vterm-send-raw-ctrl-c))
+  (let* ((ws (+workspace-current-name))
+         (local-nonempty (not (zerop (buffer-size))))
+         (thinking-p (eq (claude-repl--ws-claude-state ws) :thinking))
+         (skip-ctrl-c (and thinking-p local-nonempty)))
+    (claude-repl--log ws "discard-or-send-interrupt: clearing Claude prompt + local buffer (local-empty=%s slash-active=%s thinking=%s skip-ctrl-c=%s)"
+                      (not local-nonempty)
+                      (bound-and-true-p claude-slash-input-mode)
+                      thinking-p
+                      skip-ctrl-c)
+    (cond
+     (local-nonempty
+      (claude-repl-discard-input))
+     ((bound-and-true-p claude-slash-input-mode)
+      (claude-repl--exit-slash-mode)))
+    (unless skip-ctrl-c
+      (claude-repl--vterm-send-raw-ctrl-c))))
 
 ;;; Arrow key forwarding (insert-mode terminal navigation)
 
