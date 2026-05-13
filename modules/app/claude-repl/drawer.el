@@ -1655,10 +1655,15 @@ FN naturally placed it.
 
 We deliberately avoid `with-selected-window' here.  Selecting and then
 unselecting the drawer window for every keystroke fires window-selection
-hooks and redisplays the modeline/hl-line/etc., which makes rapid global
-navigation (`C-S-n' / `C-S-p') feel sluggish compared to in-drawer `j' /
-`k' — those just move point inside the already-selected window and pay
-none of that overhead.
+hooks and redisplays the modeline/hl-line/etc., which adds overhead vs.
+in-drawer `j' / `k' (those just move point inside the already-selected
+window).  Non-navigational dispatchers (visit, nuke, kill, …) fire
+sparsely enough that the cost would be invisible, but the visual side
+effect — a sticky `hl-line' overlay left on whatever entry the dispatch
+happened to touch — would be wrong: those commands operate on an entry
+but don't want to leave a focus highlight behind on it.  See
+`--call-in-drawer-focused' for the navigation-only variant that does
+select the window precisely so that highlight DOES stick.
 
 Instead we run FN with the drawer current, then mirror the new
 buffer-point onto the displayed window via `set-window-point' and
@@ -1683,15 +1688,49 @@ the drawer open with `SPC o d' first."
       (when-let ((win (get-buffer-window buf t)))
         (set-window-point win (point))))))
 
+(defun claude-repl-drawer--call-in-drawer-focused (fn)
+  "Like `--call-in-drawer', but actually selects the drawer window for
+the duration of FN so visual features keyed off window-selection
+(`hl-line', cursor visibility, mode-line styling) engage as if the
+user had focused the drawer directly.  After FN returns, focus reverts
+to the originally selected window — but state that those features
+install during the call (e.g. an `hl-line' overlay with default sticky
+flag) persists, which is the whole point: the user wants the moved-to
+entry to remain visibly highlighted while they stay in their original
+window.
+
+Reserved for navigation dispatchers (`global-next' / `global-prev')
+where the persistent highlight is the desired side effect.  Other
+dispatchers use the unfocused `--call-in-drawer' so rapid taps don't
+pay window-selection overhead.
+
+Errors with `user-error' if no drawer buffer exists.  Falls back to
+unfocused dispatch when the drawer buffer exists but no live window
+displays it — we can't select what isn't shown."
+  (let ((buf (or (get-buffer claude-repl-drawer-buffer-name)
+                 (user-error "Drawer not open — `SPC o d' first"))))
+    (let ((win (get-buffer-window buf t)))
+      (if (window-live-p win)
+          (with-selected-window win
+            (funcall fn)
+            (claude-repl-drawer--post-command))
+        (claude-repl-drawer--call-in-drawer fn)))))
+
 (defun claude-repl-drawer-global-next ()
-  "Move drawer cursor to next entry from any window."
+  "Move drawer cursor to next entry from any window.
+Selects the drawer window for the duration of the command so visual
+selection features (`hl-line', etc.) engage and persist after focus
+returns to the originating window — see `--call-in-drawer-focused'."
   (interactive)
-  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-next))
+  (claude-repl-drawer--call-in-drawer-focused #'claude-repl-drawer-next))
 
 (defun claude-repl-drawer-global-prev ()
-  "Move drawer cursor to previous entry from any window."
+  "Move drawer cursor to previous entry from any window.
+Selects the drawer window for the duration of the command so visual
+selection features (`hl-line', etc.) engage and persist after focus
+returns to the originating window — see `--call-in-drawer-focused'."
   (interactive)
-  (claude-repl-drawer--call-in-drawer #'claude-repl-drawer-prev))
+  (claude-repl-drawer--call-in-drawer-focused #'claude-repl-drawer-prev))
 
 (defun claude-repl-drawer-global-visit ()
   "Visit (switch to) the workspace at the drawer cursor."

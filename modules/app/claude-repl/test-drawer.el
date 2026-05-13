@@ -812,6 +812,108 @@ instead of erroring or jumping to point-min."
               (should (equal (claude-repl-drawer--workspace-at-point) "alpha"))))
         (kill-buffer buf)))))
 
+(ert-deftest claude-repl-drawer-test-call-in-drawer-focused-selects-drawer-window ()
+  "`--call-in-drawer-focused' must select the drawer window for the
+duration of FN — that's the whole reason it exists (so visual features
+keyed off window-selection take hold).  Asserts `selected-window' inside
+FN is the drawer's window, then reverts to the original after."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name)))
+      (unwind-protect
+          (let* ((drawer-win (display-buffer-in-side-window
+                              buf '((side . left))))
+                 (other-buf (get-buffer-create " *focused-test-other*"))
+                 (other-win (display-buffer other-buf
+                                            '(display-buffer-pop-up-window))))
+            (with-current-buffer buf
+              (claude-repl-drawer-mode)
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-first-workspace))
+            (select-window other-win)
+            (let ((seen-win nil))
+              (claude-repl-drawer--call-in-drawer-focused
+               (lambda () (setq seen-win (selected-window))))
+              (should (eq seen-win drawer-win))
+              (should (eq (selected-window) other-win)))
+            (when (window-live-p other-win) (delete-window other-win))
+            (when (buffer-live-p other-buf) (kill-buffer other-buf)))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-drawer-test-call-in-drawer-focused-falls-back-when-no-window ()
+  "When the drawer buffer exists but isn't displayed in any window,
+`--call-in-drawer-focused' must fall back to unfocused dispatch — there's
+no window to select, but FN still needs to run."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (claude-repl-drawer-mode)
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-first-workspace))
+            (let ((called nil))
+              (claude-repl-drawer--call-in-drawer-focused
+               (lambda () (setq called t)))
+              (should called)))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-drawer-test-call-in-drawer-focused-errors-when-no-drawer ()
+  "`--call-in-drawer-focused' errors with `user-error' when the drawer
+buffer doesn't exist — same contract as `--call-in-drawer'."
+  (when-let ((b (get-buffer claude-repl-drawer-buffer-name)))
+    (kill-buffer b))
+  (should-error (claude-repl-drawer--call-in-drawer-focused #'ignore)
+                :type 'user-error))
+
+(ert-deftest claude-repl-drawer-test-global-next-uses-focused-dispatch ()
+  "`claude-repl-drawer-global-next' must route through the focused
+dispatcher so the drawer window is selected during the move — that's
+what makes `hl-line' (and other selection-keyed visuals) engage and
+stick after focus returns.  Asserts by stubbing the focused helper and
+verifying the non-focused one is NOT called."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name)))
+      (unwind-protect
+          (let ((focused-called nil)
+                (unfocused-called nil))
+            (with-current-buffer buf
+              (claude-repl-drawer-mode)
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-first-workspace))
+            (cl-letf (((symbol-function 'claude-repl-drawer--call-in-drawer-focused)
+                       (lambda (_fn) (setq focused-called t)))
+                      ((symbol-function 'claude-repl-drawer--call-in-drawer)
+                       (lambda (_fn &optional _p) (setq unfocused-called t))))
+              (claude-repl-drawer-global-next)
+              (should focused-called)
+              (should-not unfocused-called)))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-drawer-test-global-prev-uses-focused-dispatch ()
+  "`claude-repl-drawer-global-prev' must route through the focused
+dispatcher — same rationale as global-next."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name)))
+      (unwind-protect
+          (let ((focused-called nil)
+                (unfocused-called nil))
+            (with-current-buffer buf
+              (claude-repl-drawer-mode)
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-first-workspace))
+            (cl-letf (((symbol-function 'claude-repl-drawer--call-in-drawer-focused)
+                       (lambda (_fn) (setq focused-called t)))
+                      ((symbol-function 'claude-repl-drawer--call-in-drawer)
+                       (lambda (_fn &optional _p) (setq unfocused-called t))))
+              (claude-repl-drawer-global-prev)
+              (should focused-called)
+              (should-not unfocused-called)))
+        (kill-buffer buf)))))
+
 (ert-deftest claude-repl-drawer-test-sync-cursor-to-current-ws ()
   "`--sync-cursor-to-current-ws' positions point on the current ws's entry."
   (claude-repl-test--with-clean-state
