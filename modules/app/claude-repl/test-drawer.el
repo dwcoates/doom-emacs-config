@@ -1417,6 +1417,100 @@ This is the success path for an explicit merge command."
       (goto-char (point-min))
       (should-error (claude-repl-drawer-visit) :type 'user-error))))
 
+(ert-deftest claude-repl-drawer-test-visit-on-merged-reactivates ()
+  "`claude-repl-drawer-visit' on a MERGED entry routes to
+`--reactivate-merged' (which re-establishes the persp) instead of
+calling `+workspace-switch' (which would fail because the persp was
+torn down at merge time)."
+  (claude-repl-test--with-clean-state
+    (let ((tmp (make-temp-file "claude-repl-test-merged-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl-drawer-test--register
+             "merged-ws" :merge-completed t :project-dir tmp)
+            (claude-repl-drawer-test--with-buffer
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-first-workspace)
+              (let ((established-with nil)
+                    (switched-to nil))
+                (cl-letf (((symbol-function 'claude-repl--state-save)
+                           (lambda (&rest _) nil))
+                          ((symbol-function 'claude-repl--establish-workspace)
+                           (lambda (ws dir) (setq established-with (list ws dir))))
+                          ((symbol-function '+workspace-switch)
+                           (lambda (ws &rest _) (setq switched-to ws))))
+                  (claude-repl-drawer-visit))
+                (should (equal established-with (list "merged-ws" tmp)))
+                (should-not switched-to))))
+        (delete-directory tmp t)))))
+
+(ert-deftest claude-repl-drawer-test-visit-on-merged-clears-merge-flags ()
+  "Reactivating a MERGED workspace via `drawer-visit' clears the
+`:merge-completed' / `:merge-completed-at' / `:repl-state :merged'
+plist keys so the entry leaves the MERGED bucket on next render."
+  (claude-repl-test--with-clean-state
+    (let ((tmp (make-temp-file "claude-repl-test-merged-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl-drawer-test--register
+             "merged-ws"
+             :merge-completed t
+             :merge-completed-at 1234567890.0
+             :repl-state :merged
+             :project-dir tmp)
+            (claude-repl-drawer-test--with-buffer
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-first-workspace)
+              (cl-letf (((symbol-function 'claude-repl--state-save)
+                         (lambda (&rest _) nil))
+                        ((symbol-function 'claude-repl--establish-workspace)
+                         (lambda (&rest _) nil)))
+                (claude-repl-drawer-visit))
+              (should-not (claude-repl--ws-get "merged-ws" :merge-completed))
+              (should-not (claude-repl--ws-get "merged-ws" :merge-completed-at))
+              (should-not (claude-repl--ws-get "merged-ws" :repl-state))
+              (should-not (eq (claude-repl-drawer--workspace-section "merged-ws")
+                              :merged))))
+        (delete-directory tmp t)))))
+
+(ert-deftest claude-repl-drawer-test-visit-on-merged-persists-cleared-flags ()
+  "Reactivation calls `--state-save' so the cleared `:merge-completed'
+flag survives to disk — without this, the snapshot loader would put
+the workspace right back into MERGED on the next Emacs restart."
+  (claude-repl-test--with-clean-state
+    (let ((tmp (make-temp-file "claude-repl-test-merged-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl-drawer-test--register
+             "merged-ws" :merge-completed t :project-dir tmp)
+            (claude-repl-drawer-test--with-buffer
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-first-workspace)
+              (let ((state-saved-for nil))
+                (cl-letf (((symbol-function 'claude-repl--state-save)
+                           (lambda (ws) (setq state-saved-for ws)))
+                          ((symbol-function 'claude-repl--establish-workspace)
+                           (lambda (&rest _) nil)))
+                  (claude-repl-drawer-visit))
+                (should (equal state-saved-for "merged-ws")))))
+        (delete-directory tmp t)))))
+
+(ert-deftest claude-repl-drawer-test-visit-on-merged-without-project-dir-errors ()
+  "`drawer-visit' on a MERGED entry whose `:project-dir' is missing or
+no longer points to a real directory signals `user-error' — reactivation
+needs a valid worktree dir to establish into."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register
+     "merged-ws" :merge-completed t :project-dir "/nonexistent/path/here")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((established-called nil))
+        (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+                   (lambda (&rest _) (setq established-called t))))
+          (should-error (claude-repl-drawer-visit) :type 'user-error))
+        (should-not established-called)))))
+
 (ert-deftest claude-repl-drawer-test-visit-redirects-from-side-window-before-switch ()
   "`claude-repl-drawer-visit' leaves a side-window selection before calling
 `+workspace-switch'.  Persp's `persp-delete-other-windows' uses

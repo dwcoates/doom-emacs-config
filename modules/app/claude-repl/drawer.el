@@ -972,15 +972,45 @@ No-op when the selected window is not a side window."
     (when-let ((main (and (fboundp 'window-main-window) (window-main-window))))
       (select-window main))))
 
+(defun claude-repl-drawer--reactivate-merged (ws)
+  "Reactivate a MERGED workspace WS so it becomes a usable persp again.
+Clears the `:merge-completed' / `:merge-completed-at' flags and the
+`:merged' repl-state so the drawer stops bucketing WS under MERGED,
+persists the cleared flags via `--state-save', then re-establishes
+the persp + Claude session via `--establish-workspace'.
+
+The git cherry-pick performed by the original merge is not reverted
+— reactivation only un-marks the workspace as completed in the UI."
+  (let ((dir (claude-repl--ws-get ws :project-dir)))
+    (unless (and dir (file-directory-p dir))
+      (user-error "Cannot reactivate %s — project-dir missing or invalid (%s)"
+                  ws (or dir "nil")))
+    (claude-repl--log ws "drawer-visit: reactivating MERGED ws=%s dir=%s" ws dir)
+    (claude-repl--ws-put ws :merge-completed nil)
+    (claude-repl--ws-put ws :merge-completed-at nil)
+    (claude-repl--ws-put ws :repl-state nil)
+    (claude-repl--state-save ws)
+    (claude-repl-drawer--leave-side-window-before-switch)
+    (claude-repl--establish-workspace ws dir)))
+
 (defun claude-repl-drawer-visit ()
-  "Switch to the workspace at point."
+  "Switch to the workspace at point.
+
+When the workspace is in the MERGED section its persp has been torn
+down, so plain `+workspace-switch' would fail.  Dispatch to
+`--reactivate-merged' instead, which re-establishes the persp + Claude
+session and un-marks the workspace as merge-completed."
   (interactive)
   (let ((ws (claude-repl-drawer--workspace-at-point)))
     (unless ws
       (user-error "No workspace at point"))
     (claude-repl--log ws "drawer-visit: ws=%s" ws)
-    (claude-repl-drawer--leave-side-window-before-switch)
-    (+workspace-switch ws)))
+    (cond
+     ((eq (claude-repl-drawer--workspace-section ws) :merged)
+      (claude-repl-drawer--reactivate-merged ws))
+     (t
+      (claude-repl-drawer--leave-side-window-before-switch)
+      (+workspace-switch ws)))))
 
 (defun claude-repl-drawer-refresh ()
   "Manually refresh the drawer contents.
