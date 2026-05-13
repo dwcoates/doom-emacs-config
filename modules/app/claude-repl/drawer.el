@@ -1164,13 +1164,22 @@ public functions read `(+workspace-current-name)' internally and
 switch perspectives themselves, so we must temporarily inhabit the
 target workspace before invoking them.
 
+When WS is in the MERGED section its persp has been torn down (a
+plain `+workspace-switch' would fail), so we first reactivate it
+via `--reactivate-merged' — the same code path `drawer-visit'
+uses on a MERGED entry.  This lets the drawer dispatch merge
+commands on MERGED workspaces (e.g. when a prior cherry-pick
+silently failed and the workspace was marked merged anyway).
+
 Leaves the drawer side window before each switch (see
 `claude-repl-drawer--leave-side-window-before-switch') so persp's
 restore doesn't clobber the destination workspace's panel state."
   (let ((prev (and (fboundp '+workspace-current-name)
                    (+workspace-current-name))))
     (claude-repl-drawer--leave-side-window-before-switch)
-    (+workspace-switch ws)
+    (if (eq (claude-repl-drawer--workspace-section ws) :merged)
+        (claude-repl-drawer--reactivate-merged ws)
+      (+workspace-switch ws))
     (unwind-protect
         (funcall fn)
       (when (and prev (not (equal prev (+workspace-current-name))))
@@ -1184,14 +1193,15 @@ Mirrors `SPC TAB M' (`claude-repl-workspace-merge-current-into-source')
 per target.  Each target requires temporarily switching to that
 workspace before invoking the public function.
 
-Refuses to act on MERGED entries — they have no live persp to switch
-into and have already been merged."
+MERGED entries are accepted: a prior cherry-pick may have silently
+failed yet still flipped the workspace into MERGED, so re-attempts
+must be possible.  `--with-temp-current-ws' reactivates a MERGED
+target before switching so the public merge function runs against a
+live persp — the same flow as `drawer-visit' + `SPC TAB M'."
   (interactive)
-  (let ((targets (claude-repl-drawer--target-workspaces)))
-    (claude-repl-drawer--reject-merged-targets targets "merge")
-    (dolist (ws targets)
-      (claude-repl-drawer--with-temp-current-ws
-       ws #'claude-repl-workspace-merge-current-into-source))))
+  (dolist (ws (claude-repl-drawer--target-workspaces))
+    (claude-repl-drawer--with-temp-current-ws
+     ws #'claude-repl-workspace-merge-current-into-source)))
 
 (defun claude-repl-drawer-merge-child ()
   "Merge a child workspace into the entry at point.
@@ -1200,10 +1210,12 @@ function uses the current workspace as the merge destination and
 prompts for the child to merge in, so we temporarily switch to the
 entry-at-point before invoking it.
 
-Refuses when the entry at point is in the MERGED section."
+MERGED entries are accepted as the destination: a prior cherry-pick
+may have silently failed yet still flipped the workspace into
+MERGED, so re-attempts must be possible.  `--with-temp-current-ws'
+reactivates a MERGED entry before switching."
   (interactive)
   (let ((ws (claude-repl-drawer--require-ws-at-point)))
-    (claude-repl-drawer--reject-merged-targets (list ws) "merge into")
     (claude-repl-drawer--with-temp-current-ws
      ws #'claude-repl-workspace-merge)))
 

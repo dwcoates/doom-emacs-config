@@ -399,24 +399,88 @@ session has been torn down so there's no one to receive the prompt."
           (should-error (claude-repl-drawer-send-prompt) :type 'user-error))
         (should-not sent)))))
 
-(ert-deftest claude-repl-drawer-test-merge-into-master-on-merged-errors ()
-  "`M' (drawer-merge-into-master) refuses on a MERGED entry — the
-workspace has already been merged and its session torn down."
+(ert-deftest claude-repl-drawer-test-merge-into-master-on-merged-reactivates-then-merges ()
+  "`M' (drawer-merge-into-master) on a MERGED entry reactivates first
+\(same path `drawer-visit' takes), then invokes the standard
+`claude-repl-workspace-merge-current-into-source'.  A prior
+cherry-pick may have silently failed but still flipped the workspace
+into MERGED, so re-attempts must be possible."
   (claude-repl-test--with-clean-state
-    (claude-repl-drawer-test--register "merged" :merge-completed t)
-    (claude-repl-drawer-test--with-buffer
-      (claude-repl-drawer--render)
-      (claude-repl-drawer--goto-first-workspace)
-      (should-error (claude-repl-drawer-merge-into-master) :type 'user-error))))
+    (let ((tmp (make-temp-file "claude-repl-test-merged-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl-drawer-test--register
+             "merged" :merge-completed t :project-dir tmp)
+            (claude-repl-drawer-test--with-buffer
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-first-workspace)
+              (let ((established-with nil)
+                    (merge-called nil))
+                (cl-letf (((symbol-function 'claude-repl--state-save)
+                           (lambda (&rest _) nil))
+                          ((symbol-function 'claude-repl--establish-workspace)
+                           (lambda (ws dir) (setq established-with (list ws dir))))
+                          ((symbol-function 'claude-repl-workspace-merge-current-into-source)
+                           (lambda () (setq merge-called t))))
+                  (claude-repl-drawer-merge-into-master))
+                (should (equal established-with (list "merged" tmp)))
+                (should merge-called))))
+        (delete-directory tmp t)))))
 
-(ert-deftest claude-repl-drawer-test-merge-child-on-merged-errors ()
-  "`m' (drawer-merge-child) refuses on a MERGED entry."
+(ert-deftest claude-repl-drawer-test-merge-child-on-merged-reactivates-then-merges ()
+  "`m' (drawer-merge-child) on a MERGED entry reactivates first, then
+invokes the standard `claude-repl-workspace-merge'."
   (claude-repl-test--with-clean-state
-    (claude-repl-drawer-test--register "merged" :merge-completed t)
-    (claude-repl-drawer-test--with-buffer
-      (claude-repl-drawer--render)
-      (claude-repl-drawer--goto-first-workspace)
-      (should-error (claude-repl-drawer-merge-child) :type 'user-error))))
+    (let ((tmp (make-temp-file "claude-repl-test-merged-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl-drawer-test--register
+             "merged" :merge-completed t :project-dir tmp)
+            (claude-repl-drawer-test--with-buffer
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-first-workspace)
+              (let ((established-with nil)
+                    (merge-called nil))
+                (cl-letf (((symbol-function 'claude-repl--state-save)
+                           (lambda (&rest _) nil))
+                          ((symbol-function 'claude-repl--establish-workspace)
+                           (lambda (ws dir) (setq established-with (list ws dir))))
+                          ((symbol-function 'claude-repl-workspace-merge)
+                           (lambda () (setq merge-called t))))
+                  (claude-repl-drawer-merge-child))
+                (should (equal established-with (list "merged" tmp)))
+                (should merge-called))))
+        (delete-directory tmp t)))))
+
+(ert-deftest claude-repl-drawer-test-merge-into-master-on-merged-clears-merge-flags ()
+  "Reactivation during `M' on a MERGED entry clears the
+`:merge-completed' / `:merge-completed-at' / `:repl-state :merged'
+plist keys (the workspace must leave the MERGED bucket so the
+re-attempted merge runs against a live persp)."
+  (claude-repl-test--with-clean-state
+    (let ((tmp (make-temp-file "claude-repl-test-merged-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl-drawer-test--register
+             "merged"
+             :merge-completed t
+             :merge-completed-at 1234567890.0
+             :repl-state :merged
+             :project-dir tmp)
+            (claude-repl-drawer-test--with-buffer
+              (claude-repl-drawer--render)
+              (claude-repl-drawer--goto-first-workspace)
+              (cl-letf (((symbol-function 'claude-repl--state-save)
+                         (lambda (&rest _) nil))
+                        ((symbol-function 'claude-repl--establish-workspace)
+                         (lambda (&rest _) nil))
+                        ((symbol-function 'claude-repl-workspace-merge-current-into-source)
+                         (lambda () nil)))
+                (claude-repl-drawer-merge-into-master))
+              (should-not (claude-repl--ws-get "merged" :merge-completed))
+              (should-not (claude-repl--ws-get "merged" :merge-completed-at))
+              (should-not (claude-repl--ws-get "merged" :repl-state))))
+        (delete-directory tmp t)))))
 
 (ert-deftest claude-repl-drawer-test-new-child-on-merged-errors ()
   "`n' (drawer-new-child) refuses to branch from a MERGED entry —
