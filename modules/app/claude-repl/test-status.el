@@ -169,7 +169,7 @@ default at restart and shouldn't pin behavior."
   (should (eq :init (claude-repl--composed-state :init :inactive))))
 
 (ert-deftest claude-repl-test-composed-idle ()
-  "Composed (:idle, any) → :idle — idle Claude renders via explicit palette entry (purple)."
+  "Composed (:idle, any) → :idle — idle Claude renders via explicit palette entry (orange)."
   (should (eq :idle (claude-repl--composed-state :idle nil)))
   (should (eq :idle (claude-repl--composed-state :idle :inactive))))
 
@@ -298,7 +298,7 @@ to be reverted to should-error once the leaking writer is found)."
       (should-not (claude-repl--ws-display-state "ws1")))))
 
 (ert-deftest claude-repl-test-display-state-idle-panels-open-renders-idle ()
-  ":idle with Claude panel present in layout renders :idle (purple)."
+  ":idle with Claude panel present in layout renders :idle (orange)."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :idle)
     (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p)
@@ -913,9 +913,9 @@ selected tab dims to the normal selected face like other states."
     (should (equal (plist-get spec :bracket-fg) "white"))))
 
 (ert-deftest claude-repl-test-tab-spec-selected-idle-bracket-bg ()
-  "Selected :idle bracket-bg should be the idle purple color."
+  "Selected :idle bracket-bg should be the idle orange color."
   (let ((spec (claude-repl--tab-spec :idle t)))
-    (should (equal (plist-get spec :bracket-bg) "#7c3aed"))
+    (should (equal (plist-get spec :bracket-bg) "#d97706"))
     (should (equal (plist-get spec :bracket-fg) "white"))))
 
 (ert-deftest claude-repl-test-tab-spec-selected-permission-bracket-bg ()

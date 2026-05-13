@@ -607,7 +607,7 @@ Unrecognized states render as plain bold."
                  ((eq claude-state :thinking)  claude-repl--color-thinking-red)
                  ((memq claude-state '(:done :permission))
                   claude-repl--color-done-green)
-                 ((eq claude-state :idle)      claude-repl--color-idle-purple)
+                 ((eq claude-state :idle)      claude-repl--color-idle-orange)
                  ((eq claude-state :stop-failed)
                   claude-repl--color-stop-failed-magenta))))
     (if color

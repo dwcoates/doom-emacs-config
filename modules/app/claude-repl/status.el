@@ -502,8 +502,8 @@ A no-op if a check is already in progress for WS."
 (defconst claude-repl--color-done-green       "#1a7a1a"
   "Dark green used for :done and :permission tab backgrounds.")
 
-(defconst claude-repl--color-idle-purple      "#7c3aed"
-  "Purple used for the :idle claude-state tab background.
+(defconst claude-repl--color-idle-orange      "#d97706"
+  "Orange used for the :idle claude-state tab background.
 :idle means \"session alive, awaiting prompt or decayed from :done\" — an
 explicit palette entry (not a fallback) so idle workspaces are
 visually distinct from states that have no palette mapping.")
@@ -633,13 +633,13 @@ Distributed evenly across `claude-repl-flash-count' on/off cycles."
                   :weight ,claude-repl--tab-weight))
     (:idle
      :face       claude-repl-tab-idle
-     :unselected (:bg ,claude-repl--color-idle-purple
-                  :fg ,claude-repl--color-light
+     :unselected (:bg ,claude-repl--color-idle-orange
+                  :fg ,claude-repl--color-dark
                   :bracket-fg ,claude-repl--color-default-bracket
                   :weight ,claude-repl--tab-weight)
      :selected   (:bg ,claude-repl--color-selected-bg
                   :fg ,claude-repl--color-dark
-                  :bracket-bg ,claude-repl--color-idle-purple
+                  :bracket-bg ,claude-repl--color-idle-orange
                   :bracket-fg ,claude-repl--color-light
                   :weight ,claude-repl--tab-weight))
     (:stop-failed
@@ -720,10 +720,10 @@ falls back to the default appearance."
   "Face for workspace tabs where Claude needs permission (green + emoji).")
 
 (defface claude-repl-tab-idle
-  `((t :background ,claude-repl--color-idle-purple
-       :foreground ,claude-repl--color-light
+  `((t :background ,claude-repl--color-idle-orange
+       :foreground ,claude-repl--color-dark
        :weight ,claude-repl--tab-weight))
-  "Face for workspace tabs where Claude is idle (purple).")
+  "Face for workspace tabs where Claude is idle (orange).")
 
 (defface claude-repl-tab-stop-failed
   `((t :background ,claude-repl--color-stop-failed-magenta
@@ -889,7 +889,7 @@ Rule:
   :permission  → :permission               (green + ❓)
   :init        → :init                     (blue — Claude starting)
   :done        → :done                     (green — unacknowledged work)
-  :idle        → :idle                     (purple)
+  :idle        → :idle                     (orange)
   :stop-failed → :stop-failed              (magenta + ⚠ — turn errored)
   nil + :merged → :merged                  (default + 🔀)
   nil + :dead  → :dead                     (default + ❌)
