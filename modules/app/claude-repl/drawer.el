@@ -809,26 +809,17 @@ header."
            (trees (claude-repl-drawer--build-tree workspaces parent-fn)))
       (claude-repl-drawer--render-trees trees current section))))
 
-(defun claude-repl-drawer--render ()
-  "Render the drawer: MAIN, HIDDEN, MERGING, MERGED, in that order.
-MERGING precedes MERGED so the user reads the lifecycle top-to-bottom:
-in-progress (MAIN/HIDDEN) → changes-ready (MERGING) → completed
-(MERGED)."
-  (let* ((inhibit-read-only t)
-         (saved-line (line-number-at-pos))
-         (saved-col  (current-column))
-         ;; Anchor cursor restoration by workspace identity, not just line
-         ;; number: line numbers shift when an entry above the cursor
-         ;; expands/collapses or appears/disappears between polls, and
-         ;; `forward-line saved-line' can then land on a non-workspace
-         ;; line (detail line, blank, section header), which causes
-         ;; `--update-current-entry-overlay' to delete the arrow.  Nested
-         ;; children sit deeper in the buffer and so are most affected.
-         (saved-ws   (claude-repl-drawer--workspace-at-point))
-         (current    (claude-repl-drawer--current-ws))
-         (sections   (claude-repl-drawer--partition-by-section
-                      (claude-repl-drawer--visible-workspace-keys))))
-    (erase-buffer)
+(defun claude-repl-drawer--insert-content ()
+  "Insert the drawer's full content into the current buffer.
+Extracted from `--render' so `--render' can build content in a temp
+buffer and diff-apply it.  Order: MAIN, HIDDEN, MERGING, MERGED —
+the user reads the lifecycle top-to-bottom: in-progress (MAIN/HIDDEN)
+→ changes-ready (MERGING) → completed (MERGED).
+Reads buffer-local state (`--marked-set', `--expanded-set'); callers
+must set those in the current buffer before calling."
+  (let* ((current  (claude-repl-drawer--current-ws))
+         (sections (claude-repl-drawer--partition-by-section
+                    (claude-repl-drawer--visible-workspace-keys))))
     (insert "\n")
     (let ((mains    (alist-get :main    sections))
           (hiddens  (alist-get :hidden  sections))
@@ -844,16 +835,60 @@ in-progress (MAIN/HIDDEN) → changes-ready (MERGING) → completed
        (format "MERGING (%d)" (length mergings)) mergings current :merging)
       (insert "\n")
       (claude-repl-drawer--insert-section
-       (format "MERGED (%d)" (length mergeds))  mergeds  current :merged))
-    (unless (and saved-ws
-                 (claude-repl-drawer--goto-workspace-line saved-ws))
-      (goto-char (point-min))
-      (forward-line (1- saved-line))
-      (move-to-column saved-col))
-    ;; `erase-buffer' above collapses the current-entry overlay to (1,1).
-    ;; Reposition it here so the arrow persists across 1Hz status-poll
-    ;; renders, when the drawer's buffer-local post-command-hook is not
-    ;; firing (drawer not selected).
+       (format "MERGED (%d)" (length mergeds))  mergeds  current :merged))))
+
+(defun claude-repl-drawer--render ()
+  "Render the drawer, skipping the buffer rewrite when content is unchanged.
+Builds the new content (with text properties) in a temp buffer and
+compares it against the live buffer's content.  When they match, the
+function is a true no-op for the buffer — no `erase-buffer', no
+full re-insert, no full-buffer redisplay.  Eliminates the gutter
+flicker visible during rapid back-to-back renders: the persp-activated
+`--sync-cursor-to-current-ws' followed by the deferred
+`--update-all-workspace-states' → `--refresh-if-visible' double-fire,
+and the 1Hz poll's idle pulse when no state has changed.
+
+`replace-buffer-contents' would skip the rewrite too, but its diff
+algorithm preserves the destination buffer's text properties on
+characters its LCS happens to match — leaving stale workspace text
+properties pointing at a workspace whose visible text is gone.  A
+string-equality check + clean erase-and-reinsert avoids that pitfall.
+
+Anchors cursor restoration by workspace identity, not just line
+number: line numbers shift when an entry above the cursor
+expands/collapses or appears/disappears between polls, and
+`forward-line saved-line' can then land on a non-workspace line
+(detail line, blank, section header), which causes
+`--update-current-entry-overlay' to delete the arrow.  Nested
+children sit deeper in the buffer and so are most affected."
+  (let* ((saved-line   (line-number-at-pos))
+         (saved-col    (current-column))
+         (saved-ws     (claude-repl-drawer--workspace-at-point))
+         (marked-set   claude-repl-drawer--marked-set)
+         (expanded-set claude-repl-drawer--expanded-set)
+         (new-content
+          (with-temp-buffer
+            ;; The render helpers consult these via buffer-local lookup;
+            ;; mirror the source buffer's values so the temp render
+            ;; reflects marks and expanded entries correctly.
+            (setq-local claude-repl-drawer--marked-set marked-set)
+            (setq-local claude-repl-drawer--expanded-set expanded-set)
+            (claude-repl-drawer--insert-content)
+            (buffer-substring (point-min) (point-max))))
+         (current-content (buffer-substring (point-min) (point-max))))
+    (unless (equal current-content new-content)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert new-content))
+      (unless (and saved-ws
+                   (claude-repl-drawer--goto-workspace-line saved-ws))
+        (goto-char (point-min))
+        (forward-line (1- saved-line))
+        (move-to-column saved-col)))
+    ;; Always refresh the overlay: point may have moved (e.g. via
+    ;; `--sync-cursor-to-current-ws') even when content didn't change,
+    ;; and `erase-buffer' above collapses the overlay to (1,1) when
+    ;; content did change.
     (claude-repl-drawer--update-current-entry-overlay)))
 
 ;;;; Navigation -------------------------------------------------------------

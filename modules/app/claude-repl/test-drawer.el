@@ -135,6 +135,68 @@ the 1Hz status poll when the drawer is not the selected window)."
         (should (string-match-p (regexp-quote claude-repl-drawer-current-arrow)
                                 disp))))))
 
+(ert-deftest claude-repl-drawer-test-render-noop-skips-buffer-rewrite ()
+  "Re-rendering with no state change must NOT erase-and-reinsert the buffer.
+The buffer's `buffer-modified-tick' captures any mutation, so an
+unchanged-content re-render leaves it untouched.  This is the
+flicker-elimination guarantee: when the persp-switch-deferred render
+or 1Hz idle poll fires with no state change, the buffer is not
+rewritten and no redisplay artifact is produced for the gutter."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--register "beta"  :priority "p2")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (let ((tick-before (buffer-modified-tick)))
+        (claude-repl-drawer--render)
+        (should (= tick-before (buffer-modified-tick)))))))
+
+(ert-deftest claude-repl-drawer-test-render-after-mark-rewrites-buffer ()
+  "Re-rendering after a state change (a workspace gets marked) DOES rewrite
+the buffer.  Pairs with `--render-noop-skips-buffer-rewrite' to assert the
+content-equality check distinguishes real changes from no-ops."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--ensure-marked-set)
+      (puthash "alpha" t claude-repl-drawer--marked-set)
+      (let ((tick-before (buffer-modified-tick)))
+        (claude-repl-drawer--render)
+        (should (> (buffer-modified-tick) tick-before))))))
+
+(ert-deftest claude-repl-drawer-test-render-noop-preserves-text-properties ()
+  "A no-op re-render must NOT corrupt text properties.
+Stress-tests the path against the `replace-buffer-contents' pitfall
+where the diff's LCS preserves the destination's stale text properties
+on characters it matches — leaving the wrong workspace name attached
+to text that visually belongs to another entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--register "beta"  :priority "p2")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (let ((props-before nil))
+        (save-excursion
+          (goto-char (point-min))
+          (while (not (eobp))
+            (push (cons (point)
+                        (get-text-property
+                         (point) 'claude-repl-drawer-workspace))
+                  props-before)
+            (forward-char 1)))
+        (claude-repl-drawer--render)
+        (let ((props-after nil))
+          (save-excursion
+            (goto-char (point-min))
+            (while (not (eobp))
+              (push (cons (point)
+                          (get-text-property
+                           (point) 'claude-repl-drawer-workspace))
+                    props-after)
+              (forward-char 1)))
+          (should (equal props-before props-after)))))))
+
 (ert-deftest claude-repl-drawer-test-render-anchors-cursor-to-workspace ()
   "`--render' restores point onto the same workspace by identity (not line
 number) so the current-entry arrow tracks the entry through layout shifts
