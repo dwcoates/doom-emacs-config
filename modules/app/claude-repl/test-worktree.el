@@ -3830,55 +3830,36 @@ Covers the full call the interactive `SPC TAB n' path builds up."
       (claude-repl--workspace-merge-do "other-ws")
       (should (equal loaded-file claude-repl--config-file)))))
 
-(ert-deftest claude-repl-test-workspace-merge-do-reloads-before-magit ()
-  "Non-silent workspace-merge-do reloads config before popping magit-status."
-  (let ((call-order nil))
-    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
-               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
-               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
-               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
-               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
-               ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto) nil))
-               ((symbol-function 'claude-repl--nuke-one-workspace) (lambda (&rest _) nil))
-               ((symbol-function 'load-file) (lambda (_f) (push 'reload call-order)))
-               ((symbol-function 'claude-repl--show-and-refresh-magit-status)
-                (lambda (_dir) (push 'magit call-order))))
-      (claude-repl--workspace-merge-do "other-ws")
-      (should (equal (nreverse call-order) '(reload magit))))))
-
-(ert-deftest claude-repl-test-workspace-merge-do-magit-receives-project-dir ()
-  "Non-silent workspace-merge-do passes the project directory to the magit helper."
-  (let ((magit-dir nil))
-    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
-               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
-               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
-               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
-               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
-               ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto) nil))
-               ((symbol-function 'claude-repl--nuke-one-workspace) (lambda (&rest _) nil))
-               ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'claude-repl--show-and-refresh-magit-status)
-                (lambda (dir) (setq magit-dir dir))))
-      (claude-repl--workspace-merge-do "other-ws")
-      (should (equal magit-dir "/tmp/fake")))))
-
-(ert-deftest claude-repl-test-workspace-merge-do-silent-skips-magit ()
-  "When SILENT is non-nil, workspace-merge-do must NOT call the
-magit-status helper.  This is the path used for skill-invoked merges
-\(`/workspace-merge') so they don't yank user focus."
-  (let ((magit-called nil))
-    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
-               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
-               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
-               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
-               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
-               ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto) nil))
-               ((symbol-function 'claude-repl--nuke-one-workspace) (lambda (&rest _) nil))
-               ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'claude-repl--show-and-refresh-magit-status)
-                (lambda (&rest _) (setq magit-called t))))
-      (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
-      (should-not magit-called))))
+(ert-deftest claude-repl-test-workspace-merge-do-never-pops-magit-status ()
+  "`--workspace-merge-do' must NEVER open or refresh a magit-status
+buffer — post-merge buffer presentation is purely the caller's
+(`--workspace-merge-into-source') workspace-switch responsibility.  The
+function exercises both the SILENT and non-SILENT call shapes to assert
+this is unconditional, not gated on SILENT."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (let ((magit-status-called nil)
+          (magit-refresh-called nil))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto) nil))
+                 ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+                 ((symbol-function 'claude-repl--close-workspace) #'ignore)
+                 ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
+                 ((symbol-function 'load-file) #'ignore)
+                 ((symbol-function 'magit-status) (lambda (&rest _) (setq magit-status-called t)))
+                 ((symbol-function 'magit-refresh) (lambda (&rest _) (setq magit-refresh-called t))))
+        ;; Non-silent path.
+        (claude-repl--workspace-merge-do "other-ws")
+        (should-not magit-status-called)
+        (should-not magit-refresh-called)
+        ;; Silent path.
+        (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+        (should-not magit-status-called)
+        (should-not magit-refresh-called)))))
 
 ;;;; ---- Tests: tag-merge-completion ----
 
@@ -3971,8 +3952,7 @@ the target workspace before the auto-finish tear-down runs.  Stubs
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto) nil))
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
-               ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+               ((symbol-function 'load-file) #'ignore))
       (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
       (should (eq (claude-repl--ws-get "other-ws" :merge-completed) t)))))
 
@@ -3993,8 +3973,7 @@ workspace into the MERGED bucket via `:merge-completed t' but flips
                 (lambda (_dir _ws _base _br &optional _auto) 'failed))
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
-               ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+               ((symbol-function 'load-file) #'ignore))
       (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
       (should (eq (claude-repl--ws-get "other-ws" :repl-state) :merge-failed))
       (should (eq (claude-repl--ws-get "other-ws" :merge-completed) t))
@@ -4017,8 +3996,7 @@ the `merge/<ws>' tag would mislabel an unrelated commit."
                  ((symbol-function 'claude-repl--tag-merge-completion)
                   (lambda (_root _ws) (setq tagged t)))
                  ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
-                 ((symbol-function 'load-file) #'ignore)
-                 ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+                 ((symbol-function 'load-file) #'ignore))
         (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
         (should-not tagged)))))
 
@@ -4037,8 +4015,7 @@ showing ❌ despite the latest run landing cleanly."
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto) nil))
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
-               ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+               ((symbol-function 'load-file) #'ignore))
       (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
       (should-not (claude-repl--ws-get "other-ws" :merge-failed))
       (should (eq (claude-repl--ws-get "other-ws" :repl-state) :merged)))))
@@ -4057,8 +4034,7 @@ otherwise mark the (now-vterm-less) workspace `:dead'."
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto) nil))
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
-               ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+               ((symbol-function 'load-file) #'ignore))
       (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
       (should (eq (claude-repl--ws-get "other-ws" :repl-state) :merged)))))
 
@@ -4086,8 +4062,7 @@ NOT called — that runs only when the user explicitly presses `x'."
                   (lambda (ws &optional preserve)
                     (setq nuked-ws ws)
                     (setq nuked-preserve preserve)))
-                 ((symbol-function 'load-file) #'ignore)
-                 ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+                 ((symbol-function 'load-file) #'ignore))
         (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
         (should tagged)
         (should (equal nuked-ws "other-ws"))
@@ -4110,7 +4085,6 @@ explicit drawer `x' (`--finish-workspace') removes it."
                  ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto) nil))
                  ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
-                 ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
                  ((symbol-function 'claude-repl--nuke-one-workspace)
                   (lambda (ws &optional preserve)
                     (setq nuked-ws ws)
@@ -4135,7 +4109,6 @@ what we want to defer until the user explicitly chooses."
                  ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
-                 ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
                  ((symbol-function 'claude-repl--finish-workspace)
                   (lambda (&rest _) (setq finish-called t))))
         (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
@@ -4154,8 +4127,7 @@ drawer can render an age/timestamp once that surfaces in the UI."
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto) nil))
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
-               ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+               ((symbol-function 'load-file) #'ignore))
       (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
       (should (numberp (claude-repl--ws-get "other-ws" :merge-completed-at))))))
 
@@ -4217,7 +4189,6 @@ state, not stale pre-merge snapshots."
                  ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
-                 ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
                  ((symbol-function 'claude-repl-drawer--refresh-detail-cache)
                   (lambda (ws) (setq refreshed-ws ws))))
         (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
@@ -4239,7 +4210,6 @@ synchronous git calls still resolve."
                  ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto) nil))
                  ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
-                 ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
                  ((symbol-function 'claude-repl--nuke-one-workspace)
                   (lambda (&rest _) (push 'nuke call-order)))
                  ((symbol-function 'claude-repl-drawer--refresh-detail-cache)
@@ -4262,7 +4232,6 @@ merge completes normally when `--refresh-detail-cache' is unbound."
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore)
                ((symbol-function 'fboundp)
                 (lambda (sym) (not (eq sym 'claude-repl-drawer--refresh-detail-cache)))))
       ;; Should complete without error and still record :merge-completed.
@@ -4307,8 +4276,7 @@ and enter MERGED in the same operation."
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto) nil))
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
-               ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+               ((symbol-function 'load-file) #'ignore))
       (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
       (should-not (claude-repl--ws-get "other-ws" :merging)))))
 
@@ -4352,8 +4320,7 @@ cherry-pick begins, not after."
                     nil))
                  ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
-                 ((symbol-function 'load-file) #'ignore)
-                 ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+                 ((symbol-function 'load-file) #'ignore))
         (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
         (should (eq merging-mid-flight t))))))
 
@@ -4402,120 +4369,6 @@ timestamp) and getting an accidental MERGED bucket placement."
   (claude-repl-test--with-clean-state
     (puthash "ws" '(:merge-completed "1970") claude-repl--workspaces)
     (should-not (claude-repl--ws-merge-completed-p "ws"))))
-
-;;;; ---- Tests: show-and-refresh-magit-status ----
-
-(ert-deftest claude-repl-test-show-and-refresh-magit-opens-status-for-root ()
-  "show-and-refresh-magit-status calls magit-status with the project root."
-  (let ((magit-dir nil))
-    (cl-letf (((symbol-function 'magit-status)
-               (lambda (dir) (setq magit-dir dir)))
-              ((symbol-function 'window-list) (lambda (&rest _) nil))
-              ((symbol-function 'magit-refresh) #'ignore))
-      (claude-repl--show-and-refresh-magit-status "/tmp/repo")
-      (should (equal magit-dir "/tmp/repo")))))
-
-(ert-deftest claude-repl-test-show-and-refresh-magit-selects-matching-window ()
-  "When a magit-status window for the project exists, it is selected."
-  (let ((selected-win nil)
-        (fake-win 'fake-magit-window)
-        (fake-buf (generate-new-buffer "*fake-magit*")))
-    (unwind-protect
-        (progn
-          (with-current-buffer fake-buf
-            (setq-local default-directory "/tmp/repo/")
-            (setq major-mode 'magit-status-mode))
-          (cl-letf (((symbol-function 'magit-status) #'ignore)
-                    ((symbol-function 'window-list)
-                     (lambda (&rest _) (list fake-win)))
-                    ((symbol-function 'window-buffer)
-                     (lambda (w) (when (eq w fake-win) fake-buf)))
-                    ((symbol-function 'select-window)
-                     (lambda (w) (setq selected-win w)))
-                    ((symbol-function 'magit-refresh) #'ignore)
-                    ((symbol-function 'claude-repl--path-canonical)
-                     (lambda (p) (directory-file-name (or p "")))))
-            (claude-repl--show-and-refresh-magit-status "/tmp/repo")
-            (should (eq selected-win fake-win))))
-      (kill-buffer fake-buf))))
-
-(ert-deftest claude-repl-test-show-and-refresh-magit-refreshes-selected-buffer ()
-  "After selecting the magit window, magit-refresh is called."
-  (let ((refreshed nil)
-        (fake-win 'fake-magit-window)
-        (fake-buf (generate-new-buffer "*fake-magit*")))
-    (unwind-protect
-        (progn
-          (with-current-buffer fake-buf
-            (setq-local default-directory "/tmp/repo/")
-            (setq major-mode 'magit-status-mode))
-          (cl-letf (((symbol-function 'magit-status) #'ignore)
-                    ((symbol-function 'window-list)
-                     (lambda (&rest _) (list fake-win)))
-                    ((symbol-function 'window-buffer)
-                     (lambda (w) (when (eq w fake-win) fake-buf)))
-                    ((symbol-function 'select-window) #'ignore)
-                    ((symbol-function 'magit-refresh)
-                     (lambda () (setq refreshed t)))
-                    ((symbol-function 'claude-repl--path-canonical)
-                     (lambda (p) (directory-file-name (or p "")))))
-            (claude-repl--show-and-refresh-magit-status "/tmp/repo")
-            (should refreshed)))
-      (kill-buffer fake-buf))))
-
-(ert-deftest claude-repl-test-show-and-refresh-magit-skips-non-matching-windows ()
-  "Windows whose magit buffer points at a different repo are not selected."
-  (let ((selected-win nil)
-        (refreshed nil)
-        (fake-win 'fake-magit-window)
-        (fake-buf (generate-new-buffer "*fake-magit-other*")))
-    (unwind-protect
-        (progn
-          (with-current-buffer fake-buf
-            (setq-local default-directory "/tmp/other-repo/")
-            (setq major-mode 'magit-status-mode))
-          (cl-letf (((symbol-function 'magit-status) #'ignore)
-                    ((symbol-function 'window-list)
-                     (lambda (&rest _) (list fake-win)))
-                    ((symbol-function 'window-buffer)
-                     (lambda (w) (when (eq w fake-win) fake-buf)))
-                    ((symbol-function 'select-window)
-                     (lambda (w) (setq selected-win w)))
-                    ((symbol-function 'magit-refresh)
-                     (lambda () (setq refreshed t)))
-                    ((symbol-function 'claude-repl--path-canonical)
-                     (lambda (p) (directory-file-name (or p "")))))
-            (claude-repl--show-and-refresh-magit-status "/tmp/repo")
-            (should (null selected-win))
-            (should (null refreshed))))
-      (kill-buffer fake-buf))))
-
-(ert-deftest claude-repl-test-show-and-refresh-magit-skips-non-magit-windows ()
-  "Windows whose buffer is not in magit-status-mode are skipped."
-  (let ((selected-win nil)
-        (refreshed nil)
-        (fake-win 'fake-window)
-        (fake-buf (generate-new-buffer "*not-magit*")))
-    (unwind-protect
-        (progn
-          (with-current-buffer fake-buf
-            (setq-local default-directory "/tmp/repo/")
-            (setq major-mode 'fundamental-mode))
-          (cl-letf (((symbol-function 'magit-status) #'ignore)
-                    ((symbol-function 'window-list)
-                     (lambda (&rest _) (list fake-win)))
-                    ((symbol-function 'window-buffer)
-                     (lambda (w) (when (eq w fake-win) fake-buf)))
-                    ((symbol-function 'select-window)
-                     (lambda (w) (setq selected-win w)))
-                    ((symbol-function 'magit-refresh)
-                     (lambda () (setq refreshed t)))
-                    ((symbol-function 'claude-repl--path-canonical)
-                     (lambda (p) (directory-file-name (or p "")))))
-            (claude-repl--show-and-refresh-magit-status "/tmp/repo")
-            (should (null selected-win))
-            (should (null refreshed))))
-      (kill-buffer fake-buf))))
 
 ;;;; ---- Tests: workspace-merge-current-into-source ----
 
@@ -5008,8 +4861,7 @@ on workspace switch in repos with many worktrees."
 
 (ert-deftest claude-repl-test-workspace-merge-do-uses-project-root-override ()
   "When PROJECT-ROOT-OVERRIDE is non-nil, cherry-pick lands there (not at current ws's dir)."
-  (let ((cherry-pick-dir nil)
-        (magit-dir nil))
+  (let ((cherry-pick-dir nil))
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
                ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
                ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/should/not/be/used/"))
@@ -5018,12 +4870,9 @@ on workspace switch in repos with many worktrees."
                ((symbol-function 'claude-repl--cherry-pick-commits)
                 (lambda (dir _ws _base _br &optional _auto) (setq cherry-pick-dir dir)))
                ((symbol-function 'claude-repl--nuke-one-workspace) (lambda (&rest _) nil))
-               ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'claude-repl--show-and-refresh-magit-status)
-                (lambda (dir) (setq magit-dir dir))))
+               ((symbol-function 'load-file) #'ignore))
       (claude-repl--workspace-merge-do "other-ws" "/explicit/target/")
-      (should (equal cherry-pick-dir "/explicit/target/"))
-      (should (equal magit-dir "/explicit/target/")))))
+      (should (equal cherry-pick-dir "/explicit/target/")))))
 
 ;;;; ---- Tests: remove-doom-dashboard ----
 

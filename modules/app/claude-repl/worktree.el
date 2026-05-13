@@ -1785,28 +1785,6 @@ the `-x' annotation that the parent cherry-pick was invoked with."
                       target-ws add-ec continue-ec)
     continue-ec))
 
-(defun claude-repl--show-and-refresh-magit-status (project-root)
-  "Open magit-status for PROJECT-ROOT, select its window, and refresh it.
-Used at the end of `claude-repl--workspace-merge-do' (non-silent) to
-guarantee the post-merge window the user lands on is the magit-status
-buffer for the just-merged worktree, freshly refreshed.  `magit-status'
-alone usually selects the new window but the behavior depends on
-`magit-display-buffer-function'; this helper makes the window-selection
-and refresh explicit so the merge flow is independent of user-tunable
-magit display settings."
-  (magit-status project-root)
-  (let* ((canonical (claude-repl--path-canonical project-root))
-         (magit-win (cl-loop for win in (window-list)
-                             when (with-current-buffer (window-buffer win)
-                                    (and (derived-mode-p 'magit-status-mode)
-                                         (equal (claude-repl--path-canonical
-                                                 default-directory)
-                                                canonical)))
-                             return win)))
-    (when magit-win
-      (select-window magit-win)
-      (magit-refresh))))
-
 (defun claude-repl--tag-merge-completion (project-root source-ws)
   "Tag HEAD in PROJECT-ROOT as `merge/SOURCE-WS' after a successful merge.
 The tag marks the final cherry-picked commit so the merged workspace's
@@ -1870,12 +1848,12 @@ the workspace-commands dispatch loop) see the original message.  The
 dispatch loop wraps each command in its own error handler so a
 re-signaled failure here does not abort sibling commands.
 
-When SILENT is non-nil, the post-merge magit-status pop is suppressed
-\(the merge does not steal user focus).  Interactive entry points pass
-nil so SPC TAB m / SPC TAB M still surface the magit view; the
-skill-invoked path (`claude-repl--handle-merge-command') passes t so
-background-triggered merges never interrupt whatever the user is
-doing.
+SILENT is accepted (and logged) for caller-symmetry with
+`claude-repl--workspace-merge-into-source', which uses it to gate the
+workspace switch before merging.  This function performs no
+buffer-visible side effects (no magit pop, no buffer change) regardless
+of SILENT — the post-merge experience is purely the (already-completed)
+workspace switch performed by the caller.
 
 When AUTO-RESOLVE is non-nil, cherry-pick conflicts are first sent to
 `claude -p' for an attempt at file-level resolution (see
@@ -1971,8 +1949,6 @@ off so the user resolves in magit directly."
              (t
               (message "Merged workspace '%s' -> '%s'." target-ws current-ws)))
             (load-file claude-repl--config-file)
-            (unless silent
-              (claude-repl--show-and-refresh-magit-status project-root))
             ;; Cherry-pick complete (success/already/silent-fail) — the
             ;; in-flight gate is now clear from this merge's perspective,
             ;; so attempt to drain any merges parked behind this one.
@@ -2444,15 +2420,16 @@ selecting the master workspace afterwards.
 
 When SILENT is nil (the interactive default, used by `SPC TAB M'),
 switches to the target workspace via `claude-repl-switch-to-project'
-\(which creates a perspective for the project if none is open) and the
-cherry-pick is followed by a magit-status pop.
+\(which creates a perspective for the project if none is open).  No
+magit-status pop, no buffer change beyond the workspace switch itself —
+the user lands on the target workspace's current buffer.
 
 When SILENT is non-nil (used by `claude-repl--handle-merge-command' for
-skill-invoked merges), neither the workspace switch nor the magit pop
-occurs — the merge runs entirely in the background and does not steal
-the user's focus.  The resolved target directory is always passed
-explicitly to `--workspace-merge-do' so the cherry-pick lands there
-regardless of which workspace is currently active.
+skill-invoked merges), the workspace switch is skipped — the merge runs
+entirely in the background and does not steal the user's focus.  The
+resolved target directory is always passed explicitly to
+`--workspace-merge-do' so the cherry-pick lands there regardless of
+which workspace is currently active.
 
 Signals `user-error' if SOURCE-WS is unknown — checked explicitly via
 `claude-repl--ws-get' rather than `claude-repl--ws-dir' (which raises a
