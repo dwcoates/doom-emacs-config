@@ -1243,7 +1243,9 @@ on disk).  The other git helpers run for real."
                     'failed))))))
 
 (ert-deftest claude-repl-test-cherry-pick-commits-conflict-signals ()
-  "Cherry-pick conflict opens magit and signals user-error."
+  "Cherry-pick conflict aborts the cherry-pick and signals user-error
+\(no magit pop — the abort clears CHERRY_PICK_HEAD so there's nothing
+left to resolve)."
   (claude-repl-test--with-temp-git-repo repo
     ;; Create base with shared file
     (write-region "base" nil (expand-file-name "shared" repo))
@@ -1260,9 +1262,10 @@ on disk).  The other git helpers run for real."
       (call-process "git" nil nil nil "-C" repo "add" "shared")
       (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
       ;; Cherry-pick should conflict
-      (cl-letf (((symbol-function 'magit-status) (lambda (&rest _) nil)))
-        (should-error (claude-repl--cherry-pick-commits repo "feature" sha-m "feature")
-                      :type 'user-error)))))
+      (should-error (claude-repl--cherry-pick-commits repo "feature" sha-m "feature")
+                    :type 'user-error)
+      ;; After the signal, the cherry-pick state must be cleared.
+      (should-not (claude-repl--cherry-pick-in-progress-p repo)))))
 
 ;;;; ---- Tests: check-cherry-pick-conflict ----
 
@@ -1274,7 +1277,10 @@ on disk).  The other git helpers run for real."
     (should-not (claude-repl--check-cherry-pick-conflict "test-ws" repo "test-ws"))))
 
 (ert-deftest claude-repl-test-check-cherry-pick-conflict-with-conflict ()
-  "When CHERRY_PICK_HEAD exists, magit-status is called and user-error is signaled."
+  "When CHERRY_PICK_HEAD exists, `git cherry-pick --abort' is run before
+user-error is signaled.  Verifies that the cherry-pick resolution state
+is cleared (no CHERRY_PICK_HEAD remaining) so the worktree is not left
+half-merged for the user to clean up."
   (claude-repl-test--with-temp-git-repo repo
     ;; Set up a conflicting cherry-pick
     (write-region "base" nil (expand-file-name "file" repo))
@@ -1293,9 +1299,11 @@ on disk).  The other git helpers run for real."
       ;; Create a conflict
       (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
       ;; Now CHERRY_PICK_HEAD should exist
-      (cl-letf (((symbol-function 'magit-status) (lambda (&rest _) nil)))
-        (should-error (claude-repl--check-cherry-pick-conflict "test-ws" repo "test-ws")
-                      :type 'user-error)))))
+      (should (claude-repl--cherry-pick-in-progress-p repo))
+      (should-error (claude-repl--check-cherry-pick-conflict "test-ws" repo "test-ws")
+                    :type 'user-error)
+      ;; After the signal, the cherry-pick must have been aborted.
+      (should-not (claude-repl--cherry-pick-in-progress-p repo)))))
 
 ;;;; ---- Tests: cherry-pick-in-progress-p ----
 
@@ -1645,9 +1653,9 @@ commit carrying the cherry-pick -x annotation."
 
 (ert-deftest claude-repl-test-cherry-pick-commits-auto-resolve-decline-falls-back-to-magit ()
   "When auto-resolve cannot clear the markers, `--cherry-pick-commits'
-falls through to the existing magit + user-error path (gated by
-SILENT=nil from interactive callers, but the underlying loop body
-signals regardless once auto-resolve declines)."
+falls through to `--check-cherry-pick-conflict' which aborts the
+cherry-pick and signals user-error — the underlying loop body signals
+regardless once auto-resolve declines."
   (claude-repl-test--with-temp-git-repo repo
     (write-region "base" nil (expand-file-name "shared" repo))
     (call-process "git" nil nil nil "-C" repo "add" "shared")
@@ -1673,9 +1681,9 @@ signals regardless once auto-resolve declines)."
 
 (ert-deftest claude-repl-test-cherry-pick-commits-auto-resolve-off-still-signals ()
   "With auto-resolve omitted (interactive `SPC TAB m'/`SPC TAB M' path),
-behavior is unchanged: conflicts signal user-error after a magit pop.
-Guards against the new optional parameter accidentally flipping the
-default for existing callers."
+conflicts abort the cherry-pick and signal user-error.  Guards against
+the optional auto-resolve parameter accidentally flipping the default
+for existing callers."
   (claude-repl-test--with-temp-git-repo repo
     (write-region "base" nil (expand-file-name "shared" repo))
     (call-process "git" nil nil nil "-C" repo "add" "shared")

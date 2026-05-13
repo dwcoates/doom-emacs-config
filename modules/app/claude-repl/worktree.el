@@ -1539,8 +1539,11 @@ by `--check-cherry-pick-conflict' to gate the magit pop."
 (defun claude-repl--check-cherry-pick-conflict (ws root target-ws)
   "Check if a cherry-pick conflict exists in repo at ROOT.
 WS is the workspace name for logging.
-If CHERRY_PICK_HEAD exists, open magit and signal `user-error'
-mentioning TARGET-WS."
+If CHERRY_PICK_HEAD exists, run `git cherry-pick --abort' to clear the
+cherry-pick resolution state and signal `user-error' mentioning
+TARGET-WS.  Aborting (rather than opening magit) ensures a failed
+workspace merge does not leave git half-merged for the user to
+manually clean up."
   (let* ((git-dir (claude-repl--git-string
                    "-C" root "rev-parse" "--absolute-git-dir"))
          (cherry-pick-head (expand-file-name "CHERRY_PICK_HEAD" git-dir))
@@ -1548,11 +1551,13 @@ mentioning TARGET-WS."
     (claude-repl--log ws "cherry-pick-commits git-dir=%s cherry-pick-head=%s exists=%s"
                       git-dir cherry-pick-head head-exists)
     (when head-exists
-      (let ((conflicting-commit (claude-repl--git-string
-                                 "-C" root
-                                 "rev-parse" "--short" "CHERRY_PICK_HEAD")))
-        (magit-status)
-        (user-error "Conflict cherry-picking %s from '%s' — resolve in magit" conflicting-commit target-ws)))))
+      (let* ((conflicting-commit (claude-repl--git-string
+                                  "-C" root
+                                  "rev-parse" "--short" "CHERRY_PICK_HEAD"))
+             (abort-ec (claude-repl--git-exit-code root "cherry-pick" "--abort")))
+        (claude-repl--log ws "cherry-pick-commits cherry-pick --abort exit=%d" abort-ec)
+        (user-error "Conflict cherry-picking %s from '%s' — aborted cherry-pick"
+                    conflicting-commit target-ws)))))
 
 ;;; Auto-resolution of cherry-pick conflicts (skill-invoked merges only)
 
