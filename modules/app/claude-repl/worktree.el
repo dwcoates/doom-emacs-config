@@ -183,6 +183,58 @@ worktree is on master or if git fails."
     (when (and output (not (string-empty-p output)))
       (claude-repl--parse-worktree-porcelain output target-ref))))
 
+(defun claude-repl--maybe-fast-forward-master (git-root)
+  "Fast-forward local `master' to `origin/master' when safe.
+GIT-ROOT is any directory inside the repository.  Runs synchronously
+\(plumbing commands are fast).  Only resets the local trunk branch
+\(named by `claude-repl-master-branch-name') when it is strictly an
+ancestor of the matching `origin/<trunk>' ref — i.e. fast-forward is
+possible with no local-only commits to lose.
+
+When the trunk is currently checked out in some worktree, the advance
+happens via `git -C <wt> merge --ff-only origin/<trunk>' so the
+working tree advances too; otherwise `git update-ref' rewrites the
+branch ref directly.  All other cases (diverged, equal, missing
+origin/trunk, missing local trunk, merge failure on a dirty wt) are
+no-ops and logged."
+  (let* ((branch claude-repl-master-branch-name)
+         (origin-ref (concat "origin/" branch)))
+    (cond
+     ((not (= 0 (claude-repl--git-exit-code
+                 git-root "rev-parse" "--verify" "--quiet" origin-ref)))
+      (claude-repl--log nil "ff-master: %s missing in %s; skipping"
+                        origin-ref git-root))
+     ((not (claude-repl--git-branch-exists-p git-root branch))
+      (claude-repl--log nil "ff-master: local %s missing in %s; skipping"
+                        branch git-root))
+     ((not (= 0 (claude-repl--git-exit-code
+                 git-root "merge-base" "--is-ancestor" branch origin-ref)))
+      (claude-repl--log nil
+                        "ff-master: local %s has commits not in %s; not resetting"
+                        branch origin-ref))
+     (t
+      (let ((local (claude-repl--git-string "-C" git-root "rev-parse" branch))
+            (remote (claude-repl--git-string "-C" git-root "rev-parse" origin-ref)))
+        (cond
+         ((equal local remote)
+          (claude-repl--log nil "ff-master: %s == %s; no-op"
+                            branch origin-ref))
+         (t
+          (let ((master-wt (claude-repl--master-worktree-path git-root)))
+            (if master-wt
+                (let ((ec (claude-repl--git-exit-code
+                           master-wt "merge" "--ff-only" origin-ref)))
+                  (claude-repl--log nil
+                                    "ff-master: merge --ff-only %s in %s exit=%d"
+                                    origin-ref master-wt ec))
+              (let ((ec (claude-repl--git-exit-code
+                         git-root "update-ref"
+                         (concat "refs/heads/" branch)
+                         (concat "refs/remotes/origin/" branch))))
+                (claude-repl--log nil
+                                  "ff-master: update-ref %s -> %s exit=%d"
+                                  branch origin-ref ec)))))))))))
+
 (defun claude-repl--bare-workspace-name (ws)
   "Extract bare workspace name from WS (e.g. \"DWC/foo\" -> \"foo\")."
   (file-name-nondirectory (directory-file-name ws)))
@@ -631,6 +683,17 @@ Logs OUTPUT and then calls ADD-FN to proceed with the worktree-add step."
   (claude-repl--log nil "worktree fetch: %s" output)
   (funcall add-fn))
 
+(defun claude-repl--worktree-fetch-master-callback (add-fn git-root _ok output)
+  "Handle the result of an async git-fetch for master-based worktree creation.
+Logs OUTPUT, then attempts to fast-forward local trunk to its origin
+counterpart via `claude-repl--maybe-fast-forward-master' so the new
+worktree branches off a fresh master when ff is safe.  Always calls
+ADD-FN afterward — failure to ff (e.g. local-only commits) is a no-op,
+not a blocker for worktree creation."
+  (claude-repl--log nil "worktree fetch (master): %s" output)
+  (claude-repl--maybe-fast-forward-master git-root)
+  (funcall add-fn))
+
 (defun claude-repl--validate-worktree-creation (name git-root dirname branch-name path)
   "Validate that a worktree can be created for NAME.
 Checks that NAME is non-empty, PATH does not already exist on disk, and
@@ -714,7 +777,8 @@ from; persisted as `:source-ws-dir' on the new workspace so
         (claude-repl--async-git
          "fetch" git-root
          (list "fetch" "origin" base-commit)
-         (apply-partially #'claude-repl--worktree-fetch-callback add-fn)))
+         (apply-partially #'claude-repl--worktree-fetch-master-callback
+                          add-fn git-root)))
        (t
         (funcall add-fn))))))
 
@@ -750,8 +814,11 @@ Keys are the symbols callers pass as the BASE argument; values are the
 git refs forwarded to `claude-repl--do-create-worktree-workspace'.
 The `master' entry resolves to LOCAL `master' (not `origin/master') so
 new worktrees inherit any local-only commits; the worktree-creation
-flow still runs `git fetch origin master' first as a freshness gesture
-\(see `claude-repl--do-create-worktree-workspace').")
+flow still runs `git fetch origin master' first as a freshness gesture,
+and — when local master is strictly an ancestor of `origin/master' —
+fast-forwards local master to `origin/master' so the new worktree
+branches off the freshest commit (see
+`claude-repl--maybe-fast-forward-master').")
 
 (defun claude-repl--resolve-worktree-base (base)
   "Return the git ref corresponding to BASE.
@@ -785,9 +852,13 @@ symbol key in `claude-repl--worktree-base-commits':
              `:source-ws-dir' is the calling workspace, so the drawer
              nests it as a child.
   `master' — branch off LOCAL `master'.  A `git fetch origin master'
-             still runs first so `origin/master' stays current, but the
-             new branch is rooted in local `master' so any local-only
-             commits on master carry over.  The new workspace's
+             still runs first so `origin/master' stays current; if
+             local `master' is strictly an ancestor of `origin/master'
+             (no local-only commits to lose), it is fast-forwarded to
+             match before the worktree-add.  When local `master' has
+             commits not in `origin/master', it is left alone and the
+             new worktree branches off the local tip.  The new
+             workspace's
              `:source-ws-dir' is the master worktree path, resolved at
              receive time in `claude-repl--create-worktree-from-command'
              from BASE-COMMIT.  When no worktree is on master, the new
@@ -873,9 +944,11 @@ regardless of the calling workspace, and the spawned agent receives the
 Thin wrapper around `claude-repl-create-worktree-workspace' that
 passes BASE = `master' so a keybinding can invoke it directly.
 
-A `git fetch origin master' still runs first (cheap freshness gesture
-that updates the `origin/master' tracking ref), but the new branch is
-rooted in local `master' so any local-only commits carry over.
+A `git fetch origin master' still runs first (updates the
+`origin/master' tracking ref).  If local `master' is strictly an
+ancestor of `origin/master', it is fast-forwarded before the worktree
+is created; if local `master' has commits `origin/master' lacks, it is
+left untouched and the new branch is rooted in the local tip.
 SOURCE-WS, when non-nil, names the workspace whose repository the new
 worktree is rooted in.  Interactively, `\\[universal-argument]' prompts
 for it from the persp workspace list."

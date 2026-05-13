@@ -646,6 +646,166 @@ retain the old switch-to-project + magit pop behavior."
     (claude-repl--worktree-fetch-callback (lambda () (setq called t)) nil "error")
     (should called)))
 
+;;;; ---- Tests: worktree-fetch-master-callback ----
+
+(ert-deftest claude-repl-test-worktree-fetch-master-callback-calls-ff-then-add-fn ()
+  "Master fetch callback calls ff-master with git-root, then invokes add-fn."
+  (let ((ff-called-with nil)
+        (add-called nil))
+    (cl-letf (((symbol-function 'claude-repl--maybe-fast-forward-master)
+               (lambda (root) (setq ff-called-with root))))
+      (claude-repl--worktree-fetch-master-callback
+       (lambda () (setq add-called t)) "/some/root" t "output"))
+    (should (equal ff-called-with "/some/root"))
+    (should add-called)))
+
+(ert-deftest claude-repl-test-worktree-fetch-master-callback-calls-add-fn-on-failure ()
+  "Master fetch callback still calls add-fn when fetch reports failure."
+  (let ((add-called nil))
+    (cl-letf (((symbol-function 'claude-repl--maybe-fast-forward-master)
+               (lambda (_root) nil)))
+      (claude-repl--worktree-fetch-master-callback
+       (lambda () (setq add-called t)) "/some/root" nil "error"))
+    (should add-called)))
+
+;;;; ---- Tests: maybe-fast-forward-master ----
+;;
+;; Helpers below build a temp repo with a fake `origin/master' ref via
+;; `git update-ref' so we never need a real remote.  Each test verifies
+;; the resulting sha of `refs/heads/master' against the expected outcome.
+
+(defun claude-repl-test--sha (repo ref)
+  "Return SHA of REF in REPO, trimmed."
+  (claude-repl--git-string "-C" repo "rev-parse" ref))
+
+(ert-deftest claude-repl-test-maybe-ff-master-advances-when-behind ()
+  "Local master strictly behind origin/master is fast-forwarded (no wt on master)."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-master-branch-name "master"))
+      ;; Two commits on master.
+      (claude-repl-test--git-commit repo "c1" "a")
+      (call-process "git" nil nil nil "-C" repo "branch" "-M" "master")
+      (let ((c1 (claude-repl-test--sha repo "HEAD")))
+        (claude-repl-test--git-commit repo "c2" "b")
+        (let ((c2 (claude-repl-test--sha repo "HEAD")))
+          ;; Move HEAD off master so the trunk is not checked out anywhere.
+          (call-process "git" nil nil nil "-C" repo "checkout" "-qb" "other")
+          ;; origin/master at c2, local master at c1 (strictly behind).
+          (call-process "git" nil nil nil "-C" repo "update-ref"
+                        "refs/remotes/origin/master" c2)
+          (call-process "git" nil nil nil "-C" repo "update-ref"
+                        "refs/heads/master" c1)
+          (should (equal (claude-repl-test--sha repo "master") c1))
+          (claude-repl--maybe-fast-forward-master repo)
+          (should (equal (claude-repl-test--sha repo "master") c2)))))))
+
+(ert-deftest claude-repl-test-maybe-ff-master-noop-when-diverged ()
+  "Local master with commits origin/master lacks is NOT reset."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-master-branch-name "master"))
+      ;; Base commit on master.
+      (claude-repl-test--git-commit repo "c1" "a")
+      (call-process "git" nil nil nil "-C" repo "branch" "-M" "master")
+      ;; Build divergent origin/master via a side branch and a new file.
+      (call-process "git" nil nil nil "-C" repo "checkout" "-qb" "side")
+      (claude-repl-test--git-commit repo "side-c" "side-content")
+      (let ((side-sha (claude-repl-test--sha repo "HEAD")))
+        ;; Back to master and add a different file → divergent commit.
+        (call-process "git" nil nil nil "-C" repo "checkout" "-q" "master")
+        (claude-repl-test--git-commit repo "master-c" "master-content")
+        (let ((master-sha (claude-repl-test--sha repo "master")))
+          ;; Move HEAD off master so we exercise the ref-update path —
+          ;; if ff were (incorrectly) attempted, it'd hit update-ref.
+          (call-process "git" nil nil nil "-C" repo "checkout" "-q" "side")
+          (call-process "git" nil nil nil "-C" repo "update-ref"
+                        "refs/remotes/origin/master" side-sha)
+          ;; merge-base --is-ancestor master origin/master should fail
+          ;; (master has master-c which origin/master lacks).
+          (claude-repl--maybe-fast-forward-master repo)
+          (should (equal (claude-repl-test--sha repo "master") master-sha)))))))
+
+(ert-deftest claude-repl-test-maybe-ff-master-noop-when-equal ()
+  "When master == origin/master, the ref is unchanged."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-master-branch-name "master"))
+      (claude-repl-test--git-commit repo "c1" "a")
+      (call-process "git" nil nil nil "-C" repo "branch" "-M" "master")
+      (let ((sha (claude-repl-test--sha repo "master")))
+        (call-process "git" nil nil nil "-C" repo "checkout" "-qb" "other")
+        (call-process "git" nil nil nil "-C" repo "update-ref"
+                      "refs/remotes/origin/master" sha)
+        (claude-repl--maybe-fast-forward-master repo)
+        (should (equal (claude-repl-test--sha repo "master") sha))))))
+
+(ert-deftest claude-repl-test-maybe-ff-master-noop-when-origin-missing ()
+  "No origin/master ref → function is a no-op (no error, master unchanged)."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-master-branch-name "master"))
+      (claude-repl-test--git-commit repo "c1" "a")
+      (call-process "git" nil nil nil "-C" repo "branch" "-M" "master")
+      (let ((sha (claude-repl-test--sha repo "master")))
+        ;; No origin/master ref configured.
+        (claude-repl--maybe-fast-forward-master repo)
+        (should (equal (claude-repl-test--sha repo "master") sha))))))
+
+(ert-deftest claude-repl-test-maybe-ff-master-noop-when-local-master-missing ()
+  "No local master branch → function is a no-op (no error)."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-master-branch-name "master"))
+      (claude-repl-test--git-commit repo "c1" "a")
+      ;; Rename initial branch to something other than master so master
+      ;; does not exist locally.
+      (call-process "git" nil nil nil "-C" repo "branch" "-M" "trunk")
+      (let ((sha (claude-repl-test--sha repo "HEAD")))
+        ;; Make origin/master point somewhere so the first cond branch
+        ;; is satisfied and we reach the "local missing" guard.
+        (call-process "git" nil nil nil "-C" repo "update-ref"
+                      "refs/remotes/origin/master" sha)
+        ;; Should not signal.
+        (claude-repl--maybe-fast-forward-master repo)
+        ;; And local master still does not exist.
+        (should (not (= 0 (claude-repl--git-exit-code
+                           repo "rev-parse" "--verify" "--quiet" "master"))))))))
+
+(ert-deftest claude-repl-test-maybe-ff-master-advances-when-checked-out ()
+  "When master is checked out, ff happens via `merge --ff-only' in that worktree."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-master-branch-name "master"))
+      ;; Initial commit on master.
+      (claude-repl-test--git-commit repo "c1" "a")
+      (call-process "git" nil nil nil "-C" repo "branch" "-M" "master")
+      (let ((c1 (claude-repl-test--sha repo "master")))
+        ;; Build a future commit on a side branch (without touching master).
+        (call-process "git" nil nil nil "-C" repo "checkout" "-qb" "side")
+        (claude-repl-test--git-commit repo "future" "future-content")
+        (let ((future-sha (claude-repl-test--sha repo "HEAD")))
+          ;; Back to master so it is the checked-out branch.
+          (call-process "git" nil nil nil "-C" repo "checkout" "-q" "master")
+          (should (equal (claude-repl-test--sha repo "master") c1))
+          ;; Plant origin/master at future-sha — local master is strictly behind.
+          (call-process "git" nil nil nil "-C" repo "update-ref"
+                        "refs/remotes/origin/master" future-sha)
+          (claude-repl--maybe-fast-forward-master repo)
+          (should (equal (claude-repl-test--sha repo "master") future-sha)))))))
+
+(ert-deftest claude-repl-test-maybe-ff-master-honors-custom-branch-name ()
+  "`claude-repl-master-branch-name' selects which local/remote pair to ff."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-master-branch-name "trunk"))
+      (claude-repl-test--git-commit repo "c1" "a")
+      (call-process "git" nil nil nil "-C" repo "branch" "-M" "trunk")
+      (let ((c1 (claude-repl-test--sha repo "trunk")))
+        (claude-repl-test--git-commit repo "c2" "b")
+        (let ((c2 (claude-repl-test--sha repo "trunk")))
+          (call-process "git" nil nil nil "-C" repo "checkout" "-qb" "other")
+          (call-process "git" nil nil nil "-C" repo "update-ref"
+                        "refs/remotes/origin/trunk" c2)
+          (call-process "git" nil nil nil "-C" repo "update-ref"
+                        "refs/heads/trunk" c1)
+          (should (equal (claude-repl-test--sha repo "trunk") c1))
+          (claude-repl--maybe-fast-forward-master repo)
+          (should (equal (claude-repl-test--sha repo "trunk") c2)))))))
+
 ;;;; ---- Tests: validate-worktree-creation ----
 
 (ert-deftest claude-repl-test-validate-worktree-creation-empty-name ()
