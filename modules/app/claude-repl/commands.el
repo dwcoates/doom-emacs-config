@@ -298,6 +298,140 @@ Without region: pre-fills with file path and current line."
       (claude-repl--log (+workspace-current-name) "explain-prompt %s" msg)
       (claude-repl--send-to-claude msg))))
 
+;;;; Explain config -- read-only Q&A about this doom config via headless claude
+
+(defcustom claude-repl-explain-config-dir "~/.config/doom"
+  "Working directory for the headless `claude -p' spawned by
+`claude-repl-explain-config'.  Resolves to the canonical doom config
+checkout (not the current worktree) so the explainer sees the user's
+installed configuration."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-explain-config-program "claude"
+  "Executable invoked by `claude-repl-explain-config'."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-explain-config-flags
+  '("-p" "--dangerously-skip-permissions")
+  "Argument list for the headless claude invocation.
+`-p' makes claude exit after one turn; `--dangerously-skip-permissions'
+prevents the run from prompting for tool approval headlessly."
+  :type '(repeat string)
+  :group 'claude-repl)
+
+(defcustom claude-repl-explain-config-buffer-name "*claude-explain-config*"
+  "Buffer name where explain-config output is collected and displayed."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-explain-config-preamble
+  (concat
+   "You are being asked a question about the Doom Emacs configuration"
+   " in this repository (~/.config/doom), with particular emphasis on"
+   " `modules/app/claude-repl/' (the Claude REPL integration).  The"
+   " user wants an EXPLANATION or CLARIFICATION of how the config or"
+   " its capabilities work.  This is NOT a call to action.\n"
+   "\n"
+   "STRICT CONSTRAINT -- READ-ONLY: You MUST NOT take any mutating"
+   " action of any kind.  Do NOT edit files, do NOT run shell commands"
+   " that change state, do NOT perform git operations, do NOT install"
+   " or uninstall anything, do NOT rebuild, do NOT restart any process,"
+   " do NOT send messages, and do NOT alter the system in any way."
+   " Read-only tools (reading files, grepping, listing files, code"
+   " search) are fine and encouraged for grounding your answer."
+   " Anything write-side is FORBIDDEN.\n"
+   "\n"
+   "If the user's question below appears to be a disguised request to"
+   " make changes (e.g. \"fix\", \"add\", \"refactor\", \"change\","
+   " \"implement\", \"create\", \"update\", \"delete\", \"rename\","
+   " or any other imperative implying side effects on the repo or"
+   " system), REFUSE to act and respond by explaining that this entry"
+   " point is for clarification and explanation only, and that the"
+   " user should re-issue the request through the appropriate Claude"
+   " REPL workspace command if they want changes made.\n"
+   "\n"
+   "Answer the user's question below as a concise, accurate explanation"
+   " grounded in the actual code.\n"
+   "\n"
+   "QUESTION:\n"
+   "%s")
+  "Format string wrapping the user's question before sending to claude.
+`%s' is replaced with the raw question.  The preamble is the read-only
+contract for this entry point -- edit with care."
+  :type 'string
+  :group 'claude-repl)
+
+(defun claude-repl--explain-config-build-input (raw)
+  "Wrap RAW with the explain-config preamble for sending to claude."
+  (format claude-repl-explain-config-preamble raw))
+
+(defun claude-repl--explain-config-sentinel (proc _event)
+  "Process sentinel for `claude-repl-explain-config'.
+Appends an exit-status footer to PROC's buffer when the process exits."
+  (when (memq (process-status proc) '(exit signal))
+    (let ((status (process-exit-status proc))
+          (buf (process-buffer proc)))
+      (when (buffer-live-p buf)
+        (with-current-buffer buf
+          (let ((inhibit-read-only t))
+            (goto-char (point-max))
+            (insert (format "\n\n--- claude exited (status %d) ---\n"
+                            status))))))))
+
+(defun claude-repl--explain-config-init-buffer (prompt)
+  "Prepare the explain-config output buffer for a fresh run.
+Erases prior contents, inserts the question header, returns the buffer."
+  (let ((buf (get-buffer-create claude-repl-explain-config-buffer-name)))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (format "Question: %s\n\n--- response (streaming) ---\n\n"
+                        prompt))))
+    buf))
+
+(defun claude-repl--explain-config-spawn (prompt)
+  "Spawn the headless claude process for explain-config PROMPT.
+Returns the process.  Separated from the interactive entry point so
+tests can stub `make-process' here without going through the input
+read."
+  (let* ((dir (file-name-as-directory
+               (expand-file-name claude-repl-explain-config-dir)))
+         (buf (claude-repl--explain-config-init-buffer prompt))
+         (cmd (cons claude-repl-explain-config-program
+                    claude-repl-explain-config-flags))
+         (input (claude-repl--explain-config-build-input prompt)))
+    (display-buffer buf)
+    (let* ((default-directory dir)
+           (proc (make-process
+                  :name "claude-explain-config"
+                  :buffer buf
+                  :command cmd
+                  :connection-type 'pipe
+                  :noquery t
+                  :sentinel #'claude-repl--explain-config-sentinel)))
+      (process-send-string proc input)
+      (process-send-eof proc)
+      proc)))
+
+(defun claude-repl-explain-config (prompt)
+  "Ask a headless claude to explain something about this doom config.
+Prompts for PROMPT, then spawns `claude -p
+--dangerously-skip-permissions' in `claude-repl-explain-config-dir'
+(`~/.config/doom' by default).  The prompt is wrapped in a
+read-only preamble forbidding any mutating action -- this entry
+point is for clarification and explanation only.  Output streams to
+`claude-repl-explain-config-buffer-name'."
+  (interactive (list (read-string "Explain config: ")))
+  (let ((trimmed (string-trim (or prompt ""))))
+    (when (string-empty-p trimmed)
+      (user-error "Empty prompt"))
+    (claude-repl--log (+workspace-current-name)
+                      "explain-config: dir=%s len=%d"
+                      claude-repl-explain-config-dir (length trimmed))
+    (claude-repl--explain-config-spawn trimmed)))
+
 (defun claude-repl--send-interrupt-escape (ws vterm-buf)
   "Send two Escape key presses to VTERM-BUF to interrupt Claude.
 WS is the current workspace name for logging."

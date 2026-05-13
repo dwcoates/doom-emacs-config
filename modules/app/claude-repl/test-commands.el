@@ -349,6 +349,115 @@
       (claude-repl-explain-prompt)
       (should (null sent-text)))))
 
+;;;; ---- claude-repl-explain-config ----
+
+(ert-deftest claude-repl-cmd-test-explain-config-build-input/embeds-raw-prompt ()
+  "build-input embeds the raw prompt verbatim in the rendered output."
+  (let ((rendered (claude-repl--explain-config-build-input
+                   "what does SPC j RET do?")))
+    (should (string-match-p "what does SPC j RET do\\?" rendered))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-build-input/preamble-marks-read-only ()
+  "Preamble declares the entry point READ-ONLY and forbids mutation."
+  (let ((rendered (claude-repl--explain-config-build-input "anything")))
+    (should (string-match-p "READ-ONLY" rendered))
+    (should (string-match-p "MUST NOT" rendered))
+    (should (string-match-p "FORBIDDEN" rendered))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-build-input/preamble-instructs-refusal-on-misuse ()
+  "Preamble must instruct the model to REFUSE misuse attempts."
+  (let ((rendered (claude-repl--explain-config-build-input "anything")))
+    (should (string-match-p "REFUSE" rendered))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-flags/contains-headless-and-skip-perms ()
+  "Default flags include `-p' and `--dangerously-skip-permissions'."
+  (should (member "-p" claude-repl-explain-config-flags))
+  (should (member "--dangerously-skip-permissions"
+                  claude-repl-explain-config-flags)))
+
+(ert-deftest claude-repl-cmd-test-explain-config-dir/defaults-to-doom-config ()
+  "Default dir resolves to `~/.config/doom' (the canonical doom config)."
+  (should (equal (expand-file-name claude-repl-explain-config-dir)
+                 (expand-file-name "~/.config/doom"))))
+
+(ert-deftest claude-repl-cmd-test-explain-config/empty-prompt-errors ()
+  "explain-config signals user-error for an empty prompt."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws"))
+            ((symbol-function 'claude-repl--explain-config-spawn)
+             (lambda (_p) 'fake-proc)))
+    (should-error (claude-repl-explain-config "") :type 'user-error)))
+
+(ert-deftest claude-repl-cmd-test-explain-config/whitespace-prompt-errors ()
+  "explain-config signals user-error for a whitespace-only prompt."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws"))
+            ((symbol-function 'claude-repl--explain-config-spawn)
+             (lambda (_p) 'fake-proc)))
+    (should-error (claude-repl-explain-config "   \n\t  ") :type 'user-error)))
+
+(ert-deftest claude-repl-cmd-test-explain-config/forwards-trimmed-prompt ()
+  "explain-config trims surrounding whitespace before forwarding to spawn."
+  (let (captured)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws"))
+              ((symbol-function 'claude-repl--explain-config-spawn)
+               (lambda (p) (setq captured p) 'fake-proc)))
+      (claude-repl-explain-config "  hello  ")
+      (should (equal captured "hello")))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-spawn/builds-command-from-defcustoms ()
+  "spawn constructs the command list from program + flags defcustoms."
+  (let (captured-cmd)
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest args)
+                 (setq captured-cmd (plist-get args :command))
+                 'fake-proc))
+              ((symbol-function 'process-send-string) #'ignore)
+              ((symbol-function 'process-send-eof) #'ignore)
+              ((symbol-function 'display-buffer) #'ignore))
+      (claude-repl--explain-config-spawn "anything")
+      (should (equal (car captured-cmd) claude-repl-explain-config-program))
+      (should (member "-p" captured-cmd))
+      (should (member "--dangerously-skip-permissions" captured-cmd)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-spawn/runs-in-configured-dir ()
+  "spawn sets `default-directory' to the configured dir (with trailing slash)."
+  (let (captured-dir)
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest _args)
+                 (setq captured-dir default-directory)
+                 'fake-proc))
+              ((symbol-function 'process-send-string) #'ignore)
+              ((symbol-function 'process-send-eof) #'ignore)
+              ((symbol-function 'display-buffer) #'ignore))
+      (claude-repl--explain-config-spawn "anything")
+      (should (equal captured-dir
+                     (file-name-as-directory
+                      (expand-file-name claude-repl-explain-config-dir)))))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-spawn/sends-wrapped-input-on-stdin ()
+  "spawn sends the preamble-wrapped prompt to the process's stdin."
+  (let (captured-input)
+    (cl-letf (((symbol-function 'make-process) (lambda (&rest _args) 'fake-proc))
+              ((symbol-function 'process-send-string)
+               (lambda (_proc s) (setq captured-input s)))
+              ((symbol-function 'process-send-eof) #'ignore)
+              ((symbol-function 'display-buffer) #'ignore))
+      (claude-repl--explain-config-spawn "what does foo do?")
+      (should (string-match-p "what does foo do\\?" captured-input))
+      (should (string-match-p "READ-ONLY" captured-input)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-init-buffer/erases-and-headers ()
+  "init-buffer erases prior contents and inserts a Question header."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-config*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name)))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf (insert "stale content"))
+          (claude-repl--explain-config-init-buffer "the question")
+          (with-current-buffer buf
+            (should-not (string-match-p "stale content" (buffer-string)))
+            (should (string-match-p "Question: the question" (buffer-string)))))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
 ;;;; ---- claude-repl--send-interrupt-escape ----
 
 (ert-deftest claude-repl-cmd-test-send-interrupt-escape/sends-two-escapes ()
