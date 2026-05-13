@@ -1824,12 +1824,12 @@ just restored from the destination workspace's saved config."
     (should (equal (plist-get (claude-repl-drawer--name-face "ws") :foreground)
                    claude-repl--color-done-green))))
 
-(ert-deftest claude-repl-drawer-test-name-face-idle-is-orange ()
-  "`:idle' state colors the name with the idle-orange foreground."
+(ert-deftest claude-repl-drawer-test-name-face-idle-is-purple ()
+  "`:idle' state colors the name with the idle-purple foreground."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "ws" :claude-state :idle)
     (should (equal (plist-get (claude-repl-drawer--name-face "ws") :foreground)
-                   claude-repl--color-idle-orange))))
+                   claude-repl--color-idle-purple))))
 
 (ert-deftest claude-repl-drawer-test-name-face-no-state-falls-back ()
   "No claude-state falls back to the plain bold workspace-name face."
