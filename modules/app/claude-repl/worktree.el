@@ -1845,10 +1845,17 @@ records `:merge-completed t' on TARGET-WS, and auto-finishes the
 workspace (kills its perspective + vterm + worktree) — the cherry-pick
 has landed on the parent so the source branch has served its purpose.
 
-When the cherry-pick fails (conflict opened in magit, or all commits
-already incorporated), TARGET-WS is marked `:repl-state :dead' via
-`claude-repl--mark-merge-failed' so the drawer shows the ❌ badge,
-and the error is re-signaled so callers (interactive `SPC TAB M' and
+When the cherry-pick silently fails (git exits non-zero with no
+CHERRY_PICK_HEAD remaining — commits never landed), TARGET-WS is
+flagged `:merge-failed t' / `:repl-state :merge-failed' for the ❌
+badge but the workspace is NOT closed: the user retains the live
+session, perspective, and buffers to investigate and retry.  No
+`:merge-completed' flip, no tag, no teardown.
+
+When the cherry-pick conflicts (CHERRY_PICK_HEAD still present after
+the auto-resolve loop declines), the cherry-pick is aborted and
+`claude-repl--mark-merge-failed' marks TARGET-WS `:repl-state :dead';
+the error is re-signaled so callers (interactive `SPC TAB M' and
 the workspace-commands dispatch loop) see the original message.  The
 dispatch loop wraps each command in its own error handler so a
 re-signaled failure here does not abort sibling commands.
@@ -1889,64 +1896,51 @@ off so the user resolves in magit directly."
                           auto-resolve))
                  (already (eq result 'already-incorporated))
                  (failed  (eq result 'failed)))
-            ;; Cherry-pick completed without signaling — record bucket
-            ;; state before any user-visible side effects so the MERGED
-            ;; bucket reflects reality even if a later step (tag/load/
-            ;; magit) fails.  `failed' here means git exited non-zero
-            ;; but no CHERRY_PICK_HEAD remains (silent failure: the
-            ;; commits never landed).  The workspace still lands in
-            ;; MERGED (via `:merge-completed t') so the user sees the
-            ;; attempt, but `:repl-state :merge-failed' surfaces the
-            ;; ❌ badge to distinguish it from a clean merge.
+            ;; Cherry-pick completed without signaling.  Two routes:
+            ;; - success / already-incorporated → the workspace's
+            ;;   contribution is on the parent, so flip into the MERGED
+            ;;   bucket, tag the completion, and tear down the editor
+            ;;   side (`--close-workspace' with `preserve-entry').
+            ;; - failed (git exited non-zero, no CHERRY_PICK_HEAD) →
+            ;;   commits did NOT land.  Leave the workspace alive so
+            ;;   the user can investigate and retry; no bucket flip,
+            ;;   no tag, no teardown.  `:repl-state :merge-failed'
+            ;;   surfaces the ❌ badge in its existing bucket.
             (claude-repl--ws-put target-ws :merging nil)
-            (claude-repl--ws-put target-ws :merge-completed t)
-            (claude-repl--ws-put target-ws :merge-completed-at
-                                 (float-time))
-            (claude-repl--ws-put target-ws :merge-failed (when failed t))
-            ;; Flip the repl-state so the badge replaces the ❌ that
-            ;; would otherwise appear post-nuke when `--mark-dead-vterm'
-            ;; runs on the (now-vterm-less) preserved hash entry.  The
-            ;; guard in `--mark-dead-vterm' protects this value from
-            ;; being clobbered.  `:merge-failed' deliberately also
-            ;; shows ❌ — it's the same visual signal as :dead, but
-            ;; routes through the merged-success precedence rules.
-            (claude-repl--ws-put target-ws :repl-state
-                                 (if failed :merge-failed :merged))
-            (claude-repl--ws-put target-ws :claude-state nil)
-            (claude-repl--log target-ws "workspace-merge-do: ws=%s -> :merge-completed t already=%S failed=%S"
+            (claude-repl--log target-ws "workspace-merge-do: ws=%s already=%S failed=%S"
                               target-ws already failed)
-            ;; Skip the merge tag when the cherry-pick silently failed
-            ;; — HEAD has not advanced to include TARGET-WS's work, so
-            ;; tagging it as `merge/TARGET-WS' would mislabel an
-            ;; unrelated commit.
-            (unless failed
-              (claude-repl--tag-merge-completion project-root target-ws))
-            ;; Compose with `claude-repl--close-workspace' (the named
-            ;; workspace-close primitive) for the editor-side teardown
-            ;; rather than duplicating its logic here.  Same partition
-            ;; as the `/workspace-close' skill path: kill session,
-            ;; buffers, perspective.  Merge-specific concerns above
-            ;; (cherry-pick, tag, repl-state bookkeeping) and below
-            ;; (drawer refresh, config reload, magit pop) stay outside
-            ;; `--close-workspace' so the close primitive remains a
-            ;; pure editor-state teardown.  `preserve-entry' is the
-            ;; merge-only flag: the hashmap entry survives so the
-            ;; drawer's MERGED bucket can render this ws until the
-            ;; user explicitly `x' (which runs `--finish-workspace'
-            ;; and removes the worktree from disk).
-            (claude-repl--close-workspace target-ws 'preserve-entry)
-            ;; Re-fetch the drawer's `:detail-*' cache for the merged
-            ;; workspace so the MERGED bucket's expanded view reflects
-            ;; post-merge git state (ahead-master/source, dirty count,
-            ;; last commit) instead of values cached pre-merge.  The
-            ;; hash entry survives via `preserve-entry' and the worktree
-            ;; dir on disk is preserved, so the synchronous git calls
+            (cond
+             (failed
+              (claude-repl--ws-put target-ws :merge-failed t)
+              (claude-repl--ws-put target-ws :repl-state :merge-failed)
+              (claude-repl--ws-put target-ws :claude-state nil))
+             (t
+              (claude-repl--ws-put target-ws :merge-completed t)
+              (claude-repl--ws-put target-ws :merge-completed-at
+                                   (float-time))
+              (claude-repl--ws-put target-ws :merge-failed nil)
+              ;; Flip the repl-state so the 🔀 badge survives the
+              ;; post-nuke poll cycle that would otherwise mark the
+              ;; (now-vterm-less) preserved hash entry `:dead'.
+              (claude-repl--ws-put target-ws :repl-state :merged)
+              (claude-repl--ws-put target-ws :claude-state nil)
+              (claude-repl--tag-merge-completion project-root target-ws)
+              ;; Compose with `claude-repl--close-workspace' (the
+              ;; named workspace-close primitive) for the editor-side
+              ;; teardown.  `preserve-entry' keeps the hash entry
+              ;; alive so the drawer's MERGED bucket renders until
+              ;; the user explicitly `x' (which runs
+              ;; `--finish-workspace' and removes the worktree).
+              (claude-repl--close-workspace target-ws 'preserve-entry)))
+            ;; Refresh the drawer's `:detail-*' cache so its rendering
+            ;; reflects post-cherry-pick git state.  The worktree dir
+            ;; survives on either branch, so the synchronous git calls
             ;; in `--refresh-detail-cache' still resolve.
             (when (fboundp 'claude-repl-drawer--refresh-detail-cache)
               (claude-repl-drawer--refresh-detail-cache target-ws))
             (cond
              (failed
-              (message "Cherry-pick of workspace '%s' into '%s' reported failure — see drawer ❌ badge."
+              (message "Cherry-pick of workspace '%s' into '%s' reported failure — workspace left active for investigation."
                        target-ws current-ws))
              (already
               (message "Workspace '%s' was already merged into '%s' — merged."

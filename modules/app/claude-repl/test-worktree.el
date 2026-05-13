@@ -3966,10 +3966,11 @@ the target workspace before the auto-finish tear-down runs.  Stubs
 
 (ert-deftest claude-repl-test-workspace-merge-do-sets-merge-failed-on-silent-failure ()
   "When `--cherry-pick-commits' returns `failed' (silent failure: exit
-non-zero, no CHERRY_PICK_HEAD), `--workspace-merge-do' still routes the
-workspace into the MERGED bucket via `:merge-completed t' but flips
-`:repl-state' to `:merge-failed' (so the drawer surfaces ❌ instead of
-🔀) and records `:merge-failed t' for persistence."
+non-zero, no CHERRY_PICK_HEAD), `--workspace-merge-do' flips
+`:repl-state' to `:merge-failed' and records `:merge-failed t' so the
+drawer surfaces the ❌ badge.  `:merge-completed' is NOT set —
+commits did not land, so the workspace stays in its normal (alive)
+bucket rather than routing into MERGED."
   (claude-repl-test--with-clean-state
     (puthash "other-ws" '() claude-repl--workspaces)
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
@@ -3984,8 +3985,36 @@ workspace into the MERGED bucket via `:merge-completed t' but flips
                ((symbol-function 'load-file) #'ignore))
       (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
       (should (eq (claude-repl--ws-get "other-ws" :repl-state) :merge-failed))
-      (should (eq (claude-repl--ws-get "other-ws" :merge-completed) t))
+      (should-not (claude-repl--ws-get "other-ws" :merge-completed))
       (should (eq (claude-repl--ws-get "other-ws" :merge-failed) t)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-does-not-close-on-silent-failure ()
+  "On silent cherry-pick failure (`failed' sentinel), the workspace is
+NOT torn down: `--close-workspace' (and its underlying
+`--nuke-one-workspace') must not run.  The user keeps the live
+session/perspective/buffers so they can investigate and retry — the
+whole point of the SPC TAB M failure path is to preserve in-flight
+work, not auto-finish a workspace whose commits never landed."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (let ((close-called nil)
+          (nuke-called nil))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits)
+                  (lambda (_dir _ws _base _br &optional _auto) 'failed))
+                 ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+                 ((symbol-function 'claude-repl--close-workspace)
+                  (lambda (&rest _) (setq close-called t)))
+                 ((symbol-function 'claude-repl--nuke-one-workspace)
+                  (lambda (&rest _) (setq nuke-called t)))
+                 ((symbol-function 'load-file) #'ignore))
+        (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+        (should-not close-called)
+        (should-not nuke-called)))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-skips-tag-on-silent-failure ()
   "When the cherry-pick silently failed, HEAD has not advanced to include
