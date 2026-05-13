@@ -1236,16 +1236,108 @@ empty, the default applies (HEAD for forks,
     (claude-repl--log ws "workspace-commands-file finish: ws=%s" ws)
     (claude-repl--finish-workspace ws)))
 
+(defcustom claude-repl-gns-sockets-close-prompt "/gns-sockets close"
+  "Prompt sent to a workspace's Claude session before tearing it down.
+Sent by `claude-repl--gns-sockets-close-then' so the in-workspace
+Claude can release any held GNS sockets before its vterm process is
+killed by close or merge."
+  :type 'string
+  :group 'claude-repl)
+
+(defcustom claude-repl-gns-sockets-close-timeout 30
+  "Maximum seconds to wait for :done/:idle after sending the close prompt.
+After this elapses, teardown proceeds regardless of `:claude-state' —
+a hung session must not stall close indefinitely."
+  :type 'number
+  :group 'claude-repl)
+
+(defcustom claude-repl-gns-sockets-close-settle-delay 1.5
+  "Seconds to wait after the send commits before polling for :done/:idle.
+Gives the `prompt_submit' hook time to fire and transition the
+workspace to `:thinking' — otherwise the pre-send state (often
+`:done'/`:idle') would be observed and teardown would fire
+immediately, before Claude had a chance to process the close prompt."
+  :type 'number
+  :group 'claude-repl)
+
+(defcustom claude-repl-gns-sockets-close-poll-interval 0.5
+  "Polling interval in seconds while waiting for :done/:idle.
+Read by `claude-repl--gns-sockets-close-poll' between state checks."
+  :type 'number
+  :group 'claude-repl)
+
+(defun claude-repl--gns-sockets-close-poll (ws teardown-fn started-at)
+  "Poll WS's `:claude-state' for :done/:idle, then call TEARDOWN-FN.
+Falls back to immediate invocation after
+`claude-repl-gns-sockets-close-timeout' seconds.  STARTED-AT is the
+`float-time' at which the wait began."
+  (let ((state (claude-repl--ws-claude-state ws))
+        (elapsed (- (float-time) started-at)))
+    (cond
+     ((memq state '(:done :idle))
+      (claude-repl--log ws "gns-sockets-close-poll: ws=%s state=%s after %.2fs — tearing down"
+                        ws state elapsed)
+      (funcall teardown-fn))
+     ((>= elapsed claude-repl-gns-sockets-close-timeout)
+      (claude-repl--log ws "gns-sockets-close-poll: ws=%s timeout after %.2fs (state=%s) — tearing down anyway"
+                        ws elapsed state)
+      (funcall teardown-fn))
+     (t
+      (claude-repl--log-verbose ws "gns-sockets-close-poll: ws=%s state=%s elapsed=%.2fs — polling"
+                                ws state elapsed)
+      (run-at-time claude-repl-gns-sockets-close-poll-interval nil
+                   #'claude-repl--gns-sockets-close-poll
+                   ws teardown-fn started-at)))))
+
+(defun claude-repl--gns-sockets-close-then (ws teardown-fn)
+  "Send `claude-repl-gns-sockets-close-prompt' to WS, then run TEARDOWN-FN.
+TEARDOWN-FN is a zero-arg thunk that performs the actual teardown
+\(persp kill, vterm kill, etc).  When WS has no live ready vterm,
+TEARDOWN-FN runs immediately — there is no Claude session to drain.
+Otherwise the prompt is sent and a poll loop waits for
+`:claude-state' to become `:done' or `:idle' before running
+TEARDOWN-FN, with `claude-repl-gns-sockets-close-timeout' as a hard
+fallback so a hung session cannot stall close indefinitely.
+
+The settle delay (`claude-repl-gns-sockets-close-settle-delay') is
+inserted between the on-settle callback and the first state poll so
+the `prompt_submit' hook has time to transition the workspace to
+`:thinking'; otherwise a workspace that was already `:done' or
+`:idle' before the send would short-circuit teardown immediately."
+  (let* ((vterm-buf (claude-repl--ws-get ws :vterm-buffer))
+         (ready (and vterm-buf
+                     (buffer-live-p vterm-buf)
+                     (buffer-local-value 'claude-repl--ready vterm-buf))))
+    (cond
+     ((not ready)
+      (claude-repl--log ws "gns-sockets-close-then: ws=%s no live ready vterm — tearing down directly" ws)
+      (funcall teardown-fn))
+     (t
+      (claude-repl--log ws "gns-sockets-close-then: ws=%s sending %S and awaiting :done/:idle"
+                        ws claude-repl-gns-sockets-close-prompt)
+      (claude-repl--send claude-repl-gns-sockets-close-prompt ws nil
+                         (lambda ()
+                           (run-at-time
+                            claude-repl-gns-sockets-close-settle-delay nil
+                            #'claude-repl--gns-sockets-close-poll
+                            ws teardown-fn (float-time))))))))
+
 (defun claude-repl--handle-close-command (cmd)
   "Handle a \"close\" workspace command CMD.
 Closes the editor workspace via `claude-repl--close-workspace': kills
 the Claude session, workspace buffers, and Doom perspective; drops the
 hashmap entry.  Does NOT cherry-pick, tag, reload config, switch focus,
 or remove the git worktree from disk — those are the merge/finish paths
-respectively.  Skill-invoked from `/workspace-close'."
+respectively.  Skill-invoked from `/workspace-close'.
+
+Before tearing down, sends `claude-repl-gns-sockets-close-prompt' to
+the workspace's Claude session via `claude-repl--gns-sockets-close-then'
+and waits for `:done'/`:idle' so Claude can release any held GNS
+sockets before the vterm process is killed."
   (let ((ws (alist-get 'workspace cmd)))
     (claude-repl--log ws "workspace-commands-file close: ws=%s" ws)
-    (claude-repl--close-workspace ws)))
+    (claude-repl--gns-sockets-close-then
+     ws (lambda () (claude-repl--close-workspace ws)))))
 
 (defun claude-repl--handle-clipboard-command (cmd)
   "Handle a \"clipboard\" workspace command CMD.
@@ -1931,7 +2023,12 @@ off so the user resolves in magit directly."
               ;; alive so the drawer's MERGED bucket renders until
               ;; the user explicitly `x' (which runs
               ;; `--finish-workspace' and removes the worktree).
-              (claude-repl--close-workspace target-ws 'preserve-entry)))
+              ;; Gate the close on `/gns-sockets close' so Claude can
+              ;; release any held GNS sockets before the vterm dies.
+              (claude-repl--gns-sockets-close-then
+               target-ws
+               (lambda ()
+                 (claude-repl--close-workspace target-ws 'preserve-entry)))))
             ;; Refresh the drawer's `:detail-*' cache so its rendering
             ;; reflects post-cherry-pick git state.  The worktree dir
             ;; survives on either branch, so the synchronous git calls

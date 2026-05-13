@@ -533,6 +533,196 @@ merge-completion-only behavior owned by `--workspace-merge-do'."
        '((type . "close") (workspace . "feature-one")))
       (should (null received-preserve)))))
 
+(ert-deftest claude-repl-test-handle-close-command-routes-through-gns-gating ()
+  "`--handle-close-command' must dispatch via `--gns-sockets-close-then'
+so the in-workspace Claude is sent `/gns-sockets close' and given a
+chance to release sockets before its vterm dies."
+  (let ((gating-ws :unset)
+        (gating-teardown :unset))
+    (cl-letf (((symbol-function 'claude-repl--gns-sockets-close-then)
+               (lambda (ws teardown-fn)
+                 (setq gating-ws ws
+                       gating-teardown teardown-fn))))
+      (claude-repl--handle-close-command
+       '((type . "close") (workspace . "feature-one")))
+      (should (equal gating-ws "feature-one"))
+      (should (functionp gating-teardown)))))
+
+(ert-deftest claude-repl-test-handle-close-command-teardown-thunk-closes ()
+  "The teardown thunk forwarded to `--gns-sockets-close-then' must call
+`--close-workspace' with the workspace name when invoked."
+  (let ((received :unset)
+        (teardown-fn nil))
+    (cl-letf (((symbol-function 'claude-repl--gns-sockets-close-then)
+               (lambda (_ws fn) (setq teardown-fn fn)))
+              ((symbol-function 'claude-repl--close-workspace)
+               (lambda (ws &optional _preserve) (setq received ws))))
+      (claude-repl--handle-close-command
+       '((type . "close") (workspace . "feature-one")))
+      (funcall teardown-fn)
+      (should (equal received "feature-one")))))
+
+;;;; ---- Tests: gns-sockets-close-then ----
+
+(ert-deftest claude-repl-test-gns-sockets-close-then-no-vterm-runs-teardown-directly ()
+  "Without a live vterm buffer, `--gns-sockets-close-then' must run the
+teardown thunk immediately — there is no Claude to drain."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" '() claude-repl--workspaces)
+    (let ((called nil)
+          (sent nil))
+      (cl-letf (((symbol-function 'claude-repl--send)
+                 (lambda (&rest _) (setq sent t))))
+        (claude-repl--gns-sockets-close-then
+         "ws" (lambda () (setq called t)))
+        (should called)
+        (should-not sent)))))
+
+(ert-deftest claude-repl-test-gns-sockets-close-then-not-ready-runs-teardown-directly ()
+  "A live vterm buffer that has not yet set `claude-repl--ready' must
+still fall through to immediate teardown — the prompt would otherwise
+queue on `:pending-prompts' and never drain before close."
+  (claude-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *test-vterm*"))
+          (called nil)
+          (sent nil))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (setq-local claude-repl--ready nil))
+            (puthash "ws" (list :vterm-buffer buf) claude-repl--workspaces)
+            (cl-letf (((symbol-function 'claude-repl--send)
+                       (lambda (&rest _) (setq sent t))))
+              (claude-repl--gns-sockets-close-then
+               "ws" (lambda () (setq called t)))
+              (should called)
+              (should-not sent)))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-gns-sockets-close-then-ready-sends-prompt ()
+  "With a live, ready vterm, `--gns-sockets-close-then' must dispatch
+`claude-repl-gns-sockets-close-prompt' via `--send' and defer teardown."
+  (claude-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *test-vterm*"))
+          (sent-prompt :unset)
+          (sent-ws :unset)
+          (teardown-called nil))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (setq-local claude-repl--ready t))
+            (puthash "ws" (list :vterm-buffer buf) claude-repl--workspaces)
+            (cl-letf (((symbol-function 'claude-repl--send)
+                       (lambda (prompt ws &optional _force _on-settle)
+                         (setq sent-prompt prompt
+                               sent-ws ws)))
+                      ((symbol-function 'run-at-time)
+                       (lambda (&rest _) nil)))
+              (claude-repl--gns-sockets-close-then
+               "ws" (lambda () (setq teardown-called t)))
+              (should (equal sent-prompt claude-repl-gns-sockets-close-prompt))
+              (should (equal sent-ws "ws"))
+              (should-not teardown-called)))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-gns-sockets-close-then-on-settle-schedules-poll ()
+  "The `on-settle' callback handed to `--send' must schedule the first
+`--gns-sockets-close-poll' via `run-at-time' so the prompt_submit hook
+has time to fire before state is polled."
+  (claude-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *test-vterm*"))
+          (scheduled-fn :unset)
+          (scheduled-delay :unset)
+          (captured-on-settle nil))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (setq-local claude-repl--ready t))
+            (puthash "ws" (list :vterm-buffer buf) claude-repl--workspaces)
+            (cl-letf (((symbol-function 'claude-repl--send)
+                       (lambda (_prompt _ws &optional _force on-settle)
+                         (setq captured-on-settle on-settle)))
+                      ((symbol-function 'run-at-time)
+                       (lambda (delay _repeat fn &rest _args)
+                         (setq scheduled-delay delay
+                               scheduled-fn fn))))
+              (claude-repl--gns-sockets-close-then
+               "ws" (lambda () nil))
+              (should (functionp captured-on-settle))
+              (funcall captured-on-settle)
+              (should (equal scheduled-delay
+                             claude-repl-gns-sockets-close-settle-delay))
+              (should (eq scheduled-fn #'claude-repl--gns-sockets-close-poll))))
+        (kill-buffer buf)))))
+
+;;;; ---- Tests: gns-sockets-close-poll ----
+
+(ert-deftest claude-repl-test-gns-sockets-close-poll-runs-teardown-on-done ()
+  "When `:claude-state' is `:done', the poll must call TEARDOWN-FN
+rather than rescheduling."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" (list :claude-state :done) claude-repl--workspaces)
+    (let ((called nil)
+          (rescheduled nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (&rest _) (setq rescheduled t))))
+        (claude-repl--gns-sockets-close-poll
+         "ws" (lambda () (setq called t)) (float-time))
+        (should called)
+        (should-not rescheduled)))))
+
+(ert-deftest claude-repl-test-gns-sockets-close-poll-runs-teardown-on-idle ()
+  "`:idle' is also a terminal state for the poll — the workspace has
+decayed from `:done' but the turn is still finished, so it is safe to
+tear down."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" (list :claude-state :idle) claude-repl--workspaces)
+    (let ((called nil)
+          (rescheduled nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (&rest _) (setq rescheduled t))))
+        (claude-repl--gns-sockets-close-poll
+         "ws" (lambda () (setq called t)) (float-time))
+        (should called)
+        (should-not rescheduled)))))
+
+(ert-deftest claude-repl-test-gns-sockets-close-poll-reschedules-on-thinking ()
+  "When the workspace is still `:thinking', the poll must reschedule
+itself via `run-at-time' with the configured poll interval and must
+NOT call TEARDOWN-FN."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" (list :claude-state :thinking) claude-repl--workspaces)
+    (let ((called nil)
+          (rescheduled-delay :unset)
+          (rescheduled-fn :unset))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (delay _repeat fn &rest _args)
+                   (setq rescheduled-delay delay
+                         rescheduled-fn fn))))
+        (claude-repl--gns-sockets-close-poll
+         "ws" (lambda () (setq called t)) (float-time))
+        (should-not called)
+        (should (equal rescheduled-delay
+                       claude-repl-gns-sockets-close-poll-interval))
+        (should (eq rescheduled-fn #'claude-repl--gns-sockets-close-poll))))))
+
+(ert-deftest claude-repl-test-gns-sockets-close-poll-times-out ()
+  "Once `claude-repl-gns-sockets-close-timeout' seconds have elapsed
+without reaching `:done'/`:idle', the poll must call TEARDOWN-FN
+anyway — a hung session must not stall close indefinitely."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" (list :claude-state :thinking) claude-repl--workspaces)
+    (let ((called nil)
+          (rescheduled nil)
+          (started-at (- (float-time)
+                         (+ claude-repl-gns-sockets-close-timeout 1.0))))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (&rest _) (setq rescheduled t))))
+        (claude-repl--gns-sockets-close-poll
+         "ws" (lambda () (setq called t)) started-at)
+        (should called)
+        (should-not rescheduled)))))
+
 ;;;; ---- Tests: handle-merge-command ----
 
 (ert-deftest claude-repl-test-handle-merge-command-literal-match ()
@@ -4104,6 +4294,41 @@ NOT called — that runs only when the user explicitly presses `x'."
         (should tagged)
         (should (equal nuked-ws "other-ws"))
         (should nuked-preserve)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-routes-close-through-gns-gating ()
+  "Successful merge must dispatch the editor-side close via
+`--gns-sockets-close-then' so the in-workspace Claude is sent
+`/gns-sockets close' before its vterm dies.  The teardown thunk
+forwarded to the gate must call `--close-workspace' with
+`preserve-entry'."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (let ((gating-ws :unset)
+          (gating-teardown nil)
+          (closed-ws :unset)
+          (closed-preserve :unset))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto) nil))
+                 ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+                 ((symbol-function 'load-file) #'ignore)
+                 ((symbol-function 'claude-repl--gns-sockets-close-then)
+                  (lambda (ws fn)
+                    (setq gating-ws ws
+                          gating-teardown fn)))
+                 ((symbol-function 'claude-repl--close-workspace)
+                  (lambda (ws &optional preserve)
+                    (setq closed-ws ws
+                          closed-preserve preserve))))
+        (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+        (should (equal gating-ws "other-ws"))
+        (should (functionp gating-teardown))
+        (funcall gating-teardown)
+        (should (equal closed-ws "other-ws"))
+        (should (eq closed-preserve 'preserve-entry))))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-tears-down-on-success ()
   "Successful merge nukes the target workspace's session/persp/buffers
