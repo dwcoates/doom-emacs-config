@@ -394,6 +394,22 @@ before the prompt is sent."
   (interactive)
   (claude-repl-create-or-update-pr '(no-self-certified)))
 
+(defun claude-repl-create-or-update-pr-paste (&optional excluded)
+  "Insert the /create-or-update-pr prompt at point instead of sending.
+EXCLUDED has the same semantics as in `claude-repl-create-or-update-pr'.
+No workspace state is touched — the input buffer is left intact and
+Claude is not contacted."
+  (interactive)
+  (let ((prompt (claude-repl--build-create-or-update-pr-prompt excluded)))
+    (claude-repl--log (+workspace-current-name)
+                      "create-or-update-pr-paste: prompt=%s" prompt)
+    (insert prompt)))
+
+(defun claude-repl-create-or-update-pr-no-self-certified-paste ()
+  "Insert the /create-or-update-pr prompt (no --self-certified) at point."
+  (interactive)
+  (claude-repl-create-or-update-pr-paste '(no-self-certified)))
+
 (defun claude-repl--nuke-one-workspace (ws &optional preserve-entry)
   "Tear down a single claude-repl workspace WS without prompting.
 Kills any in-flight git-diff process, tears down the vterm session

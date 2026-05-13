@@ -649,6 +649,72 @@ No interrupt was actually delivered, so the state should not change."
       (claude-repl-create-or-update-pr-no-self-certified)
       (should-not (string-match-p "--self-certified" sent-text)))))
 
+;;;; ---- claude-repl-create-or-update-pr-paste ----
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr-paste/inserts-prompt-at-point ()
+  "paste variant inserts the full base prompt at point in the current buffer."
+  (with-temp-buffer
+    (claude-repl-create-or-update-pr-paste)
+    (should (equal (buffer-string)
+                   (claude-repl--build-create-or-update-pr-prompt nil)))))
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr-paste/does-not-send-to-claude ()
+  "paste variant must not call `claude-repl--send-to-claude'."
+  (let (send-called)
+    (cl-letf (((symbol-function 'claude-repl--send-to-claude)
+               (lambda (&rest _) (setq send-called t))))
+      (with-temp-buffer
+        (claude-repl-create-or-update-pr-paste)
+        (should-not send-called)))))
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr-paste/excluded-arg-omits-flag ()
+  "paste variant honors EXCLUDED and drops the named flag from the inserted text."
+  (with-temp-buffer
+    (claude-repl-create-or-update-pr-paste '(no-self-certified))
+    (should-not (string-match-p "--self-certified" (buffer-string)))))
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr-paste/ignores-input-buffer-prefix ()
+  "paste variant inserts the bare prompt — the workspace input buffer is not consulted."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-coup-paste-input*"
+      (insert "do a thing")
+      (claude-repl--ws-put "test-ws" :input-buffer (current-buffer))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--commit-input-buffer)
+                 (lambda (&rest _) (error "must not commit input buffer"))))
+        (with-temp-buffer
+          (claude-repl-create-or-update-pr-paste)
+          (should (equal (buffer-string)
+                         (claude-repl--build-create-or-update-pr-prompt nil))))))))
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr-paste/inserts-at-point-not-end ()
+  "paste variant inserts at point, preserving surrounding buffer content."
+  (with-temp-buffer
+    (insert "before-AFTER")
+    (goto-char (+ (point-min) 7))
+    (claude-repl-create-or-update-pr-paste)
+    (let ((expected (concat "before-"
+                            (claude-repl--build-create-or-update-pr-prompt nil)
+                            "AFTER")))
+      (should (equal (buffer-string) expected)))))
+
+;;;; ---- claude-repl-create-or-update-pr-no-self-certified-paste ----
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr-no-self-certified-paste/omits-flag ()
+  "no-self-certified paste wrapper inserts a prompt without --self-certified."
+  (with-temp-buffer
+    (claude-repl-create-or-update-pr-no-self-certified-paste)
+    (should-not (string-match-p "--self-certified" (buffer-string)))))
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr-no-self-certified-paste/does-not-send ()
+  "no-self-certified paste wrapper does not invoke `claude-repl--send-to-claude'."
+  (let (send-called)
+    (cl-letf (((symbol-function 'claude-repl--send-to-claude)
+               (lambda (&rest _) (setq send-called t))))
+      (with-temp-buffer
+        (claude-repl-create-or-update-pr-no-self-certified-paste)
+        (should-not send-called)))))
+
 ;;;; ---- claude-repl-copy-reference ----
 
 (ert-deftest claude-repl-cmd-test-copy-reference/copies-to-kill-ring ()

@@ -699,8 +699,10 @@ global drawer-mirror bindings win in vterm buffers."
          :desc "branch"      "b" #'claude-repl-explain-diff-branch))
        :desc "Reload claude-repl config" "R" #'claude-repl-reload-config
        (:prefix ("s" "Send predefined input to Claude")
-        :desc "create PR (no --self-certified)" "p" #'claude-repl-create-or-update-pr-no-self-certified
-        :desc "create PR"                       "P" #'claude-repl-create-or-update-pr)
+        :desc "create PR (no --self-certified)"       "p"   #'claude-repl-create-or-update-pr-no-self-certified
+        :desc "create PR"                             "P"   #'claude-repl-create-or-update-pr
+        :desc "paste: create PR (no --self-certified)" "C-p" #'claude-repl-create-or-update-pr-no-self-certified-paste
+        :desc "paste: create PR"                       "C-S-p" #'claude-repl-create-or-update-pr-paste)
        (:prefix ("m" . "modify workspace")
         :desc "Set/change priority" "p" #'claude-repl-set-priority)
        (:prefix ("t" . "tests")
