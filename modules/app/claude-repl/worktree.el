@@ -1969,9 +1969,18 @@ off so the user resolves in magit directly."
               (message "Merged workspace '%s' -> '%s'." target-ws current-ws)))
             (load-file claude-repl--config-file)
             (unless silent
-              (claude-repl--show-and-refresh-magit-status project-root)))
+              (claude-repl--show-and-refresh-magit-status project-root))
+            ;; Cherry-pick complete (success/already/silent-fail) — the
+            ;; in-flight gate is now clear from this merge's perspective,
+            ;; so attempt to drain any merges parked behind this one.
+            (claude-repl--drain-merge-queue))
         (error
          (claude-repl--mark-merge-failed target-ws err)
+         ;; Drain before re-signaling: the in-flight gate is clear and a
+         ;; queued merge should not be blocked by this one's failure.
+         ;; `--drain-merge-queue' catches errors from the deferred call,
+         ;; so it cannot mask the original failure being re-signaled.
+         (claude-repl--drain-merge-queue)
          (signal (car err) (cdr err)))))))
 
 (defalias '+dwc/workspace-merge--do #'claude-repl--workspace-merge-do)
@@ -2138,6 +2147,102 @@ workspace lands there exclusively because a `SPC TAB M' /
 `/workspace-merge' invocation completed successfully, never as a
 side-effect of asynchronous ancestry polling."
   (eq (claude-repl--ws-get ws :merge-completed) t))
+
+;;; Merge queue
+;;
+;; Serializes `claude-repl--workspace-merge-into-source' invocations so a
+;; cherry-pick already in progress (detected by CHERRY_PICK_HEAD in any
+;; registered workspace dir) defers subsequent requests onto a FIFO
+;; queue.  Each `claude-repl--workspace-merge-do' completion (success or
+;; failure) drains one queued entry — a natural drain loop, no timers.
+;;
+;; Using CHERRY_PICK_HEAD directly (rather than a tracked flag) trades a
+;; miniscule race window for a much simpler invariant: the in-flight
+;; signal is whatever git itself reports.  Emacs is single-threaded, so
+;; the only re-entrancy window is the `accept-process-output' wait
+;; inside `claude-repl--invoke-auto-resolve-claude' (auto-resolve mode),
+;; during which file-watcher callbacks can fire and dispatch a second
+;; merge command.  The queue is the serialization point for that case.
+
+(defvar claude-repl--merge-queue nil
+  "FIFO queue of merge requests deferred behind an in-flight cherry-pick.
+Each element is a plist of the form
+`(:source-ws WS :silent BOOL :auto-resolve BOOL)' representing a
+deferred `claude-repl--workspace-merge-into-source' call.")
+
+(defun claude-repl--ws-merge-queued-p (ws)
+  "Return non-nil when WS is parked in `claude-repl--merge-queue'.
+Reads the `:repl-state' marker set by `claude-repl--enqueue-merge'.
+This is the workflow-state signal that surfaces queued workspaces in
+the drawer's MERGING bucket alongside in-flight merges."
+  (eq (claude-repl--ws-get ws :repl-state) :merge-queued))
+
+(defun claude-repl--any-cherry-pick-in-progress-p ()
+  "Return non-nil when any registered workspace dir has a cherry-pick in flight.
+Iterates `claude-repl--workspaces' and checks each `:project-dir' for
+CHERRY_PICK_HEAD via `claude-repl--cherry-pick-in-progress-p'.  Used
+as the gate for `claude-repl--workspace-merge-into-source' so a second
+merge request arriving while one is mid-cherry-pick (e.g. via the
+auto-resolve `accept-process-output' window) is deferred onto the
+queue rather than racing the live cherry-pick."
+  (catch 'found
+    (maphash
+     (lambda (_ws plist)
+       (let ((dir (plist-get plist :project-dir)))
+         (when (and dir
+                    (stringp dir)
+                    (file-directory-p dir)
+                    (claude-repl--cherry-pick-in-progress-p dir))
+           (throw 'found t))))
+     claude-repl--workspaces)
+    nil))
+
+(defun claude-repl--enqueue-merge (source-ws silent auto-resolve)
+  "Park a merge request for SOURCE-WS onto `claude-repl--merge-queue'.
+Marks SOURCE-WS with `:repl-state :merge-queued' so the drawer
+surfaces it under MERGING with the queued-state badge.  Clears
+`:claude-state' for the same reason `--mark-merge-failed' does:
+state-glyph precedence reads `:repl-state' first, but a stale
+claude-state would still color the name."
+  (setq claude-repl--merge-queue
+        (append claude-repl--merge-queue
+                (list (list :source-ws source-ws
+                            :silent silent
+                            :auto-resolve auto-resolve))))
+  (claude-repl--ws-put source-ws :repl-state :merge-queued)
+  (claude-repl--ws-put source-ws :claude-state nil)
+  (claude-repl--log source-ws
+                    "merge-queue: enqueued ws=%s silent=%s auto-resolve=%s queue-len=%d"
+                    source-ws (if silent "t" "nil") (if auto-resolve "t" "nil")
+                    (length claude-repl--merge-queue)))
+
+(defun claude-repl--drain-merge-queue ()
+  "Dispatch the next queued merge when no cherry-pick is in flight.
+No-op when the queue is empty or when a cherry-pick remains in flight
+\(another caller will drain after that completes).  Pops one entry,
+clears its `:merge-queued' marker, and re-enters
+`claude-repl--workspace-merge-into-source'.  Errors raised by the
+deferred merge are caught and logged so a single failure does not
+leave the queue stuck — `--workspace-merge-do' already calls drain
+again from its own failure path."
+  (when (and claude-repl--merge-queue
+             (not (claude-repl--any-cherry-pick-in-progress-p)))
+    (let* ((next (pop claude-repl--merge-queue))
+           (ws (plist-get next :source-ws))
+           (silent (plist-get next :silent))
+           (auto-resolve (plist-get next :auto-resolve)))
+      (when (eq (claude-repl--ws-get ws :repl-state) :merge-queued)
+        (claude-repl--ws-put ws :repl-state nil))
+      (claude-repl--log ws
+                        "merge-queue: draining ws=%s silent=%s auto-resolve=%s remaining=%d"
+                        ws (if silent "t" "nil") (if auto-resolve "t" "nil")
+                        (length claude-repl--merge-queue))
+      (condition-case err
+          (claude-repl--workspace-merge-into-source ws silent auto-resolve)
+        (error
+         (claude-repl--log ws
+                           "merge-queue: deferred merge failed ws=%s err=%S"
+                           ws err))))))
 
 (defun claude-repl--branch-merge-sentinel (ws proc _event)
   "Process sentinel for the async `:branch-merged' refresh of WS.
@@ -2348,37 +2453,48 @@ regardless of which workspace is currently active.
 
 Signals `user-error' if SOURCE-WS is unknown — checked explicitly via
 `claude-repl--ws-get' rather than `claude-repl--ws-dir' (which raises a
-generic `error') so command-file dispatch surfaces user-facing errors."
+generic `error') so command-file dispatch surfaces user-facing errors.
+
+When `claude-repl--any-cherry-pick-in-progress-p' reports a live
+cherry-pick in any registered workspace dir, the request is deferred
+onto `claude-repl--merge-queue' via `claude-repl--enqueue-merge' and
+this call returns without running.  The drain loop fires from
+`claude-repl--workspace-merge-do' (on success or failure) and re-enters
+this function once the in-flight cherry-pick clears."
   (let* ((source-ws (claude-repl--bare-workspace-name source-ws))
          (source-dir (claude-repl--ws-get source-ws :project-dir)))
     (unless source-dir
       (user-error "Unknown workspace '%s' — cannot merge" source-ws))
-    (let* ((recorded (claude-repl--ws-get source-ws :source-ws-dir))
-           (parent-dir (or (and recorded (file-directory-p recorded) recorded)
-                           (claude-repl--master-worktree-path source-dir)))
-           (master-dir (claude-repl--master-worktree-path source-dir))
-           (target-dir (claude-repl--resolve-merge-into-source-target parent-dir master-dir)))
-      (claude-repl--log source-ws
-                        "workspace-merge-into-source: source-ws=%s source-dir=%s recorded=%s parent-dir=%s master-dir=%s target-dir=%s silent=%s"
-                        source-ws source-dir (or recorded "nil")
-                        (or parent-dir "nil") (or master-dir "nil") (or target-dir "nil") silent)
-      (unless target-dir
-        (user-error "Cannot determine merge target for '%s': no recorded source and no '%s' worktree found"
-                    source-ws claude-repl-master-branch-name))
-      (when (string= (claude-repl--path-canonical target-dir)
-                     (claude-repl--path-canonical source-dir))
-        (user-error "Already on the source workspace — nothing to merge"))
-      ;; Guard: uncommitted changes would interfere with cherry-pick.
-      (claude-repl--assert-clean-worktree source-ws source-dir)
-      (unless silent
-        (claude-repl-switch-to-project target-dir))
-      ;; After (the optional) switch, default-directory may still point at the
-      ;; source ws — bind it to the target so cherry-pick paths resolve there.
-      ;; Pass target-dir explicitly to --workspace-merge-do so the cherry-pick
-      ;; lands in the resolved target, not in whatever :project-dir the
-      ;; current-ws happens to carry.
-      (let ((default-directory (file-name-as-directory target-dir)))
-        (claude-repl--workspace-merge-do source-ws target-dir silent auto-resolve)))))
+    (cond
+     ((claude-repl--any-cherry-pick-in-progress-p)
+      (claude-repl--enqueue-merge source-ws silent auto-resolve))
+     (t
+      (let* ((recorded (claude-repl--ws-get source-ws :source-ws-dir))
+             (parent-dir (or (and recorded (file-directory-p recorded) recorded)
+                             (claude-repl--master-worktree-path source-dir)))
+             (master-dir (claude-repl--master-worktree-path source-dir))
+             (target-dir (claude-repl--resolve-merge-into-source-target parent-dir master-dir)))
+        (claude-repl--log source-ws
+                          "workspace-merge-into-source: source-ws=%s source-dir=%s recorded=%s parent-dir=%s master-dir=%s target-dir=%s silent=%s"
+                          source-ws source-dir (or recorded "nil")
+                          (or parent-dir "nil") (or master-dir "nil") (or target-dir "nil") silent)
+        (unless target-dir
+          (user-error "Cannot determine merge target for '%s': no recorded source and no '%s' worktree found"
+                      source-ws claude-repl-master-branch-name))
+        (when (string= (claude-repl--path-canonical target-dir)
+                       (claude-repl--path-canonical source-dir))
+          (user-error "Already on the source workspace — nothing to merge"))
+        ;; Guard: uncommitted changes would interfere with cherry-pick.
+        (claude-repl--assert-clean-worktree source-ws source-dir)
+        (unless silent
+          (claude-repl-switch-to-project target-dir))
+        ;; After (the optional) switch, default-directory may still point at the
+        ;; source ws — bind it to the target so cherry-pick paths resolve there.
+        ;; Pass target-dir explicitly to --workspace-merge-do so the cherry-pick
+        ;; lands in the resolved target, not in whatever :project-dir the
+        ;; current-ws happens to carry.
+        (let ((default-directory (file-name-as-directory target-dir)))
+          (claude-repl--workspace-merge-do source-ws target-dir silent auto-resolve)))))))
 
 (defun claude-repl-workspace-merge-current-into-source ()
   "Merge the current workspace's commits into its source workspace.

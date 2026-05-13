@@ -2489,5 +2489,63 @@ that crosses a scroll boundary triggers the center-on-screen behavior."
         (claude-repl-drawer--post-command)
         (should called)))))
 
+;;;; ---- Tests: :merge-queued routing + glyph ----
+
+(ert-deftest claude-repl-drawer-test-workspace-section-merge-queued-routes-to-merging ()
+  "`:repl-state :merge-queued' buckets the workspace under MERGING so
+queued merges appear alongside in-flight ones."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :repl-state :merge-queued)
+    (should (eq (claude-repl-drawer--workspace-section "ws") :merging))))
+
+(ert-deftest claude-repl-drawer-test-workspace-section-merging-dominates-queued ()
+  "`:merging' t (in-flight) outranks `:repl-state :merge-queued'.
+Covers the brief window between drain clearing `:merge-queued' and
+`--workspace-merge-do' setting `:merging'."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws"
+                                       :merging t
+                                       :repl-state :merge-queued)
+    (should (eq (claude-repl-drawer--workspace-section "ws") :merging))))
+
+(ert-deftest claude-repl-drawer-test-workspace-section-merge-completed-dominates-queued ()
+  "A completed merge marker outranks `:merge-queued' — should not happen
+in practice (completed clears repl-state) but the precedence chain
+must remain stable."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws"
+                                       :merge-completed t
+                                       :repl-state :merge-queued)
+    (should (eq (claude-repl-drawer--workspace-section "ws") :merged))))
+
+(ert-deftest claude-repl-drawer-test-state-glyph-merge-queued ()
+  "`:repl-state :merge-queued' surfaces the 🕒 glyph from the icon
+alist, distinct from :merging (no icon — the merging bucket shows the
+underlying claude-state glyph) and :merged (🔀)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :repl-state :merge-queued)
+    (should (equal (claude-repl-drawer--state-glyph "ws")
+                   (alist-get :merge-queued
+                              claude-repl-drawer-state-icons)))))
+
+(ert-deftest claude-repl-drawer-test-state-glyph-merge-queued-overrides-claude-state ()
+  "`:merge-queued' on repl-state outranks a stale `:claude-state' —
+guards against the queued badge being clobbered by a leftover
+thinking/done glyph."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws"
+                                       :repl-state :merge-queued
+                                       :claude-state :thinking)
+    (should (equal (claude-repl-drawer--state-glyph "ws")
+                   (alist-get :merge-queued
+                              claude-repl-drawer-state-icons)))))
+
+(ert-deftest claude-repl-drawer-test-state-glyph-merged-still-wins-over-queued ()
+  "Precedence guard: `:merged' beats `:merge-queued' on the glyph too."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :repl-state :merged)
+    (should (equal (claude-repl-drawer--state-glyph "ws")
+                   (alist-get :merged claude-repl-drawer-state-icons)))))
+
 (provide 'test-drawer)
 ;;; test-drawer.el ends here

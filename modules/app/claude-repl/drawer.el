@@ -75,7 +75,8 @@ the indent change — no other knobs needed."
     (:stop-failed  . "❗")
     (:dead         . "❌")
     (:merged       . "🔀")
-    (:merge-failed . "❌"))
+    (:merge-failed . "❌")
+    (:merge-queued . "🕒"))
   "Alist mapping claude-state keyword to an indicator glyph.
 The :dead entry is used when `:repl-state' is `:dead' (overrides
 :claude-state).  The :merged entry is used when `:repl-state' is
@@ -84,9 +85,12 @@ whose vterm has since died still reads as merged).  The :merge-failed
 entry is used when `:repl-state' is `:merge-failed' (a workspace that
 landed in the MERGED bucket but whose cherry-pick reported failure);
 it shares the ❌ glyph with :dead since both signal failure, but
-remains routed under MERGED via `:merge-completed'.  Unrecognized
-values fall through to a single middot placeholder, used for
-workspaces registered but with no live session."
+remains routed under MERGED via `:merge-completed'.  The :merge-queued
+entry is used when `:repl-state' is `:merge-queued' (a merge request
+parked on `claude-repl--merge-queue' waiting for a live cherry-pick
+to finish); it routes under MERGING alongside in-flight merges.
+Unrecognized values fall through to a single middot placeholder, used
+for workspaces registered but with no live session."
   :type '(alist :key-type symbol :value-type string)
   :group 'claude-repl)
 
@@ -471,7 +475,8 @@ Legacy two-section partition; tree-aware sectioning lives in
 
 (defun claude-repl-drawer--workspace-section (ws)
   "Return :main, :hidden, :merging, or :merged for WS based on its plist state.
-Precedence (highest first): :merged → :merging → :hidden → :main.
+Precedence (highest first): :merged → :merging (in-flight or queued)
+→ :hidden → :main.
 - :merged is reserved for workspaces whose explicit merge command
   completed successfully (`:merge-completed' t).
 - :merging is the in-flight workflow signal — set when
@@ -480,14 +485,18 @@ Precedence (highest first): :merged → :merging → :hidden → :main.
   (alongside `--mark-merge-failed').  Git ancestry no longer drives
   this bucket: an empty child whose parent advanced past it used to
   mis-bucket here, and ancestry is now reserved for tree flattening.
+  Workspaces parked on `claude-repl--merge-queue' (`:repl-state'
+  `:merge-queued') also surface here so the user sees pending merges
+  alongside the active one.
 - :hidden / :main are unchanged.
 
-A completed merge dominates an in-flight one (transition state
-during the brief window between setting `:merge-completed t' and
-clearing `:merging') and both dominate hidden."
+A completed merge dominates an in-flight or queued one (transition
+state during the brief window between setting `:merge-completed t' and
+clearing `:merging') and all dominate hidden."
   (cond
    ((claude-repl--ws-merge-completed-p ws)            :merged)
    ((claude-repl--ws-merge-in-progress-p ws)          :merging)
+   ((claude-repl--ws-merge-queued-p ws)               :merging)
    ((eq (claude-repl--ws-get ws :repl-state) :hidden) :hidden)
    (t :main)))
 
@@ -600,13 +609,17 @@ CHILDREN is a list of trees.  Roots and siblings are sorted by
 workspace whose vterm has since died still shows the 🔀 badge).
 `:repl-state' `:merge-failed' surfaces the ❌ badge while remaining in
 the MERGED bucket — a workspace whose cherry-pick reported failure but
-which the merge flow still bookkept as completed."
+which the merge flow still bookkept as completed.  `:repl-state'
+`:merge-queued' surfaces the 🕒 badge for workspaces parked behind an
+in-flight cherry-pick on `claude-repl--merge-queue'."
   (let ((repl-state (claude-repl--ws-get ws :repl-state))
         (claude-state (claude-repl--ws-get ws :claude-state)))
     (or (and (eq repl-state :merge-failed)
              (alist-get :merge-failed claude-repl-drawer-state-icons))
         (and (eq repl-state :merged)
              (alist-get :merged claude-repl-drawer-state-icons))
+        (and (eq repl-state :merge-queued)
+             (alist-get :merge-queued claude-repl-drawer-state-icons))
         (and (eq repl-state :dead)
              (alist-get :dead claude-repl-drawer-state-icons))
         (alist-get claude-state claude-repl-drawer-state-icons)
@@ -626,14 +639,15 @@ workspaces don't carry a phantom space."
 
 (defun claude-repl-drawer--name-face (ws)
   "Return the face spec for WS's name, colored by claude-state.
-:dead, :merged, and :merge-failed fall through to the default
-workspace-name face (the existing hidden/dim treatment provides the
-muting).  Unrecognized states render as plain bold."
+:dead, :merged, :merge-failed, and :merge-queued fall through to the
+default workspace-name face (the existing hidden/dim treatment
+provides the muting).  Unrecognized states render as plain bold."
   (let* ((repl-state   (claude-repl--ws-get ws :repl-state))
          (claude-state (claude-repl--ws-get ws :claude-state))
          (color (cond
                  ((eq repl-state :merged)       nil)
                  ((eq repl-state :merge-failed) nil)
+                 ((eq repl-state :merge-queued) nil)
                  ((eq repl-state :dead)         nil)
                  ((eq claude-state :init)      claude-repl--color-init-blue)
                  ((eq claude-state :thinking)  claude-repl--color-thinking-red)

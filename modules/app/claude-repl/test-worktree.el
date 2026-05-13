@@ -5405,4 +5405,236 @@ and existing call sites that pass no arguments."
         (claude-repl-create-doom-oneshot-workspace)
         (should (equal captured-base "master"))))))
 
+;;;; ---- Tests: merge queue ----
+
+(defmacro claude-repl-test--with-empty-merge-queue (&rest body)
+  "Run BODY with `claude-repl--merge-queue' freshly empty.
+The queue is a top-level defvar, so tests that enqueue MUST scrub it
+afterwards or later tests inherit stale state."
+  (declare (indent 0))
+  `(let ((claude-repl--merge-queue nil))
+     (unwind-protect (progn ,@body)
+       (setq claude-repl--merge-queue nil))))
+
+(ert-deftest claude-repl-test-ws-merge-queued-p-true-when-marker-set ()
+  "WS with `:repl-state :merge-queued' is detected as queued."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :project-dir "/tmp/ws")
+    (claude-repl--ws-put "ws" :repl-state :merge-queued)
+    (should (claude-repl--ws-merge-queued-p "ws"))))
+
+(ert-deftest claude-repl-test-ws-merge-queued-p-nil-when-unmarked ()
+  "WS without the queued marker is not detected as queued."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :project-dir "/tmp/ws")
+    (should-not (claude-repl--ws-merge-queued-p "ws"))))
+
+(ert-deftest claude-repl-test-ws-merge-queued-p-nil-for-other-repl-states ()
+  "Other `:repl-state' values are not mistaken for queued."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :project-dir "/tmp/ws")
+    (claude-repl--ws-put "ws" :repl-state :merged)
+    (should-not (claude-repl--ws-merge-queued-p "ws"))))
+
+(ert-deftest claude-repl-test-any-cherry-pick-in-progress-false-on-clean-tree ()
+  "No CHERRY_PICK_HEAD in any registered ws dir → returns nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-git-repo repo
+      (claude-repl-test--git-commit repo "M" "base")
+      (claude-repl--ws-put "ws" :project-dir repo)
+      (should-not (claude-repl--any-cherry-pick-in-progress-p)))))
+
+(ert-deftest claude-repl-test-any-cherry-pick-in-progress-true-during-conflict ()
+  "Any registered ws dir with CHERRY_PICK_HEAD → returns t."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-git-repo repo
+      (write-region "base" nil (expand-file-name "f" repo))
+      (call-process "git" nil nil nil "-C" repo "add" "f")
+      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
+      (claude-repl-test--git-checkout repo "feature" t)
+      (write-region "feature" nil (expand-file-name "f" repo))
+      (call-process "git" nil nil nil "-C" repo "add" "f")
+      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
+      (let ((sha-f1 (string-trim
+                     (shell-command-to-string
+                      (format "git -C %s rev-parse HEAD"
+                              (shell-quote-argument repo))))))
+        (claude-repl-test--git-checkout repo "master")
+        (write-region "master" nil (expand-file-name "f" repo))
+        (call-process "git" nil nil nil "-C" repo "add" "f")
+        (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
+        (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
+        (claude-repl--ws-put "ws" :project-dir repo)
+        (should (claude-repl--any-cherry-pick-in-progress-p))))))
+
+(ert-deftest claude-repl-test-any-cherry-pick-in-progress-skips-missing-dir ()
+  "Stale :project-dir entries (dir no longer exists) are skipped, not
+errored on.  Tests the defensive `file-directory-p' guard."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :project-dir "/nonexistent/path/missing")
+    (should-not (claude-repl--any-cherry-pick-in-progress-p))))
+
+(ert-deftest claude-repl-test-enqueue-merge-appends-to-queue ()
+  "`--enqueue-merge' appends a plist describing the request to the FIFO."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (should (equal claude-repl--merge-queue
+                     '((:source-ws "ws1" :silent t :auto-resolve t)))))))
+
+(ert-deftest claude-repl-test-enqueue-merge-marks-repl-state ()
+  "`--enqueue-merge' flips the workspace's `:repl-state' to `:merge-queued'
+so the drawer can route it under MERGING."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--enqueue-merge "ws1" nil nil)
+      (should (eq (claude-repl--ws-get "ws1" :repl-state) :merge-queued)))))
+
+(ert-deftest claude-repl-test-enqueue-merge-clears-claude-state ()
+  "Stale `:claude-state' is cleared so the state glyph reflects queued."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--ws-put "ws1" :claude-state :thinking)
+      (claude-repl--enqueue-merge "ws1" nil nil)
+      (should (null (claude-repl--ws-get "ws1" :claude-state))))))
+
+(ert-deftest claude-repl-test-enqueue-merge-preserves-fifo-order ()
+  "Multiple enqueues land in arrival order — the drain must pop oldest first."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+      (claude-repl--ws-put "ws3" :project-dir "/tmp/ws3")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (claude-repl--enqueue-merge "ws2" nil t)
+      (claude-repl--enqueue-merge "ws3" t nil)
+      (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
+                             claude-repl--merge-queue)
+                     '("ws1" "ws2" "ws3"))))))
+
+(ert-deftest claude-repl-test-drain-merge-queue-noop-when-empty ()
+  "Empty queue → drain does nothing, no error."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (let ((called nil))
+        (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (&rest _) (setq called t))))
+          (claude-repl--drain-merge-queue)
+          (should-not called))))))
+
+(ert-deftest claude-repl-test-drain-merge-queue-noop-when-cherry-pick-active ()
+  "If any registered ws dir still has CHERRY_PICK_HEAD, drain leaves the
+queue untouched — another caller will drain after the live cherry-pick
+finishes."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl-test--with-temp-git-repo repo
+        (write-region "base" nil (expand-file-name "f" repo))
+        (call-process "git" nil nil nil "-C" repo "add" "f")
+        (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
+        (claude-repl-test--git-checkout repo "feature" t)
+        (write-region "feature" nil (expand-file-name "f" repo))
+        (call-process "git" nil nil nil "-C" repo "add" "f")
+        (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
+        (let ((sha-f1 (string-trim
+                       (shell-command-to-string
+                        (format "git -C %s rev-parse HEAD"
+                                (shell-quote-argument repo))))))
+          (claude-repl-test--git-checkout repo "master")
+          (write-region "master" nil (expand-file-name "f" repo))
+          (call-process "git" nil nil nil "-C" repo "add" "f")
+          (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
+          (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
+          (claude-repl--ws-put "ws-blocker" :project-dir repo)
+          (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+          (claude-repl--enqueue-merge "ws1" t t)
+          (let ((called nil))
+            (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+                       (lambda (&rest _) (setq called t))))
+              (claude-repl--drain-merge-queue)
+              (should-not called)
+              (should (= 1 (length claude-repl--merge-queue))))))))))
+
+(ert-deftest claude-repl-test-drain-merge-queue-pops-oldest-first ()
+  "Drain pops the oldest enqueued entry (FIFO)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (claude-repl--enqueue-merge "ws2" nil nil)
+      (let ((dispatched nil))
+        (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (ws &optional silent auto)
+                     (push (list ws silent auto) dispatched))))
+          (claude-repl--drain-merge-queue)
+          (should (equal dispatched '(("ws1" t t))))
+          (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
+                                 claude-repl--merge-queue)
+                         '("ws2"))))))))
+
+(ert-deftest claude-repl-test-drain-merge-queue-clears-queued-marker ()
+  "Drain clears the dispatched workspace's `:merge-queued' marker so the
+re-entered `--workspace-merge-into-source' can flip `:merging' t
+without precedence collisions."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+                 (lambda (&rest _) nil)))
+        (claude-repl--drain-merge-queue)
+        (should-not (eq (claude-repl--ws-get "ws1" :repl-state)
+                        :merge-queued))))))
+
+(ert-deftest claude-repl-test-drain-merge-queue-catches-deferred-error ()
+  "Errors from a deferred merge are caught so a single bad entry does
+not leave the queue stuck — drain returns normally, no signal."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+                 (lambda (&rest _) (error "boom"))))
+        ;; Must not raise.
+        (claude-repl--drain-merge-queue)))))
+
+(ert-deftest claude-repl-test-workspace-merge-into-source-enqueues-when-cherry-pick-in-flight ()
+  "When a cherry-pick is in progress in any registered ws dir, the new
+merge request is parked on the queue rather than running."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl-test--with-temp-git-repo repo
+        (write-region "base" nil (expand-file-name "f" repo))
+        (call-process "git" nil nil nil "-C" repo "add" "f")
+        (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
+        (claude-repl-test--git-checkout repo "feature" t)
+        (write-region "feature" nil (expand-file-name "f" repo))
+        (call-process "git" nil nil nil "-C" repo "add" "f")
+        (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
+        (let ((sha-f1 (string-trim
+                       (shell-command-to-string
+                        (format "git -C %s rev-parse HEAD"
+                                (shell-quote-argument repo))))))
+          (claude-repl-test--git-checkout repo "master")
+          (write-region "master" nil (expand-file-name "f" repo))
+          (call-process "git" nil nil nil "-C" repo "add" "f")
+          (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
+          (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
+          (claude-repl--ws-put "ws-blocker" :project-dir repo)
+          ;; ws-pending has a registered project-dir so the "unknown ws"
+          ;; guard doesn't fire before the queue check.
+          (claude-repl--ws-put "ws-pending" :project-dir "/tmp/ws-pending")
+          (let ((merge-do-called nil))
+            (cl-letf (((symbol-function 'claude-repl--workspace-merge-do)
+                       (lambda (&rest _) (setq merge-do-called t))))
+              (claude-repl--workspace-merge-into-source "ws-pending" t t)
+              (should-not merge-do-called)
+              (should (= 1 (length claude-repl--merge-queue)))
+              (should (eq (claude-repl--ws-get "ws-pending" :repl-state)
+                          :merge-queued)))))))))
+
 ;;; test-worktree.el ends here
