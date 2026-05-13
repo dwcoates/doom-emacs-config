@@ -344,8 +344,9 @@ input window and disturbs redisplay.  Going through `set-window-start'
       :ni "S-RET"     #'newline
       :i  "/"         #'claude-repl--slash-start
       :ni "C-RET"     #'claude-repl-send-with-postfix
-      :ni "C-S-M-RET" #'claude-repl-queue-deferred-prompt
-      :ni "C-M-S-RET" #'claude-repl-queue-deferred-prompt
+      ;; Deferred-prompt enqueue lives on `SPC j RET' in the leader map
+      ;; (see `keybindings.el') so it's reachable from any context with
+      ;; one canonical chord, instead of a buffer-local C-S-M-RET tower.
       ;; `C-S-RET' is intentionally NOT bound here -- the global drawer-visit
       ;; override (`claude-repl--install-drawer-visit-override') needs the
       ;; chord to reach `claude-repl-drawer-global-visit' from inside the

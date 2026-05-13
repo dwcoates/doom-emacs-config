@@ -678,6 +678,7 @@ global drawer-mirror bindings win in vterm buffers."
 ;; SPC j -- Tell Claude to do a predefined thing
 (map! :leader
       (:prefix ("j" . "claude")
+       :desc "Enqueue input as deferred prompt"        "RET" #'claude-repl-queue-deferred-prompt
        :desc "One-shot doom edit (from master)"        "o" #'claude-repl-create-doom-oneshot-workspace
        :desc "One-shot doom edit (from current branch)" "O" #'claude-repl-create-doom-oneshot-workspace-from-current-branch
        :desc "Kill workspace"           "d" #'claude-repl-kill-workspace

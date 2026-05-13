@@ -217,7 +217,7 @@
         (should (equal (buffer-string) ""))
         (should evil-called)))))
 
-;;;; ---- Tests: Deferred prompt queue (C-S-M-RET) ----
+;;;; ---- Tests: Deferred prompt queue (SPC j RET) ----
 
 (ert-deftest claude-repl-test-queue-deferred-prompt-appends-to-queue ()
   "`claude-repl-queue-deferred-prompt' appends input buffer text to `:deferred-prompts'."

@@ -588,8 +588,8 @@ current workspace is different, and drains any deferred-prompt queue
 ;;
 ;; Distinct from `:pending-prompts' (the at-startup queue drained when
 ;; the session_start hook arrives — see `--drain-pending-prompts').
-;; `:deferred-prompts' is a runtime FIFO seeded by the input-buffer
-;; command `claude-repl-queue-deferred-prompt' (bound to `C-S-M-RET'):
+;; `:deferred-prompts' is a runtime FIFO seeded by the leader-key
+;; command `claude-repl-queue-deferred-prompt' (bound to `SPC j RET'):
 ;; the user keeps typing prompts while Claude is busy, and each one
 ;; is held until Claude reaches `:done' / `:idle', at which point the
 ;; head of the queue is sent.  Subsequent prompts drain one per
