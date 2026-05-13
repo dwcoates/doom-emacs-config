@@ -1142,7 +1142,25 @@ can call finish without worrying whether a normal finish already ran."
                         loaded skipped load-error (or origin "nil"))
       (message "Loaded %d workspace(s), skipped %d, errored %d"
                loaded skipped load-error))
-    (setq claude-repl--snapshot-load-state nil)))
+    (setq claude-repl--snapshot-load-state nil)
+    (claude-repl--snapshot-load-close-main)))
+
+(defun claude-repl--snapshot-load-close-main ()
+  "Kill the `main' workspace left over from Doom's startup, if it still exists.
+Doom always creates `+workspaces-main' (typically \"main\") at startup;
+once the snapshot load has populated the real workspace set, this
+artifact is no longer useful and we kill it to keep the tabline clean.
+Absent main, the function is a no-op.  Errors from `+workspace/kill'
+are logged but never propagated — finish must remain robust."
+  (let ((main (and (boundp '+workspaces-main) +workspaces-main)))
+    (when (and main
+               (fboundp '+workspace-exists-p)
+               (+workspace-exists-p main)
+               (fboundp '+workspace/kill))
+      (claude-repl--log nil "snapshot-load: closing 'main' workspace artifact main=%s" main)
+      (condition-case err
+          (+workspace/kill main)
+        (error (claude-repl--log nil "snapshot-load: close-main error: %S" err))))))
 
 (defun claude-repl--snapshot-load-on-loaded (ws &optional _marker)
   "Ws-fully-loaded hook handler: advance the snapshot load queue iff WS is awaited.

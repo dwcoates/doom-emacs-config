@@ -2778,6 +2778,74 @@ sees nil state and short-circuits without printing bogus counters."
     (claude-repl--snapshot-load-finish)
     (should-not claude-repl--snapshot-load-state)))
 
+;;;; ---- claude-repl--snapshot-load-close-main ----
+
+(ert-deftest claude-repl-cmd-test-snapshot-load-finish/closes-main-when-exists ()
+  "After finish, the leftover `main' workspace artifact is killed via
+`+workspace/kill' when it still exists."
+  (claude-repl-test--with-clean-state
+    (let ((killed nil))
+      (setq claude-repl--snapshot-load-state
+            (list :queue nil :origin nil :awaiting nil
+                  :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
+      (cl-letf (((symbol-function '+workspace-exists-p)
+                 (lambda (name) (equal name "main")))
+                ((symbol-function '+workspace/kill)
+                 (lambda (name) (setq killed name)))
+                (+workspaces-main "main"))
+        (claude-repl--snapshot-load-finish)
+        (should (equal killed "main"))))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load-finish/main-missing-is-noop ()
+  "Finish is a no-op for the main-close step when `main' doesn't exist."
+  (claude-repl-test--with-clean-state
+    (let ((kill-calls 0))
+      (setq claude-repl--snapshot-load-state
+            (list :queue nil :origin nil :awaiting nil
+                  :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
+      (cl-letf (((symbol-function '+workspace-exists-p) (lambda (_n) nil))
+                ((symbol-function '+workspace/kill)
+                 (lambda (_n) (cl-incf kill-calls)))
+                (+workspaces-main "main"))
+        (claude-repl--snapshot-load-finish)
+        (should (= 0 kill-calls))))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load-finish/close-main-error-swallowed ()
+  "An error from `+workspace/kill' on main is logged but never propagated."
+  (claude-repl-test--with-clean-state
+    (setq claude-repl--snapshot-load-state
+          (list :queue nil :origin nil :awaiting nil
+                :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
+    (cl-letf (((symbol-function '+workspace-exists-p)
+               (lambda (name) (equal name "main")))
+              ((symbol-function '+workspace/kill)
+               (lambda (_n) (error "boom")))
+              (+workspaces-main "main"))
+      ;; Must not signal.
+      (claude-repl--snapshot-load-finish)
+      (should-not claude-repl--snapshot-load-state))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load-finish/idempotent-skips-second-close-main ()
+  "A second `--snapshot-load-finish' call (state already nil) must not
+re-invoke the main-close step — close-main is part of the per-load
+finalization, not a standalone teardown."
+  (claude-repl-test--with-clean-state
+    (let ((kill-calls 0))
+      (setq claude-repl--snapshot-load-state
+            (list :queue nil :origin nil :awaiting nil
+                  :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
+      (cl-letf (((symbol-function '+workspace-exists-p)
+                 (lambda (name) (equal name "main")))
+                ((symbol-function '+workspace/kill)
+                 (lambda (_n) (cl-incf kill-calls)))
+                (+workspaces-main "main"))
+        (claude-repl--snapshot-load-finish)
+        (should (= 1 kill-calls))
+        ;; Second call: state is nil, the early `when' short-circuits before
+        ;; the close-main call, so no extra kill fires.
+        (claude-repl--snapshot-load-finish)
+        (should (= 1 kill-calls))))))
+
 ;;;; ---- claude-repl--hydrate-priority-from-state ----
 
 (ert-deftest claude-repl-cmd-test-hydrate-priority/sets-priority-from-state-file ()
