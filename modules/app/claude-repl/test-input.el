@@ -519,6 +519,25 @@
       ;; Should not error
       (claude-repl--append-to-input-buffer "text"))))
 
+;;;; ---- Tests: prepend-to-input-buffer ----
+
+(ert-deftest claude-repl-test-prepend-to-input-buffer ()
+  "Should prepend text to the start of the input buffer."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-prepend*"
+      (insert "end")
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+        (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+        (claude-repl--prepend-to-input-buffer "start ")
+        (should (equal (buffer-string) "start end"))))))
+
+(ert-deftest claude-repl-test-prepend-to-input-buffer-no-buffer ()
+  "Should be a no-op when no input buffer is registered."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+      ;; Should not error
+      (claude-repl--prepend-to-input-buffer "text"))))
+
 ;;;; ---- Tests: send-input-to-vterm always-bracketed-paste ----
 
 (ert-deftest claude-repl-test-send-input-to-vterm-exact-threshold ()
@@ -2109,6 +2128,29 @@ Claude input buffer."
             ;; Send should have been called
             (should send-called)))))))
 
+;;; send-with-prefix: prepends prefix then sends
+
+(ert-deftest claude-repl-test-send-with-prefix ()
+  "`claude-repl-send-with-prefix' prepends the prefix, then calls send."
+  (claude-repl-test--with-clean-state
+    (let ((send-called nil)
+          (claude-repl-send-prefix "PREFIX "))
+      (claude-repl-test--with-temp-buffer " *test-prefix-input*"
+        (insert "hello")
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+          (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+          (cl-letf (((symbol-function 'claude-repl--send)
+                     (lambda (&rest _) (setq send-called t))))
+            (claude-repl-send-with-prefix)
+            ;; Prefix should have been prepended
+            (should (equal (buffer-string) "PREFIX hello"))
+            ;; Send should have been called
+            (should send-called)))))))
+
+(ert-deftest claude-repl-test-send-prefix-default-value ()
+  "`claude-repl-send-prefix' default must be the canonical \"just answer\" string."
+  (should (equal claude-repl-send-prefix "just answer, dont take action: ")))
+
 ;;; vterm-deferred-action: dead buffer at schedule time
 
 (ert-deftest claude-repl-test-vterm-deferred-action-dead-buffer-schedules ()
@@ -2252,6 +2294,18 @@ but `with-current-buffer' on a dead buffer signals an error."
         (kill-buffer buf)
         ;; Dead buffer passes when-let but with-current-buffer errors
         (should-error (claude-repl--append-to-input-buffer "text"))))))
+
+;;; prepend-to-input-buffer: dead buffer for workspace
+
+(ert-deftest claude-repl-test-prepend-to-input-buffer-dead-buffer ()
+  "`claude-repl--prepend-to-input-buffer' errors when the input buffer is dead.
+Mirrors the append-to-input-buffer dead-buffer case."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create " *test-prepend-dead*")))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+        (claude-repl--ws-put "ws1" :input-buffer buf)
+        (kill-buffer buf)
+        (should-error (claude-repl--prepend-to-input-buffer "text"))))))
 
 ;;;; ---- Tests: mark-ws-thinking state overwrite edge cases (status transitions .md) ----
 

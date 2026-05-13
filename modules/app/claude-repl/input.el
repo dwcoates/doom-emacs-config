@@ -91,6 +91,11 @@ Active when `claude-repl-skip-permissions' is non-nil, subject to
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-send-prefix "just answer, dont take action: "
+  "String prepended to input when sending via `claude-repl-send-with-prefix'."
+  :type 'string
+  :group 'claude-repl)
+
 (defcustom claude-repl-paste-delay 0.25
   "Seconds to wait after pasting before sending Return.
 Used by `claude-repl--send-input-to-vterm' for large inputs."
@@ -350,11 +355,12 @@ input window and disturbs redisplay.  Going through `set-window-start'
       ;; `C-S-RET' is intentionally NOT bound here -- the global drawer-visit
       ;; override (`claude-repl--install-drawer-visit-override') needs the
       ;; chord to reach `claude-repl-drawer-global-visit' from inside the
-      ;; Claude input buffer.  Metaprompt-send stays reachable on macOS via
-      ;; `S-s-RET' (Doom's `:gn' binding) caught by the
-      ;; `[remap +default/newline-above]' entry below.
+      ;; Claude input buffer.  Prefix-send (prepending
+      ;; `claude-repl-send-prefix') stays reachable on macOS via `S-s-RET'
+      ;; (Doom's `:gn' binding) caught by the `[remap
+      ;; +default/newline-above]' entry below.
       [remap +default/newline-below] #'claude-repl-send-with-postfix
-      [remap +default/newline-above] #'claude-repl-send-with-metaprompt
+      [remap +default/newline-above] #'claude-repl-send-with-prefix
       :ni "C-c C-k"   #'claude-repl-interrupt
       :ni "C-c C-c"   #'claude-repl-discard-or-send-interrupt
       :ni "C-c y"     #'claude-repl--send-y
@@ -697,6 +703,24 @@ Handles input preparation, sending, history, and persistence."
   (interactive)
   (claude-repl--log (+workspace-current-name) "send-with-postfix")
   (claude-repl--append-to-input-buffer claude-repl-send-postfix)
+  (claude-repl--send))
+
+(defun claude-repl--prepend-to-input-buffer (text)
+  "Prepend TEXT to the start of the current workspace's input buffer."
+  (claude-repl--log (+workspace-current-name) "prepend-to-input-buffer: len=%d" (length text))
+  (let ((buf (claude-repl--ws-get (+workspace-current-name) :input-buffer)))
+    (if buf
+        (with-current-buffer buf
+          (goto-char (point-min))
+          (insert text))
+      (message "[claude-repl] WARNING: no input buffer for current workspace — text not prepended")
+      (claude-repl--log (+workspace-current-name) "prepend-to-input-buffer: no input buffer, text discarded"))))
+
+(defun claude-repl-send-with-prefix ()
+  "Prepend `claude-repl-send-prefix' to the input buffer, then send."
+  (interactive)
+  (claude-repl--log (+workspace-current-name) "send-with-prefix")
+  (claude-repl--prepend-to-input-buffer claude-repl-send-prefix)
   (claude-repl--send))
 
 (defun claude-repl-queue-deferred-prompt ()
