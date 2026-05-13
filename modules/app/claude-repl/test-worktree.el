@@ -6691,4 +6691,104 @@ work."
                  (file-name-as-directory
                   (expand-file-name
                    "~/workspace/ChessCom/explanation-engine")))))
+
+;;;; ---- Tests: claude-repl--build-oneshot-success-suffix ----
+
+(ert-deftest claude-repl-test-build-oneshot-success-suffix-interpolates-invocation-twice ()
+  "INVOCATION appears in BOTH the 'invoke X to Y' action sentence and the
+'Only invoke X when ...' gate sentence — the helper must wire it through
+both clauses, otherwise the gate dangles."
+  (let ((suffix (claude-repl--build-oneshot-success-suffix
+                 "the /foo skill" "do the foo thing")))
+    (with-temp-buffer
+      (insert suffix)
+      (goto-char (point-min))
+      (should (search-forward "invoke the /foo skill to do the foo thing"
+                              nil t))
+      (should (search-forward "Only invoke the /foo skill when"
+                              nil t)))))
+
+(ert-deftest claude-repl-test-build-oneshot-success-suffix-mentions-stop-on-ambiguity ()
+  "Every success-suffix MUST carry the STOP-on-ambiguity safety clause —
+otherwise a one-shot can auto-merge / auto-PR a faulty implementation."
+  (let ((suffix (claude-repl--build-oneshot-success-suffix
+                 "the /foo skill" "do the foo thing")))
+    (should (string-match-p "STOP" suffix))
+    (should (string-match-p "ambiguity" suffix))))
+
+(ert-deftest claude-repl-test-build-oneshot-success-suffix-gates-on-tests-and-commits ()
+  "The gate clause must require implementation AND tests AND commits, not
+just implementation — the helper hard-codes this gate so every variant
+inherits it."
+  (let ((suffix (claude-repl--build-oneshot-success-suffix
+                 "the /foo skill" "do the foo thing")))
+    (should (string-match-p "tests" suffix))
+    (should (string-match-p "[Cc]ommit" suffix))))
+
+;;;; ---- Tests: claude-repl--create-pinned-oneshot-workspace ----
+
+(ert-deftest claude-repl-test-create-pinned-oneshot-uses-tag-in-minibuffer-prompt ()
+  "TAG is interpolated into the minibuffer prompt so distinct one-shot
+variants are visually distinguishable when the user is typing the
+preemptive prompt."
+  (claude-repl-test--with-clean-state
+    (let ((captured-mb-prompt :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (setq captured-mb-prompt prompt)
+                   "do a thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (&rest _) nil)))
+        (claude-repl--create-pinned-oneshot-workspace
+         "/tmp/repo/" 'master "SUFFIX" "test-tag")
+        (should (equal captured-mb-prompt "One-shot test-tag prompt: "))))))
+
+(ert-deftest claude-repl-test-create-pinned-oneshot-rejects-empty-prompt ()
+  "Empty/whitespace prompt is rejected at the helper level so every
+variant inherits the validation — no caller can accidentally skip it."
+  (claude-repl-test--with-clean-state
+    (let ((spawned nil))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "   "))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (&rest _) (setq spawned t))))
+        (should-error
+         (claude-repl--create-pinned-oneshot-workspace
+          "/tmp/repo/" 'master "SUFFIX" "test-tag")
+         :type 'user-error)
+        (should-not spawned)))))
+
+(ert-deftest claude-repl-test-create-pinned-oneshot-passes-git-root-through ()
+  "GIT-ROOT flows verbatim through to `claude-repl--spawn-workspace-generation'
+— a caller pinning a non-default repo must see exactly that path."
+  (claude-repl-test--with-clean-state
+    (let ((captured-git-root :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "do a thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed git-root _base _fork-from)
+                   (setq captured-git-root git-root))))
+        (claude-repl--create-pinned-oneshot-workspace
+         "/tmp/some-pinned-repo/" 'master "SUFFIX" "test-tag")
+        (should (equal captured-git-root "/tmp/some-pinned-repo/"))))))
+
+(ert-deftest claude-repl-test-create-pinned-oneshot-appends-suffix-to-prefixed-only ()
+  "SUFFIX is appended to the PREFIXED prompt (agent's first message) but
+NOT to the RAW prompt (used for slug generation) — keeps the
+workspace-name slug clean across every one-shot variant."
+  (claude-repl-test--with-clean-state
+    (let ((captured-raw :unset)
+          (captured-prefixed :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "do a thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (raw prefixed _git-root _base _fork-from)
+                   (setq captured-raw raw)
+                   (setq captured-prefixed prefixed))))
+        (claude-repl--create-pinned-oneshot-workspace
+         "/tmp/repo/" 'master "::SENTINEL-SUFFIX::" "test-tag")
+        (should-not (string-match-p "::SENTINEL-SUFFIX::" captured-raw))
+        (should (string-match-p "::SENTINEL-SUFFIX::"
+                                captured-prefixed))))))
+
 ;;; test-worktree.el ends here
