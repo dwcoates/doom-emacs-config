@@ -324,11 +324,32 @@ Searches that pull point mid-line make the cursor reappear; j/k snap
 back to col 0 and re-hide it."
   (setq-local cursor-type (if (zerop (current-column)) nil 'box)))
 
+(defun claude-repl-drawer--recenter-if-offscreen (&optional buf)
+  "Vertically center every window showing BUF when point is off-screen.
+BUF defaults to the singleton drawer buffer.  For each live window
+across all frames displaying BUF, checks `pos-visible-in-window-p'
+on the buffer's point; if point's line is outside the window's
+visible range, calls `recenter' inside that window to place point
+on the middle line.
+
+Cheap when point is on-screen — `pos-visible-in-window-p' early-outs
+before any `with-selected-window' detour.  Called from `--post-command'
+so j/k navigation that crosses a scroll boundary lands the cursor at
+the vertical center instead of snapping to the window's top/bottom edge."
+  (when-let* ((buf (or buf (get-buffer claude-repl-drawer-buffer-name))))
+    (dolist (win (get-buffer-window-list buf nil t))
+      (when (window-live-p win)
+        (let ((pt (with-current-buffer buf (point))))
+          (unless (pos-visible-in-window-p pt win)
+            (with-selected-window win
+              (recenter))))))))
+
 (defun claude-repl-drawer--post-command ()
   "Refresh the current-entry overlay and cursor visibility.
 Runs after every command in the drawer buffer."
   (claude-repl-drawer--update-current-entry-overlay)
-  (claude-repl-drawer--update-cursor))
+  (claude-repl-drawer--update-cursor)
+  (claude-repl-drawer--recenter-if-offscreen))
 
 (defun claude-repl-drawer--apply-background ()
   "Remap the buffer's `default' face to the drawer background color.
@@ -1834,7 +1855,8 @@ overlay-refresh action explicitly."
       (with-current-buffer buf
         (when (claude-repl-drawer--goto-workspace-line current-ws)
           (when win (set-window-point win (point)))
-          (claude-repl-drawer--update-current-entry-overlay))))))
+          (claude-repl-drawer--update-current-entry-overlay)
+          (claude-repl-drawer--recenter-if-offscreen buf))))))
 
 (defvar claude-repl-drawer--last-was-drawer nil
   "Tracks whether the last command ran with the drawer buffer current.
