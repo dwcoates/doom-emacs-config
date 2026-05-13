@@ -1558,7 +1558,9 @@ mentioning TARGET-WS."
 
 (defcustom claude-repl-auto-resolve-conflicts-program "claude"
   "Executable used to attempt auto-resolution of cherry-pick conflicts.
-Invoked with `-p --model MODEL' and the resolution prompt on stdin."
+Invoked with `-p --model MODEL <extra-args> <prompt>'; the resolution
+prompt is the final positional argument (that is how the `claude -p'
+non-interactive API consumes it)."
   :type 'string
   :group 'claude-repl)
 
@@ -1665,9 +1667,11 @@ working tree allows `git cherry-pick --continue' to fire."
 
 (defun claude-repl--invoke-auto-resolve-claude (root prompt)
   "Synchronously invoke the auto-resolution `claude -p' in repo at ROOT.
-PROMPT is the resolver prompt sent on stdin.  Returns the process exit
-status (integer) on completion, or the symbol `timeout' when the
-configured timeout elapsed without the process exiting.
+PROMPT is appended as the final positional argument to `claude -p' —
+that is how the non-interactive API consumes the user prompt.  Returns
+the process exit status (integer) on completion, or the symbol
+`timeout' when the configured timeout elapsed without the process
+exiting.
 
 Runs synchronously because the cherry-pick path is itself synchronous —
 the merge flow waits for the working tree to settle before advancing.
@@ -1678,14 +1682,13 @@ Factored out as its own function so tests can stub the headless call
 without spawning an actual `claude' process."
   (let* ((cmd (append (list claude-repl-auto-resolve-conflicts-program
                             "-p" "--model" claude-repl-auto-resolve-conflicts-model)
-                      claude-repl-auto-resolve-conflicts-extra-args))
+                      claude-repl-auto-resolve-conflicts-extra-args
+                      (list prompt)))
          (out-buf (generate-new-buffer " *claude-auto-resolve*"))
          (default-directory (file-name-as-directory root))
          (proc (apply #'start-process
                       "claude-auto-resolve" out-buf cmd)))
     (set-process-query-on-exit-flag proc nil)
-    (process-send-string proc prompt)
-    (process-send-eof proc)
     (let ((deadline (+ (float-time) claude-repl-auto-resolve-conflicts-timeout))
           (timed-out nil))
       (while (and (process-live-p proc) (not timed-out))

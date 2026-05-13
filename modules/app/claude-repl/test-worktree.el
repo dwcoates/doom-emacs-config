@@ -1463,15 +1463,27 @@ after the base `-p --model MODEL' args."
                  ;; poll loop terminates immediately without spawning
                  ;; the real `claude' binary.
                  (funcall real-start "claude-auto-resolve-stub"
-                          (generate-new-buffer " *stub*") "true")))
-              ((symbol-function 'process-send-string) (lambda (&rest _) nil))
-              ((symbol-function 'process-send-eof) (lambda (&rest _) nil)))
+                          (generate-new-buffer " *stub*") "true"))))
       (claude-repl--invoke-auto-resolve-claude "/tmp" "prompt"))
     (should (member "--dangerously-skip-permissions" captured-cmd))
     (should (equal (cl-subseq captured-cmd 0 4)
                    (list claude-repl-auto-resolve-conflicts-program
                          "-p" "--model"
                          claude-repl-auto-resolve-conflicts-model)))))
+
+(ert-deftest claude-repl-test-invoke-auto-resolve-claude-passes-prompt-as-trailing-arg ()
+  "`--invoke-auto-resolve-claude' passes PROMPT as the final positional
+argument to `claude -p' (that is how the non-interactive API consumes
+the prompt — NOT via stdin)."
+  (let* ((captured-cmd nil)
+         (real-start (symbol-function 'start-process)))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name _buf &rest cmd)
+                 (setq captured-cmd cmd)
+                 (funcall real-start "claude-auto-resolve-stub"
+                          (generate-new-buffer " *stub*") "true"))))
+      (claude-repl--invoke-auto-resolve-claude "/tmp" "RESOLVE THIS"))
+    (should (equal (car (last captured-cmd)) "RESOLVE THIS"))))
 
 ;;;; ---- Tests: auto-resolve-cherry-pick-conflict ----
 
