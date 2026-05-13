@@ -28,6 +28,12 @@
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-rebase-onto-origin-master-prompt
+  "please rebase the current branch onto origin/master (I already ran `git fetch origin` for you), resolving any conflicts as appropriate"
+  "Prompt sent to Claude by `claude-repl-rebase-onto-origin-master'."
+  :type 'string
+  :group 'claude-repl)
+
 (defcustom claude-repl-create-or-update-pr-base-flags
   '("commit" "--patch" "--self-certified" "--add-to-merge-queue" "--skip-tests")
   "Default flag list for the /create-or-update-pr slash command.
@@ -341,6 +347,37 @@ is the sole observer here."
   (interactive)
   (claude-repl--log (+workspace-current-name) "update-pr: sending update-pr prompt")
   (claude-repl--send-to-claude claude-repl-update-pr-prompt))
+
+(defun claude-repl--rebase-onto-origin-master-callback (ws ok output)
+  "Process the `git fetch origin' result and ask Claude to rebase.
+WS is the workspace name.  OK and OUTPUT come from the async-git
+sentinel.  On success, dispatches `claude-repl-rebase-onto-origin-master-prompt'
+to Claude so the agent runs the rebase itself.  On failure, surfaces
+the git error via `message' and skips the agent dispatch — the rebase
+would proceed against stale `origin/master' otherwise."
+  (claude-repl--log ws "rebase-onto-origin-master: fetch ok=%s output=%s" ok output)
+  (if ok
+      (progn
+        (message "[%s] git fetch origin complete; asking Claude to rebase onto origin/master" ws)
+        (claude-repl--send-to-claude claude-repl-rebase-onto-origin-master-prompt))
+    (message "[%s] git fetch origin failed: %s" ws output)))
+
+(defun claude-repl-rebase-onto-origin-master ()
+  "Fetch origin asynchronously, then ask Claude to rebase onto origin/master.
+Runs `git fetch origin' in the current workspace's project directory.
+When it succeeds, sends `claude-repl-rebase-onto-origin-master-prompt'
+to Claude so the agent performs the rebase itself (and resolves any
+conflicts).  On fetch failure, skips the dispatch and surfaces the git
+error via `message'."
+  (interactive)
+  (let* ((ws (+workspace-current-name))
+         (project-dir (claude-repl--ws-dir ws)))
+    (claude-repl--log ws "rebase-onto-origin-master: fetching origin in %s" project-dir)
+    (message "[%s] git fetch origin..." ws)
+    (claude-repl--async-git
+     "rebase-fetch" project-dir '("fetch" "origin")
+     (lambda (ok output)
+       (claude-repl--rebase-onto-origin-master-callback ws ok output)))))
 
 (defun claude-repl--exclusion-symbol-to-flag (sym)
   "Convert exclusion SYM (e.g. \\='no-self-certified) to flag (e.g. \"--self-certified\")."

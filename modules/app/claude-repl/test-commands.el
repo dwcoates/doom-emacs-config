@@ -478,6 +478,57 @@ No interrupt was actually delivered, so the state should not change."
       (claude-repl-update-pr)
       (should (equal sent-text claude-repl-update-pr-prompt)))))
 
+;;;; ---- claude-repl-rebase-onto-origin-master ----
+
+(ert-deftest claude-repl-cmd-test-rebase-onto-origin-master/fetches-origin-in-ws-dir ()
+  "rebase-onto-origin-master invokes async-git with `fetch origin' in the workspace dir."
+  (let (label-arg git-root-arg args-arg)
+    (cl-letf (((symbol-function '+workspace-current-name)
+               (lambda () "test-ws"))
+              ((symbol-function 'claude-repl--ws-dir)
+               (lambda (_ws) "/project/"))
+              ((symbol-function 'claude-repl--async-git)
+               (lambda (label git-root args _callback)
+                 (setq label-arg label
+                       git-root-arg git-root
+                       args-arg args))))
+      (claude-repl-rebase-onto-origin-master)
+      (should (equal label-arg "rebase-fetch"))
+      (should (equal git-root-arg "/project/"))
+      (should (equal args-arg '("fetch" "origin"))))))
+
+(ert-deftest claude-repl-cmd-test-rebase-onto-origin-master/sends-prompt-on-fetch-success ()
+  "On fetch success, callback sends the rebase prompt to claude."
+  (let (sent-text)
+    (cl-letf (((symbol-function 'claude-repl--send-to-claude)
+               (lambda (text) (setq sent-text text))))
+      (claude-repl--rebase-onto-origin-master-callback "test-ws" t "fetch output")
+      (should (equal sent-text claude-repl-rebase-onto-origin-master-prompt)))))
+
+(ert-deftest claude-repl-cmd-test-rebase-onto-origin-master/skips-prompt-on-fetch-failure ()
+  "On fetch failure, callback does NOT send the rebase prompt."
+  (let ((send-called nil))
+    (cl-letf (((symbol-function 'claude-repl--send-to-claude)
+               (lambda (_text) (setq send-called t))))
+      (claude-repl--rebase-onto-origin-master-callback "test-ws" nil "fatal: not a git repository")
+      (should-not send-called))))
+
+(ert-deftest claude-repl-cmd-test-rebase-onto-origin-master/callback-routes-through-async-git ()
+  "Command's async-git callback dispatches via the named callback helper."
+  (let (captured-callback sent-text)
+    (cl-letf (((symbol-function '+workspace-current-name)
+               (lambda () "test-ws"))
+              ((symbol-function 'claude-repl--ws-dir)
+               (lambda (_ws) "/project/"))
+              ((symbol-function 'claude-repl--async-git)
+               (lambda (_label _git-root _args callback)
+                 (setq captured-callback callback)))
+              ((symbol-function 'claude-repl--send-to-claude)
+               (lambda (text) (setq sent-text text))))
+      (claude-repl-rebase-onto-origin-master)
+      (funcall captured-callback t "ok")
+      (should (equal sent-text claude-repl-rebase-onto-origin-master-prompt)))))
+
 ;;;; ---- claude-repl--exclusion-symbol-to-flag ----
 
 (ert-deftest claude-repl-cmd-test-exclusion-symbol-to-flag/single-word ()

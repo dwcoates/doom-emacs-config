@@ -682,6 +682,7 @@ global drawer-mirror bindings win in vterm buffers."
        :desc "One-shot doom edit (from current branch)" "O" #'claude-repl-create-doom-oneshot-workspace-from-current-branch
        :desc "Kill workspace"           "d" #'claude-repl-kill-workspace
        :desc "Update GitHub PR description"  "r" #'claude-repl-update-pr
+       :desc "Rebase branch onto origin/master" "b" #'claude-repl-rebase-onto-origin-master
        :desc "Nuke workspace"           "x" #'claude-repl-nuke-workspace
        :desc "Nuke ALL workspaces"      "X" #'claude-repl-nuke-all-workspaces
        :desc "Paste workspace clipboard" "p" #'claude-repl-paste-clipboard
