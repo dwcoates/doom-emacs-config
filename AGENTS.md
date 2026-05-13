@@ -73,6 +73,37 @@ Never maintain two mechanisms for the same thing. Redundancy adds complexity, ob
 
 Example: Claude Code hooks (`session_start`, `stop`, `prompt_submit`) are the sole source of session IDs and lifecycle events. Do not also scan `~/.claude/sessions/` files, watch terminal titles for readiness, or poll for state that hooks already deliver. One mechanism, one source of truth.
 
+## No Duplicated or Mirrored Code — Always Extract Shared Helpers
+
+**ABSOLUTE RULE: Never duplicate, mirror, or copy-paste code when extraction into a shared helper is possible. Always extract.** This applies to function bodies, prompt/template strings, defconst content, conditional branches, repeated `let*` blocks, parallel test-setup boilerplate — anything. If two call sites share more than trivial structure, the shared structure belongs in a helper, and the call sites become thin dispatches that vary only in their parameters.
+
+The bar is intentionally low: if a future reader would look at two functions and think "these look almost identical," they should be one function with parameters. "Almost identical" is the smell — do not let it ship.
+
+Why this is absolute:
+- Mirrored code drifts. Every "almost identical" pair becomes a "subtly divergent" pair within a few edits — one site picks up a fix or a new arg, the other doesn't, and the bug is invisible until it bites.
+- Mirrored code multiplies the test surface. Two parallel functions need two parallel test suites; one helper needs one test suite plus thin per-caller tests.
+- Mirrored code obscures intent. A reader cannot tell whether the duplication is intentional (different requirements) or accidental (lazy copy-paste). Extraction forces that decision to be explicit at the parameter list.
+- Mirrored code creates fertile ground for the "fix one, forget the other" class of bug — which is doubly bad in conjunction with the No-Silent-Fallbacks rule, because both sites continue silently doing the wrong thing.
+
+Required process when adding a new variant of an existing pattern:
+
+1. **Before writing the new variant, identify the existing one.** Read it. Look for what would differ vs. what would stay the same.
+2. **If anything stays the same, extract first.** Pull the shared body into a private helper (`claude-repl--<verb>-<noun>`). Make the differing parts parameters. Then rewrite the existing call site through the helper *as a separate refactor commit*, run the tests to prove the refactor is behavior-preserving, and only then add the new variant on top.
+3. **Test the helper directly,** in addition to the wrappers. The wrappers are thin and tested via end-to-end behavior; the helper carries the contract and deserves its own focused unit tests for the contract (validation, interpolation, edge cases).
+4. **The wrappers must be trivial after extraction.** Each wrapper should be ~3–8 lines: docstring + `(interactive)` + a single call into the helper with literal arguments. If the wrapper is doing anything else, push that into the helper too.
+
+Anti-patterns to reject:
+- Two `defun`s whose bodies are 80%+ the same and differ only in 2–3 literal values (path, label, prompt string).
+- Two `defconst`s whose strings share more than a sentence of template structure and differ only in interpolated tokens — extract a builder function and call it from both `defconst`s.
+- "I'll just copy this and tweak it" as a working assumption when implementing a variant — that *is* the moment to extract.
+- A new variant added without first refactoring the original through a shared helper.
+- Comments like "mirrors X" / "parallel to X" / "based on X" used as a substitute for actually sharing code with X — those comments are a confession that the code should have been extracted.
+- Test files where two `ert-deftest`s differ only in which function is called and which expected literal is asserted — extract a helper, parameterize, or write a single table-driven test.
+
+The ONLY acceptable reason to leave near-duplication in place is that the user has been told what the shared helper would look like and has *explicitly* opted to keep the duplication for a stated reason. Default to extraction; ask if unsure.
+
+Example (this is the canonical reference): the one-shot creators `claude-repl-create-doom-oneshot-workspace` and `claude-repl-create-explanation-engine-oneshot-workspace` both dispatch through `claude-repl--create-pinned-oneshot-workspace`. The success-suffix constants `claude-repl--oneshot-merge-suffix` and `claude-repl--oneshot-create-pr-suffix` are both built via `claude-repl--build-oneshot-success-suffix`. Any future `claude-repl-create-<repo>-oneshot-workspace` MUST dispatch through the same helper — do not start a third copy.
+
 ## Comment Non-Obvious Code
 
 **ALWAYS comment any change whose reasoning isn't immediately obvious from the code itself — even if it's only slightly non-obvious.** The bar is low on purpose: if a future reader (or a future you) would have to re-derive *why* the line is shaped the way it is, leave a comment that says why. Examples that always warrant a `WHY:` comment:
