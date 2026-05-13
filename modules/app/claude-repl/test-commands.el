@@ -1321,6 +1321,75 @@ post-restart MERGED entry shows the same metadata it had before quit."
                              "did the thing"))))
         (delete-file tmp)))))
 
+(ert-deftest claude-repl-cmd-test-register-merged-workspace/clean-sets-merged-state ()
+  "When the on-disk state has `:merge-completed t' but no `:merge-failed'
+\(or `:merge-failed nil') AND the backward-compat probe reports the
+merge as landed, `--register-merged-workspace' sets `:repl-state' to
+`:merged' and leaves `:merge-failed' clear so the drawer shows 🔀."
+  (claude-repl-test--with-clean-state
+    (let ((tmp (make-temp-file "claude-repl-state-" nil ".el")))
+      (unwind-protect
+          (progn
+            (with-temp-file tmp
+              (prin1 '(:project-dir "/tmp/merged"
+                       :merge-completed t)
+                     (current-buffer)))
+            (cl-letf (((symbol-function 'claude-repl--state-file-for-read)
+                       (lambda (_) tmp))
+                      ((symbol-function 'claude-repl--detect-merge-actually-landed-p)
+                       (lambda (_ws) t)))
+              (claude-repl--register-merged-workspace "merged-ws" "/tmp/merged")
+              (should (eq (claude-repl--ws-get "merged-ws" :repl-state) :merged))
+              (should-not (claude-repl--ws-get "merged-ws" :merge-failed))))
+        (delete-file tmp)))))
+
+(ert-deftest claude-repl-cmd-test-register-merged-workspace/restores-persisted-merge-failed ()
+  "When the on-disk state explicitly carries `:merge-failed t', the
+registered workspace adopts `:repl-state :merge-failed' regardless of
+the probe's current verdict — the user's prior signal is authoritative
+and should not be overwritten by an opportunistic post-restart probe."
+  (claude-repl-test--with-clean-state
+    (let ((tmp (make-temp-file "claude-repl-state-" nil ".el")))
+      (unwind-protect
+          (progn
+            (with-temp-file tmp
+              (prin1 '(:project-dir "/tmp/merged"
+                       :merge-completed t
+                       :merge-failed t)
+                     (current-buffer)))
+            (cl-letf (((symbol-function 'claude-repl--state-file-for-read)
+                       (lambda (_) tmp))
+                      ((symbol-function 'claude-repl--detect-merge-actually-landed-p)
+                       (lambda (_ws) t)))
+              (claude-repl--register-merged-workspace "merged-ws" "/tmp/merged")
+              (should (eq (claude-repl--ws-get "merged-ws" :merge-failed) t))
+              (should (eq (claude-repl--ws-get "merged-ws" :repl-state) :merge-failed))))
+        (delete-file tmp)))))
+
+(ert-deftest claude-repl-cmd-test-register-merged-workspace/probe-promotes-to-merge-failed ()
+  "When the on-disk state has `:merge-completed t' but no
+`:merge-failed' (legacy snapshot from before the flag existed) AND the
+backward-compat probe reports the merge as NOT landed, the registered
+workspace is promoted to `:repl-state :merge-failed' / `:merge-failed t'
+so the drawer ❌ badge appears on first load even though no prior run
+recorded the failure."
+  (claude-repl-test--with-clean-state
+    (let ((tmp (make-temp-file "claude-repl-state-" nil ".el")))
+      (unwind-protect
+          (progn
+            (with-temp-file tmp
+              (prin1 '(:project-dir "/tmp/merged"
+                       :merge-completed t)
+                     (current-buffer)))
+            (cl-letf (((symbol-function 'claude-repl--state-file-for-read)
+                       (lambda (_) tmp))
+                      ((symbol-function 'claude-repl--detect-merge-actually-landed-p)
+                       (lambda (_ws) nil)))
+              (claude-repl--register-merged-workspace "merged-ws" "/tmp/merged")
+              (should (eq (claude-repl--ws-get "merged-ws" :merge-failed) t))
+              (should (eq (claude-repl--ws-get "merged-ws" :repl-state) :merge-failed))))
+        (delete-file tmp)))))
+
 (ert-deftest claude-repl-cmd-test-state-merge-completed-p/detects-flag ()
   "`--state-merge-completed-p' returns t when state.el carries
 `:merge-completed' t and nil otherwise.  Powers the snapshot loader's

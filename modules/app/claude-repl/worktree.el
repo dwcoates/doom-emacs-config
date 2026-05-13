@@ -1470,8 +1470,11 @@ TARGET-WS is used only for error messages.
 Returns `already-incorporated' (sentinel) when the range is empty —
 the workspace's contribution is already on the parent, so the merge
 is a successful no-op and the caller should proceed with auto-finish.
-Returns nil otherwise.  Signals `user-error' on a cherry-pick conflict
-(after opening magit)."
+Returns `failed' (sentinel) when `git cherry-pick' exits non-zero but
+no CHERRY_PICK_HEAD remains — the commits did not land on the target
+and there is no in-progress conflict to resolve (a silent failure).
+Returns nil on a clean cherry-pick.  Signals `user-error' on a
+cherry-pick conflict (after opening magit)."
   (let* ((range (format "%s..%s" base-branch target-branch))
          (range-count (claude-repl--git-string
                        "-C" root "rev-list" "--count" range)))
@@ -1485,9 +1488,15 @@ Returns nil otherwise.  Signals `user-error' on a cherry-pick conflict
       (claude-repl--log target-ws "cherry-pick-commits target-ws=%s target-branch=%s base=%s range=%s"
                         target-ws target-branch base-branch range)
       (let ((exit-code (claude-repl--git-exit-code root "cherry-pick" "-x" range)))
-        (claude-repl--log target-ws "cherry-pick-commits exit-code=%s" exit-code))
-      (claude-repl--check-cherry-pick-conflict target-ws root target-ws)
-      nil))))
+        (claude-repl--log target-ws "cherry-pick-commits exit-code=%s" exit-code)
+        (claude-repl--check-cherry-pick-conflict target-ws root target-ws)
+        ;; Conflict path signaled above.  Non-zero exit without a
+        ;; CHERRY_PICK_HEAD means git aborted before producing a
+        ;; conflict file (e.g. dirty tree, empty-after-empty commits,
+        ;; -x rejection) — the commits never landed, so surface a
+        ;; `failed' sentinel for the caller to flip the workspace into
+        ;; the :merge-failed bucket.
+        (if (= 0 exit-code) nil 'failed))))))
 
 (defun claude-repl--check-cherry-pick-conflict (ws root target-ws)
   "Check if a cherry-pick conflict exists in repo at ROOT.
@@ -1619,25 +1628,40 @@ doing."
           (let* ((base (claude-repl--cherry-pick-base project-root target-branch))
                  (result (claude-repl--cherry-pick-commits
                           project-root target-ws base target-branch))
-                 (already (eq result 'already-incorporated)))
-            ;; Cherry-pick succeeded (or was a no-op) — record success
+                 (already (eq result 'already-incorporated))
+                 (failed  (eq result 'failed)))
+            ;; Cherry-pick completed without signaling — record bucket
             ;; state before any user-visible side effects so the MERGED
             ;; bucket reflects reality even if a later step (tag/load/
-            ;; magit) fails.
+            ;; magit) fails.  `failed' here means git exited non-zero
+            ;; but no CHERRY_PICK_HEAD remains (silent failure: the
+            ;; commits never landed).  The workspace still lands in
+            ;; MERGED (via `:merge-completed t') so the user sees the
+            ;; attempt, but `:repl-state :merge-failed' surfaces the
+            ;; ❌ badge to distinguish it from a clean merge.
             (claude-repl--ws-put target-ws :merging nil)
             (claude-repl--ws-put target-ws :merge-completed t)
             (claude-repl--ws-put target-ws :merge-completed-at
                                  (float-time))
-            ;; Flip the repl-state to :merged so the 🔀 badge replaces
-            ;; the ❌ that would otherwise appear post-nuke when
-            ;; `--mark-dead-vterm' runs on the (now-vterm-less)
-            ;; preserved hash entry.  The guard in `--mark-dead-vterm'
-            ;; protects this value from being clobbered.
-            (claude-repl--ws-put target-ws :repl-state :merged)
+            (claude-repl--ws-put target-ws :merge-failed (when failed t))
+            ;; Flip the repl-state so the badge replaces the ❌ that
+            ;; would otherwise appear post-nuke when `--mark-dead-vterm'
+            ;; runs on the (now-vterm-less) preserved hash entry.  The
+            ;; guard in `--mark-dead-vterm' protects this value from
+            ;; being clobbered.  `:merge-failed' deliberately also
+            ;; shows ❌ — it's the same visual signal as :dead, but
+            ;; routes through the merged-success precedence rules.
+            (claude-repl--ws-put target-ws :repl-state
+                                 (if failed :merge-failed :merged))
             (claude-repl--ws-put target-ws :claude-state nil)
-            (claude-repl--log target-ws "workspace-merge-do: ws=%s -> :merge-completed t already=%S"
-                              target-ws already)
-            (claude-repl--tag-merge-completion project-root target-ws)
+            (claude-repl--log target-ws "workspace-merge-do: ws=%s -> :merge-completed t already=%S failed=%S"
+                              target-ws already failed)
+            ;; Skip the merge tag when the cherry-pick silently failed
+            ;; — HEAD has not advanced to include TARGET-WS's work, so
+            ;; tagging it as `merge/TARGET-WS' would mislabel an
+            ;; unrelated commit.
+            (unless failed
+              (claude-repl--tag-merge-completion project-root target-ws))
             ;; Compose with `claude-repl--close-workspace' (the named
             ;; workspace-close primitive) for the editor-side teardown
             ;; rather than duplicating its logic here.  Same partition
@@ -1661,10 +1685,15 @@ doing."
             ;; in `--refresh-detail-cache' still resolve.
             (when (fboundp 'claude-repl-drawer--refresh-detail-cache)
               (claude-repl-drawer--refresh-detail-cache target-ws))
-            (if already
-                (message "Workspace '%s' was already merged into '%s' — merged."
-                         target-ws current-ws)
-              (message "Merged workspace '%s' -> '%s'." target-ws current-ws))
+            (cond
+             (failed
+              (message "Cherry-pick of workspace '%s' into '%s' reported failure — see drawer ❌ badge."
+                       target-ws current-ws))
+             (already
+              (message "Workspace '%s' was already merged into '%s' — merged."
+                       target-ws current-ws))
+             (t
+              (message "Merged workspace '%s' -> '%s'." target-ws current-ws)))
             (load-file claude-repl--config-file)
             (unless silent
               (claude-repl--show-and-refresh-magit-status project-root)))
@@ -1738,6 +1767,68 @@ session (no parent dir exists to find), so the sentinel is safe."
   "Return non-nil when an `:branch-merged' refresh process is live for WS."
   (when-let ((proc (claude-repl--ws-get ws :merge-proc)))
     (process-live-p proc)))
+
+(defun claude-repl--detect-merge-actually-landed-p (ws)
+  "Return non-nil when WS's branch tip is incorporated in its parent worktree.
+Read by `--register-merged-workspace' at snapshot-load time as a
+backward-compat probe: workspaces that were marked `:merge-completed t'
+under the old flow (which masked silent cherry-pick failures as clean
+merges) can be re-classified as `:merge-failed' on the next claude-repl
+load without the user needing to re-run the merge.
+
+Resolves the parent worktree via WS's `:source-ws-dir' and inspects
+its HEAD log for cherry-pick `-x' annotations referencing every commit
+on WS's branch ahead of the parent.  All present → merge landed
+(returns t); any missing → merge silently failed (returns nil).
+
+Defaults to t (treats unknown as merged) when any input cannot be
+resolved (missing project-dir, missing source-ws-dir, missing branch,
+or any git error).  The safe default is to leave pre-existing
+successes alone — false positives here would flip a long-standing
+clean merge to the ❌ badge, which is worse than failing to detect a
+genuine silent failure."
+  (let* ((project-dir (claude-repl--ws-get ws :project-dir))
+         (parent-dir  (claude-repl--ws-get ws :source-ws-dir)))
+    (cond
+     ((not (and project-dir (file-directory-p project-dir))) t)
+     ((not (and parent-dir  (file-directory-p parent-dir)))  t)
+     (t
+      (condition-case err
+          (let* ((target-branch
+                  (claude-repl--git-string-quiet
+                   "-C" project-dir "rev-parse" "--abbrev-ref" "HEAD"))
+                 (valid-branch (and (stringp target-branch)
+                                    (not (string-empty-p target-branch))
+                                    (not (string-prefix-p "fatal" target-branch))
+                                    (not (string= target-branch "HEAD")))))
+            (cond
+             ((not valid-branch) t)
+             (t
+              (let* ((range (format "HEAD...%s" target-branch))
+                     (target-only (split-string
+                                   (claude-repl--git-string-quiet
+                                    "-C" parent-dir
+                                    "log" "--right-only" "--pretty=%H" "--no-merges"
+                                    range)
+                                   "\n" t))
+                     (parent-log (claude-repl--git-string-quiet
+                                  "-C" parent-dir
+                                  "log" "--left-only" "--pretty=%B"
+                                  range))
+                     (incorporated
+                      (claude-repl--extract-cherry-pick-shas parent-log))
+                     (landed
+                      (or (null target-only)
+                          (cl-every (lambda (sha) (member sha incorporated))
+                                    target-only))))
+                (claude-repl--log ws "detect-merge-actually-landed: ws=%s parent=%s target=%s target-only=%d landed=%s"
+                                  ws parent-dir target-branch
+                                  (length target-only) landed)
+                landed))))
+        (error
+         (claude-repl--log ws "detect-merge-actually-landed: err ws=%s err=%S — defaulting to t"
+                           ws err)
+         t))))))
 
 (defun claude-repl--ws-merged-p (ws)
   "Return non-nil when WS's branch is detected as merged into its immediate parent.

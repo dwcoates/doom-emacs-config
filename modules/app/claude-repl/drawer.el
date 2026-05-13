@@ -67,19 +67,24 @@ the indent change — no other knobs needed."
       (eval (car (get 'claude-repl-drawer-width-fraction 'standard-value))))
 
 (defcustom claude-repl-drawer-state-icons
-  '((:init        . "⏳")
-    (:thinking    . "⌛")
-    (:done        . "✅")
-    (:idle        . "💤")
-    (:permission  . "❓")
-    (:stop-failed . "❗")
-    (:dead        . "❌")
-    (:merged      . "🔀"))
+  '((:init         . "⏳")
+    (:thinking     . "⌛")
+    (:done         . "✅")
+    (:idle         . "💤")
+    (:permission   . "❓")
+    (:stop-failed  . "❗")
+    (:dead         . "❌")
+    (:merged       . "🔀")
+    (:merge-failed . "❌"))
   "Alist mapping claude-state keyword to an indicator glyph.
 The :dead entry is used when `:repl-state' is `:dead' (overrides
 :claude-state).  The :merged entry is used when `:repl-state' is
 `:merged' and takes precedence over `:dead' (so a merged workspace
-whose vterm has since died still reads as merged).  Unrecognized
+whose vterm has since died still reads as merged).  The :merge-failed
+entry is used when `:repl-state' is `:merge-failed' (a workspace that
+landed in the MERGED bucket but whose cherry-pick reported failure);
+it shares the ❌ glyph with :dead since both signal failure, but
+remains routed under MERGED via `:merge-completed'.  Unrecognized
 values fall through to a single middot placeholder, used for
 workspaces registered but with no live session."
   :type '(alist :key-type symbol :value-type string)
@@ -571,10 +576,15 @@ CHILDREN is a list of trees.  Roots and siblings are sorted by
 (defun claude-repl-drawer--state-glyph (ws)
   "Return the indicator glyph for workspace WS.
 `:repl-state' `:merged' takes precedence over `:dead' (so a merged
-workspace whose vterm has since died still shows the 🔀 badge)."
+workspace whose vterm has since died still shows the 🔀 badge).
+`:repl-state' `:merge-failed' surfaces the ❌ badge while remaining in
+the MERGED bucket — a workspace whose cherry-pick reported failure but
+which the merge flow still bookkept as completed."
   (let ((repl-state (claude-repl--ws-get ws :repl-state))
         (claude-state (claude-repl--ws-get ws :claude-state)))
-    (or (and (eq repl-state :merged)
+    (or (and (eq repl-state :merge-failed)
+             (alist-get :merge-failed claude-repl-drawer-state-icons))
+        (and (eq repl-state :merged)
              (alist-get :merged claude-repl-drawer-state-icons))
         (and (eq repl-state :dead)
              (alist-get :dead claude-repl-drawer-state-icons))
@@ -595,14 +605,15 @@ workspaces don't carry a phantom space."
 
 (defun claude-repl-drawer--name-face (ws)
   "Return the face spec for WS's name, colored by claude-state.
-:dead and :merged fall through to the default workspace-name face
-(the existing hidden/dim treatment provides the muting).
-Unrecognized states render as plain bold."
+:dead, :merged, and :merge-failed fall through to the default
+workspace-name face (the existing hidden/dim treatment provides the
+muting).  Unrecognized states render as plain bold."
   (let* ((repl-state   (claude-repl--ws-get ws :repl-state))
          (claude-state (claude-repl--ws-get ws :claude-state))
          (color (cond
-                 ((eq repl-state :merged)      nil)
-                 ((eq repl-state :dead)        nil)
+                 ((eq repl-state :merged)       nil)
+                 ((eq repl-state :merge-failed) nil)
+                 ((eq repl-state :dead)         nil)
                  ((eq claude-state :init)      claude-repl--color-init-blue)
                  ((eq claude-state :thinking)  claude-repl--color-thinking-red)
                  ((memq claude-state '(:done :permission))
@@ -974,10 +985,11 @@ No-op when the selected window is not a side window."
 
 (defun claude-repl-drawer--reactivate-merged (ws)
   "Reactivate a MERGED workspace WS so it becomes a usable persp again.
-Clears the `:merge-completed' / `:merge-completed-at' flags and the
-`:merged' repl-state so the drawer stops bucketing WS under MERGED,
-persists the cleared flags via `--state-save', then re-establishes
-the persp + Claude session via `--establish-workspace'.
+Clears the `:merge-completed' / `:merge-completed-at' / `:merge-failed'
+flags and the `:merged'/`:merge-failed' repl-state so the drawer stops
+bucketing WS under MERGED, persists the cleared flags via
+`--state-save', then re-establishes the persp + Claude session via
+`--establish-workspace'.
 
 The git cherry-pick performed by the original merge is not reverted
 — reactivation only un-marks the workspace as completed in the UI."
@@ -988,6 +1000,7 @@ The git cherry-pick performed by the original merge is not reverted
     (claude-repl--log ws "drawer-visit: reactivating MERGED ws=%s dir=%s" ws dir)
     (claude-repl--ws-put ws :merge-completed nil)
     (claude-repl--ws-put ws :merge-completed-at nil)
+    (claude-repl--ws-put ws :merge-failed nil)
     (claude-repl--ws-put ws :repl-state nil)
     (claude-repl--state-save ws)
     (claude-repl-drawer--leave-side-window-before-switch)

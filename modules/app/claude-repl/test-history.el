@@ -622,6 +622,26 @@ explicitly `x's it (which routes to `--finish-workspace')."
               (should (= (plist-get data :merge-completed-at) 1234567890.0))))
         (delete-directory tmpdir t)))))
 
+(ert-deftest claude-repl-test-state-save-includes-merge-failed ()
+  "state-save serializes `:merge-failed' so a silent-failure merge ws
+keeps its ❌ badge in the MERGED bucket after restart instead of
+regressing to the clean :merged 🔀 badge."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-mf-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :merge-completed t)
+            (claude-repl--ws-put "ws" :merge-failed t)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (claude-repl--state-file tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (eq (plist-get data :merge-failed) t))))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest claude-repl-test-state-save-includes-worktree-p ()
   "state-save serializes `:worktree-p' so a post-restart MERGED entry's
 `x' (-> `--finish-workspace') still knows to remove the git worktree."

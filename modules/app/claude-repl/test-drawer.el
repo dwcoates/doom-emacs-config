@@ -2198,6 +2198,45 @@ already-bound symbols and palette tweaks would require an Emacs restart."
     (should (equal (claude-repl-drawer--state-glyph "merged-ws")
                    (alist-get :merged claude-repl-drawer-state-icons)))))
 
+(ert-deftest claude-repl-drawer-test-state-glyph-merge-failed-surfaces-x ()
+  ":repl-state :merge-failed renders the ❌ glyph (failed cherry-pick
+that still lives in the MERGED bucket).  Distinct mapping from
+:merged so the user can visually differentiate a clean merge from a
+silent-failure merge in the drawer."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "broken-merge"
+                                       :repl-state :merge-failed)
+    (should (equal (claude-repl-drawer--state-glyph "broken-merge")
+                   (alist-get :merge-failed claude-repl-drawer-state-icons)))))
+
+(ert-deftest claude-repl-drawer-test-state-glyph-merge-failed-overrides-claude-state ()
+  ":repl-state :merge-failed takes precedence over :claude-state for
+the glyph — a post-merge silent-failure workspace whose vterm is
+stale still reads as ❌-merge-failed rather than its claude-state
+mood."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws"
+                                       :claude-state :thinking
+                                       :repl-state :merge-failed)
+    (should (equal (claude-repl-drawer--state-glyph "ws")
+                   (alist-get :merge-failed claude-repl-drawer-state-icons)))))
+
+(ert-deftest claude-repl-drawer-test-state-icons-include-merge-failed ()
+  "`claude-repl-drawer-state-icons' includes a :merge-failed entry."
+  (should (equal (alist-get :merge-failed claude-repl-drawer-state-icons) "❌")))
+
+(ert-deftest claude-repl-drawer-test-workspace-section-merge-failed-routes-to-merged ()
+  "A workspace flagged with :merge-completed t still lands in the
+:merged bucket even when its :repl-state is :merge-failed.  The
+section bucket is driven exclusively by `:merge-completed' — the
+:repl-state distinction is purely visual (badge selection in
+`--state-glyph')."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws"
+                                       :merge-completed t
+                                       :repl-state :merge-failed)
+    (should (eq (claude-repl-drawer--workspace-section "ws") :merged))))
+
 (ert-deftest claude-repl-drawer-test-state-glyph-merged-overrides-dead ()
   ":repl-state :merged would normally not coexist with :dead, but if
 both somehow appear in a stale plist, :merged wins so the merge badge

@@ -1472,7 +1472,18 @@ Idempotent: a subsequent call overwrites the relevant plist fields.
 Keys populated when present in the state file:
   :project-dir, :priority, :source-ws-dir, :last-prompt-summary,
   :last-prompt-time, :worktree-p, :merge-completed,
-  :merge-completed-at."
+  :merge-completed-at, :merge-failed.
+
+Runs `claude-repl--detect-merge-actually-landed-p' against git reality
+to reclassify pre-:merge-failed workspaces: under the old flow, a
+silent cherry-pick failure still wrote `:merge-completed t' without a
+`:merge-failed' flag.  On load, the probe reads the parent worktree's
+HEAD log for cherry-pick -x annotations of every target-branch commit;
+any missing commit promotes the saved state to `:merge-failed t' /
+`:repl-state :merge-failed' so the drawer surfaces the ❌ badge for
+the first time.  Clean merges set `:repl-state :merged' so the 🔀
+badge re-appears post-restart (the snapshot loader does not pass
+through `--initialize-ws-env' for merged entries)."
   (claude-repl--with-error-logging (format "register-merged-workspace[%s]" ws)
     (let* ((state-file (claude-repl--state-file-for-read dir))
            (saved (and state-file
@@ -1490,7 +1501,15 @@ Keys populated when present in the state file:
         (dolist (key '(:priority :source-ws-dir :last-prompt-summary
                        :last-prompt-time :worktree-p :merge-completed-at))
           (when-let ((v (plist-get saved key)))
-            (claude-repl--ws-put ws key v)))))))
+            (claude-repl--ws-put ws key v))))
+      (let* ((saved-failed (and saved (eq (plist-get saved :merge-failed) t)))
+             (landed (claude-repl--detect-merge-actually-landed-p ws))
+             (failed (or saved-failed (not landed))))
+        (claude-repl--log ws "register-merged: ws=%s saved-failed=%s landed=%s -> failed=%s"
+                          ws saved-failed landed failed)
+        (claude-repl--ws-put ws :merge-failed (when failed t))
+        (claude-repl--ws-put ws :repl-state
+                             (if failed :merge-failed :merged))))))
 
 ;;;; Project-switch wrapper
 

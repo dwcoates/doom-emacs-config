@@ -1389,6 +1389,50 @@ so the deprio-hide marker survives Emacs restart."
             (should (eq (claude-repl--ws-get "ws1" :repl-state) :hidden)))
         (delete-directory tmpdir t)))))
 
+(ert-deftest claude-repl-test-initialize-ws-env-restores-merge-completed-as-merged ()
+  "initialize-ws-env reads `:merge-completed t' from the saved file and
+restores `:repl-state :merged' so the 🔀 badge re-appears post-restart.
+Absence of `:merge-failed' takes the success path."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-mc-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (claude-repl--state-file (claude-repl--path-canonical tmpdir))
+             `(:project-dir ,(claude-repl--path-canonical tmpdir)
+               :active-env :bare-metal
+               :merge-completed t
+               :bare-metal nil
+               :sandbox nil))
+            (claude-repl--initialize-ws-env "ws1" tmpdir)
+            (should (eq (claude-repl--ws-get "ws1" :merge-completed) t))
+            (should (eq (claude-repl--ws-get "ws1" :repl-state) :merged))
+            (should-not (claude-repl--ws-get "ws1" :merge-failed)))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-initialize-ws-env-restores-merge-failed-as-merge-failed ()
+  "initialize-ws-env reads `:merge-failed t' from the saved file and
+restores `:repl-state :merge-failed' so the ❌ badge re-appears
+post-restart in the MERGED bucket (preserving the silent-failure
+distinction across restarts)."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-mf-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (claude-repl--state-file (claude-repl--path-canonical tmpdir))
+             `(:project-dir ,(claude-repl--path-canonical tmpdir)
+               :active-env :bare-metal
+               :merge-completed t
+               :merge-failed t
+               :bare-metal nil
+               :sandbox nil))
+            (claude-repl--initialize-ws-env "ws1" tmpdir)
+            (should (eq (claude-repl--ws-get "ws1" :merge-completed) t))
+            (should (eq (claude-repl--ws-get "ws1" :merge-failed) t))
+            (should (eq (claude-repl--ws-get "ws1" :repl-state) :merge-failed)))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest claude-repl-test-initialize-ws-env-skips-non-persistable-repl-state ()
   "initialize-ws-env ignores `:repl-state :dead' / nil from the saved file
 — those are not desired-state hints and should not pin behavior on

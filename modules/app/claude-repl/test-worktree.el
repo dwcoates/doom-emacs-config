@@ -1108,6 +1108,88 @@ existing worktree."
       (let ((fork (+dwc/workspace-merge--fork repo "branch-c")))
         (should (equal fork sha-b1))))))
 
+;;;; ---- Tests: detect-merge-actually-landed-p ----
+
+(ert-deftest claude-repl-test-detect-merge-actually-landed-p-defaults-true-no-project-dir ()
+  "Returns t when WS has no :project-dir — backward-compat probe must
+default to landed/success rather than flipping pre-existing successes
+to ❌ when the worktree dir is gone or unset."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" '() claude-repl--workspaces)
+    (should (claude-repl--detect-merge-actually-landed-p "ws"))))
+
+(ert-deftest claude-repl-test-detect-merge-actually-landed-p-defaults-true-no-source-ws-dir ()
+  "Returns t when WS has no :source-ws-dir — the probe can't reach the
+parent worktree to inspect cherry-pick annotations, so it defaults to
+landed/success rather than slandering a clean merge."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-git-repo project
+      (puthash "ws" `(:project-dir ,project) claude-repl--workspaces)
+      (should (claude-repl--detect-merge-actually-landed-p "ws")))))
+
+(ert-deftest claude-repl-test-detect-merge-actually-landed-p-true-on-clean-merge ()
+  "Returns t when every commit on WS's branch is referenced via
+cherry-pick -x in the parent's HEAD log.  Simulates a successful prior
+merge: parent worktree is the SAME repo as the workspace worktree
+\(same .git, two branches), so HEAD's log contains the picks."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-git-repo repo
+      (let ((sha-m (claude-repl-test--git-commit repo "M" "base")))
+        (claude-repl-test--git-checkout repo "feature" t)
+        (claude-repl-test--git-commit repo "F1" "f1")
+        (let ((sha-f1 (string-trim
+                       (shell-command-to-string
+                        (format "git -C %s rev-parse HEAD"
+                                (shell-quote-argument repo))))))
+          (claude-repl-test--git-checkout repo "master")
+          (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
+          (ignore sha-m)
+          ;; Workspace's :project-dir is a separate dir checked out to
+          ;; "feature".  Cleanest: use a worktree of the same repo.
+          (let ((wt (make-temp-file "ws-wt-" t)))
+            (unwind-protect
+                (progn
+                  (delete-directory wt t)
+                  (call-process "git" nil nil nil "-C" repo
+                                "worktree" "add" wt "feature")
+                  (puthash "ws"
+                           `(:project-dir ,wt :source-ws-dir ,repo)
+                           claude-repl--workspaces)
+                  (should (claude-repl--detect-merge-actually-landed-p "ws")))
+              (ignore-errors
+                (call-process "git" nil nil nil "-C" repo
+                              "worktree" "remove" "-f" wt))
+              (when (file-directory-p wt) (delete-directory wt t)))))))))
+
+(ert-deftest claude-repl-test-detect-merge-actually-landed-p-false-on-missing-pick ()
+  "Returns nil when WS's branch has commits that are NOT referenced via
+cherry-pick -x in the parent's HEAD log — the silent-failure case the
+backward-compat probe is designed to detect."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-git-repo repo
+      (claude-repl-test--git-commit repo "M" "base")
+      (claude-repl-test--git-checkout repo "feature" t)
+      (claude-repl-test--git-commit repo "F1" "f1")
+      (claude-repl-test--git-checkout repo "master")
+      ;; Note: no cherry-pick has happened — F1 is on `feature' but
+      ;; nothing on master references it.  Simulates the silent-failure
+      ;; case: workspace was marked :merge-completed t but its commits
+      ;; never actually landed.
+      (let ((wt (make-temp-file "ws-wt-" t)))
+        (unwind-protect
+            (progn
+              (delete-directory wt t)
+              (call-process "git" nil nil nil "-C" repo
+                            "worktree" "add" wt "feature")
+              (puthash "ws"
+                       `(:project-dir ,wt :source-ws-dir ,repo)
+                       claude-repl--workspaces)
+              (should-not (claude-repl--detect-merge-actually-landed-p "ws")))
+          (ignore-errors
+            (call-process "git" nil nil nil "-C" repo
+                          "worktree" "remove" "-f" wt))
+          (when (file-directory-p wt) (delete-directory wt t)))))))
+
 ;;;; ---- Tests: cherry-pick-commits ----
 
 (ert-deftest claude-repl-test-cherry-pick-commits-empty-range-returns-sentinel ()
@@ -1136,6 +1218,29 @@ to auto-finish."
                   (shell-command-to-string
                    (format "git -C %s log --oneline -1" (shell-quote-argument repo))))))
         (should (string-match-p "F1" log))))))
+
+(ert-deftest claude-repl-test-cherry-pick-commits-silent-failure-returns-failed ()
+  "When `git cherry-pick' exits non-zero but no CHERRY_PICK_HEAD is left
+behind (silent failure — commits didn't land and no conflict resolution
+is in flight), `--cherry-pick-commits' returns `failed'.  Simulated by
+stubbing `--git-exit-code' to a non-zero return for the cherry-pick step
+while leaving `--check-cherry-pick-conflict' a no-op (no CHERRY_PICK_HEAD
+on disk).  The other git helpers run for real."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((sha-m (claude-repl-test--git-commit repo "M" "base")))
+      (claude-repl-test--git-checkout repo "feature" t)
+      (claude-repl-test--git-commit repo "F1" "f1")
+      (claude-repl-test--git-checkout repo "master")
+      (cl-letf* ((orig-exit (symbol-function 'claude-repl--git-exit-code))
+                 ((symbol-function 'claude-repl--git-exit-code)
+                  (lambda (root &rest args)
+                    (if (and (stringp (car args))
+                             (string= (car args) "cherry-pick"))
+                        128
+                      (apply orig-exit root args)))))
+        (should (eq (claude-repl--cherry-pick-commits
+                     repo "feature" sha-m "feature")
+                    'failed))))))
 
 (ert-deftest claude-repl-test-cherry-pick-commits-conflict-signals ()
   "Cherry-pick conflict opens magit and signals user-error."
@@ -3452,6 +3557,73 @@ the target workspace before the auto-finish tear-down runs.  Stubs
                ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
       (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
       (should (eq (claude-repl--ws-get "other-ws" :merge-completed) t)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-sets-merge-failed-on-silent-failure ()
+  "When `--cherry-pick-commits' returns `failed' (silent failure: exit
+non-zero, no CHERRY_PICK_HEAD), `--workspace-merge-do' still routes the
+workspace into the MERGED bucket via `:merge-completed t' but flips
+`:repl-state' to `:merge-failed' (so the drawer surfaces ❌ instead of
+🔀) and records `:merge-failed t' for persistence."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits)
+                (lambda (_dir _ws _base _br) 'failed))
+               ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+               ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
+               ((symbol-function 'load-file) #'ignore)
+               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+      (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+      (should (eq (claude-repl--ws-get "other-ws" :repl-state) :merge-failed))
+      (should (eq (claude-repl--ws-get "other-ws" :merge-completed) t))
+      (should (eq (claude-repl--ws-get "other-ws" :merge-failed) t)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-skips-tag-on-silent-failure ()
+  "When the cherry-pick silently failed, HEAD has not advanced to include
+the target workspace's work — `--tag-merge-completion' MUST NOT run, or
+the `merge/<ws>' tag would mislabel an unrelated commit."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (let ((tagged nil))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits)
+                  (lambda (_dir _ws _base _br) 'failed))
+                 ((symbol-function 'claude-repl--tag-merge-completion)
+                  (lambda (_root _ws) (setq tagged t)))
+                 ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
+                 ((symbol-function 'load-file) #'ignore)
+                 ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+        (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+        (should-not tagged)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-clears-merge-failed-on-success ()
+  "A successful merge must explicitly clear `:merge-failed' (in case a
+prior attempt set it).  Without this, a re-run from a silent-failure
+state would leave `:merge-failed t' sticky and the drawer would keep
+showing ❌ despite the latest run landing cleanly."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '(:merge-failed t) claude-repl--workspaces)
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br) nil))
+               ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+               ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
+               ((symbol-function 'load-file) #'ignore)
+               ((symbol-function 'claude-repl--show-and-refresh-magit-status) #'ignore))
+      (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+      (should-not (claude-repl--ws-get "other-ws" :merge-failed))
+      (should (eq (claude-repl--ws-get "other-ws" :repl-state) :merged)))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-sets-repl-state-merged-on-success ()
   "After a successful cherry-pick, `:repl-state' is set to `:merged'

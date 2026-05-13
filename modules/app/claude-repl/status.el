@@ -1215,17 +1215,24 @@ documented lifecycle-cleanup exception to the sentinel-only writer
 rule: no hook will ever fire again for a dead process, so Emacs is
 the only observer that can reset state.
 
-No-op in three cases:
+No-op in four cases:
 - `:repl-state' is already `:dead' (idempotent on the poll path).
 - `:repl-state' is `:merged' — the workspace was nuked after a
   successful merge and `:merged' takes precedence over `:dead'.
   Without this guard, the next poll would clobber the merge badge.
+- `:repl-state' is `:merge-failed' — the workspace was nuked after
+  a silent-failure merge and `:merge-failed' is the canonical badge
+  for that state (also ❌, but routed under MERGED, not orphaned as
+  :dead).  Without this guard, the next poll would re-classify the
+  workspace as plain `:dead' and the MERGED-section semantics would
+  be lost.
 - `:claude-state' is `:init' — Claude is starting, the vterm process
   may not have reached running state yet, and observing no process
   does not mean dead.  The session-start hook will transition away
   from `:init' shortly; until then the timer leaves things alone."
   (unless (or (eq (claude-repl--ws-repl-state ws) :dead)
               (eq (claude-repl--ws-repl-state ws) :merged)
+              (eq (claude-repl--ws-repl-state ws) :merge-failed)
               (eq (claude-repl--ws-claude-state ws) :init))
     (claude-repl--log ws "mark-dead-vterm: ws=%s claude-state=%s -> :dead"
                       ws (claude-repl--ws-claude-state ws))
