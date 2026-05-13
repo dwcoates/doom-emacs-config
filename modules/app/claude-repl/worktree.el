@@ -1041,6 +1041,26 @@ do not need to track the owning repository separately."
     (claude-repl--log nil "finish-workspace worktree-remove: %s" result))
   (projectile-remove-known-project (file-name-as-directory project-dir)))
 
+(defun claude-repl--close-workspace (ws &optional preserve-entry)
+  "Close the editor workspace WS: kill session, buffers, persp.
+Editor-only teardown — tears down vterm session, workspace buffers,
+the Doom perspective, and (unless PRESERVE-ENTRY is non-nil) the
+`claude-repl--workspaces' hashmap entry.  The git worktree on disk
+is intentionally left in place; full teardown including the worktree
+is `claude-repl--finish-workspace's job.
+
+When PRESERVE-ENTRY is non-nil, the hashmap entry survives close so
+callers that need to keep rendering WS afterwards (e.g. the merge-
+completed bucket in the drawer) can continue to do so until an
+explicit `finish' fires.
+
+Thin wrapper over `claude-repl--nuke-one-workspace' — the same teardown
+primitive used by the interactive nuke/kill commands.  Naming this
+entry point separately lets `claude-repl--handle-close-command' and
+`claude-repl--workspace-merge-do' both spell close-as-composition at
+their call sites without each duplicating the underlying primitive."
+  (claude-repl--nuke-one-workspace ws preserve-entry))
+
 (defun claude-repl--finish-workspace (ws)
   "Tear down workspace WS: kill Claude session, remove state, kill persp, remove worktree.
 WS may be a full branch name (e.g. DWC/foo) or a bare workspace name (e.g. foo);
@@ -1216,6 +1236,17 @@ empty, the default applies (HEAD for forks,
     (claude-repl--log ws "workspace-commands-file finish: ws=%s" ws)
     (claude-repl--finish-workspace ws)))
 
+(defun claude-repl--handle-close-command (cmd)
+  "Handle a \"close\" workspace command CMD.
+Closes the editor workspace via `claude-repl--close-workspace': kills
+the Claude session, workspace buffers, and Doom perspective; drops the
+hashmap entry.  Does NOT cherry-pick, tag, reload config, switch focus,
+or remove the git worktree from disk — those are the merge/finish paths
+respectively.  Skill-invoked from `/workspace-close'."
+  (let ((ws (alist-get 'workspace cmd)))
+    (claude-repl--log ws "workspace-commands-file close: ws=%s" ws)
+    (claude-repl--close-workspace ws)))
+
 (defun claude-repl--handle-clipboard-command (cmd)
   "Handle a \"clipboard\" workspace command CMD.
 Stores the `text' field on workspace WS at `:clipboard'.  The OS
@@ -1303,6 +1334,9 @@ unchanged otherwise)."
       create-delay)
      ((string= type "finish")
       (claude-repl--handle-finish-command cmd)
+      create-delay)
+     ((string= type "close")
+      (claude-repl--handle-close-command cmd)
       create-delay)
      ((string= type "clipboard")
       (claude-repl--handle-clipboard-command cmd)
@@ -1604,12 +1638,20 @@ doing."
             (claude-repl--log target-ws "workspace-merge-do: ws=%s -> :merge-completed t already=%S"
                               target-ws already)
             (claude-repl--tag-merge-completion project-root target-ws)
-            ;; Tear down session/persp/buffers but keep the hash entry so
-            ;; the drawer's MERGED bucket can render this ws until the
-            ;; user explicitly `x' (which runs `--finish-workspace' and
-            ;; removes the worktree).  The worktree directory on disk
-            ;; is intentionally preserved here.
-            (claude-repl--nuke-one-workspace target-ws 'preserve-entry)
+            ;; Compose with `claude-repl--close-workspace' (the named
+            ;; workspace-close primitive) for the editor-side teardown
+            ;; rather than duplicating its logic here.  Same partition
+            ;; as the `/workspace-close' skill path: kill session,
+            ;; buffers, perspective.  Merge-specific concerns above
+            ;; (cherry-pick, tag, repl-state bookkeeping) and below
+            ;; (drawer refresh, config reload, magit pop) stay outside
+            ;; `--close-workspace' so the close primitive remains a
+            ;; pure editor-state teardown.  `preserve-entry' is the
+            ;; merge-only flag: the hashmap entry survives so the
+            ;; drawer's MERGED bucket can render this ws until the
+            ;; user explicitly `x' (which runs `--finish-workspace'
+            ;; and removes the worktree from disk).
+            (claude-repl--close-workspace target-ws 'preserve-entry)
             ;; Re-fetch the drawer's `:detail-*' cache for the merged
             ;; workspace so the MERGED bucket's expanded view reflects
             ;; post-merge git state (ahead-master/source, dirty count,

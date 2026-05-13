@@ -416,6 +416,16 @@ Returns the full SHA of the new commit."
           (should (= new-delay 10))
           (should (= (length handled) 1)))))))
 
+(ert-deftest claude-repl-test-dispatch-workspace-command-close ()
+  "Close commands route to the close handler and do not change delay."
+  (let ((handled nil))
+    (cl-letf (((symbol-function 'claude-repl--handle-close-command)
+               (lambda (cmd) (push cmd handled))))
+      (let ((cmd '((type . "close") (workspace . "ws1"))))
+        (let ((new-delay (claude-repl--dispatch-workspace-command cmd 10)))
+          (should (= new-delay 10))
+          (should (= (length handled) 1)))))))
+
 (ert-deftest claude-repl-test-dispatch-workspace-command-unknown ()
   "Unknown command type does not change delay and does not error."
   (let ((new-delay (claude-repl--dispatch-workspace-command
@@ -466,6 +476,62 @@ Returns the full SHA of the new commit."
     (claude-repl--handle-clipboard-command
      '((workspace . "ws1") (text . "second")))
     (should (equal (claude-repl--ws-get "ws1" :clipboard) "second"))))
+
+;;;; ---- Tests: close-workspace ----
+
+(ert-deftest claude-repl-test-close-workspace-delegates-to-nuke ()
+  "`--close-workspace' delegates to `--nuke-one-workspace' with the same ws."
+  (let ((received :unset))
+    (cl-letf (((symbol-function 'claude-repl--nuke-one-workspace)
+               (lambda (ws &optional _preserve)
+                 (setq received ws))))
+      (claude-repl--close-workspace "feature-one")
+      (should (equal received "feature-one")))))
+
+(ert-deftest claude-repl-test-close-workspace-default-drops-entry ()
+  "`--close-workspace' without PRESERVE-ENTRY passes nil to the nuke primitive.
+Standalone close (skill dispatch path) should fully drop the registry
+entry — merge's preserve-entry behavior is opt-in only."
+  (let ((received-preserve :unset))
+    (cl-letf (((symbol-function 'claude-repl--nuke-one-workspace)
+               (lambda (_ws &optional preserve)
+                 (setq received-preserve preserve))))
+      (claude-repl--close-workspace "feature-one")
+      (should (null received-preserve)))))
+
+(ert-deftest claude-repl-test-close-workspace-preserve-entry-passes-through ()
+  "`--close-workspace' threads PRESERVE-ENTRY to the nuke primitive.
+This is the merge-completion path: the hashmap entry must survive close
+so the drawer's MERGED bucket can keep rendering until explicit finish."
+  (let ((received-preserve :unset))
+    (cl-letf (((symbol-function 'claude-repl--nuke-one-workspace)
+               (lambda (_ws &optional preserve)
+                 (setq received-preserve preserve))))
+      (claude-repl--close-workspace "feature-one" 'preserve-entry)
+      (should (eq received-preserve 'preserve-entry)))))
+
+;;;; ---- Tests: handle-close-command ----
+
+(ert-deftest claude-repl-test-handle-close-command-invokes-close ()
+  "`--handle-close-command' invokes `--close-workspace' with the ws from CMD."
+  (let ((received :unset))
+    (cl-letf (((symbol-function 'claude-repl--close-workspace)
+               (lambda (ws &optional _preserve) (setq received ws))))
+      (claude-repl--handle-close-command
+       '((type . "close") (workspace . "feature-one")))
+      (should (equal received "feature-one")))))
+
+(ert-deftest claude-repl-test-handle-close-command-no-preserve ()
+  "`--handle-close-command' does NOT pass `preserve-entry'.
+Skill-invoked close fully drops the workspace; preserve-entry is the
+merge-completion-only behavior owned by `--workspace-merge-do'."
+  (let ((received-preserve :unset))
+    (cl-letf (((symbol-function 'claude-repl--close-workspace)
+               (lambda (_ws &optional preserve)
+                 (setq received-preserve preserve))))
+      (claude-repl--handle-close-command
+       '((type . "close") (workspace . "feature-one")))
+      (should (null received-preserve)))))
 
 ;;;; ---- Tests: handle-merge-command ----
 
