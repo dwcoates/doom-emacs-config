@@ -1420,22 +1420,40 @@ selected tab dims to the normal selected face like other states."
       (claude-repl--update-ws-state "ws1")
       (should (eq (claude-repl--ws-state "ws1") :thinking)))))
 
-(ert-deftest claude-repl-test-update-ws-state-done-clean-acked-to-idle ()
-  ":done + clean + :done-acked → :idle (user has seen it; nothing outstanding)."
+(ert-deftest claude-repl-test-update-ws-state-done-clean-acked-dwell-elapsed-to-idle ()
+  ":done + clean + acked + dwell elapsed → :idle (user has dwelled long enough)."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :done)
     (claude-repl--ws-put "ws1" :done-acked t)
+    ;; Focus started well in the past so dwell exceeds delay.
+    (claude-repl--ws-put "ws1" :done-acked-at
+                         (- (float-time) (+ claude-repl-done-idle-delay 1)))
     (claude-repl--ws-put "ws1" :git-clean 'clean)
     (claude-repl--update-ws-state "ws1")
     (should (eq (claude-repl--ws-claude-state "ws1") :idle))
-    ;; :done-acked clears so a future :done cycle starts unacknowledged.
-    (should (null (claude-repl--ws-get "ws1" :done-acked)))))
+    ;; Both ack flags clear so a future :done cycle starts unacknowledged.
+    (should (null (claude-repl--ws-get "ws1" :done-acked)))
+    (should (null (claude-repl--ws-get "ws1" :done-acked-at)))))
+
+(ert-deftest claude-repl-test-update-ws-state-done-clean-acked-dwell-not-elapsed-stays-done ()
+  ":done + clean + acked + dwell NOT elapsed stays :done — user just arrived."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :done)
+    (claude-repl--ws-put "ws1" :done-acked t)
+    ;; Focus started right now — dwell is essentially zero.
+    (claude-repl--ws-put "ws1" :done-acked-at (float-time))
+    (claude-repl--ws-put "ws1" :git-clean 'clean)
+    (claude-repl--update-ws-state "ws1")
+    (should (eq (claude-repl--ws-claude-state "ws1") :done))
+    ;; Timestamp preserved so the countdown continues on the next tick.
+    (should (claude-repl--ws-get "ws1" :done-acked-at))))
 
 (ert-deftest claude-repl-test-update-ws-state-done-clean-not-acked-stays-done ()
   ":done + clean + NOT acked stays :done — wait for user to view."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :done)
     (claude-repl--ws-put "ws1" :done-acked nil)
+    (claude-repl--ws-put "ws1" :done-acked-at nil)
     (claude-repl--ws-put "ws1" :git-clean 'clean)
     (claude-repl--update-ws-state "ws1")
     (should (eq (claude-repl--ws-claude-state "ws1") :done))))
@@ -1445,6 +1463,8 @@ selected tab dims to the normal selected face like other states."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "ws1" :done)
     (claude-repl--ws-put "ws1" :done-acked t)
+    (claude-repl--ws-put "ws1" :done-acked-at
+                         (- (float-time) (+ claude-repl-done-idle-delay 1)))
     (claude-repl--ws-put "ws1" :git-clean 'dirty)
     (claude-repl--update-ws-state "ws1")
     (should (eq (claude-repl--ws-claude-state "ws1") :done))))

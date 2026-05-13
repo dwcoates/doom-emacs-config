@@ -521,17 +521,22 @@ and title-change paths fire for the same turn completion."
 (defun claude-repl--mark-claude-done (ws)
   "Mark WS's claude-state as :done.
 Unconditional: called on every Stop hook.  Also manages the
-`:done-acked' acknowledgment flag (orthogonal to `:repl-state'):
+`:done-acked' acknowledgment flag and `:done-acked-at' focus-start
+timestamp (orthogonal to `:repl-state'):
   - If WS is the current workspace, the user is actively looking at
-    this :done as it arrives — set `:done-acked' to t so the decay
-    timer clears it on the next tick.
-  - Otherwise, clear `:done-acked' to nil so this fresh :done starts
+    this :done as it arrives — set `:done-acked' to t and stamp
+    `:done-acked-at' with the current time so the decay timer can
+    clear it once `claude-repl-done-idle-delay' seconds have
+    elapsed.
+  - Otherwise, clear both flags so this fresh :done starts
     unacknowledged (regardless of any leftover ack from a prior
-    cycle); `on-workspace-switch' flips it to t when the user next
+    cycle); `on-workspace-switch' sets them when the user next
     selects the workspace."
   (claude-repl--log ws "mark-claude-done ws=%s" ws)
   (claude-repl--ws-set-claude-state ws :done)
-  (claude-repl--ws-put ws :done-acked (claude-repl--current-ws-p ws)))
+  (let ((current (claude-repl--current-ws-p ws)))
+    (claude-repl--ws-put ws :done-acked current)
+    (claude-repl--ws-put ws :done-acked-at (and current (float-time)))))
 
 (defun claude-repl--refresh-vterm-after-finish (vterm-buf)
   "Refresh display and scroll position for VTERM-BUF if it is still live."

@@ -28,6 +28,16 @@
   :type 'integer
   :group 'claude-repl)
 
+(defcustom claude-repl-done-idle-delay 5
+  "Seconds the user must focus a :done workspace before it decays to :idle.
+The countdown starts when the workspace becomes the active workspace
+\(or when :done arrives while it is already active).  Switching away
+from a :done workspace before the delay elapses clears the timestamp,
+so a quick transit through the tab does not silently strip the green
+\"ready for review\" indicator — the user must return and dwell again."
+  :type 'number
+  :group 'claude-repl)
+
 (defvar claude-repl--priority-images nil
   "Alist mapping priority strings (\"p05\" \"p1\" \"p2\" \"p3\") to Emacs image specs.")
 
@@ -1158,32 +1168,43 @@ For background workspaces, inspects the saved persp window configuration."
 This is the sole transition the timer drives on the claude-state axis.
 Every other transition is sentinel-owned (see the hook handlers in
 `sentinel.el').  When Claude finishes a turn the Stop hook writes
-`:done'; if the worktree is clean AND the user has acknowledged the
-workspace (`:done-acked' = t), there is nothing outstanding and the
-tab decays to `:idle'.  If the worktree is dirty OR the user has not
-yet acknowledged the workspace, the tab stays green.
+`:done'; if the worktree is clean AND the user has been focused on
+the workspace for at least `claude-repl-done-idle-delay' seconds
+\(tracked via `:done-acked-at'), the tab decays to `:idle'.  If the
+worktree is dirty, the user has not yet focused the workspace, or
+the focus dwell time has not yet elapsed, the tab stays green.
 
-Decay also clears `:done-acked' back to nil so a future :done cycle
-starts from a clean slate.
+The dwell requirement prevents a quick transit through a `:done'
+workspace from silently dropping the green indicator: the focus
+timestamp is cleared on switch-away from a `:done' workspace, so the
+countdown restarts on every return.
+
+Decay also clears `:done-acked' and `:done-acked-at' so a future
+:done cycle starts from a clean slate.
 
 State table:
-  :done + clean + acked    → :idle   (this function)
-  :done + clean + !acked   → unchanged (wait for user to view)
-  :done + dirty            → unchanged (wait for user to stage/commit)
-  anything else            → unchanged (sentinel-owned or already terminal)"
-  (let ((state (claude-repl--ws-claude-state ws))
-        (acked (claude-repl--ws-get ws :done-acked))
-        (git-status (claude-repl--ws-get ws :git-clean)))
+  :done + clean + acked + dwell-elapsed   → :idle   (this function)
+  :done + clean + acked + !dwell          → unchanged (still counting)
+  :done + clean + !acked                  → unchanged (wait for user to view)
+  :done + dirty                           → unchanged (wait for stage/commit)
+  anything else                           → unchanged (sentinel-owned or terminal)"
+  (let* ((state (claude-repl--ws-claude-state ws))
+         (acked (claude-repl--ws-get ws :done-acked))
+         (acked-at (claude-repl--ws-get ws :done-acked-at))
+         (git-status (claude-repl--ws-get ws :git-clean))
+         (dwell (and acked-at (- (float-time) acked-at)))
+         (dwell-elapsed (and dwell (> dwell claude-repl-done-idle-delay))))
     (cond
      ((null git-status)
       (claude-repl--log-verbose ws "update-ws-state ws=%s state=%s git-clean not yet populated, skipping" ws state))
-     ((and (eq state :done) (eq git-status 'clean) acked)
-      (claude-repl--log ws "update-ws-state ws=%s :done->:idle (clean, acked)" ws)
+     ((and (eq state :done) (eq git-status 'clean) acked dwell-elapsed)
+      (claude-repl--log ws "update-ws-state ws=%s :done->:idle (clean, acked, dwell=%.2fs)" ws dwell)
       (claude-repl--ws-set-claude-state ws :idle)
-      (claude-repl--ws-put ws :done-acked nil))
+      (claude-repl--ws-put ws :done-acked nil)
+      (claude-repl--ws-put ws :done-acked-at nil))
      (t
-      (claude-repl--log-verbose ws "update-ws-state ws=%s state=%s acked=%s git-status=%s no-op"
-                                ws state acked git-status)))))
+      (claude-repl--log-verbose ws "update-ws-state ws=%s state=%s acked=%s dwell=%s git-status=%s no-op"
+                                ws state acked dwell git-status)))))
 
 (defun claude-repl--update-all-workspace-states ()
   "Update state for claude-repl workspaces based on visibility and git status.

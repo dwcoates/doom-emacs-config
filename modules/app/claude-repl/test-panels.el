@@ -1578,6 +1578,76 @@ the ws-plist hash with a nil key in test/init environments."
       (claude-repl--on-workspace-switch nil)
       (should-not (gethash nil claude-repl--workspaces)))))
 
+(ert-deftest claude-repl-test-panels-on-workspace-switch-done-stamps-acked-at ()
+  "Switching to a workspace in :done sets :done-acked t and stamps
+:done-acked-at with the current time so the focus-dwell countdown
+can start."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'claude-repl--maybe-sweep-hidden-on-switch) #'ignore)
+              ((symbol-function 'claude-repl--update-all-workspace-states) #'ignore)
+              ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+              ((symbol-function 'claude-repl--reset-vterm-cursors) #'ignore)
+              ((symbol-function 'claude-repl--drain-pending-magit) #'ignore)
+              ((symbol-function 'claude-repl--drain-pending-initial-buffers) #'ignore)
+              ((symbol-function 'claude-repl--drain-pending-show-panels) #'ignore)
+              ((symbol-function 'claude-repl--maybe-autoselect-input) #'ignore))
+      (claude-repl--ws-set-claude-state "ws1" :done)
+      (let ((before (float-time)))
+        (claude-repl--on-workspace-switch "ws1")
+        (should (eq (claude-repl--ws-get "ws1" :done-acked) t))
+        (let ((stamp (claude-repl--ws-get "ws1" :done-acked-at)))
+          (should (numberp stamp))
+          (should (>= stamp before)))))))
+
+(ert-deftest claude-repl-test-panels-on-workspace-switch-non-done-does-not-stamp ()
+  "Switching to a workspace not in :done does not touch :done-acked-at."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'claude-repl--maybe-sweep-hidden-on-switch) #'ignore)
+              ((symbol-function 'claude-repl--update-all-workspace-states) #'ignore)
+              ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+              ((symbol-function 'claude-repl--reset-vterm-cursors) #'ignore)
+              ((symbol-function 'claude-repl--drain-pending-magit) #'ignore)
+              ((symbol-function 'claude-repl--drain-pending-initial-buffers) #'ignore)
+              ((symbol-function 'claude-repl--drain-pending-show-panels) #'ignore)
+              ((symbol-function 'claude-repl--maybe-autoselect-input) #'ignore))
+      (claude-repl--ws-set-claude-state "ws1" :thinking)
+      (claude-repl--on-workspace-switch "ws1")
+      (should-not (claude-repl--ws-get "ws1" :done-acked))
+      (should-not (claude-repl--ws-get "ws1" :done-acked-at)))))
+
+(ert-deftest claude-repl-test-panels-clear-done-ack-on-switch-away-done ()
+  "Leaving a workspace in :done clears :done-acked and :done-acked-at so
+the dwell countdown restarts on return."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :done)
+    (claude-repl--ws-put "ws1" :done-acked t)
+    (claude-repl--ws-put "ws1" :done-acked-at (float-time))
+    (claude-repl--clear-done-ack-on-switch-away "ws1")
+    (should-not (claude-repl--ws-get "ws1" :done-acked))
+    (should-not (claude-repl--ws-get "ws1" :done-acked-at))))
+
+(ert-deftest claude-repl-test-panels-clear-done-ack-on-switch-away-non-done ()
+  "Leaving a workspace NOT in :done leaves ack flags untouched — the
+clear only resets the dwell countdown for live :done workspaces."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :thinking)
+    (claude-repl--ws-put "ws1" :done-acked t)
+    (let ((stamp (float-time)))
+      (claude-repl--ws-put "ws1" :done-acked-at stamp)
+      (claude-repl--clear-done-ack-on-switch-away "ws1")
+      ;; :thinking ws was not affected.
+      (should (eq (claude-repl--ws-get "ws1" :done-acked) t))
+      (should (= (claude-repl--ws-get "ws1" :done-acked-at) stamp)))))
+
+(ert-deftest claude-repl-test-panels-clear-done-ack-on-switch-away-nil-ws ()
+  "Switch-away clear with nil ws is a no-op (covers test/init envs where
++workspace-current-name returns nil)."
+  (claude-repl-test--with-clean-state
+    ;; Should not error.
+    (claude-repl--clear-done-ack-on-switch-away nil)))
+
 (ert-deftest claude-repl-test-panels-on-workspace-switch-explicit-ws-overrides-current ()
   "An explicit WS argument propagates to every per-ws side effect,
 overriding `(+workspace-current-name)' at call time.  This is how

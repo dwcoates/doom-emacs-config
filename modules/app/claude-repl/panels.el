@@ -302,10 +302,13 @@ to, even if another switch raced ahead before the timer fired.
 Also opens panels for workspaces that were created with a preemptive
 prompt, and auto-selects the input window if visible.
 
-If the newly-active workspace has `:claude-state :done', sets
-`:done-acked' to t so the decay timer can clear :done → :idle on the
-next tick.  This implements \"only decay after the user has viewed
-the workspace.\"
+If the newly-active workspace has `:claude-state :done', stamps
+`:done-acked' to t and `:done-acked-at' to the current time so the
+decay timer can clear :done → :idle once
+`claude-repl-done-idle-delay' seconds of continuous focus have
+elapsed.  The companion clear in `--before-persp-deactivate' resets
+the timestamp on switch-away, so a quick transit through the tab
+never causes a silent decay.
 
 Also runs `claude-repl--maybe-sweep-hidden-on-switch' so workspaces
 marked `:hidden' (via `SPC o C') are persp-killed when hide-mode is on
@@ -313,7 +316,8 @@ marked `:hidden' (via `SPC o C') are persp-killed when hide-mode is on
   (let ((ws (or ws (+workspace-current-name))))
     (claude-repl--log-verbose ws "workspace-switch ws=%s" ws)
     (when (eq (claude-repl--ws-claude-state ws) :done)
-      (claude-repl--ws-put ws :done-acked t))
+      (claude-repl--ws-put ws :done-acked t)
+      (claude-repl--ws-put ws :done-acked-at (float-time)))
     (claude-repl--maybe-sweep-hidden-on-switch ws)
     (claude-repl--update-all-workspace-states)
     (claude-repl--refresh-vterm)
@@ -372,13 +376,28 @@ No-op when no safe target exists (fullscreen-claude or drawer-only)."
                           (window-list))))
         (select-window target)))))
 
+(defun claude-repl--clear-done-ack-on-switch-away (ws)
+  "Reset WS's :done focus-dwell tracking when switching away.
+If WS is in `:claude-state :done' and the decay has not yet fired,
+clear `:done-acked' and `:done-acked-at' so the dwell countdown
+restarts on the next return.  This makes the
+`claude-repl-done-idle-delay' check count only continuous focus
+periods — a quick transit (< delay) leaves the workspace green."
+  (when (and ws (eq (claude-repl--ws-claude-state ws) :done))
+    (claude-repl--log ws "clear-done-ack-on-switch-away ws=%s" ws)
+    (claude-repl--ws-put ws :done-acked nil)
+    (claude-repl--ws-put ws :done-acked-at nil)))
+
 (defun claude-repl--before-persp-deactivate (&rest _)
   "Save window state before perspective deactivation.
-Redirects away from Claude buffers and saves frame state.
+Redirects away from Claude buffers and saves frame state.  Also
+clears the `:done' focus-dwell tracking on the outgoing workspace so
+a sub-`claude-repl-done-idle-delay' transit never decays it.
 Logs `persp-names-cache' so cache mutations across persp lifecycle
 events (kill, switch, add) are traceable."
   (claude-repl--log (+workspace-current-name) "before-persp-deactivate: entry cache=%S"
                     (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
+  (claude-repl--clear-done-ack-on-switch-away (+workspace-current-name))
   (claude-repl--redirect-from-claude-before-save)
   (condition-case err
       (persp-frame-save-state)
