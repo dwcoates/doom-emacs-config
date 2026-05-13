@@ -703,11 +703,21 @@ No interrupt was actually delivered, so the state should not change."
 ;;;; ---- claude-repl-create-or-update-pr-paste ----
 
 (ert-deftest claude-repl-cmd-test-create-or-update-pr-paste/inserts-prompt-at-point ()
-  "paste variant inserts the full base prompt at point in the current buffer."
+  "paste variant inserts the full base prompt at point, wrapped in backticks."
   (with-temp-buffer
     (claude-repl-create-or-update-pr-paste)
     (should (equal (buffer-string)
-                   (claude-repl--build-create-or-update-pr-prompt nil)))))
+                   (concat "`"
+                           (claude-repl--build-create-or-update-pr-prompt nil)
+                           "`")))))
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr-paste/wraps-in-backticks ()
+  "paste variant wraps the inserted prompt in single backticks."
+  (with-temp-buffer
+    (claude-repl-create-or-update-pr-paste)
+    (let ((s (buffer-string)))
+      (should (string-prefix-p "`" s))
+      (should (string-suffix-p "`" s)))))
 
 (ert-deftest claude-repl-cmd-test-create-or-update-pr-paste/does-not-send-to-claude ()
   "paste variant must not call `claude-repl--send-to-claude'."
@@ -736,7 +746,9 @@ No interrupt was actually delivered, so the state should not change."
         (with-temp-buffer
           (claude-repl-create-or-update-pr-paste)
           (should (equal (buffer-string)
-                         (claude-repl--build-create-or-update-pr-prompt nil))))))))
+                         (concat "`"
+                                 (claude-repl--build-create-or-update-pr-prompt nil)
+                                 "`"))))))))
 
 (ert-deftest claude-repl-cmd-test-create-or-update-pr-paste/inserts-at-point-not-end ()
   "paste variant inserts at point, preserving surrounding buffer content."
@@ -744,9 +756,9 @@ No interrupt was actually delivered, so the state should not change."
     (insert "before-AFTER")
     (goto-char (+ (point-min) 7))
     (claude-repl-create-or-update-pr-paste)
-    (let ((expected (concat "before-"
+    (let ((expected (concat "before-`"
                             (claude-repl--build-create-or-update-pr-prompt nil)
-                            "AFTER")))
+                            "`AFTER")))
       (should (equal (buffer-string) expected)))))
 
 ;;;; ---- claude-repl-create-or-update-pr-no-self-certified-paste ----
@@ -756,6 +768,14 @@ No interrupt was actually delivered, so the state should not change."
   (with-temp-buffer
     (claude-repl-create-or-update-pr-no-self-certified-paste)
     (should-not (string-match-p "--self-certified" (buffer-string)))))
+
+(ert-deftest claude-repl-cmd-test-create-or-update-pr-no-self-certified-paste/wraps-in-backticks ()
+  "no-self-certified paste wrapper wraps the inserted prompt in single backticks."
+  (with-temp-buffer
+    (claude-repl-create-or-update-pr-no-self-certified-paste)
+    (let ((s (buffer-string)))
+      (should (string-prefix-p "`" s))
+      (should (string-suffix-p "`" s)))))
 
 (ert-deftest claude-repl-cmd-test-create-or-update-pr-no-self-certified-paste/does-not-send ()
   "no-self-certified paste wrapper does not invoke `claude-repl--send-to-claude'."

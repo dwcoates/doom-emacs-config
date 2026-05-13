@@ -434,13 +434,14 @@ before the prompt is sent."
 (defun claude-repl-create-or-update-pr-paste (&optional excluded)
   "Insert the /create-or-update-pr prompt at point instead of sending.
 EXCLUDED has the same semantics as in `claude-repl-create-or-update-pr'.
-No workspace state is touched — the input buffer is left intact and
-Claude is not contacted."
+The inserted prompt is wrapped in single backticks for inline-code
+rendering in markdown contexts.  No workspace state is touched — the
+input buffer is left intact and Claude is not contacted."
   (interactive)
   (let ((prompt (claude-repl--build-create-or-update-pr-prompt excluded)))
     (claude-repl--log (+workspace-current-name)
                       "create-or-update-pr-paste: prompt=%s" prompt)
-    (insert prompt)))
+    (insert "`" prompt "`")))
 
 (defun claude-repl-create-or-update-pr-no-self-certified-paste ()
   "Insert the /create-or-update-pr prompt (no --self-certified) at point."
