@@ -938,16 +938,61 @@ must set those in the current buffer before calling."
       (claude-repl-drawer--insert-section
        (format "MERGED (%d)" (length mergeds))  mergeds  current :merged))))
 
+(defvar-local claude-repl-drawer--last-render-signature 'unset
+  "Signature of the inputs at the last successful `--render' build.
+When the next `--render' call computes the same signature, the
+temp-buffer build + content compare + cursor restore are all skipped
+— the live buffer is already correct, so paying the build cost on
+every 1Hz poll is wasted.  Sentinel value `unset' so the first render
+always proceeds even if the natural signature happens to be nil.")
+
+(defun claude-repl-drawer--render-signature ()
+  "Return a cheap signature of every input that affects `--insert-content'.
+Sorted on workspace names so the result is stable across hash-table
+iteration order.  Captures the same plist values the render helpers
+read (state, git/merge status, priority, summary, group), plus
+marked/expanded sets per ws, current workspace, and the events
+header's formatted age buckets — the latter ensures the header
+updates as ages cross the s/m/h boundaries (`--format-event-age')."
+  (let (ws-sig)
+    (dolist (ws (sort (claude-repl-drawer--visible-workspace-keys) #'string<))
+      (push (list ws
+                  (claude-repl--ws-get ws :repl-state)
+                  (claude-repl--ws-get ws :claude-state)
+                  (claude-repl--ws-get ws :git-clean)
+                  (claude-repl--ws-get ws :branch-merged)
+                  (claude-repl--ws-get ws :priority)
+                  (claude-repl--ws-get ws :last-prompt-summary)
+                  (claude-repl--ws-get ws :group-key)
+                  (claude-repl-drawer--marked-p ws)
+                  (claude-repl-drawer--expanded-p ws))
+            ws-sig))
+    (list (claude-repl-drawer--current-ws)
+          ws-sig
+          (when (fboundp 'claude-repl--events-recent)
+            (let ((now (float-time)))
+              (mapcar (lambda (ev)
+                        (cons (plist-get ev :kind)
+                              (claude-repl-drawer--format-event-age
+                               (- now (or (plist-get ev :time) now)))))
+                      (seq-take (claude-repl--events-recent now) 5)))))))
+
 (defun claude-repl-drawer--render ()
   "Render the drawer, skipping the buffer rewrite when content is unchanged.
-Builds the new content (with text properties) in a temp buffer and
-compares it against the live buffer's content.  When they match, the
-function is a true no-op for the buffer — no `erase-buffer', no
-full re-insert, no full-buffer redisplay.  Eliminates the gutter
-flicker visible during rapid back-to-back renders: the persp-activated
-`--sync-cursor-to-current-ws' followed by the deferred
-`--update-all-workspace-states' → `--refresh-if-visible' double-fire,
-and the 1Hz poll's idle pulse when no state has changed.
+First short-circuits on a cheap input signature (`--render-signature'):
+when the signature matches the last successful render, the entire
+temp-buffer build is skipped — the live buffer is already correct.
+This is the 1Hz poll's idle-tick fast path: with the drawer open and
+no state change, no allocation/insertion/comparison happens at all.
+
+When the signature differs, builds the new content (with text
+properties) in a temp buffer and compares it against the live
+buffer's content.  When they match, the function is a true no-op for
+the buffer — no `erase-buffer', no full re-insert, no full-buffer
+redisplay.  Eliminates the gutter flicker visible during rapid
+back-to-back renders: the persp-activated `--sync-cursor-to-current-ws'
+followed by the deferred `--update-all-workspace-states' →
+`--refresh-if-visible' double-fire.
 
 `replace-buffer-contents' would skip the rewrite too, but its diff
 algorithm preserves the destination buffer's text properties on
@@ -962,35 +1007,38 @@ expands/collapses or appears/disappears between polls, and
 (detail line, blank, section header), which causes
 `--update-current-entry-overlay' to delete the arrow.  Nested
 children sit deeper in the buffer and so are most affected."
-  (let* ((saved-line   (line-number-at-pos))
-         (saved-col    (current-column))
-         (saved-ws     (claude-repl-drawer--workspace-at-point))
-         (marked-set   claude-repl-drawer--marked-set)
-         (expanded-set claude-repl-drawer--expanded-set)
-         (new-content
-          (with-temp-buffer
-            ;; The render helpers consult these via buffer-local lookup;
-            ;; mirror the source buffer's values so the temp render
-            ;; reflects marks and expanded entries correctly.
-            (setq-local claude-repl-drawer--marked-set marked-set)
-            (setq-local claude-repl-drawer--expanded-set expanded-set)
-            (claude-repl-drawer--insert-content)
-            (buffer-substring (point-min) (point-max))))
-         (current-content (buffer-substring (point-min) (point-max))))
-    (unless (equal current-content new-content)
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert new-content))
-      (unless (and saved-ws
-                   (claude-repl-drawer--goto-workspace-line saved-ws))
-        (goto-char (point-min))
-        (forward-line (1- saved-line))
-        (move-to-column saved-col)))
-    ;; Always refresh the overlay: point may have moved (e.g. via
-    ;; `--sync-cursor-to-current-ws') even when content didn't change,
-    ;; and `erase-buffer' above collapses the overlay to (1,1) when
-    ;; content did change.
-    (claude-repl-drawer--update-current-entry-overlay)))
+  (let ((sig (claude-repl-drawer--render-signature)))
+    (unless (equal sig claude-repl-drawer--last-render-signature)
+      (let* ((saved-line   (line-number-at-pos))
+             (saved-col    (current-column))
+             (saved-ws     (claude-repl-drawer--workspace-at-point))
+             (marked-set   claude-repl-drawer--marked-set)
+             (expanded-set claude-repl-drawer--expanded-set)
+             (new-content
+              (with-temp-buffer
+                ;; The render helpers consult these via buffer-local lookup;
+                ;; mirror the source buffer's values so the temp render
+                ;; reflects marks and expanded entries correctly.
+                (setq-local claude-repl-drawer--marked-set marked-set)
+                (setq-local claude-repl-drawer--expanded-set expanded-set)
+                (claude-repl-drawer--insert-content)
+                (buffer-substring (point-min) (point-max))))
+             (current-content (buffer-substring (point-min) (point-max))))
+        (unless (equal current-content new-content)
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (insert new-content))
+          (unless (and saved-ws
+                       (claude-repl-drawer--goto-workspace-line saved-ws))
+            (goto-char (point-min))
+            (forward-line (1- saved-line))
+            (move-to-column saved-col))))
+      (setq-local claude-repl-drawer--last-render-signature sig)))
+  ;; Always refresh the overlay: point may have moved (e.g. via
+  ;; `--sync-cursor-to-current-ws') even when content didn't change,
+  ;; and `erase-buffer' above collapses the overlay to (1,1) when
+  ;; content did change.
+  (claude-repl-drawer--update-current-entry-overlay))
 
 ;;;; Navigation -------------------------------------------------------------
 

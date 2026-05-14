@@ -165,6 +165,101 @@ content-equality check distinguishes real changes from no-ops."
         (claude-repl-drawer--render)
         (should (> (buffer-modified-tick) tick-before))))))
 
+(ert-deftest claude-repl-drawer-test-render-skips-build-on-matching-signature ()
+  "When the render-signature matches the last render, `--render' must NOT
+re-enter `--insert-content'.  This is the 1Hz poll fast path: with the
+drawer open and no state change, the per-tick render allocates nothing
+and walks no characters.  Counts invocations of `--insert-content' via
+an `:around' override."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (let ((calls 0)
+            (orig (symbol-function 'claude-repl-drawer--insert-content)))
+        (cl-letf (((symbol-function 'claude-repl-drawer--insert-content)
+                   (lambda (&rest args)
+                     (cl-incf calls)
+                     (apply orig args))))
+          (claude-repl-drawer--render)
+          (should (= calls 1))
+          (claude-repl-drawer--render)
+          (should (= calls 1)))))))
+
+(ert-deftest claude-repl-drawer-test-render-rebuilds-when-claude-state-changes ()
+  "A `:claude-state' change on a registered workspace must invalidate the
+render-signature so the next `--render' rebuilds.  Confirms the signature
+captures plist values the 1Hz status poll mutates."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1"
+                                       :claude-state :idle)
+    (claude-repl-drawer-test--with-buffer
+      (let ((calls 0)
+            (orig (symbol-function 'claude-repl-drawer--insert-content)))
+        (cl-letf (((symbol-function 'claude-repl-drawer--insert-content)
+                   (lambda (&rest args)
+                     (cl-incf calls)
+                     (apply orig args))))
+          (claude-repl-drawer--render)
+          (claude-repl--ws-put "alpha" :claude-state :thinking)
+          (claude-repl-drawer--render)
+          (should (= calls 2)))))))
+
+(ert-deftest claude-repl-drawer-test-render-rebuilds-when-git-clean-changes ()
+  "A `:git-clean' change must invalidate the signature.  The 1Hz poll's
+async git-diff sentinel writes this field, so the next render must
+pick up the new value."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1"
+                                       :git-clean 'clean)
+    (claude-repl-drawer-test--with-buffer
+      (let ((calls 0)
+            (orig (symbol-function 'claude-repl-drawer--insert-content)))
+        (cl-letf (((symbol-function 'claude-repl-drawer--insert-content)
+                   (lambda (&rest args)
+                     (cl-incf calls)
+                     (apply orig args))))
+          (claude-repl-drawer--render)
+          (claude-repl--ws-put "alpha" :git-clean 'dirty)
+          (claude-repl-drawer--render)
+          (should (= calls 2)))))))
+
+(ert-deftest claude-repl-drawer-test-render-rebuilds-when-workspace-added ()
+  "Adding a workspace must invalidate the signature.  Workspace registration
+mutates the `claude-repl--workspaces' hash; the next render must reflect
+the new entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (let ((calls 0)
+            (orig (symbol-function 'claude-repl-drawer--insert-content)))
+        (cl-letf (((symbol-function 'claude-repl-drawer--insert-content)
+                   (lambda (&rest args)
+                     (cl-incf calls)
+                     (apply orig args))))
+          (claude-repl-drawer--render)
+          (claude-repl-drawer-test--register "beta" :priority "p2")
+          (claude-repl-drawer--render)
+          (should (= calls 2)))))))
+
+(ert-deftest claude-repl-drawer-test-render-rebuilds-when-mark-toggled ()
+  "Toggling a mark must invalidate the signature.  Marks affect the rendered
+gutter glyph and are buffer-local — the signature includes per-ws marked
+state."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (let ((calls 0)
+            (orig (symbol-function 'claude-repl-drawer--insert-content)))
+        (cl-letf (((symbol-function 'claude-repl-drawer--insert-content)
+                   (lambda (&rest args)
+                     (cl-incf calls)
+                     (apply orig args))))
+          (claude-repl-drawer--render)
+          (claude-repl-drawer--ensure-marked-set)
+          (puthash "alpha" t claude-repl-drawer--marked-set)
+          (claude-repl-drawer--render)
+          (should (= calls 2)))))))
+
 (ert-deftest claude-repl-drawer-test-render-noop-preserves-text-properties ()
   "A no-op re-render must NOT corrupt text properties.
 Stress-tests the path against the `replace-buffer-contents' pitfall
@@ -2545,6 +2640,7 @@ re-centers the cursor."
                  #'ignore))
         (claude-repl-drawer--post-command)
         (should called)))))
+
 
 (ert-deftest claude-repl-drawer-test-sync-cursor-calls-center-selection ()
   "`--sync-cursor-to-current-ws' must also center — persp-driven cursor
