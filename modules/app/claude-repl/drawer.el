@@ -284,6 +284,15 @@ Default is near-black."
   "Overlay that draws the current-entry arrow over the static gutter.
 Repositioned by `claude-repl-drawer--post-command' to follow point.")
 
+(defvar-local claude-repl-drawer--last-post-command-ws 'unset
+  "Workspace at point on the previous `--post-command' tick.
+Used to short-circuit the per-keystroke overlay refresh + recenter
+when navigation did not cross an entry boundary.  `recenter' forces a
+window redisplay, so gating it on entry change saves noticeable cost
+on no-op commands and intra-entry motion.  Sentinel value `unset' (not
+nil) so the first tick always runs even when point starts on a non-
+workspace line.")
+
 (defun claude-repl-drawer--entry-bounds-at-point ()
   "Return (START . END) of the workspace block at point, or nil."
   (let ((ws (claude-repl-drawer--workspace-at-point)))
@@ -355,10 +364,19 @@ there's content off-screen\" behavior."
 
 (defun claude-repl-drawer--post-command ()
   "Refresh the current-entry overlay and cursor visibility.
-Runs after every command in the drawer buffer."
-  (claude-repl-drawer--update-current-entry-overlay)
+Runs after every command in the drawer buffer.  Short-circuits the
+overlay rebuild and the `recenter' call when the workspace at point
+has not changed since the previous tick — the overlay and scroll
+position are entry-granularity artifacts, and `--render' already
+re-establishes overlay state after mark/expand mutations.  The cursor
+visibility flip is always-on because column position can shift
+within the same entry (e.g. via in-line search)."
   (claude-repl-drawer--update-cursor)
-  (claude-repl-drawer--center-selection))
+  (let ((ws (claude-repl-drawer--workspace-at-point)))
+    (unless (equal ws claude-repl-drawer--last-post-command-ws)
+      (claude-repl-drawer--update-current-entry-overlay)
+      (claude-repl-drawer--center-selection)
+      (setq claude-repl-drawer--last-post-command-ws ws))))
 
 (defun claude-repl-drawer--apply-background ()
   "Remap the buffer's `default' face to the drawer background color.

@@ -2641,6 +2641,73 @@ re-centers the cursor."
         (claude-repl-drawer--post-command)
         (should called)))))
 
+(ert-deftest claude-repl-drawer-test-post-command-skips-center-when-ws-unchanged ()
+  "`--post-command' must NOT re-invoke `--center-selection' when point is
+still on the same workspace entry as on the previous tick.  `recenter'
+forces a window redisplay; firing it on no-op commands or intra-entry
+motion is the per-keystroke perf hit this gates against."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((calls 0))
+        (cl-letf (((symbol-function 'claude-repl-drawer--center-selection)
+                   (lambda (&optional _buf) (cl-incf calls)))
+                  ((symbol-function 'claude-repl-drawer--update-current-entry-overlay)
+                   #'ignore)
+                  ((symbol-function 'claude-repl-drawer--update-cursor)
+                   #'ignore))
+          (claude-repl-drawer--post-command)
+          (should (= calls 1))
+          (claude-repl-drawer--post-command)
+          (should (= calls 1)))))))
+
+(ert-deftest claude-repl-drawer-test-post-command-recenters-after-entry-change ()
+  "`--post-command' must re-invoke `--center-selection' when navigation
+crosses an entry boundary — i.e. the normal j/k case.  Pairs with
+`--post-command-skips-center-when-ws-unchanged' to assert the gating
+is keyed on entry change, not unconditionally disabled."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--register "beta"  :priority "p2")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((calls 0))
+        (cl-letf (((symbol-function 'claude-repl-drawer--center-selection)
+                   (lambda (&optional _buf) (cl-incf calls)))
+                  ((symbol-function 'claude-repl-drawer--update-current-entry-overlay)
+                   #'ignore)
+                  ((symbol-function 'claude-repl-drawer--update-cursor)
+                   #'ignore))
+          (claude-repl-drawer--post-command)
+          (claude-repl-drawer-next)
+          (claude-repl-drawer--post-command)
+          (should (= calls 2)))))))
+
+(ert-deftest claude-repl-drawer-test-post-command-skips-overlay-when-ws-unchanged ()
+  "`--post-command' must NOT re-invoke `--update-current-entry-overlay'
+when ws-at-point is unchanged.  The overlay refresh walks the entry's
+characters via `--entry-bounds-at-point' — gating it on entry change
+saves the per-keystroke buffer scan."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--with-buffer
+      (claude-repl-drawer--render)
+      (claude-repl-drawer--goto-first-workspace)
+      (let ((calls 0))
+        (cl-letf (((symbol-function 'claude-repl-drawer--update-current-entry-overlay)
+                   (lambda () (cl-incf calls)))
+                  ((symbol-function 'claude-repl-drawer--center-selection)
+                   #'ignore)
+                  ((symbol-function 'claude-repl-drawer--update-cursor)
+                   #'ignore))
+          (claude-repl-drawer--post-command)
+          (should (= calls 1))
+          (claude-repl-drawer--post-command)
+          (should (= calls 1)))))))
+
 
 (ert-deftest claude-repl-drawer-test-sync-cursor-calls-center-selection ()
   "`--sync-cursor-to-current-ws' must also center — persp-driven cursor
