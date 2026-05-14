@@ -430,12 +430,15 @@ by vterm-buf presence; the :done write is not."
         (should (equal (car result) ""))))))
 
 (ert-deftest claude-repl-test-workspace-mode-line-keeps-prompt-summary-segment ()
-  "Mode-line list has 2 elements; the trailing :eval prompt-summary segment is preserved."
+  "Mode-line list has 3 elements; the prompt-summary :eval segment is
+preserved in the middle position, with the ai-title :eval segment
+trailing it."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
       (let ((result (claude-repl--workspace-mode-line "ws")))
-        (should (= (length result) 2))
-        (should (eq (car (car (last result))) :eval))))))
+        (should (= (length result) 3))
+        (should (equal (nth 1 result) '(:eval (claude-repl--prompt-summary-segment))))
+        (should (equal (nth 2 result) '(:eval (claude-repl--ai-title-segment))))))))
 
 (ert-deftest claude-repl-test-workspace-mode-line-strips-trailing-slash ()
   "A trailing slash on :source-ws-dir does not leak into the parent name."

@@ -472,6 +472,9 @@ Segments, in order:
   2. `:eval' segment that renders the last-prompt summary (see
      `claude-repl--prompt-summary-segment') and recomputes on every
      mode-line redisplay.
+  3. `:eval' segment that renders Claude's own aiTitle for the active
+     session (see `claude-repl--ai-title-segment'), reading from the
+     project's session jsonl under `~/.claude/projects/'.
 
 The parent segment is computed once when the vterm is initialized; it
 is not reactive to later state changes."
@@ -487,7 +490,8 @@ is not reactive to later state changes."
            (yellow (concat (propertize green 'face '(:foreground "green" :weight bold))
                            (propertize yellow 'face '(:foreground "yellow" :weight bold))))
            (t (propertize green 'face '(:foreground "green" :weight bold))))
-          '(:eval (claude-repl--prompt-summary-segment)))))
+          '(:eval (claude-repl--prompt-summary-segment))
+          '(:eval (claude-repl--ai-title-segment)))))
 
 (defun claude-repl--log-session-start (ws start-info)
   "Log session startup details for workspace WS from START-INFO plist."

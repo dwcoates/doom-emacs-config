@@ -50,6 +50,7 @@
 (claude-repl--load-module "commands")
 (claude-repl--load-module "session")
 (claude-repl--load-module "prompt-summary")
+(claude-repl--load-module "ai-title")
 (claude-repl--load-module "window")
 (claude-repl--load-module "sibling-popup")
 (claude-repl--load-module "panels")
