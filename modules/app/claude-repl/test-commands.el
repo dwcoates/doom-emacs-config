@@ -523,45 +523,45 @@
             (should (string-match-p "status 0" (buffer-string)))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-;;;; ---- explain-config as a sibling of the drawer ----
+;;;; ---- explain-config as a decoupled bottom popup ----
 
-(ert-deftest claude-repl-cmd-test-explain-config-display-action/uses-left-side-window ()
-  "Display action routes the explain-config buffer to a left-side window."
+(ert-deftest claude-repl-cmd-test-explain-config-display-action/uses-bottom-side-window ()
+  "Display action routes the explain-config buffer to a bottom-side window."
   (should (member 'display-buffer-in-side-window
                   (car claude-repl--explain-config-display-action)))
   (should (eq (cdr (assq 'side claude-repl--explain-config-display-action))
-              'left)))
+              'bottom)))
 
-(ert-deftest claude-repl-cmd-test-explain-config-display-action/sits-at-sibling-slot ()
-  "Explain-config window lives at slot -1 — a SIBLING of the drawer (slot 0)
-on the left side, not a sub-window stacked beneath it."
+(ert-deftest claude-repl-cmd-test-explain-config-display-action/sits-at-bottom-slot-0 ()
+  "Explain-config window lives at slot 0 on the bottom side — solo,
+fully decoupled from the drawer (which is on the left)."
   (should (= (cdr (assq 'slot claude-repl--explain-config-display-action))
-             -1)))
+             0)))
 
-(ert-deftest claude-repl-cmd-test-explain-config-display-action/configures-window-width ()
-  "Display action specifies `window-width' (own width config), not `window-height'."
-  (should (assq 'window-width claude-repl--explain-config-display-action))
-  (should-not (assq 'window-height claude-repl--explain-config-display-action)))
+(ert-deftest claude-repl-cmd-test-explain-config-display-action/configures-window-height ()
+  "Display action specifies `window-height' (own height config), not `window-width'."
+  (should (assq 'window-height claude-repl--explain-config-display-action))
+  (should-not (assq 'window-width claude-repl--explain-config-display-action)))
 
-(ert-deftest claude-repl-cmd-test-explain-config-width-fraction/defcustom-defaults-positive ()
-  "Width-fraction defcustom exists and defaults to a positive float."
-  (should (boundp 'claude-repl-explain-config-width-fraction))
-  (should (floatp claude-repl-explain-config-width-fraction))
-  (should (> claude-repl-explain-config-width-fraction 0)))
+(ert-deftest claude-repl-cmd-test-explain-config-height-fraction/defcustom-defaults-positive ()
+  "Height-fraction defcustom exists and defaults to a positive float."
+  (should (boundp 'claude-repl-explain-config-height-fraction))
+  (should (floatp claude-repl-explain-config-height-fraction))
+  (should (> claude-repl-explain-config-height-fraction 0)))
 
-(ert-deftest claude-repl-cmd-test-explain-config-window-width/computes-from-fraction ()
-  "`--window-width' returns ceil(fraction × frame-width) for any window."
-  (let ((claude-repl-explain-config-width-fraction 0.25))
+(ert-deftest claude-repl-cmd-test-explain-config-window-height/computes-from-fraction ()
+  "`--window-height' returns ceil(fraction × frame-height) for any window."
+  (let ((claude-repl-explain-config-height-fraction 0.25))
     (cl-letf (((symbol-function 'window-frame) (lambda (_w) 'fake-frame))
-              ((symbol-function 'frame-width) (lambda (_f) 200)))
-      (should (= (claude-repl--explain-config-window-width 'fake-win) 50)))))
+              ((symbol-function 'frame-height) (lambda (_f) 80)))
+      (should (= (claude-repl--explain-config-window-height 'fake-win) 20)))))
 
-(ert-deftest claude-repl-cmd-test-explain-config-window-width/clamps-floor-at-1 ()
-  "`--window-width' floors at 1 column even when fraction × width rounds to 0."
-  (let ((claude-repl-explain-config-width-fraction 0.001))
+(ert-deftest claude-repl-cmd-test-explain-config-window-height/clamps-floor-at-1 ()
+  "`--window-height' floors at 1 row even when fraction × height rounds to 0."
+  (let ((claude-repl-explain-config-height-fraction 0.001))
     (cl-letf (((symbol-function 'window-frame) (lambda (_w) 'fake-frame))
-              ((symbol-function 'frame-width) (lambda (_f) 80)))
-      (should (>= (claude-repl--explain-config-window-width 'fake-win) 1)))))
+              ((symbol-function 'frame-height) (lambda (_f) 40)))
+      (should (>= (claude-repl--explain-config-window-height 'fake-win) 1)))))
 
 (ert-deftest claude-repl-cmd-test-explain-config-show/no-op-when-buffer-missing ()
   "Show is a no-op when no explain-config buffer has ever been created."
@@ -584,7 +584,7 @@ on the left side, not a sub-window stacked beneath it."
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
                   ((symbol-function 'display-buffer)
                    (lambda (b action) (setq display-args (list b action)) nil))
-                  ((symbol-function 'claude-repl--explain-config-apply-width) #'ignore))
+                  ((symbol-function 'claude-repl--explain-config-apply-height) #'ignore))
           (claude-repl--explain-config-show)
           (should (eq (car display-args) buf))
           (should (eq (cadr display-args)
@@ -599,26 +599,26 @@ on the left side, not a sub-window stacked beneath it."
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
                   ((symbol-function 'display-buffer) (lambda (&rest _) nil))
-                  ((symbol-function 'claude-repl--explain-config-apply-width) #'ignore))
+                  ((symbol-function 'claude-repl--explain-config-apply-height) #'ignore))
           (claude-repl--explain-config-show)
           (should claude-repl--explain-config-global-visible-p))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-(ert-deftest claude-repl-cmd-test-explain-config-show/reapplies-width-when-visible ()
-  "Show reapplies the configured width when a window already displays the buffer."
+(ert-deftest claude-repl-cmd-test-explain-config-show/reapplies-height-when-visible ()
+  "Show reapplies the configured height when a window already displays the buffer."
   (let* ((claude-repl-explain-config-buffer-name " *test-explain-reapply*")
          (buf (get-buffer-create claude-repl-explain-config-buffer-name))
-         (width-applied-with nil))
+         (height-applied-with nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window)
                    (lambda (&rest _) 'fake-win))
                   ((symbol-function 'window-live-p) (lambda (_w) t))
                   ((symbol-function 'display-buffer)
                    (lambda (&rest _) (error "should not redisplay")))
-                  ((symbol-function 'claude-repl--explain-config-apply-width)
-                   (lambda (w) (setq width-applied-with w))))
+                  ((symbol-function 'claude-repl--explain-config-apply-height)
+                   (lambda (w) (setq height-applied-with w))))
           (claude-repl--explain-config-show)
-          (should (eq width-applied-with 'fake-win)))
+          (should (eq height-applied-with 'fake-win)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest claude-repl-cmd-test-explain-config-hide/deletes-windows-for-buffer ()
@@ -659,7 +659,7 @@ on the left side, not a sub-window stacked beneath it."
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
                   ((symbol-function 'display-buffer)
                    (lambda (b action) (setq display-args (list b action)) nil))
-                  ((symbol-function 'claude-repl--explain-config-apply-width) #'ignore))
+                  ((symbol-function 'claude-repl--explain-config-apply-height) #'ignore))
           (claude-repl--explain-config-ensure-visible-on-persp-switch)
           (should (eq (car display-args) buf))
           (should (eq (cadr display-args)
