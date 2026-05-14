@@ -523,7 +523,7 @@
             (should (string-match-p "status 0" (buffer-string)))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-;;;; ---- explain-config drawer-space coupling ----
+;;;; ---- explain-config as a sibling of the drawer ----
 
 (ert-deftest claude-repl-cmd-test-explain-config-display-action/uses-left-side-window ()
   "Display action routes the explain-config buffer to a left-side window."
@@ -532,19 +532,48 @@
   (should (eq (cdr (assq 'side claude-repl--explain-config-display-action))
               'left)))
 
-(ert-deftest claude-repl-cmd-test-explain-config-display-action/sits-below-drawer-slot ()
-  "Explain-config window occupies slot 1 (the drawer is at slot 0)."
+(ert-deftest claude-repl-cmd-test-explain-config-display-action/sits-at-sibling-slot ()
+  "Explain-config window lives at slot -1 — a SIBLING of the drawer (slot 0)
+on the left side, not a sub-window stacked beneath it."
   (should (= (cdr (assq 'slot claude-repl--explain-config-display-action))
-             1)))
+             -1)))
+
+(ert-deftest claude-repl-cmd-test-explain-config-display-action/configures-window-width ()
+  "Display action specifies `window-width' (own width config), not `window-height'."
+  (should (assq 'window-width claude-repl--explain-config-display-action))
+  (should-not (assq 'window-height claude-repl--explain-config-display-action)))
+
+(ert-deftest claude-repl-cmd-test-explain-config-width-fraction/defcustom-defaults-positive ()
+  "Width-fraction defcustom exists and defaults to a positive float."
+  (should (boundp 'claude-repl-explain-config-width-fraction))
+  (should (floatp claude-repl-explain-config-width-fraction))
+  (should (> claude-repl-explain-config-width-fraction 0)))
+
+(ert-deftest claude-repl-cmd-test-explain-config-window-width/computes-from-fraction ()
+  "`--window-width' returns ceil(fraction × frame-width) for any window."
+  (let ((claude-repl-explain-config-width-fraction 0.25))
+    (cl-letf (((symbol-function 'window-frame) (lambda (_w) 'fake-frame))
+              ((symbol-function 'frame-width) (lambda (_f) 200)))
+      (should (= (claude-repl--explain-config-window-width 'fake-win) 50)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-window-width/clamps-floor-at-1 ()
+  "`--window-width' floors at 1 column even when fraction × width rounds to 0."
+  (let ((claude-repl-explain-config-width-fraction 0.001))
+    (cl-letf (((symbol-function 'window-frame) (lambda (_w) 'fake-frame))
+              ((symbol-function 'frame-width) (lambda (_f) 80)))
+      (should (>= (claude-repl--explain-config-window-width 'fake-win) 1)))))
 
 (ert-deftest claude-repl-cmd-test-explain-config-show/no-op-when-buffer-missing ()
   "Show is a no-op when no explain-config buffer has ever been created."
   (let ((claude-repl-explain-config-buffer-name " *nonexistent-explain-config*")
+        (claude-repl--explain-config-global-visible-p nil)
         (display-called nil))
     (cl-letf (((symbol-function 'display-buffer)
                (lambda (&rest _) (setq display-called t) nil)))
       (claude-repl--explain-config-show)
-      (should-not display-called))))
+      (should-not display-called)
+      ;; Flag stays nil when buffer doesn't exist — nothing to show.
+      (should-not claude-repl--explain-config-global-visible-p))))
 
 (ert-deftest claude-repl-cmd-test-explain-config-show/displays-existing-buffer ()
   "Show calls `display-buffer' with the side-window action when buffer exists."
@@ -554,25 +583,42 @@
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
                   ((symbol-function 'display-buffer)
-                   (lambda (b action) (setq display-args (list b action)) nil)))
+                   (lambda (b action) (setq display-args (list b action)) nil))
+                  ((symbol-function 'claude-repl--explain-config-apply-width) #'ignore))
           (claude-repl--explain-config-show)
           (should (eq (car display-args) buf))
           (should (eq (cadr display-args)
                       claude-repl--explain-config-display-action)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-(ert-deftest claude-repl-cmd-test-explain-config-show/skips-when-already-visible ()
-  "Show does nothing when a live window already displays the buffer."
-  (let* ((claude-repl-explain-config-buffer-name " *test-explain-already*")
+(ert-deftest claude-repl-cmd-test-explain-config-show/sets-global-visible-flag ()
+  "Show sets `--global-visible-p' so the popup follows the user across persps."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-flag-set*")
          (buf (get-buffer-create claude-repl-explain-config-buffer-name))
-         (display-called nil))
+         (claude-repl--explain-config-global-visible-p nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
+                  ((symbol-function 'display-buffer) (lambda (&rest _) nil))
+                  ((symbol-function 'claude-repl--explain-config-apply-width) #'ignore))
+          (claude-repl--explain-config-show)
+          (should claude-repl--explain-config-global-visible-p))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-show/reapplies-width-when-visible ()
+  "Show reapplies the configured width when a window already displays the buffer."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-reapply*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name))
+         (width-applied-with nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window)
                    (lambda (&rest _) 'fake-win))
+                  ((symbol-function 'window-live-p) (lambda (_w) t))
                   ((symbol-function 'display-buffer)
-                   (lambda (&rest _) (setq display-called t) nil)))
+                   (lambda (&rest _) (error "should not redisplay")))
+                  ((symbol-function 'claude-repl--explain-config-apply-width)
+                   (lambda (w) (setq width-applied-with w))))
           (claude-repl--explain-config-show)
-          (should-not display-called))
+          (should (eq width-applied-with 'fake-win)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest claude-repl-cmd-test-explain-config-hide/deletes-windows-for-buffer ()
@@ -596,30 +642,84 @@
       (claude-repl--explain-config-hide)
       (should-not delete-called))))
 
-(ert-deftest claude-repl-cmd-test-explain-config-spawn/opens-drawer ()
-  "Spawn opens the drawer so the explain-config sidekick has its parent space."
+(ert-deftest claude-repl-cmd-test-explain-config-hide/clears-global-visible-flag ()
+  "Hide clears `--global-visible-p' so the popup stays gone across persps."
+  (let ((claude-repl--explain-config-global-visible-p t))
+    (cl-letf (((symbol-function 'claude-repl-window--delete-buffer-windows) #'ignore))
+      (claude-repl--explain-config-hide)
+      (should-not claude-repl--explain-config-global-visible-p))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-ensure-visible/shows-when-flag-set-and-hidden ()
+  "Persp-reconciliation re-displays the popup when flag is set and window is missing."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-persp-show*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name))
+         (claude-repl--explain-config-global-visible-p t)
+         (display-args nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
+                  ((symbol-function 'display-buffer)
+                   (lambda (b action) (setq display-args (list b action)) nil))
+                  ((symbol-function 'claude-repl--explain-config-apply-width) #'ignore))
+          (claude-repl--explain-config-ensure-visible-on-persp-switch)
+          (should (eq (car display-args) buf))
+          (should (eq (cadr display-args)
+                      claude-repl--explain-config-display-action)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-ensure-visible/hides-when-flag-nil-and-shown ()
+  "Persp-reconciliation deletes stale popup windows when flag is nil."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-persp-hide*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name))
+         (claude-repl--explain-config-global-visible-p nil)
+         (delete-called-with nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window)
+                   (lambda (&rest _) 'fake-win))
+                  ((symbol-function 'claude-repl-window--delete-buffer-windows)
+                   (lambda (b &rest _) (setq delete-called-with b))))
+          (claude-repl--explain-config-ensure-visible-on-persp-switch)
+          (should (eq delete-called-with buf)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-ensure-visible/noop-when-flag-set-and-already-visible ()
+  "Persp-reconciliation skips display when flag is set and window is already live."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-persp-noop*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name))
+         (claude-repl--explain-config-global-visible-p t))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window)
+                   (lambda (&rest _) 'fake-win))
+                  ((symbol-function 'display-buffer)
+                   (lambda (&rest _) (error "should not redisplay")))
+                  ((symbol-function 'claude-repl-window--delete-buffer-windows)
+                   (lambda (&rest _) (error "should not delete"))))
+          (claude-repl--explain-config-ensure-visible-on-persp-switch)
+          ;; No error means the test passed.
+          (should t))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-spawn/does-not-open-drawer ()
+  "Spawn must NOT open the drawer — the popup is decoupled and stands alone."
   (let ((drawer-shown nil))
     (cl-letf (((symbol-function 'make-process) (lambda (&rest _) 'fake-proc))
               ((symbol-function 'process-send-string) #'ignore)
               ((symbol-function 'process-send-eof) #'ignore)
-              ((symbol-function 'display-buffer) #'ignore)
+              ((symbol-function 'claude-repl--explain-config-show) #'ignore)
               ((symbol-function 'claude-repl-drawer-show)
                (lambda () (setq drawer-shown t))))
       (claude-repl--explain-config-spawn "anything")
-      (should drawer-shown))))
+      (should-not drawer-shown))))
 
-(ert-deftest claude-repl-cmd-test-explain-config-spawn/displays-with-drawer-side-action ()
-  "Spawn passes the side-window display action to `display-buffer'."
-  (let (display-args)
+(ert-deftest claude-repl-cmd-test-explain-config-spawn/calls-show ()
+  "Spawn calls `--explain-config-show' so the popup appears and the flag flips."
+  (let ((show-called nil))
     (cl-letf (((symbol-function 'make-process) (lambda (&rest _) 'fake-proc))
               ((symbol-function 'process-send-string) #'ignore)
               ((symbol-function 'process-send-eof) #'ignore)
-              ((symbol-function 'claude-repl-drawer-show) #'ignore)
-              ((symbol-function 'display-buffer)
-               (lambda (b action) (setq display-args (list b action)) nil)))
+              ((symbol-function 'claude-repl--explain-config-show)
+               (lambda () (setq show-called t))))
       (claude-repl--explain-config-spawn "anything")
-      (should (eq (cadr display-args)
-                  claude-repl--explain-config-display-action)))))
+      (should show-called))))
 
 ;;;; ---- claude-repl explain-config face-markup rendering ----
 

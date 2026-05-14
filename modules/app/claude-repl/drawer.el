@@ -1724,11 +1724,6 @@ immediately, not after the next command."
       (claude-repl-window--harden win :dedicate t :fringes 0)
       (claude-repl-drawer--apply-width win))
     (setq claude-repl-drawer--global-visible-p t)
-    ;; Drawer + explain-config buffer share one "drawer space" — when
-    ;; the drawer opens, re-display the explain-config output (if a
-    ;; prior run produced it) beneath the drawer at slot 1.
-    (when (fboundp 'claude-repl--explain-config-show)
-      (claude-repl--explain-config-show))
     win))
 
 (defun claude-repl-drawer-hide ()
@@ -1750,12 +1745,7 @@ hiding genuinely wants to delete a side window."
     (dolist (win (get-buffer-window-list buf nil t))
       (when (window-live-p win)
         (set-window-dedicated-p win nil)))
-    (claude-repl-window--delete-buffer-windows buf))
-  ;; Couple: hiding the drawer also hides the explain-config output
-  ;; window (the buffer survives, only its visibility tracks the
-  ;; drawer).
-  (when (fboundp 'claude-repl--explain-config-hide)
-    (claude-repl--explain-config-hide)))
+    (claude-repl-window--delete-buffer-windows buf)))
 
 ;;;; Global drawer-mirror dispatch -----------------------------------------
 
@@ -2006,15 +1996,7 @@ switches with no cursor disruption."
       (dolist (w (get-buffer-window-list buf nil t))
         (when (window-live-p w)
           (set-window-dedicated-p w nil)))
-      (claude-repl-window--delete-buffer-windows buf)))
-    ;; Reconcile the explain-config sidekick in the same pass — its
-    ;; visibility is coupled to the drawer's, so persp restore should
-    ;; never leave them inconsistent (drawer shown but explain hidden,
-    ;; or vice versa).
-    (when (fboundp 'claude-repl--explain-config-show)
-      (if claude-repl-drawer--global-visible-p
-          (claude-repl--explain-config-show)
-        (claude-repl--explain-config-hide)))))
+      (claude-repl-window--delete-buffer-windows buf)))))
 
 (with-eval-after-load 'persp-mode
   (add-hook 'persp-activated-functions
