@@ -633,6 +633,8 @@ perspective rather than the caller's."
       :source-ws-dir source-dir)
     (claude-repl--reorder-workspace-by-priority ws)
     (claude-repl--setup-worktree-session ws-id path ws force-sandbox)
+    (when (fboundp 'claude-repl--events-record)
+      (claude-repl--events-record ws :create))
     (message "Worktree '%s' ready." dirname)
     (when callback (funcall callback path dirname))))
 
@@ -2027,6 +2029,8 @@ off so the user resolves in magit directly."
               (claude-repl--ws-put target-ws :merge-completed-at
                                    (float-time))
               (claude-repl--ws-put target-ws :merge-failed nil)
+              (when (fboundp 'claude-repl--events-record)
+                (claude-repl--events-record target-ws :merge))
               ;; Flip the repl-state so the 🔀 badge survives the
               ;; post-nuke poll cycle that would otherwise mark the
               ;; (now-vterm-less) preserved hash entry `:dead'.
