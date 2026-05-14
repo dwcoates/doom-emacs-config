@@ -67,16 +67,17 @@ the indent change — no other knobs needed."
       (eval (car (get 'claude-repl-drawer-width-fraction 'standard-value))))
 
 (defcustom claude-repl-drawer-state-icons
-  '((:init         . "⏳")
-    (:thinking     . "⌛")
-    (:done         . "✅")
-    (:idle         . "💤")
-    (:permission   . "❓")
-    (:stop-failed  . "❗")
-    (:dead         . "❌")
-    (:merged       . "🔀")
-    (:merge-failed . "❌")
-    (:merge-queued . "🕒"))
+  '((:init           . "⏳")
+    (:thinking       . "⌛")
+    (:done           . "✅")
+    (:idle           . "💤")
+    (:permission     . "❓")
+    (:stop-failed    . "❗")
+    (:dead           . "❌")
+    (:merged         . "🔀")
+    (:merge-failed   . "❌")
+    (:merge-conflict . "💥")
+    (:merge-queued   . "🕒"))
   "Alist mapping claude-state keyword to an indicator glyph.
 The :dead entry is used when `:repl-state' is `:dead' (overrides
 :claude-state).  The :merged entry is used when `:repl-state' is
@@ -644,16 +645,20 @@ CHILDREN is a list of trees.  Roots and siblings are sorted by
 
 (defun claude-repl-drawer--state-glyph (ws)
   "Return the indicator glyph for workspace WS.
-`:repl-state' `:merged' takes precedence over `:dead' (so a merged
-workspace whose vterm has since died still shows the 🔀 badge).
-`:repl-state' `:merge-failed' surfaces the ❌ badge while remaining in
-the MERGED bucket — a workspace whose cherry-pick reported failure but
-which the merge flow still bookkept as completed.  `:repl-state'
-`:merge-queued' surfaces the 🕒 badge for workspaces parked behind an
-in-flight cherry-pick on `claude-repl--merge-queue'."
+`:repl-state' `:merge-conflict' takes precedence over every other
+state so a workspace whose merge collided with master surfaces the 💥
+badge regardless of subsequent vterm activity.  `:merged' next, so a
+successfully-merged workspace whose vterm has since died still shows
+the 🔀 badge.  `:merge-failed' surfaces ❌ while remaining in the
+MERGED bucket — a workspace whose cherry-pick silently failed but
+which the merge flow still bookkept as completed.  `:merge-queued'
+surfaces 🕒 for workspaces parked behind an in-flight cherry-pick on
+`claude-repl--merge-queue'.  `:dead' falls through last."
   (let ((repl-state (claude-repl--ws-get ws :repl-state))
         (claude-state (claude-repl--ws-get ws :claude-state)))
-    (or (and (eq repl-state :merge-failed)
+    (or (and (eq repl-state :merge-conflict)
+             (alist-get :merge-conflict claude-repl-drawer-state-icons))
+        (and (eq repl-state :merge-failed)
              (alist-get :merge-failed claude-repl-drawer-state-icons))
         (and (eq repl-state :merged)
              (alist-get :merged claude-repl-drawer-state-icons))
@@ -678,16 +683,18 @@ workspaces don't carry a phantom space."
 
 (defun claude-repl-drawer--name-face (ws)
   "Return the face spec for WS's name, colored by claude-state.
-:dead, :merged, :merge-failed, and :merge-queued fall through to the
-default workspace-name face (the existing hidden/dim treatment
-provides the muting).  Unrecognized states render as plain bold."
+:dead, :merged, :merge-failed, :merge-conflict, and :merge-queued fall
+through to the default workspace-name face (the existing hidden/dim
+treatment provides the muting).  Unrecognized states render as plain
+bold."
   (let* ((repl-state   (claude-repl--ws-get ws :repl-state))
          (claude-state (claude-repl--ws-get ws :claude-state))
          (color (cond
-                 ((eq repl-state :merged)       nil)
-                 ((eq repl-state :merge-failed) nil)
-                 ((eq repl-state :merge-queued) nil)
-                 ((eq repl-state :dead)         nil)
+                 ((eq repl-state :merged)         nil)
+                 ((eq repl-state :merge-failed)   nil)
+                 ((eq repl-state :merge-conflict) nil)
+                 ((eq repl-state :merge-queued)   nil)
+                 ((eq repl-state :dead)           nil)
                  ((eq claude-state :init)      claude-repl--color-init-blue)
                  ((eq claude-state :thinking)  claude-repl--color-thinking-red)
                  ((memq claude-state '(:done :permission))

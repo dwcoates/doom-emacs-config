@@ -185,6 +185,28 @@ default at restart and shouldn't pin behavior."
   "Composed (nil, :merged) → :merged — branch merged into source, show 🔀 badge."
   (should (eq :merged (claude-repl--composed-state nil :merged))))
 
+(ert-deftest claude-repl-test-composed-nil-merge-conflict ()
+  "Composed (nil, :merge-conflict) → :merge-conflict — cherry-pick
+conflict left unresolved, show 💥 badge."
+  (should (eq :merge-conflict (claude-repl--composed-state nil :merge-conflict))))
+
+(ert-deftest claude-repl-test-composed-thinking-merge-conflict ()
+  "Composed (:thinking, :merge-conflict) → :thinking — claude-state
+dominates repl-state.  The conflict badge surfaces in the drawer via
+`--state-glyph', which reads repl-state directly; the tab-bar palette
+flows through `composed-state' and follows claude-state."
+  (should (eq :thinking
+              (claude-repl--composed-state :thinking :merge-conflict))))
+
+(ert-deftest claude-repl-test-tab-palette-has-merge-conflict-label ()
+  "Palette has a `:merge-conflict' entry that maps to the 💥 label so
+the tab-bar renders the new badge when `composed-state' yields
+`:merge-conflict' (vterm dead + repl-state = :merge-conflict)."
+  (should (equal (plist-get
+                  (alist-get :merge-conflict claude-repl--tab-palette)
+                  :label)
+                 "💥")))
+
 (ert-deftest claude-repl-test-composed-unknown-returns-nil ()
   "DIAGNOSTIC: unknown claude-state currently logs + returns nil (temporary —
 to be reverted to should-error once the leaking writer is found)."

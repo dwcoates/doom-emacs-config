@@ -4,6 +4,10 @@
 
 (require 'filenotify)
 
+(define-error 'claude-repl-merge-conflict-error
+  "Cherry-pick conflict left in tree (resolver declined or interactive abort)"
+  'user-error)
+
 (defvar +dwc/workspace-history nil
   "Workspace names ordered by most-recently-visited first.
 Defined in config.el; declared here to suppress byte-compiler warnings.")
@@ -1678,8 +1682,9 @@ manually clean up."
                                   "rev-parse" "--short" "CHERRY_PICK_HEAD"))
              (abort-ec (claude-repl--git-exit-code root "cherry-pick" "--abort")))
         (claude-repl--log ws "cherry-pick-commits cherry-pick --abort exit=%d" abort-ec)
-        (user-error "Conflict cherry-picking %s from '%s' — aborted cherry-pick"
-                    conflicting-commit target-ws)))))
+        (signal 'claude-repl-merge-conflict-error
+                (list (format "Conflict cherry-picking %s from '%s' — aborted cherry-pick"
+                              conflicting-commit target-ws)))))))
 
 (defun claude-repl--surface-silent-merge-conflict (target-ws root)
   "Surface a stalled silent-mode cherry-pick conflict to the user.
@@ -1711,8 +1716,9 @@ user knows where to look for the decline reason."
       (claude-repl-switch-to-project root))
     (when (fboundp 'magit-status)
       (magit-status root))
-    (user-error "Conflict cherry-picking %s from '%s' — magit opened in %s; resolver output: %s"
-                conflicting-commit target-ws root resolver-buf)))
+    (signal 'claude-repl-merge-conflict-error
+            (list (format "Conflict cherry-picking %s from '%s' — magit opened in %s; resolver output: %s"
+                          conflicting-commit target-ws root resolver-buf)))))
 
 ;;; Auto-resolution of cherry-pick conflicts (skill-invoked merges only)
 
@@ -2127,7 +2133,14 @@ in the MERGED bucket on the strength of a partial earlier success, and
 clears `:merging' so it exits the MERGING bucket too.
 
 A failed merge is the only path that flips a workspace dead via the
-merge flow; the success path uses `:merge-completed' instead."
+merge flow; the success path uses `:merge-completed' instead.
+
+Reserved for non-conflict failures: branch resolution errors, the
+silent `'failed' cherry-pick sentinel, or anything else not raised by
+`claude-repl-merge-conflict-error'.  Real cherry-pick conflicts route
+through `claude-repl--mark-merge-conflict' instead so the drawer can
+distinguish 💥 (conflict awaiting human resolution) from ❌ (process
+died / generic failure)."
   (claude-repl--log target-ws
                     "workspace-merge-do: merge failed ws=%s err=%S -> :repl-state :dead"
                     target-ws err)
@@ -2135,6 +2148,31 @@ merge flow; the success path uses `:merge-completed' instead."
   (claude-repl--ws-put target-ws :merge-completed nil)
   (claude-repl--ws-put target-ws :claude-state nil)
   (claude-repl--ws-put target-ws :repl-state :dead))
+
+(defun claude-repl--mark-merge-conflict (target-ws err)
+  "Mark TARGET-WS as `:merge-conflict' because the cherry-pick conflicted.
+Distinct from `claude-repl--mark-merge-failed': set only on real
+cherry-pick conflicts (CHERRY_PICK_HEAD existed, auto-resolver
+declined OR interactive `--check-cherry-pick-conflict' aborted).  The
+drawer surfaces the 💥 badge so the user can tell a conflict failure
+from a vterm-death or silent git failure.
+
+Clears `:merging' and `:merge-completed' so the workspace exits the
+MERGING bucket and does not land in MERGED.  Keeps `:claude-state'
+untouched (unlike `--mark-merge-failed') because the workspace's vterm
+is still alive — the user can keep typing into it after they resolve
+the conflict outside.
+
+Set via the conflict-specific signal `claude-repl-merge-conflict-error'
+raised by `claude-repl--check-cherry-pick-conflict' and
+`claude-repl--surface-silent-merge-conflict'; routed in the error
+handler of `claude-repl--workspace-merge-do'."
+  (claude-repl--log target-ws
+                    "workspace-merge-do: merge conflict ws=%s err=%S -> :repl-state :merge-conflict"
+                    target-ws err)
+  (claude-repl--ws-put target-ws :merging nil)
+  (claude-repl--ws-put target-ws :merge-completed nil)
+  (claude-repl--ws-put target-ws :repl-state :merge-conflict))
 
 (defun claude-repl--workspace-merge-do (target-ws &optional project-root-override silent auto-resolve)
   "Cherry-pick TARGET-WS's branch commits onto the current branch.
@@ -2192,6 +2230,15 @@ off so the user resolves in magit directly."
       (claude-repl--log current-ws "workspace-merge-do project-root=%s (for ws=%s)" project-root current-ws)
       (unless (claude-repl--git-branch-exists-p project-root target-branch)
         (user-error "Branch '%s' not found in repo %s" target-branch project-root))
+      ;; Clear any prior `:merge-conflict' badge from a previous failed
+      ;; attempt so a retry starts visually clean.  Restricted to the
+      ;; conflict state so we don't clobber `:dead' / `:merged' that
+      ;; would mean something different here.
+      (when (eq (claude-repl--ws-get target-ws :repl-state) :merge-conflict)
+        (claude-repl--log target-ws
+                          "workspace-merge-do: clearing prior :merge-conflict on ws=%s for retry"
+                          target-ws)
+        (claude-repl--ws-put target-ws :repl-state nil))
       ;; Flip the workflow flag before the cherry-pick so the drawer's
       ;; MERGING bucket reflects "merge in flight" for the duration of
       ;; the attempt.  Cleared on either branch below.
@@ -2268,6 +2315,15 @@ off so the user resolves in magit directly."
             ;; in-flight gate is now clear from this merge's perspective,
             ;; so attempt to drain any merges parked behind this one.
             (claude-repl--drain-merge-queue))
+        (claude-repl-merge-conflict-error
+         ;; Real cherry-pick conflict — distinguish from generic merge
+         ;; failure so the drawer can render 💥 (conflict awaiting
+         ;; resolution) instead of ❌ (process died).  Branch matched
+         ;; before the generic `error' handler so the more specific
+         ;; signal takes precedence (per Emacs's condition-case rules).
+         (claude-repl--mark-merge-conflict target-ws err)
+         (claude-repl--drain-merge-queue)
+         (signal (car err) (cdr err)))
         (error
          (claude-repl--mark-merge-failed target-ws err)
          ;; Drain before re-signaling: the in-flight gate is clear and a

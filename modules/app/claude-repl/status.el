@@ -597,6 +597,13 @@ process has died.")
 StopFailure hook fired (turn ended on an API error, but the vterm
 session is still alive and re-promptable).")
 
+(defconst claude-repl--label-merge-conflict   "💥"
+  "Bracket label shown adjacent to the numeric index when a workspace's
+merge was rejected by a cherry-pick conflict (real conflict markers
+left behind, auto-resolver declined or interactive abort).  Distinct
+from `:dead' (vterm died) and `:merge-failed' (silent git-aborted, no
+CHERRY_PICK_HEAD) — collision metaphor reflects the actual conflict.")
+
 (defconst claude-repl--label-merged           "🔀"
   "Bracket label shown adjacent to the numeric index when the
 workspace's branch has been merged into its source (`:repl-state'
@@ -707,6 +714,8 @@ Distributed evenly across `claude-repl-flash-count' on/off cycles."
                   :weight ,claude-repl--tab-weight))
     (:dead
      :label      ,claude-repl--label-dead)
+    (:merge-conflict
+     :label      ,claude-repl--label-merge-conflict)
     (:merged
      :label      ,claude-repl--label-merged))
   "Per-state tab-appearance palette.
@@ -936,15 +945,16 @@ Every known claude-state is mapped explicitly.  Unknown states error
 hard — no silent fallback.
 
 Rule:
-  :thinking    → :thinking                (red)
-  :permission  → :permission               (green + ❓)
-  :init        → :init                     (blue — Claude starting)
-  :done        → :done                     (green — unacknowledged work)
-  :idle        → :idle                     (orange)
-  :stop-failed → :stop-failed              (magenta + ⚠ — turn errored)
-  nil + :merged → :merged                  (default + 🔀)
-  nil + :dead  → :dead                     (default + ❌)
-  nil          → nil                       (no session / unborn)"
+  :thinking    → :thinking                  (red)
+  :permission  → :permission                 (green + ❓)
+  :init        → :init                       (blue — Claude starting)
+  :done        → :done                       (green — unacknowledged work)
+  :idle        → :idle                       (orange)
+  :stop-failed → :stop-failed                (magenta + ⚠ — turn errored)
+  nil + :merged         → :merged            (default + 🔀)
+  nil + :merge-conflict → :merge-conflict    (default + 💥)
+  nil + :dead           → :dead              (default + ❌)
+  nil                   → nil                (no session / unborn)"
   (cond
    ((eq claude :thinking)    :thinking)
    ((eq claude :permission)  :permission)
@@ -953,6 +963,10 @@ Rule:
    ((eq claude :idle)        :idle)
    ((eq claude :stop-failed) :stop-failed)
    ((and (null claude) (eq repl :merged)) :merged)
+   ;; `:merge-conflict' takes precedence over `:dead' so a workspace
+   ;; whose vterm later dies still surfaces the conflict signal — the
+   ;; merge failure is the more actionable badge.
+   ((and (null claude) (eq repl :merge-conflict)) :merge-conflict)
    ((and (null claude) (eq repl :dead)) :dead)
    ((null claude)           nil)
    (t

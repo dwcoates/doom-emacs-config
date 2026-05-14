@@ -4919,9 +4919,11 @@ drawer can render an age/timestamp once that surfaces in the UI."
       (should (numberp (claude-repl--ws-get "other-ws" :merge-completed-at))))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-marks-dead-on-cherry-pick-error ()
-  "Cherry-pick failure flips the target workspace to `:repl-state :dead'
-\(and clears `:claude-state') so the drawer shows the ❌ badge.  The
-error is still re-signaled to the caller."
+  "GENERIC cherry-pick failure (non-conflict `user-error') flips the
+target workspace to `:repl-state :dead' (and clears `:claude-state')
+so the drawer shows the ❌ badge.  The error is still re-signaled.
+Conflict-specific errors go through a different path — see
+`claude-repl-test-workspace-merge-do-marks-merge-conflict-on-conflict-error'."
   (claude-repl-test--with-clean-state
     (puthash "other-ws" '(:claude-state :thinking) claude-repl--workspaces)
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
@@ -4930,13 +4932,80 @@ error is still re-signaled to the caller."
                ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits)
-                (lambda (_dir _ws _base _br &optional _auto _silent) (user-error "Conflict")))
+                (lambda (_dir _ws _base _br &optional _auto _silent) (user-error "Generic failure")))
                ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
       (should-error (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
                     :type 'user-error)
       (should (eq (claude-repl--ws-get "other-ws" :repl-state) :dead))
       (should (null (claude-repl--ws-get "other-ws" :claude-state))))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-marks-merge-conflict-on-conflict-error ()
+  "When the cherry-pick raises `claude-repl-merge-conflict-error', the
+target workspace flips to `:repl-state :merge-conflict' (not `:dead')
+so the drawer renders the 💥 badge.  `:claude-state' is preserved
+because the vterm is still alive — the user can keep typing after
+resolving the conflict externally."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '(:claude-state :thinking) claude-repl--workspaces)
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits)
+                (lambda (_dir _ws _base _br &optional _auto _silent)
+                  (signal 'claude-repl-merge-conflict-error '("Conflict"))))
+               ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
+               ((symbol-function 'load-file) #'ignore))
+      (should-error (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+                    :type 'claude-repl-merge-conflict-error)
+      (should (eq (claude-repl--ws-get "other-ws" :repl-state) :merge-conflict))
+      ;; vterm-alive workspace should keep its claude-state through a conflict
+      (should (eq (claude-repl--ws-get "other-ws" :claude-state) :thinking)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-clears-prior-merge-conflict-on-retry ()
+  "A retry of a previously-conflicted merge clears the stale 💥 badge
+before re-entering the cherry-pick so the drawer reflects in-flight
+state, not stale failure state.  Only `:merge-conflict' is cleared —
+other repl-states are preserved."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '(:repl-state :merge-conflict) claude-repl--workspaces)
+    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+               ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+               ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+               ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+               ((symbol-function 'claude-repl--cherry-pick-commits)
+                (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+               ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
+               ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+               ((symbol-function 'claude-repl--gns-sockets-close-then)
+                (lambda (_ws thunk) (funcall thunk)))
+               ((symbol-function 'claude-repl--close-workspace) #'ignore)
+               ((symbol-function 'load-file) #'ignore))
+      (claude-repl--workspace-merge-do "other-ws" "/tmp/fake")
+      ;; After a successful retry, the workspace ends up :merged — but
+      ;; the assertion we care about is that the initial :merge-conflict
+      ;; was cleared (it would NOT be `:merge-conflict' here regardless).
+      (should-not (eq (claude-repl--ws-get "other-ws" :repl-state)
+                      :merge-conflict)))))
+
+(ert-deftest claude-repl-test-mark-merge-conflict-sets-state ()
+  "Direct invariants of `claude-repl--mark-merge-conflict':
+`:repl-state' → `:merge-conflict', `:merging' cleared,
+`:merge-completed' cleared, `:claude-state' NOT touched."
+  (claude-repl-test--with-clean-state
+    (puthash "ws" '(:claude-state :thinking
+                    :merging t
+                    :merge-completed t)
+             claude-repl--workspaces)
+    (claude-repl--mark-merge-conflict "ws" '(error "test"))
+    (should (eq (claude-repl--ws-get "ws" :repl-state) :merge-conflict))
+    (should (null (claude-repl--ws-get "ws" :merging)))
+    (should (null (claude-repl--ws-get "ws" :merge-completed)))
+    ;; :claude-state must remain — vterm is still alive on a conflict
+    (should (eq (claude-repl--ws-get "ws" :claude-state) :thinking))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-does-not-set-merge-completed-on-error ()
   "A failed cherry-pick must leave `:merge-completed' nil so the

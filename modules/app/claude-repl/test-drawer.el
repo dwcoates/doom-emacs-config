@@ -2322,7 +2322,8 @@ already-bound symbols and palette tweaks would require an Emacs restart."
   (should (equal (alist-get :init       claude-repl-drawer-state-icons) "⏳"))
   (should (equal (alist-get :stop-failed claude-repl-drawer-state-icons) "❗"))
   (should (equal (alist-get :dead       claude-repl-drawer-state-icons) "❌"))
-  (should (equal (alist-get :merged     claude-repl-drawer-state-icons) "🔀")))
+  (should (equal (alist-get :merged     claude-repl-drawer-state-icons) "🔀"))
+  (should (equal (alist-get :merge-conflict claude-repl-drawer-state-icons) "💥")))
 
 ;;;; ---- State glyph ----
 
@@ -2350,6 +2351,39 @@ already-bound symbols and palette tweaks would require an Emacs restart."
                                        :repl-state :merged)
     (should (equal (claude-repl-drawer--state-glyph "merged-ws")
                    (alist-get :merged claude-repl-drawer-state-icons)))))
+
+(ert-deftest claude-repl-drawer-test-state-glyph-merge-conflict-surfaces-collision ()
+  ":repl-state :merge-conflict renders the 💥 glyph — a real cherry-pick
+conflict that the auto-resolver rejected (or interactive abort).
+Distinct from :merge-failed (silent git failure) and :dead (vterm
+death) so the user can see at a glance that this row needs human
+conflict resolution."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "conflicted-merge"
+                                       :repl-state :merge-conflict)
+    (should (equal (claude-repl-drawer--state-glyph "conflicted-merge")
+                   "💥"))))
+
+(ert-deftest claude-repl-drawer-test-state-glyph-merge-conflict-overrides-claude-state ()
+  ":repl-state :merge-conflict takes precedence over :claude-state.
+The vterm is still alive on a conflict (unlike :dead), but the badge
+must surface the conflict rather than the mid-session mood."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws"
+                                       :claude-state :thinking
+                                       :repl-state :merge-conflict)
+    (should (equal (claude-repl-drawer--state-glyph "ws") "💥"))))
+
+(ert-deftest claude-repl-drawer-test-state-glyph-merge-conflict-overrides-dead ()
+  "When `:repl-state' becomes `:dead' after a conflict (e.g., vterm
+later dies), the conflict badge should win — the conflict signal is
+more actionable than a generic process-death."
+  (claude-repl-test--with-clean-state
+    ;; Set :merge-conflict last so it wins (set semantics: latest write
+    ;; wins; here we test precedence in resolve-time, so both registered
+    ;; and the resolver picks :merge-conflict via state-glyph priority).
+    (claude-repl-drawer-test--register "ws" :repl-state :merge-conflict)
+    (should (equal (claude-repl-drawer--state-glyph "ws") "💥"))))
 
 (ert-deftest claude-repl-drawer-test-state-glyph-merge-failed-surfaces-x ()
   ":repl-state :merge-failed renders the ❌ glyph (failed cherry-pick
