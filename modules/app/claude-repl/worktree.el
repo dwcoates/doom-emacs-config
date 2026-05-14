@@ -1712,6 +1712,37 @@ path)."
   :type 'integer
   :group 'claude-repl)
 
+(defcustom claude-repl-auto-resolve-verify-command nil
+  "Command run after auto-resolve clears markers to verify the resolution is sound.
+Executed in the worktree root after the model edits files clean of
+`<<<<<<<' markers but BEFORE `git add -u' + `git cherry-pick
+--continue' fire.  Non-zero exit or timeout decline the resolution,
+falling through to the existing `cherry-pick --abort' + user-error
+path — so a broken merge cannot land via auto-resolve.
+
+Value forms:
+- nil (default): skip verification entirely (current behavior).  The
+  textual marker scan remains the only gate in that case.
+- list of strings: the command + args (e.g. `(\"just\" \"test\")').
+- function: called with the worktree ROOT as its single argument; must
+  return either a list of strings (run that command) or nil (skip
+  verification for this invocation).
+
+Set this per-project to gain real soundness coverage — compile, lint,
+or test the model's resolution before letting the cherry-pick commit."
+  :type '(choice (const :tag "Skip verification" nil)
+                 (repeat string)
+                 function)
+  :group 'claude-repl)
+
+(defcustom claude-repl-auto-resolve-verify-timeout 300
+  "Seconds to wait for `claude-repl-auto-resolve-verify-command' to exit.
+On timeout the verifier is killed and the resolution is declined (falls
+through to the existing abort + user-error path).  Default 300 because
+project test suites are commonly slower than the resolver itself."
+  :type 'integer
+  :group 'claude-repl)
+
 (defun claude-repl--cherry-pick-conflicted-files (root)
   "Return the list of conflicted file paths in repo at ROOT.
 Reads `git diff --name-only --diff-filter=U' so the list reflects the
@@ -1817,6 +1848,96 @@ without spawning an actual `claude' process."
             (process-exit-status proc))
         (when (buffer-live-p out-buf) (kill-buffer out-buf))))))
 
+(defun claude-repl--auto-resolve-verify-cmd (root)
+  "Resolve `claude-repl-auto-resolve-verify-command' to a concrete command list.
+Returns nil when verification should be skipped — either because the
+config is nil, the function-form returned nil, or the value has a
+malformed shape (logged and treated as nil so a typo cannot silently
+let a bad merge through OR block all merges).  ROOT is forwarded to the
+function-form so per-worktree decisions are possible."
+  (let ((cfg claude-repl-auto-resolve-verify-command))
+    (cond
+     ((null cfg) nil)
+     ((functionp cfg)
+      (let ((r (funcall cfg root)))
+        (cond
+         ((null r) nil)
+         ((and (listp r) (cl-every #'stringp r)) r)
+         (t (claude-repl--log nil
+                              "auto-resolve-verify: function returned malformed %S — skipping"
+                              r)
+            nil))))
+     ((and (listp cfg) (cl-every #'stringp cfg)) cfg)
+     (t (claude-repl--log nil
+                          "auto-resolve-verify: malformed config %S — skipping"
+                          cfg)
+        nil))))
+
+(defun claude-repl--invoke-auto-resolve-verify (root command)
+  "Synchronously run COMMAND (list of strings) in repo at ROOT.
+Returns the process exit status (integer) on completion, or the symbol
+`timeout' when `claude-repl-auto-resolve-verify-timeout' elapses without
+the process exiting.
+
+Factored out as its own function so tests can stub the subprocess
+without spawning the project's real test runner."
+  (let* ((out-buf (generate-new-buffer " *claude-auto-resolve-verify*"))
+         (default-directory (file-name-as-directory root))
+         (proc (apply #'start-process
+                      "claude-auto-resolve-verify" out-buf command)))
+    (set-process-query-on-exit-flag proc nil)
+    (let ((deadline (+ (float-time) claude-repl-auto-resolve-verify-timeout))
+          (timed-out nil))
+      (while (and (process-live-p proc) (not timed-out))
+        (accept-process-output proc 0.2)
+        (when (> (float-time) deadline)
+          (setq timed-out t)
+          (delete-process proc)))
+      (unwind-protect
+          (if timed-out
+              'timeout
+            (process-exit-status proc))
+        (when (buffer-live-p out-buf) (kill-buffer out-buf))))))
+
+(defun claude-repl--auto-resolve-verify-passes-p (target-ws root)
+  "Run the configured verify command and return t when it passes.
+Returns t when no verify command is configured (the marker-scan remains
+the only gate in that case — preserves prior behavior).  Returns t when
+the verify command exits 0.  Returns nil on non-zero exit or timeout;
+the caller treats nil identically to `markers remain' and falls through
+to `cherry-pick --abort' + user-error."
+  (let ((cmd (claude-repl--auto-resolve-verify-cmd root)))
+    (cond
+     ((null cmd)
+      (claude-repl--log target-ws
+                        "auto-resolve-verify: target-ws=%s no verify-command — accepting"
+                        target-ws)
+      t)
+     (t
+      (claude-repl--log target-ws
+                        "auto-resolve-verify: target-ws=%s running %S"
+                        target-ws cmd)
+      (let ((result (claude-repl--invoke-auto-resolve-verify root cmd)))
+        (claude-repl--log target-ws
+                          "auto-resolve-verify: target-ws=%s result=%S"
+                          target-ws result)
+        (cond
+         ((eq result 'timeout)
+          (claude-repl--log target-ws
+                            "auto-resolve-verify: target-ws=%s timed out — declining"
+                            target-ws)
+          nil)
+         ((and (numberp result) (zerop result))
+          (claude-repl--log target-ws
+                            "auto-resolve-verify: target-ws=%s passed — accepting"
+                            target-ws)
+          t)
+         (t
+          (claude-repl--log target-ws
+                            "auto-resolve-verify: target-ws=%s non-zero exit=%S — declining"
+                            target-ws result)
+          nil)))))))
+
 (defun claude-repl--auto-resolve-cherry-pick-conflict (target-ws root)
   "Attempt LLM-based resolution of the in-progress cherry-pick conflict.
 TARGET-WS is the workspace being cherry-picked (for logging + the
@@ -1869,9 +1990,9 @@ the caller to run `git cherry-pick --continue'."
             nil)
            ((claude-repl--all-conflicts-resolved-p root files)
             (claude-repl--log target-ws
-                              "auto-resolve: target-ws=%s all markers cleared — accepting"
+                              "auto-resolve: target-ws=%s all markers cleared — verifying"
                               target-ws)
-            t)
+            (claude-repl--auto-resolve-verify-passes-p target-ws root))
            (t
             (claude-repl--log target-ws
                               "auto-resolve: target-ws=%s markers remain — declining"

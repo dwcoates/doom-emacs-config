@@ -1803,6 +1803,229 @@ honest signal that something went wrong inside the headless agent."
                    1)))
         (should-not (claude-repl--auto-resolve-cherry-pick-conflict "ws" repo))))))
 
+;;;; ---- Tests: auto-resolve-verify-cmd (config resolver) ----
+
+(ert-deftest claude-repl-test-auto-resolve-verify-cmd-nil-config ()
+  "nil config resolves to nil (skip verification)."
+  (let ((claude-repl-auto-resolve-verify-command nil))
+    (should-not (claude-repl--auto-resolve-verify-cmd "/tmp"))))
+
+(ert-deftest claude-repl-test-auto-resolve-verify-cmd-list-config ()
+  "List-of-strings config resolves to itself."
+  (let ((claude-repl-auto-resolve-verify-command '("just" "test")))
+    (should (equal (claude-repl--auto-resolve-verify-cmd "/tmp")
+                   '("just" "test")))))
+
+(ert-deftest claude-repl-test-auto-resolve-verify-cmd-function-returning-list ()
+  "Function-form config: function is called with ROOT, return list is used."
+  (let* ((received-root nil)
+         (claude-repl-auto-resolve-verify-command
+          (lambda (root) (setq received-root root) '("verify" "here"))))
+    (should (equal (claude-repl--auto-resolve-verify-cmd "/tmp/wt")
+                   '("verify" "here")))
+    (should (equal received-root "/tmp/wt"))))
+
+(ert-deftest claude-repl-test-auto-resolve-verify-cmd-function-returning-nil ()
+  "Function-form returning nil means skip verification for this invocation."
+  (let ((claude-repl-auto-resolve-verify-command (lambda (_root) nil)))
+    (should-not (claude-repl--auto-resolve-verify-cmd "/tmp"))))
+
+(ert-deftest claude-repl-test-auto-resolve-verify-cmd-function-returning-malformed ()
+  "Function-form returning malformed value resolves to nil (skip), not raise."
+  (let ((claude-repl-auto-resolve-verify-command (lambda (_r) 'oops)))
+    (should-not (claude-repl--auto-resolve-verify-cmd "/tmp"))))
+
+(ert-deftest claude-repl-test-auto-resolve-verify-cmd-malformed-list-config ()
+  "List containing non-strings resolves to nil (skip), not raise."
+  (let ((claude-repl-auto-resolve-verify-command '("just" 42)))
+    (should-not (claude-repl--auto-resolve-verify-cmd "/tmp"))))
+
+;;;; ---- Tests: invoke-auto-resolve-verify (subprocess) ----
+
+(ert-deftest claude-repl-test-invoke-auto-resolve-verify-zero-exit ()
+  "Verifier with exit-0 command returns 0."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-auto-resolve-verify-timeout 30))
+      (should (eql (claude-repl--invoke-auto-resolve-verify repo '("true"))
+                   0)))))
+
+(ert-deftest claude-repl-test-invoke-auto-resolve-verify-nonzero-exit ()
+  "Verifier with exit-non-zero command returns the non-zero exit code."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-auto-resolve-verify-timeout 30))
+      (let ((rc (claude-repl--invoke-auto-resolve-verify repo '("false"))))
+        (should (and (numberp rc) (not (zerop rc))))))))
+
+(ert-deftest claude-repl-test-invoke-auto-resolve-verify-timeout ()
+  "Verifier with a hung command returns `timeout' when the deadline elapses.
+Uses `sleep 30' with a sub-second timeout — the timeout is a deliberately
+short deadline (NOT a sleep-for-synchronization)."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-auto-resolve-verify-timeout 1))
+      (should (eq (claude-repl--invoke-auto-resolve-verify
+                   repo '("sleep" "30"))
+                  'timeout)))))
+
+(ert-deftest claude-repl-test-invoke-auto-resolve-verify-cwd-is-root ()
+  "Verifier runs with `default-directory' set to ROOT.
+The spawned process inherits cwd; asserting via `pwd > marker' written
+into the repo proves the verifier shell-pwd matched ROOT."
+  (claude-repl-test--with-temp-git-repo repo
+    (let* ((claude-repl-auto-resolve-verify-timeout 30)
+           (marker (expand-file-name "pwd.marker" repo))
+           (rc (claude-repl--invoke-auto-resolve-verify
+                repo (list "sh" "-c"
+                           (format "pwd > %s" (shell-quote-argument marker))))))
+      (should (eql rc 0))
+      (should (file-exists-p marker))
+      (let ((captured (string-trim
+                       (with-temp-buffer
+                         (insert-file-contents marker)
+                         (buffer-string))))
+            (expected (string-trim
+                       (shell-command-to-string
+                        (format "cd %s && pwd" (shell-quote-argument repo))))))
+        (should (equal captured expected))))))
+
+;;;; ---- Tests: auto-resolve-verify-passes-p ----
+
+(ert-deftest claude-repl-test-auto-resolve-verify-passes-p-no-command ()
+  "With no verify-command configured, the gate accepts without spawning."
+  (let ((claude-repl-auto-resolve-verify-command nil)
+        (spawned nil))
+    (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-verify)
+               (lambda (&rest _) (setq spawned t) 0)))
+      (should (claude-repl--auto-resolve-verify-passes-p "ws" "/tmp"))
+      (should-not spawned))))
+
+(ert-deftest claude-repl-test-auto-resolve-verify-passes-p-zero-exit ()
+  "Verifier exit=0 → gate accepts."
+  (let ((claude-repl-auto-resolve-verify-command '("true")))
+    (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-verify)
+               (lambda (&rest _) 0)))
+      (should (claude-repl--auto-resolve-verify-passes-p "ws" "/tmp")))))
+
+(ert-deftest claude-repl-test-auto-resolve-verify-passes-p-nonzero-exit ()
+  "Verifier exit non-zero → gate declines (returns nil)."
+  (let ((claude-repl-auto-resolve-verify-command '("false")))
+    (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-verify)
+               (lambda (&rest _) 1)))
+      (should-not (claude-repl--auto-resolve-verify-passes-p "ws" "/tmp")))))
+
+(ert-deftest claude-repl-test-auto-resolve-verify-passes-p-timeout ()
+  "Verifier timeout → gate declines (returns nil)."
+  (let ((claude-repl-auto-resolve-verify-command '("hang")))
+    (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-verify)
+               (lambda (&rest _) 'timeout)))
+      (should-not (claude-repl--auto-resolve-verify-passes-p "ws" "/tmp")))))
+
+;;;; ---- Tests: auto-resolve-cherry-pick-conflict with verify ----
+
+(ert-deftest claude-repl-test-auto-resolve-declines-when-verify-fails ()
+  "Even with markers cleared and resolver exit=0, a non-zero verify
+exit causes `--auto-resolve-cherry-pick-conflict' to return nil.
+Soundness gate: textual marker scan is necessary but not sufficient."
+  (claude-repl-test--with-temp-git-repo repo
+    (write-region "base" nil (expand-file-name "shared" repo))
+    (call-process "git" nil nil nil "-C" repo "add" "shared")
+    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
+    (claude-repl-test--git-checkout repo "feature" t)
+    (write-region "feature-content" nil (expand-file-name "shared" repo))
+    (call-process "git" nil nil nil "-C" repo "add" "shared")
+    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
+    (let ((sha-f1 (string-trim
+                   (shell-command-to-string
+                    (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
+      (claude-repl-test--git-checkout repo "master")
+      (write-region "master-content" nil (expand-file-name "shared" repo))
+      (call-process "git" nil nil nil "-C" repo "add" "shared")
+      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
+      (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
+      (let ((claude-repl-auto-resolve-verify-command '("verify-cmd")))
+        (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
+                   (lambda (root _prompt)
+                     (dolist (f (claude-repl--cherry-pick-conflicted-files root))
+                       (with-temp-file (expand-file-name f root)
+                         (insert "resolved\n")))
+                     0))
+                  ((symbol-function 'claude-repl--invoke-auto-resolve-verify)
+                   (lambda (&rest _) 1)))
+          (should-not (claude-repl--auto-resolve-cherry-pick-conflict "ws" repo)))))))
+
+(ert-deftest claude-repl-test-auto-resolve-accepts-when-verify-passes ()
+  "Markers cleared AND verify exit=0 → `--auto-resolve-cherry-pick-conflict' returns t."
+  (claude-repl-test--with-temp-git-repo repo
+    (write-region "base" nil (expand-file-name "shared" repo))
+    (call-process "git" nil nil nil "-C" repo "add" "shared")
+    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
+    (claude-repl-test--git-checkout repo "feature" t)
+    (write-region "feature-content" nil (expand-file-name "shared" repo))
+    (call-process "git" nil nil nil "-C" repo "add" "shared")
+    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
+    (let ((sha-f1 (string-trim
+                   (shell-command-to-string
+                    (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
+      (claude-repl-test--git-checkout repo "master")
+      (write-region "master-content" nil (expand-file-name "shared" repo))
+      (call-process "git" nil nil nil "-C" repo "add" "shared")
+      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
+      (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
+      (let ((claude-repl-auto-resolve-verify-command '("verify-cmd")))
+        (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
+                   (lambda (root _prompt)
+                     (dolist (f (claude-repl--cherry-pick-conflicted-files root))
+                       (with-temp-file (expand-file-name f root)
+                         (insert "resolved\n")))
+                     0))
+                  ((symbol-function 'claude-repl--invoke-auto-resolve-verify)
+                   (lambda (&rest _) 0)))
+          (should (claude-repl--auto-resolve-cherry-pick-conflict "ws" repo)))))))
+
+;;;; ---- Tests: cherry-pick-commits end-to-end with verify ----
+
+(ert-deftest claude-repl-test-cherry-pick-commits-verify-fail-aborts-and-signals ()
+  "End-to-end: markers cleared by resolver but verify-fail → `cherry-pick
+--commits' falls through to abort + user-error; no commit lands and
+CHERRY_PICK_HEAD is cleared."
+  (claude-repl-test--with-temp-git-repo repo
+    (write-region "base" nil (expand-file-name "shared" repo))
+    (call-process "git" nil nil nil "-C" repo "add" "shared")
+    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
+    (let ((sha-m (string-trim
+                  (shell-command-to-string
+                   (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
+      (claude-repl-test--git-checkout repo "feature" t)
+      (write-region "feature-content" nil (expand-file-name "shared" repo))
+      (call-process "git" nil nil nil "-C" repo "add" "shared")
+      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
+      (claude-repl-test--git-checkout repo "master")
+      (write-region "master-content" nil (expand-file-name "shared" repo))
+      (call-process "git" nil nil nil "-C" repo "add" "shared")
+      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
+      (let ((master-head-before
+             (string-trim
+              (shell-command-to-string
+               (format "git -C %s rev-parse HEAD" (shell-quote-argument repo)))))
+            (claude-repl-auto-resolve-verify-command '("verify-cmd")))
+        (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
+                   (lambda (root _prompt)
+                     (dolist (f (claude-repl--cherry-pick-conflicted-files root))
+                       (with-temp-file (expand-file-name f root)
+                         (insert "resolved\n")))
+                     0))
+                  ((symbol-function 'claude-repl--invoke-auto-resolve-verify)
+                   (lambda (&rest _) 1))
+                  ((symbol-function 'magit-status) (lambda (&rest _) nil)))
+          (should-error (claude-repl--cherry-pick-commits
+                         repo "feature" sha-m "feature" t)
+                        :type 'user-error)
+          (should-not (claude-repl--cherry-pick-in-progress-p repo))
+          (let ((master-head-after
+                 (string-trim
+                  (shell-command-to-string
+                   (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
+            (should (equal master-head-before master-head-after))))))))
+
 ;;;; ---- Tests: cherry-pick-commits with auto-resolve ----
 
 (ert-deftest claude-repl-test-cherry-pick-commits-auto-resolve-success-advances-merge ()
