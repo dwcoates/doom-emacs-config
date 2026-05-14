@@ -2429,9 +2429,9 @@ gap.  We assert: (a) every char preceding a newline is a space, and
       (should-not (claude-repl--repo-default-priority-for-path "/any/path")))))
 
 (ert-deftest claude-repl-test-repo-default-priority-default-value-has-explanation-engine ()
-  "Default value of `claude-repl-repo-default-priorities' assigns p3 to explanation-engine."
+  "Default value of `claude-repl-repo-default-priorities' assigns p1 to explanation-engine."
   (should (equal (cdr (assoc "explanation-engine" claude-repl-repo-default-priorities))
-                 "p3")))
+                 "p1")))
 
 (provide 'test-status)
 

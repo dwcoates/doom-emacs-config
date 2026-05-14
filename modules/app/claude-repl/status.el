@@ -12,7 +12,7 @@
   :type '(repeat string)
   :group 'claude-repl)
 
-(defcustom claude-repl-repo-default-priorities '(("explanation-engine" . "p3"))
+(defcustom claude-repl-repo-default-priorities '(("explanation-engine" . "p1"))
   "Alist mapping repository names to default `:priority' values for new workspaces.
 The repository name is the basename of the parent of `git rev-parse
 --git-common-dir' for a path, matching how the drawer groups workspaces
