@@ -36,10 +36,6 @@ fi
 SETTINGS="$HOME/.claude/settings.json"
 HOOKS_DIR="$HOME/.claude/hooks"
 SKILLS_DIR="$HOME/.claude/skills"
-# Source tree for managed skills.  Override via CLAUDE_REPL_SKILLS_SRC.
-# Symlinks are created at install time, so $HOME expands on the host;
-# nothing is committed with a hardcoded user path.
-SKILLS_SRC="${CLAUDE_REPL_SKILLS_SRC:-$HOME/workspace/ChessCom/explanation-engine/.claude/skills}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOOK_SCRIPTS_SRC="$SCRIPT_DIR/../modules/app/claude-repl/hooks"
 
@@ -55,24 +51,43 @@ HOOKS=(
   "Notification|permission-notify.sh|permission_prompt"
 )
 
-# Host-level skill symlinks managed by this script.  Each name resolves
-# to $SKILLS_DIR/<name> -> $SKILLS_SRC/<name>.
-SKILLS=(
-  "emit-workspace-commands.sh"
-  "generate-workspace"
-  "workspace-update"
-)
+# Resolve a $SCRIPT_DIR-relative path to an absolute canonical form
+# (no ".." segments).  Symlink targets that pass through such
+# segments would be valid but visually noisy and would break equality
+# checks against canonical paths in other tooling.
+_canonpath() {
+  local raw="$1"
+  if [ -d "$raw" ]; then
+    ( cd "$raw" && pwd )
+  else
+    echo "$raw"
+  fi
+}
 
 # Skills checked into THIS repo (under modules/app/claude-repl/skills/).
-# Installed via symlink — same idempotency rules as $SKILLS, but sourced
-# from this tree instead of $SKILLS_SRC so the skill content is the
-# single source of truth and edits go live without a reinstall.
-LOCAL_SKILLS_SRC="$SCRIPT_DIR/../modules/app/claude-repl/skills"
+# Installed via symlink — the in-tree dir is the single source of truth
+# so edits to checked-in SKILL.md go live without a reinstall.
+LOCAL_SKILLS_SRC="$(_canonpath "$SCRIPT_DIR/../modules/app/claude-repl/skills")"
 LOCAL_SKILLS=(
   "debug-logs"
   "workspace-close"
   "workspace-profile"
 )
+
+# Cached workspace-* skills.  The manifest declares each cached skill's
+# name + canonical host impl path; sync.sh mirrors impl content into
+# this dir on commit, and install.sh below symlinks each name into
+# $SKILLS_DIR — preferring an existing doom-managed symlink to the live
+# impl when one is already in place, falling back to the cache copy
+# otherwise (so a fresh clone has working workspace-* skills even when
+# the live impl trees aren't on the host).
+SKILLS_CACHE_DIR="$(_canonpath "$SCRIPT_DIR/../modules/app/claude-repl/skills-cache")"
+SKILLS_CACHE_SYNC="$SKILLS_CACHE_DIR/sync.sh"
+SKILLS_CACHE_MANIFEST="$SKILLS_CACHE_DIR/manifest.sh"
+
+# Pre-commit hook that keeps the skills cache in sync with the live
+# impls.  Installed into the repo's git hooks dir by do_install below.
+GITHOOKS_DIR="$(_canonpath "$SCRIPT_DIR/../.githooks")"
 
 # --- Helpers ---
 
@@ -157,26 +172,52 @@ do_install() {
     echo "[install] Registered hook: $event -> $script"
   done
 
-  # Managed skill symlinks under ~/.claude/skills/.  Idempotent: replace
-  # when the target differs, skip when correct, warn when source absent.
+  # Cached workspace-* skills.  Idempotency rules:
+  #   1. If $SKILLS_DIR/<name> is already a symlink pointing at the
+  #      live impl declared in the manifest, that's a doom-managed
+  #      symlink from a previous install — leave it alone, it gives
+  #      the user live-edit semantics they've already opted into.
+  #   2. If $SKILLS_DIR/<name> is already a symlink pointing at our
+  #      cache copy, it's already correctly installed — skip.
+  #   3. If $SKILLS_DIR/<name> is anything else (foreign symlink or
+  #      regular file), warn and skip — don't overwrite the user.
+  #   4. Otherwise, symlink the cache copy into $SKILLS_DIR.  The
+  #      cache is the persisted fallback that ships with the repo.
   mkdir -p "$SKILLS_DIR"
-  if [ ! -d "$SKILLS_SRC" ]; then
-    echo "[install] WARNING: skills source dir not found: $SKILLS_SRC"
-    echo "[install] Skill symlinks will be skipped.  Set CLAUDE_REPL_SKILLS_SRC to override."
+  if [ ! -f "$SKILLS_CACHE_MANIFEST" ]; then
+    echo "[install] WARNING: skills-cache manifest missing at $SKILLS_CACHE_MANIFEST"
+    echo "[install] Cached skill installation will be skipped."
   else
-    for name in "${SKILLS[@]}"; do
-      src="$SKILLS_SRC/$name"
+    # shellcheck source=../modules/app/claude-repl/skills-cache/manifest.sh
+    source "$SKILLS_CACHE_MANIFEST"
+    for entry in "${CACHED_SKILLS[@]}"; do
+      IFS='|' read -r name impl <<< "$entry"
+      cache="$SKILLS_CACHE_DIR/$name"
       dest="$SKILLS_DIR/$name"
-      if [ ! -e "$src" ] && [ ! -L "$src" ]; then
-        echo "[install] WARNING: skill source missing: $src (skipped)"
+
+      if [ -L "$dest" ]; then
+        target="$(readlink "$dest")"
+        if [ "$target" = "$impl" ]; then
+          echo "[install] Cached skill $name: live-impl symlink already in place (skipped)"
+          continue
+        fi
+        if [ "$target" = "$cache" ]; then
+          echo "[install] Cached skill $name: cache symlink already in place (skipped)"
+          continue
+        fi
+        echo "[install] WARNING: $name has foreign symlink at $dest -> $target (skipped)"
         continue
       fi
-      if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$src" ]; then
-        echo "[install] Skill already linked: $name (skipped)"
+      if [ -e "$dest" ]; then
+        echo "[install] WARNING: $name has non-symlink file at $dest (skipped)"
         continue
       fi
-      ln -sfn "$src" "$dest"
-      echo "[install] Linked skill: $dest -> $src"
+      if [ ! -e "$cache" ] && [ ! -L "$cache" ]; then
+        echo "[install] WARNING: cache missing for $name at $cache (skipped)"
+        continue
+      fi
+      ln -sfn "$cache" "$dest"
+      echo "[install] Linked cached skill: $dest -> $cache"
     done
   fi
 
@@ -201,6 +242,40 @@ do_install() {
       ln -sfn "$src" "$dest"
       echo "[install] Linked local skill: $dest -> $src"
     done
+  fi
+
+  # Install the skills-cache sync pre-commit hook into the repo's
+  # current git hooks dir (wherever core.hooksPath / git config say
+  # it is).  Idempotency:
+  #   - No pre-commit exists  → copy ours in.
+  #   - Pre-commit has our marker → refresh (the user re-ran install).
+  #   - Foreign pre-commit exists → warn, skip, don't trample.
+  if [ -d "$GITHOOKS_DIR" ] && command -v git >/dev/null 2>&1; then
+    repo_top="$(git -C "$GITHOOKS_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+    if [ -n "$repo_top" ]; then
+      hooks_path="$(git -C "$repo_top" rev-parse --git-path hooks 2>/dev/null || true)"
+      if [ -n "$hooks_path" ]; then
+        if [[ "$hooks_path" != /* ]]; then
+          hooks_path="$repo_top/$hooks_path"
+        fi
+        mkdir -p "$hooks_path"
+        src_hook="$GITHOOKS_DIR/pre-commit"
+        dest_hook="$hooks_path/pre-commit"
+        marker="CLAUDE_REPL_MANAGED_HOOK: claude-repl-skills-cache-sync"
+        if [ ! -f "$dest_hook" ]; then
+          cp "$src_hook" "$dest_hook"
+          chmod +x "$dest_hook"
+          echo "[install] Installed pre-commit hook -> $dest_hook"
+        elif grep -q "$marker" "$dest_hook" 2>/dev/null; then
+          cp "$src_hook" "$dest_hook"
+          chmod +x "$dest_hook"
+          echo "[install] Refreshed managed pre-commit hook -> $dest_hook"
+        else
+          echo "[install] WARNING: foreign pre-commit hook at $dest_hook (skipped)"
+          echo "[install] To enable skills-cache sync, append the body of $src_hook to it."
+        fi
+      fi
+    fi
   fi
 
   echo "[install] Done. Hooks registered in $SETTINGS"
@@ -243,16 +318,25 @@ do_uninstall() {
     fi
   done
 
-  # Remove managed skill symlinks — only ours (those pointing at SKILLS_SRC).
+  # Remove cached-skill symlinks — only ours (pointing at either the
+  # live impl declared in the manifest or our in-repo cache copy).
   # Foreign files under the same name are left alone.
-  for name in "${SKILLS[@]}"; do
-    dest="$SKILLS_DIR/$name"
-    expected="$SKILLS_SRC/$name"
-    if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$expected" ]; then
-      rm -f "$dest"
-      echo "[uninstall] Removed skill link: $dest"
-    fi
-  done
+  if [ -f "$SKILLS_CACHE_MANIFEST" ]; then
+    # shellcheck source=../modules/app/claude-repl/skills-cache/manifest.sh
+    source "$SKILLS_CACHE_MANIFEST"
+    for entry in "${CACHED_SKILLS[@]}"; do
+      IFS='|' read -r name impl <<< "$entry"
+      cache="$SKILLS_CACHE_DIR/$name"
+      dest="$SKILLS_DIR/$name"
+      if [ -L "$dest" ]; then
+        target="$(readlink "$dest")"
+        if [ "$target" = "$impl" ] || [ "$target" = "$cache" ]; then
+          rm -f "$dest"
+          echo "[uninstall] Removed cached-skill link: $dest"
+        fi
+      fi
+    done
+  fi
 
   # Remove repo-local skill symlinks (only ours, pointing at LOCAL_SKILLS_SRC).
   for name in "${LOCAL_SKILLS[@]}"; do
@@ -263,6 +347,25 @@ do_uninstall() {
       echo "[uninstall] Removed local skill link: $dest"
     fi
   done
+
+  # Remove the managed pre-commit hook only if it carries our marker.
+  if command -v git >/dev/null 2>&1 && [ -d "$GITHOOKS_DIR" ]; then
+    repo_top="$(git -C "$GITHOOKS_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+    if [ -n "$repo_top" ]; then
+      hooks_path="$(git -C "$repo_top" rev-parse --git-path hooks 2>/dev/null || true)"
+      if [ -n "$hooks_path" ]; then
+        if [[ "$hooks_path" != /* ]]; then
+          hooks_path="$repo_top/$hooks_path"
+        fi
+        dest_hook="$hooks_path/pre-commit"
+        marker="CLAUDE_REPL_MANAGED_HOOK: claude-repl-skills-cache-sync"
+        if [ -f "$dest_hook" ] && grep -q "$marker" "$dest_hook" 2>/dev/null; then
+          rm -f "$dest_hook"
+          echo "[uninstall] Removed managed pre-commit hook: $dest_hook"
+        fi
+      fi
+    fi
+  fi
 
   echo "[uninstall] Done."
 }
