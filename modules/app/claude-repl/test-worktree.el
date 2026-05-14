@@ -792,6 +792,68 @@ retain the old switch-to-project + magit pop behavior."
          '((type . "merge") (workspace . "feature-one")))
         (should (eq silent-arg t))))))
 
+;;;; ---- Tests: ws-merge-routing-root ----
+
+(ert-deftest claude-repl-test-ws-merge-routing-root-prefers-source-dir ()
+  "Routing root prefers :source-ws-dir when it is a live directory."
+  (claude-repl-test--with-clean-state
+    (let ((src-dir (make-temp-file "claude-repl-routing-src-" t))
+          (own-dir (make-temp-file "claude-repl-routing-own-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :project-dir own-dir)
+            (claude-repl--ws-put "ws1" :source-ws-dir src-dir)
+            (should (equal (claude-repl--ws-merge-routing-root "ws1") src-dir)))
+        (delete-directory src-dir t)
+        (delete-directory own-dir t)))))
+
+(ert-deftest claude-repl-test-ws-merge-routing-root-falls-back-to-project-dir ()
+  "Routing root falls back to :project-dir when :source-ws-dir is nil."
+  (claude-repl-test--with-clean-state
+    (let ((own-dir (make-temp-file "claude-repl-routing-own-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :project-dir own-dir)
+            (should (equal (claude-repl--ws-merge-routing-root "ws1") own-dir)))
+        (delete-directory own-dir t)))))
+
+(ert-deftest claude-repl-test-ws-merge-routing-root-falls-back-when-source-missing ()
+  "When :source-ws-dir is set but the directory doesn't exist, falls back to :project-dir."
+  (claude-repl-test--with-clean-state
+    (let ((own-dir (make-temp-file "claude-repl-routing-own-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :project-dir own-dir)
+            (claude-repl--ws-put "ws1" :source-ws-dir "/nonexistent/dir")
+            (should (equal (claude-repl--ws-merge-routing-root "ws1") own-dir)))
+        (delete-directory own-dir t)))))
+
+(ert-deftest claude-repl-test-ws-merge-routing-root-nil-when-neither ()
+  "When neither :source-ws-dir nor :project-dir resolves, returns nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir nil)
+    (should-not (claude-repl--ws-merge-routing-root "ws1"))))
+
+;;;; ---- Tests: handle-merge-command dispatch via registry ----
+
+(ert-deftest claude-repl-test-handle-merge-command-dispatches-via-registry ()
+  "handle-merge-command routes through `claude-repl--dispatch-merge-handler'.
+Mocks the dispatcher and verifies it receives the resolved ws + routing root."
+  (claude-repl-test--with-clean-state
+    (let ((src-dir (make-temp-file "claude-repl-dispatch-src-" t))
+          (captured nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "feature-one" :project-dir "/tmp/feature-one")
+            (claude-repl--ws-put "feature-one" :source-ws-dir src-dir)
+            (cl-letf (((symbol-function 'claude-repl--dispatch-merge-handler)
+                       (lambda (ws root) (setq captured (list ws root)))))
+              (claude-repl--handle-merge-command
+               '((type . "merge") (workspace . "feature-one")))
+              (should (equal (car captured) "feature-one"))
+              (should (equal (cadr captured) src-dir))))
+        (delete-directory src-dir t)))))
+
 ;;;; ---- Tests: resolve-merge-workspace-name ----
 
 (ert-deftest claude-repl-test-resolve-merge-workspace-name-literal ()

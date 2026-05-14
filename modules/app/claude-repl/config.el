@@ -53,6 +53,7 @@
 (claude-repl--load-module "window")
 (claude-repl--load-module "sibling-popup")
 (claude-repl--load-module "panels")
+(claude-repl--load-module "merge-handlers")
 (claude-repl--load-module "worktree")
 (claude-repl--load-module "rename")
 (claude-repl--load-module "drawer")

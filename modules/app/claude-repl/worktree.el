@@ -1403,35 +1403,46 @@ bare names, so the tail fallback bridges the two."
     (let ((tail (claude-repl--bare-workspace-name ws)))
       (when (claude-repl--ws-get tail :project-dir) tail)))))
 
+(defun claude-repl--ws-merge-routing-root (ws)
+  "Return the repo root used to look up WS's merge-handler config.
+Prefers `:source-ws-dir' (the parent worktree where a cherry-pick
+would land) when it's a live directory, falling back to WS's own
+`:project-dir'.  Both point at worktrees of the same repo, so the
+checked-in `.claude-repl/workspace-merge.eld' file resolves to the
+same content either way — the preference is just for the canonical
+landing dir.  Returns nil if neither is known."
+  (let ((source (claude-repl--ws-get ws :source-ws-dir))
+        (own    (claude-repl--ws-get ws :project-dir)))
+    (cond
+     ((and source (stringp source) (file-directory-p source)) source)
+     ((and own (stringp own) (file-directory-p own)) own)
+     (t nil))))
+
 (defun claude-repl--handle-merge-command (cmd)
   "Handle a \"merge\" workspace command CMD.
-Performs the equivalent of `SPC TAB M' on the named workspace, but in
-SILENT mode: the cherry-pick happens against the resolved target
-directory without switching the user's active workspace or popping
-magit.  This keeps skill-invoked (`/workspace-merge') merges from
-yanking focus away from whatever the user is doing — only the
-interactive entry points (`SPC TAB m' / `SPC TAB M') change focus.
+Dispatches post-merge processing through
+`claude-repl--dispatch-merge-handler', which routes by the target
+workspace's repo root via the registered handler set.  The default
+`cherry-pick' handler preserves the historical behaviour (silent,
+auto-resolving cherry-pick into the source workspace) — other repos
+can opt into a different strategy by checking in
+`.claude-repl/workspace-merge.eld' (see merge-handlers.el).
 
 Resolves the JSON `workspace' field via
 `claude-repl--resolve-merge-workspace-name' so a branch-style value
 like \"DWC/foo\" matches a registry keyed by the bare name \"foo\".
 When neither the literal name nor the tail matches, logs an
 `unknown workspace' line (so the failure is debuggable) and returns —
-no error is raised, since a missing workspace is not actionable here.
-
-Passes AUTO-RESOLVE=t so cherry-pick conflicts attempt a headless
-`claude -p' resolution before falling back to the existing magit +
-`:merge-failed' path.  Skill-invoked merges run in the background
-without a human watching magit, so the auto-resolver is the only
-chance for orthogonal one-shot edits to land cleanly."
+no error is raised, since a missing workspace is not actionable here."
   (let* ((ws (alist-get 'workspace cmd))
          (resolved (claude-repl--resolve-merge-workspace-name ws)))
     (cond
      (resolved
-      (claude-repl--log ws
-                        "workspace-commands-file merge: ws=%s resolved=%s (silent, auto-resolve)"
-                        ws resolved)
-      (claude-repl--workspace-merge-into-source resolved t t))
+      (let ((repo-root (claude-repl--ws-merge-routing-root resolved)))
+        (claude-repl--log ws
+                          "workspace-commands-file merge: ws=%s resolved=%s repo-root=%s"
+                          ws resolved (or repo-root "nil"))
+        (claude-repl--dispatch-merge-handler resolved repo-root)))
      (t
       (let ((tail (and (stringp ws) (string-match-p "/" ws)
                        (claude-repl--bare-workspace-name ws))))
