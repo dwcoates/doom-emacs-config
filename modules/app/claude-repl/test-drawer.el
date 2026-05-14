@@ -2577,5 +2577,56 @@ moves should keep the active workspace centered, not just user j/k."
             (should called))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
+;;;; ---- Tests: --source-ws-name plist cache ----
+
+(ert-deftest claude-repl-drawer-test-source-ws-name-returns-nil-without-source-dir ()
+  "`--source-ws-name' returns nil when the workspace has no `:source-ws-dir'.
+Existing root-workspace contract — no caching, no scan."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "root" :project-dir "/tmp/root")
+    (should-not (claude-repl-drawer--source-ws-name "root"))))
+
+(ert-deftest claude-repl-drawer-test-source-ws-name-populates-cache-on-miss ()
+  "First call resolves via `--ws-name-for-dir' and writes the result
+into `:source-ws-name' on the workspace plist."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "parent" :project-dir "/tmp/parent")
+    (claude-repl-drawer-test--register "child"  :project-dir "/tmp/child"
+                                       :source-ws-dir "/tmp/parent")
+    (cl-letf (((symbol-function 'claude-repl--ws-name-for-dir)
+               (lambda (dir) (when (equal dir "/tmp/parent") "parent"))))
+      (should-not (claude-repl--ws-get "child" :source-ws-name))
+      (should (equal (claude-repl-drawer--source-ws-name "child") "parent"))
+      (should (equal (claude-repl--ws-get "child" :source-ws-name) "parent")))))
+
+(ert-deftest claude-repl-drawer-test-source-ws-name-cache-hit-skips-scan ()
+  "Second call returns the cached value without consulting
+`--ws-name-for-dir'.  Pins the O(1) fast-path contract — the cache
+is the WHOLE point of this rewrite."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "child"
+                                       :project-dir "/tmp/child"
+                                       :source-ws-dir "/tmp/parent"
+                                       :source-ws-name "parent")
+    (let ((scan-called nil))
+      (cl-letf (((symbol-function 'claude-repl--ws-name-for-dir)
+                 (lambda (_dir) (setq scan-called t) "should-not-see-this")))
+        (should (equal (claude-repl-drawer--source-ws-name "child") "parent"))
+        (should-not scan-called)))))
+
+(ert-deftest claude-repl-drawer-test-source-ws-name-does-not-cache-nil-resolution ()
+  "When the reverse lookup returns nil (source workspace deleted, no
+match for `:source-ws-dir' in the hash), the cache stays clear — a nil
+write would be indistinguishable from \"never cached\" on the next read
+under the `or'-fall-through model."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "child"
+                                       :project-dir "/tmp/child"
+                                       :source-ws-dir "/tmp/orphan")
+    (cl-letf (((symbol-function 'claude-repl--ws-name-for-dir)
+               (lambda (_dir) nil)))
+      (should-not (claude-repl-drawer--source-ws-name "child"))
+      (should-not (claude-repl--ws-get "child" :source-ws-name)))))
+
 (provide 'test-drawer)
 ;;; test-drawer.el ends here

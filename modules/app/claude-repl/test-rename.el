@@ -238,6 +238,42 @@ new path back even when the input is the raw path."
         (delete-directory new t)
         (delete-directory other t)))))
 
+(ert-deftest claude-repl-test-rename-source-back-refs-clears-source-ws-name-cache ()
+  "Peers whose `:source-ws-dir' is rewritten must have their
+`:source-ws-name' cache (populated by the drawer's fast-path)
+cleared.  The renamed workspace is rehashed under a new name elsewhere
+in the rename flow, so any cached name pointing at the old identity
+is stale and must be re-resolved on next read."
+  (claude-repl-test--with-clean-state
+    (let ((old (make-temp-file "claude-repl-rename-old-" t))
+          (new (make-temp-file "claude-repl-rename-new-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "child" :source-ws-dir old)
+            (claude-repl--ws-put "child" :source-ws-name "old-name")
+            (claude-repl--rename-update-source-back-refs old new)
+            (should-not (claude-repl--ws-get "child" :source-ws-name)))
+        (delete-directory old t)
+        (delete-directory new t)))))
+
+(ert-deftest claude-repl-test-rename-source-back-refs-leaves-unrelated-cache ()
+  "Peers whose `:source-ws-dir' was not rewritten keep their
+`:source-ws-name' cache — the sweep targets only the affected peers."
+  (claude-repl-test--with-clean-state
+    (let ((old (make-temp-file "claude-repl-rename-old-" t))
+          (new (make-temp-file "claude-repl-rename-new-" t))
+          (other (make-temp-file "claude-repl-rename-other-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "child" :source-ws-dir other)
+            (claude-repl--ws-put "child" :source-ws-name "other-name")
+            (claude-repl--rename-update-source-back-refs old new)
+            (should (equal (claude-repl--ws-get "child" :source-ws-name)
+                           "other-name")))
+        (delete-directory old t)
+        (delete-directory new t)
+        (delete-directory other t)))))
+
 ;;;; ---- Tests: update-buffers ----
 
 (ert-deftest claude-repl-test-rename-update-buffers-renames-vterm-and-input ()

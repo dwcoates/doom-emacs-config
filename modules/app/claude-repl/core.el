@@ -527,9 +527,20 @@ producer can be identified without first turning debug logging on."
   "Remove all state for workspace WS.
 Logs the deletion (and whether WS had a hash entry to remove) so nuke
 flows can be correlated with the precise moment per-workspace state
-disappears."
+disappears.
+
+Sweeps peers' cached `:source-ws-name' (populated by the drawer's
+`claude-repl-drawer--source-ws-name' fast-path) so a deleted WS can
+never be returned as a valid parent name — a stale cache pointing at
+WS would mis-route tree-flattening if a new workspace named WS later
+exists at a different `:project-dir'.  Runs before `remhash' so the
+sweep still sees the canonical workspace set."
   (let ((had-entry (not (null (gethash ws claude-repl--workspaces)))))
     (claude-repl--log ws "ws-del: ws=%s had-entry=%s" ws (if had-entry "t" "nil"))
+    (maphash (lambda (peer plist)
+               (when (equal (plist-get plist :source-ws-name) ws)
+                 (claude-repl--ws-put peer :source-ws-name nil)))
+             claude-repl--workspaces)
     (remhash ws claude-repl--workspaces)))
 
 (defun claude-repl--active-inst (ws)

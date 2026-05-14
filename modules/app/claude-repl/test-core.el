@@ -1652,6 +1652,37 @@ The master kill-switch overrides the always-on file-write decoupling."
       (claude-repl--do-log-to-file "x"))
     (should (= 7 claude-repl--log-write-counter))))
 
+;;;; ---- Tests: --ws-del invalidates :source-ws-name cache ----
+
+(ert-deftest claude-repl-test-ws-del-clears-peer-source-ws-name-cache ()
+  "`--ws-del' must clear `:source-ws-name' on peers that cached the
+deleted ws as their resolved source.  Without the sweep, a future
+workspace re-using the deleted name would be returned as a parent it
+isn't (different `:project-dir').  Asserts the sweep targets exactly
+the affected peers."
+  (claude-repl-test--with-clean-state
+    (puthash "parent" '(:project-dir "/tmp/parent")
+             claude-repl--workspaces)
+    (puthash "child"  '(:project-dir "/tmp/child"
+                                     :source-ws-dir "/tmp/parent"
+                                     :source-ws-name "parent")
+             claude-repl--workspaces)
+    (puthash "unrelated" '(:project-dir "/tmp/u"
+                                        :source-ws-name "someone-else")
+             claude-repl--workspaces)
+    (claude-repl--ws-del "parent")
+    (should-not (claude-repl--ws-get "child" :source-ws-name))
+    (should (equal (claude-repl--ws-get "unrelated" :source-ws-name)
+                   "someone-else"))))
+
+(ert-deftest claude-repl-test-ws-del-removes-hash-entry ()
+  "`--ws-del' still removes the target's own entry (pre-existing behavior)
+— pinning so the new sweep can't accidentally short-circuit the remhash."
+  (claude-repl-test--with-clean-state
+    (puthash "doomed" '(:project-dir "/tmp/x") claude-repl--workspaces)
+    (claude-repl--ws-del "doomed")
+    (should-not (gethash "doomed" claude-repl--workspaces))))
+
 (provide 'test-core)
 
 ;;; test-core.el ends here

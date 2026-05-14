@@ -162,7 +162,13 @@ Copies the plist for OLD-WS to NEW-WS, drops the cached `:ws-id'
   "Update peer workspaces' `:source-ws-dir' from OLD-PATH to NEW-PATH.
 Any workspace recorded as having OLD-PATH as its source (i.e., it was
 forked off the workspace being renamed) is rewritten to point at
-NEW-PATH so `SPC TAB M' continues to route the merge correctly."
+NEW-PATH so `SPC TAB M' continues to route the merge correctly.
+
+Also clears each peer's `:source-ws-name' cache (populated by the
+drawer's `claude-repl-drawer--source-ws-name' fast-path).  The renamed
+workspace is rehashed under a new name elsewhere in the rename flow,
+so any cached name pointing at the old identity is stale — the next
+drawer render re-resolves and repopulates against the new name."
   (let ((canonical-old (claude-repl--path-canonical old-path))
         (canonical-new (claude-repl--path-canonical new-path)))
     (maphash
@@ -170,6 +176,7 @@ NEW-PATH so `SPC TAB M' continues to route the merge correctly."
        (when-let ((src (plist-get plist :source-ws-dir)))
          (when (string= (claude-repl--path-canonical src) canonical-old)
            (claude-repl--ws-put ws :source-ws-dir canonical-new)
+           (claude-repl--ws-put ws :source-ws-name nil)
            (claude-repl--log ws "rename: source-ws-dir %s -> %s" src canonical-new))))
      claude-repl--workspaces)))
 

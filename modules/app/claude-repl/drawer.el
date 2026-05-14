@@ -507,9 +507,25 @@ clearing `:merging') and all dominate hidden."
 
 (defun claude-repl-drawer--source-ws-name (ws)
   "Return the workspace name recorded as WS's source, or nil.
-Reverse-lookups `:source-ws-dir' through `claude-repl--ws-name-for-dir'."
+Reverse-lookups `:source-ws-dir' through `claude-repl--ws-name-for-dir'
+and caches the resolved name on the workspace plist as
+`:source-ws-name'.  Cache invalidation is centralized at the two paths
+that mutate name→workspace mappings:
+- `claude-repl--ws-del' sweeps peers whose `:source-ws-name' equals
+  the deleted workspace.
+- `claude-repl--rename-update-source-back-refs' clears
+  `:source-ws-name' alongside the `:source-ws-dir' rewrite it already
+  performs.
+A cached value is therefore always either correct or nil.  Avoids the
+O(N) `claude-repl--ws-name-for-dir' scan (one `file-truename' per
+workspace) on every tree-build / `--max-depth' walk during drawer
+render."
   (when-let ((dir (claude-repl--ws-get ws :source-ws-dir)))
-    (claude-repl--ws-name-for-dir dir)))
+    (or (claude-repl--ws-get ws :source-ws-name)
+        (let ((resolved (claude-repl--ws-name-for-dir dir)))
+          (when resolved
+            (claude-repl--ws-put ws :source-ws-name resolved))
+          resolved))))
 
 (defcustom claude-repl-drawer-tree-max-depth 16
   "Cycle defense for drawer parent-chain walks."
