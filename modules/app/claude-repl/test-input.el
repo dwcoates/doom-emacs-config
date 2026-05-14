@@ -340,91 +340,40 @@
 
 ;;;; ---- Tests: command-prefix content ----
 
-(ert-deftest claude-repl-test-command-prefix-contains-tldr-tldr ()
-  "`claude-repl-command-prefix' must instruct including a 'TLDR's TLDR' section."
+(ert-deftest claude-repl-test-command-prefix-contains-convo-tldr ()
+  "`claude-repl-command-prefix' must instruct including a 'Convo TLDR' section."
   (should (stringp claude-repl-command-prefix))
-  (should (string-match-p "TLDR's TLDR" claude-repl-command-prefix)))
+  (should (string-match-p "Convo TLDR" claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-tldr-precedes-summary ()
-  "The 'TLDR's TLDR' instruction must mandate it be directly before the final 'Summary' section."
-  (should (string-match-p "TLDR's TLDR.*before the final 'Summary'\\|TLDR's TLDR.*directly before the final 'Summary'"
+(ert-deftest claude-repl-test-command-prefix-contains-response-tldr ()
+  "`claude-repl-command-prefix' must instruct including a 'Response TLDR' section."
+  (should (string-match-p "Response TLDR" claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-contains-tldr-tldr ()
+  "`claude-repl-command-prefix' must instruct including a 'Response TLDR's TLDR' section."
+  (should (string-match-p "Response TLDR's TLDR" claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-tldr-is-last-instruction ()
+  "The 'Response TLDR's TLDR' instruction must mandate it be the very last item."
+  (should (string-match-p "Response TLDR's TLDR.*VERY LAST\\|VERY LAST.*Response TLDR's TLDR"
                            claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-order ()
+  "The three TLDR sections must be specified in order: Convo -> Response -> Response's TLDR.
+The numbered list items in the metaprompt must appear in this order."
+  (let ((item1-pos (string-match "1\\. 'Convo TLDR'" claude-repl-command-prefix))
+        (item2-pos (string-match "2\\. 'Response TLDR'" claude-repl-command-prefix))
+        (item3-pos (string-match "3\\. 'Response TLDR's TLDR'" claude-repl-command-prefix)))
+    (should item1-pos)
+    (should item2-pos)
+    (should item3-pos)
+    (should (< item1-pos item2-pos))
+    (should (< item2-pos item3-pos))))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-tldr-recurses-spec ()
-  "The 'TLDR's TLDR' instruction must reference applying the TLDR spec to the TLDR."
-  (should (string-match-p "TLDR of the TLDR" claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-contains-large-context-tldr ()
-  "`claude-repl-command-prefix' must instruct including a 'large context TLDR' section."
-  (should (stringp claude-repl-command-prefix))
-  (should (string-match-p "large context TLDR" claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-large-context-tldr-precedes-last-response-tldr ()
-  "The 'large context TLDR' must be described as preceding the 'last response TLDR'."
-  ;; The first textual mention of 'large context TLDR' must occur before
-  ;; the first textual mention of 'last response TLDR' inside the bullet
-  ;; that introduces the large-context TLDR -- i.e. the instruction must
-  ;; place large-context-TLDR before last-response-TLDR.
-  (should (string-match-p "BEFORE the 'last response TLDR'.*'large context TLDR'\\|'large context TLDR'.*BEFORE the 'last response TLDR'"
-                           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-large-context-tldr-summarizes-context ()
-  "The 'large context TLDR' instruction must describe summarizing the broader context/conversation."
-  (should (string-match-p "large context TLDR.*\\(context\\|conversation\\|arc\\)"
-                           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-large-context-tldr-same-format ()
-  "The 'large context TLDR' instruction must reference the same format specification as the TLDR."
-  ;; Same shape as the TLDR's-TLDR recurses-spec test: explicit cross-reference
-  ;; so the format rules don't have to be duplicated and can't silently drift.
-  (should (string-match-p "large context TLDR.*\\(same format\\|EXACT same format\\|same specification\\)"
-                           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-tldr-ordering-documented ()
-  "The metaprompt must explicitly document the trailing-section ordering."
-  ;; Guards against silent drift in ordering:
-  ;; large context TLDR -> last response TLDR -> TLDR's TLDR -> Summary.
-  (should (string-match-p "large context TLDR.*last response TLDR.*TLDR's TLDR.*Summary"
-                           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-contains-final-summary ()
-  "`claude-repl-command-prefix' must instruct including a final 'Summary' section."
-  (should (stringp claude-repl-command-prefix))
-  (should (string-match-p "'Summary'" claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-summary-is-very-last ()
-  "The 'Summary' directive must mandate it be the VERY LAST item in the response."
-  (should (string-match-p "'Summary' section as the VERY LAST\\|VERY LAST.*'Summary'"
-                           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-summary-is-one-sentence ()
-  "The 'Summary' directive must specify exactly ONE SENTENCE."
-  (should (string-match-p "'Summary'.*ONE SENTENCE\\|ONE SENTENCE.*'Summary'"
-                           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-summary-no-bullets ()
-  "The 'Summary' directive must forbid bullets/lists/formatting."
-  (should (string-match-p "'Summary'.*[Nn]o bullets" claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-summary-applies-always ()
-  "The 'Summary' directive must apply even to short responses (no exceptions)."
-  (should (string-match-p "'Summary'.*\\(no exceptions\\|even to 1-5 sentence\\)"
-                           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-tldr-caps-top-level-at-five ()
-  "The TLDR spec must hard-cap top-level bullets at 5."
-  (should (string-match-p "HARD-CAPPED at 5 top-level bullets"
-                           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-tldr-forbids-length-bypass ()
-  "The TLDR spec must forbid bypassing the cap by lengthening surviving bullets."
-  (should (string-match-p "not attempt to circumvent this cap by making the surviving bullets individually longer"
-                           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-tldr-tldr-inherits-cap ()
-  "The 'TLDR's TLDR' spec must inherit the 5-bullet cap and no-bypass rule."
-  (should (string-match-p "5-top-level-bullet hard cap and no-bypass-by-lengthening rule applies recursively"
-                           claude-repl-command-prefix)))
+  "The 'Response TLDR's TLDR' instruction must reference applying the spec recursively to the Response TLDR."
+  (should (string-match-p "recursively" claude-repl-command-prefix))
+  (should (string-match-p "TLDR of the Response TLDR" claude-repl-command-prefix)))
 
 ;;;; ---- Tests: should-prepend-metaprompt-p ----
 
