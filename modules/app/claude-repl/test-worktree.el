@@ -6697,10 +6697,12 @@ the spawned agent knows to invoke
                  (regexp-quote claude-repl--oneshot-create-pr-suffix)
                  captured-prefixed))))))
 
-(ert-deftest claude-repl-test-explanation-engine-oneshot-does-not-use-workspace-merge ()
-  "The explanation-engine one-shot must NOT instruct the agent to invoke
-`/workspace-merge' — that's the doom one-shot's flow.  This variant
-pushes the branch via the PR command instead."
+(ert-deftest claude-repl-test-explanation-engine-oneshot-chains-workspace-merge-after-create-pr ()
+  "The explanation-engine one-shot chains `/workspace-merge' AFTER
+`/create-or-update-pr' as a second-stage teardown — the prefixed prompt
+must mention `/workspace-merge', and it must appear textually AFTER the
+`/create-or-update-pr' reference so the chain reads chronologically
+(implement → PR → CICD → workspace-merge)."
   (claude-repl-test--with-clean-state
     (let ((captured-prefixed :unset))
       (cl-letf (((symbol-function 'read-string)
@@ -6709,8 +6711,13 @@ pushes the branch via the PR command instead."
                  (lambda (_raw prefixed _git-root _base _fork-from)
                    (setq captured-prefixed prefixed))))
         (claude-repl-create-explanation-engine-oneshot-workspace)
-        (should-not (string-match-p "/workspace-merge"
-                                    captured-prefixed))))))
+        (let ((pr-pos (string-match
+                       (regexp-quote claude-repl--oneshot-create-pr-command)
+                       captured-prefixed))
+              (merge-pos (string-match "/workspace-merge" captured-prefixed)))
+          (should pr-pos)
+          (should merge-pos)
+          (should (< pr-pos merge-pos)))))))
 
 (ert-deftest claude-repl-test-explanation-engine-oneshot-keeps-raw-prompt-clean ()
   "The create-PR suffix is NOT appended to the raw prompt — raw is used
@@ -6803,6 +6810,72 @@ work."
                  (file-name-as-directory
                   (expand-file-name
                    "~/workspace/ChessCom/explanation-engine")))))
+
+;;;; ---- Tests: claude-repl--oneshot-create-pr-then-merge-followup ----
+
+(ert-deftest claude-repl-test-oneshot-create-pr-then-merge-followup-mentions-workspace-merge ()
+  "The follow-up clause must reference `/workspace-merge' — that's the
+slash command the spawned agent invokes once CICD passes."
+  (should (string-match-p "/workspace-merge"
+                          claude-repl--oneshot-create-pr-then-merge-followup)))
+
+(ert-deftest claude-repl-test-oneshot-create-pr-then-merge-followup-gates-on-check-cicd-pass ()
+  "The follow-up clause must explicitly gate `/workspace-merge' on
+`/check-cicd' returning PASS — without this gate the agent could tear
+down the workspace even after a failing CI run."
+  (should (string-match-p "/check-cicd"
+                          claude-repl--oneshot-create-pr-then-merge-followup))
+  (should (string-match-p "PASS"
+                          claude-repl--oneshot-create-pr-then-merge-followup)))
+
+(ert-deftest claude-repl-test-oneshot-create-pr-then-merge-followup-stops-on-check-cicd-fail ()
+  "On CICD FAIL the follow-up clause must tell the agent to STOP and NOT
+invoke `/workspace-merge' — otherwise a failing CI could still lead to a
+workspace teardown that loses the editor state without the change landing."
+  (should (string-match-p "FAIL"
+                          claude-repl--oneshot-create-pr-then-merge-followup))
+  (should (string-match-p "STOP"
+                          claude-repl--oneshot-create-pr-then-merge-followup))
+  ;; The "do NOT invoke /workspace-merge" instruction must appear so the
+  ;; agent doesn't mis-read STOP as merely "stop the implementation" and
+  ;; still fire the teardown.
+  (should (string-match-p "NOT invoke `/workspace-merge`"
+                          claude-repl--oneshot-create-pr-then-merge-followup)))
+
+(ert-deftest claude-repl-test-oneshot-create-pr-then-merge-followup-references-create-pr-command ()
+  "The follow-up clause must name the create-PR command it chains off —
+otherwise the agent has to guess which prior invocation's CICD result
+gates the workspace-merge."
+  (should (string-match-p
+           (regexp-quote claude-repl--oneshot-create-pr-command)
+           claude-repl--oneshot-create-pr-then-merge-followup)))
+
+;;;; ---- Tests: chained suffix integration ----
+
+(ert-deftest claude-repl-test-oneshot-create-pr-suffix-includes-followup ()
+  "The composed create-PR suffix must include the workspace-merge
+follow-up clause — otherwise the chain is half-wired and the agent only
+gets the first-stage gate."
+  (should (string-match-p
+           (regexp-quote claude-repl--oneshot-create-pr-then-merge-followup)
+           claude-repl--oneshot-create-pr-suffix)))
+
+(ert-deftest claude-repl-test-oneshot-create-pr-suffix-followup-comes-after-build-suffix ()
+  "The follow-up clause must appear AFTER the build-oneshot-success-suffix
+output, not before — order is load-bearing because the follow-up gates
+on the first-stage invocation's CICD result."
+  (let* ((first-stage (claude-repl--build-oneshot-success-suffix
+                       (concat "`" claude-repl--oneshot-create-pr-command "`")
+                       "push and queue this branch for merge"))
+         (first-pos (string-match (regexp-quote first-stage)
+                                  claude-repl--oneshot-create-pr-suffix))
+         (followup-pos (string-match
+                        (regexp-quote
+                         claude-repl--oneshot-create-pr-then-merge-followup)
+                        claude-repl--oneshot-create-pr-suffix)))
+    (should first-pos)
+    (should followup-pos)
+    (should (< first-pos followup-pos))))
 
 ;;;; ---- Tests: claude-repl--build-oneshot-success-suffix ----
 

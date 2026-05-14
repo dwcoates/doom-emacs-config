@@ -430,19 +430,48 @@ or stop and surface on genuine ambiguity.")
 (defconst claude-repl--oneshot-create-pr-command
   "/create-or-update-pr --patch --add-to-merge-queue --skip-tests"
   "Slash command the explanation-engine one-shot agent invokes on success
-instead of `/workspace-merge'.  The PR-creation flow pushes the branch
-and queues it for merge directly, so there's no host-side cherry-pick or
-config reload (which makes sense for doom-config but not for a service
-repo).")
+as the FIRST stage of the wrap-up.  The PR-creation flow pushes the
+branch and queues it for merge directly (which makes sense for a service
+repo) and runs `/check-cicd' internally; on CICD PASS the second stage
+(see `claude-repl--oneshot-create-pr-then-merge-followup') chains
+`/workspace-merge' to tear down the editor workspace.")
+
+(defconst claude-repl--oneshot-create-pr-then-merge-followup
+  (concat
+   "\n\n"
+   "After `" claude-repl--oneshot-create-pr-command "` returns and its "
+   "internal `/check-cicd` (the merge-queue CI run, when "
+   "`--add-to-merge-queue` is in effect) reports PASS, invoke the "
+   "`/workspace-merge` skill to merge this workspace back into its "
+   "source.\n"
+   "\n"
+   "Only invoke `/workspace-merge` when `/check-cicd` reports PASS. If "
+   "`/check-cicd` reports FAIL — whether from the PR-level run or the "
+   "merge-queue run — do NOT invoke `/workspace-merge`; STOP and "
+   "surface the failing CI to the user instead.")
+  "Second-stage gate appended to `claude-repl--oneshot-create-pr-suffix'.
+Chains `/workspace-merge' onto a successful `/check-cicd' result so the
+explanation-engine one-shot tears down its editor workspace once the PR
+has landed cleanly in the merge queue.  Kept as a separate constant
+(rather than threading through `claude-repl--build-oneshot-success-suffix')
+because the two gates are structurally distinct: the first gates on
+implementation/tests/commits, the second gates on a slash-command's CICD
+result emitted by a downstream skill.")
 
 (defconst claude-repl--oneshot-create-pr-suffix
-  (claude-repl--build-oneshot-success-suffix
-   (concat "`" claude-repl--oneshot-create-pr-command "`")
-   "push and queue this branch for merge")
+  (concat
+   (claude-repl--build-oneshot-success-suffix
+    (concat "`" claude-repl--oneshot-create-pr-command "`")
+    "push and queue this branch for merge")
+   claude-repl--oneshot-create-pr-then-merge-followup)
   "Suffix appended to the user's preemptive prompt for the
-explanation-engine one-shot flow.  Tells the spawned agent to invoke
-`claude-repl--oneshot-create-pr-command' on success instead of
-`/workspace-merge'.")
+explanation-engine one-shot flow.  Two-stage gate:
+  1. Implementation + tests + commits succeed → invoke
+     `claude-repl--oneshot-create-pr-command' (push + queue + internal
+     `/check-cicd').
+  2. `/check-cicd' reports PASS → invoke `/workspace-merge' to merge
+     this workspace back into its source.  On CICD FAIL the agent must
+     STOP rather than invoke `/workspace-merge'.")
 
 ;;; Async workspace-name generation via headless `claude -p'
 
