@@ -69,7 +69,7 @@ recognized repo or the repo has no configured default."
   :type 'integer
   :group 'claude-repl)
 
-(defcustom claude-repl-done-idle-delay 5
+(defcustom claude-repl-done-idle-delay 3
   "Seconds the user must focus a :done workspace before it decays to :idle.
 The countdown starts when the workspace becomes the active workspace
 \(or when :done arrives while it is already active).  Switching away
