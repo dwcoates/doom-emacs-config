@@ -443,9 +443,12 @@ first.  This test pins that ordering."
 
 ;;;; ---- Tests: on-permission-event handler ----
 
-(ert-deftest claude-repl-test-on-permission-event-sets-permission ()
-  "on-permission-event should call ws-set-claude-state with :permission."
+(ert-deftest claude-repl-test-on-permission-event-sets-permission-from-thinking ()
+  "on-permission-event should call ws-set-claude-state with :permission when state is :thinking.
+Mid-turn (:thinking) is the only state where a permission_prompt notification
+is treated as a real permission request; see on-permission-event docstring."
   (claude-repl-test--with-clean-state
+    (claude-repl--ws-set "ws1" :thinking)
     (let ((set-args nil))
       (cl-letf (((symbol-function 'claude-repl--ws-set-claude-state)
                  (lambda (ws state) (setq set-args (list ws state)))))
@@ -781,7 +784,9 @@ first.  This test pins that ordering."
 ;;;; ---- Tests: end-to-end dispatch through process-sentinel-file ----
 
 (ert-deftest claude-repl-test-end-to-end-permission-dispatch ()
-  "Full dispatch: permission_prompt file -> on-permission-event -> ws-set-claude-state :permission."
+  "Full dispatch: permission_prompt file -> on-permission-event -> ws-set-claude-state :permission.
+ws-get is mocked to return :thinking so the elisp state-gate in
+on-permission-event treats the notification as a real permission prompt."
   (claude-repl-test--with-clean-state
     (let ((set-args nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
@@ -793,7 +798,7 @@ first.  This test pins that ordering."
                 ((symbol-function 'claude-repl--ws-set-claude-state)
                  (lambda (ws state) (setq set-args (list ws state))))
                 ((symbol-function 'claude-repl--ws-get)
-                 (lambda (_ws _key) nil))
+                 (lambda (_ws _key) :thinking))
                 ((symbol-function 'delete-file) #'ignore))
         (claude-repl--dispatch-sentinel-file "/dir/permission_prompt")
         (should (equal set-args '("test-ws" :permission)))))))
@@ -1050,20 +1055,69 @@ is still skipped and the file is still deleted."
 ;;;; ---- Tests: on-permission-event uncovered edge cases ----
 
 (ert-deftest claude-repl-test-on-permission-event-nil-ws-errors ()
-  "on-permission-event with nil ws should error in ws-set."
+  "on-permission-event with nil ws and :thinking state should error in ws-set.
+The state-gate runs `claude-repl--ws-get' first (which tolerates a nil ws),
+so we have to engineer the gate to pass before the nil-ws error surfaces.
+We do that by stubbing ws-get to return :thinking unconditionally."
   (claude-repl-test--with-clean-state
-    ;; ws-set raises an error when ws is nil
-    (should-error (claude-repl--on-permission-event nil "/some/dir"))))
+    (cl-letf (((symbol-function 'claude-repl--ws-get)
+               (lambda (_ws _key) :thinking)))
+      (should-error (claude-repl--on-permission-event nil "/some/dir")))))
 
-(ert-deftest claude-repl-test-on-permission-event-already-permission ()
-  "on-permission-event should still call ws-set-claude-state even if ws already has :permission."
+(ert-deftest claude-repl-test-on-permission-event-already-permission-no-op ()
+  "on-permission-event should NOT re-set state when ws is already :permission.
+A duplicate or stale Notification arriving while we're still in :permission
+must not call ws-set-claude-state — the gate accepts only :thinking."
   (claude-repl-test--with-clean-state
-    (let ((set-args nil))
+    (let ((set-called nil))
       (claude-repl--ws-set "ws1" :permission)
       (cl-letf (((symbol-function 'claude-repl--ws-set-claude-state)
-                 (lambda (ws state) (setq set-args (list ws state)))))
+                 (lambda (_ws _state) (setq set-called t))))
         (claude-repl--on-permission-event "ws1" "/some/dir")
-        (should (equal set-args '("ws1" :permission)))))))
+        (should-not set-called)))))
+
+(ert-deftest claude-repl-test-on-permission-event-idle-no-op ()
+  "on-permission-event must no-op when state is :idle (post-turn idle nudge).
+This is the regression guard for phantom ❓ appearing after the user is done."
+  (claude-repl-test--with-clean-state
+    (let ((set-called nil))
+      (claude-repl--ws-set "ws1" :idle)
+      (cl-letf (((symbol-function 'claude-repl--ws-set-claude-state)
+                 (lambda (_ws _state) (setq set-called t))))
+        (claude-repl--on-permission-event "ws1" "/some/dir")
+        (should-not set-called)
+        (should (eq (claude-repl--ws-state "ws1") :idle))))))
+
+(ert-deftest claude-repl-test-on-permission-event-done-no-op ()
+  "on-permission-event must no-op when state is :done (post-turn idle nudge)."
+  (claude-repl-test--with-clean-state
+    (let ((set-called nil))
+      (claude-repl--ws-set "ws1" :done)
+      (cl-letf (((symbol-function 'claude-repl--ws-set-claude-state)
+                 (lambda (_ws _state) (setq set-called t))))
+        (claude-repl--on-permission-event "ws1" "/some/dir")
+        (should-not set-called)
+        (should (eq (claude-repl--ws-state "ws1") :done))))))
+
+(ert-deftest claude-repl-test-on-permission-event-init-no-op ()
+  "on-permission-event must no-op when state is :init (Claude not yet ready)."
+  (claude-repl-test--with-clean-state
+    (let ((set-called nil))
+      (claude-repl--ws-set "ws1" :init)
+      (cl-letf (((symbol-function 'claude-repl--ws-set-claude-state)
+                 (lambda (_ws _state) (setq set-called t))))
+        (claude-repl--on-permission-event "ws1" "/some/dir")
+        (should-not set-called)
+        (should (eq (claude-repl--ws-state "ws1") :init))))))
+
+(ert-deftest claude-repl-test-on-permission-event-nil-state-no-op ()
+  "on-permission-event must no-op when state is nil (workspace has no claude session)."
+  (claude-repl-test--with-clean-state
+    (let ((set-called nil))
+      (cl-letf (((symbol-function 'claude-repl--ws-set-claude-state)
+                 (lambda (_ws _state) (setq set-called t))))
+        (claude-repl--on-permission-event "ws1" "/some/dir")
+        (should-not set-called)))))
 
 ;;;; ---- Tests: on-stop-event uncovered edge cases ----
 
@@ -1211,12 +1265,14 @@ is still skipped and the file is still deleted."
         (claude-repl--on-stop-event "ws1" "/some/dir")
         (should (equal finished-called "ws1"))))))
 
-(ert-deftest claude-repl-test-on-permission-event-overwrites-done ()
-  "Permission event should overwrite :done status with :permission."
+(ert-deftest claude-repl-test-on-permission-event-leaves-done-alone ()
+  "Permission event must NOT overwrite :done — the notification is an idle nudge.
+Regression guard for the phantom ❓-after-done bug; the prior behavior
+overwrote :done with :permission, which is exactly what we no longer want."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "ws1" :done)
     (claude-repl--on-permission-event "ws1" "/some/dir")
-    (should (eq (claude-repl--ws-state "ws1") :permission))))
+    (should (eq (claude-repl--ws-state "ws1") :done))))
 
 (ert-deftest claude-repl-test-on-permission-event-overwrites-thinking ()
   "Permission event should overwrite :thinking status with :permission."
@@ -1618,14 +1674,17 @@ This is the stall fix: a swallowed duplicate must not block loader advance."
                 (should (eq (claude-repl--ws-get "ws1" :claude-ready) t)))))
         (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
 
-;;;; ---- Tests: permission-notify.sh message filtering ----
+;;;; ---- Tests: permission-notify.sh sentinel writing ----
 ;;
 ;; Claude Code's Notification hook fires for two distinct semantics under
 ;; the same notification_type=permission_prompt — real permission/approval
-;; prompts AND a 60s-idle "needs your attention" nudge.  The hook filters
-;; on .message so only real prompts write the sentinel file; otherwise the
-;; idle nudge would (mis)set :permission well after the user is already
-;; done.  These tests drive the actual shell script end-to-end.
+;; prompts AND a 60s-idle "needs your attention" nudge.  Earlier versions
+;; of the script filtered the idle nudge in bash, but Claude Code also
+;; uses the "needs your attention" wording for some real permission
+;; prompts, so the filter caused real prompts to be missed.  The script
+;; now writes the sentinel unconditionally and discrimination is done in
+;; elisp by `claude-repl--on-permission-event' (state-gated on
+;; `:thinking').  These tests drive the actual shell script end-to-end.
 
 (defconst claude-repl-test--permission-hook-path
   ;; Captured at load time — `load-file-name' is nil inside ERT test bodies.
@@ -1680,21 +1739,25 @@ Returns (:exit CODE :sentinel-exists BOOL :sentinel-content STRING)."
     (should (= 0 (plist-get result :exit)))
     (should (plist-get result :sentinel-exists))))
 
-(ert-deftest claude-repl-test-permission-hook-idle-attention-skips ()
-  "The 60s-idle \"Claude Code needs your attention\" message must NOT write the sentinel.
-This is the regression guard for the bug where the tab's ❓ appeared after
-the user was already done — see the hook script header for context."
+(ert-deftest claude-repl-test-permission-hook-attention-writes-sentinel ()
+  "A \"Claude Code needs your attention\" message ALSO writes the sentinel.
+Claude Code uses that wording for some real permission prompts, so the
+hook no longer filters on .message; discrimination between real prompts
+and 60s-idle nudges happens elisp-side in
+`claude-repl--on-permission-event' by gating on `:claude-state'."
   (let* ((input "{\"cwd\":\"/d\",\"session_id\":\"s\",\"message\":\"Claude Code needs your attention\",\"notification_type\":\"permission_prompt\"}")
          (result (claude-repl-test--run-permission-hook input)))
     (should (= 0 (plist-get result :exit)))
-    (should-not (plist-get result :sentinel-exists))))
+    (should (plist-get result :sentinel-exists))))
 
-(ert-deftest claude-repl-test-permission-hook-empty-message-skips ()
-  "An empty or missing .message field is not a recognized real prompt and is skipped."
+(ert-deftest claude-repl-test-permission-hook-empty-message-writes-sentinel ()
+  "An empty or missing .message field still writes the sentinel.
+Same rationale as the attention-writes-sentinel test: elisp gates on
+state, so the shell hook is now message-agnostic."
   (let* ((input "{\"cwd\":\"/d\",\"session_id\":\"s\",\"notification_type\":\"permission_prompt\"}")
          (result (claude-repl-test--run-permission-hook input)))
     (should (= 0 (plist-get result :exit)))
-    (should-not (plist-get result :sentinel-exists))))
+    (should (plist-get result :sentinel-exists))))
 
 (provide 'test-sentinel)
 

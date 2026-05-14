@@ -233,11 +233,26 @@ name and the directory."
 
 (defun claude-repl--on-permission-event (ws _dir)
   "Set :permission status on workspace WS.
-Callback for the permission_prompt sentinel handler."
+Callback for the permission_prompt sentinel handler.
+
+The Notification hook fires for both real permission prompts and the
+60s-idle \"Claude Code needs your attention\" nudge under the same
+notification_type=permission_prompt.  We can't distinguish them by
+message text alone (Claude Code uses the attention wording for some
+real permission prompts too), so we gate on `:claude-state' instead:
+mid-turn (`:thinking') means Claude is actively working and a
+notification at this point is a real permission prompt; any other
+state (`:idle' / `:done' / `:permission' / `:init' / nil) means the
+turn is settled or already attention-flagged, so the notification is
+either a stale idle nudge or a duplicate, and we leave state alone."
   (let ((before (claude-repl--ws-get ws :claude-state)))
     (claude-repl--log-verbose ws "on-permission-event: ws=%s status-BEFORE=%s" ws before)
-    (claude-repl--ws-set-claude-state ws :permission)
-    (claude-repl--log-verbose ws "on-permission-event: ws=%s status-AFTER=%s" ws (claude-repl--ws-get ws :claude-state))))
+    (cond
+     ((eq before :thinking)
+      (claude-repl--ws-set-claude-state ws :permission)
+      (claude-repl--log-verbose ws "on-permission-event: ws=%s status-AFTER=%s" ws (claude-repl--ws-get ws :claude-state)))
+     (t
+      (claude-repl--log ws "on-permission-event: ws=%s ignoring notification (state=%s, not :thinking)" ws before)))))
 
 (defun claude-repl--maybe-finalize-stop (ws)
   "If WS is fully stopped (Stop fired AND no pending subagents), finalize it.
