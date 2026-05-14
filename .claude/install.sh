@@ -71,6 +71,7 @@ LOCAL_SKILLS_SRC="$SCRIPT_DIR/../modules/app/claude-repl/skills"
 LOCAL_SKILLS=(
   "debug-logs"
   "workspace-close"
+  "workspace-profile"
 )
 
 # --- Helpers ---

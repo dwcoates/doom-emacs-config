@@ -442,6 +442,117 @@ Returns the full SHA of the new commit."
           (should (= new-delay 10))
           (should (= (length handled) 1)))))))
 
+(ert-deftest claude-repl-test-dispatch-workspace-command-profile ()
+  "Profile commands route to the profile handler and do not change delay."
+  (let ((handled nil))
+    (cl-letf (((symbol-function 'claude-repl--handle-profile-command)
+               (lambda (cmd) (push cmd handled))))
+      (let ((cmd '((type . "profile") (enabled . t))))
+        (let ((new-delay (claude-repl--dispatch-workspace-command cmd 10)))
+          (should (= new-delay 10))
+          (should (= (length handled) 1)))))))
+
+;;;; ---- Tests: parse-profile-mode ----
+
+(ert-deftest claude-repl-test-parse-profile-mode-nil-uses-default ()
+  "Nil mode returns `claude-repl-profile-default-mode'."
+  (let ((claude-repl-profile-default-mode 'cpu+mem))
+    (should (eq (claude-repl--parse-profile-mode nil) 'cpu+mem))))
+
+(ert-deftest claude-repl-test-parse-profile-mode-empty-uses-default ()
+  "Empty-string mode returns `claude-repl-profile-default-mode'."
+  (let ((claude-repl-profile-default-mode 'cpu))
+    (should (eq (claude-repl--parse-profile-mode "") 'cpu))))
+
+(ert-deftest claude-repl-test-parse-profile-mode-cpu ()
+  "\"cpu\" maps to the `cpu' symbol."
+  (should (eq (claude-repl--parse-profile-mode "cpu") 'cpu)))
+
+(ert-deftest claude-repl-test-parse-profile-mode-mem ()
+  "\"mem\" maps to the `mem' symbol."
+  (should (eq (claude-repl--parse-profile-mode "mem") 'mem)))
+
+(ert-deftest claude-repl-test-parse-profile-mode-cpu+mem ()
+  "\"cpu+mem\" maps to the `cpu+mem' symbol."
+  (should (eq (claude-repl--parse-profile-mode "cpu+mem") 'cpu+mem)))
+
+(ert-deftest claude-repl-test-parse-profile-mode-unknown ()
+  "Unknown mode string returns nil so the handler can refuse the request."
+  (should (null (claude-repl--parse-profile-mode "gpu"))))
+
+;;;; ---- Tests: handle-profile-command ----
+
+(ert-deftest claude-repl-test-handle-profile-command-enabled-starts ()
+  "enabled=t starts the profiler with the default mode when not already running."
+  (let ((started-with :unset))
+    (cl-letf (((symbol-function 'profiler-running-p) (lambda () nil))
+              ((symbol-function 'profiler-start)
+               (lambda (mode) (setq started-with mode)))
+              ((symbol-function 'profiler-stop) (lambda () (error "should not stop")))
+              ((symbol-function 'profiler-report) (lambda () (error "should not report")))
+              (claude-repl-profile-default-mode 'cpu+mem))
+      (claude-repl--handle-profile-command '((type . "profile") (enabled . t)))
+      (should (eq started-with 'cpu+mem)))))
+
+(ert-deftest claude-repl-test-handle-profile-command-enabled-honors-mode ()
+  "enabled=t with mode=\"cpu\" starts the profiler with the `cpu' symbol."
+  (let ((started-with :unset))
+    (cl-letf (((symbol-function 'profiler-running-p) (lambda () nil))
+              ((symbol-function 'profiler-start)
+               (lambda (mode) (setq started-with mode)))
+              ((symbol-function 'profiler-stop) (lambda () (error "should not stop")))
+              ((symbol-function 'profiler-report) (lambda () (error "should not report"))))
+      (claude-repl--handle-profile-command
+       '((type . "profile") (enabled . t) (mode . "cpu")))
+      (should (eq started-with 'cpu)))))
+
+(ert-deftest claude-repl-test-handle-profile-command-enabled-noop-when-running ()
+  "enabled=t is a no-op when the profiler is already running — no start, no stop."
+  (let ((started nil))
+    (cl-letf (((symbol-function 'profiler-running-p) (lambda () t))
+              ((symbol-function 'profiler-start)
+               (lambda (_mode) (setq started t)))
+              ((symbol-function 'profiler-stop) (lambda () (error "should not stop")))
+              ((symbol-function 'profiler-report) (lambda () (error "should not report"))))
+      (claude-repl--handle-profile-command '((type . "profile") (enabled . t)))
+      (should-not started))))
+
+(ert-deftest claude-repl-test-handle-profile-command-disabled-stops-and-reports ()
+  "enabled=nil stops the profiler and pops up the report when running."
+  (let ((stopped nil) (reported nil))
+    (cl-letf (((symbol-function 'profiler-running-p) (lambda () t))
+              ((symbol-function 'profiler-start) (lambda (_m) (error "should not start")))
+              ((symbol-function 'profiler-stop) (lambda () (setq stopped t)))
+              ((symbol-function 'profiler-report) (lambda () (setq reported t))))
+      (claude-repl--handle-profile-command
+       '((type . "profile") (enabled . :json-false)))
+      (should stopped)
+      (should reported))))
+
+(ert-deftest claude-repl-test-handle-profile-command-disabled-noop-when-not-running ()
+  "enabled=nil is a no-op when the profiler is not running — no stop, no report."
+  (let ((stopped nil) (reported nil))
+    (cl-letf (((symbol-function 'profiler-running-p) (lambda () nil))
+              ((symbol-function 'profiler-start) (lambda (_m) (error "should not start")))
+              ((symbol-function 'profiler-stop) (lambda () (setq stopped t)))
+              ((symbol-function 'profiler-report) (lambda () (setq reported t))))
+      (claude-repl--handle-profile-command
+       '((type . "profile") (enabled . :json-false)))
+      (should-not stopped)
+      (should-not reported))))
+
+(ert-deftest claude-repl-test-handle-profile-command-unknown-mode-refuses-start ()
+  "An unknown `mode' string refuses the start — profiler-start is NOT called."
+  (let ((started nil))
+    (cl-letf (((symbol-function 'profiler-running-p) (lambda () nil))
+              ((symbol-function 'profiler-start)
+               (lambda (_m) (setq started t)))
+              ((symbol-function 'profiler-stop) (lambda () (error "should not stop")))
+              ((symbol-function 'profiler-report) (lambda () (error "should not report"))))
+      (claude-repl--handle-profile-command
+       '((type . "profile") (enabled . t) (mode . "gpu")))
+      (should-not started))))
+
 ;;;; ---- Tests: handle-clipboard-command ----
 
 (ert-deftest claude-repl-test-handle-clipboard-command-stores-text ()

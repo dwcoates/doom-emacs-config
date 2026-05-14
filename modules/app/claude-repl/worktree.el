@@ -3,6 +3,7 @@
 ;;; Code:
 
 (require 'filenotify)
+(require 'profiler)
 
 (define-error 'claude-repl-merge-conflict-error
   "Cherry-pick conflict left in tree (resolver declined or interactive abort)"
@@ -1386,6 +1387,79 @@ annotation must not error out the whole batch."
                ws (length text)
                (if note (format ": %s" note) ""))))))
 
+(defcustom claude-repl-profile-default-mode 'cpu+mem
+  "Default `profiler-start' mode for `/workspace-profile' when JSON omits `mode'.
+Must be one of `cpu', `mem', or `cpu+mem'."
+  :type '(choice (const cpu) (const mem) (const cpu+mem))
+  :group 'claude-repl)
+
+(defconst claude-repl--profile-mode-alist
+  '(("cpu"     . cpu)
+    ("mem"     . mem)
+    ("cpu+mem" . cpu+mem))
+  "Map JSON `mode' strings to `profiler-start' mode symbols.")
+
+(defun claude-repl--parse-profile-mode (mode)
+  "Parse JSON MODE string into a `profiler-start' mode symbol.
+Returns `claude-repl-profile-default-mode' when MODE is nil or empty.
+Returns nil for an unknown MODE so the caller can refuse the request."
+  (cond
+   ((or (null mode) (and (stringp mode) (string-empty-p mode)))
+    claude-repl-profile-default-mode)
+   ((stringp mode)
+    (cdr (assoc mode claude-repl--profile-mode-alist)))
+   (t nil)))
+
+(defun claude-repl--handle-profile-command (cmd)
+  "Handle a \"profile\" workspace command CMD.
+Toggles the Emacs profiler based on the `enabled' boolean in CMD:
+
+  - `enabled' = t   → starts the profiler via `profiler-start' if it
+                      is not already running.  Uses the JSON `mode'
+                      field (\"cpu\", \"mem\", or \"cpu+mem\") or
+                      `claude-repl-profile-default-mode' when omitted.
+  - `enabled' = nil → stops the profiler via `profiler-stop' if it is
+                      running, then pops up `profiler-report'.
+
+The command is workspace-agnostic — the profiler is process-wide, so the
+JSON intentionally omits a `workspace' field and this handler does not
+touch `claude-repl--workspaces'.
+
+Idempotent: a start while running and a stop while idle are both no-ops
+\(logged, not errored).  An unknown `mode' string is refused with a log
+entry rather than silently falling back to the default — a malformed
+mode is a bug in the dispatch source and should surface, not paper over."
+  (let* ((enabled-raw (alist-get 'enabled cmd))
+         (enabled (and (not (eq enabled-raw :json-false)) enabled-raw))
+         (mode-raw (alist-get 'mode cmd))
+         (mode (claude-repl--parse-profile-mode mode-raw))
+         (running (profiler-running-p)))
+    (cond
+     ((and enabled (null mode))
+      (claude-repl--log nil "workspace-commands-file profile: unknown mode=%S — skipping"
+                        mode-raw)
+      (message "[claude-repl] profile: unknown mode %S — skipping" mode-raw))
+     (enabled
+      (cond
+       (running
+        (claude-repl--log nil "workspace-commands-file profile: already running, skipping start (requested mode=%s)"
+                          mode)
+        (message "[claude-repl] profile: already running, skipping start"))
+       (t
+        (claude-repl--log nil "workspace-commands-file profile: starting mode=%s" mode)
+        (profiler-start mode)
+        (message "[claude-repl] profile: started (%s)" mode))))
+     (t
+      (cond
+       ((not running)
+        (claude-repl--log nil "workspace-commands-file profile: not running, skipping stop")
+        (message "[claude-repl] profile: not running, skipping stop"))
+       (t
+        (claude-repl--log nil "workspace-commands-file profile: stopping and reporting")
+        (profiler-stop)
+        (profiler-report)
+        (message "[claude-repl] profile: stopped, report opened")))))))
+
 (defun claude-repl--resolve-merge-workspace-name (ws)
   "Resolve WS to a registered workspace name for merge dispatch.
 
@@ -1474,6 +1548,9 @@ unchanged otherwise)."
       create-delay)
      ((string= type "merge")
       (claude-repl--handle-merge-command cmd)
+      create-delay)
+     ((string= type "profile")
+      (claude-repl--handle-profile-command cmd)
       create-delay)
      (t
       (claude-repl--log nil "workspace-commands-file unknown type: %s" type)
