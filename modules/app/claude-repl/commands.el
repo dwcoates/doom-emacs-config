@@ -326,6 +326,42 @@ prevents the run from prompting for tool approval headlessly."
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-explain-config-window-height 0.5
+  "Fraction of frame height for the explain-config side window.
+The buffer is displayed in the same side-window allotment as the
+drawer (left side, slot 1), stacked beneath it.  This fraction
+controls how the column is split."
+  :type 'float
+  :group 'claude-repl)
+
+(defvar claude-repl--explain-config-display-action
+  `((display-buffer-in-side-window)
+    (side . left)
+    (slot . 1)
+    (window-height . ,claude-repl-explain-config-window-height)
+    (window-parameters
+     (no-delete-other-windows . t)
+     (no-other-window . nil)))
+  "Display action for the explain-config output buffer.
+Places it in the drawer's side-window allotment (left, slot 1) so
+it stacks beneath the drawer (slot 0).  Conceptually one
+\"drawer space\" with two separately-navigable windows.")
+
+(defun claude-repl--explain-config-show ()
+  "Display the existing explain-config buffer in the drawer side-window.
+No-op when the buffer doesn't exist (nothing to show yet) or when
+its window is already live.  Returns the displayed window or nil."
+  (when-let ((buf (get-buffer claude-repl-explain-config-buffer-name)))
+    (unless (get-buffer-window buf t)
+      (display-buffer buf claude-repl--explain-config-display-action))))
+
+(defun claude-repl--explain-config-hide ()
+  "Delete every window displaying the explain-config buffer.
+Keeps the buffer itself alive — only its visibility is coupled to
+the drawer.  Returns the list of deleted windows."
+  (when-let ((buf (get-buffer claude-repl-explain-config-buffer-name)))
+    (claude-repl-window--delete-buffer-windows buf)))
+
 (defcustom claude-repl-explain-config-preamble
   (concat
    "You are being asked a question about the Doom Emacs configuration"
@@ -663,14 +699,20 @@ tagged output renders with Emacs faces instead of raw Markdown."
   "Spawn the headless claude process for explain-config PROMPT.
 Returns the process.  Separated from the interactive entry point so
 tests can stub `make-process' here without going through the input
-read."
+read.
+
+Ensures the drawer is open before displaying the explain-config
+buffer in the drawer's side-window allotment (slot 1) — the two are
+conceptually coupled at the UI level."
   (let* ((dir (file-name-as-directory
                (expand-file-name claude-repl-explain-config-dir)))
          (buf (claude-repl--explain-config-init-buffer prompt))
          (cmd (cons claude-repl-explain-config-program
                     claude-repl-explain-config-flags))
          (input (claude-repl--explain-config-build-input prompt)))
-    (display-buffer buf)
+    (when (fboundp 'claude-repl-drawer-show)
+      (claude-repl-drawer-show))
+    (display-buffer buf claude-repl--explain-config-display-action)
     (let* ((default-directory dir)
            (proc (make-process
                   :name "claude-explain-config"

@@ -523,6 +523,104 @@
             (should (string-match-p "status 0" (buffer-string)))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
+;;;; ---- explain-config drawer-space coupling ----
+
+(ert-deftest claude-repl-cmd-test-explain-config-display-action/uses-left-side-window ()
+  "Display action routes the explain-config buffer to a left-side window."
+  (should (member 'display-buffer-in-side-window
+                  (car claude-repl--explain-config-display-action)))
+  (should (eq (cdr (assq 'side claude-repl--explain-config-display-action))
+              'left)))
+
+(ert-deftest claude-repl-cmd-test-explain-config-display-action/sits-below-drawer-slot ()
+  "Explain-config window occupies slot 1 (the drawer is at slot 0)."
+  (should (= (cdr (assq 'slot claude-repl--explain-config-display-action))
+             1)))
+
+(ert-deftest claude-repl-cmd-test-explain-config-show/no-op-when-buffer-missing ()
+  "Show is a no-op when no explain-config buffer has ever been created."
+  (let ((claude-repl-explain-config-buffer-name " *nonexistent-explain-config*")
+        (display-called nil))
+    (cl-letf (((symbol-function 'display-buffer)
+               (lambda (&rest _) (setq display-called t) nil)))
+      (claude-repl--explain-config-show)
+      (should-not display-called))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-show/displays-existing-buffer ()
+  "Show calls `display-buffer' with the side-window action when buffer exists."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-show*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name))
+         (display-args nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
+                  ((symbol-function 'display-buffer)
+                   (lambda (b action) (setq display-args (list b action)) nil)))
+          (claude-repl--explain-config-show)
+          (should (eq (car display-args) buf))
+          (should (eq (cadr display-args)
+                      claude-repl--explain-config-display-action)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-show/skips-when-already-visible ()
+  "Show does nothing when a live window already displays the buffer."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-already*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name))
+         (display-called nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window)
+                   (lambda (&rest _) 'fake-win))
+                  ((symbol-function 'display-buffer)
+                   (lambda (&rest _) (setq display-called t) nil)))
+          (claude-repl--explain-config-show)
+          (should-not display-called))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-hide/deletes-windows-for-buffer ()
+  "Hide delegates to `claude-repl-window--delete-buffer-windows' for the buffer."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-hide*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name))
+         (delete-called-with nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl-window--delete-buffer-windows)
+                   (lambda (b &rest _) (setq delete-called-with b))))
+          (claude-repl--explain-config-hide)
+          (should (eq delete-called-with buf)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-hide/no-op-when-buffer-missing ()
+  "Hide is a no-op when no explain-config buffer has ever been created."
+  (let ((claude-repl-explain-config-buffer-name " *nonexistent-explain-hide*")
+        (delete-called nil))
+    (cl-letf (((symbol-function 'claude-repl-window--delete-buffer-windows)
+               (lambda (&rest _) (setq delete-called t))))
+      (claude-repl--explain-config-hide)
+      (should-not delete-called))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-spawn/opens-drawer ()
+  "Spawn opens the drawer so the explain-config sidekick has its parent space."
+  (let ((drawer-shown nil))
+    (cl-letf (((symbol-function 'make-process) (lambda (&rest _) 'fake-proc))
+              ((symbol-function 'process-send-string) #'ignore)
+              ((symbol-function 'process-send-eof) #'ignore)
+              ((symbol-function 'display-buffer) #'ignore)
+              ((symbol-function 'claude-repl-drawer-show)
+               (lambda () (setq drawer-shown t))))
+      (claude-repl--explain-config-spawn "anything")
+      (should drawer-shown))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-spawn/displays-with-drawer-side-action ()
+  "Spawn passes the side-window display action to `display-buffer'."
+  (let (display-args)
+    (cl-letf (((symbol-function 'make-process) (lambda (&rest _) 'fake-proc))
+              ((symbol-function 'process-send-string) #'ignore)
+              ((symbol-function 'process-send-eof) #'ignore)
+              ((symbol-function 'claude-repl-drawer-show) #'ignore)
+              ((symbol-function 'display-buffer)
+               (lambda (b action) (setq display-args (list b action)) nil)))
+      (claude-repl--explain-config-spawn "anything")
+      (should (eq (cadr display-args)
+                  claude-repl--explain-config-display-action)))))
+
 ;;;; ---- claude-repl explain-config face-markup rendering ----
 
 (defmacro claude-repl-test--with-explain-config-buf (buf-sym &rest body)

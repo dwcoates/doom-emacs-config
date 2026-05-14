@@ -731,6 +731,76 @@ drawer truly global so hiding in one workspace hides in all."
           (should (eq delete-called-with buf)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
+;;;; ---- Drawer ↔ explain-config coupling ----
+;;
+;; The explain-config buffer (SPC j h c output) is a sibling of the
+;; drawer in the same side-window allotment.  Open/close gestures on
+;; the drawer must reach the explain-config window too so the two read
+;; as one "drawer space".
+
+(ert-deftest claude-repl-drawer-test-show-also-shows-explain-config ()
+  "`claude-repl-drawer-show' triggers `--explain-config-show' so a prior
+explain-config run reappears beneath the drawer when the drawer reopens."
+  (let ((explain-show-called nil))
+    (cl-letf (((symbol-function 'claude-repl-drawer--get-or-create-buffer)
+               (lambda () (get-buffer-create " *test-drawer-buf*")))
+              ((symbol-function 'claude-repl-drawer--current-ws)
+               (lambda () nil))
+              ((symbol-function 'display-buffer) (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl-drawer--render) #'ignore)
+              ((symbol-function 'claude-repl-drawer--goto-workspace-line)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl-drawer--goto-first-workspace)
+               (lambda () nil))
+              ((symbol-function 'claude-repl-drawer--post-command) #'ignore)
+              ((symbol-function 'claude-repl-drawer--apply-background) #'ignore)
+              ((symbol-function 'claude-repl--explain-config-show)
+               (lambda () (setq explain-show-called t))))
+      (claude-repl-drawer-show)
+      (should explain-show-called))
+    (when-let ((b (get-buffer " *test-drawer-buf*"))) (kill-buffer b))))
+
+(ert-deftest claude-repl-drawer-test-hide-also-hides-explain-config ()
+  "`claude-repl-drawer-hide' triggers `--explain-config-hide' so the help
+output disappears when the user collapses the drawer space."
+  (let ((explain-hide-called nil)
+        (claude-repl-drawer--global-visible-p t))
+    (cl-letf (((symbol-function 'claude-repl-window--delete-buffer-windows)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--explain-config-hide)
+               (lambda () (setq explain-hide-called t))))
+      (claude-repl-drawer-hide)
+      (should explain-hide-called))))
+
+(ert-deftest claude-repl-drawer-test-ensure-visible-shows-explain-when-flag-set ()
+  "Persp-switch reconciliation re-displays the explain-config buffer
+alongside the drawer when the global visible-flag is set."
+  (let ((claude-repl-drawer--global-visible-p t)
+        (explain-show-called nil))
+    (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) 'fake-win))
+              ((symbol-function 'display-buffer) (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl-drawer--apply-width) #'ignore)
+              ((symbol-function 'claude-repl--explain-config-show)
+               (lambda () (setq explain-show-called t)))
+              ((symbol-function 'claude-repl--explain-config-hide)
+               (lambda () (error "should not hide when flag is set"))))
+      (claude-repl-drawer--ensure-visible-on-persp-switch)
+      (should explain-show-called))))
+
+(ert-deftest claude-repl-drawer-test-ensure-visible-hides-explain-when-flag-nil ()
+  "Persp-switch reconciliation hides the explain-config buffer when the
+drawer's global visible-flag is nil — couples the two on every persp
+restore, not just on user-initiated show/hide."
+  (let ((claude-repl-drawer--global-visible-p nil)
+        (explain-hide-called nil))
+    (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--explain-config-show)
+               (lambda () (error "should not show when flag is nil")))
+              ((symbol-function 'claude-repl--explain-config-hide)
+               (lambda () (setq explain-hide-called t))))
+      (claude-repl-drawer--ensure-visible-on-persp-switch)
+      (should explain-hide-called))))
+
 ;;;; ---- Global dispatch + auto-revert ----
 
 (ert-deftest claude-repl-drawer-test-global-next-dispatches-to-drawer ()
