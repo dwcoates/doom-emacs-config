@@ -2306,13 +2306,16 @@ states — only `:hidden' is filtered."
   (should (equal (claude-repl--join-tabline-rows nil) "")))
 
 (ert-deftest claude-repl-test-join-tabline-rows-single ()
-  "A single line is returned unchanged (no separator appended)."
-  (should (equal (claude-repl--join-tabline-rows '("only")) "only")))
+  "A single line is suffixed with an unfaced space so the tab-bar's
+per-row face extension paints the default face on the row remainder,
+not the row's last entry's faced padding space."
+  (should (equal (claude-repl--join-tabline-rows '("only")) "only ")))
 
 (ert-deftest claude-repl-test-join-tabline-rows-multi-uses-space-newline ()
-  "Adjacent rows are separated by ` \\n', not bare `\\n'."
+  "Adjacent rows are separated by ` \\n' and the final row also gets a
+trailing ` ' so EVERY row ends with an unfaced space terminator."
   (should (equal (claude-repl--join-tabline-rows '("a" "b" "c"))
-                 "a \nb \nc")))
+                 "a \nb \nc ")))
 
 (ert-deftest claude-repl-test-join-tabline-rows-non-final-rows-end-with-unfaced-space ()
   "The character immediately before each newline is an unfaced space.
@@ -2336,6 +2339,30 @@ gap.  We assert: (a) every char preceding a newline is a space, and
         (should (>= prev 0))
         (should (eq (aref joined prev) ?\s))
         (should-not (get-text-property prev 'face joined))))))
+
+(ert-deftest claude-repl-test-join-tabline-rows-final-row-ends-with-unfaced-space ()
+  "The last character of the joined string is an unfaced space.
+Without this, the tab-bar's per-row face extension would paint the
+final entry's name-face background across the last row's remainder
+(the bug visible whenever multi-line tab-bar wraps and the last
+entry on the bottom row carries a stateful background)."
+  (let* ((faced-a (propertize "alpha" 'face '+workspace-tab-selected-face))
+         (faced-b (propertize "beta"  'face '+workspace-tab-face))
+         (joined  (claude-repl--join-tabline-rows (list faced-a faced-b)))
+         (last    (1- (length joined))))
+    (should (eq (aref joined last) ?\s))
+    (should-not (get-text-property last 'face joined))))
+
+(ert-deftest claude-repl-test-join-tabline-rows-single-line-final-char-unfaced ()
+  "Even a single-row tab-bar gets the trailing unfaced space.
+Same face-extension reasoning as the multi-row case: when a single
+centered row is shorter than the frame width, the face extension would
+paint the rightmost entry's background to the right edge."
+  (let* ((faced (propertize "alpha" 'face '+workspace-tab-selected-face))
+         (joined (claude-repl--join-tabline-rows (list faced)))
+         (last (1- (length joined))))
+    (should (eq (aref joined last) ?\s))
+    (should-not (get-text-property last 'face joined))))
 
 (ert-deftest claude-repl-test-join-tabline-rows-preserves-row-faces ()
   "Joining does not strip text properties from the original row content."
@@ -2432,6 +2459,27 @@ gap.  We assert: (a) every char preceding a newline is a space, and
   "Default value of `claude-repl-repo-default-priorities' assigns p1 to explanation-engine."
   (should (equal (cdr (assoc "explanation-engine" claude-repl-repo-default-priorities))
                  "p1")))
+
+;;;; ---- Tests: pack-width / center-width reserve room for terminator ----
+
+(ert-deftest claude-repl-test-pack-tabline-entries-reserve-room-for-terminator ()
+  "Callers must pack to `(- frame-width 1)' (not `frame-width') so the
+unfaced terminator appended by `claude-repl--join-tabline-rows' lands
+within the visible columns (0..frame-width-1) after centering.
+
+This test pins the contract: packing to W must never return a line
+wider than W chars.  Combined with center-target = W, this guarantees
+the centered+terminated row source is `<= W + 1` chars total, where
+the terminator at col W is offscreen — but with the caller now passing
+`(1- frame-width)' as W, the terminator lands at col `<= frame-width -
+1' (visible)."
+  ;; Packing to N never returns lines wider than N (already true).
+  (dolist (n '(5 10 20))
+    (let ((entries (mapcar #'number-to-string (number-sequence 1 n))))
+      (dolist (lines (list (claude-repl--pack-tabline-entries entries 4)
+                           (claude-repl--pack-tabline-entries entries 8)))
+        (dolist (line lines)
+          (should (<= (length line) (max 4 8))))))))
 
 (provide 'test-status)
 

@@ -437,25 +437,30 @@ this trick is necessary.")
 
   (defun +dwc/workspace-tabline-formatted ()
     "Format workspace list for tab-bar display.
-Packs entries into lines no wider than `frame-width' so the tab-bar
-wraps only between entries (never mid-name), centers each line
-independently, and joins them via `claude-repl--join-tabline-rows' so
-the per-row face extension does not paint the selected tab's
-background to the right edge.  Appends a toggled trailing space tied
-to `+dwc/tab-bar-refresh-toggle' so the left-aligned tab-bar segment's
+Packs entries into lines no wider than `(1- (frame-width))' so the
+tab-bar wraps only between entries (never mid-name) AND so the
+unfaced terminator that `claude-repl--join-tabline-rows' appends to
+each row lands within the visible columns (col < `frame-width').
+Centers each packed line to the same reserved width so left-only
+padding from `+doom-dashboard--center' doesn't push the row back to
+the right edge.  Joins via `claude-repl--join-tabline-rows' so the
+per-row face extension does not paint the rightmost tab's background
+to the right edge.  Appends a toggled trailing space tied to
+`+dwc/tab-bar-refresh-toggle' so the left-aligned tab-bar segment's
 string content actually changes across refresh ticks (the
 alternating-space trick — see the block comment above).  Without the
 toggle, face-only status transitions (e.g. :thinking -> :done) stay
 invisible until a workspace switch."
     (let* ((width (frame-width))
+           (line-width (max 1 (1- width)))
            (entries (if (fboundp 'claude-repl--tabline-rendered-entries)
                         (claude-repl--tabline-rendered-entries)
                       (list (+workspace--tabline))))
            (lines (if (fboundp 'claude-repl--pack-tabline-entries)
-                      (claude-repl--pack-tabline-entries entries width)
+                      (claude-repl--pack-tabline-entries entries line-width)
                     (list (mapconcat #'identity entries " "))))
            (centered-lines (mapcar (lambda (line)
-                                     (+doom-dashboard--center width line))
+                                     (+doom-dashboard--center line-width line))
                                    lines))
            (joined (if (fboundp 'claude-repl--join-tabline-rows)
                        (claude-repl--join-tabline-rows centered-lines)

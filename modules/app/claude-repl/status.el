@@ -1103,19 +1103,28 @@ wrap points remain at entry boundaries."
 (defun claude-repl--join-tabline-rows (lines)
   "Join LINES (pre-centered tab-bar rows) with row separators.
 
-Each adjacent pair of LINES is separated by a single unfaced space
-followed by a newline; the newline alone would let the previous row's
-last glyph paint its background across the rest of the row.  The
+Each row is terminated with a single unfaced space; adjacent rows are
+separated by that space followed by a newline, and the final row also
+gets the trailing space (no newline after it).  This is what stops the
 tab-bar's per-row redisplay (`display_tab_bar_line' in src/xdisp.c)
-unconditionally calls `extend_face_to_end_of_line', which paints the
-last glyph's face to the right edge of the row regardless of the
-face's `:extend' attribute.  Since each rendered tab-entry ends with a
-faced name-padding space (see `claude-repl--render-tab'), the selected
-tab's background would otherwise visibly stretch to the frame's right
-edge whenever the selected tab landed at the end of a wrapped row.
-Terminating each row with an unfaced space breaks the face run so the
-extension paints the default tab-bar face instead."
-  (mapconcat #'identity lines " \n"))
+from painting the previous row's last glyph face across the row's
+remainder.  `extend_face_to_end_of_line' uses the last glyph's face
+regardless of the face's `:extend' attribute, and since each rendered
+tab-entry ends with a faced name-padding space (see
+`claude-repl--render-tab'), the selected tab's background would
+otherwise visibly stretch to the frame's right edge whenever the
+selected tab landed at the end of any wrapped row, including the
+final one.
+
+Callers must size each row so the trailing unfaced space lands within
+the frame's visible columns (col < `frame-width').  `+doom-dashboard
+--center' only left-pads, so a row of length `frame-width' has its
+appended space at column `frame-width' — offscreen — and the last
+visible glyph is still the faced one.  Pack and center to
+`(1- (frame-width))' to leave room for the terminator."
+  (if (null lines)
+      ""
+    (concat (mapconcat #'identity lines " \n") " ")))
 
 (cl-defun claude-repl--tabline-advice (&optional (names nil names-supplied-p))
   "Override for `+workspace--tabline' to color tabs by Claude status.
