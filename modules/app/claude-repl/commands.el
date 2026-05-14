@@ -352,8 +352,43 @@ prevents the run from prompting for tool approval headlessly."
    " user should re-issue the request through the appropriate Claude"
    " REPL workspace command if they want changes made.\n"
    "\n"
+   "OUTPUT FORMAT -- EMACS FACE MARKUP (NOT MARKDOWN):\n"
+   "Your answer is rendered directly into an Emacs buffer.  DO NOT use"
+   " Markdown (no `#` / `##` / `###` headers, no `**bold**`, no"
+   " `*italic*`, no `` ```fences``` ``, no `- ` bullet syntax, no `>`"
+   " quote prefix, no `[text](url)` links).  Instead, use the following"
+   " face tags exactly.  Each tag pair wraps the text it styles; the"
+   " open tag is `⟦NAME⟧`, the close tag is `⟦/NAME⟧`."
+   "  Tags may nest (e.g. bold inside a heading).  Available tags:\n"
+   "\n"
+   "  ⟦h1⟧Top-level heading⟦/h1⟧\n"
+   "  ⟦h2⟧Subheading⟦/h2⟧\n"
+   "  ⟦h3⟧Sub-subheading⟦/h3⟧\n"
+   "  ⟦b⟧bold⟦/b⟧   ⟦i⟧italic⟦/i⟧\n"
+   "  ⟦code⟧inline-code⟦/code⟧\n"
+   "  ⟦block⟧multi-line\n"
+   "  code block⟦/block⟧\n"
+   "  ⟦quote⟧blockquote text⟦/quote⟧\n"
+   "  ⟦link⟧https://example.com⟦/link⟧\n"
+   "  ⟦bullet⟧• list item label⟦/bullet⟧ then body text\n"
+   "  ⟦kbd⟧SPC j h c⟦/kbd⟧   ⟦file⟧modules/app/claude-repl/commands.el⟦/file⟧\n"
+   "  ⟦sym⟧claude-repl-explain-config⟦/sym⟧\n"
+   "\n"
+   "Rules for face markup:\n"
+   "  - Plain prose needs NO tags -- only tag the things that benefit"
+   " from emphasis or semantic styling.\n"
+   "  - Always close every tag you open.  Close in LIFO order when"
+   " nesting.\n"
+   "  - The ⟦ ⟧ brackets are U+27E6 / U+27E7 -- use those exact"
+   " characters, not `[[` / `]]`.\n"
+   "  - Do NOT emit literal `⟦` or `⟧` inside tagged content -- they"
+   " are reserved as tag delimiters.\n"
+   "  - Unknown tag names render verbatim, so stick to the list above.\n"
+   "  - Use ⟦block⟧ for any multi-line code or shell example; use"
+   " ⟦code⟧ only for short inline references.\n"
+   "\n"
    "Answer the user's question below as a concise, accurate explanation"
-   " grounded in the actual code.\n"
+   " grounded in the actual code, formatted using the face tags above.\n"
    "\n"
    "QUESTION:\n"
    "%s")
@@ -366,6 +401,111 @@ contract for this entry point -- edit with care."
 (defun claude-repl--explain-config-build-input (raw)
   "Wrap RAW with the explain-config preamble for sending to claude."
   (format claude-repl-explain-config-preamble raw))
+
+;;; Rich-text faces for the model's tagged response body.  The model
+;;; emits semantic face tags (see `claude-repl-explain-config-preamble');
+;;; the streaming filter (`claude-repl--explain-config-filter') parses
+;;; them and applies these faces to the inserted text so the buffer
+;;; renders with Emacs's own font system instead of raw Markdown.
+
+(defface claude-repl-explain-config-h1
+  '((t :inherit org-level-1 :weight bold :height 1.25))
+  "Face for ⟦h1⟧ headings in explain-config output."
+  :group 'claude-repl)
+
+(defface claude-repl-explain-config-h2
+  '((t :inherit org-level-2 :weight bold :height 1.15))
+  "Face for ⟦h2⟧ headings in explain-config output."
+  :group 'claude-repl)
+
+(defface claude-repl-explain-config-h3
+  '((t :inherit org-level-3 :weight bold))
+  "Face for ⟦h3⟧ headings in explain-config output."
+  :group 'claude-repl)
+
+(defface claude-repl-explain-config-bold
+  '((t :inherit bold))
+  "Face for ⟦b⟧ bold spans in explain-config output."
+  :group 'claude-repl)
+
+(defface claude-repl-explain-config-italic
+  '((t :inherit italic))
+  "Face for ⟦i⟧ italic spans in explain-config output."
+  :group 'claude-repl)
+
+(defface claude-repl-explain-config-code
+  '((t :inherit font-lock-constant-face :background "#2A2A2A"))
+  "Face for ⟦code⟧ inline-code spans in explain-config output."
+  :group 'claude-repl)
+
+(defface claude-repl-explain-config-block
+  '((t :inherit org-block :extend t))
+  "Face for ⟦block⟧ multi-line code blocks in explain-config output."
+  :group 'claude-repl)
+
+(defface claude-repl-explain-config-quote
+  '((t :inherit org-quote :slant italic))
+  "Face for ⟦quote⟧ blockquotes in explain-config output."
+  :group 'claude-repl)
+
+(defface claude-repl-explain-config-link
+  '((t :inherit link))
+  "Face for ⟦link⟧ URLs in explain-config output."
+  :group 'claude-repl)
+
+(defface claude-repl-explain-config-bullet
+  '((t :inherit org-list-dt :weight bold))
+  "Face for ⟦bullet⟧ list-item labels in explain-config output."
+  :group 'claude-repl)
+
+(defface claude-repl-explain-config-kbd
+  '((t :inherit help-key-binding))
+  "Face for ⟦kbd⟧ keybinding spans in explain-config output."
+  :group 'claude-repl)
+
+(defface claude-repl-explain-config-file
+  '((t :inherit font-lock-string-face :underline t))
+  "Face for ⟦file⟧ filepath spans in explain-config output."
+  :group 'claude-repl)
+
+(defface claude-repl-explain-config-sym
+  '((t :inherit font-lock-function-name-face))
+  "Face for ⟦sym⟧ identifier spans in explain-config output."
+  :group 'claude-repl)
+
+(defconst claude-repl--explain-config-face-map
+  '(("h1"     . claude-repl-explain-config-h1)
+    ("h2"     . claude-repl-explain-config-h2)
+    ("h3"     . claude-repl-explain-config-h3)
+    ("b"      . claude-repl-explain-config-bold)
+    ("i"      . claude-repl-explain-config-italic)
+    ("code"   . claude-repl-explain-config-code)
+    ("block"  . claude-repl-explain-config-block)
+    ("quote"  . claude-repl-explain-config-quote)
+    ("link"   . claude-repl-explain-config-link)
+    ("bullet" . claude-repl-explain-config-bullet)
+    ("kbd"    . claude-repl-explain-config-kbd)
+    ("file"   . claude-repl-explain-config-file)
+    ("sym"    . claude-repl-explain-config-sym))
+  "Mapping of face-tag names (as emitted by the model) to Emacs faces.
+Unknown tag names render verbatim and apply no face.")
+
+(defconst claude-repl--explain-config-tag-re
+  "⟦\\(/?\\)\\([a-z][a-z0-9]*\\)⟧"
+  "Regex matching one open (`⟦NAME⟧') or close (`⟦/NAME⟧') face tag.")
+
+(defconst claude-repl--explain-config-partial-tag-re
+  "⟦/?[a-z0-9]*\\'"
+  "Regex matching a possibly-incomplete tag at the very end of a string.
+Used to defer tag fragments across streaming chunk boundaries.")
+
+(defvar-local claude-repl--explain-config-pending ""
+  "Accumulated stream bytes not yet flushed to the buffer.
+Holds back partial face tags until their closing `⟧' arrives.")
+
+(defvar-local claude-repl--explain-config-face-stack nil
+  "Stack of active face symbols (innermost first) for the rendering filter.
+Pushed on each open tag, popped on each matching close tag.")
 
 (defconst claude-repl--explain-config-orange "#FF8C42"
   "Claude-orange accent used in the explain-config buffer chrome.")
@@ -439,13 +579,85 @@ Appends an exit-status footer to PROC's buffer when the process exits."
 
 (defun claude-repl--explain-config-init-buffer (prompt)
   "Prepare the explain-config output buffer for a fresh run.
-Erases prior contents, inserts the question header, returns the buffer."
+Erases prior contents, inserts the question header, returns the buffer.
+Also resets the streaming filter's per-buffer parser state."
   (let ((buf (get-buffer-create claude-repl-explain-config-buffer-name)))
     (with-current-buffer buf
+      (setq claude-repl--explain-config-pending ""
+            claude-repl--explain-config-face-stack nil)
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert (claude-repl--explain-config-format-header prompt))))
     buf))
+
+(defun claude-repl--explain-config-current-face (stack)
+  "Return the face property value for STACK (innermost first).
+nil means no face; a single symbol means a single face; a list means
+multiple faces merged in the standard Emacs left-overrides-right order."
+  (cond
+   ((null stack)        nil)
+   ((null (cdr stack))  (car stack))
+   (t                   stack)))
+
+(defun claude-repl--explain-config-insert-styled (buf text stack)
+  "Insert TEXT into BUF at point-max, propertized with the face for STACK.
+No-op if TEXT is empty.  Buffer is treated as read-only-aware."
+  (when (and (stringp text) (> (length text) 0))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t)
+            (face (claude-repl--explain-config-current-face stack)))
+        (goto-char (point-max))
+        (if face
+            (insert (propertize text 'face face))
+          (insert text))))))
+
+(defun claude-repl--explain-config-parse-chunk (buf chunk)
+  "Parse CHUNK against the face-markup grammar and flush styled text into BUF.
+Maintains BUF-local pending bytes and face stack across calls so partial
+tags arriving in different process chunks are joined correctly.  Returns
+the new pending string (also stored buffer-locally)."
+  (with-current-buffer buf
+    (let* ((input (concat claude-repl--explain-config-pending (or chunk "")))
+           (pos 0)
+           (stack claude-repl--explain-config-face-stack))
+      (while (string-match claude-repl--explain-config-tag-re input pos)
+        (let* ((m-start (match-beginning 0))
+               (m-end   (match-end 0))
+               (is-close (string= (match-string 1 input) "/"))
+               (name    (match-string 2 input))
+               (face    (cdr (assoc name claude-repl--explain-config-face-map))))
+          (claude-repl--explain-config-insert-styled
+           buf (substring input pos m-start) stack)
+          (cond
+           ;; Unknown tag name -- emit verbatim, leave stack untouched.
+           ((null face)
+            (claude-repl--explain-config-insert-styled
+             buf (substring input m-start m-end) stack))
+           ;; Close tag -- pop only when it matches innermost open.
+           (is-close
+            (when (eq (car stack) face)
+              (setq stack (cdr stack))))
+           ;; Open tag -- push onto stack.
+           (t (setq stack (cons face stack))))
+          (setq pos m-end)))
+      (let ((tail (substring input pos)))
+        (if (string-match claude-repl--explain-config-partial-tag-re tail)
+            (let ((open (match-beginning 0)))
+              (claude-repl--explain-config-insert-styled
+               buf (substring tail 0 open) stack)
+              (setq claude-repl--explain-config-pending (substring tail open)))
+          (claude-repl--explain-config-insert-styled buf tail stack)
+          (setq claude-repl--explain-config-pending "")))
+      (setq claude-repl--explain-config-face-stack stack)
+      claude-repl--explain-config-pending)))
+
+(defun claude-repl--explain-config-filter (proc chunk)
+  "Process filter for `claude-repl-explain-config'.
+Routes CHUNK from PROC through the face-markup parser so the model's
+tagged output renders with Emacs faces instead of raw Markdown."
+  (let ((buf (process-buffer proc)))
+    (when (buffer-live-p buf)
+      (claude-repl--explain-config-parse-chunk buf chunk))))
 
 (defun claude-repl--explain-config-spawn (prompt)
   "Spawn the headless claude process for explain-config PROMPT.
@@ -466,6 +678,7 @@ read."
                   :command cmd
                   :connection-type 'pipe
                   :noquery t
+                  :filter #'claude-repl--explain-config-filter
                   :sentinel #'claude-repl--explain-config-sentinel)))
       (process-send-string proc input)
       (process-send-eof proc)

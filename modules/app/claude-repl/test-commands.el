@@ -523,6 +523,176 @@
             (should (string-match-p "status 0" (buffer-string)))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
+;;;; ---- claude-repl explain-config face-markup rendering ----
+
+(defmacro claude-repl-test--with-explain-config-buf (buf-sym &rest body)
+  "Bind BUF-SYM to a fresh, parser-initialized explain-config buffer.
+Clean up the buffer after BODY runs."
+  (declare (indent 1))
+  `(let* ((claude-repl-explain-config-buffer-name
+           (format " *test-explain-config-render-%s*" (cl-gensym)))
+          (,buf-sym (get-buffer-create claude-repl-explain-config-buffer-name)))
+     (unwind-protect
+         (progn
+           (with-current-buffer ,buf-sym
+             (erase-buffer)
+             (setq claude-repl--explain-config-pending ""
+                   claude-repl--explain-config-face-stack nil))
+           ,@body)
+       (when (buffer-live-p ,buf-sym) (kill-buffer ,buf-sym)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-preamble/instructs-face-markup ()
+  "Preamble documents the ⟦face⟧ tag contract instead of Markdown."
+  (let ((rendered (claude-repl--explain-config-build-input "anything")))
+    (should (string-match-p "EMACS FACE MARKUP" rendered))
+    (should (string-match-p "DO NOT use\\s-+Markdown" rendered))
+    (should (string-match-p "⟦h1⟧" rendered))
+    (should (string-match-p "⟦/h1⟧" rendered))
+    (should (string-match-p "⟦code⟧" rendered))
+    (should (string-match-p "⟦block⟧" rendered))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/plain-text-passes-through ()
+  "Untagged text is inserted verbatim with no face property."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk buf "hello world")
+    (with-current-buffer buf
+      (should (equal (buffer-string) "hello world"))
+      (should-not (get-text-property 1 'face)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/single-tag-applies-face ()
+  "An ⟦h1⟧…⟦/h1⟧ segment renders with the h1 face and strips the tags."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk buf "⟦h1⟧Title⟦/h1⟧")
+    (with-current-buffer buf
+      (should (equal (buffer-string) "Title"))
+      (should (eq (get-text-property 1 'face)
+                  'claude-repl-explain-config-h1)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/nested-tags-stack-faces ()
+  "Nested tags produce a list face value with innermost first."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk buf "⟦h1⟧A ⟦b⟧B⟦/b⟧ C⟦/h1⟧")
+    (with-current-buffer buf
+      (let* ((s (buffer-string))
+             (b-pos (string-match "B" s))
+             (a-pos (string-match "A" s))
+             (b-face (get-text-property b-pos 'face s))
+             (a-face (get-text-property a-pos 'face s)))
+        (should (equal s "A B C"))
+        (should (eq a-face 'claude-repl-explain-config-h1))
+        (should (equal b-face
+                       '(claude-repl-explain-config-bold
+                         claude-repl-explain-config-h1)))))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/partial-tag-across-chunks ()
+  "An open tag split across two chunks still styles the inner text correctly."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk buf "pre ⟦b")
+    (with-current-buffer buf
+      (should (equal (buffer-string) "pre "))
+      (should (equal claude-repl--explain-config-pending "⟦b")))
+    (claude-repl--explain-config-parse-chunk buf "⟧bold⟦/b⟧ post")
+    (with-current-buffer buf
+      (let* ((s (buffer-string))
+             (bold-pos (string-match "bold" s))
+             (post-pos (string-match "post" s)))
+        (should (equal s "pre bold post"))
+        (should (eq (get-text-property bold-pos 'face s)
+                    'claude-repl-explain-config-bold))
+        (should-not (get-text-property post-pos 'face s))))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/partial-close-tag-across-chunks ()
+  "A close tag split across two chunks doesn't leak the partial bytes."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk buf "⟦b⟧bold⟦/b")
+    (with-current-buffer buf
+      (should (equal (buffer-string) "bold"))
+      (should (equal claude-repl--explain-config-pending "⟦/b")))
+    (claude-repl--explain-config-parse-chunk buf "⟧ tail")
+    (with-current-buffer buf
+      (let* ((s (buffer-string))
+             (tail-pos (string-match " tail" s)))
+        (should (equal s "bold tail"))
+        (should (equal claude-repl--explain-config-pending ""))
+        (should-not (get-text-property tail-pos 'face s))))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/unknown-tag-emits-verbatim ()
+  "Unknown tag names are rendered verbatim with no face change."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk buf "x ⟦bogus⟧y⟦/bogus⟧ z")
+    (with-current-buffer buf
+      (should (equal (buffer-string) "x ⟦bogus⟧y⟦/bogus⟧ z"))
+      (should-not (get-text-property 1 'face)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/stray-close-tag-is-noop ()
+  "A close tag with no matching open is a no-op on the face stack."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk buf "before⟦/b⟧after")
+    (with-current-buffer buf
+      (should (equal (buffer-string) "beforeafter"))
+      (should (null claude-repl--explain-config-face-stack))
+      (should-not (get-text-property 1 'face)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/block-and-kbd-have-distinct-faces ()
+  "Different tag names map to different defined faces."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk
+     buf "⟦kbd⟧SPC j h c⟦/kbd⟧ runs ⟦sym⟧explain-config⟦/sym⟧")
+    (with-current-buffer buf
+      (let* ((s (buffer-string))
+             (spc-pos (string-match "SPC" s))
+             (sym-pos (string-match "explain-config" s)))
+        (should (eq (get-text-property spc-pos 'face s)
+                    'claude-repl-explain-config-kbd))
+        (should (eq (get-text-property sym-pos 'face s)
+                    'claude-repl-explain-config-sym))))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-filter/routes-chunk-through-parser ()
+  "Process filter forwards CHUNK to the parser using PROC's buffer."
+  (claude-repl-test--with-explain-config-buf buf
+    (cl-letf (((symbol-function 'process-buffer) (lambda (_p) buf)))
+      (claude-repl--explain-config-filter 'fake-proc "⟦b⟧hi⟦/b⟧")
+      (with-current-buffer buf
+        (should (equal (buffer-string) "hi"))
+        (should (eq (get-text-property 1 'face)
+                    'claude-repl-explain-config-bold))))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-filter/dead-buffer-is-noop ()
+  "Filter does not throw if PROC's buffer is dead."
+  (let ((buf (generate-new-buffer " *tmp-dead*")))
+    (kill-buffer buf)
+    (cl-letf (((symbol-function 'process-buffer) (lambda (_p) buf)))
+      (should (progn (claude-repl--explain-config-filter 'fake-proc "x") t)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-init-buffer/resets-parser-state ()
+  "init-buffer wipes any leftover pending bytes and face stack from prior runs."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-config-reset*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name)))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (setq claude-repl--explain-config-pending "⟦h"
+                  claude-repl--explain-config-face-stack
+                  '(claude-repl-explain-config-h1)))
+          (claude-repl--explain-config-init-buffer "q")
+          (with-current-buffer buf
+            (should (equal claude-repl--explain-config-pending ""))
+            (should (null claude-repl--explain-config-face-stack))))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-spawn/registers-face-filter ()
+  "spawn installs the rendering filter on the new process."
+  (let (captured-filter)
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest args)
+                 (setq captured-filter (plist-get args :filter))
+                 'fake-proc))
+              ((symbol-function 'process-send-string) #'ignore)
+              ((symbol-function 'process-send-eof) #'ignore)
+              ((symbol-function 'display-buffer) #'ignore))
+      (claude-repl--explain-config-spawn "anything")
+      (should (eq captured-filter #'claude-repl--explain-config-filter)))))
+
 ;;;; ---- claude-repl--send-interrupt-escape ----
 
 (ert-deftest claude-repl-cmd-test-send-interrupt-escape/sends-two-escapes ()
