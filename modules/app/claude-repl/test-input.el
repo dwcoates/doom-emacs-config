@@ -338,6 +338,22 @@
     (claude-repl--increment-prefix-counter "ws1")
     (should (= (claude-repl--ws-get "ws1" :prefix-counter) 43))))
 
+;;;; ---- Tests: command-prefix content ----
+
+(ert-deftest claude-repl-test-command-prefix-contains-tldr-tldr ()
+  "`claude-repl-command-prefix' must instruct including a 'TLDR's TLDR' section."
+  (should (stringp claude-repl-command-prefix))
+  (should (string-match-p "TLDR's TLDR" claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-tldr-is-last-instruction ()
+  "The 'TLDR's TLDR' instruction must mandate it be the very last item."
+  (should (string-match-p "TLDR's TLDR.*VERY LAST\\|VERY LAST.*TLDR's TLDR"
+                           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-tldr-recurses-spec ()
+  "The 'TLDR's TLDR' instruction must reference applying the TLDR spec to the TLDR."
+  (should (string-match-p "TLDR of the TLDR" claude-repl-command-prefix)))
+
 ;;;; ---- Tests: should-prepend-metaprompt-p ----
 
 (ert-deftest claude-repl-test-should-prepend-metaprompt-p-all-conditions ()
