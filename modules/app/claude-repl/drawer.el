@@ -191,6 +191,16 @@ Default is near-black."
   "Face for the rule line beneath a section title."
   :group 'claude-repl)
 
+(defface claude-repl-drawer-events-header
+  '((t :inherit font-lock-comment-face :weight bold))
+  "Face for the events summary header at the top of the drawer."
+  :group 'claude-repl)
+
+(defface claude-repl-drawer-events-line
+  '((t :inherit shadow))
+  "Face for the events summary body line(s) at the top of the drawer."
+  :group 'claude-repl)
+
 (defface claude-repl-drawer-group-label
   '((t :inherit font-lock-comment-face :weight bold))
   "Face for repo group labels in drawer sections."
@@ -850,6 +860,39 @@ header."
            (trees (claude-repl-drawer--build-tree workspaces parent-fn)))
       (claude-repl-drawer--render-trees trees current section))))
 
+(defun claude-repl-drawer--format-event-age (seconds)
+  "Format SECONDS as a short relative age (e.g. \"3m\", \"2h\")."
+  (cond
+   ((< seconds 60)   (format "%ds" (max 0 (truncate seconds))))
+   ((< seconds 3600) (format "%dm" (truncate (/ seconds 60))))
+   (t                (format "%dh" (truncate (/ seconds 3600))))))
+
+(defun claude-repl-drawer--insert-events-header ()
+  "Insert a one-block summary of workspace create/merge events from the last 24h.
+No-op when no events are recorded in that window."
+  (when (fboundp 'claude-repl--events-recent)
+    (let* ((now (float-time))
+           (events (claude-repl--events-recent now))
+           (creates (claude-repl--events-count-by-kind events :create))
+           (merges  (claude-repl--events-count-by-kind events :merge)))
+      (when events
+        (insert (propertize " Last 24h\n"
+                            'face 'claude-repl-drawer-events-header))
+        (insert (propertize
+                 (format "   ✨ %d created   🔀 %d merged\n" creates merges)
+                 'face 'claude-repl-drawer-events-line))
+        (dolist (ev (seq-take events 5))
+          (let* ((kind (plist-get ev :kind))
+                 (ws   (plist-get ev :ws))
+                 (ts   (plist-get ev :time))
+                 (glyph (cond ((eq kind :create) "✨")
+                              ((eq kind :merge)  "🔀")
+                              (t "·")))
+                 (age  (claude-repl-drawer--format-event-age (- now (or ts now)))))
+            (insert (propertize
+                     (format "   %s %s  %s\n" glyph age (or ws "?"))
+                     'face 'claude-repl-drawer-events-line))))))))
+
 (defun claude-repl-drawer--insert-content ()
   "Insert the drawer's full content into the current buffer.
 Extracted from `--render' so `--render' can build content in a temp
@@ -861,6 +904,7 @@ must set those in the current buffer before calling."
   (let* ((current  (claude-repl-drawer--current-ws))
          (sections (claude-repl-drawer--partition-by-section
                     (claude-repl-drawer--visible-workspace-keys))))
+    (claude-repl-drawer--insert-events-header)
     (insert "\n")
     (let ((mains    (alist-get :main    sections))
           (hiddens  (alist-get :hidden  sections))
