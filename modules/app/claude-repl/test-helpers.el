@@ -270,6 +270,15 @@
 (when (boundp 'claude-repl-log-to-file)
   (setq claude-repl-log-to-file nil))
 
+;; Redirect the events log to a throwaway temp path so any test that
+;; exercises a code path which records workspace lifecycle events does
+;; not clobber the user's real `~/.claude/emacs/events.el'.  Per-test
+;; isolation still uses the `--with-clean-state' rebinding below.
+(when (boundp 'claude-repl-events-file)
+  (setq claude-repl-events-file
+        (expand-file-name (format "claude-events-test-%d.el" (emacs-pid))
+                          temporary-file-directory)))
+
 ;;;; ---- Test utilities ----
 
 (defmacro claude-repl-test--with-clean-state (&rest body)
@@ -288,11 +297,17 @@ user's real snapshot during ERT runs."
          (claude-repl-workspace-snapshot-file
           (expand-file-name (format "claude-snap-%s" (random)) temporary-file-directory))
          (claude-repl--snapshot-archived-this-run nil)
-         (claude-repl--restored-workspaces nil))
+         (claude-repl--restored-workspaces nil)
+         (claude-repl-events-file
+          (expand-file-name (format "claude-events-%s.el" (random)) temporary-file-directory))
+         (claude-repl--events-cache nil)
+         (claude-repl--events-cache-loaded t))
      (unwind-protect
          (progn ,@body)
        (when (file-exists-p claude-repl-workspace-snapshot-file)
          (delete-file claude-repl-workspace-snapshot-file))
+       (when (file-exists-p claude-repl-events-file)
+         (delete-file claude-repl-events-file))
        (let ((archive-dir (claude-repl--workspace-snapshot-archive-dir)))
          (when (file-directory-p archive-dir)
            (delete-directory archive-dir t))))))
