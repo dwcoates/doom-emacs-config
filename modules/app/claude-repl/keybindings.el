@@ -690,7 +690,8 @@ global drawer-mirror bindings win in vterm buffers."
        :desc "Toggle debug logging"    "D" #'claude-repl-debug/toggle-logging
        (:prefix ("h" . "help/debug")
         :desc "Dump workspace state"     "p" #'claude-repl-debug/dump-workspace
-        :desc "Explain config (read-only Q&A)" "c" #'claude-repl-explain-config)
+        :desc "Explain config (read-only Q&A)" "c" #'claude-repl-explain-config
+        :desc "Close explain-config popup"     "C" #'claude-repl-explain-config-close)
        (:prefix ("e" . "explain")
         :desc "line/region/hunk (prompt)" "e" #'claude-repl-explain-prompt
         :desc "line/region/hunk (canned)" "E" #'claude-repl-explain

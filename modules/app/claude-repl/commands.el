@@ -403,6 +403,31 @@ visibility is toggled."
   (when-let ((buf (get-buffer claude-repl-explain-config-buffer-name)))
     (claude-repl-window--delete-buffer-windows buf)))
 
+;;;###autoload
+(defun claude-repl-explain-config-close ()
+  "Close the explain-config popup everywhere.
+Deletes every visible explain-config window in the current frame and
+clears the global visible-flag so the popup will not reappear on
+workspace switch.  Buffer contents are preserved — re-running
+`claude-repl-explain-config' (or reopening via leader) will show them
+again with the new question's output appended."
+  (interactive)
+  (claude-repl--explain-config-hide))
+
+(defvar claude-repl-explain-config-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "q") #'claude-repl-explain-config-close)
+    map)
+  "Keymap for `claude-repl-explain-config-mode'.")
+
+(define-minor-mode claude-repl-explain-config-mode
+  "Minor mode enabled in the explain-config output popup.
+Provides a buffer-local `q' binding to dismiss the popup globally via
+`claude-repl-explain-config-close', so the user does not need to
+navigate-and-`C-x 0' the window in every workspace separately."
+  :lighter " ExplainCfg"
+  :keymap claude-repl-explain-config-mode-map)
+
 (defun claude-repl--explain-config-ensure-visible-on-persp-switch (&rest _)
   "Reconcile explain-config visibility with the global state on workspace switch.
 Mirrors `claude-repl-drawer--ensure-visible-on-persp-switch' — when
@@ -682,6 +707,7 @@ Also resets the streaming filter's per-buffer parser state."
     (with-current-buffer buf
       (setq claude-repl--explain-config-pending ""
             claude-repl--explain-config-face-stack nil)
+      (claude-repl-explain-config-mode 1)
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert (claude-repl--explain-config-format-header prompt))))

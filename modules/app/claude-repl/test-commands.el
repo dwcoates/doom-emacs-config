@@ -649,6 +649,50 @@ fully decoupled from the drawer (which is on the left)."
       (claude-repl--explain-config-hide)
       (should-not claude-repl--explain-config-global-visible-p))))
 
+;;;; ---- claude-repl-explain-config-close ----
+
+(ert-deftest claude-repl-cmd-test-explain-config-close/is-interactive ()
+  "Public close command is interactively callable (has interactive form)."
+  (should (commandp #'claude-repl-explain-config-close)))
+
+(ert-deftest claude-repl-cmd-test-explain-config-close/delegates-to-hide ()
+  "Public close command invokes the private hide implementation."
+  (let ((hide-called 0))
+    (cl-letf (((symbol-function 'claude-repl--explain-config-hide)
+               (lambda (&rest _) (cl-incf hide-called))))
+      (claude-repl-explain-config-close)
+      (should (= hide-called 1)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-close/clears-flag-and-deletes-windows ()
+  "End-to-end: public close clears the global flag AND deletes the popup windows."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-close-e2e*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name))
+         (claude-repl--explain-config-global-visible-p t)
+         (delete-called-with nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl-window--delete-buffer-windows)
+                   (lambda (b &rest _) (setq delete-called-with b))))
+          (claude-repl-explain-config-close)
+          (should-not claude-repl--explain-config-global-visible-p)
+          (should (eq delete-called-with buf)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-mode/q-binds-to-close ()
+  "Minor-mode keymap binds `q' to the public close command."
+  (should (eq (lookup-key claude-repl-explain-config-mode-map (kbd "q"))
+              #'claude-repl-explain-config-close)))
+
+(ert-deftest claude-repl-cmd-test-explain-config-init-buffer/enables-minor-mode ()
+  "init-buffer activates `claude-repl-explain-config-mode' in the output buffer."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-config-mode*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name)))
+    (unwind-protect
+        (progn
+          (claude-repl--explain-config-init-buffer "any question")
+          (with-current-buffer buf
+            (should claude-repl-explain-config-mode)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
 (ert-deftest claude-repl-cmd-test-explain-config-ensure-visible/shows-when-flag-set-and-hidden ()
   "Persp-reconciliation re-displays the popup when flag is set and window is missing."
   (let* ((claude-repl-explain-config-buffer-name " *test-explain-persp-show*")
