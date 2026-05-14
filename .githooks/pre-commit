@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# pre-commit — keep modules/app/claude-repl/skills-cache/ in sync with
+# the live workspace-* impls, then stage the cache update so the
+# commit ships the refreshed copy.
+#
+# Installed by .claude/install.sh into the repo's git hooks dir.  The
+# marker string below lets install/uninstall recognize this script as
+# managed (so it can be refreshed or removed without touching foreign
+# pre-commit hooks).  Don't edit the marker.
+# CLAUDE_REPL_MANAGED_HOOK: claude-repl-skills-cache-sync
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SYNC="$REPO_ROOT/modules/app/claude-repl/skills-cache/sync.sh"
+CACHE_DIR="$REPO_ROOT/modules/app/claude-repl/skills-cache"
+
+if [ ! -x "$SYNC" ]; then
+  echo "[pre-commit] sync.sh missing or not executable at $SYNC — skipping cache sync." >&2
+  exit 0
+fi
+
+# Run the sync.  Don't fail the commit on a transient sync error —
+# the cache itself is checked in, so we'd rather let an unrelated
+# commit proceed than block on a flaky rsync.  Surface the failure.
+if ! "$SYNC"; then
+  echo "[pre-commit] WARNING: skills-cache sync exited non-zero — continuing without staging." >&2
+  exit 0
+fi
+
+# Stage anything sync produced.  Use --name-only against HEAD so we
+# pick up both unstaged and untracked cache files in one pass.
+mapfile -t changed < <(git -C "$REPO_ROOT" status --porcelain -- "$CACHE_DIR" | awk '{print $NF}')
+if [ "${#changed[@]}" -gt 0 ]; then
+  echo "[pre-commit] Staging ${#changed[@]} skills-cache change(s)."
+  git -C "$REPO_ROOT" add -- "$CACHE_DIR"
+fi
