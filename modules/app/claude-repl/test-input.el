@@ -354,6 +354,38 @@
   "The 'TLDR's TLDR' instruction must reference applying the TLDR spec to the TLDR."
   (should (string-match-p "TLDR of the TLDR" claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-contains-large-context-tldr ()
+  "`claude-repl-command-prefix' must instruct including a 'large context TLDR' section."
+  (should (stringp claude-repl-command-prefix))
+  (should (string-match-p "large context TLDR" claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-large-context-tldr-precedes-last-response-tldr ()
+  "The 'large context TLDR' must be described as preceding the 'last response TLDR'."
+  ;; The first textual mention of 'large context TLDR' must occur before
+  ;; the first textual mention of 'last response TLDR' inside the bullet
+  ;; that introduces the large-context TLDR -- i.e. the instruction must
+  ;; place large-context-TLDR before last-response-TLDR.
+  (should (string-match-p "BEFORE the 'last response TLDR'.*'large context TLDR'\\|'large context TLDR'.*BEFORE the 'last response TLDR'"
+                           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-large-context-tldr-summarizes-context ()
+  "The 'large context TLDR' instruction must describe summarizing the broader context/conversation."
+  (should (string-match-p "large context TLDR.*\\(context\\|conversation\\|arc\\)"
+                           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-large-context-tldr-same-format ()
+  "The 'large context TLDR' instruction must reference the same format specification as the TLDR."
+  ;; Same shape as the TLDR's-TLDR recurses-spec test: explicit cross-reference
+  ;; so the format rules don't have to be duplicated and can't silently drift.
+  (should (string-match-p "large context TLDR.*\\(same format\\|EXACT same format\\|same specification\\)"
+                           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-ordering-documented ()
+  "The metaprompt must explicitly document the trailing-section ordering."
+  ;; Guards against silent drift in ordering: large context TLDR -> last response TLDR -> TLDR's TLDR.
+  (should (string-match-p "large context TLDR.*last response TLDR.*TLDR's TLDR"
+                           claude-repl-command-prefix)))
+
 ;;;; ---- Tests: should-prepend-metaprompt-p ----
 
 (ert-deftest claude-repl-test-should-prepend-metaprompt-p-all-conditions ()
