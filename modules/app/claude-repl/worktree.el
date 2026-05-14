@@ -1502,6 +1502,42 @@ Returns nil for an unknown MODE so the caller can refuse the request."
     (cdr (assoc mode claude-repl--profile-mode-alist)))
    (t nil)))
 
+(defun claude-repl--profile-report-buffers ()
+  "Return the list of live buffers in `profiler-report-mode'."
+  (cl-remove-if-not
+   (lambda (b)
+     (and (buffer-live-p b)
+          (with-current-buffer b (derived-mode-p 'profiler-report-mode))))
+   (buffer-list)))
+
+(defun claude-repl--profile-stop-and-collect ()
+  "Stop the profiler, generate its report, and return the report as a string.
+Captures the buffers `profiler-report' creates by diffing
+`claude-repl--profile-report-buffers' before and after the call, so
+older report buffers from prior runs are not re-grabbed.  Returns the
+empty string when no new report buffer is produced."
+  (let ((before (claude-repl--profile-report-buffers)))
+    (profiler-stop)
+    (profiler-report)
+    (let* ((after (claude-repl--profile-report-buffers))
+           (new-bufs (cl-set-difference after before))
+           (parts nil))
+      (dolist (buf new-bufs)
+        (when (buffer-live-p buf)
+          (push (format "=== %s ===\n%s"
+                        (buffer-name buf)
+                        (with-current-buffer buf
+                          (buffer-substring-no-properties (point-min) (point-max))))
+                parts)))
+      (mapconcat #'identity (nreverse parts) "\n\n"))))
+
+(defun claude-repl--profile-format-prompt (report-text)
+  "Wrap REPORT-TEXT in a prompt for the requesting workspace's Claude.
+The fenced block delimits the report so Claude can treat it as data."
+  (concat "Profiler report below — analyze the hotspots:\n\n```\n"
+          report-text
+          "\n```"))
+
 (defun claude-repl--handle-profile-command (cmd)
   "Handle a \"profile\" workspace command CMD.
 Toggles the Emacs profiler based on the `enabled' boolean in CMD:
@@ -1511,11 +1547,15 @@ Toggles the Emacs profiler based on the `enabled' boolean in CMD:
                       field (\"cpu\", \"mem\", or \"cpu+mem\") or
                       `claude-repl-profile-default-mode' when omitted.
   - `enabled' = nil → stops the profiler via `profiler-stop' if it is
-                      running, then pops up `profiler-report'.
+                      running, pops up `profiler-report', and — when
+                      the JSON carries a `workspace' field — pipes the
+                      report text back into that workspace's Claude
+                      session via `claude-repl--send'.
 
-The command is workspace-agnostic — the profiler is process-wide, so the
-JSON intentionally omits a `workspace' field and this handler does not
-touch `claude-repl--workspaces'.
+The profiler itself is process-wide; the `workspace' field is the
+requesting agent's session, used solely to route the captured report
+back to whoever asked for it.  When `workspace' is absent the handler
+still stops and reports — it just doesn't dispatch the send.
 
 Idempotent: a start while running and a stop while idle are both no-ops
 \(logged, not errored).  An unknown `mode' string is refused with a log
@@ -1525,6 +1565,7 @@ mode is a bug in the dispatch source and should surface, not paper over."
          (enabled (and (not (eq enabled-raw :json-false)) enabled-raw))
          (mode-raw (alist-get 'mode cmd))
          (mode (claude-repl--parse-profile-mode mode-raw))
+         (ws (alist-get 'workspace cmd))
          (running (profiler-running-p)))
     (cond
      ((and enabled (null mode))
@@ -1548,9 +1589,20 @@ mode is a bug in the dispatch source and should surface, not paper over."
         (message "[claude-repl] profile: not running, skipping stop"))
        (t
         (claude-repl--log nil "workspace-commands-file profile: stopping and reporting")
-        (profiler-stop)
-        (profiler-report)
-        (message "[claude-repl] profile: stopped, report opened")))))))
+        (let ((report-text (claude-repl--profile-stop-and-collect)))
+          (cond
+           ((not (and ws (stringp ws) (not (string-empty-p ws))))
+            (claude-repl--log nil "workspace-commands-file profile: no workspace, report-len=%d not sent"
+                              (length report-text))
+            (message "[claude-repl] profile: stopped, report opened (no workspace; not sending)"))
+           ((string-empty-p report-text)
+            (claude-repl--log nil "workspace-commands-file profile: empty report, skipping send to ws=%s" ws)
+            (message "[claude-repl] profile: stopped, report empty (not sending)"))
+           (t
+            (claude-repl--log nil "workspace-commands-file profile: sending report (len=%d) to ws=%s"
+                              (length report-text) ws)
+            (claude-repl--send (claude-repl--profile-format-prompt report-text) ws)
+            (message "[claude-repl] profile: stopped, report sent to %s" ws))))))))))
 
 (defun claude-repl--resolve-merge-workspace-name (ws)
   "Resolve WS to a registered workspace name for merge dispatch.
