@@ -606,7 +606,9 @@ this worktree was created from; stored under `:source-ws-dir' so
 `SPC TAB M' can route the merge back to its source.
 When PRIORITY is nil and SOURCE-DIR resolves to a known workspace, the
 new workspace inherits that source workspace's `:priority' (see
-`claude-repl--inherit-priority-from-source').
+`claude-repl--inherit-priority-from-source').  When neither is available,
+falls back to `claude-repl-repo-default-priorities' keyed off PATH's
+repo name (see `claude-repl--repo-default-priority-for-path').
 Sets `:pending-magit' on the new workspace so `magit-status' opens in
 its own window layout the first time the user activates it, rather than
 splitting the caller's window.  Likewise sets `:pending-initial-buffers'
@@ -618,7 +620,8 @@ perspective rather than the caller's."
   (let* ((canonical (claude-repl--path-canonical path))
          (ws-id (substring (md5 canonical) 0 claude-repl-workspace-id-length))
          (ws dirname)
-         (effective-priority (claude-repl--inherit-priority-from-source priority source-dir)))
+         (effective-priority (or (claude-repl--inherit-priority-from-source priority source-dir)
+                                 (claude-repl--repo-default-priority-for-path path))))
     (claude-repl--log ws "worktree creating workspace %s effective-priority=%s" ws (or effective-priority "nil"))
     (+workspace-new ws)
     (claude-repl--ws-put ws :pending-magit t)
@@ -993,17 +996,30 @@ SOURCE-WS from the persp workspace list."
 (defun claude-repl--new-workspace ()
   "Create a new workspace and open magit-status in it, mirroring
 the behavior of `+workspaces-switch-project-function'.
-Signals an error if not inside a git repository."
+Signals an error if not inside a git repository.
+
+Applies `claude-repl-repo-default-priorities' for ROOT's repo: the
+default priority is written onto the workspace plist before
+`--initialize-ws-env' so it survives the initial state-save (and is
+overridden by any saved priority for the same project)."
   (interactive)
   (let ((root (claude-repl--git-root)))
     (unless root
       (error "claude-repl--new-workspace: not in a git repository"))
     (claude-repl--log (+workspace-current-name) "new-workspace: root=%s" root)
     (+workspace/new)
-    ;; Hydrate the new workspace's env state (writes :project-dir from ROOT
-    ;; via the sole writer, `initialize-ws-env'). `magit-status' only needs
-    ;; a directory — we don't start Claude yet.
-    (claude-repl--initialize-ws-env (+workspace-current-name) root)
+    (let ((ws (+workspace-current-name))
+          (default-priority (claude-repl--repo-default-priority-for-path root)))
+      (when default-priority
+        (claude-repl--log ws "new-workspace: applying repo-default priority=%s root=%s"
+                          default-priority root)
+        (claude-repl--ws-put ws :priority default-priority))
+      ;; Hydrate the new workspace's env state (writes :project-dir from ROOT
+      ;; via the sole writer, `initialize-ws-env'). `magit-status' only needs
+      ;; a directory — we don't start Claude yet.
+      (claude-repl--initialize-ws-env ws root)
+      (when default-priority
+        (claude-repl--reorder-workspace-by-priority ws)))
     (magit-status root)
     (claude-repl--remove-doom-dashboard)))
 

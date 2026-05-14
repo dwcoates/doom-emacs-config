@@ -12,6 +12,47 @@
   :type '(repeat string)
   :group 'claude-repl)
 
+(defcustom claude-repl-repo-default-priorities '(("explanation-engine" . "p3"))
+  "Alist mapping repository names to default `:priority' values for new workspaces.
+The repository name is the basename of the parent of `git rev-parse
+--git-common-dir' for a path, matching how the drawer groups workspaces
+by repo.  Used by workspace-creation paths as a final fallback when no
+explicit priority was supplied and none was inherited from a source
+workspace.  An entry whose value is nil disables the default for that
+repo."
+  :type '(alist :key-type string
+                :value-type (choice (string :tag "Priority") (const :tag "None" nil)))
+  :group 'claude-repl)
+
+(defun claude-repl--repo-name-for-path (path)
+  "Return the repository name for PATH, or nil.
+Resolved as the basename of the parent of `git rev-parse --git-common-dir',
+matching the drawer's repo-group-label logic.  Returns nil when PATH is
+nil, does not exist, is not inside a git repository, or git fails."
+  (when (and path
+             (stringp path)
+             (file-directory-p (expand-file-name path)))
+    (let* ((dir (expand-file-name path))
+           (raw (let ((default-directory dir))
+                  (claude-repl--git-string-quiet "rev-parse" "--git-common-dir"))))
+      (when (and raw
+                 (not (string-empty-p raw))
+                 (not (string-prefix-p "fatal" raw)))
+        (let* ((abs (if (file-name-absolute-p raw) raw
+                      (expand-file-name raw dir)))
+               (canon (claude-repl--path-canonical abs))
+               (parent (file-name-directory canon)))
+          (when parent
+            (file-name-nondirectory (directory-file-name parent))))))))
+
+(defun claude-repl--repo-default-priority-for-path (path)
+  "Return the default `:priority' string for a workspace rooted at PATH.
+Looks up the repo name (see `claude-repl--repo-name-for-path') in
+`claude-repl-repo-default-priorities'.  Returns nil when PATH has no
+recognized repo or the repo has no configured default."
+  (when-let ((name (claude-repl--repo-name-for-path path)))
+    (cdr (assoc name claude-repl-repo-default-priorities))))
+
 (defcustom claude-repl-tab-bracket-format "[%s]"
   "Format string for tab bracket labels.
 %s is replaced with the tab index number or emoji."

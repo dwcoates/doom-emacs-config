@@ -2440,10 +2440,137 @@ Reorder must run after `apply-workspace-properties' so the new workspace's
                (lambda (&rest _) nil))
               ((symbol-function 'claude-repl--reorder-workspace-by-priority)
                (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--repo-default-priority-for-path)
+               (lambda (_path) nil))
               ((symbol-function 'claude-repl--path-canonical) #'identity))
       (claude-repl--finalize-worktree-workspace
        "/tmp/new-wt" "child-ws" nil nil nil nil nil "/tmp/parent/")
       (should-not (claude-repl--ws-get "child-ws" :priority)))))
+
+;;;; ---- Tests: finalize-worktree-workspace falls back to repo-default priority ----
+
+(ert-deftest claude-repl-test-finalize-falls-back-to-repo-default ()
+  "When PRIORITY is nil and source-workspace has no priority, falls back to repo-default."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+               (lambda (&rest _) nil))
+              ((symbol-function '+workspace-new) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--setup-worktree-session)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--repo-default-priority-for-path)
+               (lambda (path)
+                 (when (equal path "/tmp/new-wt") "p3")))
+              ((symbol-function 'claude-repl--path-canonical) #'identity))
+      (claude-repl--finalize-worktree-workspace
+       "/tmp/new-wt" "child-ws" nil nil nil nil nil "/tmp/parent/")
+      (should (equal (claude-repl--ws-get "child-ws" :priority) "p3")))))
+
+(ert-deftest claude-repl-test-finalize-explicit-priority-wins-over-repo-default ()
+  "Explicit PRIORITY wins over the repo-default fallback."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+               (lambda (&rest _) nil))
+              ((symbol-function '+workspace-new) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--setup-worktree-session)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--repo-default-priority-for-path)
+               (lambda (_path) "p3"))
+              ((symbol-function 'claude-repl--path-canonical) #'identity))
+      (claude-repl--finalize-worktree-workspace
+       "/tmp/new-wt" "child-ws" nil "p1" nil nil nil nil)
+      (should (equal (claude-repl--ws-get "child-ws" :priority) "p1")))))
+
+(ert-deftest claude-repl-test-finalize-parent-priority-wins-over-repo-default ()
+  "Source-workspace priority wins over the repo-default fallback."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (claude-repl--ws-put "parent" :priority "p2")
+    (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+               (lambda (&rest _) nil))
+              ((symbol-function '+workspace-new) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--setup-worktree-session)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--repo-default-priority-for-path)
+               (lambda (_path) "p3"))
+              ((symbol-function 'claude-repl--path-canonical) #'identity))
+      (claude-repl--finalize-worktree-workspace
+       "/tmp/new-wt" "child-ws" nil nil nil nil nil "/tmp/parent/")
+      (should (equal (claude-repl--ws-get "child-ws" :priority) "p2")))))
+
+;;;; ---- Tests: new-workspace applies repo-default priority ----
+
+(ert-deftest claude-repl-test-new-workspace-applies-repo-default-priority ()
+  "`--new-workspace' writes the repo-default priority onto the new ws plist."
+  (claude-repl-test--with-clean-state
+    (let ((ws-name "new-ws")
+          (reorder-called nil))
+      (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&rest _) "/tmp/ee/"))
+                ((symbol-function '+workspace/new) (lambda () nil))
+                ((symbol-function '+workspace-current-name) (lambda () ws-name))
+                ((symbol-function 'claude-repl--initialize-ws-env)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--repo-default-priority-for-path)
+                 (lambda (path) (when (equal path "/tmp/ee/") "p3")))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+                 (lambda (_ws) (setq reorder-called t)))
+                ((symbol-function 'magit-status) (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--remove-doom-dashboard)
+                 (lambda (&rest _) nil)))
+        (claude-repl--new-workspace)
+        (should (equal (claude-repl--ws-get ws-name :priority) "p3"))
+        (should reorder-called)))))
+
+(ert-deftest claude-repl-test-new-workspace-no-default-leaves-priority-unset ()
+  "`--new-workspace' leaves :priority unset when no repo-default applies."
+  (claude-repl-test--with-clean-state
+    (let ((ws-name "new-ws")
+          (reorder-called nil))
+      (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&rest _) "/tmp/other/"))
+                ((symbol-function '+workspace/new) (lambda () nil))
+                ((symbol-function '+workspace-current-name) (lambda () ws-name))
+                ((symbol-function 'claude-repl--initialize-ws-env)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--repo-default-priority-for-path)
+                 (lambda (_path) nil))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+                 (lambda (_ws) (setq reorder-called t)))
+                ((symbol-function 'magit-status) (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--remove-doom-dashboard)
+                 (lambda (&rest _) nil)))
+        (claude-repl--new-workspace)
+        (should-not (claude-repl--ws-get ws-name :priority))
+        (should-not reorder-called)))))
+
+(ert-deftest claude-repl-test-new-workspace-priority-set-before-initialize-ws-env ()
+  "`--new-workspace' writes :priority BEFORE calling `--initialize-ws-env'.
+This matters because `--initialize-ws-env' reads `:priority' off the plist as
+a fallback when no saved state exists, persisting the repo-default into the
+initial state file."
+  (claude-repl-test--with-clean-state
+    (let ((ws-name "new-ws")
+          (priority-at-init nil))
+      (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (&rest _) "/tmp/ee/"))
+                ((symbol-function '+workspace/new) (lambda () nil))
+                ((symbol-function '+workspace-current-name) (lambda () ws-name))
+                ((symbol-function 'claude-repl--initialize-ws-env)
+                 (lambda (ws &rest _)
+                   (setq priority-at-init (claude-repl--ws-get ws :priority))))
+                ((symbol-function 'claude-repl--repo-default-priority-for-path)
+                 (lambda (_path) "p3"))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+                 (lambda (_ws) nil))
+                ((symbol-function 'magit-status) (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--remove-doom-dashboard)
+                 (lambda (&rest _) nil)))
+        (claude-repl--new-workspace)
+        (should (equal priority-at-init "p3"))))))
 
 ;;;; ---- Tests: setup-worktree-session ----
 

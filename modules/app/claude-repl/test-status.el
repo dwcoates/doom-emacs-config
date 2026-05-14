@@ -2346,6 +2346,93 @@ gap.  We assert: (a) every char preceding a newline is a space, and
     (should (eq (get-text-property 2 'face joined)
                 '+workspace-tab-selected-face))))
 
+;;;; ---- Tests: repo-default priority resolution ----
+
+(ert-deftest claude-repl-test-repo-name-for-path-nil ()
+  "`--repo-name-for-path' returns nil when PATH is nil."
+  (should-not (claude-repl--repo-name-for-path nil)))
+
+(ert-deftest claude-repl-test-repo-name-for-path-nonexistent ()
+  "`--repo-name-for-path' returns nil when PATH does not exist."
+  (should-not (claude-repl--repo-name-for-path "/tmp/does-not-exist-claude-repl-test/")))
+
+(ert-deftest claude-repl-test-repo-name-for-path-absolute-common-dir ()
+  "`--repo-name-for-path' extracts the basename of the parent of an absolute --git-common-dir."
+  (let ((tmp (make-temp-file "repo-name-test-" t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+                   (lambda (&rest _args)
+                     "/some/path/explanation-engine/.git"))
+                  ((symbol-function 'claude-repl--path-canonical) #'identity))
+          (should (equal (claude-repl--repo-name-for-path tmp)
+                         "explanation-engine")))
+      (delete-directory tmp t))))
+
+(ert-deftest claude-repl-test-repo-name-for-path-relative-common-dir ()
+  "`--repo-name-for-path' resolves a relative --git-common-dir against PATH."
+  (let ((tmp (make-temp-file "repo-name-test-" t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+                   (lambda (&rest _args) ".git"))
+                  ((symbol-function 'claude-repl--path-canonical) #'identity))
+          ;; basename(parent(<tmp>/.git)) = basename(<tmp>)
+          (should (equal (claude-repl--repo-name-for-path tmp)
+                         (file-name-nondirectory (directory-file-name tmp)))))
+      (delete-directory tmp t))))
+
+(ert-deftest claude-repl-test-repo-name-for-path-fatal ()
+  "`--repo-name-for-path' returns nil when git emits a fatal message."
+  (let ((tmp (make-temp-file "repo-name-test-" t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+                   (lambda (&rest _args)
+                     "fatal: not a git repository")))
+          (should-not (claude-repl--repo-name-for-path tmp)))
+      (delete-directory tmp t))))
+
+(ert-deftest claude-repl-test-repo-name-for-path-empty ()
+  "`--repo-name-for-path' returns nil when git emits an empty string."
+  (let ((tmp (make-temp-file "repo-name-test-" t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+                   (lambda (&rest _args) "")))
+          (should-not (claude-repl--repo-name-for-path tmp)))
+      (delete-directory tmp t))))
+
+(ert-deftest claude-repl-test-repo-default-priority-explanation-engine ()
+  "`--repo-default-priority-for-path' returns p3 for explanation-engine by default."
+  (let ((claude-repl-repo-default-priorities '(("explanation-engine" . "p3"))))
+    (cl-letf (((symbol-function 'claude-repl--repo-name-for-path)
+               (lambda (_path) "explanation-engine")))
+      (should (equal (claude-repl--repo-default-priority-for-path "/any/path")
+                     "p3")))))
+
+(ert-deftest claude-repl-test-repo-default-priority-unknown-repo ()
+  "`--repo-default-priority-for-path' returns nil for unconfigured repos."
+  (let ((claude-repl-repo-default-priorities '(("explanation-engine" . "p3"))))
+    (cl-letf (((symbol-function 'claude-repl--repo-name-for-path)
+               (lambda (_path) "doom")))
+      (should-not (claude-repl--repo-default-priority-for-path "/any/path")))))
+
+(ert-deftest claude-repl-test-repo-default-priority-nil-repo-name ()
+  "`--repo-default-priority-for-path' returns nil when repo name resolution fails."
+  (let ((claude-repl-repo-default-priorities '(("explanation-engine" . "p3"))))
+    (cl-letf (((symbol-function 'claude-repl--repo-name-for-path)
+               (lambda (_path) nil)))
+      (should-not (claude-repl--repo-default-priority-for-path "/any/path")))))
+
+(ert-deftest claude-repl-test-repo-default-priority-explicit-nil-value ()
+  "`--repo-default-priority-for-path' returns nil when an entry's value is nil."
+  (let ((claude-repl-repo-default-priorities '(("foo" . nil))))
+    (cl-letf (((symbol-function 'claude-repl--repo-name-for-path)
+               (lambda (_path) "foo")))
+      (should-not (claude-repl--repo-default-priority-for-path "/any/path")))))
+
+(ert-deftest claude-repl-test-repo-default-priority-default-value-has-explanation-engine ()
+  "Default value of `claude-repl-repo-default-priorities' assigns p3 to explanation-engine."
+  (should (equal (cdr (assoc "explanation-engine" claude-repl-repo-default-priorities))
+                 "p3")))
+
 (provide 'test-status)
 
 ;;; test-status.el ends here
