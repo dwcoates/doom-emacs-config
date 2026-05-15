@@ -411,6 +411,21 @@
   (should (string-match-p "'Summary'.*\\(no exceptions\\|even to 1-5 sentence\\)"
                            claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-tldr-caps-top-level-at-five ()
+  "The TLDR spec must hard-cap top-level bullets at 5."
+  (should (string-match-p "HARD-CAPPED at 5 top-level bullets"
+                           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-forbids-length-bypass ()
+  "The TLDR spec must forbid bypassing the cap by lengthening surviving bullets."
+  (should (string-match-p "not attempt to circumvent this cap by making the surviving bullets individually longer"
+                           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-tldr-inherits-cap ()
+  "The 'TLDR's TLDR' spec must inherit the 5-bullet cap and no-bypass rule."
+  (should (string-match-p "5-top-level-bullet hard cap and no-bypass-by-lengthening rule applies recursively"
+                           claude-repl-command-prefix)))
+
 ;;;; ---- Tests: should-prepend-metaprompt-p ----
 
 (ert-deftest claude-repl-test-should-prepend-metaprompt-p-all-conditions ()
