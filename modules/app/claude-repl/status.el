@@ -261,7 +261,8 @@ STATE is one of: nil, :init, :idle, :thinking, :done, :permission."
   (unless ws (error "claude-repl--ws-set-claude-state: ws is nil"))
   (claude-repl--log ws "claude-state %s -> %s" ws state)
   (claude-repl--ws-put ws :claude-state state)
-  (force-mode-line-update t))
+  (force-mode-line-update t)
+  (claude-repl--memory-state-save ws))
 
 (defun claude-repl--ws-set-repl-state (ws state)
   "Set workspace WS's :repl-state to STATE.
@@ -302,7 +303,8 @@ needed there."
   (claude-repl--ws-put ws :repl-state state)
   (force-mode-line-update t)
   (when (memq state '(:active :inactive :hidden))
-    (claude-repl--state-save ws)))
+    (claude-repl--state-save ws))
+  (claude-repl--memory-state-save ws))
 
 (defun claude-repl--ws-claude-state-clear-if (ws state)
   "Clear WS's :claude-state when it currently equals STATE.

@@ -40,6 +40,7 @@
 (claude-repl--load-module "install")
 (claude-repl--load-module "notifications")
 (claude-repl--load-module "history")
+(claude-repl--load-module "memory-state")
 (claude-repl--load-module "overlay")
 (claude-repl--load-module "status")
 (claude-repl--load-module "workspace-status-export")
