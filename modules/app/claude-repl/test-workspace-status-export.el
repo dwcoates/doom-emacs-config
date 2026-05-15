@@ -176,5 +176,95 @@ guard for `json-encode' treating bare nil as an empty alist."
             (should (file-exists-p tmp)))
         (when (file-directory-p root) (delete-directory root t))))))
 
+;;;; ---- Tests: staggered write scheduler ----
+
+(defmacro claude-repl-test--with-stubbed-run-at-time (captured-sym &rest body)
+  "Bind CAPTURED-SYM to a list that accumulates `run-at-time' calls.
+Each entry is (DELAY REPEAT FN . ARGS).  Inside BODY, `run-at-time'
+returns a benign timer object that satisfies `timerp' so callers that
+treat the return value as a real timer do not crash."
+  (declare (indent 1))
+  `(let ((,captured-sym nil))
+     (cl-letf (((symbol-function 'run-at-time)
+                (lambda (delay repeat fn &rest args)
+                  (push (cons delay (cons repeat (cons fn args))) ,captured-sym)
+                  ;; Return something timerp recognises.
+                  (timer-create))))
+       ,@body)))
+
+(ert-deftest claude-repl-test-reschedule-workspace-status-writes-empty-roster ()
+  "No workspaces → no sub-timers scheduled, list stays empty."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-stubbed-run-at-time calls
+      (setq claude-repl--workspace-status-write-sub-timers nil)
+      (claude-repl--reschedule-workspace-status-writes)
+      (should (null calls))
+      (should (null claude-repl--workspace-status-write-sub-timers)))))
+
+(ert-deftest claude-repl-test-reschedule-workspace-status-writes-schedules-n ()
+  "With N registered workspaces, scheduler queues N sub-timers."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-a" :foo 1)
+    (claude-repl--ws-put "ws-b" :foo 2)
+    (claude-repl--ws-put "ws-c" :foo 3)
+    (claude-repl-test--with-stubbed-run-at-time calls
+      (setq claude-repl--workspace-status-write-sub-timers nil)
+      (claude-repl--reschedule-workspace-status-writes)
+      (should (= 3 (length calls)))
+      (should (= 3 (length claude-repl--workspace-status-write-sub-timers))))))
+
+(ert-deftest claude-repl-test-reschedule-workspace-status-writes-spreads-evenly ()
+  "Sub-timer delays are evenly spaced from 0 to (window - window/N).
+For N=4, delays are 0, 15, 30, 45 (with window=60)."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-workspace-status-write-window-seconds 60))
+      (dolist (ws '("ws-a" "ws-b" "ws-c" "ws-d"))
+        (claude-repl--ws-put ws :foo 1))
+      (claude-repl-test--with-stubbed-run-at-time calls
+        (setq claude-repl--workspace-status-write-sub-timers nil)
+        (claude-repl--reschedule-workspace-status-writes)
+        ;; Capture call delays — order is reversed because we `push'.
+        (let ((delays (sort (mapcar #'car calls) #'<)))
+          (should (equal '(0.0 15.0 30.0 45.0) delays)))))))
+
+(ert-deftest claude-repl-test-reschedule-workspace-status-writes-schedules-target-fn ()
+  "Each scheduled sub-timer targets `claude-repl--write-workspace-status'."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-a" :foo 1)
+    (claude-repl-test--with-stubbed-run-at-time calls
+      (setq claude-repl--workspace-status-write-sub-timers nil)
+      (claude-repl--reschedule-workspace-status-writes)
+      (should (= 1 (length calls)))
+      (let* ((call (car calls))
+             ;; call shape: (DELAY REPEAT FN . ARGS) — destructure.
+             (fn (car (cddr call))))
+        (should (eq fn #'claude-repl--write-workspace-status))))))
+
+(ert-deftest claude-repl-test-reschedule-workspace-status-writes-cancels-prior ()
+  "Reschedule cancels prior sub-timers before queueing new ones."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-a" :foo 1)
+    (let* ((cancel-count 0)
+           (stale-timer (timer-create))
+           (claude-repl--workspace-status-write-sub-timers (list stale-timer)))
+      (cl-letf (((symbol-function 'cancel-timer)
+                 (lambda (_timer) (cl-incf cancel-count)))
+                ((symbol-function 'run-at-time)
+                 (lambda (&rest _) (timer-create))))
+        (claude-repl--reschedule-workspace-status-writes)
+        (should (= 1 cancel-count))))))
+
+(ert-deftest claude-repl-test-reschedule-workspace-status-writes-uses-custom-window ()
+  "Custom window seconds change the spacing.  Window=120, N=2 → delays 0, 60."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-workspace-status-write-window-seconds 120))
+      (claude-repl--ws-put "ws-a" :foo 1)
+      (claude-repl--ws-put "ws-b" :foo 2)
+      (claude-repl-test--with-stubbed-run-at-time calls
+        (setq claude-repl--workspace-status-write-sub-timers nil)
+        (claude-repl--reschedule-workspace-status-writes)
+        (let ((delays (sort (mapcar #'car calls) #'<)))
+          (should (equal '(0.0 60.0) delays)))))))
+
 (provide 'test-workspace-status-export)
 ;;; test-workspace-status-export.el ends here

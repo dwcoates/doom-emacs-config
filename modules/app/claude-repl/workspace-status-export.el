@@ -13,9 +13,13 @@
 ;; every workspace's claude can read the same file regardless of which
 ;; environment wrote it.
 ;;
-;; Refresh cadence matches the existing 1-Hz state poll
-;; (`claude-repl--update-all-workspace-states' in status.el), which
-;; calls into us on every tick.
+;; Refresh cadence: an outer scheduler runs every
+;; `claude-repl-workspace-status-write-window-seconds' (default 60s)
+;; and stages N evenly-spaced sub-timers across that window, where N is
+;; the current registered-workspace count.  Each sub-timer rewrites the
+;; full snapshot.  This decouples the JSON encode (the second-biggest
+;; CPU/memory hotspot from profiling) from the 1-Hz state poll while
+;; preserving sub-second freshness on busy multi-workspace setups.
 
 ;;; Code:
 
@@ -131,6 +135,67 @@ the substitution a no-op (the default `json-null' is plain nil)."
       (with-temp-file file
         (insert (json-encode snapshot))
         (insert "\n")))))
+
+;;;; Staggered write scheduler --------------------------------------------------
+
+(defcustom claude-repl-workspace-status-write-window-seconds 60
+  "Window (in seconds) over which to spread workspace-status JSON writes.
+Every window, the scheduler schedules N sub-timers — one per registered
+workspace — evenly spaced from t=0 to t=window.  Each sub-timer
+rewrites the full snapshot.
+
+Trade-off: snapshot freshness scales with workspace count.  With N
+workspaces, the file is rewritten every WINDOW/N seconds.  Increase the
+window to amortize cost more aggressively; decrease it for fresher
+peer-visibility.  The default of 60s is the smallest value that still
+reclaims the JSON-encode cost surfaced by profiling."
+  :type 'integer
+  :group 'claude-repl)
+
+(defvar claude-repl--workspace-status-write-sub-timers nil
+  "Active sub-timers scheduled by the workspace-status write scheduler.
+Re-cancelled and re-populated each window by
+`claude-repl--reschedule-workspace-status-writes'.")
+
+;; Re-eval safety: cancel any sub-timers left over from a prior load of
+;; this file.  Without this, re-evaluating workspace-status-export.el
+;; (e.g. via `doom/reload') would leak the previous window's sub-timers
+;; — they outlive `claude-repl--cancel-all-timers' because they are not
+;; registered in `claude-repl--timers'.
+(dolist (claude-repl--ws-status-write-stale-timer
+         claude-repl--workspace-status-write-sub-timers)
+  (when (timerp claude-repl--ws-status-write-stale-timer)
+    (cancel-timer claude-repl--ws-status-write-stale-timer)))
+(setq claude-repl--workspace-status-write-sub-timers nil)
+
+(defun claude-repl--reschedule-workspace-status-writes ()
+  "Cancel pending sub-timers; schedule N evenly-spaced writes over the window.
+N is the current count of registered workspaces.  Each scheduled write
+calls `claude-repl--write-workspace-status', which serialises the entire
+workspace snapshot — the staggering amortises that cost across the
+window rather than spiking at the 1-Hz state-poll cadence.
+
+When the workspace roster is empty no writes are scheduled; the next
+window will pick up any newly-registered workspaces."
+  (dolist (timer claude-repl--workspace-status-write-sub-timers)
+    (when (timerp timer) (cancel-timer timer)))
+  (setq claude-repl--workspace-status-write-sub-timers nil)
+  (let ((n (if (boundp 'claude-repl--workspaces)
+               (hash-table-count claude-repl--workspaces)
+             0)))
+    (when (> n 0)
+      (let ((interval (/ (float claude-repl-workspace-status-write-window-seconds)
+                         n)))
+        (dotimes (i n)
+          (push (run-at-time (* i interval) nil
+                             #'claude-repl--write-workspace-status)
+                claude-repl--workspace-status-write-sub-timers))))))
+
+;; Outer scheduler: fire immediately on load so a fresh status file is
+;; produced without waiting a full window, then re-plan every window.
+(push (run-with-timer 0 claude-repl-workspace-status-write-window-seconds
+                      #'claude-repl--reschedule-workspace-status-writes)
+      claude-repl--timers)
 
 (provide 'claude-repl-workspace-status-export)
 ;;; workspace-status-export.el ends here

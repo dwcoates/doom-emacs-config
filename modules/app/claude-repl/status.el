@@ -1321,12 +1321,10 @@ panel visibility (panels may be hidden via `SPC o c')."
       ;; rendering has fresh `:branch-merged' values.
       (when (fboundp 'claude-repl--async-refresh-branch-merged)
         (claude-repl--async-refresh-branch-merged ws))))
-  ;; Cross-workspace introspection: surface the current state of every
-  ;; registered workspace on disk so peer claude sessions (via the
-  ;; `/workspace-status' skill) can read it.  Runs every poll tick so
-  ;; the freshness matches the existing tab-bar update cadence.
-  (when (fboundp 'claude-repl--write-workspace-status)
-    (claude-repl--write-workspace-status))
+  ;; Cross-workspace introspection (workspace-status.json) is written by
+  ;; the staggered scheduler in workspace-status-export.el — NOT on this
+  ;; 1-Hz tick.  Profiling showed json-encode of the full snapshot was
+  ;; the second-biggest memory hotspot when bundled here.
   (when (fboundp 'claude-repl-drawer--refresh-if-visible)
     (claude-repl-drawer--refresh-if-visible)))
 
