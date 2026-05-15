@@ -3192,10 +3192,36 @@ this function once the in-flight cherry-pick clears."
 
 (defun claude-repl-workspace-merge-current-into-source ()
   "Merge the current workspace's commits into its source workspace.
-Interactive entry point that delegates to
-`claude-repl--workspace-merge-into-source' with the current workspace
-as SOURCE-WS."
+
+Interactive entry point (bound to `SPC TAB M').  Routes through
+`claude-repl--dispatch-merge-handler' so the same handler that
+`/workspace-merge' uses — by default
+`claude-repl--merge-handler-cherry-pick' (silent=t, auto-resolve=t) —
+also drives the interactive call.
+
+Why route through the handler instead of calling
+`claude-repl--workspace-merge-into-source' directly:
+
+  - Honors any repo-declared override in
+    `.claude-repl/workspace-merge.eld' so a repo that opts out of
+    cherry-pick gets the same treatment interactively and headlessly.
+  - Picks up `silent=t' so a conflict pops `magit-status' with the
+    cherry-pick still in tree instead of aborting it — the user lands
+    on something actionable rather than an empty user-error message.
+  - Picks up `auto-resolve=t' so orthogonal conflicts get resolved by
+    `claude -p' transparently before any UI surfaces a conflict.
+
+Trade-off: the auto-resolve path runs synchronously and can block
+Emacs for up to `claude-repl-auto-resolve-conflicts-timeout' seconds.
+The interactive caller accepts the freeze in exchange for the
+\"declined-resolver pops magit\" UX over the previous \"aborted-and-
+errored\" UX."
   (interactive)
-  (claude-repl--workspace-merge-into-source (+workspace-current-name)))
+  (let* ((ws (+workspace-current-name))
+         (repo-root (claude-repl--ws-merge-routing-root ws)))
+    (claude-repl--log ws
+                      "workspace-merge-current-into-source: ws=%s repo-root=%s"
+                      ws (or repo-root "nil"))
+    (claude-repl--dispatch-merge-handler ws repo-root)))
 
 (defalias '+dwc/workspace-merge-current-into-source #'claude-repl-workspace-merge-current-into-source)

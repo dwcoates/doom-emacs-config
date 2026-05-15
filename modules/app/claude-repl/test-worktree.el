@@ -5706,11 +5706,37 @@ timestamp) and getting an accidental MERGED bucket placement."
 
 ;;;; ---- Tests: workspace-merge-current-into-source ----
 
+(ert-deftest claude-repl-test-merge-current-into-source-routes-through-dispatch-handler ()
+  "Interactive `SPC TAB M' routes through `claude-repl--dispatch-merge-handler'
+\(same path the `/workspace-merge' skill takes), passing the current workspace
+name and its resolved merge-routing-root.  Without this, the interactive
+caller bypasses repo-declared handler overrides AND skips the
+silent/auto-resolve flags that make conflicts pop magit instead of aborting."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-merge-dispatch-" t))
+          (dispatch-args :unset))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
+            (claude-repl--ws-put "wt-ws" :source-ws-dir tmpdir)
+            (cl-letf (((symbol-function '+workspace-current-name)
+                       (lambda () "wt-ws"))
+                      ((symbol-function 'claude-repl--dispatch-merge-handler)
+                       (lambda (ws repo-root)
+                         (setq dispatch-args (list ws repo-root)))))
+              (claude-repl-workspace-merge-current-into-source)
+              (should (equal (car dispatch-args) "wt-ws"))
+              (should (equal (cadr dispatch-args) tmpdir))))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest claude-repl-test-merge-into-source-routes-to-recorded-source-dir ()
-  "When :source-ws-dir points at an existing dir, switch-to-project is called with it."
+  "When :source-ws-dir points at an existing dir, --workspace-merge-do receives it
+as the resolved target.  The interactive entry point now routes through the
+cherry-pick handler (silent=t auto-resolve=t), so `switch-to-project' is NOT
+called on the happy path — the assertion is on merge-do's TARGET-DIR arg."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-merge-src-" t))
-          (target-arg :unset)
+          (switch-called nil)
           (merge-do-args :unset))
       (unwind-protect
           (progn
@@ -5722,18 +5748,20 @@ timestamp) and getting an accidental MERGED bucket placement."
                       ((symbol-function 'claude-repl--assert-clean-worktree)
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project)
-                       (lambda (target) (setq target-arg target)))
+                       (lambda (&rest _) (setq switch-called t)))
                       ((symbol-function 'claude-repl--workspace-merge-do)
                        (lambda (&rest args) (setq merge-do-args args))))
               (claude-repl-workspace-merge-current-into-source)
-              (should (equal target-arg tmpdir))
-              (should (equal merge-do-args (list "wt-ws" tmpdir nil nil)))))
+              (should-not switch-called)
+              (should (equal merge-do-args (list "wt-ws" tmpdir t t)))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-test-merge-into-source-falls-back-to-master-when-recorded-dir-gone ()
-  "If :source-ws-dir refers to a missing directory, fall back to master worktree path."
+  "If :source-ws-dir refers to a missing directory, fall back to master worktree path.
+Assertion is on merge-do's TARGET-DIR arg (post-handler-routing, silent=t skips
+the `switch-to-project' call)."
   (claude-repl-test--with-clean-state
-    (let ((target-arg :unset))
+    (let ((merge-do-args :unset))
       (claude-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
       (claude-repl--ws-put "wt-ws" :source-ws-dir "/no/such/dir/")
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
@@ -5741,27 +5769,29 @@ timestamp) and getting an accidental MERGED bucket placement."
                  (lambda (_root) "/tmp/master-fallback/"))
                 ((symbol-function 'claude-repl--assert-clean-worktree)
                  (lambda (&rest _) nil))
-                ((symbol-function 'claude-repl-switch-to-project)
-                 (lambda (target) (setq target-arg target)))
-                ((symbol-function 'claude-repl--workspace-merge-do) #'ignore))
+                ((symbol-function 'claude-repl-switch-to-project) #'ignore)
+                ((symbol-function 'claude-repl--workspace-merge-do)
+                 (lambda (&rest args) (setq merge-do-args args))))
         (claude-repl-workspace-merge-current-into-source)
-        (should (equal target-arg "/tmp/master-fallback/"))))))
+        (should (equal merge-do-args (list "wt-ws" "/tmp/master-fallback/" t t)))))))
 
 (ert-deftest claude-repl-test-merge-into-source-falls-back-to-master-when-no-recorded-source ()
-  "Legacy workspace with no :source-ws-dir falls back to master worktree path."
+  "Legacy workspace with no :source-ws-dir falls back to master worktree path.
+Assertion is on merge-do's TARGET-DIR arg (post-handler-routing, silent=t skips
+the `switch-to-project' call)."
   (claude-repl-test--with-clean-state
-    (let ((target-arg :unset))
+    (let ((merge-do-args :unset))
       (claude-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
                 ((symbol-function 'claude-repl--master-worktree-path)
                  (lambda (_root) "/tmp/master-fallback/"))
                 ((symbol-function 'claude-repl--assert-clean-worktree)
                  (lambda (&rest _) nil))
-                ((symbol-function 'claude-repl-switch-to-project)
-                 (lambda (target) (setq target-arg target)))
-                ((symbol-function 'claude-repl--workspace-merge-do) #'ignore))
+                ((symbol-function 'claude-repl-switch-to-project) #'ignore)
+                ((symbol-function 'claude-repl--workspace-merge-do)
+                 (lambda (&rest args) (setq merge-do-args args))))
         (claude-repl-workspace-merge-current-into-source)
-        (should (equal target-arg "/tmp/master-fallback/"))))))
+        (should (equal merge-do-args (list "wt-ws" "/tmp/master-fallback/" t t)))))))
 
 (ert-deftest claude-repl-test-merge-into-source-silent-skips-switch-to-project ()
   "When SILENT is non-nil, --workspace-merge-into-source must NOT call
@@ -6136,11 +6166,13 @@ on workspace switch in repos with many worktrees."
 ;;;; ---- Tests: merge-into-source re-routes when parent merged into master ----
 
 (ert-deftest claude-repl-test-merge-into-source-reroutes-to-master-when-parent-already-merged ()
-  "When parent worktree's branch is already in master, switch-to-project gets master-dir."
+  "When parent worktree's branch is already in master, merge-do receives master-dir
+as the resolved target.  The interactive entry point routes through the
+cherry-pick handler (silent=t auto-resolve=t), so the rerouting decision is
+visible in merge-do's TARGET-DIR arg rather than in `switch-to-project'."
   (claude-repl-test--with-clean-state
     (let ((parent-dir (make-temp-file "test-reroute-parent-" t))
           (master-dir (make-temp-file "test-reroute-master-" t))
-          (target-arg :unset)
           (merge-do-args :unset))
       (unwind-protect
           (progn
@@ -6153,22 +6185,21 @@ on workspace switch in repos with many worktrees."
                        (lambda (_s _t) t))
                       ((symbol-function 'claude-repl--assert-clean-worktree)
                        (lambda (&rest _) nil))
-                      ((symbol-function 'claude-repl-switch-to-project)
-                       (lambda (target) (setq target-arg target)))
+                      ((symbol-function 'claude-repl-switch-to-project) #'ignore)
                       ((symbol-function 'claude-repl--workspace-merge-do)
                        (lambda (&rest args) (setq merge-do-args args))))
               (claude-repl-workspace-merge-current-into-source)
-              (should (equal target-arg master-dir))
-              (should (equal merge-do-args (list "wt-ws" master-dir nil nil)))))
+              (should (equal merge-do-args (list "wt-ws" master-dir t t)))))
         (delete-directory parent-dir t)
         (delete-directory master-dir t)))))
 
 (ert-deftest claude-repl-test-merge-into-source-stays-on-parent-when-not-yet-merged ()
-  "When parent worktree's branch has unmerged commits, keep parent as the target."
+  "When parent worktree's branch has unmerged commits, keep parent as the target.
+Routes through the cherry-pick handler (silent=t auto-resolve=t); the
+target-dir decision shows up in merge-do's args."
   (claude-repl-test--with-clean-state
     (let ((parent-dir (make-temp-file "test-stay-parent-" t))
           (master-dir (make-temp-file "test-stay-master-" t))
-          (target-arg :unset)
           (merge-do-args :unset))
       (unwind-protect
           (progn
@@ -6181,13 +6212,11 @@ on workspace switch in repos with many worktrees."
                        (lambda (_s _t) nil))
                       ((symbol-function 'claude-repl--assert-clean-worktree)
                        (lambda (&rest _) nil))
-                      ((symbol-function 'claude-repl-switch-to-project)
-                       (lambda (target) (setq target-arg target)))
+                      ((symbol-function 'claude-repl-switch-to-project) #'ignore)
                       ((symbol-function 'claude-repl--workspace-merge-do)
                        (lambda (&rest args) (setq merge-do-args args))))
               (claude-repl-workspace-merge-current-into-source)
-              (should (equal target-arg parent-dir))
-              (should (equal merge-do-args (list "wt-ws" parent-dir nil nil)))))
+              (should (equal merge-do-args (list "wt-ws" parent-dir t t)))))
         (delete-directory parent-dir t)
         (delete-directory master-dir t)))))
 
