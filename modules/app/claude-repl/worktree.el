@@ -1251,6 +1251,61 @@ it is normalized to the dirname before lookup."
       (claude-repl--remove-git-worktree project-dir))
     (message "Finished workspace: %s" ws)))
 
+(defun claude-repl--workspace-merge-async (ws repo-root)
+  "Run a workspace merge asynchronously.  Single unified entry for both
+the interactive `SPC TAB M' path and the `/workspace-merge' skill
+dispatch — there is no behavioral difference between the two callers.
+
+Flow:
+  1. `claude-repl--close-workspace ws \\='preserve-entry' — tear down the
+     workspace UI immediately so the user is freed from it on keystroke
+     return.  `preserve-entry' keeps `:project-dir' (and the rest of
+     the plist) in `claude-repl--workspaces' so the reopen path can
+     find it if the merge fails.
+  2. `make-thread' that runs `claude-repl--dispatch-merge-handler ws
+     repo-root' — the standard handler-routing entry, which lands on
+     the default `cherry-pick' handler (silent=t auto-resolve=t) for
+     repos without a custom handler.  Emacs threads yield during
+     `accept-process-output' (the `claude -p' busy-wait), keeping the
+     main thread responsive throughout.
+  3. `condition-case' inside the thread catches any signal:
+       - Success: post a no-op to the main thread.  The merge body's
+         own deferred teardown (gns-sockets-close-then ->
+         close-workspace via `--defer-to-main-thread') has already
+         scheduled the final cleanup.
+       - Failure (`claude-repl-merge-conflict-error' or generic
+         `error'): post `claude-repl--reopen-workspace-from-state' to
+         the main thread so the user gets the source workspace back
+         and can finish the merge manually.  The merge body's
+         `--surface-silent-merge-conflict' has already deferred the
+         magit-status pop in the parent worktree, so the user has
+         both: workspace restored AND the conflict visible in magit.
+
+All UI ops INSIDE the merge body must use `--defer-to-main-thread'
+because they run from the worker thread; the existing call sites in
+`--workspace-merge-do' and `--surface-silent-merge-conflict' already
+do this."
+  (claude-repl--log ws
+                    "workspace-merge-async: ws=%s repo-root=%s — closing UI and spawning worker thread"
+                    ws (or repo-root "nil"))
+  (claude-repl--close-workspace ws 'preserve-entry)
+  (make-thread
+   (lambda ()
+     (condition-case err
+         (progn
+           (claude-repl--dispatch-merge-handler ws repo-root)
+           (claude-repl--log ws
+                             "workspace-merge-async: ws=%s thread completed cleanly"
+                             ws))
+       (error
+        (claude-repl--log ws
+                          "workspace-merge-async: ws=%s thread caught err=%S — scheduling reopen"
+                          ws err)
+        (run-at-time 0 nil
+                     (lambda ()
+                       (claude-repl--reopen-workspace-from-state ws))))))
+   (format "claude-repl-merge-%s" ws)))
+
 (defun claude-repl--reopen-workspace-from-state (ws)
   "Recreate UI for workspace WS from its preserved state in
 `claude-repl--workspaces'.
@@ -1770,7 +1825,7 @@ no error is raised, since a missing workspace is not actionable here."
         (claude-repl--log ws
                           "workspace-commands-file merge: ws=%s resolved=%s repo-root=%s"
                           ws resolved (or repo-root "nil"))
-        (claude-repl--dispatch-merge-handler resolved repo-root)))
+        (claude-repl--workspace-merge-async resolved repo-root)))
      (t
       (let ((tail (and (stringp ws) (string-match-p "/" ws)
                        (claude-repl--bare-workspace-name ws))))
@@ -3287,6 +3342,6 @@ errored\" UX."
     (claude-repl--log ws
                       "workspace-merge-current-into-source: ws=%s repo-root=%s"
                       ws (or repo-root "nil"))
-    (claude-repl--dispatch-merge-handler ws repo-root)))
+    (claude-repl--workspace-merge-async ws repo-root)))
 
 (defalias '+dwc/workspace-merge-current-into-source #'claude-repl-workspace-merge-current-into-source)

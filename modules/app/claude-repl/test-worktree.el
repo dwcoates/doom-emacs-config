@@ -1163,6 +1163,26 @@ Mocks the dispatcher and verifies it receives the resolved ws + routing root."
               (should (equal (cadr captured) src-dir))))
         (delete-directory src-dir t)))))
 
+(ert-deftest claude-repl-test-handle-merge-command-routes-through-async-wrapper ()
+  "Skill-invoked merges go through `claude-repl--workspace-merge-async' —
+the SAME wrapper the interactive `SPC TAB M' path uses, so there is no
+behavioral difference between the two callers.  Both close the workspace
+UI, run the merge on a worker thread, and reopen on failure."
+  (claude-repl-test--with-clean-state
+    (let ((src-dir (make-temp-file "claude-repl-async-sentinel-" t))
+          (async-args :unset))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "feature-one" :project-dir "/tmp/feature-one")
+            (claude-repl--ws-put "feature-one" :source-ws-dir src-dir)
+            (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+                       (lambda (ws root) (setq async-args (list ws root)))))
+              (claude-repl--handle-merge-command
+               '((type . "merge") (workspace . "feature-one")))
+              (should (equal (car async-args) "feature-one"))
+              (should (equal (cadr async-args) src-dir))))
+        (delete-directory src-dir t)))))
+
 ;;;; ---- Tests: resolve-merge-workspace-name ----
 
 (ert-deftest claude-repl-test-resolve-merge-workspace-name-literal ()
@@ -2816,6 +2836,95 @@ headless resolver — interactive paths leave it nil."
         (claude-repl--handle-merge-command
          '((type . "merge") (workspace . "feature-one")))
         (should (eq auto-arg t))))))
+
+;;;; ---- Tests: workspace-merge-async ----
+
+(ert-deftest claude-repl-test-workspace-merge-async-closes-workspace-with-preserve-entry ()
+  "Async wrapper closes the workspace UI FIRST (with `preserve-entry') so
+the user is freed from it immediately on keystroke return.  Preserve-entry
+keeps `:project-dir' alive so the reopen-on-failure path can find it."
+  (let ((close-args nil))
+    (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+               claude-repl-test--orig-workspace-merge-async)
+              ((symbol-function 'claude-repl--close-workspace)
+               (lambda (ws preserve) (setq close-args (list ws preserve))))
+              ((symbol-function 'make-thread)
+               (lambda (_thunk &optional _name) nil)))
+      (claude-repl--workspace-merge-async "ws1" "/tmp/repo"))
+    (should (equal close-args (list "ws1" 'preserve-entry)))))
+
+(ert-deftest claude-repl-test-workspace-merge-async-spawns-worker-thread ()
+  "Async wrapper spawns a `make-thread' (not a synchronous call) so Emacs
+stays responsive while `claude -p' runs in the merge body — threads yield
+during `accept-process-output' so the main UI keeps ticking."
+  (let ((thread-spawned nil))
+    (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+               claude-repl-test--orig-workspace-merge-async)
+              ((symbol-function 'claude-repl--close-workspace) #'ignore)
+              ((symbol-function 'make-thread)
+               (lambda (_thunk &optional _name) (setq thread-spawned t) nil)))
+      (claude-repl--workspace-merge-async "ws1" "/tmp/repo"))
+    (should thread-spawned)))
+
+(ert-deftest claude-repl-test-workspace-merge-async-thread-runs-dispatch-handler ()
+  "Inside the worker thread the wrapper invokes `--dispatch-merge-handler'
+\(the standard handler-routing entry).  This is what makes the two entry
+points (interactive `SPC TAB M' and `/workspace-merge' skill) equivalent —
+both end up here via the same dispatch."
+  (let ((dispatch-args nil))
+    (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+               claude-repl-test--orig-workspace-merge-async)
+              ((symbol-function 'claude-repl--close-workspace) #'ignore)
+              ;; Run the thread body inline so we can observe the dispatch
+              ;; call without thread-join machinery.
+              ((symbol-function 'make-thread)
+               (lambda (thunk &optional _name) (funcall thunk) nil))
+              ((symbol-function 'claude-repl--dispatch-merge-handler)
+               (lambda (ws repo-root)
+                 (setq dispatch-args (list ws repo-root)))))
+      (claude-repl--workspace-merge-async "ws1" "/tmp/repo"))
+    (should (equal dispatch-args (list "ws1" "/tmp/repo")))))
+
+(ert-deftest claude-repl-test-workspace-merge-async-on-error-schedules-reopen ()
+  "When the dispatch handler signals (conflict or any error), the wrapper's
+condition-case catches it and schedules `--reopen-workspace-from-state'
+on the main thread via `run-at-time'.  Without this, a failed merge
+leaves the user with a closed workspace and no way to recover."
+  (let ((scheduled nil))
+    (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+               claude-repl-test--orig-workspace-merge-async)
+              ((symbol-function 'claude-repl--close-workspace) #'ignore)
+              ((symbol-function 'make-thread)
+               (lambda (thunk &optional _name) (funcall thunk) nil))
+              ((symbol-function 'claude-repl--dispatch-merge-handler)
+               (lambda (&rest _) (error "boom")))
+              ((symbol-function 'run-at-time)
+               (lambda (_when _repeat thunk)
+                 (push thunk scheduled))))
+      (claude-repl--workspace-merge-async "ws1" "/tmp/repo"))
+    (should (= (length scheduled) 1))
+    ;; Invoking the scheduled thunk should call --reopen-workspace-from-state
+    ;; with the workspace name.
+    (let ((reopened nil))
+      (cl-letf (((symbol-function 'claude-repl--reopen-workspace-from-state)
+                 (lambda (ws) (setq reopened ws))))
+        (funcall (car scheduled)))
+      (should (equal reopened "ws1")))))
+
+(ert-deftest claude-repl-test-workspace-merge-async-on-success-does-not-schedule-reopen ()
+  "When dispatch completes without signaling, the wrapper does NOT schedule
+a reopen — the merge body's own deferred teardown is the cleanup path."
+  (let ((scheduled nil))
+    (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+               claude-repl-test--orig-workspace-merge-async)
+              ((symbol-function 'claude-repl--close-workspace) #'ignore)
+              ((symbol-function 'make-thread)
+               (lambda (thunk &optional _name) (funcall thunk) nil))
+              ((symbol-function 'claude-repl--dispatch-merge-handler) #'ignore)
+              ((symbol-function 'run-at-time)
+               (lambda (_when _repeat thunk) (push thunk scheduled))))
+      (claude-repl--workspace-merge-async "ws1" "/tmp/repo"))
+    (should-not scheduled)))
 
 ;;;; ---- Tests: reopen-workspace-from-state ----
 
@@ -5799,27 +5908,27 @@ timestamp) and getting an accidental MERGED bucket placement."
 
 ;;;; ---- Tests: workspace-merge-current-into-source ----
 
-(ert-deftest claude-repl-test-merge-current-into-source-routes-through-dispatch-handler ()
-  "Interactive `SPC TAB M' routes through `claude-repl--dispatch-merge-handler'
-\(same path the `/workspace-merge' skill takes), passing the current workspace
-name and its resolved merge-routing-root.  Without this, the interactive
-caller bypasses repo-declared handler overrides AND skips the
-silent/auto-resolve flags that make conflicts pop magit instead of aborting."
+(ert-deftest claude-repl-test-merge-current-into-source-routes-through-async-wrapper ()
+  "Interactive `SPC TAB M' routes through `claude-repl--workspace-merge-async'
+\(same path `/workspace-merge' skill takes — there is no behavioral diff
+between the two callers), passing the current workspace name and its
+resolved merge-routing-root.  The async wrapper handles close-then-spawn-
+then-reopen-on-failure; tests of that lifecycle live near the helper."
   (claude-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-merge-dispatch-" t))
-          (dispatch-args :unset))
+    (let ((tmpdir (make-temp-file "test-merge-async-" t))
+          (async-args :unset))
       (unwind-protect
           (progn
             (claude-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
             (claude-repl--ws-put "wt-ws" :source-ws-dir tmpdir)
             (cl-letf (((symbol-function '+workspace-current-name)
                        (lambda () "wt-ws"))
-                      ((symbol-function 'claude-repl--dispatch-merge-handler)
+                      ((symbol-function 'claude-repl--workspace-merge-async)
                        (lambda (ws repo-root)
-                         (setq dispatch-args (list ws repo-root)))))
+                         (setq async-args (list ws repo-root)))))
               (claude-repl-workspace-merge-current-into-source)
-              (should (equal (car dispatch-args) "wt-ws"))
-              (should (equal (cadr dispatch-args) tmpdir))))
+              (should (equal (car async-args) "wt-ws"))
+              (should (equal (cadr async-args) tmpdir))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-test-merge-into-source-routes-to-recorded-source-dir ()

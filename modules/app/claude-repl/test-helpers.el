@@ -262,6 +262,26 @@
 ;; Restore file-notify-add-watch after loading
 (advice-remove 'file-notify-add-watch #'file-notify-add-watch--test-stub)
 
+;; Make `claude-repl--workspace-merge-async' synchronous in tests.  In
+;; production the wrapper closes the workspace UI, spawns a worker thread
+;; that runs `--dispatch-merge-handler', and posts a reopen on failure.
+;; For most tests we want the dispatch to run inline so the test can
+;; assert on the eventual cherry-pick/merge state directly.  Tests that
+;; specifically verify the close-then-spawn-then-reopen lifecycle bypass
+;; this stub via:
+;;
+;;   (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+;;              claude-repl-test--orig-workspace-merge-async))
+;;     ...)
+(defvar claude-repl-test--orig-workspace-merge-async
+  (symbol-function 'claude-repl--workspace-merge-async)
+  "Real `claude-repl--workspace-merge-async' captured before the fixture's
+sync-stub advice.  Tests that need to exercise the actual async wrapper
+behavior can rebind via `cl-letf'.")
+(advice-add 'claude-repl--workspace-merge-async :override
+            (lambda (ws repo-root)
+              (claude-repl--dispatch-merge-handler ws repo-root)))
+
 ;; Make `claude-repl--defer-to-main-thread' synchronous in tests.  In
 ;; production the helper schedules its thunk via `run-at-time' so the work
 ;; lands on the main thread even when called from the worker thread spawned
