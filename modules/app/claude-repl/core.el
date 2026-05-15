@@ -30,8 +30,13 @@ Cancelled and reset whenever this file is re-evaluated.")
 
 (defcustom claude-repl-debug nil
   "Controls debug logging level.
-nil means no logging; t means standard logging; \\='verbose also includes
-high-frequency events (window changes, resolve-root)."
+nil means no logging; t means standard logging; \\='verbose also enables
+high-frequency events (window changes, resolve-root, vterm-process-alive
+predicates, sentinel re-entry).  Verbose mode also gates
+`claude-repl--log-verbose's file writes: when debug is anything other
+than \\='verbose, those calls are a no-op.  Use
+\\[claude-repl-debug/toggle-logging] (with `C-u' prefix for verbose) to
+flip at runtime."
   :type '(choice (const :tag "Off" nil)
                  (const :tag "On" t)
                  (const :tag "Verbose" verbose))
@@ -40,11 +45,13 @@ high-frequency events (window changes, resolve-root)."
 (defcustom claude-repl-log-to-file t
   "Master kill-switch for file-writing of claude-repl log lines.
 When non-nil (the default), every call to `claude-repl--log',
-`claude-repl--log-verbose', `claude-repl--do-log', or `claude-repl--error'
-appends its formatted line to `claude-repl-log-file-name' — REGARDLESS
-of `claude-repl-debug'.  The `claude-repl-debug' toggle only controls
-whether the line is ALSO emitted to the minibuffer / *Messages* buffer.
-Use `claude-repl-debug/toggle-log-to-file' to toggle at runtime."
+`claude-repl--do-log', or `claude-repl--error' appends its formatted
+line to `claude-repl-log-file-name' — REGARDLESS of `claude-repl-debug'.
+`claude-repl--log-verbose' is the exception: it ADDITIONALLY requires
+`claude-repl-debug' to be \\='verbose, because its hot-path callers
+(timer ticks, alive predicates) would otherwise spend ~25% of Emacs CPU
+in `write-region'.  Use `claude-repl-debug/toggle-log-to-file' to flip
+the kill-switch at runtime."
   :type 'boolean
   :group 'claude-repl)
 
@@ -322,16 +329,18 @@ FMT and ARGS use the same format conventions as `message'."
       (message "%s" text))))
 
 (defun claude-repl--log-verbose (ws fmt &rest args)
-  "Log a high-frequency message for WS, always to file, gated for *Messages*.
-File write happens whenever `claude-repl-log-to-file' is non-nil.  The
-`message' call only fires when `claude-repl-debug' is `verbose' — so
-hot-path callbacks (timer ticks, window changes, resolve-root, async git
-sentinels) can be enabled selectively without flooding the minibuffer.
-The 1 GiB size cap (`claude-repl-log-size-cap-bytes') bounds the file
-growth even with verbose calls always landing on disk."
-  (let ((text (claude-repl--build-log-text ws fmt args)))
-    (claude-repl--do-log-to-file text)
-    (when (eq claude-repl-debug 'verbose)
+  "Log a high-frequency message for WS, gated on verbose-mode for BOTH sinks.
+No-op unless `claude-repl-debug' is `verbose'.  The file write (which
+profiling showed dominated Emacs CPU when this was always-on) and the
+*Messages* emit are both behind the same gate, so hot-path callbacks
+(timer ticks, window changes, resolve-root, async git sentinels) cost
+nothing in the default-off configuration.  The `claude-repl-log-to-file'
+kill-switch still wins — when it is nil, no file write occurs even in
+verbose mode.  Toggle via \\[claude-repl-debug/toggle-logging] with a
+`C-u' prefix."
+  (when (eq claude-repl-debug 'verbose)
+    (let ((text (claude-repl--build-log-text ws fmt args)))
+      (claude-repl--do-log-to-file text)
       (message "%s" text))))
 
 (defun claude-repl--error (ws fmt &rest args)

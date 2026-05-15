@@ -1477,11 +1477,38 @@ record; `claude-repl-debug' now only gates the *Messages* emit."
           (claude-repl--log nil "test")
           (should-not message-called))))))
 
-(ert-deftest claude-repl-test-log-verbose-always-writes-file-when-debug-off ()
-  "`claude-repl--log-verbose' must write to file even when debug is off."
+(ert-deftest claude-repl-test-log-verbose-no-file-write-when-debug-off ()
+  "`claude-repl--log-verbose' must NOT write to file when debug is nil.
+The verbose-only gating is the load-bearing perf fix: profiling showed
+the always-on file write at the bottom of every alive-check / timer
+tick / window-change callback dominated Emacs CPU.  Verbose logs are
+strictly opt-in now."
   (claude-repl-test--with-temp-logfile path
     (cl-letf (((symbol-function 'message) #'ignore))
       (let ((claude-repl-debug nil))
+        (claude-repl--log-verbose nil "verbose-line")
+        ;; The helper pre-creates an empty temp file, so check that no
+        ;; bytes were appended rather than non-existence.
+        (should (zerop (nth 7 (file-attributes path))))))))
+
+(ert-deftest claude-repl-test-log-verbose-no-file-write-when-debug-t ()
+  "`claude-repl--log-verbose' must NOT write to file when debug is t.
+Only `verbose' enables the file write — plain `t' is for `--log' only.
+Regression guard: the verbose-mode gate must not collapse with the
+standard debug gate."
+  (claude-repl-test--with-temp-logfile path
+    (cl-letf (((symbol-function 'message) #'ignore))
+      (let ((claude-repl-debug t))
+        (claude-repl--log-verbose nil "verbose-line")
+        (should (zerop (nth 7 (file-attributes path))))))))
+
+(ert-deftest claude-repl-test-log-verbose-writes-file-when-debug-verbose ()
+  "`claude-repl--log-verbose' MUST write to file when debug is `verbose'.
+Positive case for the gating change — verbose mode is the opt-in
+configuration that re-enables the file write."
+  (claude-repl-test--with-temp-logfile path
+    (cl-letf (((symbol-function 'message) #'ignore))
+      (let ((claude-repl-debug 'verbose))
         (claude-repl--log-verbose nil "verbose-line")
         (should (file-exists-p path))
         (with-temp-buffer
