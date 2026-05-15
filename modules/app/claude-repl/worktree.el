@@ -1185,6 +1185,25 @@ do not need to track the owning repository separately."
     (claude-repl--log nil "finish-workspace worktree-remove: %s" result))
   (projectile-remove-known-project (file-name-as-directory project-dir)))
 
+(defun claude-repl--defer-to-main-thread (thunk)
+  "Schedule zero-arg THUNK to run on the main thread on the next event-loop tick.
+Safe to call from any thread, including the main thread itself.
+
+Used inside the merge body (`claude-repl--workspace-merge-do',
+`claude-repl--surface-silent-merge-conflict') for any UI op
+\(perspective switch, magit pop, workspace close) because those
+functions can run on the worker thread spawned by
+`claude-repl--workspace-merge-async'.  Emacs is firm that redisplay,
+window-config changes, and buffer-display ops MUST happen on the main
+thread — calling them from a worker thread is undefined behavior.
+
+A tick of delay even when already on the main thread is intentional:
+it keeps the call semantics uniform across contexts so a regression
+caused by a direct UI call cannot hide behind \"works on main thread,
+fails on worker\".  The cost is negligible — the timer queue drains
+on the very next event-loop tick."
+  (run-at-time 0 nil thunk))
+
 (defun claude-repl--close-workspace (ws &optional preserve-entry)
   "Close the editor workspace WS: kill session, buffers, persp.
 Editor-only teardown — tears down vterm session, workspace buffers,
@@ -2035,10 +2054,16 @@ user knows where to look for the decline reason."
     (claude-repl--log target-ws
                       "surface-silent-merge-conflict: target-ws=%s commit=%s root=%s"
                       target-ws conflicting-commit root)
-    (when (fboundp 'claude-repl-switch-to-project)
-      (claude-repl-switch-to-project root))
-    (when (fboundp 'magit-status)
-      (magit-status root))
+    ;; UI ops must be deferred to the main thread — this function can
+    ;; be invoked from the worker thread spawned by
+    ;; `claude-repl--workspace-merge-async', and perspective switches +
+    ;; magit-status are not safe off-main.
+    (claude-repl--defer-to-main-thread
+     (lambda ()
+       (when (fboundp 'claude-repl-switch-to-project)
+         (claude-repl-switch-to-project root))
+       (when (fboundp 'magit-status)
+         (magit-status root))))
     (signal 'claude-repl-merge-conflict-error
             (list (format "Conflict cherry-picking %s from '%s' — magit opened in %s; resolver output: %s"
                           conflicting-commit target-ws root resolver-buf)))))
@@ -2666,10 +2691,18 @@ off so the user resolves in magit directly."
               ;; `--finish-workspace' and removes the worktree).
               ;; Gate the close on `/gns-sockets close' so Claude can
               ;; release any held GNS sockets before the vterm dies.
-              (claude-repl--gns-sockets-close-then
-               target-ws
+              ;;
+              ;; Deferred to the main thread because this function can
+              ;; run on the worker thread spawned by
+              ;; `claude-repl--workspace-merge-async' — the teardown
+              ;; chain ultimately kills the perspective + vterm, which
+              ;; must happen on main.
+              (claude-repl--defer-to-main-thread
                (lambda ()
-                 (claude-repl--close-workspace target-ws 'preserve-entry)))))
+                 (claude-repl--gns-sockets-close-then
+                  target-ws
+                  (lambda ()
+                    (claude-repl--close-workspace target-ws 'preserve-entry)))))))
             ;; Refresh the drawer's `:detail-*' cache so its rendering
             ;; reflects post-cherry-pick git state.  The worktree dir
             ;; survives on either branch, so the synchronous git calls

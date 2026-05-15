@@ -262,6 +262,18 @@
 ;; Restore file-notify-add-watch after loading
 (advice-remove 'file-notify-add-watch #'file-notify-add-watch--test-stub)
 
+;; Make `claude-repl--defer-to-main-thread' synchronous in tests.  In
+;; production the helper schedules its thunk via `run-at-time' so the work
+;; lands on the main thread even when called from the worker thread spawned
+;; by `claude-repl--workspace-merge-async'.  For tests, the deferral just
+;; hides UI ops behind a timer that never fires (tests don't drain the
+;; timer queue), so override to run THUNK immediately and let assertions
+;; observe the resulting state.  Individual tests that specifically need to
+;; verify deferral semantics (rather than the deferred work itself) can
+;; rebind via `cl-letf' to capture the thunk without invoking it.
+(advice-add 'claude-repl--defer-to-main-thread :override
+            (lambda (thunk) (funcall thunk)))
+
 ;; Disable file-logging during tests so the unconditional file-write path
 ;; (always-on after the core.el log refactor) does not append every
 ;; test-emitted line to the user's real `~/.claude/emacs/doom-claude-repl.log'.

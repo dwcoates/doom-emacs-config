@@ -2705,6 +2705,34 @@ inspect."
           ;; CHERRY_PICK_HEAD must still exist — we did NOT abort.
           (should (claude-repl--cherry-pick-in-progress-p repo)))))))
 
+(ert-deftest claude-repl-test-surface-silent-merge-conflict-defers-ui-ops ()
+  "UI ops (perspective switch + magit-status) are routed through
+`claude-repl--defer-to-main-thread'.  This is what makes the function
+safe to call from the worker thread spawned by
+`claude-repl--workspace-merge-async' — direct UI calls from a worker
+thread are undefined behavior in Emacs.  Pinning the helper call here
+so a future refactor cannot silently revert to direct invocation."
+  (claude-repl-test--with-temp-git-repo repo
+    (write-region "base" nil (expand-file-name "shared" repo))
+    (call-process "git" nil nil nil "-C" repo "add" "shared")
+    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
+    (claude-repl-test--git-checkout repo "feature" t)
+    (write-region "feature-content" nil (expand-file-name "shared" repo))
+    (call-process "git" nil nil nil "-C" repo "add" "shared")
+    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
+    (claude-repl-test--git-checkout repo "master")
+    (write-region "master-content" nil (expand-file-name "shared" repo))
+    (call-process "git" nil nil nil "-C" repo "add" "shared")
+    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
+    (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" "feature")
+    (let ((defer-calls 0))
+      (cl-letf (((symbol-function 'claude-repl--defer-to-main-thread)
+                 (lambda (_thunk) (cl-incf defer-calls))))
+        (should-error (claude-repl--surface-silent-merge-conflict
+                       "feature" repo)
+                      :type 'user-error)
+        (should (= defer-calls 1))))))
+
 ;;;; ---- Tests: resolver output is preserved in a side buffer ----
 
 (ert-deftest claude-repl-test-invoke-auto-resolve-claude-preserves-output-buffer ()
@@ -5396,6 +5424,32 @@ explicit drawer `x' (`--finish-workspace') removes it."
         (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
         (should (equal nuked-ws "other-ws"))
         (should nuked-preserve)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-defers-success-teardown ()
+  "Success-path teardown (gns-sockets-close-then -> close-workspace) is
+routed through `claude-repl--defer-to-main-thread' so the perspective
+kill, vterm kill, and buffer cleanup all run on the main thread.  This
+is what makes `--workspace-merge-do' safe to execute from the worker
+thread spawned by `claude-repl--workspace-merge-async'.
+
+Pinned with a stub that captures the defer call — the test fixture's
+default override would otherwise invoke the thunk immediately, hiding
+whether the defer call was ever made."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (let ((defer-calls 0))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+                 ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+                 ((symbol-function 'load-file) #'ignore)
+                 ((symbol-function 'claude-repl--defer-to-main-thread)
+                  (lambda (_thunk) (cl-incf defer-calls))))
+        (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
+        (should (= defer-calls 1))))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-does-not-call-finish-workspace ()
   "Successful merge must NOT call `--finish-workspace' — that's reserved
