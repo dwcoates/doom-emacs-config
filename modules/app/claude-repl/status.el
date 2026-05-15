@@ -611,6 +611,13 @@ workspace's branch has been merged into its source (`:repl-state'
 workspace whose vterm has since died still reads as merged, not
 dead.")
 
+(defconst claude-repl--label-merge-failed     "⛔"
+  "Bracket label shown adjacent to the numeric index when a workspace's
+merge dispatch failed silently (`:repl-state' `:merge-failed') —
+typically because the source repo is mid cherry-pick/rebase/merge and
+git refused the cherry-pick.  Distinct from `:dead' (❌) so a stuck
+merge does not look like a dead vterm at a glance.")
+
 (defconst claude-repl--tab-weight             'bold
   "Font weight applied to every tab face.")
 
@@ -716,6 +723,8 @@ Distributed evenly across `claude-repl-flash-count' on/off cycles."
      :label      ,claude-repl--label-dead)
     (:merge-conflict
      :label      ,claude-repl--label-merge-conflict)
+    (:merge-failed
+     :label      ,claude-repl--label-merge-failed)
     (:merged
      :label      ,claude-repl--label-merged))
   "Per-state tab-appearance palette.
@@ -961,6 +970,7 @@ Rule:
   :stop-failed → :stop-failed                (magenta + ⚠ — turn errored)
   nil + :merged         → :merged            (default + 🔀)
   nil + :merge-conflict → :merge-conflict    (default + 💥)
+  nil + :merge-failed   → :merge-failed      (default + ⛔)
   nil + :dead           → :dead              (default + ❌)
   nil                   → nil                (no session / unborn)"
   (cond
@@ -975,6 +985,10 @@ Rule:
    ;; whose vterm later dies still surfaces the conflict signal — the
    ;; merge failure is the more actionable badge.
    ((and (null claude) (eq repl :merge-conflict)) :merge-conflict)
+   ;; `:merge-failed' (silent cherry-pick abort, no CHERRY_PICK_HEAD)
+   ;; ranks above `:dead' for the same reason: a blocked merge is the
+   ;; actionable signal, the dead vterm is incidental.
+   ((and (null claude) (eq repl :merge-failed)) :merge-failed)
    ((and (null claude) (eq repl :dead)) :dead)
    ((null claude)           nil)
    (t

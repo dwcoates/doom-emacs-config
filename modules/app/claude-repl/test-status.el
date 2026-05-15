@@ -207,6 +207,28 @@ the tab-bar renders the new badge when `composed-state' yields
                   :label)
                  "💥")))
 
+(ert-deftest claude-repl-test-composed-nil-merge-failed ()
+  "Composed (nil, :merge-failed) → :merge-failed — silent cherry-pick
+abort surfaces ⛔ in the tab bar so a stuck merge is not invisible."
+  (should (eq :merge-failed (claude-repl--composed-state nil :merge-failed))))
+
+(ert-deftest claude-repl-test-composed-thinking-merge-failed ()
+  "Composed (:thinking, :merge-failed) → :thinking — claude-state
+dominates repl-state for tab color, same precedence rule as
+:merge-conflict and :dead."
+  (should (eq :thinking
+              (claude-repl--composed-state :thinking :merge-failed))))
+
+(ert-deftest claude-repl-test-tab-palette-has-merge-failed-label ()
+  "Palette has a `:merge-failed' entry that maps to the ⛔ label so the
+tab-bar renders the badge when `composed-state' yields `:merge-failed'.
+Distinct from `:dead' (❌) so a blocked merge is not mistaken for a
+dead vterm."
+  (should (equal (plist-get
+                  (alist-get :merge-failed claude-repl--tab-palette)
+                  :label)
+                 "⛔")))
+
 (ert-deftest claude-repl-test-composed-unknown-returns-nil ()
   "DIAGNOSTIC: unknown claude-state currently logs + returns nil (temporary —
 to be reverted to should-error once the leaking writer is found)."

@@ -2324,7 +2324,8 @@ already-bound symbols and palette tweaks would require an Emacs restart."
   (should (equal (alist-get :stop-failed claude-repl-drawer-state-icons) "❗"))
   (should (equal (alist-get :dead       claude-repl-drawer-state-icons) "❌"))
   (should (equal (alist-get :merged     claude-repl-drawer-state-icons) "🔀"))
-  (should (equal (alist-get :merge-conflict claude-repl-drawer-state-icons) "💥")))
+  (should (equal (alist-get :merge-conflict claude-repl-drawer-state-icons) "💥"))
+  (should (equal (alist-get :merge-failed claude-repl-drawer-state-icons) "⛔")))
 
 ;;;; ---- State glyph ----
 
@@ -2387,10 +2388,10 @@ more actionable than a generic process-death."
     (should (equal (claude-repl-drawer--state-glyph "ws") "💥"))))
 
 (ert-deftest claude-repl-drawer-test-state-glyph-merge-failed-surfaces-x ()
-  ":repl-state :merge-failed renders the ❌ glyph (failed cherry-pick
+  ":repl-state :merge-failed renders the ⛔ glyph (failed cherry-pick
 that still lives in the MERGED bucket).  Distinct mapping from
-:merged so the user can visually differentiate a clean merge from a
-silent-failure merge in the drawer."
+:dead's ❌ so the user can visually differentiate a stuck merge from
+a dead vterm at a glance."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "broken-merge"
                                        :repl-state :merge-failed)
@@ -2400,7 +2401,7 @@ silent-failure merge in the drawer."
 (ert-deftest claude-repl-drawer-test-state-glyph-merge-failed-overrides-claude-state ()
   ":repl-state :merge-failed takes precedence over :claude-state for
 the glyph — a post-merge silent-failure workspace whose vterm is
-stale still reads as ❌-merge-failed rather than its claude-state
+stale still reads as ⛔-merge-failed rather than its claude-state
 mood."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "ws"
@@ -2410,8 +2411,10 @@ mood."
                    (alist-get :merge-failed claude-repl-drawer-state-icons)))))
 
 (ert-deftest claude-repl-drawer-test-state-icons-include-merge-failed ()
-  "`claude-repl-drawer-state-icons' includes a :merge-failed entry."
-  (should (equal (alist-get :merge-failed claude-repl-drawer-state-icons) "❌")))
+  "`claude-repl-drawer-state-icons' includes a :merge-failed entry
+using ⛔ — distinct from :dead's ❌ so a stuck merge does not look
+like a dead vterm."
+  (should (equal (alist-get :merge-failed claude-repl-drawer-state-icons) "⛔")))
 
 (ert-deftest claude-repl-drawer-test-workspace-section-merge-failed-routes-to-merged ()
   "A workspace flagged with :merge-completed t still lands in the

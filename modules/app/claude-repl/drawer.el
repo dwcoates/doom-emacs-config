@@ -75,7 +75,7 @@ the indent change — no other knobs needed."
     (:stop-failed    . "❗")
     (:dead           . "❌")
     (:merged         . "🔀")
-    (:merge-failed   . "❌")
+    (:merge-failed   . "⛔")
     (:merge-conflict . "💥")
     (:merge-queued   . "🕒"))
   "Alist mapping claude-state keyword to an indicator glyph.
@@ -85,8 +85,9 @@ The :dead entry is used when `:repl-state' is `:dead' (overrides
 whose vterm has since died still reads as merged).  The :merge-failed
 entry is used when `:repl-state' is `:merge-failed' (a workspace that
 landed in the MERGED bucket but whose cherry-pick reported failure);
-it shares the ❌ glyph with :dead since both signal failure, but
-remains routed under MERGED via `:merge-completed'.  The :merge-queued
+it uses the ⛔ glyph (distinct from :dead's ❌) to signal a blocked
+merge — typically the source repo is mid cherry-pick/rebase/merge.
+The :merge-queued
 entry is used when `:repl-state' is `:merge-queued' (a merge request
 parked on `claude-repl--merge-queue' waiting for a live cherry-pick
 to finish); it routes under MERGING alongside in-flight merges.
