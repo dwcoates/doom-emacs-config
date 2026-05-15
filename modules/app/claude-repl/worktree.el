@@ -1539,11 +1539,33 @@ Returns nil for an unknown MODE so the caller can refuse the request."
           (with-current-buffer b (derived-mode-p 'profiler-report-mode))))
    (buffer-list)))
 
+(defun claude-repl--profile-fully-expand-buffer (buf)
+  "Fully expand every collapsed entry in profiler-report BUF.
+The default `profiler-report' output is collapsed: only top-level
+entries are shown, each prefixed with `+'.  Reading the buffer at
+that point yields a near-useless single-frame view (e.g. `+
+timer-event-handler' at 74% with no detail on which timer
+dominates).  This walks every line and calls
+`profiler-report-expand-entry' with FULL=t, which recursively
+expands the subtree below each closed entry.  Lines that don't
+carry the closed-mark (`+') are no-ops in `profiler-report-expand-entry'
+itself, so header lines and already-expanded rows are safe to visit."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (save-excursion
+        (goto-char (point-min))
+        (while (not (eobp))
+          (profiler-report-expand-entry t)
+          (forward-line 1))))))
+
 (defun claude-repl--profile-stop-and-collect ()
   "Stop the profiler, generate its report, and return the report as a string.
 Captures the buffers `profiler-report' creates by diffing
 `claude-repl--profile-report-buffers' before and after the call, so
-older report buffers from prior runs are not re-grabbed.  Returns the
+older report buffers from prior runs are not re-grabbed.  Each new
+buffer is fully expanded via `claude-repl--profile-fully-expand-buffer'
+before its text is read, so the returned string contains the complete
+calltree rather than the default collapsed top-level rows.  Returns the
 empty string when no new report buffer is produced.
 
 `profiler-report' is invoked with `display-buffer-overriding-action'
@@ -1560,6 +1582,7 @@ report is only needed to forward back to the requesting Claude session."
            (parts nil))
       (dolist (buf new-bufs)
         (when (buffer-live-p buf)
+          (claude-repl--profile-fully-expand-buffer buf)
           (push (format "=== %s ===\n%s"
                         (buffer-name buf)
                         (with-current-buffer buf

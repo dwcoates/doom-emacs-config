@@ -660,6 +660,77 @@ back to the requesting Claude session."
       (should (equal seen-action
                      '(display-buffer-no-window . ((allow-no-window . t))))))))
 
+;;;; ---- Tests: profile-fully-expand-buffer ----
+
+(ert-deftest claude-repl-test-profile-fully-expand-buffer-calls-expand-on-each-line ()
+  "Expander walks every line and invokes `profiler-report-expand-entry' with FULL=t.
+A 3-line buffer should produce 3 calls, each with non-nil arg, so the
+recursive-subtree branch of `profiler-report-expand-entry' fires."
+  (let ((buf (generate-new-buffer " *test-expand-walk*"))
+        (calls nil))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (setq major-mode 'profiler-report-mode)
+            (insert "line1\nline2\nline3\n"))
+          (cl-letf (((symbol-function 'profiler-report-expand-entry)
+                     (lambda (&optional full) (push full calls))))
+            (claude-repl--profile-fully-expand-buffer buf))
+          (should (= (length calls) 3))
+          (should (cl-every #'identity calls)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-profile-fully-expand-buffer-noop-on-dead-buffer ()
+  "Dead buffer is a no-op — expander returns without signaling or calling expand."
+  (let ((buf (generate-new-buffer " *test-expand-dead*"))
+        (called nil))
+    (kill-buffer buf)
+    (cl-letf (((symbol-function 'profiler-report-expand-entry)
+               (lambda (&optional _) (setq called t))))
+      (claude-repl--profile-fully-expand-buffer buf))
+    (should-not called)))
+
+(ert-deftest claude-repl-test-profile-fully-expand-buffer-noop-on-empty-buffer ()
+  "Empty buffer is a no-op — eobp is true at point-min, loop body never runs."
+  (let ((buf (generate-new-buffer " *test-expand-empty*"))
+        (called nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'profiler-report-expand-entry)
+                   (lambda (&optional _) (setq called t))))
+          (claude-repl--profile-fully-expand-buffer buf))
+      (when (buffer-live-p buf) (kill-buffer buf)))
+    (should-not called)))
+
+(ert-deftest claude-repl-test-profile-stop-and-collect-expands-new-buffer ()
+  "`profile-stop-and-collect' fully expands each new report buffer before reading it.
+The expander is invoked once per new buffer, so the captured text
+reflects the post-expansion content rather than the default collapsed view."
+  (let ((new-buf (generate-new-buffer " *test-collect-expand*"))
+        (expand-calls nil))
+    (unwind-protect
+        (progn
+          (with-current-buffer new-buf
+            (setq major-mode 'profiler-report-mode)
+            (insert "collapsed"))
+          (cl-letf (((symbol-function 'profiler-stop) (lambda () nil))
+                    ((symbol-function 'profiler-report) (lambda () nil))
+                    ((symbol-function 'claude-repl--profile-report-buffers)
+                     (let ((calls 0))
+                       (lambda ()
+                         (cl-incf calls)
+                         (if (= calls 1) nil (list new-buf)))))
+                    ((symbol-function 'claude-repl--profile-fully-expand-buffer)
+                     (lambda (b)
+                       (push b expand-calls)
+                       (with-current-buffer b
+                         (goto-char (point-max))
+                         (insert " EXPANDED")))))
+            (let ((text (claude-repl--profile-stop-and-collect)))
+              (should (= (length expand-calls) 1))
+              (should (eq (car expand-calls) new-buf))
+              (should (string-match-p "collapsed EXPANDED" text)))))
+      (when (buffer-live-p new-buf) (kill-buffer new-buf)))))
+
 ;;;; ---- Tests: profile-format-prompt ----
 
 (ert-deftest claude-repl-test-profile-format-prompt-wraps-in-fenced-block ()
