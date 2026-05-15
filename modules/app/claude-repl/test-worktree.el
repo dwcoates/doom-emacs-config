@@ -2054,6 +2054,24 @@ the prompt — NOT via stdin)."
       (claude-repl--invoke-auto-resolve-claude "/tmp" "RESOLVE THIS"))
     (should (equal (car (last captured-cmd)) "RESOLVE THIS"))))
 
+(ert-deftest claude-repl-test-invoke-auto-resolve-claude-separates-prompt-with-double-dash ()
+  "PROMPT is preceded by `--' in the cmd so the claude CLI's variadic
+`--allowedTools <tools...>' flag (which comes from extra-args) cannot
+swallow the prompt as another tool name.  Without `--', claude exits
+1 with `Input must be provided either through stdin or as a prompt
+argument when using --print' and the resolver always fails."
+  (let* ((captured-cmd nil)
+         (real-start (symbol-function 'start-process)))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name _buf &rest cmd)
+                 (setq captured-cmd cmd)
+                 (funcall real-start "stub"
+                          (generate-new-buffer " *stub*") "true"))))
+      (claude-repl--invoke-auto-resolve-claude "/tmp" "MY PROMPT"))
+    (let ((tail (last captured-cmd 2)))
+      (should (equal (car tail) "--"))
+      (should (equal (cadr tail) "MY PROMPT")))))
+
 (ert-deftest claude-repl-test-invoke-auto-resolve-claude-logs-output ()
   "`--invoke-auto-resolve-claude' mirrors the resolver's stdout/stderr
 into the logfile via `claude-repl--log'.  Without this the resolver's

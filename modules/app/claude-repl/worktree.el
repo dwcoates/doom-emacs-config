@@ -2183,10 +2183,18 @@ against a hung resolver blocking the merge indefinitely.
 
 Factored out as its own function so tests can stub the headless call
 without spawning an actual `claude' process."
+  ;; `--' terminates option parsing so the claude CLI treats PROMPT as
+  ;; the positional `[prompt]' argument.  Without it, the variadic
+  ;; `--allowedTools <tools...>' flag carried in
+  ;; `claude-repl-auto-resolve-conflicts-extra-args' consumes the prompt
+  ;; as another tool name, claude sees no prompt, and exits 1 with
+  ;; `Error: Input must be provided either through stdin or as a prompt
+  ;; argument when using --print' — the merge fails before any real
+  ;; resolution work happens.
   (let* ((cmd (append (list claude-repl-auto-resolve-conflicts-program
                             "-p" "--model" claude-repl-auto-resolve-conflicts-model)
                       claude-repl-auto-resolve-conflicts-extra-args
-                      (list prompt)))
+                      (list "--" prompt)))
          (out-buf (if target-ws
                       (let ((buf (get-buffer-create
                                   (claude-repl--merge-resolver-buffer-name
