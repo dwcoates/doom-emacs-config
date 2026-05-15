@@ -2165,13 +2165,16 @@ the process exit status (integer) on completion, or the symbol
 `timeout' when the configured timeout elapsed without the process
 exiting.
 
-When TARGET-WS is supplied, the resolver's stdout+stderr is preserved
-in the side buffer named by `claude-repl--merge-resolver-buffer-name'
-so the user can post-mortem an exit=1 (decline) or timeout.  The
-buffer's previous contents are cleared on each invocation so it always
-reflects the most recent resolver run, and a header line records the
-exit code so the buffer is self-describing.  When TARGET-WS is nil
-\(legacy callers / tests), the temp buffer is killed as before.
+The resolver's full stdout+stderr is logged to
+`~/.claude/emacs/doom-claude-repl.log' via `claude-repl--log' under
+the workspace tag (when TARGET-WS is supplied) so a failure or
+timeout can be post-mortemed from the logfile alone — no need to
+know which Emacs buffer to open, and the trace survives Emacs
+restarts.  When TARGET-WS is supplied a side buffer named by
+`claude-repl--merge-resolver-buffer-name' also mirrors the output
+for live interactive inspection; it is optional, not the canonical
+record.  When TARGET-WS is nil (legacy callers / tests) the temp
+buffer is killed after its contents are logged.
 
 Runs synchronously because the cherry-pick path is itself synchronous —
 the merge flow waits for the working tree to settle before advancing.
@@ -2200,6 +2203,9 @@ without spawning an actual `claude' process."
          (default-directory (file-name-as-directory root))
          (proc (apply #'start-process
                       "claude-auto-resolve" out-buf cmd)))
+    (claude-repl--log target-ws
+                      "auto-resolve: invoking claude -p root=%s cmd=%S"
+                      root cmd)
     (set-process-query-on-exit-flag proc nil)
     (let ((deadline (+ (float-time) claude-repl-auto-resolve-conflicts-timeout))
           (timed-out nil))
@@ -2208,15 +2214,41 @@ without spawning an actual `claude' process."
         (when (> (float-time) deadline)
           (setq timed-out t)
           (delete-process proc)))
-      (let ((status (if timed-out 'timeout (process-exit-status proc))))
+      (let* ((status (if timed-out 'timeout (process-exit-status proc)))
+             ;; Capture the process output BEFORE annotating the side
+             ;; buffer so our own "# exit:" marker does not leak into
+             ;; the logged text.  Strip the inserted header block in
+             ;; the target-ws case so only the resolver's actual
+             ;; stdout/stderr makes it into the log.
+             (process-output
+              (when (buffer-live-p out-buf)
+                (with-current-buffer out-buf
+                  (if target-ws
+                      (save-excursion
+                        (goto-char (point-min))
+                        (while (and (not (eobp))
+                                    (looking-at "^#\\|^$"))
+                          (forward-line 1))
+                        (buffer-substring-no-properties
+                         (point) (point-max)))
+                    (buffer-substring-no-properties
+                     (point-min) (point-max)))))))
+        (when (and target-ws (buffer-live-p out-buf))
+          (with-current-buffer out-buf
+            (let ((inhibit-read-only t))
+              (goto-char (point-max))
+              (insert (format "\n# exit: %S\n" status)))))
+        ;; Mirror captured stdout/stderr into the logfile so the
+        ;; resolver's response is greppable and survives session
+        ;; restart — the side buffer (when present) is only for live
+        ;; inspection, not the canonical record.
+        (claude-repl--log target-ws
+                          "auto-resolve: claude -p exited status=%S output-chars=%d output follows:\n%s"
+                          status
+                          (length (or process-output ""))
+                          (or process-output ""))
         (cond
-         (target-ws
-          (when (buffer-live-p out-buf)
-            (with-current-buffer out-buf
-              (let ((inhibit-read-only t))
-                (goto-char (point-max))
-                (insert (format "\n# exit: %S\n" status)))))
-          status)
+         (target-ws status)
          (t
           (unwind-protect status
             (when (buffer-live-p out-buf) (kill-buffer out-buf)))))))))
@@ -2252,12 +2284,19 @@ Returns the process exit status (integer) on completion, or the symbol
 `timeout' when `claude-repl-auto-resolve-verify-timeout' elapses without
 the process exiting.
 
+The verify command's stdout+stderr is logged via `claude-repl--log'
+before the holding buffer is killed, so a non-zero exit (which blocks
+the merge) can be diagnosed from the persistent logfile alone.
+
 Factored out as its own function so tests can stub the subprocess
 without spawning the project's real test runner."
   (let* ((out-buf (generate-new-buffer " *claude-auto-resolve-verify*"))
          (default-directory (file-name-as-directory root))
          (proc (apply #'start-process
                       "claude-auto-resolve-verify" out-buf command)))
+    (claude-repl--log nil
+                      "auto-resolve-verify: invoking root=%s cmd=%S"
+                      root command)
     (set-process-query-on-exit-flag proc nil)
     (let ((deadline (+ (float-time) claude-repl-auto-resolve-verify-timeout))
           (timed-out nil))
@@ -2266,11 +2305,16 @@ without spawning the project's real test runner."
         (when (> (float-time) deadline)
           (setq timed-out t)
           (delete-process proc)))
-      (unwind-protect
-          (if timed-out
-              'timeout
-            (process-exit-status proc))
-        (when (buffer-live-p out-buf) (kill-buffer out-buf))))))
+      (let ((status (if timed-out 'timeout (process-exit-status proc)))
+            (output (when (buffer-live-p out-buf)
+                      (with-current-buffer out-buf
+                        (buffer-substring-no-properties
+                         (point-min) (point-max))))))
+        (claude-repl--log nil
+                          "auto-resolve-verify: exited status=%S output-chars=%d output follows:\n%s"
+                          status (length (or output "")) (or output ""))
+        (unwind-protect status
+          (when (buffer-live-p out-buf) (kill-buffer out-buf)))))))
 
 (defun claude-repl--auto-resolve-verify-passes-p (target-ws root)
   "Run the configured verify command and return t when it passes.

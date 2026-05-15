@@ -2054,6 +2054,95 @@ the prompt — NOT via stdin)."
       (claude-repl--invoke-auto-resolve-claude "/tmp" "RESOLVE THIS"))
     (should (equal (car (last captured-cmd)) "RESOLVE THIS"))))
 
+(ert-deftest claude-repl-test-invoke-auto-resolve-claude-logs-output ()
+  "`--invoke-auto-resolve-claude' mirrors the resolver's stdout/stderr
+into the logfile via `claude-repl--log'.  Without this the resolver's
+response only lives in a dedicated Emacs buffer — ungreppable, lost on
+session restart — and a post-mortem requires the user to know the
+buffer name."
+  (let* ((logged nil)
+         (real-start (symbol-function 'start-process)))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name buf &rest _cmd)
+                 (with-current-buffer buf
+                   (insert "RESOLVER STDOUT\n"))
+                 (funcall real-start "stub"
+                          (generate-new-buffer " *stub*") "true")))
+              ((symbol-function 'claude-repl--log)
+               (lambda (_ws fmt &rest args)
+                 (push (apply #'format fmt args) logged))))
+      (claude-repl--invoke-auto-resolve-claude "/tmp" "prompt" "ws1"))
+    (should (cl-some (lambda (l) (string-match-p "RESOLVER STDOUT" l)) logged))
+    (should (cl-some (lambda (l)
+                       (string-match-p "auto-resolve: claude -p exited status=" l))
+                     logged))))
+
+(ert-deftest claude-repl-test-invoke-auto-resolve-claude-log-omits-header-block ()
+  "The logged output excludes the `# claude-repl merge resolver — ...'
+header block we insert into the side buffer at the top.  Only the
+resolver's actual stdout/stderr should appear in the log — leaking our
+own header is just noise that obscures the real response."
+  (let* ((logged nil)
+         (real-start (symbol-function 'start-process)))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name buf &rest _cmd)
+                 (with-current-buffer buf
+                   (insert "ACTUAL RESOLVER OUTPUT\n"))
+                 (funcall real-start "stub"
+                          (generate-new-buffer " *stub*") "true")))
+              ((symbol-function 'claude-repl--log)
+               (lambda (_ws fmt &rest args)
+                 (push (apply #'format fmt args) logged))))
+      (claude-repl--invoke-auto-resolve-claude "/tmp" "prompt" "ws1"))
+    (let ((output-log (cl-find-if
+                       (lambda (l) (string-match-p "output follows" l))
+                       logged)))
+      (should output-log)
+      (should (string-match-p "ACTUAL RESOLVER OUTPUT" output-log))
+      (should-not (string-match-p "# claude-repl merge resolver" output-log))
+      (should-not (string-match-p "# root:" output-log))
+      (should-not (string-match-p "# cmd:" output-log)))))
+
+(ert-deftest claude-repl-test-invoke-auto-resolve-claude-passes-ws-to-log ()
+  "Resolver-output log entries carry TARGET-WS as the workspace tag, so
+the standard `{ws=... id=...}` metadata block disambiguates resolver
+runs across concurrent merges."
+  (let* ((logged-ws nil)
+         (real-start (symbol-function 'start-process)))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name _buf &rest _cmd)
+                 (funcall real-start "stub"
+                          (generate-new-buffer " *stub*") "true")))
+              ((symbol-function 'claude-repl--log)
+               (lambda (ws fmt &rest args)
+                 (when (string-match-p "exited status="
+                                       (apply #'format fmt args))
+                   (push ws logged-ws)))))
+      (claude-repl--invoke-auto-resolve-claude "/tmp" "prompt" "my-ws"))
+    (should (member "my-ws" logged-ws))))
+
+(ert-deftest claude-repl-test-invoke-auto-resolve-verify-logs-output ()
+  "`--invoke-auto-resolve-verify' mirrors the verify command's
+stdout/stderr into the logfile before the temp buffer is killed, so a
+non-zero exit (which blocks the merge) can be diagnosed from the
+logfile alone — the temp buffer is gone by the time anyone looks."
+  (let* ((logged nil)
+         (real-start (symbol-function 'start-process)))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name buf &rest _cmd)
+                 (with-current-buffer buf
+                   (insert "VERIFY OUTPUT\n"))
+                 (funcall real-start "stub"
+                          (generate-new-buffer " *stub*") "true")))
+              ((symbol-function 'claude-repl--log)
+               (lambda (_ws fmt &rest args)
+                 (push (apply #'format fmt args) logged))))
+      (claude-repl--invoke-auto-resolve-verify "/tmp" (list "true")))
+    (should (cl-some (lambda (l) (string-match-p "VERIFY OUTPUT" l)) logged))
+    (should (cl-some (lambda (l)
+                       (string-match-p "auto-resolve-verify: exited status=" l))
+                     logged))))
+
 ;;;; ---- Tests: auto-resolve-cherry-pick-conflict ----
 
 (ert-deftest claude-repl-test-auto-resolve-returns-nil-when-no-conflicted-files ()
