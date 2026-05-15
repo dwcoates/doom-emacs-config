@@ -22,18 +22,20 @@ Do NOT attempt to toggle the profiler yourself in any way. Under NO circumstance
 Each entry is a single command object of type `"profile"`:
 
 - `type` (required, string) — must be `"profile"`.
-- `enabled` (required, boolean) — `true` starts the profiler; `false` stops it and pops up the report.
+- `enabled` (required, boolean) — `true` starts the profiler; `false` stops it, pops up the report, and pipes the report text back to `workspace`'s Claude session.
 - `mode` (optional, string) — `"cpu"`, `"mem"`, or `"cpu+mem"`. Defaults to `"cpu+mem"`. Ignored when `enabled` is `false`.
+- `workspace` (required on disable, string) — the workspace name of the agent invoking this skill. The handler routes the captured `profiler-report` back to this workspace's Claude session via the normal input pipeline. The profiler itself is process-wide; this field is purely the return address. Omit on `enabled: true` (no report is generated yet); include on `enabled: false`.
 
-The `workspace` field is intentionally absent: the profiler is an Emacs-process-wide instrument, not a per-workspace one, so dispatch is ambient.
+The workspace name is the basename of the current working directory (e.g. for `/Users/foo/.config/doom-worktrees/my-feature` it is `my-feature`).
 
 ## Steps
 
 1. **Interpret** the user's request to decide:
    - Whether to start (`enabled: true`) or stop (`enabled: false`) the profiler.
    - Which mode to start in, if the user specified one (otherwise omit `mode`).
+   - On stop: determine your own workspace name via `basename "$PWD"` and include it as `workspace`.
 
-2. **Write the command** by piping JSON to `run.sh` using the Bash tool:
+2. **Write the command** by piping JSON to `run.sh` using the Bash tool. Enable:
    ```bash
    bash /home/claude/.claude/skills/workspace-profile/run.sh << 'EOF'
    [
@@ -41,6 +43,14 @@ The `workspace` field is intentionally absent: the profiler is an Emacs-process-
    ]
    EOF
    ```
+   Disable (substitute the real workspace name for `<ws>`):
+   ```bash
+   bash /home/claude/.claude/skills/workspace-profile/run.sh << EOF
+   [
+     {"type": "profile", "enabled": false, "workspace": "<ws>"}
+   ]
+   EOF
+   ```
    If the command fails due to missing `uuidgen`, **stop immediately** and tell the user they need to rebuild the sandbox image by running `.claude/install.sh`.
 
-3. **Tell the user** what was dispatched in one short line — start vs stop, and the mode if specified.
+3. **Tell the user** what was dispatched in one short line — start vs stop, and the mode if specified. On stop, mention that the report will arrive as a follow-up user message in this session.
