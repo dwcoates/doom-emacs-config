@@ -1660,15 +1660,25 @@ No interrupt was actually delivered, so the state should not change."
         (should (equal persp-killed "doomed"))
         (should-not (gethash "doomed" claude-repl--workspaces))))))
 
-(ert-deftest claude-repl-cmd-test-nuke-workspace/aborts-on-deny ()
-  "nuke-workspace does nothing when user answers no."
+(ert-deftest claude-repl-cmd-test-nuke-workspace/no-confirmation-prompt ()
+  "nuke-workspace MUST NOT prompt for confirmation.  Teardown is
+immediate — persisted state.el is preserved so accidental invocations
+are recoverable by reopening the project."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
-    (cl-letf (((symbol-function 'completing-read)
-               (lambda (_prompt _coll &rest _) "doomed"))
-              ((symbol-function 'y-or-n-p) (lambda (_prompt) nil)))
-      (should-error (claude-repl-nuke-workspace) :type 'user-error)
-      (should (gethash "doomed" claude-repl--workspaces)))))
+    (let ((prompted nil))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "doomed"))
+                ((symbol-function 'y-or-n-p)
+                 (lambda (_prompt) (setq prompted t) t))
+                ((symbol-function 'yes-or-no-p)
+                 (lambda (_prompt) (setq prompted t) t))
+                ((symbol-function 'claude-repl--kill-session) #'ignore)
+                ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-nuke-workspace)
+        (should-not prompted)
+        (should-not (gethash "doomed" claude-repl--workspaces))))))
 
 (ert-deftest claude-repl-cmd-test-nuke-workspace/kills-git-proc ()
   "nuke-workspace kills an in-flight git-diff process."
@@ -2157,15 +2167,25 @@ route-to-register-merged branch."
   (claude-repl-test--with-clean-state
     (should-error (claude-repl-kill-workspace) :type 'user-error)))
 
-(ert-deftest claude-repl-cmd-test-kill-workspace/aborts-on-deny ()
-  "kill-workspace does nothing when user answers no."
+(ert-deftest claude-repl-cmd-test-kill-workspace/no-confirmation-prompt ()
+  "kill-workspace MUST NOT prompt for confirmation.  Teardown is
+immediate — persisted state.el is preserved so accidental invocations
+are recoverable by reopening the project."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
-    (cl-letf (((symbol-function 'completing-read)
-               (lambda (_prompt _coll &rest _) "doomed"))
-              ((symbol-function 'y-or-n-p) (lambda (_prompt) nil)))
-      (should-error (claude-repl-kill-workspace) :type 'user-error)
-      (should (gethash "doomed" claude-repl--workspaces)))))
+    (let ((prompted nil))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "doomed"))
+                ((symbol-function 'y-or-n-p)
+                 (lambda (_prompt) (setq prompted t) t))
+                ((symbol-function 'yes-or-no-p)
+                 (lambda (_prompt) (setq prompted t) t))
+                ((symbol-function 'claude-repl--kill-session) #'ignore)
+                ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-kill-workspace)
+        (should-not prompted)
+        (should-not (gethash "doomed" claude-repl--workspaces))))))
 
 (ert-deftest claude-repl-cmd-test-kill-workspace/kills-session-and-removes-hashmap ()
   "kill-workspace kills session, kills persp workspace, and removes hashmap entry."

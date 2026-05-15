@@ -1112,11 +1112,13 @@ so the workspace can be re-opened later and resume its Claude session.
 When called interactively without WS, prompts to select from
 workspaces registered in `claude-repl--workspaces', defaulting to the
 current workspace when registered.  Programmatic callers (e.g. the
-drawer) pass WS directly to skip the prompt."
+drawer) pass WS directly to skip the prompt.
+
+No confirmation prompt: teardown is immediate.  Persisted state.el is
+preserved, so re-opening the workspace later resumes the Claude
+session — accidental invocations are easily recoverable."
   (interactive)
   (let ((ws (or ws (claude-repl--read-known-workspace "Nuke workspace: "))))
-    (unless (y-or-n-p (format "Nuke workspace '%s'? This kills processes and buffers but preserves on-disk state. " ws))
-      (user-error "Aborted"))
     (claude-repl--nuke-one-workspace ws)
     (force-mode-line-update t)
     (message "Nuked workspace: %s" ws)))
@@ -1178,11 +1180,13 @@ muscle-memory that bind `kill' semantics distinctly from `nuke'.
 Prompts to select from workspaces registered in
 `claude-repl--workspaces', defaulting to the current workspace
 when registered.  Programmatic callers (e.g. the drawer) pass WS
-directly to skip the prompt."
+directly to skip the prompt.
+
+No confirmation prompt: teardown is immediate.  Persisted state.el is
+preserved, so re-opening the workspace later resumes the Claude
+session — accidental invocations are easily recoverable."
   (interactive)
   (let ((ws (or ws (claude-repl--read-known-workspace "Kill workspace: "))))
-    (unless (y-or-n-p (format "Kill workspace '%s'? This kills processes and buffers but preserves priority/session-id on disk. " ws))
-      (user-error "Aborted"))
     (claude-repl--nuke-one-workspace ws)
     (force-mode-line-update t)
     (message "Killed workspace: %s" ws)))
