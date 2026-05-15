@@ -375,6 +375,26 @@ The numbered list items in the metaprompt must appear in this order."
   (should (string-match-p "recursively" claude-repl-command-prefix))
   (should (string-match-p "TLDR of the Response TLDR" claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-no-emoji-in-main-body ()
+  "The metaprompt must explicitly disallow emoji-prefixed top-level bullets in the main response body."
+  (should (string-match-p "Do NOT prefix top-level bullets with emojis in the main response body"
+                          claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-emoji-only-in-tldr ()
+  "Emoji prefixing must be prescribed for TLDR top-level bullets only.
+The first occurrence of 'emoji' in the prefix should be in a TLDR-only context
+(i.e. appear after the introduction of the main-body restriction)."
+  (let ((restriction-pos (string-match "Do NOT prefix top-level bullets with emojis"
+                                        claude-repl-command-prefix))
+        (tldr-spec-pos (string-match "TLDR spec" claude-repl-command-prefix))
+        (tldr-emoji-pos (string-match "relevant prefixing emoji for top-level bullets"
+                                       claude-repl-command-prefix)))
+    (should restriction-pos)
+    (should tldr-spec-pos)
+    (should tldr-emoji-pos)
+    (should (< restriction-pos tldr-spec-pos))
+    (should (< tldr-spec-pos tldr-emoji-pos))))
+
 ;;;; ---- Tests: should-prepend-metaprompt-p ----
 
 (ert-deftest claude-repl-test-should-prepend-metaprompt-p-all-conditions ()
