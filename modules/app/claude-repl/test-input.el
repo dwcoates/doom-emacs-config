@@ -380,6 +380,32 @@ The numbered list items in the metaprompt must appear in this order."
   (should (string-match-p "Do NOT prefix top-level bullets with emojis in the main response body"
                           claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-tldr-header-changes-annotation ()
+  "TLDR spec must require each TLDR section header to indicate whether changes were made."
+  (should (string-match-p
+           "Each TLDR section's header MUST indicate whether changes were made"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-header-changes-example ()
+  "TLDR spec must give a concrete parenthesized example of the annotation."
+  (should (string-match-p "'Convo TLDR (changes made)'" claude-repl-command-prefix))
+  (should (string-match-p "'Response TLDR (no changes made)'" claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-header-changes-defines-changes ()
+  "TLDR spec must define what 'changes' means (edits/writes/commits, not reads/analysis)."
+  (should (string-match-p
+           "'Changes' means any file edits, writes, or commits"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "read-only operations, analysis, and answers do NOT count as changes"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-header-changes-exact-wording ()
+  "TLDR spec must mandate exactly 'changes made' or 'no changes made' — no other wording."
+  (should (string-match-p
+           "exactly 'changes made' or 'no changes made'"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-emoji-only-in-tldr ()
   "Emoji prefixing must be prescribed for TLDR top-level bullets only.
 The first occurrence of 'emoji' in the prefix should be in a TLDR-only context
