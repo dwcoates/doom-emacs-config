@@ -2789,6 +2789,45 @@ headless resolver — interactive paths leave it nil."
          '((type . "merge") (workspace . "feature-one")))
         (should (eq auto-arg t))))))
 
+;;;; ---- Tests: reopen-workspace-from-state ----
+
+(ert-deftest claude-repl-test-reopen-workspace-from-state-establishes-from-project-dir ()
+  "Reopen wraps `claude-repl--establish-workspace' with the preserved
+`:project-dir' so a workspace closed with preserve-entry can be brought
+back without callers having to know the snapshot/establish protocol."
+  (claude-repl-test--with-clean-state
+    (let ((established nil))
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/saved-dir/")
+      (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+                 (lambda (ws dir) (setq established (list ws dir)))))
+        (claude-repl--reopen-workspace-from-state "ws1"))
+      (should (equal established (list "ws1" "/tmp/saved-dir/"))))))
+
+(ert-deftest claude-repl-test-reopen-workspace-from-state-noops-without-project-dir ()
+  "When the workspace plist has no `:project-dir' (entry was finalized or
+never preserved), reopen is a no-op — `--establish-workspace' is not
+called, no error is signaled.  This is the safe path for callers that
+might invoke reopen on a workspace whose state was already swept."
+  (claude-repl-test--with-clean-state
+    (let ((established nil))
+      ;; Don't put :project-dir; entry is empty.
+      (claude-repl--ws-put "ws1" :some-other-key 'something)
+      (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+                 (lambda (&rest _) (setq established t))))
+        (claude-repl--reopen-workspace-from-state "ws1"))
+      (should-not established))))
+
+(ert-deftest claude-repl-test-reopen-workspace-from-state-normalizes-branchy-name ()
+  "Branch-style name like `DWC/foo' normalizes to the bare `foo' before
+lookup — the registry is keyed by bare names so the lookup must agree."
+  (claude-repl-test--with-clean-state
+    (let ((established nil))
+      (claude-repl--ws-put "foo" :project-dir "/tmp/foo-dir/")
+      (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+                 (lambda (ws dir) (setq established (list ws dir)))))
+        (claude-repl--reopen-workspace-from-state "DWC/foo"))
+      (should (equal established (list "foo" "/tmp/foo-dir/"))))))
+
 ;;;; ---- Tests: finish-workspace ----
 
 (ert-deftest claude-repl-test-finish-workspace-non-worktree ()

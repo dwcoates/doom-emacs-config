@@ -1232,6 +1232,38 @@ it is normalized to the dirname before lookup."
       (claude-repl--remove-git-worktree project-dir))
     (message "Finished workspace: %s" ws)))
 
+(defun claude-repl--reopen-workspace-from-state (ws)
+  "Recreate UI for workspace WS from its preserved state in
+`claude-repl--workspaces'.
+
+Requires that WS was previously closed via
+`claude-repl--close-workspace ws 'preserve-entry' so the plist entry —
+in particular `:project-dir' — survived the close.  Wraps
+`claude-repl--establish-workspace', which creates the perspective,
+activates it, registers projectile, loads dir-locals, opens the recentf
+entry, and starts a fresh Claude session in a new vterm panel.
+
+Used by `claude-repl--workspace-merge-async' to bring back a workspace
+whose async merge attempt failed — the user pressed `SPC TAB M', the
+wrapper closed the workspace immediately, the background merge hit a
+conflict the resolver could not handle, and we now restore the UI so
+the user can finish manually.
+
+Logs and no-ops if WS has no `:project-dir' (the entry was already
+finalized or never preserved)."
+  (let* ((ws (claude-repl--bare-workspace-name ws))
+         (dir (claude-repl--ws-get ws :project-dir)))
+    (cond
+     ((not dir)
+      (claude-repl--log ws
+                        "reopen-workspace-from-state: ws=%s no :project-dir — skipping"
+                        ws))
+     (t
+      (claude-repl--log ws
+                        "reopen-workspace-from-state: ws=%s dir=%s — re-establishing"
+                        ws dir)
+      (claude-repl--establish-workspace ws dir)))))
+
 ;;; Workspace commands file processing
 
 (defun claude-repl--resolve-fork-session-id (fork-from)
