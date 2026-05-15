@@ -645,6 +645,21 @@ Returns the full SHA of the new commit."
             ((symbol-function 'claude-repl--profile-report-buffers) (lambda () nil)))
     (should (string= "" (claude-repl--profile-stop-and-collect)))))
 
+(ert-deftest claude-repl-test-profile-stop-and-collect-suppresses-report-window ()
+  "`profiler-report' runs with a no-window `display-buffer-overriding-action'.
+Guards against regressing the user-visible behavior fix: the profiler
+report buffer must still be created (so we can scrape its text) but no
+window should pop up for the user, since the report is only forwarded
+back to the requesting Claude session."
+  (let ((seen-action :unset))
+    (cl-letf (((symbol-function 'profiler-stop) (lambda () nil))
+              ((symbol-function 'profiler-report)
+               (lambda () (setq seen-action display-buffer-overriding-action)))
+              ((symbol-function 'claude-repl--profile-report-buffers) (lambda () nil)))
+      (claude-repl--profile-stop-and-collect)
+      (should (equal seen-action
+                     '(display-buffer-no-window . ((allow-no-window . t))))))))
+
 ;;;; ---- Tests: profile-format-prompt ----
 
 (ert-deftest claude-repl-test-profile-format-prompt-wraps-in-fenced-block ()

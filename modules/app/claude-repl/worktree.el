@@ -1544,8 +1544,15 @@ Returns nil for an unknown MODE so the caller can refuse the request."
 Captures the buffers `profiler-report' creates by diffing
 `claude-repl--profile-report-buffers' before and after the call, so
 older report buffers from prior runs are not re-grabbed.  Returns the
-empty string when no new report buffer is produced."
-  (let ((before (claude-repl--profile-report-buffers)))
+empty string when no new report buffer is produced.
+
+`profiler-report' is invoked with `display-buffer-overriding-action'
+bound to suppress window creation: the report buffer is created (so we
+can scrape its text) but no window pops up for the user, since the
+report is only needed to forward back to the requesting Claude session."
+  (let ((before (claude-repl--profile-report-buffers))
+        (display-buffer-overriding-action
+         '(display-buffer-no-window . ((allow-no-window . t)))))
     (profiler-stop)
     (profiler-report)
     (let* ((after (claude-repl--profile-report-buffers))
