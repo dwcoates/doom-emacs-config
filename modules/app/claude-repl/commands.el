@@ -314,10 +314,12 @@ installed configuration."
   :group 'claude-repl)
 
 (defcustom claude-repl-explain-config-flags
-  '("-p" "--dangerously-skip-permissions")
+  '("-p" "--model" "haiku" "--dangerously-skip-permissions")
   "Argument list for the headless claude invocation.
-`-p' makes claude exit after one turn; `--dangerously-skip-permissions'
-prevents the run from prompting for tool approval headlessly."
+`-p' makes claude exit after one turn; `--model haiku' pins the small,
+fast model (explain-config is short-form Q&A — no need for the
+default-tier model); `--dangerously-skip-permissions' prevents the run
+from prompting for tool approval headlessly."
   :type '(repeat string)
   :group 'claude-repl)
 

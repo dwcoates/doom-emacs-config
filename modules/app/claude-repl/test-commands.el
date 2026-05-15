@@ -375,6 +375,31 @@
   (should (member "--dangerously-skip-permissions"
                   claude-repl-explain-config-flags)))
 
+(ert-deftest claude-repl-cmd-test-explain-config-flags/pins-haiku-model ()
+  "Default flags pass `--model haiku' so the read-only Q&A run uses the
+small, fast model rather than the default-tier one (explain-config is
+short-form Q&A — no need for the bigger model)."
+  (should (member "--model" claude-repl-explain-config-flags))
+  (let* ((tail (cdr (member "--model" claude-repl-explain-config-flags))))
+    (should (equal (car tail) "haiku"))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-spawn/passes-haiku-model-to-process ()
+  "spawn forwards `--model haiku' through to `make-process' so the headless
+claude actually runs on haiku — guards against a future flag-list edit
+that drops the model pin without surfacing in the defcustom-shape test."
+  (let (captured-cmd)
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest args)
+                 (setq captured-cmd (plist-get args :command))
+                 'fake-proc))
+              ((symbol-function 'process-send-string) #'ignore)
+              ((symbol-function 'process-send-eof) #'ignore)
+              ((symbol-function 'display-buffer) #'ignore))
+      (claude-repl--explain-config-spawn "anything")
+      (should (member "--model" captured-cmd))
+      (let ((tail (cdr (member "--model" captured-cmd))))
+        (should (equal (car tail) "haiku"))))))
+
 (ert-deftest claude-repl-cmd-test-explain-config-dir/defaults-to-doom-config ()
   "Default dir resolves to `~/.config/doom' (the canonical doom config)."
   (should (equal (expand-file-name claude-repl-explain-config-dir)
