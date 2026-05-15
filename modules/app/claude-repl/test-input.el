@@ -345,9 +345,9 @@
   (should (stringp claude-repl-command-prefix))
   (should (string-match-p "TLDR's TLDR" claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-tldr-is-last-instruction ()
-  "The 'TLDR's TLDR' instruction must mandate it be the very last item."
-  (should (string-match-p "TLDR's TLDR.*VERY LAST\\|VERY LAST.*TLDR's TLDR"
+(ert-deftest claude-repl-test-command-prefix-tldr-tldr-precedes-summary ()
+  "The 'TLDR's TLDR' instruction must mandate it be directly before the final 'Summary' section."
+  (should (string-match-p "TLDR's TLDR.*before the final 'Summary'\\|TLDR's TLDR.*directly before the final 'Summary'"
                            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-tldr-recurses-spec ()
@@ -382,8 +382,33 @@
 
 (ert-deftest claude-repl-test-command-prefix-tldr-ordering-documented ()
   "The metaprompt must explicitly document the trailing-section ordering."
-  ;; Guards against silent drift in ordering: large context TLDR -> last response TLDR -> TLDR's TLDR.
-  (should (string-match-p "large context TLDR.*last response TLDR.*TLDR's TLDR"
+  ;; Guards against silent drift in ordering:
+  ;; large context TLDR -> last response TLDR -> TLDR's TLDR -> Summary.
+  (should (string-match-p "large context TLDR.*last response TLDR.*TLDR's TLDR.*Summary"
+                           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-contains-final-summary ()
+  "`claude-repl-command-prefix' must instruct including a final 'Summary' section."
+  (should (stringp claude-repl-command-prefix))
+  (should (string-match-p "'Summary'" claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-summary-is-very-last ()
+  "The 'Summary' directive must mandate it be the VERY LAST item in the response."
+  (should (string-match-p "'Summary' section as the VERY LAST\\|VERY LAST.*'Summary'"
+                           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-summary-is-one-sentence ()
+  "The 'Summary' directive must specify exactly ONE SENTENCE."
+  (should (string-match-p "'Summary'.*ONE SENTENCE\\|ONE SENTENCE.*'Summary'"
+                           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-summary-no-bullets ()
+  "The 'Summary' directive must forbid bullets/lists/formatting."
+  (should (string-match-p "'Summary'.*[Nn]o bullets" claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-summary-applies-always ()
+  "The 'Summary' directive must apply even to short responses (no exceptions)."
+  (should (string-match-p "'Summary'.*\\(no exceptions\\|even to 1-5 sentence\\)"
                            claude-repl-command-prefix)))
 
 ;;;; ---- Tests: should-prepend-metaprompt-p ----
