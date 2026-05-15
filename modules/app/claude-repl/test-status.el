@@ -1011,6 +1011,35 @@ selected tab dims to the normal selected face like other states."
     (should (equal (plist-get face :background) "#c0c0c0"))
     (should (equal (plist-get face :foreground) "#2a8c2a"))))
 
+(ert-deftest claude-repl-test-render-tab-ends-with-unfaced-space ()
+  "render-tab's last character is an unfaced space.
+Without this terminator the name-face background bleeds to the row's
+right edge via `extend_face_to_end_of_line'."
+  (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
+         (result (claude-repl--render-tab "ws1" spec "1" '+workspace-tab-face nil))
+         (last-idx (1- (length result))))
+    (should (equal (substring result last-idx) " "))
+    (should-not (get-text-property last-idx 'face result))))
+
+(ert-deftest claude-repl-test-render-tab-ends-with-unfaced-space-with-img ()
+  "render-tab's last character is an unfaced space even when img-str is supplied."
+  (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
+         (result (claude-repl--render-tab "ws1" spec "1" '+workspace-tab-face "IMG"))
+         (last-idx (1- (length result))))
+    (should (equal (substring result last-idx) " "))
+    (should-not (get-text-property last-idx 'face result))))
+
+(ert-deftest claude-repl-test-render-tab-penultimate-is-faced-name-padding ()
+  "The character immediately before the unfaced terminator is the
+name-face's trailing padding space — confirms the terminator was
+appended *after* the faced padding, not merged into it."
+  (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
+         (result (claude-repl--render-tab "ws1" spec "1" '+workspace-tab-face nil))
+         (penultimate (- (length result) 2)))
+    (should (equal (substring result penultimate (1+ penultimate)) " "))
+    (should (eq (get-text-property penultimate 'face result)
+                '+workspace-tab-face))))
+
 ;;;; ---- Tests: tab-label edge cases ----
 
 (ert-deftest claude-repl-test-tab-label-zero-index ()
@@ -1271,13 +1300,16 @@ selected tab dims to the normal selected face like other states."
 ;;;; ---- Tests: tabline space toggle ----
 
 (ert-deftest claude-repl-test-tabline-space-toggle-off ()
-  "tabline-advice appends no trailing space when toggle is nil."
+  "tabline-advice appends no cache-bust trailing space when toggle is nil.
+The last entry already ends with one unfaced terminator space (see
+`claude-repl--render-tab'); the toggle adds *another* trailing space
+when on.  So toggle-off must not end with two trailing unfaced spaces."
   (claude-repl-test--with-clean-state
     (let ((claude-repl--tabline-space-toggle nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function '+workspace-list-names) (lambda () '("ws1"))))
         (let ((result (claude-repl--tabline-advice '("ws1"))))
-          (should-not (string-suffix-p "  " result)))))))
+          (should-not (string-suffix-p "   " result)))))))
 
 (ert-deftest claude-repl-test-tabline-space-toggle-on ()
   "tabline-advice appends a trailing space when toggle is non-nil."

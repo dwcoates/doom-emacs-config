@@ -890,7 +890,14 @@ SPEC is a plist with keys :bg :fg :bracket-fg :weight (see
 workspace-name portion.  LABEL is the bracket content (number or
 emoji).  IMG-STR, when non-nil, is inserted between bracket and name
 with a single un-faced space on each side so the image does not butt
-up against the name's background."
+up against the name's background.
+
+The string ends with an un-faced trailing space so each entry
+self-terminates.  Emacs's `display_tab_bar_line' calls
+`extend_face_to_end_of_line', which paints the row's last glyph face
+across the remainder regardless of `:extend' — without the unfaced
+terminator, the name-face background would bleed to the right edge
+whenever an entry landed at a wrap (or the final row's) end."
   (let* ((bg         (or (plist-get spec :bg)         'unspecified))
          (fg         (or (plist-get spec :fg)         'unspecified))
          (bracket-bg (or (plist-get spec :bracket-bg) bg))
@@ -901,7 +908,8 @@ up against the name's background."
     (concat (propertize " " 'face separator-face)
             (propertize (format claude-repl-tab-bracket-format label) 'face bracket-face)
             (when img-str (concat " " img-str " "))
-            (propertize (format claude-repl-tab-name-padding name) 'face name-face))))
+            (propertize (format claude-repl-tab-name-padding name) 'face name-face)
+            " ")))
 
 (defun claude-repl--tab-label (state index)
   "Return the tab label for STATE and numeric INDEX.
