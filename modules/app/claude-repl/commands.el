@@ -326,34 +326,35 @@ prevents the run from prompting for tool approval headlessly."
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-explain-config-height-fraction 0.30
-  "Fraction of frame height for the explain-config bottom popup.
-The popup is its own bottom-side window — fully decoupled from the
-drawer (which lives on the left), with its own independent height
-configuration."
+(defcustom claude-repl-explain-config-width-fraction 0.5
+  "Fraction of frame width for the explain-config right-side popup.
+The popup is its own right-side window — separate from the drawer
+(which lives on the left), with its own independent width
+configuration.  Showing the popup hides the drawer (it is restored
+on popup close); see `claude-repl--explain-config-show'."
   :type 'float
   :group 'claude-repl)
 
-(defun claude-repl--explain-config-window-height (window)
-  "Return the configured explain-config height in rows for WINDOW.
-Resolves `claude-repl-explain-config-height-fraction' against the
-host frame's height."
-  (let ((frame-rows (frame-height (window-frame window))))
-    (max 1 (round (* claude-repl-explain-config-height-fraction frame-rows)))))
+(defun claude-repl--explain-config-window-width (window)
+  "Return the configured explain-config width in columns for WINDOW.
+Resolves `claude-repl-explain-config-width-fraction' against the
+host frame's width."
+  (let ((frame-cols (frame-width (window-frame window))))
+    (max 1 (round (* claude-repl-explain-config-width-fraction frame-cols)))))
 
 (defvar claude-repl--explain-config-display-action
   `((display-buffer-in-side-window)
-    (side . bottom)
+    (side . right)
     (slot . 0)
-    (window-height . ,#'claude-repl--explain-config-window-height)
+    (window-width . ,#'claude-repl--explain-config-window-width)
     (window-parameters
      (no-delete-other-windows . t)
      (no-other-window . nil)))
   "Display action for the explain-config output buffer.
-Lives as its own bottom-side window — fully decoupled from the
-drawer (which lives on the left).  Independent visibility lifecycle
-and its own height configuration; reconciled across workspace
-switches via the persp-activated hook.")
+Lives as its own right-side window at half the frame's width.
+Showing the popup hides the drawer (which lives on the left) and
+restores it on close.  Reconciled across workspace switches via the
+persp-activated hook.")
 
 (defvar claude-repl--explain-config-global-visible-p nil
   "Non-nil when the explain-config popup should appear in every persp.
@@ -365,43 +366,68 @@ workspaces so it feels like a frame-level UI element rather than a
 per-workspace artifact — mirrors the drawer's own
 `--global-visible-p' pattern.")
 
-(defun claude-repl--explain-config-apply-height (window)
-  "Resize WINDOW to the configured explain-config height.
-Side-window action alists honor `window-height' only at window-creation
-time, so re-displaying the popup keeps its old height if the fraction
+(defvar claude-repl--explain-config-drawer-was-visible-p nil
+  "Whether the drawer was visible when the popup last opened.
+Captured by `claude-repl--explain-config-show' on the transition from
+hidden→visible and consumed by `claude-repl--explain-config-hide' to
+restore the drawer if (and only if) the popup is the one that hid it.")
+
+(defun claude-repl--explain-config-apply-width (window)
+  "Resize WINDOW to the configured explain-config width.
+Side-window action alists honor `window-width' only at window-creation
+time, so re-displaying the popup keeps its old width if the fraction
 changed.  This forces the resize on every show — mirrors the drawer's
-`--apply-width' approach but along the vertical axis."
-  (let* ((target (claude-repl--explain-config-window-height window))
-         (window-min-height 1))
+`--apply-width'."
+  (let* ((target (claude-repl--explain-config-window-width window))
+         (window-min-width 1))
     (with-selected-window window
       (setq-local window-size-fixed nil)
-      (let ((delta (- target (window-total-height window))))
+      (let ((delta (- target (window-total-width window))))
         (cond
-         ((> delta 0) (enlarge-window delta))
-         ((< delta 0) (shrink-window (abs delta))))))))
+         ((> delta 0) (enlarge-window delta t))
+         ((< delta 0) (shrink-window (abs delta) t)))))))
 
 (defun claude-repl--explain-config-show ()
-  "Display the explain-config buffer as its own bottom-side popup.
+  "Display the explain-config buffer as its own right-side popup.
 Sets the global visible-flag so the popup follows the user across
 workspace switches.  No-op when the buffer doesn't exist (nothing to
 show yet); when a window already displays the buffer, just reapplies
-the configured height.  Returns the displayed window or nil."
+the configured width.
+
+On the hidden→visible transition, captures the drawer's current
+visibility into `claude-repl--explain-config-drawer-was-visible-p'
+and hides the drawer — the popup wants the room and the drawer's
+restoration is deferred to `claude-repl--explain-config-hide'.  The
+capture only happens on transition so persp-switch reconciles don't
+clobber the snapshot.  Returns the displayed window or nil."
   (when-let ((buf (get-buffer claude-repl-explain-config-buffer-name)))
+    (unless claude-repl--explain-config-global-visible-p
+      (setq claude-repl--explain-config-drawer-was-visible-p
+            (and (boundp 'claude-repl-drawer--global-visible-p)
+                 claude-repl-drawer--global-visible-p))
+      (when claude-repl--explain-config-drawer-was-visible-p
+        (claude-repl-drawer-hide)))
     (setq claude-repl--explain-config-global-visible-p t)
     (let ((win (or (get-buffer-window buf t)
                    (display-buffer buf claude-repl--explain-config-display-action))))
       (when (window-live-p win)
-        (claude-repl--explain-config-apply-height win))
+        (claude-repl--explain-config-apply-width win))
       win)))
 
 (defun claude-repl--explain-config-hide ()
   "Delete every window displaying the explain-config buffer.
 Clears the global visible-flag so the popup no longer auto-appears on
 workspace switches.  Keeps the buffer itself alive — only its
-visibility is toggled."
+visibility is toggled.
+
+If `claude-repl--explain-config-show' previously hid the drawer to
+make room, re-shows the drawer here and clears the captured flag."
   (setq claude-repl--explain-config-global-visible-p nil)
   (when-let ((buf (get-buffer claude-repl-explain-config-buffer-name)))
-    (claude-repl-window--delete-buffer-windows buf)))
+    (claude-repl-window--delete-buffer-windows buf))
+  (when claude-repl--explain-config-drawer-was-visible-p
+    (setq claude-repl--explain-config-drawer-was-visible-p nil)
+    (claude-repl-drawer-show)))
 
 ;;;###autoload
 (defun claude-repl-explain-config-close ()
@@ -440,7 +466,7 @@ stale window, delete it."
      ((and claude-repl--explain-config-global-visible-p buf (not win))
       (let ((new-win (display-buffer buf claude-repl--explain-config-display-action)))
         (when (window-live-p new-win)
-          (claude-repl--explain-config-apply-height new-win))))
+          (claude-repl--explain-config-apply-width new-win))))
      ((and (not claude-repl--explain-config-global-visible-p) win)
       (claude-repl-window--delete-buffer-windows buf)))))
 
@@ -777,10 +803,16 @@ the new pending string (also stored buffer-locally)."
 (defun claude-repl--explain-config-filter (proc chunk)
   "Process filter for `claude-repl-explain-config'.
 Routes CHUNK from PROC through the face-markup parser so the model's
-tagged output renders with Emacs faces instead of raw Markdown."
+tagged output renders with Emacs faces instead of raw Markdown.
+
+Triggers `claude-repl--explain-config-show' on every chunk — `--show'
+is idempotent w.r.t. the global flag, so the user-visible effect is
+\"popup appears on the first chunk\"; the drawer-state capture (and
+drawer-hide) happens exactly once on the hidden→visible transition."
   (let ((buf (process-buffer proc)))
     (when (buffer-live-p buf)
-      (claude-repl--explain-config-parse-chunk buf chunk))))
+      (claude-repl--explain-config-parse-chunk buf chunk)
+      (claude-repl--explain-config-show))))
 
 (defun claude-repl--explain-config-spawn (prompt)
   "Spawn the headless claude process for explain-config PROMPT.
@@ -788,16 +820,17 @@ Returns the process.  Separated from the interactive entry point so
 tests can stub `make-process' here without going through the input
 read.
 
-Displays the explain-config buffer as its own bottom-side popup,
-fully decoupled from the drawer.  Sets the global visible-flag via
-`--show' so the popup follows the user across workspace switches."
+The popup is NOT displayed here — it is deferred to
+`claude-repl--explain-config-filter', which calls `--show' on the
+first streamed chunk.  This delays the visible side effect (and the
+drawer-hide) until there is actual content to render, so a stalled
+or never-responding `claude' invocation doesn't disturb the UI."
   (let* ((dir (file-name-as-directory
                (expand-file-name claude-repl-explain-config-dir)))
          (buf (claude-repl--explain-config-init-buffer prompt))
          (cmd (cons claude-repl-explain-config-program
                     claude-repl-explain-config-flags))
          (input (claude-repl--explain-config-build-input prompt)))
-    (claude-repl--explain-config-show)
     (let* ((default-directory dir)
            (proc (make-process
                   :name "claude-explain-config"
