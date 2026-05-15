@@ -1,11 +1,16 @@
 ---
 name: debug-logs
-description: Read and interpret the claude-repl debug log at ~/.claude/emacs/doom-claude-repl.log, and emphatically recommend adding instrumentation when the log lacks coverage of the suspect code path. Use when the user is debugging anything in modules/app/claude-repl/ (workspaces, drawer, sentinels, REPL state, autosave, hooks, vterm panels) or invokes /debug-logs.
+description: Read and interpret (a) the claude-repl debug log at ~/.claude/emacs/doom-claude-repl.log and (b) the per-workspace memory-state.el snapshot under <root>/.claude/emacs/memory-state.el, and emphatically recommend adding instrumentation when the log lacks coverage of the suspect code path. Use when the user is debugging anything in modules/app/claude-repl/ (workspaces, drawer, sentinels, REPL state, autosave, hooks, vterm panels) or invokes /debug-logs.
 ---
 
 # Debug Logs (claude-repl)
 
-The doom claude-repl module writes a single rolling log file. Use it as your first source of truth when investigating any claude-repl bug — assume it is more authoritative than your memory of what the code does.
+The doom claude-repl module writes two on-disk artifacts you can read without an Emacs session:
+
+1. A single rolling **log file** at `~/.claude/emacs/doom-claude-repl.log` (history of events).
+2. A per-workspace **memory-state snapshot** at `<project-root>/.claude/emacs/memory-state.el` (current full plist).
+
+Use them as your first source of truth when investigating any claude-repl bug — assume they are more authoritative than your memory of what the code does.
 
 ## 1. Where the log lives
 
@@ -128,9 +133,105 @@ Prefer logging:
 - **Early returns and error fallbacks** — the most common place a bug hides.
 - **Async sentinel callbacks** — log on every invocation, with the relevant state, since async paths are hardest to reason about.
 
-## 7. What NOT to do
+## 7. The per-workspace `memory-state.el` snapshot
+
+Alongside the rolling log, every workspace writes a **point-in-time dump of its full in-memory plist** to disk. This is the same data the user would see by running `SPC j h p` (`claude-repl-debug/dump-workspace`) inside Emacs — accessible to you without an Emacs session.
+
+### 7.1 Where it lives
+
+- Path: `<project-root>/.claude/emacs/memory-state.el`
+- One file per workspace, written under that workspace's `:project-dir`.
+- Auto-overwritten on every `:claude-state` or `:repl-state` change for that workspace (see `claude-repl--ws-set-claude-state` and `claude-repl--ws-set-repl-state` in `status.el`).
+- Filename constant: `claude-repl-memory-state-filename` (defined in `modules/app/claude-repl/memory-state.el`).
+- The parent directory is auto-created on first write; no rotation, no size cap (each write replaces the file).
+
+To find every snapshot on the host:
+
+```
+fd -uu memory-state.el ~/workspace ~/.config 2>/dev/null
+# or:
+find ~/workspace ~/.config -name memory-state.el -not -path '*/node_modules/*'
+```
+
+If you already know which workspace you are debugging, just read `<that-workspace-root>/.claude/emacs/memory-state.el` directly.
+
+### 7.2 File format
+
+A single readable plist sexp. Header comments at the top identify the file; the body is one `:key value` pair per line. Example shape:
+
+```elisp
+;;; -*- lexical-binding: t; -*-
+;;; claude-repl memory-state dump — auto-written by Emacs.
+;;; Mirrors `SPC j h p' / `claude-repl-debug/dump-workspace'.
+;;; Read with: (with-temp-buffer (insert-file-contents FILE) (read (current-buffer)))
+
+(:ws "DWC/feature-foo"
+ :written-at "2026-05-15T14:33:32-0400"
+ :project-dir "/path/to/worktree"
+ :claude-state :thinking
+ :repl-state :active
+ :vterm-buffer "#<buffer claude-DWC/feature-foo live>"
+ :git-proc "#<process git-status running>"
+ :ready-timer "#<timer pending>"
+ …)
+```
+
+Values that don't survive `read` round-trip — **buffers, processes, timers, cl-structs** — are pre-stringified using the same rendering as the interactive dump:
+
+- buffer → `#<buffer NAME live>` or `#<buffer NAME dead>` (note: killed buffers report `nil` as the name because Emacs nulls it on kill — the `dead` marker is the load-bearing signal)
+- process → `#<process NAME running>` or `#<process NAME exited>`
+- timer → `#<timer pending>` or `#<timer triggered>`
+- cl-struct → the pp'd struct as a trimmed string
+
+All other values (keywords, strings, numbers, plain lists, nil, t) pass through unchanged, so the whole file is valid elisp that you can `read` programmatically:
+
+```elisp
+(with-temp-buffer
+  (insert-file-contents "<root>/.claude/emacs/memory-state.el")
+  (read (current-buffer)))
+```
+
+The header `:ws` and `:written-at` keys are prepended by the writer; everything after them is the verbatim workspace plist.
+
+### 7.3 What keys you'll find
+
+Far more than the trailing `{ws=… id=… …}` log-line metadata block in §2. The full plist surface (see `core.el` `claude-repl--workspaces` docstring and the keys written via `claude-repl--ws-put` across the module) includes — non-exhaustively:
+
+- Core identity: `:project-dir`, `:ws-id`, `:name`, `:active-env`, `:bare-metal`, `:sandbox`, `:fork-session-id`, `:session-id`, `:worktree-p`, `:source-ws-name`, `:source-ws-dir`, `:priority`, `:group-key`, `:type`
+- Lifecycle state: `:claude-state`, `:repl-state`, `:claude-ready`, `:done-acked`, `:done-acked-at`, `:stop-received`, `:pending-subagents`, `:viewed`, `:flashing`, `:bogus`, `:ws-loaded`
+- Buffers/processes/timers: `:vterm-buffer`, `:input-buffer`, `:ready-timer`, `:git-proc`, `:merge-proc`
+- Git/branch state: `:git-clean`, `:branch-merged`, `:branch-merged-last-check`, `:detail-branch`, `:detail-dirty-count`, `:detail-last-commit`, `:detail-last-commit-time`, `:detail-master-ahead`, `:detail-source-ahead`
+- Merge lifecycle: `:merge-completed`, `:merge-completed-at`, `:merge-failed`, `:merge-conflict`, `:merge-queued`, `:merge-parent-dir`, `:merging`, `:merged`
+- Prompts/UI: `:pending-prompts`, `:pending-show-panels`, `:pending-initial-buffers`, `:pending-magit`, `:deferred-prompts`, `:last-prompt-text`, `:last-prompt-time`, `:last-prompt-summary`, `:last-prompt-summary-pending`, `:last-notify-time`, `:clipboard`, `:saved-tab-index`, `:fullscreen-config`, `:ai-title-cache`
+- Counters: `:prefix-counter`, `:counter`
+- State-machine flag keywords (set as `t` when active): `:active`, `:idle`, `:thinking`, `:done`, `:permission`, `:init`, `:inactive`, `:hidden`, `:dead`, `:stop-failed`
+
+If a key is absent from the file, it means it was never set on this workspace (treat it as `nil`).
+
+### 7.4 When to use it
+
+Read `memory-state.el` instead of the rolling log when:
+
+- You need to know **what state the workspace is in *right now*** — the log shows transitions, the snapshot shows the destination.
+- You need a **dirty list of timers/processes/buffers** owned by a single workspace (the trailing log metadata only carries a few of these).
+- You're cross-checking the log against ground truth — e.g. log says `claude-state -> :done`, snapshot says `:claude-state :thinking` → there's an unwritten-back transition or a sync bug.
+- The user mentions `SPC j h p` or asks "what does the dump look like for ws X" — read the file instead of asking them to run the command.
+
+Read the rolling log file (§1–§4) instead when:
+
+- You need history, ordering, or "what fired between T1 and T2".
+- You're looking for warnings, errors, sentinel callbacks, or hot-path traces — those go to the log, not the snapshot.
+
+### 7.5 Caveats
+
+- The snapshot is **only refreshed on `:claude-state` or `:repl-state` changes.** Other plist mutations (counters, pending-prompts, prompt summaries) don't trigger a write on their own — they appear in the snapshot only when the next state transition flushes the file. So the snapshot can lag for non-state fields between transitions. If you need a guaranteed-fresh dump, ask the user to run `SPC j h p`.
+- Stub workspaces (entries without `:project-dir`) have no snapshot — they appear in the log's `STUB-CREATE` lines instead.
+- A killed buffer renders as `#<buffer nil dead>` because Emacs clears `buffer-name` on kill — the `nil` is normal, not a bug.
+
+## 8. What NOT to do
 
 - Do not mutate the log file. It is append-only by the module.
+- Do not mutate `memory-state.el`. It is rewritten by Emacs on every state change; any edits will be clobbered.
 - Do not infer state by reading the live `*Messages*` buffer when the log file has the same data — the file survives session restarts and is the canonical record.
-- Do not silently rotate or truncate the file unless the user explicitly asks; some bugs need historical context.
+- Do not silently rotate or truncate the log unless the user explicitly asks; some bugs need historical context.
 - Do not skip step 5. If the log lacks coverage of the suspect code path, surface that emphatically and propose instrumentation — that IS the right next step.
