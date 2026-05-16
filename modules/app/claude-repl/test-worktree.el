@@ -452,6 +452,16 @@ Returns the full SHA of the new commit."
           (should (= new-delay 10))
           (should (= (length handled) 1)))))))
 
+(ert-deftest claude-repl-test-dispatch-workspace-command-eval ()
+  "Eval commands route to the eval handler and do not change delay."
+  (let ((handled nil))
+    (cl-letf (((symbol-function 'claude-repl--handle-eval-command)
+               (lambda (cmd) (push cmd handled))))
+      (let ((cmd '((type . "eval") (code . "(+ 1 2)"))))
+        (let ((new-delay (claude-repl--dispatch-workspace-command cmd 10)))
+          (should (= new-delay 10))
+          (should (= (length handled) 1)))))))
+
 ;;;; ---- Tests: parse-profile-mode ----
 
 (ert-deftest claude-repl-test-parse-profile-mode-nil-uses-default ()
@@ -7399,5 +7409,175 @@ workspace-name slug clean across every one-shot variant."
         (should-not (string-match-p "::SENTINEL-SUFFIX::" captured-raw))
         (should (string-match-p "::SENTINEL-SUFFIX::"
                                 captured-prefixed))))))
+
+;;;; ---- Tests: eval-code-string ----
+
+(ert-deftest claude-repl-test-eval-code-string-returns-value-string ()
+  "Successful eval populates `:value-string' with `prin1-to-string' of result."
+  (let ((result (claude-repl--eval-code-string "(+ 1 2)")))
+    (should (equal "3" (plist-get result :value-string)))
+    (should (null (plist-get result :error)))))
+
+(ert-deftest claude-repl-test-eval-code-string-captures-printed-output ()
+  "`princ' inside the form is captured into `:printed'."
+  (let ((result (claude-repl--eval-code-string "(princ \"hello\")")))
+    (should (string-match-p "hello" (plist-get result :printed)))))
+
+(ert-deftest claude-repl-test-eval-code-string-evaluates-multiple-forms ()
+  "Multiple top-level forms evaluate in order; `:value-string' tracks the last."
+  (let ((result (claude-repl--eval-code-string "(princ \"a\") (+ 10 20)")))
+    (should (equal "30" (plist-get result :value-string)))
+    (should (string-match-p "a" (plist-get result :printed)))))
+
+(ert-deftest claude-repl-test-eval-code-string-traps-error ()
+  "Errors are trapped into `:error' instead of propagating."
+  (let ((result (claude-repl--eval-code-string "(error \"boom\")")))
+    (should (null (plist-get result :value-string)))
+    (should (stringp (plist-get result :error)))
+    (should (string-match-p "boom" (plist-get result :error)))))
+
+(ert-deftest claude-repl-test-eval-code-string-error-preserves-prior-output ()
+  "When form N raises, prior forms' printed output is still in `:printed'."
+  (let ((result (claude-repl--eval-code-string "(princ \"first\") (error \"boom\")")))
+    (should (stringp (plist-get result :error)))
+    (should (string-match-p "first" (plist-get result :printed)))))
+
+(ert-deftest claude-repl-test-eval-code-string-empty-input-yields-nil-value ()
+  "Whitespace-only code yields a `nil' value string and no error."
+  (let ((result (claude-repl--eval-code-string "   ")))
+    (should (equal "nil" (plist-get result :value-string)))
+    (should (null (plist-get result :error)))))
+
+;;;; ---- Tests: eval-format-prompt ----
+
+(ert-deftest claude-repl-test-eval-format-prompt-success-includes-result ()
+  "Success path includes the `;; result:' section with the prin1 value."
+  (let ((text (claude-repl--eval-format-prompt "(+ 1 2)" nil "" "3" nil)))
+    (should (string-match-p ";; code:" text))
+    (should (string-match-p ";; result:" text))
+    (should (string-match-p "3" text))
+    (should-not (string-match-p ";; error:" text))))
+
+(ert-deftest claude-repl-test-eval-format-prompt-error-includes-error-section ()
+  "Error path omits `;; result:' and includes `;; error:' instead."
+  (let ((text (claude-repl--eval-format-prompt "(error \"boom\")" nil "" nil "boom")))
+    (should (string-match-p ";; error:" text))
+    (should (string-match-p "boom" text))
+    (should-not (string-match-p ";; result:" text))))
+
+(ert-deftest claude-repl-test-eval-format-prompt-omits-empty-printed-section ()
+  "Empty `printed' output is not echoed back as a `;; printed:' section."
+  (let ((text (claude-repl--eval-format-prompt "(+ 1 2)" nil "" "3" nil)))
+    (should-not (string-match-p ";; printed:" text))))
+
+(ert-deftest claude-repl-test-eval-format-prompt-includes-printed-when-present ()
+  "Non-empty `printed' output renders as a `;; printed:' section."
+  (let ((text (claude-repl--eval-format-prompt
+               "(princ \"hi\")" nil "hi" "\"hi\"" nil)))
+    (should (string-match-p ";; printed:" text))
+    (should (string-match-p "hi" text))))
+
+(ert-deftest claude-repl-test-eval-format-prompt-note-renders-in-header ()
+  "A non-empty `note' is appended to the header line."
+  (let ((text (claude-repl--eval-format-prompt
+               "(+ 1 2)" "warmup" "" "3" nil)))
+    (should (string-match-p "note: warmup" text))))
+
+(ert-deftest claude-repl-test-eval-format-prompt-error-header-says-error ()
+  "Error variant uses `Elisp eval ERROR' header rather than `Elisp eval result'."
+  (let ((text (claude-repl--eval-format-prompt
+               "(error \"x\")" nil "" nil "x")))
+    (should (string-match-p "Elisp eval ERROR" text))
+    (should-not (string-match-p "Elisp eval result" text))))
+
+;;;; ---- Tests: eval-truncate ----
+
+(ert-deftest claude-repl-test-eval-truncate-under-cap-returns-unchanged ()
+  "Text shorter than the cap passes through verbatim."
+  (let ((claude-repl-eval-output-max-chars 100))
+    (should (equal "short" (claude-repl--eval-truncate "short")))))
+
+(ert-deftest claude-repl-test-eval-truncate-over-cap-clips-and-annotates ()
+  "Text longer than the cap is clipped and gets a `[truncated to N chars]' marker."
+  (let* ((claude-repl-eval-output-max-chars 5)
+         (out (claude-repl--eval-truncate "abcdefghij")))
+    (should (string-prefix-p "abcde" out))
+    (should (string-match-p "truncated to 5 chars" out))))
+
+(ert-deftest claude-repl-test-eval-truncate-zero-cap-disables-truncation ()
+  "A cap of 0 returns the input unchanged regardless of length."
+  (let ((claude-repl-eval-output-max-chars 0))
+    (should (equal "abcdefghij"
+                   (claude-repl--eval-truncate "abcdefghij")))))
+
+;;;; ---- Tests: handle-eval-command ----
+
+(ert-deftest claude-repl-test-handle-eval-command-sends-result-to-workspace ()
+  "`workspace' field routes the formatted result back via `claude-repl--send'."
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'claude-repl--send)
+               (lambda (prompt ws &rest _) (push (cons ws prompt) sent))))
+      (claude-repl--handle-eval-command
+       '((type . "eval") (code . "(+ 1 2)") (workspace . "ws1"))))
+    (should (= 1 (length sent)))
+    (should (equal "ws1" (car (car sent))))
+    (should (string-match-p ";; result:" (cdr (car sent))))
+    (should (string-match-p "3" (cdr (car sent))))))
+
+(ert-deftest claude-repl-test-handle-eval-command-no-workspace-no-send ()
+  "Without `workspace', the result is computed but never sent."
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'claude-repl--send)
+               (lambda (&rest args) (push args sent))))
+      (claude-repl--handle-eval-command
+       '((type . "eval") (code . "(+ 1 2)"))))
+    (should-not sent)))
+
+(ert-deftest claude-repl-test-handle-eval-command-empty-workspace-no-send ()
+  "Empty-string `workspace' is treated as absent — no send is dispatched."
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'claude-repl--send)
+               (lambda (&rest args) (push args sent))))
+      (claude-repl--handle-eval-command
+       '((type . "eval") (code . "(+ 1 2)") (workspace . ""))))
+    (should-not sent)))
+
+(ert-deftest claude-repl-test-handle-eval-command-missing-code-skips ()
+  "Missing `code' field skips evaluation entirely — no send, no crash."
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'claude-repl--send)
+               (lambda (&rest args) (push args sent))))
+      (claude-repl--handle-eval-command
+       '((type . "eval") (workspace . "ws1"))))
+    (should-not sent)))
+
+(ert-deftest claude-repl-test-handle-eval-command-empty-code-skips ()
+  "Empty-string `code' is treated as missing — no send is dispatched."
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'claude-repl--send)
+               (lambda (&rest args) (push args sent))))
+      (claude-repl--handle-eval-command
+       '((type . "eval") (code . "   ") (workspace . "ws1"))))
+    (should-not sent)))
+
+(ert-deftest claude-repl-test-handle-eval-command-error-sends-error-prompt ()
+  "An error inside the evaluated code is reported back as the `;; error:' section."
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'claude-repl--send)
+               (lambda (prompt ws &rest _) (push (cons ws prompt) sent))))
+      (claude-repl--handle-eval-command
+       '((type . "eval") (code . "(error \"boom\")") (workspace . "ws1"))))
+    (should (= 1 (length sent)))
+    (should (string-match-p "Elisp eval ERROR" (cdr (car sent))))
+    (should (string-match-p "boom" (cdr (car sent))))))
+
+(ert-deftest claude-repl-test-handle-eval-command-note-passed-through ()
+  "Optional `note' field is echoed back in the response header."
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'claude-repl--send)
+               (lambda (prompt ws &rest _) (push (cons ws prompt) sent))))
+      (claude-repl--handle-eval-command
+       '((type . "eval") (code . "(+ 1 2)") (workspace . "ws1") (note . "tick"))))
+    (should (string-match-p "note: tick" (cdr (car sent))))))
 
 ;;; test-worktree.el ends here

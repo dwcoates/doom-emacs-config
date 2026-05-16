@@ -1834,6 +1834,174 @@ no error is raised, since a missing workspace is not actionable here."
                           ws
                           (if tail (format " (also tried tail %s)" tail) "")))))))
 
+(defcustom claude-repl-eval-output-max-chars 8000
+  "Maximum number of characters of eval output to forward to a workspace.
+The handler concatenates the elisp printed-output, return-value, and
+error message into a single send payload.  Anything longer than this
+threshold is truncated and a `\\n;; [truncated to N chars]' marker is
+appended so the receiving agent knows the output was clipped.
+
+Set to 0 to disable truncation entirely (not recommended — a runaway
+`(dotimes (i 100000) (message ...))' can otherwise dump megabytes into
+the vterm)."
+  :type 'integer
+  :group 'claude-repl)
+
+(defun claude-repl--eval-snippet (label code-string)
+  "Return CODE-STRING wrapped in a labeled fenced block under LABEL.
+Used by `claude-repl--eval-format-prompt' to embed the raw source the
+agent submitted so the response is self-contained."
+  (concat ";; " label ":\n" code-string "\n"))
+
+(defun claude-repl--eval-truncate (text)
+  "Truncate TEXT to `claude-repl-eval-output-max-chars'.
+Returns TEXT unmodified when the cap is 0 or TEXT fits within it.
+Otherwise returns a truncated copy with a `[truncated to N chars]'
+marker appended so callers know the cut happened."
+  (cond
+   ((or (null text) (not (stringp text))) (or text ""))
+   ((<= claude-repl-eval-output-max-chars 0) text)
+   ((<= (length text) claude-repl-eval-output-max-chars) text)
+   (t (concat (substring text 0 claude-repl-eval-output-max-chars)
+              (format "\n;; [truncated to %d chars]"
+                      claude-repl-eval-output-max-chars)))))
+
+(defun claude-repl--eval-format-prompt (code-string note printed value-string error-string)
+  "Format an eval-result prompt for the requesting workspace's Claude.
+CODE-STRING is the raw elisp source.  NOTE is an optional one-line
+label.  PRINTED is the captured stdout (string or nil).  VALUE-STRING
+is the `prin1-to-string' of the return value, or nil when an error
+fired.  ERROR-STRING is the `error-message-string' of the trapped
+error, or nil on success.
+
+The format is deliberately enumerated and labeled so the receiving
+agent can pattern-match on `;; code:', `;; printed:', `;; result:',
+and `;; error:' sections without ambiguity."
+  (let* ((header (if error-string
+                     "Elisp eval ERROR"
+                   "Elisp eval result"))
+         (note-suffix (if (and note (stringp note) (not (string-empty-p note)))
+                          (format " (note: %s)" note)
+                        ""))
+         (sections (list (claude-repl--eval-snippet "code" code-string))))
+    (when (and printed (not (string-empty-p printed)))
+      (push (claude-repl--eval-snippet "printed" printed) sections))
+    (cond
+     (error-string
+      (push (claude-repl--eval-snippet "error" error-string) sections))
+     (t
+      (push (claude-repl--eval-snippet "result" (or value-string "nil")) sections)))
+    (concat header note-suffix ":\n\n"
+            "```elisp\n"
+            (claude-repl--eval-truncate
+             (mapconcat #'identity (nreverse sections) "\n"))
+            "\n```")))
+
+(defun claude-repl--eval-code-string (code-string)
+  "Read every top-level form from CODE-STRING and evaluate them in order.
+Returns a plist (:printed STRING :value-string STRING-OR-NIL :error STRING-OR-NIL).
+
+Captures `princ' / `print' output via a buffer-bound `standard-output'
+so a `(princ ...)' side-effect is reflected in `:printed' rather than
+vanishing.  Note: `message' writes to the `*Messages*' buffer
+directly and is NOT captured here — callers that need to round-trip
+messages should use `princ' instead.
+
+The return value is the value of the LAST form evaluated, formatted via
+`prin1-to-string'.  A trapped error short-circuits the remaining forms
+and populates `:error' instead; partial side-effects from earlier
+forms are still reported via `:printed'."
+  (let ((printed-buf (generate-new-buffer " *claude-repl-eval-output*"))
+        (value-string nil)
+        (error-string nil)
+        (printed ""))
+    (unwind-protect
+        (progn
+          (let ((standard-output printed-buf))
+            (condition-case err
+                (let ((pos 0)
+                      (last-value nil)
+                      (len (length code-string)))
+                  (while (< pos len)
+                    (let ((parsed (read-from-string code-string pos)))
+                      (setq last-value (eval (car parsed) t))
+                      (setq pos (cdr parsed))
+                      ;; Skip trailing whitespace between forms so the next
+                      ;; `read-from-string' starts at the next form (or EOF).
+                      (while (and (< pos len)
+                                  (memq (aref code-string pos)
+                                        '(?\s ?\t ?\n ?\r)))
+                        (setq pos (1+ pos)))))
+                  (setq value-string (prin1-to-string last-value)))
+              (end-of-file
+               ;; Only fatal when nothing was successfully read — a code-string
+               ;; consisting solely of whitespace yields nil with no error.
+               (when (null value-string)
+                 (setq value-string "nil")))
+              (error
+               (setq error-string (error-message-string err)))))
+          (setq printed (with-current-buffer printed-buf (buffer-string))))
+      (kill-buffer printed-buf))
+    (list :printed printed
+          :value-string value-string
+          :error error-string)))
+
+(defun claude-repl--handle-eval-command (cmd)
+  "Handle an \"eval\" workspace command CMD.
+Reads `code' (string) from CMD, evaluates it via
+`claude-repl--eval-code-string', then — when `workspace' is a
+non-empty string — pipes the formatted result back into that
+workspace's Claude session via `claude-repl--send'.
+
+Required JSON fields:
+  - `code'     (string): the elisp source to evaluate.
+
+Optional JSON fields:
+  - `workspace' (string): return-address workspace for the result.
+                          Omit (or empty) to evaluate without sending.
+  - `note'      (string): short label echoed in the response prompt.
+
+Errors raised by the evaluated code are trapped and reported back as
+the body of the response prompt — they do NOT abort sibling commands
+in the same batch, since a bad expression from one agent must not
+affect another agent's commands in the same JSON array."
+  (let* ((code (alist-get 'code cmd))
+         (ws (alist-get 'workspace cmd))
+         (note (alist-get 'note cmd)))
+    (cond
+     ((not (stringp code))
+      (claude-repl--log nil "workspace-commands-file eval: missing/non-string code, skipping")
+      (message "[claude-repl] eval: missing/non-string code, skipping"))
+     ((string-empty-p (string-trim code))
+      (claude-repl--log ws "workspace-commands-file eval: empty code, skipping (ws=%s)" ws)
+      (message "[claude-repl] eval: empty code, skipping"))
+     (t
+      (claude-repl--log ws
+                        "workspace-commands-file eval: ws=%s note=%s code-len=%d"
+                        (or ws "nil") (or note "nil") (length code))
+      (let* ((result (claude-repl--eval-code-string code))
+             (printed (plist-get result :printed))
+             (value-string (plist-get result :value-string))
+             (error-string (plist-get result :error))
+             (prompt-text (claude-repl--eval-format-prompt
+                           code note printed value-string error-string)))
+        (cond
+         ((not (and ws (stringp ws) (not (string-empty-p ws))))
+          (claude-repl--log nil
+                            "workspace-commands-file eval: no workspace, result-len=%d not sent (error=%s)"
+                            (length prompt-text)
+                            (if error-string "yes" "no"))
+          (message "[claude-repl] eval: completed (no workspace; not sending)%s"
+                   (if error-string " — eval raised" "")))
+         (t
+          (claude-repl--log ws
+                            "workspace-commands-file eval: sending result (len=%d, error=%s) to ws=%s"
+                            (length prompt-text)
+                            (if error-string "yes" "no") ws)
+          (claude-repl--send prompt-text ws)
+          (message "[claude-repl] eval: result sent to %s%s"
+                   ws (if error-string " (eval raised)" "")))))))))
+
 (defun claude-repl--dispatch-workspace-command (cmd create-delay)
   "Dispatch a single workspace command CMD with current CREATE-DELAY.
 Returns the new create-delay value (incremented for \"create\" commands,
@@ -1860,6 +2028,9 @@ unchanged otherwise)."
       create-delay)
      ((string= type "profile")
       (claude-repl--handle-profile-command cmd)
+      create-delay)
+     ((string= type "eval")
+      (claude-repl--handle-eval-command cmd)
       create-delay)
      (t
       (claude-repl--log nil "workspace-commands-file unknown type: %s" type)
