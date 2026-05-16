@@ -213,29 +213,54 @@ Also rewrites the workspace roster snapshot
 current `:project-dir' / `:priority' for this and all live workspaces.
 The snapshot used to save only at Emacs quit, which lost the roster on
 crash; pairing it with `state-save' makes the roster crash-safe at the
-same granularity as per-project state."
+same granularity as per-project state.
+
+`:created-at' is set once — preferring the value already on the ws plist,
+then the value persisted in the existing on-disk state file, then
+`current-time' as a final fallback — so the first state-save for a
+project stamps a creation date that subsequent saves preserve.
+`:last-killed-at' is written through unchanged when set on the ws plist
+\(nuke flows populate it before calling state-save), and falls back to
+the previously-persisted value to avoid clobbering on stray saves that
+do not represent a kill."
   (let* ((root (claude-repl--ws-get ws :project-dir))
          (file (claude-repl--state-file root)))
     (claude-repl--log ws "state-save ws=%s file=%s" ws file)
     (if (null file)
         (claude-repl--log ws "state-save: no :project-dir for ws=%s, skipping" ws)
-      (let ((state (append `(:project-dir ,root
-                              :active-env ,(claude-repl--ws-get ws :active-env)
-                              :priority ,(claude-repl--ws-get ws :priority)
-                              :source-ws-dir ,(claude-repl--ws-get ws :source-ws-dir)
-                              :repl-state ,(claude-repl--ws-get ws :repl-state)
-                              :saved-tab-index ,(claude-repl--ws-get ws :saved-tab-index)
-                              :fork-session-id ,(claude-repl--ws-get ws :fork-session-id)
-                              :last-prompt-summary ,(claude-repl--ws-get ws :last-prompt-summary)
-                              :last-prompt-time ,(claude-repl--ws-get ws :last-prompt-time)
-                              :worktree-p ,(claude-repl--ws-get ws :worktree-p)
-                              :merge-completed ,(claude-repl--ws-get ws :merge-completed)
-                              :merge-completed-at ,(claude-repl--ws-get ws :merge-completed-at)
-                              :merge-failed ,(claude-repl--ws-get ws :merge-failed))
-                           (claude-repl--collect-env-state ws))))
-        (claude-repl--with-error-logging "state-save"
-          (claude-repl--write-sexp-file file state)
-          (claude-repl--log ws "state-save: write complete ws=%s file=%s" ws file))))
+      (let* ((existing (when (file-exists-p file)
+                         (condition-case err
+                             (claude-repl--read-sexp-file file)
+                           (error
+                            (claude-repl--log ws "state-save: existing read err err=%S" err)
+                            nil))))
+             (created-at (or (claude-repl--ws-get ws :created-at)
+                             (plist-get existing :created-at)
+                             (current-time)))
+             (last-killed-at (or (claude-repl--ws-get ws :last-killed-at)
+                                 (plist-get existing :last-killed-at))))
+        (claude-repl--ws-put ws :created-at created-at)
+        (when last-killed-at
+          (claude-repl--ws-put ws :last-killed-at last-killed-at))
+        (let ((state (append `(:project-dir ,root
+                                :created-at ,created-at
+                                :last-killed-at ,last-killed-at
+                                :active-env ,(claude-repl--ws-get ws :active-env)
+                                :priority ,(claude-repl--ws-get ws :priority)
+                                :source-ws-dir ,(claude-repl--ws-get ws :source-ws-dir)
+                                :repl-state ,(claude-repl--ws-get ws :repl-state)
+                                :saved-tab-index ,(claude-repl--ws-get ws :saved-tab-index)
+                                :fork-session-id ,(claude-repl--ws-get ws :fork-session-id)
+                                :last-prompt-summary ,(claude-repl--ws-get ws :last-prompt-summary)
+                                :last-prompt-time ,(claude-repl--ws-get ws :last-prompt-time)
+                                :worktree-p ,(claude-repl--ws-get ws :worktree-p)
+                                :merge-completed ,(claude-repl--ws-get ws :merge-completed)
+                                :merge-completed-at ,(claude-repl--ws-get ws :merge-completed-at)
+                                :merge-failed ,(claude-repl--ws-get ws :merge-failed))
+                             (claude-repl--collect-env-state ws))))
+          (claude-repl--with-error-logging "state-save"
+            (claude-repl--write-sexp-file file state)
+            (claude-repl--log ws "state-save: write complete ws=%s file=%s" ws file)))))
     (claude-repl--with-error-logging "state-save: snapshot"
       (when (fboundp 'claude-repl-save-workspace-snapshot)
         (claude-repl-save-workspace-snapshot)))))

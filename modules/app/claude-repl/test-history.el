@@ -1403,6 +1403,104 @@ write is the primary obligation; snapshot is the piggyback)."
     (should (equal (buffer-string) "draft text"))
     (should (= claude-repl--history-index -1))))
 
+;;;; ---- Tests: state-save :created-at / :last-killed-at ----
+
+(ert-deftest claude-repl-test-state-save-stamps-created-at-on-first-save ()
+  "state-save sets `:created-at' on the ws plist and persists it when no
+existing state file is present."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-created-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (claude-repl--state-file tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (plist-get data :created-at))
+              (should (claude-repl--ws-get "ws" :created-at))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-state-save-preserves-existing-created-at ()
+  "state-save keeps the `:created-at' written by an earlier save instead
+of stamping a fresh timestamp on every write."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-created-existing-" t))
+          (original '(22000 0 0 0)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (claude-repl--state-file tmpdir)
+             `(:project-dir ,tmpdir :created-at ,original))
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (claude-repl--state-file tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (equal (plist-get data :created-at) original))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-state-save-includes-last-killed-at ()
+  "state-save serializes `:last-killed-at' when the ws plist carries it
+\(populated by `claude-repl--nuke-one-workspace')."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-killed-" t))
+          (killed '(23000 0 0 0)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :last-killed-at killed)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (claude-repl--state-file tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (equal (plist-get data :last-killed-at) killed))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-state-save-preserves-existing-last-killed-at ()
+  "state-save carries forward `:last-killed-at' from the on-disk file when
+the ws plist has no value, so non-kill saves don't clear the field."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-killed-existing-" t))
+          (killed '(24000 0 0 0)))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file
+             (claude-repl--state-file tmpdir)
+             `(:project-dir ,tmpdir :last-killed-at ,killed))
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (claude-repl--state-file tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (equal (plist-get data :last-killed-at) killed))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-state-save-nil-last-killed-at-when-never-killed ()
+  "state-save writes `:last-killed-at' nil for projects that have never
+been killed (both the ws plist and the existing file lack the field)."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-killed-nil-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir tmpdir)
+            (claude-repl--ws-put "ws" :active-env :bare-metal)
+            (claude-repl--ws-put "ws" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws")
+            (let* ((file (claude-repl--state-file tmpdir))
+                   (data (claude-repl--read-sexp-file file)))
+              (should (null (plist-get data :last-killed-at)))))
+        (delete-directory tmpdir t)))))
+
 (provide 'test-history)
 
 ;;; test-history.el ends here
