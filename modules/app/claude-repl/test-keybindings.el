@@ -1081,6 +1081,203 @@ deletion is routed through the helper so the contract test follows."
           (should (string-match-p ":project-dir" content))))
       (kill-buffer "*claude-repl-dump*"))))
 
+;;;; ---- Tests: claude-repl--dump-plist-to-alist ----
+
+(ert-deftest claude-repl-test-dump-plist-to-alist-preserves-order ()
+  "plist-to-alist returns the (key . value) pairs in insertion order."
+  (let ((alist (claude-repl--dump-plist-to-alist
+                '(:a 1 :b 2 :c 3))))
+    (should (equal alist '((:a . 1) (:b . 2) (:c . 3))))))
+
+(ert-deftest claude-repl-test-dump-plist-to-alist-empty ()
+  "plist-to-alist returns nil for an empty plist."
+  (should (null (claude-repl--dump-plist-to-alist nil))))
+
+(ert-deftest claude-repl-test-dump-plist-to-alist-keeps-nil-values ()
+  "plist-to-alist keeps cells whose value is nil (it does not skip them)."
+  (let ((alist (claude-repl--dump-plist-to-alist '(:a nil :b 2))))
+    (should (equal alist '((:a . nil) (:b . 2))))))
+
+;;;; ---- Tests: claude-repl--format-dump-value ----
+
+(ert-deftest claude-repl-test-format-dump-value-buffer-live ()
+  "format-dump-value renders a live buffer with `live'."
+  (claude-repl-test--with-temp-buffer " *fmt-buf-live*"
+    (let* ((buf (current-buffer))
+           (s (claude-repl--format-dump-value buf)))
+      (should (string-match-p "#<buffer " s))
+      (should (string-match-p " live>" s)))))
+
+(ert-deftest claude-repl-test-format-dump-value-buffer-dead ()
+  "format-dump-value renders a killed buffer with `dead'."
+  (let* ((buf (generate-new-buffer " *fmt-buf-dead*")))
+    (kill-buffer buf)
+    (let ((s (claude-repl--format-dump-value buf)))
+      (should (string-match-p " dead>" s)))))
+
+(ert-deftest claude-repl-test-format-dump-value-string ()
+  "format-dump-value renders a string with surrounding quotes (via pp)."
+  (let ((s (claude-repl--format-dump-value "/tmp/foo")))
+    (should (string-match-p "/tmp/foo" s))))
+
+(ert-deftest claude-repl-test-format-dump-value-keyword ()
+  "format-dump-value renders a keyword unchanged."
+  (should (equal (claude-repl--format-dump-value :thinking) ":thinking")))
+
+(ert-deftest claude-repl-test-format-dump-value-nil ()
+  "format-dump-value renders nil as `nil' rather than the empty string."
+  (should (equal (claude-repl--format-dump-value nil) "nil")))
+
+;;;; ---- Tests: claude-repl--dump-partition ----
+
+(ert-deftest claude-repl-test-dump-partition-routes-known-keys ()
+  "dump-partition places keys into the section that lists them."
+  (let* ((alist '((:project-dir . "/tmp/p") (:claude-state . :idle)))
+         (sections '(("STATE" (:claude-state))
+                     ("PROJ"  (:project-dir))))
+         (result (claude-repl--dump-partition alist sections))
+         (state (cdr (assoc "STATE" result)))
+         (proj  (cdr (assoc "PROJ"  result))))
+    (should (equal state '((:claude-state . :idle))))
+    (should (equal proj  '((:project-dir . "/tmp/p"))))))
+
+(ert-deftest claude-repl-test-dump-partition-sends-unknown-to-other ()
+  "Keys not in any section land in the Other bucket."
+  (let* ((alist '((:weird . 7) (:project-dir . "/tmp/p")))
+         (sections '(("PROJ" (:project-dir))))
+         (result (claude-repl--dump-partition alist sections))
+         (other (cdr (assoc claude-repl--dump-other-section result))))
+    (should (equal other '((:weird . 7))))))
+
+(ert-deftest claude-repl-test-dump-partition-other-when-no-unknown-keys ()
+  "The Other bucket is present but empty when every key was classified."
+  (let* ((alist '((:project-dir . "/tmp/p")))
+         (sections '(("PROJ" (:project-dir))))
+         (result (claude-repl--dump-partition alist sections))
+         (other (assoc claude-repl--dump-other-section result)))
+    (should other)
+    (should (null (cdr other)))))
+
+(ert-deftest claude-repl-test-dump-partition-respects-section-key-order ()
+  "Within a section, rows follow the section's key order, not alist order."
+  (let* ((alist '((:b . 2) (:a . 1) (:c . 3)))
+         (sections '(("S" (:a :b :c))))
+         (result (claude-repl--dump-partition alist sections))
+         (rows (cdr (assoc "S" result))))
+    (should (equal rows '((:a . 1) (:b . 2) (:c . 3))))))
+
+(ert-deftest claude-repl-test-dump-partition-each-key-once ()
+  "A key listed in two sections only lands in the first one."
+  (let* ((alist '((:x . 1)))
+         (sections '(("FIRST" (:x)) ("SECOND" (:x))))
+         (result (claude-repl--dump-partition alist sections))
+         (first  (cdr (assoc "FIRST"  result)))
+         (second (cdr (assoc "SECOND" result))))
+    (should (equal first '((:x . 1))))
+    (should (null second))))
+
+;;;; ---- Tests: claude-repl-debug/dump-workspace sectioning ----
+
+(ert-deftest claude-repl-test-dump-workspace-renders-section-headers ()
+  "dump-workspace inserts the canonical section headers for populated sections."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (claude-repl--ws-put "ws1" :status :thinking)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _coll &rest _) "ws1")))
+      (claude-repl-debug/dump-workspace)
+      (with-current-buffer "*claude-repl-dump*"
+        (let ((content (buffer-string)))
+          ;; Project / Git section header is present (uniquely identifies
+          ;; via the literal title prefix).
+          (should (string-match-p "Project / Git" content))
+          ;; State section header is present.
+          (should (string-match-p "⚡ State" content))))
+      (kill-buffer "*claude-repl-dump*"))))
+
+(ert-deftest claude-repl-test-dump-workspace-title-has-title-face ()
+  "The `Workspace: <name>' line carries the `claude-repl-dump-title' face."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-face" :project-dir "/tmp/wsf")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _coll &rest _) "ws-face")))
+      (claude-repl-debug/dump-workspace)
+      (with-current-buffer "*claude-repl-dump*"
+        (goto-char (point-min))
+        (let ((pos (search-forward "ws-face")))
+          (should pos)
+          (let ((face (get-text-property (1- pos) 'face)))
+            (should (eq face 'claude-repl-dump-title)))))
+      (kill-buffer "*claude-repl-dump*"))))
+
+(ert-deftest claude-repl-test-dump-workspace-section-header-has-section-face ()
+  "Section header text carries the `claude-repl-dump-section' face."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-sec" :project-dir "/tmp/ws-sec")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _coll &rest _) "ws-sec")))
+      (claude-repl-debug/dump-workspace)
+      (with-current-buffer "*claude-repl-dump*"
+        (goto-char (point-min))
+        (let ((pos (search-forward "Project / Git")))
+          (should pos)
+          (let ((face (get-text-property (1- pos) 'face)))
+            (should (eq face 'claude-repl-dump-section)))))
+      (kill-buffer "*claude-repl-dump*"))))
+
+(ert-deftest claude-repl-test-dump-workspace-key-has-key-face ()
+  "Plist keys carry the `claude-repl-dump-key' face."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-key" :project-dir "/tmp/ws-key")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _coll &rest _) "ws-key")))
+      (claude-repl-debug/dump-workspace)
+      (with-current-buffer "*claude-repl-dump*"
+        (goto-char (point-min))
+        (let ((pos (search-forward ":project-dir")))
+          (should pos)
+          (let ((face (get-text-property (1- pos) 'face)))
+            (should (eq face 'claude-repl-dump-key)))))
+      (kill-buffer "*claude-repl-dump*"))))
+
+(ert-deftest claude-repl-test-dump-workspace-omits-empty-sections ()
+  "Sections with no matching keys are not emitted as headers."
+  (claude-repl-test--with-clean-state
+    ;; Only set keys from one section (State); other sections should be
+    ;; absent from the output.
+    (claude-repl--ws-put "ws-min" :status :thinking)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _coll &rest _) "ws-min")))
+      (claude-repl-debug/dump-workspace)
+      (with-current-buffer "*claude-repl-dump*"
+        (let ((content (buffer-string)))
+          (should     (string-match-p "⚡ State" content))
+          ;; No project/session/etc data was set, so these headers
+          ;; should not appear.
+          (should-not (string-match-p "Project / Git" content))
+          (should-not (string-match-p "🧠 Session" content))
+          (should-not (string-match-p "💬 Prompts" content))))
+      (kill-buffer "*claude-repl-dump*"))))
+
+(ert-deftest claude-repl-test-dump-workspace-unknown-key-goes-to-other ()
+  "Keys not in `claude-repl--dump-sections' are rendered under Other."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-unk" :project-dir "/tmp/ws-unk")
+    (claude-repl--ws-put "ws-unk" :totally-novel-key 42)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _coll &rest _) "ws-unk")))
+      (claude-repl-debug/dump-workspace)
+      (with-current-buffer "*claude-repl-dump*"
+        (let ((content (buffer-string)))
+          (should (string-match-p claude-repl--dump-other-section content))
+          ;; The unknown key should appear AFTER the Other header.
+          (let ((other-pos (string-match claude-repl--dump-other-section content))
+                (key-pos   (string-match ":totally-novel-key" content)))
+            (should other-pos)
+            (should key-pos)
+            (should (< other-pos key-pos)))))
+      (kill-buffer "*claude-repl-dump*"))))
+
 ;;;; ---- Tests: debug/cancel-timers (moved from core.el) ----
 
 (ert-deftest claude-repl-test-debug-cancel-timers-calls-cancel ()

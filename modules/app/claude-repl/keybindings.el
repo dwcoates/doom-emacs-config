@@ -25,6 +25,143 @@
   :type 'string
   :group 'claude-repl)
 
+;;;; Faces for `claude-repl-debug/dump-workspace' ---------------------------
+
+(defface claude-repl-dump-title
+  '((t :weight bold :height 1.6 :inherit font-lock-function-name-face))
+  "Face for the workspace title line in `claude-repl-debug/dump-workspace'."
+  :group 'claude-repl)
+
+(defface claude-repl-dump-section
+  '((t :weight bold :height 1.25 :inherit font-lock-keyword-face))
+  "Face for section headers in `claude-repl-debug/dump-workspace'."
+  :group 'claude-repl)
+
+(defface claude-repl-dump-key
+  '((t :weight bold :inherit font-lock-variable-name-face))
+  "Face for plist keys in `claude-repl-debug/dump-workspace'."
+  :group 'claude-repl)
+
+(defface claude-repl-dump-rule
+  '((t :inherit shadow))
+  "Face for the rule line beneath the title in
+`claude-repl-debug/dump-workspace'."
+  :group 'claude-repl)
+
+;;;; Section layout for `claude-repl-debug/dump-workspace' ------------------
+
+(defconst claude-repl--dump-sections
+  '(("🏷️  Identity"
+     (:name :ws-id :priority :group-key))
+    ("⚡ State"
+     (:claude-state :repl-state :status :stop-received
+      :flashing :hidden :dead :bogus :merged))
+    ("🌳 Project / Git"
+     (:project-dir :worktree-p :source-ws-dir :source-ws-name
+      :merge-parent-dir :branch-merged :branch-merged-last-check
+      :detail-branch :detail-dirty-count :detail-last-commit
+      :detail-last-commit-time :detail-master-ahead :detail-source-ahead
+      :git-clean :git-proc))
+    ("🧠 Session"
+     (:session-id :fork-session-id :vterm-buffer :active-env
+      :sandbox :bare-metal :claude-ready :ws-loaded :ready-timer))
+    ("💬 Prompts"
+     (:last-prompt-time :last-prompt-text :last-prompt-summary
+      :last-prompt-summary-pending :deferred-prompts :pending-prompts
+      :pending-subagents :clipboard))
+    ("🔔 Notifications"
+     (:done :done-acked :done-acked-at :last-notify-time))
+    ("🔀 Merge"
+     (:merge-completed :merge-completed-at :merge-conflict
+      :merge-failed :merge-proc :merge-queued :merging))
+    ("🪟 UI / Panels"
+     (:input-buffer :pending-magit :pending-show-panels
+      :pending-initial-buffers :fullscreen-config :ai-title-cache
+      :saved-tab-index))
+    ("🔢 Counters"
+     (:counter :prefix-counter)))
+  "Section layout for `claude-repl-debug/dump-workspace'.
+Each entry is (TITLE KEYS).  TITLE is the section header string (with a
+leading emoji); KEYS is the list of plist keys that belong in that
+section, in display order.  Any key present in the workspace plist that
+is not listed in any section falls through to the
+`claude-repl--dump-other-section' bucket at the end of the dump.")
+
+(defconst claude-repl--dump-other-section "📦 Other"
+  "Section header used for plist keys not classified by
+`claude-repl--dump-sections'.")
+
+(defun claude-repl--format-dump-value (val)
+  "Render VAL for the workspace dump output.
+Buffers, processes, timers, and cl-structs become readable strings;
+every other value goes through `pp-to-string' so cons cells and lists
+render as Lisp."
+  (cond
+   ((bufferp val)
+    (format "#<buffer %s %s>"
+            (buffer-name val)
+            (if (buffer-live-p val) "live" "dead")))
+   ((processp val)
+    (format "#<process %s %s>"
+            (process-name val)
+            (if (process-live-p val) "running" "exited")))
+   ((timerp val)
+    (format "#<timer %s>" (if (timer--triggered val) "triggered" "pending")))
+   ((cl-struct-p val)
+    (string-trim (pp-to-string val)))
+   (t (string-trim (pp-to-string val)))))
+
+(defun claude-repl--dump-plist-to-alist (plist)
+  "Convert PLIST to an alist of (KEY . VALUE), preserving insertion order."
+  (let (result)
+    (while plist
+      (let ((k (pop plist))
+            (v (pop plist)))
+        (push (cons k v) result)))
+    (nreverse result)))
+
+(defun claude-repl--dump-insert-row (key val)
+  "Insert one KEY/VAL row at point in the current buffer.
+KEY is rendered with `claude-repl-dump-key' face; VAL is rendered via
+`claude-repl--format-dump-value' with no face."
+  (insert "  ")
+  (insert (propertize (format "%-30s" (symbol-name key))
+                      'face 'claude-repl-dump-key))
+  (insert "  ")
+  (insert (claude-repl--format-dump-value val))
+  (insert "\n"))
+
+(defun claude-repl--dump-insert-section (title rows)
+  "Insert section TITLE followed by ROWS (an alist of (KEY . VALUE)).
+No-op when ROWS is empty so empty sections do not clutter the output."
+  (when rows
+    (insert "\n")
+    (insert (propertize title 'face 'claude-repl-dump-section))
+    (insert "\n")
+    (dolist (row rows)
+      (claude-repl--dump-insert-row (car row) (cdr row)))))
+
+(defun claude-repl--dump-partition (alist sections)
+  "Partition ALIST by SECTIONS.
+Returns a list of (TITLE . ROWS) plus a final (OTHER-TITLE . REMAINING)
+entry holding any cells whose key did not appear in SECTIONS.  Order
+within each section follows the key order in SECTIONS; OTHER preserves
+the original ALIST order."
+  (let ((remaining alist)
+        (result nil))
+    (dolist (section sections)
+      (let* ((title (car section))
+             (keys (cadr section))
+             (rows nil))
+        (dolist (k keys)
+          (let ((cell (assoc k remaining)))
+            (when cell
+              (push cell rows)
+              (setq remaining (delq cell remaining)))))
+        (push (cons title (nreverse rows)) result)))
+    (push (cons claude-repl--dump-other-section remaining) result)
+    (nreverse result)))
+
 (defun claude-repl--cons-name-state (name)
   "Return (NAME . claude-state) for workspace NAME."
   (cons name (claude-repl--ws-claude-state name)))
@@ -406,32 +543,30 @@ appended to the file regardless of the `claude-repl-debug' level."
 (defun claude-repl-debug/dump-workspace ()
   "Display the full serialized plist for a selected workspace from the hashmap.
 Prompts to select from workspaces registered in `claude-repl--workspaces',
-defaulting to the current workspace when registered."
+defaulting to the current workspace when registered.
+
+Output is organized into emoji-prefixed sections (Identity, State,
+Project / Git, Session, Prompts, Notifications, Merge, UI / Panels,
+Counters) per `claude-repl--dump-sections', with any unclassified keys
+emitted under the `Other' bucket.  Section headers and the workspace
+title are rendered with `claude-repl-dump-section' / `claude-repl-dump-title'
+faces so they stand out visually in the help buffer."
   (interactive)
   (let* ((ws (claude-repl--read-known-workspace "Dump workspace: "))
-         (plist (gethash ws claude-repl--workspaces)))
+         (plist (gethash ws claude-repl--workspaces))
+         (alist (claude-repl--dump-plist-to-alist plist))
+         (partition (claude-repl--dump-partition
+                     alist claude-repl--dump-sections)))
     (with-help-window claude-repl-dump-buffer-name
       (with-current-buffer claude-repl-dump-buffer-name
-        (insert (format "Workspace: %s\n\n" ws))
-        (let ((pl plist))
-          (while pl
-            (let* ((key (pop pl))
-                   (val (pop pl))
-                   (val-str (cond
-                             ((bufferp val)
-                              (format "#<buffer %s %s>"
-                                      (buffer-name val)
-                                      (if (buffer-live-p val) "live" "dead")))
-                             ((processp val)
-                              (format "#<process %s %s>"
-                                      (process-name val)
-                                      (if (process-live-p val) "running" "exited")))
-                             ((timerp val)
-                              (format "#<timer %s>" (if (timer--triggered val) "triggered" "pending")))
-                             ((cl-struct-p val)
-                              (pp-to-string val))
-                             (t (pp-to-string val)))))
-              (insert (format "  %-20s %s\n" key val-str)))))))))
+        (insert (propertize (format "Workspace: %s" ws)
+                            'face 'claude-repl-dump-title))
+        (insert "\n")
+        (insert (propertize (make-string 60 ?─)
+                            'face 'claude-repl-dump-rule))
+        (insert "\n")
+        (dolist (section partition)
+          (claude-repl--dump-insert-section (car section) (cdr section)))))))
 
 (defun claude-repl-debug/workspace-clean-p (ws-name)
   "Show whether workspace WS-NAME has unstaged changes to tracked files.
