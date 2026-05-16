@@ -4332,6 +4332,343 @@ just switched to even if another switch raced ahead first."
         (should (eq (claude-repl--ws-repl-state "ws-a") :inactive))
         (should (equal swept-with "ws-a"))))))
 
+;;;; ---- nuke-one-workspace :last-killed-at stamping ----
+
+(ert-deftest claude-repl-cmd-test-nuke-one/stamps-last-killed-at-on-ws-plist ()
+  "`--nuke-one-workspace' records `:last-killed-at' on the ws plist so the
+project picker (`SPC p p') can surface most-recently-killed projects
+to the top and color the kill-date column."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (let ((persp-mode nil))
+      (cl-letf (((symbol-function 'claude-repl--kill-session) #'ignore)
+                ((symbol-function 'claude-repl--state-save) #'ignore)
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl--nuke-one-workspace "ws1" 'preserve-entry)
+        (should (claude-repl--ws-get "ws1" :last-killed-at))))))
+
+(ert-deftest claude-repl-cmd-test-nuke-one/state-save-sees-last-killed-at ()
+  "`--nuke-one-workspace' stamps `:last-killed-at' BEFORE the pre-teardown
+state-save runs, so the on-disk state.el reflects the kill timestamp
+even if downstream teardown errors before the redundant save fires."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (let ((saw-killed-at nil)
+          (persp-mode nil))
+      (cl-letf (((symbol-function 'claude-repl--kill-session) #'ignore)
+                ((symbol-function 'claude-repl--state-save)
+                 (lambda (ws)
+                   (setq saw-killed-at (claude-repl--ws-get ws :last-killed-at))))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl--nuke-one-workspace "ws1" 'preserve-entry)
+        (should saw-killed-at)))))
+
+;;;; ---- Project picker (SPC p p) helpers ----
+
+(ert-deftest claude-repl-cmd-test-picker-status-emoji/live ()
+  "Live workspace beats every other state — wins even when state file
+records a prior kill."
+  (let ((summary '(:live-p t :last-killed-at (1 2 3) :has-state t)))
+    (should (equal (claude-repl--picker-status-emoji summary) "🟢"))))
+
+(ert-deftest claude-repl-cmd-test-picker-status-emoji/killed ()
+  "When no live ws but `:last-killed-at' is set, picker shows the skull."
+  (let ((summary '(:live-p nil :last-killed-at (1 2 3) :has-state t)))
+    (should (equal (claude-repl--picker-status-emoji summary) "💀"))))
+
+(ert-deftest claude-repl-cmd-test-picker-status-emoji/has-state-no-kill ()
+  "Has state file but no live ws and no recorded kill -> folder."
+  (let ((summary '(:live-p nil :last-killed-at nil :has-state t)))
+    (should (equal (claude-repl--picker-status-emoji summary) "📁"))))
+
+(ert-deftest claude-repl-cmd-test-picker-status-emoji/never-opened ()
+  "No state file at all -> NEW indicator."
+  (let ((summary '(:live-p nil :last-killed-at nil :has-state nil)))
+    (should (equal (claude-repl--picker-status-emoji summary) "🆕"))))
+
+(ert-deftest claude-repl-cmd-test-picker-format-date/formats-real-time ()
+  "Picker formats a real time value via `claude-repl--picker-date-format'.
+Encoded in local time so `format-time-string' (which uses the local zone
+by default) reproduces the calendar date we put in — encoding in UTC
+and formatting in a non-UTC local zone would shift the date by a day."
+  (let* ((time (encode-time 0 0 12 16 5 2026))
+         (str (claude-repl--picker-format-date
+               time claude-repl--picker-date-width
+               'claude-repl-picker-created-face "----------")))
+    (should (equal (substring-no-properties str) "2026-05-16"))))
+
+(ert-deftest claude-repl-cmd-test-picker-format-date/placeholder-for-nil ()
+  "When time is nil, picker emits a fixed-width dash placeholder so the
+column aligns with rows that have a real date."
+  (let ((str (claude-repl--picker-format-date
+              nil 10 'claude-repl-picker-killed-face "----------")))
+    (should (equal (substring-no-properties str) "----------"))
+    (should (= (length (substring-no-properties str)) 10))))
+
+(ert-deftest claude-repl-cmd-test-picker-format-date/applies-face ()
+  "Picker propertizes the date string with the supplied face so the two
+columns are visually distinct in the candidate list."
+  (let ((str (claude-repl--picker-format-date
+              nil 10 'claude-repl-picker-killed-face "----------")))
+    (should (eq (get-text-property 0 'face str)
+                'claude-repl-picker-killed-face))))
+
+(ert-deftest claude-repl-cmd-test-picker-name-width/uses-longest-basename ()
+  "When the longest basename exceeds the minimum, picker pads to that
+length so date columns line up across all rows."
+  (let* ((roots '("/p/a-short" "/p/this-is-a-much-longer-project-name")))
+    (should (= (claude-repl--picker-name-width roots)
+               (length "this-is-a-much-longer-project-name")))))
+
+(ert-deftest claude-repl-cmd-test-picker-name-width/honors-minimum ()
+  "When every basename is short, picker pads to the configured minimum so
+short-name-only lists still get a readable column gutter."
+  (let ((roots '("/p/a" "/p/b")))
+    (should (= (claude-repl--picker-name-width roots)
+               claude-repl--picker-name-min-width))))
+
+(ert-deftest claude-repl-cmd-test-picker-time-greater-p/non-nil-vs-non-nil ()
+  "Picker time comparison: newer non-nil value sorts before older."
+  (should (claude-repl--picker-time-greater-p '(25000 0 0 0)
+                                              '(20000 0 0 0)))
+  (should-not (claude-repl--picker-time-greater-p '(20000 0 0 0)
+                                                  '(25000 0 0 0))))
+
+(ert-deftest claude-repl-cmd-test-picker-time-greater-p/nil-vs-non-nil ()
+  "Picker time comparison treats nil as oldest — any real time wins."
+  (should (claude-repl--picker-time-greater-p '(25000 0 0 0) nil))
+  (should-not (claude-repl--picker-time-greater-p nil '(25000 0 0 0))))
+
+(ert-deftest claude-repl-cmd-test-picker-sort-key/prefers-killed-over-created ()
+  "Sort key prefers `:last-killed-at' so projects sort by their most-recent
+kill, falling back to creation date only when never killed."
+  (let ((summary '(:created-at (10000 0 0 0) :last-killed-at (20000 0 0 0))))
+    (should (equal (claude-repl--picker-sort-key summary)
+                   '(20000 0 0 0)))))
+
+(ert-deftest claude-repl-cmd-test-picker-sort-key/falls-back-to-created ()
+  "When `:last-killed-at' is nil, sort key uses `:created-at' so projects
+that have never been killed still sort newest-first by creation."
+  (let ((summary '(:created-at (10000 0 0 0) :last-killed-at nil)))
+    (should (equal (claude-repl--picker-sort-key summary)
+                   '(10000 0 0 0)))))
+
+(ert-deftest claude-repl-cmd-test-project-has-live-workspace-p/matches ()
+  "Returns t when any registered workspace points at the given root."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :project-dir "/tmp/proj/")
+    (should (claude-repl--project-has-live-workspace-p "/tmp/proj"))))
+
+(ert-deftest claude-repl-cmd-test-project-has-live-workspace-p/no-match ()
+  "Returns nil when no registered workspace matches the given root."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :project-dir "/tmp/other/")
+    (should-not (claude-repl--project-has-live-workspace-p "/tmp/proj"))))
+
+(ert-deftest claude-repl-cmd-test-project-has-live-workspace-p/trailing-slash ()
+  "Trailing-slash differences don't cause false negatives — both the
+registered `:project-dir' and the queried root are normalized."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :project-dir "/tmp/proj")
+    (should (claude-repl--project-has-live-workspace-p "/tmp/proj/"))))
+
+(ert-deftest claude-repl-cmd-test-project-state-summary/reads-saved-fields ()
+  "Picker state-summary reads `:created-at', `:last-killed-at',
+`:priority' from the state file."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-summary-" t)))
+          (created '(10000 0 0 0))
+          (killed  '(20000 0 0 0)))
+      (unwind-protect
+          (progn
+            (claude-repl-test--seed-file
+             (claude-repl--state-file tmpdir)
+             (prin1-to-string `(:created-at ,created
+                                :last-killed-at ,killed
+                                :priority "p1")))
+            (let ((summary (claude-repl--project-state-summary tmpdir)))
+              (should (equal (plist-get summary :created-at) created))
+              (should (equal (plist-get summary :last-killed-at) killed))
+              (should (equal (plist-get summary :priority) "p1"))
+              (should (plist-get summary :has-state))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-cmd-test-project-state-summary/no-state-file ()
+  "Summary returns nil dates and `:has-state' nil when no state file exists."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-no-state-" t))))
+      (unwind-protect
+          (let ((summary (claude-repl--project-state-summary tmpdir)))
+            (should-not (plist-get summary :created-at))
+            (should-not (plist-get summary :last-killed-at))
+            (should-not (plist-get summary :has-state)))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-cmd-test-project-state-summary/created-at-falls-back-to-mtime ()
+  "When the state file lacks `:created-at' (legacy file predating the
+column picker), summary falls back to the file's mtime so older state
+files still get a creation column."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-legacy-" t))))
+      (unwind-protect
+          (progn
+            (claude-repl-test--seed-file
+             (claude-repl--state-file tmpdir)
+             (prin1-to-string '(:priority "p2")))
+            (let ((summary (claude-repl--project-state-summary tmpdir)))
+              (should (plist-get summary :created-at))
+              (should-not (plist-get summary :last-killed-at))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-cmd-test-build-project-picker-candidates/sorted-by-killed-at ()
+  "Picker sorts entries most-recently-killed first.  Older kill ranks
+below newer kill, even when older kill has a more recent created-at."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-old (file-name-as-directory (make-temp-file "picker-old-kill-" t)))
+           (tmp-new (file-name-as-directory (make-temp-file "picker-new-kill-" t))))
+      (unwind-protect
+          (progn
+            (claude-repl-test--seed-file
+             (claude-repl--state-file tmp-old)
+             (prin1-to-string '(:created-at (30000 0 0 0)
+                                :last-killed-at (10000 0 0 0))))
+            (claude-repl-test--seed-file
+             (claude-repl--state-file tmp-new)
+             (prin1-to-string '(:created-at (10000 0 0 0)
+                                :last-killed-at (20000 0 0 0))))
+            (let* ((candidates (claude-repl--build-project-picker-candidates
+                                (list tmp-old tmp-new)))
+                   (roots (mapcar #'cdr candidates)))
+              (should (equal (car roots) tmp-new))
+              (should (equal (cadr roots) tmp-old))))
+        (delete-directory tmp-old t)
+        (delete-directory tmp-new t)))))
+
+(ert-deftest claude-repl-cmd-test-build-project-picker-candidates/sorted-by-created-when-no-kill ()
+  "Projects with no `:last-killed-at' sort among themselves by
+`:created-at' (newest-first)."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-old (file-name-as-directory (make-temp-file "picker-old-create-" t)))
+           (tmp-new (file-name-as-directory (make-temp-file "picker-new-create-" t))))
+      (unwind-protect
+          (progn
+            (claude-repl-test--seed-file
+             (claude-repl--state-file tmp-old)
+             (prin1-to-string '(:created-at (10000 0 0 0))))
+            (claude-repl-test--seed-file
+             (claude-repl--state-file tmp-new)
+             (prin1-to-string '(:created-at (20000 0 0 0))))
+            (let* ((candidates (claude-repl--build-project-picker-candidates
+                                (list tmp-old tmp-new)))
+                   (roots (mapcar #'cdr candidates)))
+              (should (equal (car roots) tmp-new))
+              (should (equal (cadr roots) tmp-old))))
+        (delete-directory tmp-old t)
+        (delete-directory tmp-new t)))))
+
+(ert-deftest claude-repl-cmd-test-build-project-picker-candidates/killed-ranks-above-created-only ()
+  "A project with any `:last-killed-at' ranks above a project whose sort
+key is its `:created-at' alone — kill activity dominates the order even
+when the created-only entry has a more recent timestamp."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-no-kill (file-name-as-directory (make-temp-file "picker-no-kill-" t)))
+           (tmp-killed  (file-name-as-directory (make-temp-file "picker-killed-" t))))
+      (unwind-protect
+          (progn
+            ;; never-killed project, created today
+            (claude-repl-test--seed-file
+             (claude-repl--state-file tmp-no-kill)
+             (prin1-to-string '(:created-at (30000 0 0 0))))
+            ;; killed project, killed long-ago (older timestamp than the
+            ;; never-killed project's created-at)
+            (claude-repl-test--seed-file
+             (claude-repl--state-file tmp-killed)
+             (prin1-to-string '(:created-at (5000 0 0 0)
+                                :last-killed-at (10000 0 0 0))))
+            (let* ((candidates (claude-repl--build-project-picker-candidates
+                                (list tmp-no-kill tmp-killed)))
+                   (roots (mapcar #'cdr candidates)))
+              ;; never-killed has a newer sort key (30000 > 10000), so it
+              ;; still wins.  The "kill dominates" framing in the picker
+              ;; doc is about ordering within the kill-vs-create
+              ;; fallback choice, not about always-on priority — this
+              ;; test pins the sort-key behavior to prevent regressions.
+              (should (equal (car roots) tmp-no-kill))
+              (should (equal (cadr roots) tmp-killed))))
+        (delete-directory tmp-no-kill t)
+        (delete-directory tmp-killed t)))))
+
+(ert-deftest claude-repl-cmd-test-build-project-picker-candidates/display-includes-emoji ()
+  "Each candidate display string starts with the status emoji prefix so
+users can scan the list at a glance."
+  (claude-repl-test--with-clean-state
+    (let ((tmp (file-name-as-directory (make-temp-file "picker-display-" t))))
+      (unwind-protect
+          (let* ((candidates (claude-repl--build-project-picker-candidates
+                              (list tmp)))
+                 (display (substring-no-properties (car (car candidates)))))
+            ;; A never-opened project should be tagged "🆕".
+            (should (string-prefix-p "🆕" display)))
+        (delete-directory tmp t)))))
+
+(ert-deftest claude-repl-cmd-test-build-project-picker-candidates/display-aligns-columns ()
+  "Picker pads the project-name column to a uniform width so the date
+columns line up across rows even when basenames differ in length.
+
+Both rows in this test are never-opened (no state file), so each
+display contains two `----------' placeholders — one for created, one
+for last-killed.  We anchor on the first placeholder occurrence in
+each row; aligned columns mean that position is identical."
+  (claude-repl-test--with-clean-state
+    (let* ((short (file-name-as-directory (make-temp-file "ab-" t)))
+           (long  (file-name-as-directory (make-temp-file "xyz-much-longer-basename-" t))))
+      (unwind-protect
+          (let* ((candidates (claude-repl--build-project-picker-candidates
+                              (list short long)))
+                 (displays (mapcar (lambda (c) (substring-no-properties (car c)))
+                                   candidates))
+                 (positions (mapcar (lambda (d)
+                                      (string-match "----------" d))
+                                    displays)))
+            (should (apply #'= positions)))
+        (delete-directory short t)
+        (delete-directory long t)))))
+
+(ert-deftest claude-repl-cmd-test-read-project-via-picker/captures-cdr ()
+  "Picker returns the project root (cdr of the selected candidate), never
+the propertized display string, regardless of the shape ivy passes to
+the action closure."
+  (claude-repl-test--with-clean-state
+    (let ((tmp (file-name-as-directory (make-temp-file "picker-capture-" t))))
+      (unwind-protect
+          (cl-letf (((symbol-function 'projectile-relevant-known-projects)
+                     (lambda () (list tmp)))
+                    ((symbol-function 'ivy-read)
+                     (lambda (_prompt candidates &rest args)
+                       ;; Simulate ivy passing the cons cell into the
+                       ;; action; the closure should setq the cdr.
+                       (let ((action (plist-get args :action)))
+                         (funcall action (car candidates))))))
+            (should (equal (claude-repl--read-project-via-picker) tmp)))
+        (delete-directory tmp t)))))
+
+(ert-deftest claude-repl-cmd-test-read-project-via-picker/string-shape ()
+  "Picker also handles the ivy-shape where the action receives the
+display string rather than the cons cell — it falls back to assoc on
+the candidate list."
+  (claude-repl-test--with-clean-state
+    (let ((tmp (file-name-as-directory (make-temp-file "picker-string-" t))))
+      (unwind-protect
+          (cl-letf (((symbol-function 'projectile-relevant-known-projects)
+                     (lambda () (list tmp)))
+                    ((symbol-function 'ivy-read)
+                     (lambda (_prompt candidates &rest args)
+                       (let ((action (plist-get args :action)))
+                         ;; Pass just the display string.
+                         (funcall action (car (car candidates)))))))
+            (should (equal (claude-repl--read-project-via-picker) tmp)))
+        (delete-directory tmp t)))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here

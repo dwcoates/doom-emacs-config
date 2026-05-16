@@ -1051,6 +1051,13 @@ on-disk state.el is up-to-date."
   (claude-repl--log ws "nuke-one-workspace: ENTRY ws=%s preserve-entry=%s cache=%S"
                     ws (if preserve-entry "t" "nil")
                     (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
+  ;; Stamp the kill timestamp before the pre-teardown state-save so the
+  ;; on-disk state.el reflects this kill.  The project picker
+  ;; (`claude-repl-switch-to-project') reads `:last-killed-at' to sort
+  ;; entries (most-recently-killed first) and to color the kill-date
+  ;; column.  Recorded on the ws plist so the immediately-following
+  ;; `--state-save' picks it up via `claude-repl--ws-get'.
+  (claude-repl--ws-put ws :last-killed-at (current-time))
   ;; Save first, before any teardown touches the ws plist or risks
   ;; erroring.  The teardown path also calls state-save, but wrapping
   ;; ours up front guarantees preservation even if a downstream step
@@ -2124,10 +2131,245 @@ filesystem deletions."
                    (file-in-directory-p file project-root)))
             (bound-and-true-p recentf-list)))
 
+;;;; Project picker (SPC p p)
+;;
+;; `claude-repl-switch-to-project' replaces the plain
+;; `projectile-completing-read' candidate list with a richer column view:
+;;
+;;   <emoji> <project-name padded>   <created-date>   <last-killed-date>
+;;
+;; - The emoji prefix reflects the project's workspace state at picker time
+;;   (live workspace open, has saved state but no live ws, last action was a
+;;   kill, never opened with claude-repl).
+;; - The created-date and killed-date columns share a fixed column boundary
+;;   computed from the longest project name in the candidate set, so all
+;;   rows line up.
+;; - The two date columns get distinct faces so they read at a glance.
+;; - Entries are sorted most-recently-killed first, then by creation date
+;;   when no kill is recorded — projects that need attention surface to the
+;;   top.
+
+(defface claude-repl-picker-created-face
+  '((t :inherit font-lock-comment-face))
+  "Face for the creation-date column in `claude-repl-switch-to-project'."
+  :group 'claude-repl)
+
+(defface claude-repl-picker-killed-face
+  '((t :inherit error))
+  "Face for the last-kill-date column in `claude-repl-switch-to-project'."
+  :group 'claude-repl)
+
+(defface claude-repl-picker-name-face
+  '((t :inherit default))
+  "Face for the project-name column in `claude-repl-switch-to-project'."
+  :group 'claude-repl)
+
+(defconst claude-repl--picker-date-format "%Y-%m-%d"
+  "`format-time-string' template for the picker's date columns.")
+
+(defconst claude-repl--picker-date-width 10
+  "Width of each date column in the picker (matches
+`claude-repl--picker-date-format').  Used to keep the placeholder
+\"--\" aligned with real dates.")
+
+(defconst claude-repl--picker-name-min-width 24
+  "Minimum padding width for the project-name column in the picker.
+Actual width is the max of this and the longest candidate basename.")
+
+(defconst claude-repl--picker-column-gap "   "
+  "Whitespace inserted between the picker's name and date columns.")
+
+(defun claude-repl--project-has-live-workspace-p (project-root)
+  "Return non-nil when any registered workspace points at PROJECT-ROOT.
+Compares `expand-file-name' results so trailing-slash and `~/' vs.
+absolute differences don't cause false negatives.  Returns nil for nil
+PROJECT-ROOT."
+  (when project-root
+    (let ((canonical (file-name-as-directory (expand-file-name project-root)))
+          (found nil))
+      (maphash (lambda (_ws plist)
+                 (when-let ((dir (plist-get plist :project-dir)))
+                   (when (equal (file-name-as-directory (expand-file-name dir))
+                                canonical)
+                     (setq found t))))
+               claude-repl--workspaces)
+      found)))
+
+(defun claude-repl--project-state-summary (project-root)
+  "Return a plist summarizing PROJECT-ROOT's persisted state.
+Keys: `:created-at' `:last-killed-at' `:priority' `:live-p' `:has-state'.
+
+`:created-at' falls back to the state file's mtime when the persisted
+state lacks an explicit `:created-at' (state files predating the
+column-picker rollout).  Returns nil for all date keys when no state
+file exists."
+  (let* ((state-file (and project-root
+                          (claude-repl--state-file-for-read project-root)))
+         (has-state (and state-file (file-exists-p state-file)))
+         (saved (and has-state
+                     (condition-case err
+                         (claude-repl--read-sexp-file state-file)
+                       (error
+                        (claude-repl--log nil
+                                          "picker: state-read err project=%s err=%S"
+                                          project-root err)
+                        nil))))
+         (file-mtime (and has-state
+                          (file-attribute-modification-time
+                           (file-attributes state-file))))
+         (created-at (or (plist-get saved :created-at) file-mtime))
+         (last-killed-at (plist-get saved :last-killed-at))
+         (priority (plist-get saved :priority))
+         (live-p (claude-repl--project-has-live-workspace-p project-root)))
+    (list :created-at created-at
+          :last-killed-at last-killed-at
+          :priority priority
+          :live-p live-p
+          :has-state has-state)))
+
+(defun claude-repl--picker-status-emoji (summary)
+  "Return the status-emoji prefix for a candidate with SUMMARY.
+SUMMARY is a plist from `claude-repl--project-state-summary'.
+
+  🟢 - currently has a live claude-repl workspace open
+  💀 - last recorded action was a kill/nuke
+  📁 - has saved state but no live ws and no kill recorded
+  🆕 - no state file (never opened with claude-repl)"
+  (cond ((plist-get summary :live-p)         "🟢")
+        ((plist-get summary :last-killed-at) "💀")
+        ((plist-get summary :has-state)      "📁")
+        (t                                   "🆕")))
+
+(defun claude-repl--picker-format-date (time width face placeholder)
+  "Return a propertized fixed-width date string for TIME.
+Format via `claude-repl--picker-date-format', then `truncate-string-to-width'
+PLACEHOLDER (the dashes shown when TIME is nil) to WIDTH so the column
+lines up regardless of whether TIME is set.  FACE is applied to the
+result."
+  (let ((str (if time
+                 (format-time-string claude-repl--picker-date-format time)
+               (truncate-string-to-width placeholder width 0 ?\s))))
+    (propertize str 'face face)))
+
+(defun claude-repl--picker-name-width (project-roots)
+  "Return the padding width to use for the project-name column.
+Max of `claude-repl--picker-name-min-width' and the longest basename
+across PROJECT-ROOTS so every row's date columns start at the same
+character position."
+  (let ((max-basename
+         (apply #'max 0
+                (mapcar (lambda (p)
+                          (length (file-name-nondirectory
+                                   (directory-file-name p))))
+                        project-roots))))
+    (max claude-repl--picker-name-min-width max-basename)))
+
+(defun claude-repl--picker-sort-key (summary)
+  "Return the `:last-killed-at' time for SUMMARY, or its `:created-at'.
+Used as the sort key so most-recently-killed projects surface first, with
+never-killed projects falling back to creation-date order (also most-recent
+first).  Returns nil when neither timestamp is available; callers treat
+nil keys as oldest."
+  (or (plist-get summary :last-killed-at)
+      (plist-get summary :created-at)))
+
+(defun claude-repl--picker-time-greater-p (a b)
+  "Compare two `current-time'-shaped values: non-nil A newer than nil B."
+  (cond ((and a b) (time-less-p b a))
+        (a t)
+        (t nil)))
+
+(defun claude-repl--build-project-picker-candidates (project-roots)
+  "Return a sorted alist of (display-string . project-root) for PROJECT-ROOTS.
+
+Each entry's display string prefixes a status emoji, then a name column
+padded to a width derived from the longest basename, then two date
+columns (creation date, last kill/nuke date) separated by
+`claude-repl--picker-column-gap'.  Empty date placeholders keep the
+columns aligned across all rows.
+
+Sort order: most-recently-killed first; never-killed projects sort by
+creation date (most-recent first).  This is the input
+`projectile-completing-read' / `ivy-read' receives."
+  (let* ((name-width (claude-repl--picker-name-width project-roots))
+         (entries (mapcar
+                   (lambda (root)
+                     (let* ((basename (file-name-nondirectory
+                                       (directory-file-name root)))
+                            (summary (claude-repl--project-state-summary root)))
+                       (list :root root
+                             :basename basename
+                             :summary summary)))
+                   project-roots))
+         (sorted (sort entries
+                       (lambda (a b)
+                         (claude-repl--picker-time-greater-p
+                          (claude-repl--picker-sort-key (plist-get a :summary))
+                          (claude-repl--picker-sort-key (plist-get b :summary)))))))
+    (mapcar
+     (lambda (entry)
+       (let* ((root (plist-get entry :root))
+              (basename (plist-get entry :basename))
+              (summary (plist-get entry :summary))
+              (emoji (claude-repl--picker-status-emoji summary))
+              (name-padded
+               (propertize
+                (truncate-string-to-width basename name-width 0 ?\s)
+                'face 'claude-repl-picker-name-face))
+              (created (claude-repl--picker-format-date
+                        (plist-get summary :created-at)
+                        claude-repl--picker-date-width
+                        'claude-repl-picker-created-face
+                        "----------"))
+              (killed (claude-repl--picker-format-date
+                       (plist-get summary :last-killed-at)
+                       claude-repl--picker-date-width
+                       'claude-repl-picker-killed-face
+                       "----------"))
+              (display (concat emoji " "
+                               name-padded
+                               claude-repl--picker-column-gap
+                               created
+                               claude-repl--picker-column-gap
+                               killed)))
+         (cons display root)))
+     sorted)))
+
+(defun claude-repl--read-project-via-picker ()
+  "Prompt for a project root with the rich column picker.
+Returns the selected project root path (the cdr of the matched
+candidate) — never the propertized display string.  Uses `ivy-read' when
+available (it preserves text-property faces in the candidate list) and
+falls back to `completing-read'.
+
+Captures the choice via the action closure rather than `ivy-read''s
+return value because ivy's return shape for cons-cell candidates varies
+across versions (sometimes the cons, sometimes the car); the action
+sees `c' in a consistent shape so we can normalize once."
+  (let* ((roots (projectile-relevant-known-projects))
+         (candidates (claude-repl--build-project-picker-candidates roots))
+         (selected nil))
+    (if (fboundp 'ivy-read)
+        (ivy-read "Switch to project: " candidates
+                  :action (lambda (c)
+                            (setq selected (cond ((consp c) (cdr c))
+                                                 ((stringp c)
+                                                  (cdr (assoc c candidates)))
+                                                 (t c))))
+                  :require-match t
+                  :caller 'claude-repl-switch-to-project)
+      (let* ((choice (completing-read "Switch to project: "
+                                      (mapcar #'car candidates)
+                                      nil t))
+             (hit (assoc choice candidates)))
+        (setq selected (and hit (cdr hit)))))
+    selected))
+
 (defun claude-repl-switch-to-project (&optional project)
   "Switch to PROJECT and hydrate the workspace's priority badge.
 PROJECT is a project root path; when nil, prompt via
-`projectile-completing-read'.
+`claude-repl--read-project-via-picker' (rich column view sorted by
+last-kill / creation date).
 
 Switches via `projectile-switch-project-by-name' (which fires Doom's
 `+workspaces-switch-to-project-h' to create/activate the persp keyed
@@ -2144,15 +2386,14 @@ from `claude-repl--establish-workspace', which is a snapshot-restore
 path that bypasses the Doom hook to preserve the snapshot's exact ws
 name."
   (interactive)
-  (let* ((project (or project
-                      (projectile-completing-read "Switch to project: "
-                                                  (projectile-relevant-known-projects)))))
-    (projectile-switch-project-by-name project)
-    (when-let ((recent-file (claude-repl--most-recent-project-file project)))
-      (when (file-exists-p recent-file)
-        (find-file recent-file)))
-    (claude-repl--hydrate-priority-from-state project)
-    (claude-repl--flash-current-tab)))
+  (let ((project (or project (claude-repl--read-project-via-picker))))
+    (when project
+      (projectile-switch-project-by-name project)
+      (when-let ((recent-file (claude-repl--most-recent-project-file project)))
+        (when (file-exists-p recent-file)
+          (find-file recent-file)))
+      (claude-repl--hydrate-priority-from-state project)
+      (claude-repl--flash-current-tab))))
 
 ;;;; Workspace cycling (hide-mode aware)
 
