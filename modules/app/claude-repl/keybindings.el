@@ -216,8 +216,12 @@ before invoking `+workspace/kill'."
 (defun claude-repl--read-known-workspace (prompt)
   "Prompt for a workspace registered in `claude-repl--workspaces'.
 Defaults to the current workspace when it is registered (so RET picks
-the obvious target).  Signals `user-error' when no workspaces exist."
-  (let* ((known (hash-table-keys claude-repl--workspaces))
+the obvious target).  Signals `user-error' when no workspaces exist.
+
+Filters out tombstoned entries via `claude-repl--live-ws-names' — a
+nuked workspace's identity record survives in the hash for
+`--ws-dir' callers, but it must not surface in interactive pickers."
+  (let* ((known (claude-repl--live-ws-names))
          (current (and (fboundp '+workspace-current-name)
                        (+workspace-current-name)))
          (default (and current (member current known) current)))

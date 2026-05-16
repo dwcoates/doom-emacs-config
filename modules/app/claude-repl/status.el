@@ -1512,7 +1512,9 @@ permitted (rare in practice); each tracks its own snapshot and
 finalize, and the last to finalize clears the flag harmlessly."
   (claude-repl--poll-workspace-notifications)
   (setq claude-repl--update-tick-counter (1+ claude-repl--update-tick-counter))
-  (let* ((ws-names (hash-table-keys claude-repl--workspaces))
+  ;; Filter to live workspaces only — tombstoned entries have no
+  ;; vterm/process to probe and would burn git status calls for no UI.
+  (let* ((ws-names (claude-repl--live-ws-names))
          (n (length ws-names))
          (do-git-p (zerop (mod claude-repl--update-tick-counter
                                claude-repl-state-git-tick-modulus)))

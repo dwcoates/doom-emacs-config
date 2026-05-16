@@ -1335,7 +1335,7 @@ applies the same teardown as `claude-repl-nuke-workspace' to each.
 Persisted state.el for each project is preserved.
 Prompts once with the count before proceeding."
   (interactive)
-  (let* ((known (hash-table-keys claude-repl--workspaces))
+  (let* ((known (claude-repl--live-ws-names))
          (count (length known)))
     (unless known (user-error "No claude-repl workspaces registered"))
     (unless (y-or-n-p (format "Nuke ALL %d claude-repl workspace(s)? This kills processes and buffers but preserves on-disk state. "
@@ -1413,7 +1413,7 @@ that were actually killed (useful for tests)."
                       (lambda (ws)
                         (or (equal ws current)
                             (not (eq (claude-repl--ws-repl-state ws) :hidden))))
-                      (hash-table-keys claude-repl--workspaces))))
+                      (claude-repl--live-ws-names))))
     (claude-repl--log current
                       "sweep-hidden-workspaces: except=%s candidates=%S"
                       current candidates)
@@ -1614,15 +1614,26 @@ current `(NAME :project-dir DIR)' plist shape."
            (t (error "claude-repl: malformed snapshot entry: %S" entry))))))
 
 (defun claude-repl--collect-snapshot-entries ()
-  "Return a list of (NAME :project-dir DIR) entries from `claude-repl--workspaces'.
-Includes every workspace whose plist has a non-nil `:project-dir'.
-`:priority' is deliberately NOT included — it lives in each project's
-`<root>/.claude/emacs/state.el' so the roster doesn't become a second
-source of truth."
+  "Return a list of (NAME :project-dir DIR [:nuked-at TIME]) entries.
+Sourced from `claude-repl--workspaces'.  Includes every workspace
+whose plist has a non-nil `:project-dir'.  `:priority' is deliberately
+NOT included — it lives in each project's `<root>/.claude/emacs/state.el'
+so the roster doesn't become a second source of truth.
+
+Tombstoned entries (`:nuked-at' set) ARE included so the tombstone
+survives across Emacs restart — otherwise a nuked workspace's identity
+record would resurrect as live on next load.  Live entries omit
+`:nuked-at' entirely so the on-disk format stays minimal for the common
+case."
   (let ((entries (make-hash-table :test 'equal)))
-    (maphash (lambda (ws _plist)
-               (when-let ((dir (claude-repl--ws-get ws :project-dir)))
-                 (puthash ws (list :project-dir dir) entries)))
+    (maphash (lambda (ws plist)
+               (when-let ((dir (plist-get plist :project-dir)))
+                 (let ((tomb (plist-get plist :nuked-at)))
+                   (puthash ws
+                            (if tomb
+                                (list :project-dir dir :nuked-at tomb)
+                              (list :project-dir dir))
+                            entries))))
              claude-repl--workspaces)
     (let (snapshot)
       (maphash (lambda (ws plist) (push (cons ws plist) snapshot))
@@ -1902,6 +1913,12 @@ Each call:
     (when-let ((recent-file (claude-repl--most-recent-project-file dir)))
       (when (file-exists-p recent-file)
         (find-file recent-file)))
+    ;; Wake any pre-existing tombstone before re-asserting identity keys —
+    ;; an `--establish-workspace' call is the canonical resurrection path
+    ;; for snapshot-loaded entries that may have been tombstoned in a prior
+    ;; session.  Clearing `:nuked-at' first keeps `--ws-live-p' coherent
+    ;; with the post-establish state.
+    (claude-repl--ws-put ws :nuked-at nil)
     (claude-repl--ws-put ws :project-dir dir)
     (when (fboundp 'claude-repl--hydrate-priority-from-state)
       (claude-repl--hydrate-priority-from-state dir))
@@ -2244,9 +2261,27 @@ Returns to the workspace that was active when the load began."
          (saved-mq (plist-get parsed :merge-queue)))
     (unless snapshot
       (user-error "No workspace snapshot at %s" file))
-    (let ((queue (mapcar #'claude-repl--snapshot-entry-normalize snapshot))
-          (origin-ws (and (fboundp '+workspace-current-name)
-                          (ignore-errors (+workspace-current-name)))))
+    (let* ((normalized (mapcar #'claude-repl--snapshot-entry-normalize snapshot))
+           ;; Partition: tombstoned entries (`:nuked-at' present) are
+           ;; identity-only records — restore them directly to the hash
+           ;; without queueing them for establish (which would create a
+           ;; persp + start claude for a workspace the user already
+           ;; nuked).  Live entries follow the original establish queue.
+           (tombstones (cl-remove-if-not
+                        (lambda (e) (plist-get (cdr e) :nuked-at))
+                        normalized))
+           (queue (cl-remove-if
+                   (lambda (e) (plist-get (cdr e) :nuked-at))
+                   normalized))
+           (origin-ws (and (fboundp '+workspace-current-name)
+                           (ignore-errors (+workspace-current-name)))))
+      (dolist (entry tombstones)
+        (let ((ws (car entry))
+              (plist (cdr entry)))
+          (claude-repl--ws-put ws :project-dir (plist-get plist :project-dir))
+          (claude-repl--ws-put ws :nuked-at (plist-get plist :nuked-at))
+          (claude-repl--log ws "snapshot-load: restored tombstone ws=%s dir=%s"
+                            ws (plist-get plist :project-dir))))
       (setq claude-repl--snapshot-load-state
             (list :queue queue
                   :origin origin-ws
@@ -2432,6 +2467,9 @@ through `--initialize-ws-env' for merged entries)."
                           nil)))))
       (claude-repl--log ws "register-merged: ws=%s dir=%s saved=%s"
                         ws dir (if saved "yes" "no"))
+      ;; Merged workspaces are a re-registration path; clear any prior
+      ;; tombstone so `--ws-live-p' agrees the entry is back in play.
+      (claude-repl--ws-put ws :nuked-at nil)
       (claude-repl--ws-put ws :project-dir dir)
       (claude-repl--ws-put ws :merge-completed t)
       (when saved

@@ -217,6 +217,11 @@ state-save.  Callers already guard on `claude-repl--claude-running-p'."
                       ws root (if saved "yes" "no")
                       (if project-dir-hint "yes" "no")
                       (or active-env-hint "nil"))
+    ;; Clear any pre-existing `:nuked-at' tombstone before writing the
+    ;; identity keys below.  A workspace being re-initialized is, by
+    ;; definition, live again; leaving the tombstone in place would let
+    ;; `claude-repl--ws-live-p' return nil right after a successful init.
+    (claude-repl--ws-put ws :nuked-at nil)
     (claude-repl--ws-put ws :project-dir
                          (if saved
                              (claude-repl--path-canonical (plist-get saved :project-dir))

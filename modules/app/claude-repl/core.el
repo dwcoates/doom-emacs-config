@@ -532,25 +532,72 @@ producer can be identified without first turning debug logging on."
          "ws-put: STUB-CREATE ws=%s key=%s val=%S — entry created without :project-dir (will appear under drawer \"(no repo)\" bucket). caller-trace=%s"
          (list ws key val trace))))))
 
-(defun claude-repl--ws-del (ws)
-  "Remove all state for workspace WS.
-Logs the deletion (and whether WS had a hash entry to remove) so nuke
-flows can be correlated with the precise moment per-workspace state
-disappears.
+(defconst claude-repl--ws-runtime-keys
+  '(:claude-state :repl-state :vterm-buffer :input-buffer :vterm-status
+    :ready-timer :git-proc :flashing :pending-subagents :pending-show-panels
+    :fork-session-id :fullscreen-config :active-env :sandbox :bare-metal
+    :deferred-input-queue :done-ack :permission-prompt-active
+    :done-ack-pending :source-ws-name)
+  "Plist keys cleared by `claude-repl--ws-del' when tombstoning a workspace.
+Anything not in this list is treated as identity/historical and survives
+the tombstone — notably `:project-dir', `:created-at', `:last-killed-at',
+`:priority', `:worktree-p', `:source-ws-dir', `:ws-id', and the
+`:merge-completed*' family.  Preserving `:project-dir' across tombstone
+is what lets `claude-repl--ws-dir' callers (magit-status, async git,
+ws-id hashing) keep working on a persp that outlives its claude-repl
+session — the failure mode that previously surfaced as
+`no :project-dir for workspace X' errors after a nuke.")
 
-Sweeps peers' cached `:source-ws-name' (populated by the drawer's
-`claude-repl-drawer--source-ws-name' fast-path) so a deleted WS can
-never be returned as a valid parent name — a stale cache pointing at
-WS would mis-route tree-flattening if a new workspace named WS later
-exists at a different `:project-dir'.  Runs before `remhash' so the
-sweep still sees the canonical workspace set."
+(defun claude-repl--ws-live-p (ws)
+  "Return non-nil iff WS is a live (non-tombstoned) registered workspace.
+A workspace is live when it has a hash entry AND no `:nuked-at'
+tombstone marker.  The single liveness predicate used by every hash
+iterator that previously relied on the implicit `presence == live'
+invariant (drawer, picker, periodic state updater, reverse-lookup) so
+tombstoned entries don't surface in any UI/runtime path."
+  (and (gethash ws claude-repl--workspaces)
+       (null (claude-repl--ws-get ws :nuked-at))))
+
+(defun claude-repl--live-ws-names ()
+  "Return the list of live workspace names (hash keys minus tombstones).
+Single helper for callers that previously did
+`(hash-table-keys claude-repl--workspaces)' as a stand-in for `live
+workspaces' — that idiom now over-includes tombstones, so route
+through this filter instead."
+  (cl-remove-if-not #'claude-repl--ws-live-p
+                    (hash-table-keys claude-repl--workspaces)))
+
+(defun claude-repl--ws-del (ws)
+  "Tombstone workspace WS instead of removing its hash entry.
+Stamps `:nuked-at' with the current time, clears every key in
+`claude-repl--ws-runtime-keys' (vterm buffer / proc refs, timers,
+session-bound state), and preserves identity/historical keys
+(`:project-dir', `:created-at', `:last-killed-at', `:priority',
+`:worktree-p', `:source-ws-dir', `:ws-id', merge metadata).  The entry
+remains in `claude-repl--workspaces' so `claude-repl--ws-dir' and
+reverse-lookups still resolve, but `claude-repl--ws-live-p' returns
+nil and every filtered iterator (drawer, picker, periodic updater)
+ignores the entry — preserving the prior UX of `nuke removes the
+workspace from view' without destroying the identity record.
+
+Sweeps peers' cached `:source-ws-name' so a tombstoned WS can never be
+returned as a valid parent name.  `:last-killed-at' is bumped here too
+so the picker's sort-by-last-killed sees this tombstone immediately.
+
+No-op (beyond the log line) when WS has no hash entry — the bare ws-del
+log line preserves the pre-existing diagnostic shape."
   (let ((had-entry (not (null (gethash ws claude-repl--workspaces)))))
-    (claude-repl--log ws "ws-del: ws=%s had-entry=%s" ws (if had-entry "t" "nil"))
+    (claude-repl--log ws "ws-del: ws=%s had-entry=%s (tombstone)"
+                      ws (if had-entry "t" "nil"))
     (maphash (lambda (peer plist)
                (when (equal (plist-get plist :source-ws-name) ws)
                  (claude-repl--ws-put peer :source-ws-name nil)))
              claude-repl--workspaces)
-    (remhash ws claude-repl--workspaces)))
+    (when had-entry
+      (dolist (key claude-repl--ws-runtime-keys)
+        (claude-repl--ws-put ws key nil))
+      (claude-repl--ws-put ws :last-killed-at (current-time))
+      (claude-repl--ws-put ws :nuked-at (current-time)))))
 
 (defun claude-repl--active-inst (ws)
   "Return the active `claude-repl-instantiation' for workspace WS.

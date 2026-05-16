@@ -463,19 +463,23 @@ windows."
 ;;;; Sorting + selection helpers --------------------------------------------
 
 (defun claude-repl-drawer--visible-workspace-keys ()
-  "Return workspace keys from `claude-repl--workspaces' minus the nil perspective.
+  "Return live workspace keys from `claude-repl--workspaces' minus the nil persp.
 Filters any key whose name (or bare name) equals `persp-nil-name'
 \(default \"none\") so the persp-mode sentinel never surfaces in the
 drawer.  Workspace creation already refuses bare names that collide
 with `persp-nil-name', but the sentinel can still leak in via stray
-status syncs — this is the drawer-side safety net so it never renders."
+status syncs — this is the drawer-side safety net so it never renders.
+
+Also filters out tombstoned entries (`:nuked-at' set) so nuked
+workspaces don't linger as drawer ghosts despite their identity
+records surviving in the hash."
   (let ((nil-name (and (boundp 'persp-nil-name) persp-nil-name)))
     (cl-remove-if
      (lambda (ws)
        (and nil-name
             (or (equal ws nil-name)
                 (equal (claude-repl--bare-workspace-name ws) nil-name))))
-     (hash-table-keys claude-repl--workspaces))))
+     (claude-repl--live-ws-names))))
 
 (defun claude-repl-drawer--workspace-hidden-p (ws)
   "Return non-nil if workspace WS is in the `:hidden' repl-state."
@@ -555,11 +559,16 @@ build itself) keep the original semantics.")
   "Return a fresh hash table mapping canonical `:project-dir' → ws name.
 One `maphash' over `claude-repl--workspaces' with one
 `claude-repl--path-canonical' (i.e. `file-truename') per workspace.
-Total cost O(N); see `claude-repl-drawer--dir->name-map' for context."
+Total cost O(N); see `claude-repl-drawer--dir->name-map' for context.
+
+Skips tombstoned entries (`:nuked-at' set) so a nuked workspace's
+preserved `:project-dir' cannot shadow a live workspace that later
+resolves at the same canonical path."
   (let ((map (make-hash-table :test 'equal)))
     (maphash (lambda (ws plist)
                (when-let ((dir (plist-get plist :project-dir)))
-                 (puthash (claude-repl--path-canonical dir) ws map)))
+                 (unless (plist-get plist :nuked-at)
+                   (puthash (claude-repl--path-canonical dir) ws map))))
              claude-repl--workspaces)
     map))
 

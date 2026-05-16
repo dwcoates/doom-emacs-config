@@ -29,6 +29,31 @@ New code added to the claude-repl module must include instrumentation via `claud
 
 **Instrument every new or changed code path.** Skip only for "extremely hot" paths — code that fires more than ~once per second across all workspaces (per-keystroke handlers, per-timer-tick callbacks, redisplay hooks, char-output filters) where the file-write itself would multiply log volume and bury other events. For merely-frequent-but-load-bearing paths, use `claude-repl--log-verbose` (echo-gated, always file-written) instead of omitting the log. Default to logging; "no log" is the harder choice and warrants a one-line comment naming the firing frequency and why instrumentation would be counterproductive.
 
+## Debugging skills: when to use each
+
+The doom-claude-repl ecosystem ships several Claude Code skills for debugging. Pick by the *kind* of evidence you need.
+
+- `/debug-logs` — read history that already exists.
+  - Use for any claude-repl logic/state bug whose timestamp you can pin down.
+  - Reads `~/.claude/emacs/doom-claude-repl.log` and per-workspace `memory-state.el` snapshots.
+  - First stop for reproducible bugs originating in `modules/app/claude-repl/`.
+
+- `/workspace-eval` — inspect or mutate live editor state by sending elisp to the running Emacs.
+  - Use when you need a value, predicate, or state inspection not captured by any logger.
+  - Use to dump `*Messages*` to disk when the bug is signaled by 3rd-party output that the claude-repl log does NOT capture (magit/transient/doom-core warnings, byte-compile errors during refactor or dep bumps, package-init failures). Dump snippet is documented in the `debug-logs` skill §9.
+  - Use to drive a specific elisp snippet during a profiling session.
+
+- `/profile` — capture a fresh sample with auto-stop.
+  - Use when the symptom is performance (slow, hitching, hot path suspected).
+  - Schedules a wakeup so the profiler stops automatically; analysis lands as a follow-up message.
+
+- `/workspace-profile` — manual profiler toggle.
+  - Use when you want to start/stop on your own cadence rather than time-boxed.
+
+Rule of thumb: read first (`/debug-logs`), then inspect live (`/workspace-eval`), then measure (`/profile`).
+
+When build or compilation errors surface during refactor or dep-bump work, the failing output typically lives in `*Messages*` — not in the claude-repl log file. Use `/workspace-eval` to dump `*Messages*` (snippet in `debug-logs` §9), then grep the dump for the failure.
+
 ## No Silent Fallbacks — Fail Hard on Invariant Violations
 
 **ABSOLUTE RULE: Do not introduce ANY "fallback" behavior.** Under no circumstances — without **explicit, per-case permission from the user**, and only when the fallback is *absolutely* necessary — may code fall back to an alternative value, default, or code path when the primary input/lookup/precondition is missing or fails. **Always** prefer a loud error and a hard failure. Assume the answer is "no fallback" and propose the failure mode to the user; wait for explicit approval before writing any fallback. Do not suggest a fallback unless asked, and do not smuggle one in under names like "default", "graceful degradation", "sensible behavior when …", or "keep existing callers working".

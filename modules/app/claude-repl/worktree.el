@@ -3500,9 +3500,13 @@ returns nil when those fail.  Otherwise runs `git merge-base
           (car branches) (cdr branches)))))
 
 (defun claude-repl--ws-name-for-dir (dir)
-  "Return the workspace name whose `:project-dir' is canonical-equal to DIR, or nil.
+  "Return the live workspace name whose `:project-dir' is canonical-equal to DIR, or nil.
 Reverse lookup over `claude-repl--workspaces'.  First match wins —
-canonical paths are unique per workspace by construction."
+canonical paths are unique per LIVE workspace by construction.
+
+Skips tombstoned entries (`:nuked-at' set) so a previously-nuked
+workspace's preserved `:project-dir' cannot shadow a live workspace
+that subsequently registers at the same canonical path."
   (when dir
     (let ((canon (claude-repl--path-canonical dir))
           (result nil))
@@ -3510,6 +3514,7 @@ canonical paths are unique per workspace by construction."
                  (unless result
                    (let ((wd (plist-get plist :project-dir)))
                      (when (and wd
+                                (null (plist-get plist :nuked-at))
                                 (string= (claude-repl--path-canonical wd)
                                          canon))
                        (setq result ws)))))
