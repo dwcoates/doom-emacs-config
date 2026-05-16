@@ -2427,7 +2427,8 @@ kill so the workspace can be re-opened with its identity intact."
             (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
             (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
             (claude-repl-save-workspace-snapshot)
-            (let ((data (claude-repl--read-sexp-file snapshot-file)))
+            (let ((data (plist-get (claude-repl--read-workspace-snapshot snapshot-file)
+                                   :workspaces)))
               (should (= 2 (length data)))
               (should (equal (plist-get (cdr (assoc "ws1" data)) :project-dir) "/tmp/ws1"))
               (should (equal (plist-get (cdr (assoc "ws2" data)) :project-dir) "/tmp/ws2"))))
@@ -2442,7 +2443,8 @@ kill so the workspace can be re-opened with its identity intact."
             (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
             (claude-repl--ws-put "ws2" :vterm-buffer nil)
             (claude-repl-save-workspace-snapshot)
-            (let ((data (claude-repl--read-sexp-file snapshot-file)))
+            (let ((data (plist-get (claude-repl--read-workspace-snapshot snapshot-file)
+                                   :workspaces)))
               (should (= 1 (length data)))
               (should (equal (plist-get (cdr (assoc "ws1" data)) :project-dir) "/tmp/ws1"))
               (should-not (assoc "ws2" data))))
@@ -2466,7 +2468,8 @@ safety check after a user confirmation."
             (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
             (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) t)))
               (claude-repl-update-workspace-snapshot))
-            (let ((data (claude-repl--read-sexp-file snapshot-file)))
+            (let ((data (plist-get (claude-repl--read-workspace-snapshot snapshot-file)
+                                   :workspaces)))
               (should (= 1 (length data)))
               (should (equal (plist-get (cdr (assoc "ws1" data)) :project-dir) "/tmp/ws1"))))
         (delete-file snapshot-file)))))
@@ -2485,8 +2488,9 @@ confirmation, leaving the on-disk file untouched."
             (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) nil)))
               (should-error (claude-repl-update-workspace-snapshot)
                             :type 'user-error))
-            ;; File contents are unchanged.
-            (let ((data (claude-repl--read-sexp-file snapshot-file)))
+            ;; File contents are unchanged — still the legacy seed layout.
+            (let ((data (plist-get (claude-repl--read-workspace-snapshot snapshot-file)
+                                   :workspaces)))
               (should (= 2 (length data)))))
         (delete-file snapshot-file)))))
 
@@ -2506,7 +2510,8 @@ roster is at least as large as the on-disk one."
                        (lambda (_prompt) (setq prompted t) t)))
               (claude-repl-update-workspace-snapshot))
             (should-not prompted)
-            (let ((data (claude-repl--read-sexp-file snapshot-file)))
+            (let ((data (plist-get (claude-repl--read-workspace-snapshot snapshot-file)
+                                   :workspaces)))
               (should (= 2 (length data)))))
         (delete-file snapshot-file)))))
 
@@ -3031,7 +3036,8 @@ state file (`<root>/.claude/emacs/state.el') is the authoritative source."
             (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
             (claude-repl--ws-put "ws-a" :priority "p1")
             (claude-repl-save-workspace-snapshot)
-            (let* ((data (claude-repl--read-sexp-file snapshot-file))
+            (let* ((data (plist-get (claude-repl--read-workspace-snapshot snapshot-file)
+                                    :workspaces))
                    (entry (assoc "ws-a" data)))
               (should entry)
               (should (equal (plist-get (cdr entry) :project-dir) "/tmp/a"))
@@ -3039,7 +3045,10 @@ state file (`<root>/.claude/emacs/state.el') is the authoritative source."
         (delete-file snapshot-file)))))
 
 (ert-deftest claude-repl-cmd-test-save-workspace-snapshot/one-entry-per-line ()
-  "Save writes each workspace entry on its own line for human-readable diffs."
+  "Save writes each workspace entry on its own line for human-readable diffs.
+The current format wraps entries in a `:workspaces' key inside a top-level
+plist that also carries `:merge-queue'; the workspace list portion still
+puts one entry per line so per-workspace diffs stay tight."
   (claude-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "claude-snap-")))
       (unwind-protect
@@ -3051,16 +3060,210 @@ state file (`<root>/.claude/emacs/state.el') is the authoritative source."
             (let* ((raw (with-temp-buffer
                           (insert-file-contents snapshot-file)
                           (buffer-string)))
-                   (lines (split-string raw "\n")))
-              ;; 3 entries => 3 lines (first line opens with "(", subsequent
-              ;; lines start with " " and each carries exactly one entry).
-              (should (= 3 (length lines)))
-              (should (string-prefix-p "((" (nth 0 lines)))
-              (should (string-prefix-p " (" (nth 1 lines)))
-              (should (string-prefix-p " (" (nth 2 lines)))
-              ;; Still a valid sexp round-trip.
-              (should (= 3 (length (claude-repl--read-sexp-file snapshot-file))))))
+                   (ws-line-count
+                    (cl-count-if (lambda (line)
+                                   (string-match-p "(\"ws[0-9]+\"" line))
+                                 (split-string raw "\n"))))
+              ;; Each of the three workspace entries appears on its own
+              ;; line inside the :workspaces sub-list (order is hash-key
+              ;; dependent and intentionally not asserted here).
+              (should (= 3 ws-line-count))
+              ;; Round-trip cleanly through the new reader.
+              (let ((parsed (claude-repl--read-workspace-snapshot snapshot-file)))
+                (should (= 3 (length (plist-get parsed :workspaces)))))))
         (delete-file snapshot-file)))))
+
+;;;; ---- Tests: read-workspace-snapshot (format normalizer) ----
+
+(ert-deftest claude-repl-cmd-test-read-workspace-snapshot/legacy-list-format ()
+  "Legacy `((NAME :project-dir DIR) ...)' files normalize to a plist with
+the entries under :workspaces and a nil :merge-queue."
+  (let ((file (make-temp-file "claude-snap-")))
+    (unwind-protect
+        (progn
+          (claude-repl--write-sexp-file
+           file '(("ws-a" :project-dir "/tmp/a")
+                  ("ws-b" :project-dir "/tmp/b")))
+          (let ((parsed (claude-repl--read-workspace-snapshot file)))
+            (should (= 2 (length (plist-get parsed :workspaces))))
+            (should (null (plist-get parsed :merge-queue)))))
+      (delete-file file))))
+
+(ert-deftest claude-repl-cmd-test-read-workspace-snapshot/plist-format ()
+  "New plist files round-trip through the reader with both keys intact."
+  (let ((file (make-temp-file "claude-snap-")))
+    (unwind-protect
+        (progn
+          (claude-repl--write-sexp-file
+           file '(:workspaces (("ws-a" :project-dir "/tmp/a"))
+                  :merge-queue ((:source-ws "ws-a" :silent t :auto-resolve nil))))
+          (let ((parsed (claude-repl--read-workspace-snapshot file)))
+            (should (equal (plist-get parsed :workspaces)
+                           '(("ws-a" :project-dir "/tmp/a"))))
+            (should (equal (plist-get parsed :merge-queue)
+                           '((:source-ws "ws-a" :silent t :auto-resolve nil))))))
+      (delete-file file))))
+
+(ert-deftest claude-repl-cmd-test-read-workspace-snapshot/missing-file-returns-nil ()
+  "Reader returns nil for a non-existent file (no error)."
+  (should-not (claude-repl--read-workspace-snapshot "/nonexistent/snap.el")))
+
+;;;; ---- Tests: write-workspace-snapshot (merge-queue persistence) ----
+
+(ert-deftest claude-repl-cmd-test-write-workspace-snapshot/persists-merge-queue ()
+  "Writer round-trips `claude-repl--merge-queue' into the snapshot file
+so a later read restores the FIFO."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-")))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file)
+                (claude-repl--merge-queue
+                 '((:source-ws "ws-a" :silent t :auto-resolve nil)
+                   (:source-ws "ws-b" :silent nil :auto-resolve t))))
+            (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
+            (claude-repl--ws-put "ws-b" :project-dir "/tmp/b")
+            (claude-repl-save-workspace-snapshot)
+            (let* ((parsed (claude-repl--read-workspace-snapshot snapshot-file))
+                   (mq (plist-get parsed :merge-queue)))
+              (should (= 2 (length mq)))
+              (should (equal (plist-get (nth 0 mq) :source-ws) "ws-a"))
+              (should (eq    (plist-get (nth 0 mq) :silent) t))
+              (should (eq    (plist-get (nth 0 mq) :auto-resolve) nil))
+              (should (equal (plist-get (nth 1 mq) :source-ws) "ws-b"))
+              (should (eq    (plist-get (nth 1 mq) :silent) nil))
+              (should (eq    (plist-get (nth 1 mq) :auto-resolve) t))))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-write-workspace-snapshot/empty-merge-queue ()
+  "An empty live queue writes an empty :merge-queue list — not omitted."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-")))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file)
+                (claude-repl--merge-queue nil))
+            (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
+            (claude-repl-save-workspace-snapshot)
+            (let ((parsed (claude-repl--read-workspace-snapshot snapshot-file)))
+              ;; :merge-queue is present and explicitly an empty list.
+              (should (plist-member parsed :merge-queue))
+              (should (null (plist-get parsed :merge-queue)))))
+        (delete-file snapshot-file)))))
+
+;;;; ---- Tests: snapshot-restore-merge-queue ----
+
+(ert-deftest claude-repl-cmd-test-snapshot-restore-merge-queue/repopulates-live-queue ()
+  "Restore copies the saved entries into `claude-repl--merge-queue' in order."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--merge-queue nil))
+      (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
+      (claude-repl--ws-put "ws-b" :project-dir "/tmp/b")
+      (claude-repl--snapshot-restore-merge-queue
+       '((:source-ws "ws-a" :silent t :auto-resolve nil)
+         (:source-ws "ws-b" :silent nil :auto-resolve t)))
+      (should (= 2 (length claude-repl--merge-queue)))
+      (should (equal (plist-get (nth 0 claude-repl--merge-queue) :source-ws) "ws-a"))
+      (should (equal (plist-get (nth 1 claude-repl--merge-queue) :source-ws) "ws-b")))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-restore-merge-queue/remarks-queued-state ()
+  "Restore re-applies `:repl-state :merge-queued' on each surviving ws so
+the drawer's MERGING bucket shows them again post-restart."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--merge-queue nil))
+      (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
+      (claude-repl--snapshot-restore-merge-queue
+       '((:source-ws "ws-a" :silent t :auto-resolve t)))
+      (should (eq :merge-queued (claude-repl--ws-get "ws-a" :repl-state))))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-restore-merge-queue/drops-vanished-ws ()
+  "Entries whose `:source-ws' no longer exists in `claude-repl--workspaces'
+are dropped (a workspace was removed between sessions)."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--merge-queue nil))
+      (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
+      ;; ws-gone is not in the workspaces hash.
+      (claude-repl--snapshot-restore-merge-queue
+       '((:source-ws "ws-a" :silent t :auto-resolve t)
+         (:source-ws "ws-gone" :silent t :auto-resolve t)))
+      (should (= 1 (length claude-repl--merge-queue)))
+      (should (equal (plist-get (car claude-repl--merge-queue) :source-ws) "ws-a")))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-restore-merge-queue/empty-input-noop ()
+  "Restore with nil input leaves the live queue untouched."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--merge-queue
+           '((:source-ws "preexisting" :silent nil :auto-resolve nil))))
+      (claude-repl--snapshot-restore-merge-queue nil)
+      ;; Existing queue is unchanged.
+      (should (= 1 (length claude-repl--merge-queue))))))
+
+;;;; ---- Tests: load-workspace-snapshot (merge-queue restoration) ----
+
+(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/restores-merge-queue ()
+  "Loader populates `claude-repl--merge-queue' from the snapshot file's
+:merge-queue at the end of the load (in `--snapshot-load-finish')."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (real-dir (make-temp-file "claude-proj-" t))
+          (claude-repl--merge-queue nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file
+             snapshot-file
+             `(:workspaces (("ws-a" :project-dir ,real-dir))
+               :merge-queue ((:source-ws "ws-a" :silent t :auto-resolve nil))))
+            (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+                       (lambda (ws dir)
+                         (claude-repl--ws-put ws :project-dir dir)))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t)))
+              (claude-repl-load-workspace-snapshot)
+              (should (= 1 (length claude-repl--merge-queue)))
+              (should (equal (plist-get (car claude-repl--merge-queue) :source-ws)
+                             "ws-a"))))
+        (delete-file snapshot-file)
+        (delete-directory real-dir t)))))
+
+;;;; ---- Tests: drain-merge-queue interactive command ----
+
+(ert-deftest claude-repl-cmd-test-drain-merge-queue/empty-queue-messages ()
+  "With an empty queue the command emits a `message' and does not call
+the internal drain."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--merge-queue nil)
+          (drain-called nil))
+      (cl-letf (((symbol-function 'claude-repl--drain-merge-queue)
+                 (lambda () (setq drain-called t)))
+                ((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
+                 (lambda () nil)))
+        (claude-repl-drain-merge-queue)
+        (should-not drain-called)))))
+
+(ert-deftest claude-repl-cmd-test-drain-merge-queue/cherry-pick-active-errors ()
+  "With a cherry-pick in progress the command refuses to drain (user-error)."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--merge-queue
+           '((:source-ws "ws-a" :silent t :auto-resolve t)))
+          (drain-called nil))
+      (cl-letf (((symbol-function 'claude-repl--drain-merge-queue)
+                 (lambda () (setq drain-called t)))
+                ((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
+                 (lambda () t)))
+        (should-error (claude-repl-drain-merge-queue) :type 'user-error)
+        (should-not drain-called)))))
+
+(ert-deftest claude-repl-cmd-test-drain-merge-queue/dispatches-when-safe ()
+  "With a non-empty queue and no live cherry-pick the command calls
+`claude-repl--drain-merge-queue' to dispatch the next entry."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--merge-queue
+           '((:source-ws "ws-a" :silent t :auto-resolve t)))
+          (drain-called nil))
+      (cl-letf (((symbol-function 'claude-repl--drain-merge-queue)
+                 (lambda () (setq drain-called t)))
+                ((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
+                 (lambda () nil)))
+        (claude-repl-drain-merge-queue)
+        (should drain-called)))))
 
 ;;;; ---- Tests: load-workspace-snapshot (back-compat + hydration + pending) ----
 

@@ -7038,6 +7038,62 @@ not leave the queue stuck — drain returns normally, no signal."
         ;; Must not raise.
         (claude-repl--drain-merge-queue)))))
 
+(ert-deftest claude-repl-test-enqueue-merge-persists-snapshot ()
+  "`--enqueue-merge' triggers `claude-repl-save-workspace-snapshot' so a
+restart restores the queue.  Stubs out the saver to confirm the call."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (let ((save-calls 0))
+        (cl-letf (((symbol-function 'claude-repl-save-workspace-snapshot)
+                   (lambda () (cl-incf save-calls))))
+          (claude-repl--enqueue-merge "ws1" t t)
+          (should (= 1 save-calls)))))))
+
+(ert-deftest claude-repl-test-drain-merge-queue-persists-snapshot ()
+  "`--drain-merge-queue' triggers a snapshot save AFTER popping the next
+entry so the persisted queue reflects the post-pop length — a crash
+mid-merge does not resurrect an already-dispatched entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (let ((save-calls 0)
+            (queue-len-at-save nil))
+        (cl-letf (((symbol-function 'claude-repl-save-workspace-snapshot)
+                   (lambda ()
+                     (cl-incf save-calls)
+                     (setq queue-len-at-save (length claude-repl--merge-queue))))
+                  ((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (&rest _) nil)))
+          (claude-repl--drain-merge-queue)
+          (should (= 1 save-calls))
+          ;; Drain pops before saving, so the persisted queue has 0 entries.
+          (should (= 0 queue-len-at-save)))))))
+
+(ert-deftest claude-repl-test-persist-merge-queue-tolerates-missing-saver ()
+  "`--persist-merge-queue' is a no-op when the saver isn't fboundp, so
+test fixtures and partial-load environments don't crash on enqueue/drain."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (cl-letf (((symbol-function 'fboundp)
+                 (lambda (sym)
+                   (if (eq sym 'claude-repl-save-workspace-snapshot)
+                       nil
+                     (funcall (symbol-function 'fboundp) sym)))))
+        ;; Must not raise.
+        (claude-repl--persist-merge-queue)))))
+
+(ert-deftest claude-repl-test-persist-merge-queue-swallows-save-errors ()
+  "Errors from the saver are caught and logged so a write failure does
+not propagate into the queue mutator and stall the merge flow."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (cl-letf (((symbol-function 'claude-repl-save-workspace-snapshot)
+                 (lambda () (error "disk full"))))
+        ;; Must not raise.
+        (claude-repl--persist-merge-queue)))))
+
 (ert-deftest claude-repl-test-workspace-merge-into-source-enqueues-when-cherry-pick-in-flight ()
   "When a cherry-pick is in progress in any registered ws dir, the new
 merge request is parked on the queue rather than running."

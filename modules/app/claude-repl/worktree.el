@@ -3187,7 +3187,12 @@ Marks SOURCE-WS with `:repl-state :merge-queued' so the drawer
 surfaces it under MERGING with the queued-state badge.  Clears
 `:claude-state' for the same reason `--mark-merge-failed' does:
 state-glyph precedence reads `:repl-state' first, but a stale
-claude-state would still color the name."
+claude-state would still color the name.
+
+After the enqueue, persists the live queue to the workspace snapshot
+file (`claude-repl-workspace-snapshot-file') via
+`claude-repl-save-workspace-snapshot' so an Emacs restart preserves
+the pending merges (a restart used to lose them silently)."
   (setq claude-repl--merge-queue
         (append claude-repl--merge-queue
                 (list (list :source-ws source-ws
@@ -3198,7 +3203,21 @@ claude-state would still color the name."
   (claude-repl--log source-ws
                     "merge-queue: enqueued ws=%s silent=%s auto-resolve=%s queue-len=%d"
                     source-ws (if silent "t" "nil") (if auto-resolve "t" "nil")
-                    (length claude-repl--merge-queue)))
+                    (length claude-repl--merge-queue))
+  (claude-repl--persist-merge-queue))
+
+(defun claude-repl--persist-merge-queue ()
+  "Persist the live `claude-repl--merge-queue' to the workspace snapshot file.
+Thin wrapper around `claude-repl-save-workspace-snapshot' — guarded on
+the function being defined (test fixtures and partial-load environments
+can call enqueue/drain without commands.el having declared the saver)
+and on its error path being logged so a write failure does not
+propagate into the queue mutators."
+  (when (fboundp 'claude-repl-save-workspace-snapshot)
+    (condition-case err
+        (claude-repl-save-workspace-snapshot)
+      (error
+       (claude-repl--log nil "persist-merge-queue: save-workspace-snapshot err=%S" err)))))
 
 (defun claude-repl--drain-merge-queue ()
   "Dispatch the next queued merge when no cherry-pick is in flight.
@@ -3208,7 +3227,11 @@ clears its `:merge-queued' marker, and re-enters
 `claude-repl--workspace-merge-into-source'.  Errors raised by the
 deferred merge are caught and logged so a single failure does not
 leave the queue stuck — `--workspace-merge-do' already calls drain
-again from its own failure path."
+again from its own failure path.
+
+Re-persists the (now shorter) queue to the workspace snapshot file
+after the pop so a crash mid-merge does not resurrect an entry that
+has already been dispatched."
   (when (and claude-repl--merge-queue
              (not (claude-repl--any-cherry-pick-in-progress-p)))
     (let* ((next (pop claude-repl--merge-queue))
@@ -3221,6 +3244,7 @@ again from its own failure path."
                         "merge-queue: draining ws=%s silent=%s auto-resolve=%s remaining=%d"
                         ws (if silent "t" "nil") (if auto-resolve "t" "nil")
                         (length claude-repl--merge-queue))
+      (claude-repl--persist-merge-queue)
       (condition-case err
           (claude-repl--workspace-merge-into-source ws silent auto-resolve)
         (error

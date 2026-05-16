@@ -2,6 +2,14 @@
 
 ;;; Code:
 
+;; Forward declarations: defined in worktree.el (loaded after commands.el).
+;; Snapshot save/load helpers and the interactive drain command in this
+;; file refer to these symbols, so the names must be readable here at
+;; compile/load time.
+(defvar claude-repl--merge-queue)
+(declare-function claude-repl--drain-merge-queue "worktree")
+(declare-function claude-repl--any-cherry-pick-in-progress-p "worktree")
+
 ;;;; Customization — prompts & diff specs
 
 (defcustom claude-repl-branch-diff-spec
@@ -1507,10 +1515,8 @@ covers the fresh-install case where no prior file exists, is empty, or
 is unreadable as a sexp — there's nothing to lose."
   (or claude-repl--snapshot-loaded-p
       (let* ((file claude-repl-workspace-snapshot-file)
-             (on-disk (and (file-exists-p file)
-                           (condition-case _
-                               (claude-repl--read-sexp-file-if-exists file)
-                             (error nil)))))
+             (parsed (claude-repl--read-workspace-snapshot file))
+             (on-disk (plist-get parsed :workspaces)))
         (or (null on-disk)
             (<= (length on-disk) live-count)))))
 
@@ -1544,8 +1550,69 @@ source of truth."
                entries)
       snapshot)))
 
-(defun claude-repl--write-workspace-snapshot (snapshot)
-  "Write SNAPSHOT (a list of entries) to `claude-repl-workspace-snapshot-file'.
+(defun claude-repl--snapshot-raw-format (raw)
+  "Classify the RAW sexp read from a workspace-snapshot file.
+Returns `:plist' when RAW is a plist (top-level keyword keys — the
+current format that carries both `:workspaces' and `:merge-queue'),
+`:legacy' when RAW is the older list-of-entries shape (each element a
+cons/list whose car is a ws-name string), and `:empty' when RAW is nil."
+  (cond
+   ((null raw) :empty)
+   ((and (consp raw) (keywordp (car raw))) :plist)
+   (t :legacy)))
+
+(defun claude-repl--snapshot-entries-from-raw (raw)
+  "Return the workspace-entries list from RAW (a parsed snapshot sexp).
+Handles both the current plist format and the legacy list-of-entries
+format.  Returns nil when RAW carries no entries (or is itself nil)."
+  (pcase (claude-repl--snapshot-raw-format raw)
+    (:plist (plist-get raw :workspaces))
+    (:legacy raw)
+    (_ nil)))
+
+(defun claude-repl--snapshot-merge-queue-from-raw (raw)
+  "Return the persisted merge-queue from RAW (a parsed snapshot sexp).
+Returns nil when RAW is in the legacy list-of-entries format (which
+predates merge-queue persistence) or carries no `:merge-queue' key."
+  (pcase (claude-repl--snapshot-raw-format raw)
+    (:plist (plist-get raw :merge-queue))
+    (_ nil)))
+
+(defun claude-repl--read-workspace-snapshot (file)
+  "Read FILE and return (:workspaces ENTRIES :merge-queue QUEUE).
+Normalizes both legacy (`((ws :project-dir dir) ...)') and current
+plist-shaped files into the plist return shape so callers don't need
+to branch on disk layout.  Returns nil when FILE does not exist or
+the sexp is unreadable."
+  (when (and file (file-exists-p file))
+    (condition-case err
+        (let ((raw (claude-repl--read-sexp-file file)))
+          (list :workspaces (claude-repl--snapshot-entries-from-raw raw)
+                :merge-queue (claude-repl--snapshot-merge-queue-from-raw raw)))
+      (error
+       (claude-repl--log nil "read-workspace-snapshot: read err file=%s err=%S"
+                         file err)
+       nil))))
+
+(defun claude-repl--serialize-merge-queue (queue)
+  "Return QUEUE (the live `claude-repl--merge-queue') stripped down to
+the keys that survive `read' round-trip.  Drops nothing today — every
+entry plist is plain strings/booleans — but the indirection keeps the
+on-disk format insulated from future plist-key additions."
+  (mapcar (lambda (entry)
+            (list :source-ws (plist-get entry :source-ws)
+                  :silent (and (plist-get entry :silent) t)
+                  :auto-resolve (and (plist-get entry :auto-resolve) t)))
+          queue))
+
+(defun claude-repl--write-workspace-snapshot (snapshot &optional merge-queue)
+  "Write SNAPSHOT (a list of workspace entries) and MERGE-QUEUE to
+`claude-repl-workspace-snapshot-file' in the plist format
+`(:workspaces SNAPSHOT :merge-queue MERGE-QUEUE)'.
+
+When MERGE-QUEUE is omitted, defaults to `claude-repl--merge-queue' so
+every snapshot write captures the live FIFO alongside the roster.
+
 Creates the parent directory if missing and archives the previous file
 before overwriting.  Caller is responsible for any pre-write checks
 \(e.g. `--snapshot-save-safe-p' or interactive confirmation)."
@@ -1554,14 +1621,24 @@ before overwriting.  Caller is responsible for any pre-write checks
     (when (and dir (not (file-directory-p dir)))
       (make-directory dir t)))
   (claude-repl--archive-workspace-snapshot)
-  (with-temp-file claude-repl-workspace-snapshot-file
-    (insert "(")
-    (let ((first t))
-      (dolist (entry snapshot)
-        (unless first (insert "\n "))
-        (setq first nil)
-        (prin1 entry (current-buffer))))
-    (insert ")")))
+  (let* ((queue (claude-repl--serialize-merge-queue
+                 (or merge-queue
+                     (and (boundp 'claude-repl--merge-queue)
+                          claude-repl--merge-queue)))))
+    (with-temp-file claude-repl-workspace-snapshot-file
+      (insert "(:workspaces (")
+      (let ((first t))
+        (dolist (entry snapshot)
+          (unless first (insert "\n               "))
+          (setq first nil)
+          (prin1 entry (current-buffer))))
+      (insert ")\n :merge-queue (")
+      (let ((first t))
+        (dolist (entry queue)
+          (unless first (insert "\n                "))
+          (setq first nil)
+          (prin1 entry (current-buffer))))
+      (insert "))"))))
 
 (defun claude-repl-save-workspace-snapshot ()
   "Save the current set of claude-repl workspaces to a hidden file.
@@ -1606,10 +1683,8 @@ without waiting for the next `--state-save' piggyback."
   (let* ((snapshot (claude-repl--collect-snapshot-entries))
          (live-count (length snapshot))
          (file claude-repl-workspace-snapshot-file)
-         (on-disk (and (file-exists-p file)
-                       (condition-case _
-                           (claude-repl--read-sexp-file-if-exists file)
-                         (error nil))))
+         (parsed (claude-repl--read-workspace-snapshot file))
+         (on-disk (plist-get parsed :workspaces))
          (on-disk-count (length on-disk)))
     (when (and (> on-disk-count live-count)
                (not (y-or-n-p
@@ -1803,6 +1878,41 @@ the entire load."
     (setq claude-repl--snapshot-load-state
           (plist-put claude-repl--snapshot-load-state :timeout-timer nil))))
 
+(defun claude-repl--snapshot-restore-merge-queue (saved-mq)
+  "Repopulate `claude-repl--merge-queue' from SAVED-MQ (read from disk).
+Filters out entries whose `:source-ws' no longer exists in
+`claude-repl--workspaces' (the workspace was removed between sessions,
+or its snapshot entry was skipped because its `:project-dir' was gone).
+Re-applies the `:repl-state :merge-queued' marker on each surviving
+source-ws so the drawer's MERGING bucket re-surfaces them.
+
+Does NOT auto-drain — `claude-repl--workspace-merge-do' is the normal
+drain trigger and the user kicks it off via `claude-repl-drain-merge-queue'
+\(intended for cases where the in-flight cherry-pick died with Emacs and
+the user has manually resolved before re-entering the loop)."
+  (when (and saved-mq (boundp 'claude-repl--merge-queue))
+    (let ((restored nil)
+          (dropped 0))
+      (dolist (entry saved-mq)
+        (let ((ws (plist-get entry :source-ws)))
+          (cond
+           ((and ws (gethash ws claude-repl--workspaces))
+            (push (list :source-ws ws
+                        :silent (and (plist-get entry :silent) t)
+                        :auto-resolve (and (plist-get entry :auto-resolve) t))
+                  restored)
+            (claude-repl--ws-put ws :repl-state :merge-queued)
+            (claude-repl--ws-put ws :claude-state nil))
+           (t
+            (cl-incf dropped)
+            (claude-repl--log nil
+                              "snapshot-restore-merge-queue: dropping entry ws=%s — ws absent post-load"
+                              (or ws "nil"))))))
+      (setq claude-repl--merge-queue (nreverse restored))
+      (claude-repl--log nil
+                        "snapshot-restore-merge-queue: restored=%d dropped=%d"
+                        (length claude-repl--merge-queue) dropped))))
+
 (defun claude-repl--snapshot-load-finish ()
   "Finalize the recursive load: detach hook, return to origin, message.
 Idempotent: re-entry with `claude-repl--snapshot-load-state' already
@@ -1816,7 +1926,9 @@ can call finish without worrying whether a normal finish already ran."
            (origin (plist-get state :origin))
            (loaded (plist-get state :loaded))
            (skipped (plist-get state :skipped))
-           (load-error (or (plist-get state :load-error) 0)))
+           (load-error (or (plist-get state :load-error) 0))
+           (saved-mq (plist-get state :saved-merge-queue)))
+      (claude-repl--snapshot-restore-merge-queue saved-mq)
       ;; persp-mode saved origin's window-config when the loader's first
       ;; `--establish-workspace' switched away from it, so this switch-back
       ;; replays that layout — and persp-mode's restore filters foreign
@@ -1828,10 +1940,16 @@ can call finish without worrying whether a normal finish already ran."
         (persp-frame-switch origin))
       (force-mode-line-update t)
       (setq claude-repl--snapshot-loaded-p t)
-      (claude-repl--log nil "snapshot-load: END loaded=%d skipped=%d load-error=%d returned-to=%s"
-                        loaded skipped load-error (or origin "nil"))
-      (message "Loaded %d workspace(s), skipped %d, errored %d"
-               loaded skipped load-error))
+      (let ((mq-restored (and (boundp 'claude-repl--merge-queue)
+                              (length claude-repl--merge-queue))))
+        (claude-repl--log nil
+                          "snapshot-load: END loaded=%d skipped=%d load-error=%d merge-queue=%d returned-to=%s"
+                          loaded skipped load-error (or mq-restored 0) (or origin "nil"))
+        (message "Loaded %d workspace(s), skipped %d, errored %d%s"
+                 loaded skipped load-error
+                 (if (and mq-restored (> mq-restored 0))
+                     (format ", merge-queue=%d" mq-restored)
+                   ""))))
     (setq claude-repl--snapshot-load-state nil)
     (claude-repl--snapshot-load-close-main)))
 
@@ -2042,7 +2160,9 @@ Returns to the workspace that was active when the load began."
   (when claude-repl--snapshot-load-state
     (user-error "claude-repl: a snapshot load is already in progress"))
   (let* ((file (or file (claude-repl--workspace-snapshot-file-for-read)))
-         (snapshot (claude-repl--read-sexp-file-if-exists file)))
+         (parsed (claude-repl--read-workspace-snapshot file))
+         (snapshot (plist-get parsed :workspaces))
+         (saved-mq (plist-get parsed :merge-queue)))
     (unless snapshot
       (user-error "No workspace snapshot at %s" file))
     (let ((queue (mapcar #'claude-repl--snapshot-entry-normalize snapshot))
@@ -2056,11 +2176,13 @@ Returns to the workspace that was active when the load began."
                   :skipped 0
                   :load-error 0
                   :total (length queue)
-                  :timeout-timer nil))
+                  :timeout-timer nil
+                  :saved-merge-queue saved-mq))
       (add-hook 'claude-repl-ws-fully-loaded-functions
                 #'claude-repl--snapshot-load-on-loaded)
-      (claude-repl--log nil "snapshot-load: BEGIN file=%s entries=%d origin-ws=%s"
-                        file (length queue) (or origin-ws "nil"))
+      (claude-repl--log nil
+                        "snapshot-load: BEGIN file=%s entries=%d merge-queue=%d origin-ws=%s"
+                        file (length queue) (length saved-mq) (or origin-ws "nil"))
       (claude-repl--snapshot-load-step))))
 
 (defun claude-repl--load-workspace-snapshot-on-startup ()
@@ -2076,9 +2198,13 @@ corrupt snapshot can't block startup."
 ;;;; Workspace snapshot archive picker
 
 (defun claude-repl--snapshot-file-ws-count (file)
-  "Return the number of workspace entries in snapshot FILE, or 0 on error."
+  "Return the number of workspace entries in snapshot FILE, or 0 on error.
+Reads via `claude-repl--read-workspace-snapshot' so both the current
+plist format and the legacy list-of-entries shape report the workspace
+roster length (not the wrapping plist's length)."
   (or (ignore-errors
-        (length (claude-repl--read-sexp-file-if-exists file)))
+        (length (plist-get (claude-repl--read-workspace-snapshot file)
+                           :workspaces)))
       0))
 
 (defun claude-repl--snapshot-file-mtime-string (file)
@@ -2128,6 +2254,48 @@ explicitly (skips the configured-vs-legacy resolver)."
     (when file
       (claude-repl--log nil "load-workspace-snapshot-from-archive: file=%s" file)
       (claude-repl-load-workspace-snapshot file))))
+
+;;;; Merge-queue manual drain
+
+(defun claude-repl-drain-merge-queue ()
+  "Re-kick the merge-queue drain loop after a manually-resolved stall.
+
+Normal flow: `claude-repl--workspace-merge-do' completes (success or
+failure) and immediately calls `claude-repl--drain-merge-queue', so the
+queue drains naturally as cherry-picks finish.  This command is the
+escape hatch for stalls where that automatic drain didn't happen — for
+example, when Emacs restarts with a non-empty queue restored from the
+on-disk snapshot, or when a cherry-pick fails in a way that requires
+the user to repair the worktree by hand before the next queued merge
+can proceed.
+
+No-op (with a `message') when the queue is empty.  No-op (with a
+`message') when a cherry-pick is still in progress in any registered
+workspace — the user must clear `CHERRY_PICK_HEAD' first (commit,
+abort, or resolve) so the queue isn't dispatched into the middle of a
+live merge.
+
+The drain itself is the same `claude-repl--drain-merge-queue' that the
+automatic path uses: one entry pops, the corresponding
+`claude-repl--workspace-merge-into-source' runs, and its completion
+cascades into the next drain."
+  (interactive)
+  (cond
+   ((not (boundp 'claude-repl--merge-queue))
+    (user-error "claude-repl: merge queue module not loaded"))
+   ((null claude-repl--merge-queue)
+    (message "[claude-repl] merge queue is empty — nothing to drain"))
+   ((claude-repl--any-cherry-pick-in-progress-p)
+    (user-error "claude-repl: a cherry-pick is still in progress — resolve it before draining"))
+   (t
+    (claude-repl--log nil
+                      "drain-merge-queue: manual kick queue-len=%d"
+                      (length claude-repl--merge-queue))
+    (message "[claude-repl] draining merge queue (%d entries)"
+             (length claude-repl--merge-queue))
+    (claude-repl--drain-merge-queue))))
+
+(defalias '+dwc/drain-merge-queue #'claude-repl-drain-merge-queue)
 
 ;;;; Merge-completed restore
 
