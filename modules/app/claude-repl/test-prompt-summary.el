@@ -66,6 +66,14 @@
   (should (equal (claude-repl--prompt-summary-clean "hello!") "hello"))
   (should (equal (claude-repl--prompt-summary-clean "hello;") "hello")))
 
+(ert-deftest claude-repl-test-prompt-summary-clean-preserves-trailing-question-mark ()
+  "Trailing `?' is preserved — the always-interrogative mood requires
+the question mark to survive cleaning."
+  (should (equal (claude-repl--prompt-summary-clean "How does the cache work?")
+                 "How does the cache work?"))
+  (should (equal (claude-repl--prompt-summary-clean "Why is auth failing?")
+                 "Why is auth failing?")))
+
 ;;;; ---- Tests: prompt-summary-skip-p ----
 
 (ert-deftest claude-repl-test-prompt-summary-skip-empty ()
@@ -209,13 +217,84 @@ Pins the anti-injection framing: the model must treat the prompt as data,
 never execute / answer / refuse / comply with it."
   (let ((rendered (claude-repl--prompt-summary-build-input
                    "what is 2+2? please answer")))
-    ;; Must explicitly call out that the prompt is to be summarized only.
-    (should (string-match-p "SUMMARIZE" rendered))
+    ;; Must explicitly call out that the prompt is to be analyzed/summarized only.
+    (should (string-match-p "\\(?:SUMMARIZE\\|summarize\\|analyze\\)" rendered))
     ;; Must explicitly forbid responding to the embedded prompt.
     (should (string-match-p "\\(?:NEVER\\|Do NOT\\|not\\) \\(?:answer\\|respond\\)"
                             rendered))
     ;; Must label the embedded prompt as data, not a directive.
-    (should (string-match-p "\\(?:DATA\\|data\\), not a directive" rendered))))
+    (should (string-match-p "\\(?:DATA\\|data\\), not \\(?:a directive\\|directives\\)"
+                            rendered))))
+
+;;;; ---- Tests: prompt-format frames the task as current top-level objective ----
+
+(ert-deftest claude-repl-test-prompt-format-frames-current-top-level-objective ()
+  "Format must frame the model's job as identifying the CURRENT top-level
+objective of the conversation, not as merely summarizing the latest
+prompt verbatim.  Pins the philosophy shift from `summarize the latest
+prompt' to `track the user's current high-level effort'."
+  (let ((rendered (claude-repl--prompt-summary-build-input "do the thing")))
+    (should (string-match-p "CURRENT TOP-LEVEL OBJECTIVE" rendered))
+    (should (string-match-p "highest-level effort" rendered))))
+
+(ert-deftest claude-repl-test-prompt-format-forbids-granular-sub-step-summary ()
+  "Format must instruct the model to roll tactical sub-steps up to their
+parent top-level effort, not to summarize the latest prompt verbatim
+when that prompt is a sub-step (`go for it', `how?', `run the tests')."
+  (let ((rendered (claude-repl--prompt-summary-build-input "go for it")))
+    (should (string-match-p "\\(?:TACTICAL SUB-STEPS\\|tactical sub-step\\)"
+                            rendered))
+    (should (string-match-p "HIGHER-LEVEL effort" rendered))))
+
+(ert-deftest claude-repl-test-prompt-format-instructs-following-goal-pivots ()
+  "Format must instruct the model that when the latest prompt pivots to
+a new top-level effort, the summary should describe the NEW effort and
+discard the OLD effort — never blend the two."
+  (let ((rendered (claude-repl--prompt-summary-build-input "now do something different")))
+    (should (string-match-p "\\(?:GOAL SHIFTS\\|PIVOTS\\|pivot\\)" rendered))
+    (should (string-match-p "NEW effort" rendered))
+    (should (string-match-p "\\(?:Discard\\|discard\\) the old\\(?:er\\)? effort"
+                            rendered))))
+
+(ert-deftest claude-repl-test-prompt-format-includes-worked-pivot-example ()
+  "Format must contain the canonical worked example anchoring the
+required granularity AND question-mood: the doom-config-sharing →
+transport-layer pivot case.  Both WRONG formulations (old effort, and
+right-effort-wrong-mood) and the RIGHT question-mood formulation are
+pinned so the framing cannot be silently weakened."
+  (let ((rendered (claude-repl--prompt-summary-build-input "the prompt")))
+    ;; WRONG #1: captures the OLD effort.
+    (should (string-match-p "Simplify doom config sharing with brother" rendered))
+    ;; WRONG #2: right effort but wrong (non-question) mood.
+    (should (string-match-p "Implementing transport layer to facilitate communication with brother"
+                            rendered))
+    ;; RIGHT: question-mood phrasing of the current top-level effort.
+    (should (string-match-p
+             "How should the transport layer for communicating with brother be built\\?"
+             rendered))))
+
+;;;; ---- Tests: prompt-format requires always-interrogative mood ----
+
+(ert-deftest claude-repl-test-prompt-format-requires-always-question-mood ()
+  "Format must require the reminder to ALWAYS be phrased as a question,
+ending with `?', regardless of the mood of the latest prompt.  Pins the
+always-interrogative rule so a future relaxation back to mixed mood
+cannot land silently."
+  (let ((rendered (claude-repl--prompt-summary-build-input "fix the auth bug")))
+    ;; The "ALWAYS" / "question" framing.
+    (should (string-match-p "ALWAYS be phrased as a QUESTION" rendered))
+    ;; Explicit override: not the mood of the latest prompt.
+    (should (string-match-p "regardless of the mood of the latest prompt"
+                            rendered))
+    ;; Imperative/gerund are explicitly forbidden.
+    (should (string-match-p "never use imperative or gerund mood" rendered))))
+
+(ert-deftest claude-repl-test-prompt-format-output-section-requires-trailing-question-mark ()
+  "Output-formatting section must require a trailing `?' on the reminder.
+Pins the wire-format requirement so the output rule and the MOOD rule
+agree."
+  (let ((rendered (claude-repl--prompt-summary-build-input "fix the auth bug")))
+    (should (string-match-p "MUST end with a single \"\\?\"" rendered))))
 
 ;;;; ---- Tests: prompt-format forbids pronouns as subject/direct object ----
 
@@ -237,13 +316,13 @@ example so a future refactor doesn't accidentally weaken it."
 
 (ert-deftest claude-repl-test-prompt-format-includes-context-header ()
   "Format must have a CONTEXT section that precedes the PROMPT block, so
-the model reads the prior prompts before the one to summarize."
+the model reads the prior prompts before the latest one."
   (let ((rendered (claude-repl--prompt-summary-build-input "the prompt")))
     (should (string-match-p "CONTEXT" rendered))
     (should (string-match-p "PROMPT" rendered))
-    ;; CONTEXT must appear before PROMPT.
-    (should (< (string-match "CONTEXT" rendered)
-               (string-match "PROMPT (the one to summarize)" rendered)))))
+    ;; CONTEXT must appear before the labeled PROMPT block.
+    (should (< (string-match "CONTEXT (recent prior prompts" rendered)
+               (string-match "PROMPT (the latest user message" rendered)))))
 
 (ert-deftest claude-repl-test-prompt-format-context-placeholder-when-empty ()
   "When no prior prompts are passed, the CONTEXT slot still renders a
