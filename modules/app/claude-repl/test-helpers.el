@@ -164,6 +164,10 @@
   (defun magit-diff-visit-worktree-file (&rest _args) "Stub." nil))
 (unless (fboundp 'magit-diff-visit-file-other-window)
   (defun magit-diff-visit-file-other-window (&rest _args) "Stub." nil))
+(unless (fboundp 'magit-insert-tags-header)
+  (defun magit-insert-tags-header (&rest _args) "Stub." nil))
+(unless (fboundp 'magit-refresh)
+  (defun magit-refresh (&rest _args) "Stub." nil))
 
 ;; magit variable stubs — `after!' is a no-op shim in tests, so the
 ;; `(after! magit ...)' body in magit.el executes and would reference
@@ -174,6 +178,8 @@
   (defvar magit-diff-visit-previous-blob nil "Stub."))
 (unless (boundp 'magit-section-initial-visibility-alist)
   (defvar magit-section-initial-visibility-alist nil "Stub."))
+(unless (boundp 'magit-status-headers-hook)
+  (defvar magit-status-headers-hook nil "Stub: simulated magit headers hook."))
 (unless (boundp 'magit-display-buffer-function)
   (defvar magit-display-buffer-function nil "Stub."))
 

@@ -282,5 +282,99 @@ so the buffer replaces the selected window's content."
       (should (eq captured-buffer 'fake-buf))
       (should (equal captured-action '(display-buffer-same-window))))))
 
+;;;; ---- Tests: claude-repl-magit-show-tags-header (defcustom default) ----
+
+(ert-deftest claude-repl-test-magit-show-tags-header-defaults-to-nil ()
+  "Tags header is hidden by default — the option ships off."
+  (should (null (default-value 'claude-repl-magit-show-tags-header))))
+
+;;;; ---- Tests: claude-repl--magit-apply-tags-header-visibility ----
+
+(ert-deftest claude-repl-test-magit-apply-tags-header-removes-when-nil ()
+  "When the option is nil, `magit-insert-tags-header' is removed from the hook."
+  (let ((claude-repl-magit-show-tags-header nil)
+        (magit-status-headers-hook (list #'magit-insert-error-header
+                                          #'magit-insert-tags-header)))
+    (cl-letf (((symbol-function 'magit-insert-error-header)
+               (lambda (&rest _) nil)))
+      (claude-repl--magit-apply-tags-header-visibility)
+      (should-not (memq #'magit-insert-tags-header magit-status-headers-hook))
+      ;; Other hook members are not disturbed.
+      (should (memq #'magit-insert-error-header magit-status-headers-hook)))))
+
+(ert-deftest claude-repl-test-magit-apply-tags-header-adds-when-non-nil ()
+  "When the option is non-nil, `magit-insert-tags-header' is added to the hook."
+  (let ((claude-repl-magit-show-tags-header t)
+        (magit-status-headers-hook nil))
+    (claude-repl--magit-apply-tags-header-visibility)
+    (should (memq #'magit-insert-tags-header magit-status-headers-hook))))
+
+(ert-deftest claude-repl-test-magit-apply-tags-header-idempotent-on-add ()
+  "Adding when already present must not duplicate the hook entry."
+  (let ((claude-repl-magit-show-tags-header t)
+        (magit-status-headers-hook (list #'magit-insert-tags-header)))
+    (claude-repl--magit-apply-tags-header-visibility)
+    (should (equal (cl-count #'magit-insert-tags-header
+                             magit-status-headers-hook)
+                   1))))
+
+(ert-deftest claude-repl-test-magit-apply-tags-header-idempotent-on-remove ()
+  "Removing when already absent is a no-op."
+  (let ((claude-repl-magit-show-tags-header nil)
+        (magit-status-headers-hook nil))
+    (claude-repl--magit-apply-tags-header-visibility)
+    (should (null magit-status-headers-hook))))
+
+;;;; ---- Tests: +dwc/magit-toggle-tags-header ----
+
+(ert-deftest claude-repl-test-magit-toggle-flips-from-nil-to-t ()
+  "Toggle flips the option from nil to t and adds the hook entry."
+  (let ((claude-repl-magit-show-tags-header nil)
+        (magit-status-headers-hook nil))
+    (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) nil))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (+dwc/magit-toggle-tags-header)
+      (should (eq claude-repl-magit-show-tags-header t))
+      (should (memq #'magit-insert-tags-header magit-status-headers-hook)))))
+
+(ert-deftest claude-repl-test-magit-toggle-flips-from-t-to-nil ()
+  "Toggle flips the option from t to nil and removes the hook entry."
+  (let ((claude-repl-magit-show-tags-header t)
+        (magit-status-headers-hook (list #'magit-insert-tags-header)))
+    (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) nil))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (+dwc/magit-toggle-tags-header)
+      (should (null claude-repl-magit-show-tags-header))
+      (should-not (memq #'magit-insert-tags-header magit-status-headers-hook)))))
+
+(ert-deftest claude-repl-test-magit-toggle-refreshes-in-magit-status-mode ()
+  "Toggle calls `magit-refresh' when invoked from a `magit-status-mode' buffer."
+  (let ((claude-repl-magit-show-tags-header nil)
+        (magit-status-headers-hook nil)
+        (refresh-calls 0))
+    (cl-letf (((symbol-function 'derived-mode-p)
+               (lambda (mode) (eq mode 'magit-status-mode)))
+              ((symbol-function 'magit-refresh)
+               (lambda (&rest _) (cl-incf refresh-calls)))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (+dwc/magit-toggle-tags-header)
+      (should (= refresh-calls 1)))))
+
+(ert-deftest claude-repl-test-magit-toggle-no-refresh-outside-magit-status ()
+  "Toggle does NOT call `magit-refresh' when invoked outside magit-status."
+  (let ((claude-repl-magit-show-tags-header nil)
+        (magit-status-headers-hook nil)
+        (refresh-calls 0))
+    (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) nil))
+              ((symbol-function 'magit-refresh)
+               (lambda (&rest _) (cl-incf refresh-calls)))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (+dwc/magit-toggle-tags-header)
+      (should (= refresh-calls 0)))))
+
+(ert-deftest claude-repl-test-magit-toggle-is-interactive ()
+  "Toggle is an interactive command so it can be bound to a key."
+  (should (commandp #'+dwc/magit-toggle-tags-header)))
+
 (provide 'test-magit)
 ;;; test-magit.el ends here

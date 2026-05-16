@@ -35,7 +35,40 @@ First %s is the repo name, second %s is the commit SHA."
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-magit-show-tags-header nil
+  "Whether `magit-status' displays the tags header line.
+When nil (the default), `magit-insert-tags-header' is removed from
+`magit-status-headers-hook' so the \"Tags:\" header is omitted from
+status buffers.  Toggle interactively inside any magit-status
+buffer with `+dwc/magit-toggle-tags-header'."
+  :type 'boolean
+  :group 'claude-repl)
+
 ;;;; --- magit settings and keybindings ---------------------------------------
+
+(defun claude-repl--magit-apply-tags-header-visibility ()
+  "Sync `magit-status-headers-hook' to `claude-repl-magit-show-tags-header'.
+Adds `magit-insert-tags-header' to the hook when the option is non-nil
+and removes it otherwise — the hook is the canonical place magit reads
+to assemble status buffer headers."
+  (if claude-repl-magit-show-tags-header
+      (add-hook 'magit-status-headers-hook #'magit-insert-tags-header t)
+    (remove-hook 'magit-status-headers-hook #'magit-insert-tags-header)))
+
+(defun +dwc/magit-toggle-tags-header ()
+  "Toggle whether `magit-status' displays the tags header line.
+Flips `claude-repl-magit-show-tags-header', syncs the hook via
+`claude-repl--magit-apply-tags-header-visibility', and refreshes the
+current buffer when invoked from a `magit-status-mode' buffer so the
+change becomes visible immediately."
+  (interactive)
+  (setq claude-repl-magit-show-tags-header
+        (not claude-repl-magit-show-tags-header))
+  (claude-repl--magit-apply-tags-header-visibility)
+  (when (derived-mode-p 'magit-status-mode)
+    (magit-refresh))
+  (message "magit-status tags header %s"
+           (if claude-repl-magit-show-tags-header "shown" "hidden")))
 
 (after! magit
   (setq magit-no-confirm (append magit-no-confirm claude-repl-magit-no-confirm-extras)
@@ -46,6 +79,9 @@ First %s is the repo name, second %s is the commit SHA."
         '((unpushed . show)
           (stashes  . show)
           (untracked . show)))
+
+  ;; Apply the tags-header visibility preference (default: hidden).
+  (claude-repl--magit-apply-tags-header-visibility)
 
   (map! :map (magit-unstaged-section-map magit-staged-section-map magit-untracked-section-map magit-mode-map)
         :desc "Jump to recent commits"
@@ -211,7 +247,8 @@ transitions `:repl-state' to :inactive)."
 
 (map! :map magit-status-mode-map
       "g c" #'+dwc/magit-copy-commit-link
-      "g C" #'+dwc/magit-open-commit-in-github)
+      "g C" #'+dwc/magit-open-commit-in-github
+      "g T" #'+dwc/magit-toggle-tags-header)
 
 (map! :map (magit-status-mode-map magit-diff-section-base-map magit-diff-section-map)
       "C-<return>" #'magit-diff-visit-file-other-window)
