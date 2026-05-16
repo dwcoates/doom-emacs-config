@@ -1040,16 +1040,29 @@ If found, the class name is returned, otherwise STR is returned"
   (add-to-list 'undo-fu-session-incompatible-files
                (concat "\\`" (regexp-quote (expand-file-name "~/.config/doom/")))))
 
-;; Load claude-repl via `doom-after-modules-config-hook' rather than
-;; `:app claude-repl' in init.el.  The hook fires AFTER every module's
-;; config.el (including `:config default'+evil-bindings.el, which binds
-;; `SPC TAB n' → `+workspace/new'), so claude-repl's `map!' for the same
-;; cell lands last and wins.  Loading from `:app' or directly here would
-;; run too early and get overwritten — see startup-binding investigation.
-(add-hook 'doom-after-modules-config-hook
-          (lambda ()
-            (unless (featurep 'claude-repl)
-              (load! "modules/app/claude-repl/config"))))
+;; Load claude-repl directly here rather than via `:app claude-repl' in
+;; init.el OR `doom-after-modules-config-hook'.
+;;
+;; `:app claude-repl' loaded the module during the :app phase, BEFORE
+;; `:config default'+evil-bindings.el ran -- which then rebound
+;; `SPC TAB n' to `+workspace/new', shadowing claude-repl's own binding
+;; to `claude-repl-create-worktree-workspace'.
+;;
+;; `doom-after-modules-config-hook' looked like the right home for the
+;; load, but Doom's startup order is: ALL module config.el files (which
+;; includes `:config default') → fire `doom-after-modules-config-hook'
+;; → load $DOOMDIR/config.el (this file).  So `add-hook' from this file
+;; is dead code on cold boot — the hook has already fired by the time
+;; we get here and won't fire again until `M-x doom/reload', which is
+;; why claude-repl came up only partially after a fresh start: the
+;; module never loaded, so `keybindings.el' never ran and `SPC TAB n'
+;; kept the default `+workspace/new' binding.
+;;
+;; $DOOMDIR/config.el runs AFTER every module's config.el, so loading
+;; the module here is the simplest way to make claude-repl's `map!'
+;; calls land last and win.
+(unless (featurep 'claude-repl)
+  (load! "modules/app/claude-repl/config"))
 
 ;; Per-repo initial buffers for new worktree workspaces.
 (after! claude-repl
