@@ -149,18 +149,27 @@ If the selected window is a side window (e.g., the workspace
 drawer), first pops to the frame's main window so magit replaces the
 main buffer rather than failing on the dedicated side window.
 
-Clears the saved `:fullscreen-config' since claude is no longer
-fullscreen once magit replaces the current window."
+When the current workspace is tracked by claude-repl, uses the
+workspace's `:project-dir' and clears any saved `:fullscreen-config'
+(claude is no longer fullscreen once magit replaces the current
+window).  When the workspace is NOT tracked by claude-repl (e.g.,
+the main \"doom\" workspace, or a workspace whose entry has been
+nuked), falls back to `default-directory' so magit still opens and
+skips the `:fullscreen-config' write to avoid creating a stub
+entry (see `claude-repl--ws-put' STUB-CREATE warning)."
   (interactive)
   (when (window-parameter (selected-window) 'window-side)
     (select-window (window-main-window)))
   (let* ((ws (+workspace-current-name))
-         (dir (claude-repl--ws-dir ws))
+         (tracked-dir (ignore-errors (claude-repl--ws-dir ws)))
+         (dir (or tracked-dir default-directory))
          (magit-display-buffer-function
           #'claude-repl--magit-display-buffer-same-window))
     (when (fboundp 'claude-repl--log)
-      (claude-repl--log ws "magit-status-workspace: same-window dir=%s" dir))
-    (claude-repl--ws-put ws :fullscreen-config nil)
+      (claude-repl--log ws "magit-status-workspace: same-window dir=%s tracked=%s"
+                        dir (if tracked-dir "yes" "no")))
+    (when tracked-dir
+      (claude-repl--ws-put ws :fullscreen-config nil))
     (magit-status dir)))
 
 ;;;; --- Hide Claude panels before magit-status RET actions -----------------
