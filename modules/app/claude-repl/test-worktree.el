@@ -1268,6 +1268,206 @@ UI, run the merge on a worker thread, and reopen on failure."
           (should (= finish-count 1)))
       (when (file-exists-p tmpfile) (delete-file tmpfile)))))
 
+;;;; ---- Tests: random-disambiguator-suffix ----
+
+(ert-deftest claude-repl-test-random-disambiguator-suffix-length ()
+  "Suffix is exactly 3 characters."
+  (should (= 3 (length (claude-repl--random-disambiguator-suffix)))))
+
+(ert-deftest claude-repl-test-random-disambiguator-suffix-lowercase ()
+  "Suffix contains only lowercase a-z."
+  (let ((suffix (claude-repl--random-disambiguator-suffix)))
+    (should (string-match-p "\\`[a-z]\\{3\\}\\'" suffix))))
+
+;;;; ---- Tests: workspace-name-collides-p ----
+
+(ert-deftest claude-repl-test-workspace-name-collides-p-fresh ()
+  "Fresh name in a clean repo and empty workspaces hash → no collision."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (claude-repl--workspace-names-in-flight nil)
+          (claude-repl-worktree-start-tag-prefix nil))
+      (should-not (claude-repl--workspace-name-collides-p "DWC/fresh" repo)))))
+
+(ert-deftest claude-repl-test-workspace-name-collides-p-in-flight ()
+  "Name already reserved in `claude-repl--workspace-names-in-flight' → collision."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (claude-repl--workspace-names-in-flight
+           (let ((h (make-hash-table :test 'equal)))
+             (puthash "DWC/dup" t h)
+             h))
+          (claude-repl-worktree-start-tag-prefix nil))
+      (should (claude-repl--workspace-name-collides-p "DWC/dup" repo)))))
+
+(ert-deftest claude-repl-test-workspace-name-collides-p-workspaces-hash ()
+  "Bare name present in `claude-repl--workspaces' → collision."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (claude-repl--workspace-names-in-flight nil)
+          (claude-repl-worktree-start-tag-prefix nil))
+      ;; Hash table keyed by bare name (matches `(+workspace-current-name)' style).
+      (puthash "existing" '(:project-dir "/tmp/x") claude-repl--workspaces)
+      (should (claude-repl--workspace-name-collides-p "DWC/existing" repo)))))
+
+(ert-deftest claude-repl-test-workspace-name-collides-p-on-disk-path ()
+  "Existing on-disk path at the resolved worktree dir → collision."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (let* ((paths (claude-repl--resolve-worktree-paths repo "DWC/ondisk"))
+           (path (plist-get paths :path))
+           (claude-repl--workspaces (make-hash-table :test 'equal))
+           (claude-repl--workspace-names-in-flight nil)
+           (claude-repl-worktree-start-tag-prefix nil))
+      (make-directory path t)
+      (unwind-protect
+          (should (claude-repl--workspace-name-collides-p "DWC/ondisk" repo))
+        (delete-directory path t)))))
+
+(ert-deftest claude-repl-test-workspace-name-collides-p-git-branch ()
+  "Existing git branch in repo → collision."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (claude-repl-test--git-checkout repo "DWC/existing-branch" t)
+    (claude-repl-test--git-checkout repo "master")
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (claude-repl--workspace-names-in-flight nil)
+          (claude-repl-worktree-start-tag-prefix nil))
+      (should (claude-repl--workspace-name-collides-p "DWC/existing-branch" repo)))))
+
+(ert-deftest claude-repl-test-workspace-name-collides-p-start-tag ()
+  "Existing start-tag for the resolved branch → collision."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (call-process "git" nil nil nil "-C" repo "tag" "start/DWC/has-tag")
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (claude-repl--workspace-names-in-flight nil)
+          (claude-repl-worktree-start-tag-prefix "start/"))
+      (should (claude-repl--workspace-name-collides-p "DWC/has-tag" repo)))))
+
+(ert-deftest claude-repl-test-workspace-name-collides-p-tag-ignored-when-prefix-nil ()
+  "When start-tag prefix is nil, a stray `start/<branch>' tag does not flag collision."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (call-process "git" nil nil nil "-C" repo "tag" "start/DWC/no-tag-check")
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (claude-repl--workspace-names-in-flight nil)
+          (claude-repl-worktree-start-tag-prefix nil))
+      (should-not (claude-repl--workspace-name-collides-p "DWC/no-tag-check" repo)))))
+
+;;;; ---- Tests: disambiguate-workspace-name ----
+
+(ert-deftest claude-repl-test-disambiguate-workspace-name-no-collision ()
+  "When the name does not collide, it is returned unchanged (no suffix)."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (claude-repl--workspace-names-in-flight nil)
+          (claude-repl-worktree-start-tag-prefix nil))
+      (should (equal "DWC/clean"
+                     (claude-repl--disambiguate-workspace-name "DWC/clean" repo))))))
+
+(ert-deftest claude-repl-test-disambiguate-workspace-name-collides-appends-suffix ()
+  "When the name collides, the result is `NAME-XYZ' with a 3-char suffix."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (claude-repl-test--git-checkout repo "DWC/taken" t)
+    (claude-repl-test--git-checkout repo "master")
+    (let* ((claude-repl--workspaces (make-hash-table :test 'equal))
+           (claude-repl--workspace-names-in-flight nil)
+           (claude-repl-worktree-start-tag-prefix nil)
+           (result (claude-repl--disambiguate-workspace-name "DWC/taken" repo)))
+      (should (string-match-p "\\`DWC/taken-[a-z]\\{3\\}\\'" result)))))
+
+(ert-deftest claude-repl-test-disambiguate-workspace-name-errors-when-max-attempts-exceeded ()
+  "When every candidate keeps colliding, an error is signaled.
+Simulated by stubbing `claude-repl--workspace-name-collides-p' to always
+return t — the loop must exit and `error' rather than spin forever or
+silently return a colliding name."
+  (claude-repl-test--with-temp-git-repo repo
+    (let ((claude-repl-workspace-name-disambiguate-max-attempts 3))
+      (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
+                 (lambda (&rest _args) t)))
+        (should-error (claude-repl--disambiguate-workspace-name "DWC/x" repo))))))
+
+;;;; ---- Tests: handle-create-command disambiguation integration ----
+
+(ert-deftest claude-repl-test-handle-create-command-passes-clean-name-through ()
+  "When the desired name does not collide, the timer is scheduled with the original name."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (claude-repl--workspace-names-in-flight (make-hash-table :test 'equal))
+          (claude-repl-worktree-start-tag-prefix nil)
+          (scheduled-args nil))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat _fn &rest args)
+                   (setq scheduled-args args))))
+        (claude-repl--handle-create-command
+         `((type . "create") (name . "DWC/clean") (git_root . ,repo))
+         0)
+        ;; Args are (git-root name prompt priority fork-session-id base-commit)
+        (should (equal "DWC/clean" (nth 1 scheduled-args)))))))
+
+(ert-deftest claude-repl-test-handle-create-command-disambiguates-collision ()
+  "When the desired name collides (existing branch), the timer is scheduled with a suffixed name."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (claude-repl-test--git-checkout repo "DWC/taken" t)
+    (claude-repl-test--git-checkout repo "master")
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (claude-repl--workspace-names-in-flight (make-hash-table :test 'equal))
+          (claude-repl-worktree-start-tag-prefix nil)
+          (scheduled-args nil))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat _fn &rest args)
+                   (setq scheduled-args args))))
+        (claude-repl--handle-create-command
+         `((type . "create") (name . "DWC/taken") (git_root . ,repo))
+         0)
+        (should (string-match-p "\\`DWC/taken-[a-z]\\{3\\}\\'"
+                                (nth 1 scheduled-args)))))))
+
+(ert-deftest claude-repl-test-handle-create-command-reserves-name-in-flight ()
+  "After scheduling, the effective name is recorded in the in-flight hash so siblings see it."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (claude-repl--workspace-names-in-flight (make-hash-table :test 'equal))
+          (claude-repl-worktree-start-tag-prefix nil))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (&rest _args) nil)))
+        (claude-repl--handle-create-command
+         `((type . "create") (name . "DWC/sibling") (git_root . ,repo))
+         0))
+      (should (gethash "DWC/sibling" claude-repl--workspace-names-in-flight)))))
+
+(ert-deftest claude-repl-test-handle-create-command-second-sibling-gets-suffix ()
+  "Two sibling creates in the same batch with the same name yield distinct effective names."
+  (claude-repl-test--with-temp-git-repo repo
+    (claude-repl-test--git-commit repo "initial" "content")
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (claude-repl--workspace-names-in-flight (make-hash-table :test 'equal))
+          (claude-repl-worktree-start-tag-prefix nil)
+          (scheduled-names nil))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat _fn &rest args)
+                   (push (nth 1 args) scheduled-names))))
+        (claude-repl--handle-create-command
+         `((type . "create") (name . "DWC/dup") (git_root . ,repo))
+         0)
+        (claude-repl--handle-create-command
+         `((type . "create") (name . "DWC/dup") (git_root . ,repo))
+         5))
+      (setq scheduled-names (nreverse scheduled-names))
+      (should (= 2 (length scheduled-names)))
+      (should (equal "DWC/dup" (nth 0 scheduled-names)))
+      (should (string-match-p "\\`DWC/dup-[a-z]\\{3\\}\\'" (nth 1 scheduled-names)))
+      (should-not (equal (nth 0 scheduled-names) (nth 1 scheduled-names))))))
+
 ;;;; ---- Tests: worktree-add-callback ----
 
 (ert-deftest claude-repl-test-worktree-add-callback-failure ()

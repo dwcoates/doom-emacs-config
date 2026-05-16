@@ -1395,6 +1395,125 @@ Prevents concurrent Claude startups from corrupting ~/.claude.json."
   :type 'integer
   :group 'claude-repl)
 
+;;; Workspace-name disambiguation (collision-only suffix)
+;;
+;; The workspace-generation skill emits BARE workspace names with no
+;; randomized suffix.  Disambiguation is exclusively Emacs's job and
+;; fires ONLY on actual collision against an existing workspace, an
+;; on-disk worktree, a git branch, a companion start-tag, or a
+;; name already reserved earlier in the current dispatch batch.  When
+;; a name is clean, it passes through verbatim.
+
+(defvar claude-repl--workspace-names-in-flight nil
+  "Hash table of workspace names reserved by the current dispatch batch.
+Dynamically bound by `claude-repl--process-workspace-commands-file' so
+sibling `create' entries within the same JSON file can detect name
+collisions against each other before any git worktree has been added.
+Keyed by the full workspace name (e.g. \"DWC/foo\").  nil outside a
+dispatch batch — collision checks then only consult on-disk, git, and
+`claude-repl--workspaces' state.")
+
+(defcustom claude-repl-workspace-name-disambiguate-max-attempts 20
+  "Max attempts to find a non-colliding suffix in
+`claude-repl--disambiguate-workspace-name'.
+Each attempt generates a fresh 3-letter lowercase suffix; 20 attempts
+is overwhelmingly sufficient since the keyspace is 17,576."
+  :type 'integer
+  :group 'claude-repl)
+
+(defun claude-repl--random-disambiguator-suffix ()
+  "Return a fresh 3-character lowercase suffix string (no leading dash).
+Used by `claude-repl--disambiguate-workspace-name' to mint a tiebreaker
+when a desired workspace name would collide."
+  (let ((chars "abcdefghijklmnopqrstuvwxyz"))
+    (concat (string (aref chars (random 26)))
+            (string (aref chars (random 26)))
+            (string (aref chars (random 26))))))
+
+(defun claude-repl--candidate-worktree-path (git-root name)
+  "Return the would-be worktree directory path for NAME rooted at GIT-ROOT.
+Side-effect-free counterpart to `claude-repl--resolve-worktree-paths' —
+does NOT create the worktree-parent directory.  Intended for collision
+detection where the only question is what path WOULD be used; the
+real, mkdir-creating resolver runs later as part of worktree-add."
+  (let* ((git-root (claude-repl--path-canonical git-root))
+         (dirname (claude-repl--bare-workspace-name name))
+         (git-root-parent (file-name-directory git-root))
+         (in-worktree (file-regular-p (expand-file-name ".git" git-root)))
+         (worktree-parent
+          (if in-worktree
+              git-root-parent
+            (let ((repo-name (file-name-nondirectory
+                              (directory-file-name git-root))))
+              (expand-file-name (concat repo-name claude-repl-worktree-dir-suffix)
+                                git-root-parent)))))
+    (claude-repl--path-canonical (expand-file-name dirname worktree-parent))))
+
+(defun claude-repl--workspace-name-collides-p (name git-root)
+  "Return non-nil if NAME would collide with existing workspace state.
+GIT-ROOT is the target repository.  Checks (in order): the in-flight
+reservation set bound by `claude-repl--process-workspace-commands-file'
+\(keyed by full name like \"DWC/foo\"), the live `claude-repl--workspaces'
+hash table (keyed by bare name like \"foo\"), the on-disk worktree
+path, the git branch named NAME, and the companion start-tag.
+Returns the first matched signal (a non-nil value), or nil when NAME
+is collision-free.
+
+The path lookup is side-effect-free
+\(`claude-repl--candidate-worktree-path' — no mkdir) so this predicate
+is safe to call against stub repo paths in tests."
+  (let* ((path (claude-repl--candidate-worktree-path git-root name))
+         (branch-name name)
+         (bare-name (claude-repl--bare-workspace-name name))
+         (start-tag (claude-repl--start-tag-name branch-name)))
+    (or (and (hash-table-p claude-repl--workspace-names-in-flight)
+             (gethash name claude-repl--workspace-names-in-flight))
+        (and (boundp 'claude-repl--workspaces)
+             (hash-table-p claude-repl--workspaces)
+             (gethash bare-name claude-repl--workspaces)
+             :workspace-exists)
+        (and (file-directory-p path) :path-exists)
+        (and (claude-repl--git-branch-exists-p git-root branch-name)
+             :branch-exists)
+        (and start-tag
+             (claude-repl--git-tag-exists-p git-root start-tag)
+             :start-tag-exists))))
+
+(defun claude-repl--disambiguate-workspace-name (name git-root)
+  "Return NAME unchanged when collision-free, else NAME with a `-XYZ' suffix.
+A collision is detected via `claude-repl--workspace-name-collides-p'.
+On collision, appends a fresh 3-letter random lowercase suffix and
+rechecks; up to `claude-repl-workspace-name-disambiguate-max-attempts'
+attempts.  Signals `error' when no non-colliding suffix is found
+within the cap — disambiguation must not silently succeed with a
+colliding name, since downstream `git worktree add' would fail."
+  (if (not (claude-repl--workspace-name-collides-p name git-root))
+      name
+    (let ((attempt 0)
+          (max-attempts claude-repl-workspace-name-disambiguate-max-attempts)
+          (candidate nil))
+      (while (and (< attempt max-attempts) (null candidate))
+        (let ((cand (format "%s-%s" name (claude-repl--random-disambiguator-suffix))))
+          (unless (claude-repl--workspace-name-collides-p cand git-root)
+            (setq candidate cand)))
+        (cl-incf attempt))
+      (unless candidate
+        (error "Could not disambiguate workspace name '%s' in %s after %d attempts"
+               name git-root max-attempts))
+      (claude-repl--log name
+                        "disambiguate-workspace-name: '%s' collided in %s; resolved to '%s' after %d attempt(s)"
+                        name git-root candidate attempt)
+      candidate)))
+
+(defun claude-repl--reserve-workspace-name (name)
+  "Record NAME in `claude-repl--workspace-names-in-flight' if bound.
+No-op when called outside a dispatch batch (i.e., the dynamic var is
+nil).  Reservation is consulted by
+`claude-repl--workspace-name-collides-p' so a later sibling `create'
+entry in the same JSON batch is disambiguated away from NAME."
+  (when (hash-table-p claude-repl--workspace-names-in-flight)
+    (puthash name t claude-repl--workspace-names-in-flight)))
+
 (defun claude-repl--handle-create-command (cmd delay)
   "Handle a \"create\" workspace command CMD, scheduling it after DELAY seconds.
 When CMD contains a \"fork_from\" field, resolves it to a session ID so the
@@ -1467,12 +1586,25 @@ empty, the default applies (HEAD for forks,
       (message "[claude-repl] ERROR: cannot create workspace '%s' — git_root is required and must be non-empty"
                name))
      (t
-      (let ((git-root (file-name-as-directory (expand-file-name cmd-git-root))))
-        (claude-repl--log name "workspace-commands-file create: %s (delay %.1fs) priority=%s fork-session-id=%s git-root=%s base-commit=%s"
-                          name delay priority fork-session-id git-root (or base-commit "nil"))
-        (run-with-timer delay nil
-                        #'claude-repl--create-worktree-from-command
-                        git-root name prompt priority fork-session-id base-commit))))))
+      (let* ((git-root (file-name-as-directory (expand-file-name cmd-git-root)))
+             (effective-name
+              (condition-case err
+                  (claude-repl--disambiguate-workspace-name name git-root)
+                (error
+                 (claude-repl--log name
+                                   "handle-create-command: ABORTING workspace '%s' — disambiguation failed: %s"
+                                   name (error-message-string err))
+                 (message "[claude-repl] ERROR: cannot disambiguate workspace name '%s' — %s"
+                          name (error-message-string err))
+                 nil))))
+        (when effective-name
+          (claude-repl--reserve-workspace-name effective-name)
+          (claude-repl--log effective-name
+                            "workspace-commands-file create: %s (delay %.1fs, requested=%s) priority=%s fork-session-id=%s git-root=%s base-commit=%s"
+                            effective-name delay name priority fork-session-id git-root (or base-commit "nil"))
+          (run-with-timer delay nil
+                          #'claude-repl--create-worktree-from-command
+                          git-root effective-name prompt priority fork-session-id base-commit)))))))
 
 (defun claude-repl--handle-prompt-command (cmd)
   "Handle a \"prompt\" workspace command CMD."
@@ -2073,7 +2205,12 @@ the headless workspace-generation flow occasionally emits the latter."
     (claude-repl--log nil "workspace-commands-file processing: %s" file)
     (let ((commands (claude-repl--normalize-workspace-commands
                      (json-read-file file)))
-          (create-delay 0))
+          (create-delay 0)
+          ;; Per-batch reservation set so sibling `create' entries with
+          ;; the same desired name in this JSON file get disambiguated
+          ;; against each other before any worktree-add has fired.
+          (claude-repl--workspace-names-in-flight
+           (make-hash-table :test 'equal)))
       (claude-repl--log nil "workspace-commands-file normalized: %d command(s)"
                         (length commands))
       (dolist (cmd commands)
