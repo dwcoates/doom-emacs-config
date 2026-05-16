@@ -12,6 +12,8 @@ The doom claude-repl module writes two on-disk artifacts you can read without an
 
 Use them as your first source of truth when investigating any claude-repl bug — assume they are more authoritative than your memory of what the code does.
 
+If the suspected problem is **performance** (Emacs feels slow, an operation hitches, a hot path is suspect) rather than logic / state, this skill is the wrong tool. Use `/profile` instead — it orchestrates a time-boxed capture of the Emacs profiler with auto-stop and analysis. `/debug-logs` is for reading history that already exists; `/profile` is for capturing fresh sampling data.
+
 ## 1. Where the log lives
 
 - Path: `~/.claude/emacs/doom-claude-repl.log` (current Emacs session)

@@ -70,6 +70,7 @@ _canonpath() {
 LOCAL_SKILLS_SRC="$(_canonpath "$SCRIPT_DIR/../modules/app/claude-repl/skills")"
 LOCAL_SKILLS=(
   "debug-logs"
+  "profile"
   "workspace-close"
   "workspace-profile"
 )

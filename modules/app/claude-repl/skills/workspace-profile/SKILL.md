@@ -9,6 +9,8 @@ The user is running an editor (Emacs) that watches `~/.claude/output/` for JSON 
 
 This skill is the editor-instrumentation counterpart to the rest of the workspace-command skills: it does not touch git, perspectives, buffers, or the Claude session — it only flips the profiler on or off in the running editor.
 
+For a hands-off "start, wait N minutes, auto-stop, analyze" flow, use `/profile` instead — it wraps this skill with `ScheduleWakeup`-based auto-stop, a wait-duration policy, and JSONL session logging. Stay on plain `/workspace-profile` only when the user explicitly wants manual toggle control.
+
 Use `/workspace-profile` when:
 
 - The user reports an Emacs slowdown and wants to capture a profile.
