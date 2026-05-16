@@ -600,18 +600,20 @@ that drops the model pin without surfacing in the defcustom-shape test."
       (should-not claude-repl--explain-config-global-visible-p))))
 
 (ert-deftest claude-repl-cmd-test-explain-config-show/displays-existing-buffer ()
-  "Show calls `display-buffer' with the side-window action when buffer exists."
+  "Show falls back to `display-buffer' with the side-window action when no
+vterm output window is available to take over."
   (let* ((claude-repl-explain-config-buffer-name " *test-explain-show*")
          (buf (get-buffer-create claude-repl-explain-config-buffer-name))
          (claude-repl--explain-config-global-visible-p nil)
-         (claude-repl--explain-config-drawer-was-visible-p nil)
+         (claude-repl--explain-config-replaced-window nil)
          (display-args nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
+                  ((symbol-function 'claude-repl--explain-config-current-vterm-window)
+                   (lambda () nil))
                   ((symbol-function 'display-buffer)
                    (lambda (b action) (setq display-args (list b action)) nil))
-                  ((symbol-function 'claude-repl--explain-config-apply-width) #'ignore)
-                  ((symbol-function 'claude-repl-drawer-hide) #'ignore))
+                  ((symbol-function 'claude-repl--explain-config-apply-width) #'ignore))
           (claude-repl--explain-config-show)
           (should (eq (car display-args) buf))
           (should (eq (cadr display-args)
@@ -623,21 +625,23 @@ that drops the model pin without surfacing in the defcustom-shape test."
   (let* ((claude-repl-explain-config-buffer-name " *test-explain-flag-set*")
          (buf (get-buffer-create claude-repl-explain-config-buffer-name))
          (claude-repl--explain-config-global-visible-p nil)
-         (claude-repl--explain-config-drawer-was-visible-p nil))
+         (claude-repl--explain-config-replaced-window nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
+                  ((symbol-function 'claude-repl--explain-config-current-vterm-window)
+                   (lambda () nil))
                   ((symbol-function 'display-buffer) (lambda (&rest _) nil))
-                  ((symbol-function 'claude-repl--explain-config-apply-width) #'ignore)
-                  ((symbol-function 'claude-repl-drawer-hide) #'ignore))
+                  ((symbol-function 'claude-repl--explain-config-apply-width) #'ignore))
           (claude-repl--explain-config-show)
           (should claude-repl--explain-config-global-visible-p))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest claude-repl-cmd-test-explain-config-show/reapplies-width-when-visible ()
-  "Show reapplies the configured width when a window already displays the buffer."
+  "Show reapplies the configured width when a side-window already displays the buffer."
   (let* ((claude-repl-explain-config-buffer-name " *test-explain-reapply*")
          (buf (get-buffer-create claude-repl-explain-config-buffer-name))
          (claude-repl--explain-config-global-visible-p t)
+         (claude-repl--explain-config-replaced-window nil)
          (width-applied-with nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window)
@@ -651,76 +655,102 @@ that drops the model pin without surfacing in the defcustom-shape test."
           (should (eq width-applied-with 'fake-win)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-(ert-deftest claude-repl-cmd-test-explain-config-show/hides-drawer-on-transition-and-captures-state ()
-  "Hidden→visible transition captures `drawer--global-visible-p' and calls drawer-hide."
-  (let* ((claude-repl-explain-config-buffer-name " *test-explain-drawer-cap*")
+;;;; ---- Drawer decoupling: --show must never touch the drawer ----
+
+(ert-deftest claude-repl-cmd-test-explain-config-show/does-not-call-drawer-hide ()
+  "Show must NOT call `claude-repl-drawer-hide' regardless of drawer state —
+the popup and drawer are fully decoupled."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-no-drawer-hide*")
          (buf (get-buffer-create claude-repl-explain-config-buffer-name))
          (claude-repl--explain-config-global-visible-p nil)
-         (claude-repl--explain-config-drawer-was-visible-p nil)
+         (claude-repl--explain-config-replaced-window nil)
          (claude-repl-drawer--global-visible-p t)
          (drawer-hide-called nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
+                  ((symbol-function 'claude-repl--explain-config-current-vterm-window)
+                   (lambda () nil))
                   ((symbol-function 'display-buffer) (lambda (&rest _) nil))
                   ((symbol-function 'claude-repl--explain-config-apply-width) #'ignore)
                   ((symbol-function 'claude-repl-drawer-hide)
                    (lambda () (setq drawer-hide-called t))))
           (claude-repl--explain-config-show)
-          (should drawer-hide-called)
-          (should claude-repl--explain-config-drawer-was-visible-p))
+          (should-not drawer-hide-called))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-(ert-deftest claude-repl-cmd-test-explain-config-show/skips-drawer-hide-when-drawer-already-hidden ()
-  "Drawer-hide is NOT called when the drawer was already hidden on the transition."
-  (let* ((claude-repl-explain-config-buffer-name " *test-explain-drawer-skip*")
+;;;; ---- Vterm-window takeover ----
+
+(ert-deftest claude-repl-cmd-test-explain-config-show/takes-over-vterm-window-when-visible ()
+  "Show reuses the live vterm output window via `set-window-buffer' rather
+than falling back to the side-window display action."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-takeover*")
          (buf (get-buffer-create claude-repl-explain-config-buffer-name))
          (claude-repl--explain-config-global-visible-p nil)
-         (claude-repl--explain-config-drawer-was-visible-p nil)
-         (claude-repl-drawer--global-visible-p nil)
-         (drawer-hide-called nil))
+         (claude-repl--explain-config-replaced-window nil)
+         (set-window-buffer-args nil)
+         (display-buffer-called nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
-                  ((symbol-function 'display-buffer) (lambda (&rest _) nil))
-                  ((symbol-function 'claude-repl--explain-config-apply-width) #'ignore)
-                  ((symbol-function 'claude-repl-drawer-hide)
-                   (lambda () (setq drawer-hide-called t))))
+                  ((symbol-function 'claude-repl--explain-config-current-vterm-window)
+                   (lambda () 'fake-vterm-win))
+                  ((symbol-function 'window-buffer) (lambda (_w) 'prev-buf))
+                  ((symbol-function 'set-window-dedicated-p) #'ignore)
+                  ((symbol-function 'set-window-buffer)
+                   (lambda (w b) (setq set-window-buffer-args (list w b))))
+                  ((symbol-function 'display-buffer)
+                   (lambda (&rest _) (setq display-buffer-called t) nil)))
           (claude-repl--explain-config-show)
-          (should-not drawer-hide-called)
-          (should-not claude-repl--explain-config-drawer-was-visible-p))
+          (should (equal set-window-buffer-args (list 'fake-vterm-win buf)))
+          (should-not display-buffer-called))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-(ert-deftest claude-repl-cmd-test-explain-config-show/skips-drawer-capture-on-reentry ()
-  "When the popup is already visible, --show must NOT re-capture drawer state.
-This protects the capture against persp-switch reconciles that re-show
-the popup — only the original hidden→visible transition records state."
-  (let* ((claude-repl-explain-config-buffer-name " *test-explain-drawer-reentry*")
+(ert-deftest claude-repl-cmd-test-explain-config-show/records-replaced-window-on-takeover ()
+  "Show stashes the (window . prev-buffer) cell so `--hide' can restore."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-takeover-record*")
          (buf (get-buffer-create claude-repl-explain-config-buffer-name))
-         (claude-repl--explain-config-global-visible-p t)
-         (claude-repl--explain-config-drawer-was-visible-p t)
-         (claude-repl-drawer--global-visible-p nil)
-         (drawer-hide-called nil))
+         (claude-repl--explain-config-global-visible-p nil)
+         (claude-repl--explain-config-replaced-window nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
-                  ((symbol-function 'display-buffer) (lambda (&rest _) nil))
-                  ((symbol-function 'claude-repl--explain-config-apply-width) #'ignore)
-                  ((symbol-function 'claude-repl-drawer-hide)
-                   (lambda () (setq drawer-hide-called t))))
+                  ((symbol-function 'claude-repl--explain-config-current-vterm-window)
+                   (lambda () 'fake-vterm-win))
+                  ((symbol-function 'window-buffer) (lambda (_w) 'prev-buf))
+                  ((symbol-function 'set-window-dedicated-p) #'ignore)
+                  ((symbol-function 'set-window-buffer) #'ignore))
           (claude-repl--explain-config-show)
-          (should-not drawer-hide-called)
-          ;; Snapshot is preserved across the re-show — still t.
-          (should claude-repl--explain-config-drawer-was-visible-p))
+          (should (equal claude-repl--explain-config-replaced-window
+                         '(fake-vterm-win . prev-buf))))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-show/takeover-clears-window-dedication ()
+  "Show clears the vterm window's dedicated flag before swapping buffers —
+without this, `set-window-buffer' would error on the dedicated vterm window."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-takeover-dedup*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name))
+         (claude-repl--explain-config-global-visible-p nil)
+         (claude-repl--explain-config-replaced-window nil)
+         (dedicated-cleared-with nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
+                  ((symbol-function 'claude-repl--explain-config-current-vterm-window)
+                   (lambda () 'fake-vterm-win))
+                  ((symbol-function 'window-buffer) (lambda (_w) 'prev-buf))
+                  ((symbol-function 'set-window-dedicated-p)
+                   (lambda (w flag) (setq dedicated-cleared-with (list w flag))))
+                  ((symbol-function 'set-window-buffer) #'ignore))
+          (claude-repl--explain-config-show)
+          (should (equal dedicated-cleared-with '(fake-vterm-win nil))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest claude-repl-cmd-test-explain-config-hide/deletes-windows-for-buffer ()
   "Hide delegates to `claude-repl-window--delete-buffer-windows' for the buffer."
   (let* ((claude-repl-explain-config-buffer-name " *test-explain-hide*")
          (buf (get-buffer-create claude-repl-explain-config-buffer-name))
-         (claude-repl--explain-config-drawer-was-visible-p nil)
+         (claude-repl--explain-config-replaced-window nil)
          (delete-called-with nil))
     (unwind-protect
         (cl-letf (((symbol-function 'claude-repl-window--delete-buffer-windows)
-                   (lambda (b &rest _) (setq delete-called-with b)))
-                  ((symbol-function 'claude-repl-drawer-show) #'ignore))
+                   (lambda (b &rest _) (setq delete-called-with b))))
           (claude-repl--explain-config-hide)
           (should (eq delete-called-with buf)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
@@ -728,45 +758,94 @@ the popup — only the original hidden→visible transition records state."
 (ert-deftest claude-repl-cmd-test-explain-config-hide/no-op-when-buffer-missing ()
   "Hide is a no-op when no explain-config buffer has ever been created."
   (let ((claude-repl-explain-config-buffer-name " *nonexistent-explain-hide*")
-        (claude-repl--explain-config-drawer-was-visible-p nil)
+        (claude-repl--explain-config-replaced-window nil)
         (delete-called nil))
     (cl-letf (((symbol-function 'claude-repl-window--delete-buffer-windows)
-               (lambda (&rest _) (setq delete-called t)))
-              ((symbol-function 'claude-repl-drawer-show) #'ignore))
+               (lambda (&rest _) (setq delete-called t))))
       (claude-repl--explain-config-hide)
       (should-not delete-called))))
 
 (ert-deftest claude-repl-cmd-test-explain-config-hide/clears-global-visible-flag ()
   "Hide clears `--global-visible-p' so the popup stays gone across persps."
   (let ((claude-repl--explain-config-global-visible-p t)
-        (claude-repl--explain-config-drawer-was-visible-p nil))
-    (cl-letf (((symbol-function 'claude-repl-window--delete-buffer-windows) #'ignore)
-              ((symbol-function 'claude-repl-drawer-show) #'ignore))
+        (claude-repl--explain-config-replaced-window nil))
+    (cl-letf (((symbol-function 'claude-repl-window--delete-buffer-windows) #'ignore))
       (claude-repl--explain-config-hide)
       (should-not claude-repl--explain-config-global-visible-p))))
 
-(ert-deftest claude-repl-cmd-test-explain-config-hide/restores-drawer-when-it-was-visible ()
-  "Hide reopens the drawer iff `--drawer-was-visible-p' is set, and clears the flag."
-  (let ((claude-repl--explain-config-global-visible-p t)
-        (claude-repl--explain-config-drawer-was-visible-p t)
-        (drawer-show-called nil))
-    (cl-letf (((symbol-function 'claude-repl-window--delete-buffer-windows) #'ignore)
-              ((symbol-function 'claude-repl-drawer-show)
-               (lambda () (setq drawer-show-called t))))
-      (claude-repl--explain-config-hide)
-      (should drawer-show-called)
-      (should-not claude-repl--explain-config-drawer-was-visible-p))))
+;;;; ---- Drawer decoupling: --hide must never touch the drawer ----
 
-(ert-deftest claude-repl-cmd-test-explain-config-hide/leaves-drawer-alone-when-not-captured ()
-  "Hide does NOT reopen the drawer when `--drawer-was-visible-p' is nil."
+(ert-deftest claude-repl-cmd-test-explain-config-hide/does-not-call-drawer-show ()
+  "Hide must NOT call `claude-repl-drawer-show' — the popup never modified
+the drawer in the first place, so it has nothing to restore."
   (let ((claude-repl--explain-config-global-visible-p t)
-        (claude-repl--explain-config-drawer-was-visible-p nil)
+        (claude-repl--explain-config-replaced-window nil)
         (drawer-show-called nil))
     (cl-letf (((symbol-function 'claude-repl-window--delete-buffer-windows) #'ignore)
               ((symbol-function 'claude-repl-drawer-show)
                (lambda () (setq drawer-show-called t))))
       (claude-repl--explain-config-hide)
       (should-not drawer-show-called))))
+
+;;;; ---- Vterm-window restoration on --hide ----
+
+(ert-deftest claude-repl-cmd-test-explain-config-hide/restores-prev-buffer-in-replaced-window ()
+  "Hide re-displays the saved prev-buffer in the window the popup took over."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-restore*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name))
+         (prev (get-buffer-create " *test-explain-restore-prev*"))
+         (claude-repl--explain-config-global-visible-p t)
+         (claude-repl--explain-config-replaced-window (cons 'fake-vterm-win prev))
+         (set-window-buffer-args nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
+                  ((symbol-function 'set-window-buffer)
+                   (lambda (w b) (setq set-window-buffer-args (list w b))))
+                  ((symbol-function 'claude-repl--configure-vterm-window) #'ignore)
+                  ((symbol-function 'claude-repl-window--delete-buffer-windows) #'ignore))
+          (claude-repl--explain-config-hide)
+          (should (equal set-window-buffer-args (list 'fake-vterm-win prev))))
+      (when (buffer-live-p buf) (kill-buffer buf))
+      (when (buffer-live-p prev) (kill-buffer prev)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-hide/clears-replaced-window-after-restore ()
+  "Hide clears `--replaced-window' after restoring, so a future show won't
+double-restore an already-rehydrated vterm window."
+  (let ((claude-repl--explain-config-global-visible-p t)
+        (claude-repl--explain-config-replaced-window (cons 'fake-vterm-win 'prev-buf)))
+    (cl-letf (((symbol-function 'window-live-p) (lambda (_w) nil))
+              ((symbol-function 'claude-repl-window--delete-buffer-windows) #'ignore))
+      (claude-repl--explain-config-hide)
+      (should-not claude-repl--explain-config-replaced-window))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-hide/reapplies-vterm-window-hardening ()
+  "Hide re-applies `--configure-vterm-window' on successful restore so the
+vterm window regains its dedicate/size-fix/delete-protect recipe."
+  (let* ((prev (get-buffer-create " *test-explain-reharden-prev*"))
+         (claude-repl--explain-config-global-visible-p t)
+         (claude-repl--explain-config-replaced-window (cons 'fake-vterm-win prev))
+         (configure-called-with nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
+                  ((symbol-function 'set-window-buffer) #'ignore)
+                  ((symbol-function 'claude-repl--configure-vterm-window)
+                   (lambda (w) (setq configure-called-with w)))
+                  ((symbol-function 'claude-repl-window--delete-buffer-windows) #'ignore))
+          (claude-repl--explain-config-hide)
+          (should (eq configure-called-with 'fake-vterm-win)))
+      (when (buffer-live-p prev) (kill-buffer prev)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-hide/skips-restore-when-window-dead ()
+  "Hide is a no-op on the restore path when the saved window is no longer live."
+  (let ((claude-repl--explain-config-global-visible-p t)
+        (claude-repl--explain-config-replaced-window (cons 'dead-win 'prev-buf))
+        (set-window-buffer-called nil))
+    (cl-letf (((symbol-function 'window-live-p) (lambda (_w) nil))
+              ((symbol-function 'set-window-buffer)
+               (lambda (&rest _) (setq set-window-buffer-called t)))
+              ((symbol-function 'claude-repl-window--delete-buffer-windows) #'ignore))
+      (claude-repl--explain-config-hide)
+      (should-not set-window-buffer-called))))
 
 ;;;; ---- claude-repl-explain-config-close ----
 
@@ -787,12 +866,11 @@ the popup — only the original hidden→visible transition records state."
   (let* ((claude-repl-explain-config-buffer-name " *test-explain-close-e2e*")
          (buf (get-buffer-create claude-repl-explain-config-buffer-name))
          (claude-repl--explain-config-global-visible-p t)
-         (claude-repl--explain-config-drawer-was-visible-p nil)
+         (claude-repl--explain-config-replaced-window nil)
          (delete-called-with nil))
     (unwind-protect
         (cl-letf (((symbol-function 'claude-repl-window--delete-buffer-windows)
-                   (lambda (b &rest _) (setq delete-called-with b)))
-                  ((symbol-function 'claude-repl-drawer-show) #'ignore))
+                   (lambda (b &rest _) (setq delete-called-with b))))
           (claude-repl-explain-config-close)
           (should-not claude-repl--explain-config-global-visible-p)
           (should (eq delete-called-with buf)))
@@ -815,13 +893,17 @@ the popup — only the original hidden→visible transition records state."
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest claude-repl-cmd-test-explain-config-ensure-visible/shows-when-flag-set-and-hidden ()
-  "Persp-reconciliation re-displays the popup when flag is set and window is missing."
+  "Persp-reconciliation re-displays the popup via `--show' when flag is set
+and window is missing, with no vterm window available to take over."
   (let* ((claude-repl-explain-config-buffer-name " *test-explain-persp-show*")
          (buf (get-buffer-create claude-repl-explain-config-buffer-name))
          (claude-repl--explain-config-global-visible-p t)
+         (claude-repl--explain-config-replaced-window nil)
          (display-args nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
+                  ((symbol-function 'claude-repl--explain-config-current-vterm-window)
+                   (lambda () nil))
                   ((symbol-function 'display-buffer)
                    (lambda (b action) (setq display-args (list b action)) nil))
                   ((symbol-function 'claude-repl--explain-config-apply-width) #'ignore))
@@ -829,6 +911,50 @@ the popup — only the original hidden→visible transition records state."
           (should (eq (car display-args) buf))
           (should (eq (cadr display-args)
                       claude-repl--explain-config-display-action)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-ensure-visible/takes-over-new-persp-vterm-window ()
+  "Persp-reconciliation routes through `--show', which takes over the new
+persp's vterm window when one is visible — no side-window fallback."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-persp-takeover*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name))
+         (claude-repl--explain-config-global-visible-p t)
+         (claude-repl--explain-config-replaced-window nil)
+         (set-window-buffer-args nil)
+         (display-buffer-called nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
+                  ((symbol-function 'claude-repl--explain-config-current-vterm-window)
+                   (lambda () 'new-persp-vterm-win))
+                  ((symbol-function 'window-buffer) (lambda (_w) 'new-prev-buf))
+                  ((symbol-function 'set-window-dedicated-p) #'ignore)
+                  ((symbol-function 'set-window-buffer)
+                   (lambda (w b) (setq set-window-buffer-args (list w b))))
+                  ((symbol-function 'display-buffer)
+                   (lambda (&rest _) (setq display-buffer-called t) nil)))
+          (claude-repl--explain-config-ensure-visible-on-persp-switch)
+          (should (equal set-window-buffer-args (list 'new-persp-vterm-win buf)))
+          (should-not display-buffer-called))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-ensure-visible/drops-stale-replaced-window ()
+  "Persp-reconciliation discards a `--replaced-window' whose window is dead
+before re-showing — the cell belongs to the persp we left, not the new one."
+  (let* ((claude-repl-explain-config-buffer-name " *test-explain-persp-stale*")
+         (buf (get-buffer-create claude-repl-explain-config-buffer-name))
+         (claude-repl--explain-config-global-visible-p t)
+         (claude-repl--explain-config-replaced-window (cons 'dead-win 'old-prev)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
+                  ((symbol-function 'window-live-p)
+                   (lambda (w) (not (eq w 'dead-win))))
+                  ((symbol-function 'claude-repl--explain-config-current-vterm-window)
+                   (lambda () nil))
+                  ((symbol-function 'display-buffer) (lambda (&rest _) nil))
+                  ((symbol-function 'claude-repl--explain-config-apply-width) #'ignore))
+          (claude-repl--explain-config-ensure-visible-on-persp-switch)
+          ;; Stale cell is gone — neither show nor hide tried to use it.
+          (should-not claude-repl--explain-config-replaced-window))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest claude-repl-cmd-test-explain-config-ensure-visible/hides-when-flag-nil-and-shown ()
