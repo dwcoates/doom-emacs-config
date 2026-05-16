@@ -2007,6 +2007,31 @@ selection to the frame's main window when invoked from a side window."
       (claude-repl-drawer--update-cursor)
       (should (eq cursor-type 'box)))))
 
+;;;; ---- apply-background idempotence ----
+
+(ert-deftest claude-repl-drawer-test-apply-background-idempotent ()
+  "`--apply-background' adds exactly one relative remap on the `default'
+face no matter how many times it is called.  Without cookie tracking,
+each call would stack another `(:background ...)' entry onto the face's
+relative-remap list — `claude-repl-drawer-mode' adds one and every
+`claude-repl-drawer-show' adds another, so a buffer that has been
+toggled N times would carry N+1 entries and pay redisplay overhead for
+each one.  Pins the leak fix."
+  (claude-repl-drawer-test--with-buffer
+    ;; Mode init already called `--apply-background' once.  Call again
+    ;; several times and assert the `default' remap entry list still has
+    ;; exactly one user-installed relative spec.
+    (claude-repl-drawer--apply-background)
+    (claude-repl-drawer--apply-background)
+    (claude-repl-drawer--apply-background)
+    (let* ((entry (assq 'default face-remapping-alist))
+           ;; cdr is the list of relative specs, with the final element
+           ;; being the base face (`default' itself).  Drop the base.
+           (relatives (and entry (butlast (cdr entry)))))
+      (should (= (length relatives) 1))
+      (should (equal (car relatives)
+                     `(:background ,claude-repl-drawer-background))))))
+
 ;;;; ---- Refresh-if-visible ----
 
 (ert-deftest claude-repl-drawer-test-refresh-if-visible-no-buffer-noop ()

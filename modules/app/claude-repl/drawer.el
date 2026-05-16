@@ -380,13 +380,26 @@ within the same entry (e.g. via in-line search)."
       (claude-repl-drawer--center-selection)
       (setq claude-repl-drawer--last-post-command-ws ws))))
 
+(defvar-local claude-repl-drawer--background-remap-cookie nil
+  "Cookie returned by `face-remap-add-relative' for the drawer background.
+Tracked buffer-locally so repeated `--apply-background' calls do not
+stack additional relative-remap entries on the `default' face.  Mode
+init + every subsequent `claude-repl-drawer-show' both call
+`--apply-background'; without this cookie each call would `cons' a new
+entry onto the face's relative-remap list, growing it unboundedly across
+reopens and slowing every redisplay in the drawer buffer.")
+
 (defun claude-repl-drawer--apply-background ()
   "Remap the buffer's `default' face to the drawer background color.
-Idempotent and cheap; safe to call from mode init and from show
-self-heal paths.  Uses `face-remap-add-relative' so the change is
-buffer-local and doesn't leak into the workspace's other windows."
-  (face-remap-add-relative
-   'default :background claude-repl-drawer-background))
+Truly idempotent: first call records the cookie returned by
+`face-remap-add-relative' in `claude-repl-drawer--background-remap-cookie'
+and subsequent calls short-circuit.  Uses `face-remap-add-relative' so
+the change is buffer-local and doesn't leak into the workspace's other
+windows."
+  (unless claude-repl-drawer--background-remap-cookie
+    (setq claude-repl-drawer--background-remap-cookie
+          (face-remap-add-relative
+           'default :background claude-repl-drawer-background))))
 
 (define-derived-mode claude-repl-drawer-mode special-mode "ClaudeDrawer"
   "Major mode for the claude-repl workspace drawer."
