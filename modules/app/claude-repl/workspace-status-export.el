@@ -80,18 +80,32 @@ serialize as JSON `null' instead of `{}'."
       ("git_clean"           . ,(claude-repl--json-null-if-nil git))
       ("done_acked"          . ,acked))))
 
+(defun claude-repl--workspace-status-merged-p (ws)
+  "Return non-nil when WS is a merged-and-dead workspace.
+Merged workspaces have no live claude session and all interesting
+fields stay `null' for the remainder of the registry's lifetime, so
+they are filtered out of the JSON snapshot to (a) keep the on-disk
+file focused on live workspaces and (b) scale json-encode cost with
+the live roster rather than the total roster.  Profiling on a
+~111-workspace registry showed ~95% of entries were merged."
+  (eq (claude-repl--ws-repl-state ws) :merged))
+
 (defun claude-repl--workspace-status-snapshot ()
-  "Return an alist describing every registered workspace's status.
+  "Return an alist describing every non-merged registered workspace's status.
 Shape:
   ((\"updated_at\" . ISO-8601-STRING)
    (\"workspaces\" . ((WS-NAME . STATUS-ALIST) ...)))
 `workspaces' is wrapped in a `:json-object' marker (via the alist
 shape `json-encode' recognizes) so an empty roster serializes as
-`{}' instead of `[]'."
+`{}' instead of `[]'.
+
+`:merged' workspaces are skipped — see
+`claude-repl--workspace-status-merged-p'."
   (let (entries)
     (maphash (lambda (ws _plist)
-               (push (cons ws (claude-repl--workspace-status-entry ws))
-                     entries))
+               (unless (claude-repl--workspace-status-merged-p ws)
+                 (push (cons ws (claude-repl--workspace-status-entry ws))
+                       entries)))
              claude-repl--workspaces)
     ;; Sort by workspace name so the file is diff-stable across ticks
     ;; — easier to eyeball changes when tailing the file.
@@ -112,6 +126,39 @@ when ENTRIES is empty — an empty hash table always serializes to `{}'."
       (puthash (car e) (cdr e) h))
     h))
 
+(defun claude-repl--snapshot->json-serializable (snapshot)
+  "Project SNAPSHOT (a string-keyed alist) onto a hash table tree.
+`json-serialize' requires alist KEYS to be symbols; our snapshot uses
+human-readable string keys throughout.  Re-keying the alists to
+symbols would either churn intern-pool entries or force tests to
+rewrite their `(assoc \"foo\" ...)' lookups.  Hash tables sidestep
+both: they accept string keys natively, and `json-serialize'
+encodes them as JSON objects.
+
+The projection is shallow-recursive: the top-level alist becomes a
+hash table; the `workspaces' value is already a hash table whose
+values are per-workspace string-keyed alists, so each of those is
+projected into its own hash table too."
+  (let ((top (make-hash-table :test 'equal)))
+    (dolist (pair snapshot)
+      (let ((k (car pair)) (v (cdr pair)))
+        (puthash k
+                 (cond
+                  ;; Per-workspace map: rewrap each entry-alist as a
+                  ;; hash table so json-serialize accepts it.
+                  ((and (equal k "workspaces") (hash-table-p v))
+                   (let ((out (make-hash-table :test 'equal)))
+                     (maphash (lambda (ws entry-alist)
+                                (let ((entry-hash (make-hash-table :test 'equal)))
+                                  (dolist (p entry-alist)
+                                    (puthash (car p) (cdr p) entry-hash))
+                                  (puthash ws entry-hash out)))
+                              v)
+                     out))
+                  (t v))
+                 top)))
+    top))
+
 (defun claude-repl--write-workspace-status ()
   "Write the current workspace status snapshot to disk as JSON.
 Writes to `claude-repl-workspace-status-file', creating the parent
@@ -121,19 +168,29 @@ break the 1-Hz poll loop that drives this.
 
 `json-null' is rebound to `:null' BEFORE the snapshot is built so the
 substitution inside `claude-repl--json-null-if-nil' uses the same
-sentinel value that `json-encode' will later route through
-`json-encode-keyword'.  Binding only after the snapshot would leave
-the substitution a no-op (the default `json-null' is plain nil)."
+sentinel value that the encoder will later route through to JSON
+`null'.  Binding only after the snapshot would leave the substitution
+a no-op (the default `json-null' is plain nil, and bare nil collides
+with json-serialize's empty-object encoding).
+
+Encoder: native C `json-serialize' rather than elisp `json-encode'.
+Profiling on a ~111-workspace registry showed `json-encode' (with
+`json-encoding-pretty-print') allocated ~937 MB of transient garbage
+per profile window to produce a ~43 KB file; that GC was the proximate
+cause of the visible periodic hang.  `json-serialize' is a C builtin
+that emits compact JSON with dramatically lower allocation."
   (claude-repl--with-error-logging "write-workspace-status"
     (let* ((json-null :null)
            (snapshot (claude-repl--workspace-status-snapshot))
-           (json-encoding-pretty-print t)
            (file claude-repl-workspace-status-file)
            (dir  (file-name-directory file)))
       (when (and dir (not (file-directory-p dir)))
         (make-directory dir t))
       (with-temp-file file
-        (insert (json-encode snapshot))
+        (insert (json-serialize
+                 (claude-repl--snapshot->json-serializable snapshot)
+                 :null-object :null
+                 :false-object :json-false))
         (insert "\n")))))
 
 ;;;; Staggered write scheduler --------------------------------------------------
@@ -168,21 +225,36 @@ Re-cancelled and re-populated each window by
     (cancel-timer claude-repl--ws-status-write-stale-timer)))
 (setq claude-repl--workspace-status-write-sub-timers nil)
 
+(defun claude-repl--workspace-status-live-count ()
+  "Return the number of registered workspaces that are NOT `:merged'.
+Mirrors the filter in `claude-repl--workspace-status-snapshot' so the
+staggered scheduler's N tracks the live roster rather than the total
+roster.  Without this, a long-running session that accumulates 100+
+merged workspaces would still schedule 100+ writes per window even
+though each write only encodes the ~5 live entries."
+  (if (boundp 'claude-repl--workspaces)
+      (let ((n 0))
+        (maphash (lambda (ws _plist)
+                   (unless (claude-repl--workspace-status-merged-p ws)
+                     (cl-incf n)))
+                 claude-repl--workspaces)
+        n)
+    0))
+
 (defun claude-repl--reschedule-workspace-status-writes ()
   "Cancel pending sub-timers; schedule N evenly-spaced writes over the window.
-N is the current count of registered workspaces.  Each scheduled write
-calls `claude-repl--write-workspace-status', which serialises the entire
-workspace snapshot — the staggering amortises that cost across the
-window rather than spiking at the 1-Hz state-poll cadence.
+N is the count of NON-merged registered workspaces (see
+`claude-repl--workspace-status-live-count').  Each scheduled write
+calls `claude-repl--write-workspace-status', which serialises the
+entire workspace snapshot — the staggering amortises that cost across
+the window rather than spiking at the 1-Hz state-poll cadence.
 
-When the workspace roster is empty no writes are scheduled; the next
-window will pick up any newly-registered workspaces."
+When no live workspaces are registered, no writes are scheduled; the
+next window will pick up any newly-registered workspaces."
   (dolist (timer claude-repl--workspace-status-write-sub-timers)
     (when (timerp timer) (cancel-timer timer)))
   (setq claude-repl--workspace-status-write-sub-timers nil)
-  (let ((n (if (boundp 'claude-repl--workspaces)
-               (hash-table-count claude-repl--workspaces)
-             0)))
+  (let ((n (claude-repl--workspace-status-live-count)))
     (when (> n 0)
       (let ((interval (/ (float claude-repl-workspace-status-write-window-seconds)
                          n)))

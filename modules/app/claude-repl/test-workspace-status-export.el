@@ -114,6 +114,46 @@ leaves non-nil values alone."
       (should (hash-table-p workspaces))
       (should (zerop (hash-table-count workspaces))))))
 
+(ert-deftest claude-repl-test-workspace-status-snapshot-skips-merged ()
+  "Snapshot omits workspaces whose `repl-state' is `:merged'.
+Merged workspaces have no live session and all their interesting
+fields are null forever, so including them only bloats the JSON
+encode."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws-live" :idle)
+    (claude-repl--ws-set-repl-state   "ws-live" :active)
+    (claude-repl--ws-set-repl-state   "ws-merged" :merged)
+    (let* ((snap (claude-repl--workspace-status-snapshot))
+           (workspaces (cdr (assoc "workspaces" snap))))
+      (should (gethash "ws-live" workspaces))
+      (should-not (gethash "ws-merged" workspaces)))))
+
+(ert-deftest claude-repl-test-workspace-status-snapshot-skips-only-merged ()
+  "All other `repl-state' values stay in the snapshot — only `:merged' is filtered."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-repl-state "ws-active"   :active)
+    (claude-repl--ws-set-repl-state "ws-inactive" :inactive)
+    (claude-repl--ws-set-repl-state "ws-hidden"   :hidden)
+    (claude-repl--ws-set-repl-state "ws-dead"     :dead)
+    (claude-repl--ws-set-repl-state "ws-merged"   :merged)
+    (let* ((snap (claude-repl--workspace-status-snapshot))
+           (workspaces (cdr (assoc "workspaces" snap))))
+      (should (gethash "ws-active"   workspaces))
+      (should (gethash "ws-inactive" workspaces))
+      (should (gethash "ws-hidden"   workspaces))
+      (should (gethash "ws-dead"     workspaces))
+      (should-not (gethash "ws-merged" workspaces)))))
+
+(ert-deftest claude-repl-test-workspace-status-merged-p ()
+  "`claude-repl--workspace-status-merged-p' returns t exactly for `:merged' workspaces."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-repl-state "ws-m" :merged)
+    (claude-repl--ws-set-repl-state "ws-a" :active)
+    (claude-repl--ws-put            "ws-n" :foo 1) ; no repl-state set → nil
+    (should      (claude-repl--workspace-status-merged-p "ws-m"))
+    (should-not  (claude-repl--workspace-status-merged-p "ws-a"))
+    (should-not  (claude-repl--workspace-status-merged-p "ws-n"))))
+
 ;;;; ---- Tests: JSON write to disk ----
 
 (ert-deftest claude-repl-test-write-workspace-status-creates-file ()
@@ -148,7 +188,9 @@ leaves non-nil values alone."
 
 (ert-deftest claude-repl-test-write-workspace-status-nil-fields-serialize-as-null ()
   "Absent optional fields render as JSON null, not `{}'.  Regression
-guard for `json-encode' treating bare nil as an empty alist."
+guard for the bare-nil-as-empty-object behavior of both `json-encode'
+and `json-serialize'.  Output is compact (no spaces after colons)
+since the writer uses `json-serialize' without pretty-printing."
   (claude-repl-test--with-clean-state
     (let* ((tmp (make-temp-file "claude-repl-status-" nil ".json"))
            (claude-repl-workspace-status-file tmp))
@@ -159,9 +201,29 @@ guard for `json-encode' treating bare nil as an empty alist."
             (with-temp-buffer
               (insert-file-contents tmp)
               (let ((raw (buffer-string)))
-                (should (string-match-p "\"priority\": null" raw))
-                (should (string-match-p "\"last_prompt_summary\": null" raw))
-                (should-not (string-match-p "\"priority\": {}" raw)))))
+                (should (string-match-p "\"priority\":null" raw))
+                (should (string-match-p "\"last_prompt_summary\":null" raw))
+                (should-not (string-match-p "\"priority\":{}" raw)))))
+        (when (file-exists-p tmp) (delete-file tmp))))))
+
+(ert-deftest claude-repl-test-write-workspace-status-is-compact-not-pretty ()
+  "The on-disk file is compact JSON.  Regression guard for the
+pretty-printer that allocated ~900 MB of transient garbage per encode
+on a 111-workspace registry."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp (make-temp-file "claude-repl-status-" nil ".json"))
+           (claude-repl-workspace-status-file tmp))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-set-claude-state "ws-compact" :idle)
+            (claude-repl--write-workspace-status)
+            (with-temp-buffer
+              (insert-file-contents tmp)
+              (let ((raw (buffer-string)))
+                ;; Pretty-printed output would have newlines+indent
+                ;; between every key/value pair; compact output has
+                ;; at most a single trailing newline.
+                (should (< (cl-count ?\n raw) 3)))))
         (when (file-exists-p tmp) (delete-file tmp))))))
 
 (ert-deftest claude-repl-test-write-workspace-status-creates-parent-dir ()
@@ -265,6 +327,42 @@ For N=4, delays are 0, 15, 30, 45 (with window=60)."
         (claude-repl--reschedule-workspace-status-writes)
         (let ((delays (sort (mapcar #'car calls) #'<)))
           (should (equal '(0.0 60.0) delays)))))))
+
+(ert-deftest claude-repl-test-reschedule-workspace-status-writes-excludes-merged ()
+  "Scheduler counts only non-merged workspaces when computing N.
+With 1 live + 2 merged, N=1 → exactly one sub-timer is scheduled
+\(at delay 0), not three.  This is the second half of the
+merged-filter — without it, 100+ merged workspaces would still
+schedule 100+ writes per window even though each write encoded the
+filtered (small) snapshot."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-repl-state "ws-live"    :active)
+    (claude-repl--ws-set-repl-state "ws-merged1" :merged)
+    (claude-repl--ws-set-repl-state "ws-merged2" :merged)
+    (claude-repl-test--with-stubbed-run-at-time calls
+      (setq claude-repl--workspace-status-write-sub-timers nil)
+      (claude-repl--reschedule-workspace-status-writes)
+      (should (= 1 (length calls))))))
+
+(ert-deftest claude-repl-test-reschedule-workspace-status-writes-all-merged ()
+  "All-merged roster schedules zero sub-timers — same as empty roster."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-repl-state "ws-m1" :merged)
+    (claude-repl--ws-set-repl-state "ws-m2" :merged)
+    (claude-repl-test--with-stubbed-run-at-time calls
+      (setq claude-repl--workspace-status-write-sub-timers nil)
+      (claude-repl--reschedule-workspace-status-writes)
+      (should (null calls))
+      (should (null claude-repl--workspace-status-write-sub-timers)))))
+
+(ert-deftest claude-repl-test-workspace-status-live-count ()
+  "`claude-repl--workspace-status-live-count' returns the non-merged total."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-repl-state "ws-a" :active)
+    (claude-repl--ws-set-repl-state "ws-b" :inactive)
+    (claude-repl--ws-set-repl-state "ws-c" :merged)
+    (claude-repl--ws-set-repl-state "ws-d" :merged)
+    (should (= 2 (claude-repl--workspace-status-live-count)))))
 
 (provide 'test-workspace-status-export)
 ;;; test-workspace-status-export.el ends here
