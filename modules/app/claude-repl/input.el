@@ -113,6 +113,21 @@ Active when `claude-repl-skip-permissions' is non-nil, subject to
 `claude-repl-prefix-period'.  Baked in at load time from
 `claude-repl-command-prefix'.")
 
+;; `defcustom' and `defvar' only initialize their values on first load;
+;; reloading the file (e.g. via `claude-repl-reload-config' or
+;; `doom/reload') leaves the variables at their old values even when the
+;; source has changed.  Force-refresh them here so editing the metaprompt
+;; in this file and reloading is enough — no manual `M-x eval-defun'
+;; required.  `standard-value' is re-set by `defcustom' on every load, so
+;; re-evaluating it picks up whatever this file currently defines.
+(setq claude-repl-command-prefix
+      (eval (car (get 'claude-repl-command-prefix 'standard-value))))
+(setq claude-repl-command-prefix-template
+      (eval (car (get 'claude-repl-command-prefix-template 'standard-value))))
+(setq claude-repl--command-prefix
+      (format claude-repl-command-prefix-template
+              claude-repl-command-prefix))
+
 (defcustom claude-repl-send-postfix "\n what do you think? do NOT code, just analyze."
   "String appended to input when sending via `claude-repl-send-with-postfix'."
   :type 'string
