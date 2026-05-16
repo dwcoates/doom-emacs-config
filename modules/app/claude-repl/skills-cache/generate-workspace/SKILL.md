@@ -90,7 +90,7 @@ When analyzing Slack threads, **follow all links exhaustively**:
     - E.g., `DWC/hello-world`
   - If the user supplied a Jira ticket, be sure to include it in the name as a prefix using the format `DWC/<ticket-id>/<feature-name>` 
     - E.g., `DWC/CV-100/fix-login`. 
-  - **Do NOT append a random hash suffix yourself.** `run.sh` automatically appends a random 3-letter lowercase suffix (e.g. `-abc`) to every `"create"` entry's `name` when it writes the file. Emit the bare name (e.g. `DWC/fix-login`); the on-disk result will be `DWC/fix-login-xyz`. Never call `openssl`, `uuidgen`, `tr`, etc. to mint your own suffix — that responsibility lives exclusively in `run.sh`.
+  - **Do NOT append a random hash suffix yourself.** Emit the bare, human-readable name (e.g. `DWC/fix-login`). The downstream consumer (Emacs) detects collisions against existing workspaces, on-disk worktrees, git branches, and start tags, and only when a collision is found does it append a random 3-letter lowercase suffix (e.g. `-abc`). When there is no collision, the on-disk name matches what you emit verbatim. Never call `openssl`, `uuidgen`, `tr`, etc. to mint your own suffix — disambiguation is exclusively the downstream consumer's responsibility, and only fires on actual collision.
 
 3. **Determine commands**: Build an array of typed command objects.
   - Always emit one `"create"` entry per workspace.
@@ -164,7 +164,7 @@ When analyzing Slack threads, **follow all links exhaustively**:
    ]
    ```
 
-4. **Write the commands** by piping the JSON array into the skill's `run.sh`. `run.sh` is the single source of truth for: (a) injecting the random 3-letter suffix on each `create` entry's `name`, and (b) writing atomically to `~/.claude/output/workspace_commands_<uuid>.json`. Do not write the file yourself with `mktemp`/`mv` — always go through `run.sh`.
+4. **Write the commands** by piping the JSON array into the skill's `run.sh`. `run.sh` is the single source of truth for writing the payload atomically to `~/.claude/output/workspace_commands_<uuid>.json`. It does not mutate `name` fields — collision disambiguation lives downstream (Emacs), not in `run.sh`. Do not write the file yourself with `mktemp`/`mv` — always go through `run.sh`.
    ```bash
    cat <<'EOF' | <skill_base_dir>/run.sh
    [
@@ -178,7 +178,7 @@ When analyzing Slack threads, **follow all links exhaustively**:
    **`run.sh` is FIRE-AND-FORGET.** After invoking it, you are DONE with the dispatch step — there is no verification phase, no post-write check, no inspection of `~/.claude/output/`, no second call. The exit code of `run.sh` is the sole and authoritative signal:
    - Exit 0 → the write succeeded. Trust it unconditionally and move on. Do NOT `ls`, `cat`, `stat`, `find`, `test -f`, `[ -e ... ]`, or otherwise look at `~/.claude/output/` to "confirm." The downstream consumer (Emacs) watches that directory and deletes each file the instant it is dispatched, so any post-write inspection will almost always show your file missing — that is normal, not a failure. **Missing file ≠ failure.**
    - Exit non-zero → stop immediately and surface the error to the user verbatim. Do not retry, do not adapt, do not work around, do not "re-run with stderr captured."
-   - Do NOT re-invoke `run.sh` for any reason — not to retry, not to verify, not to debug, not to "fix" anything. Each invocation produces a fresh random suffix, so a second call dispatches duplicate workspaces with different names; there is no idempotency safety net.
+   - Do NOT re-invoke `run.sh` for any reason — not to retry, not to verify, not to debug, not to "fix" anything. A second call dispatches duplicate workspaces with the same bare names, and downstream disambiguation will silently fork them apart — but the duplicates are not desired.
    - Do NOT attempt to fix, infer, or self-correct any aspect of the dispatch process. The pipeline is correct; assume your understanding of it is the unreliable part.
 
 6. **Tell the user** the workspace names that were written and that the workspaces will be created automatically. If prompt commands were included, mention that the prompts will be dispatched once each session is ready.

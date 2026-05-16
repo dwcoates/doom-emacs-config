@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Reads a JSON workspace commands array from stdin, appends a random
-# 3-letter lowercase suffix (e.g. "-abc") to each create entry's "name"
-# field, then writes the result atomically to
-# ~/.claude/output/workspace_commands_<uuid>.json.
+# Reads a JSON workspace commands array from stdin and writes it atomically
+# to ~/.claude/output/workspace_commands_<uuid>.json. Validates the payload
+# is a JSON array; otherwise passes the data through unchanged.
 #
-# The suffix is added here — not by the caller — so workspace names
-# always carry a deterministic disambiguator, even when callers forget
-# to include one. This keeps suffix generation off the LLM's hot path.
+# Collision disambiguation (appending a 3-letter suffix to a `create`
+# entry's `name` when it would clash with an existing workspace, on-disk
+# worktree, git branch, or start tag) lives in the downstream consumer
+# (Emacs), NOT here.  This script does not mutate names.
 #
 # (Previously a wrapper that exec'd ../emit-workspace-commands.sh; inlined
 # here so the skill is self-contained and can be `gns skills publish`'d.)
@@ -31,8 +31,6 @@ tmp=$(mktemp ~/.claude/output/.workspace_commands_XXXXXX)
 # run.sh's stdin (a `python3 - <<'PY'` heredoc would shadow it).
 python3 -c "$(cat <<'PY'
 import json
-import secrets
-import string
 import sys
 
 try:
@@ -44,16 +42,6 @@ except json.JSONDecodeError as e:
 if not isinstance(data, list):
     print("ERROR: workspace commands payload must be a JSON array", file=sys.stderr)
     sys.exit(2)
-
-for entry in data:
-    if (
-        isinstance(entry, dict)
-        and entry.get("type") == "create"
-        and isinstance(entry.get("name"), str)
-        and entry["name"]
-    ):
-        suffix = "".join(secrets.choice(string.ascii_lowercase) for _ in range(3))
-        entry["name"] = f"{entry['name']}-{suffix}"
 
 json.dump(data, sys.stdout, indent=2)
 sys.stdout.write("\n")
