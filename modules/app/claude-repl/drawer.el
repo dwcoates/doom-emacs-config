@@ -538,24 +538,68 @@ clearing `:merging') and all dominate hidden."
    ((eq (claude-repl--ws-get ws :repl-state) :hidden) :hidden)
    (t :main)))
 
+(defvar claude-repl-drawer--dir->name-map nil
+  "Dynamic-binding cache: canonical project-dir → workspace name.
+When non-nil (bound by `claude-repl-drawer--with-dir-map'),
+`--source-ws-name' resolves cold misses via O(1) hash lookup against
+this map instead of falling through to `claude-repl--ws-name-for-dir',
+whose `maphash' + per-workspace `file-truename' is O(N) per call.  N
+chain walks during a render would otherwise be O(N²); the map collapses
+this to O(N) — one build, all lookups constant-time.
+
+Outside the macro's dynamic extent the var is nil and callers fall back
+to the legacy lookup, so non-drawer callers (and the macro's first cold
+build itself) keep the original semantics.")
+
+(defun claude-repl-drawer--build-dir->name-map ()
+  "Return a fresh hash table mapping canonical `:project-dir' → ws name.
+One `maphash' over `claude-repl--workspaces' with one
+`claude-repl--path-canonical' (i.e. `file-truename') per workspace.
+Total cost O(N); see `claude-repl-drawer--dir->name-map' for context."
+  (let ((map (make-hash-table :test 'equal)))
+    (maphash (lambda (ws plist)
+               (when-let ((dir (plist-get plist :project-dir)))
+                 (puthash (claude-repl--path-canonical dir) ws map)))
+             claude-repl--workspaces)
+    map))
+
+(defmacro claude-repl-drawer--with-dir-map (&rest body)
+  "Evaluate BODY with `claude-repl-drawer--dir->name-map' bound.
+Builds the reverse-lookup map exactly once for the duration of BODY so
+nested `--source-ws-name' calls amortize against a single O(N) walk.
+Nested invocations reuse the outer binding (the `or' branch) so a
+caller wrapping `claude-repl-drawer-show' doesn't pay a second build
+when an inner `--render' or `--max-depth' also wraps."
+  (declare (indent 0) (debug t))
+  `(let ((claude-repl-drawer--dir->name-map
+          (or claude-repl-drawer--dir->name-map
+              (claude-repl-drawer--build-dir->name-map))))
+     ,@body))
+
 (defun claude-repl-drawer--source-ws-name (ws)
   "Return the workspace name recorded as WS's source, or nil.
-Reverse-lookups `:source-ws-dir' through `claude-repl--ws-name-for-dir'
-and caches the resolved name on the workspace plist as
-`:source-ws-name'.  Cache invalidation is centralized at the two paths
-that mutate name→workspace mappings:
+Reverse-lookups `:source-ws-dir' and caches the resolved name on the
+workspace plist as `:source-ws-name'.  Cache invalidation is centralized
+at the two paths that mutate name→workspace mappings:
 - `claude-repl--ws-del' sweeps peers whose `:source-ws-name' equals
   the deleted workspace.
 - `claude-repl--rename-update-source-back-refs' clears
   `:source-ws-name' alongside the `:source-ws-dir' rewrite it already
   performs.
-A cached value is therefore always either correct or nil.  Avoids the
-O(N) `claude-repl--ws-name-for-dir' scan (one `file-truename' per
-workspace) on every tree-build / `--max-depth' walk during drawer
-render."
+A cached value is therefore always either correct or nil.
+
+Cold-miss path: when `claude-repl-drawer--dir->name-map' is bound (we
+are inside a `--with-dir-map' body), resolves via O(1) hash lookup
+against that map.  Otherwise falls back to `claude-repl--ws-name-for-dir',
+which is correct but O(N) per call — driving the O(N²) cost of cold
+tree walks that the macro exists to eliminate."
   (when-let ((dir (claude-repl--ws-get ws :source-ws-dir)))
     (or (claude-repl--ws-get ws :source-ws-name)
-        (let ((resolved (claude-repl--ws-name-for-dir dir)))
+        (let ((resolved
+               (if claude-repl-drawer--dir->name-map
+                   (gethash (claude-repl--path-canonical dir)
+                            claude-repl-drawer--dir->name-map)
+                 (claude-repl--ws-name-for-dir dir))))
           (when resolved
             (claude-repl--ws-put ws :source-ws-name resolved))
           resolved))))
@@ -1045,7 +1089,19 @@ expands/collapses or appears/disappears between polls, and
 `forward-line saved-line' can then land on a non-workspace line
 (detail line, blank, section header), which causes
 `--update-current-entry-overlay' to delete the arrow.  Nested
-children sit deeper in the buffer and so are most affected."
+children sit deeper in the buffer and so are most affected.
+
+Wrapped in `--with-dir-map' so every `--source-ws-name' lookup during
+this render (signature compute, partition, tree build, max-depth, …)
+amortizes against a single O(N) reverse-map build instead of N
+independent `--ws-name-for-dir' scans."
+  (claude-repl-drawer--with-dir-map
+   (claude-repl-drawer--render-inner)))
+
+(defun claude-repl-drawer--render-inner ()
+  "Implementation half of `--render'; see that function for semantics.
+Extracted so `--render' can wrap the body in `--with-dir-map' without
+adding indentation noise to every line."
   (let ((sig (claude-repl-drawer--render-signature)))
     (unless (equal sig claude-repl-drawer--last-render-signature)
       (let* ((saved-line   (line-number-at-pos))
@@ -1640,16 +1696,23 @@ Walks each workspace's `:source-ws-dir' chain and returns the maximum
 hop count.  Cycle-capped via `claude-repl-drawer-tree-max-depth'.
 Slight overestimate when merged ancestors exist (the rendered tree
 flattens through them, but this counts raw chain hops) — acceptable;
-the drawer ends up a couple cols wider than strictly needed."
-  (let ((maxd 0))
-    (dolist (ws (claude-repl-drawer--visible-workspace-keys))
-      (let ((d 0)
-            (cur (claude-repl-drawer--source-ws-name ws)))
-        (while (and cur (< d claude-repl-drawer-tree-max-depth))
-          (setq d (1+ d))
-          (setq cur (claude-repl-drawer--source-ws-name cur)))
-        (when (> d maxd) (setq maxd d))))
-    maxd))
+the drawer ends up a couple cols wider than strictly needed.
+
+Wrapped in `--with-dir-map' so the N parent-chain walks share one O(N)
+reverse-lookup build, dropping the cold-cache cost from O(N²) to O(N).
+Called from `--window-width', which the side-window display-action
+invokes once at window creation AND `--apply-width' re-invokes on every
+show — so cheap matters even when `:source-ws-name' caches are warm."
+  (claude-repl-drawer--with-dir-map
+   (let ((maxd 0))
+     (dolist (ws (claude-repl-drawer--visible-workspace-keys))
+       (let ((d 0)
+             (cur (claude-repl-drawer--source-ws-name ws)))
+         (while (and cur (< d claude-repl-drawer-tree-max-depth))
+           (setq d (1+ d))
+           (setq cur (claude-repl-drawer--source-ws-name cur)))
+         (when (> d maxd) (setq maxd d))))
+     maxd)))
 
 (defun claude-repl-drawer--window-width (window)
   "Return the configured drawer width in columns for WINDOW.
@@ -1778,8 +1841,20 @@ global visible-flag so the drawer follows the user across workspace
 switches.  Self-heals if an existing drawer buffer pre-dates the
 current mode init by ensuring the overlay-driving post-command hook
 is installed and firing it once so the arrow is positioned
-immediately, not after the next command."
+immediately, not after the next command.
+
+Wrapped in `--with-dir-map' at the outermost level so the side-window
+display-action's `--window-width' callback, the `--render' that
+follows, and the post-display `--apply-width' all share a single
+O(N) reverse-lookup build instead of paying it three times."
   (interactive)
+  (claude-repl-drawer--with-dir-map
+   (claude-repl-drawer-show--inner)))
+
+(defun claude-repl-drawer-show--inner ()
+  "Implementation half of `claude-repl-drawer-show'.
+Split out so the public entry point can wrap the body in
+`--with-dir-map' without adding indentation noise to every line."
   (let* ((buf        (claude-repl-drawer--get-or-create-buffer))
          (current-ws (claude-repl-drawer--current-ws))
          (win        (display-buffer buf claude-repl-drawer--display-action)))

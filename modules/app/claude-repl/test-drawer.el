@@ -2007,6 +2007,101 @@ selection to the frame's main window when invoked from a side window."
       (claude-repl-drawer--update-cursor)
       (should (eq cursor-type 'box)))))
 
+;;;; ---- Dir→name reverse-map cache (cold-path perf) ----
+
+(ert-deftest claude-repl-drawer-test-with-dir-map-binds-and-restores ()
+  "`--with-dir-map' binds the map for BODY and restores nil after.
+Outside the dynamic extent the map must be nil so non-drawer callers
+fall back to the legacy `--ws-name-for-dir' path."
+  (claude-repl-test--with-clean-state
+    (puthash "alpha" '(:project-dir "/a/") claude-repl--workspaces)
+    (let ((claude-repl-drawer--dir->name-map nil))
+      (should-not claude-repl-drawer--dir->name-map)
+      (claude-repl-drawer--with-dir-map
+        (should (hash-table-p claude-repl-drawer--dir->name-map)))
+      (should-not claude-repl-drawer--dir->name-map))))
+
+(ert-deftest claude-repl-drawer-test-with-dir-map-nested-reuses-outer ()
+  "Nested `--with-dir-map' reuses the outer map instead of rebuilding.
+The `or' branch in the macro guards against paying a second O(N)
+`maphash' when a caller (e.g. `drawer-show') already wrapped an inner
+`--render' or `--max-depth'."
+  (claude-repl-test--with-clean-state
+    (puthash "a" '(:project-dir "/a/") claude-repl--workspaces)
+    (let ((build-count 0))
+      (cl-letf* ((orig (symbol-function 'claude-repl-drawer--build-dir->name-map))
+                 ((symbol-function 'claude-repl-drawer--build-dir->name-map)
+                  (lambda (&rest args)
+                    (cl-incf build-count)
+                    (apply orig args))))
+        (claude-repl-drawer--with-dir-map
+          (claude-repl-drawer--with-dir-map
+            (claude-repl-drawer--with-dir-map
+              t)))
+        (should (= build-count 1))))))
+
+(ert-deftest claude-repl-drawer-test-source-ws-name-uses-dir-map-when-bound ()
+  "Cold `--source-ws-name' resolves via the map without calling `--ws-name-for-dir'.
+When `--dir->name-map' is bound, the slow O(N) reverse lookup must be
+bypassed entirely — that bypass is the whole point of the map."
+  (claude-repl-test--with-clean-state
+    (puthash "parent" '(:project-dir "/parent/")  claude-repl--workspaces)
+    (puthash "child"  '(:project-dir "/child/"
+                        :source-ws-dir "/parent/")
+             claude-repl--workspaces)
+    (let ((legacy-calls 0))
+      (cl-letf (((symbol-function 'claude-repl--ws-name-for-dir)
+                 (lambda (_dir)
+                   (cl-incf legacy-calls)
+                   nil)))
+        (claude-repl-drawer--with-dir-map
+          (should (equal (claude-repl-drawer--source-ws-name "child") "parent"))
+          (should (= legacy-calls 0)))))))
+
+(ert-deftest claude-repl-drawer-test-source-ws-name-falls-back-without-map ()
+  "Outside `--with-dir-map' the legacy `--ws-name-for-dir' path is used.
+Non-drawer callers (and any code path that hasn't been wrapped) must
+keep behaving exactly as before."
+  (claude-repl-test--with-clean-state
+    (puthash "parent" '(:project-dir "/parent/")  claude-repl--workspaces)
+    (puthash "child"  '(:project-dir "/child/"
+                        :source-ws-dir "/parent/")
+             claude-repl--workspaces)
+    (let ((legacy-calls 0))
+      (cl-letf (((symbol-function 'claude-repl--ws-name-for-dir)
+                 (lambda (_dir)
+                   (cl-incf legacy-calls)
+                   "parent")))
+        (let ((claude-repl-drawer--dir->name-map nil))
+          (should (equal (claude-repl-drawer--source-ws-name "child") "parent"))
+          (should (= legacy-calls 1)))))))
+
+(ert-deftest claude-repl-drawer-test-max-depth-cold-path-builds-map-once ()
+  "Cold `--max-depth' over N workspaces builds the dir→name map exactly once.
+Without the map the function would call `--ws-name-for-dir' O(N×depth)
+times, each doing its own O(N) maphash.  The reverse-map collapses this
+to one O(N) build + O(1) lookups."
+  (claude-repl-test--with-clean-state
+    (puthash "root"  '(:project-dir "/root/")  claude-repl--workspaces)
+    (puthash "mid"   '(:project-dir "/mid/"  :source-ws-dir "/root/")
+             claude-repl--workspaces)
+    (puthash "leaf1" '(:project-dir "/l1/"   :source-ws-dir "/mid/")
+             claude-repl--workspaces)
+    (puthash "leaf2" '(:project-dir "/l2/"   :source-ws-dir "/mid/")
+             claude-repl--workspaces)
+    (let ((build-count 0)
+          (legacy-calls 0))
+      (cl-letf* ((orig (symbol-function 'claude-repl-drawer--build-dir->name-map))
+                 ((symbol-function 'claude-repl-drawer--build-dir->name-map)
+                  (lambda (&rest args)
+                    (cl-incf build-count)
+                    (apply orig args)))
+                 ((symbol-function 'claude-repl--ws-name-for-dir)
+                  (lambda (_dir) (cl-incf legacy-calls) nil)))
+        (claude-repl-drawer--max-depth)
+        (should (= build-count 1))
+        (should (= legacy-calls 0))))))
+
 ;;;; ---- apply-background idempotence ----
 
 (ert-deftest claude-repl-drawer-test-apply-background-idempotent ()
