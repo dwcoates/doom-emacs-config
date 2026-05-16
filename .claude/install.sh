@@ -72,6 +72,7 @@ LOCAL_SKILLS=(
   "debug-logs"
   "profile"
   "workspace-close"
+  "workspace-eval"
   "workspace-profile"
 )
 

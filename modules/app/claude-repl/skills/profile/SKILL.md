@@ -28,6 +28,22 @@ Use plain `/workspace-profile` instead when:
 
 `/debug-logs` covers a different problem (reading existing logs / recommending instrumentation). If the suspect is performance and you want fresh sampling data, use `/profile`. If the suspect is logic or state and you want history, use `/debug-logs`.
 
+## Pairing with /workspace-eval to profile a specific snippet
+
+When the user wants to measure exactly one operation (not just "whatever the editor happens to do during N seconds"), `/workspace-eval` is the missing piece — it hands an elisp snippet to the editor, has it evaluated, and pipes the result back as a follow-up message. Combine the three skills like this:
+
+1. Dispatch `/workspace-profile` enable (or call `/profile` with `manual` mode if you want it to also own session logging).
+2. Dispatch `/workspace-eval` with the snippet under measurement. Use a `note` field to label it in the session log post-mortem (e.g. `"note": "scroll-1000-lines"`).
+3. Dispatch `/workspace-profile` disable (or let `/profile`'s auto-stop fire) so the `profiler-report` round-trips back here.
+
+Three reasons to reach for this pairing over a bare `/profile`:
+
+- **You want sampling around a specific user-invocable command** rather than whatever-happens-to-be-running. The eval snippet calls the command once (or a known number of times) so the report is dominated by that code path.
+- **You want a deterministic re-run.** A snippet sent via `/workspace-eval` is identical across runs; the user "scrolling for 90 seconds" is not.
+- **You need to inspect editor state before/after** the measured operation (e.g. confirm a cache was warm) — wrap your snippet with `princ` calls and they roundtrip in the `;; printed:` section of the eval response.
+
+`/workspace-eval` uses the same return-address pipeline this skill already relies on for the `profiler-report`. There is no new state to track here — the eval response simply arrives as another follow-up user message, in addition to the profiler-report message.
+
 ## Wait-duration policy
 
 Pick the wait duration `N` (seconds) using the first rule that matches:
