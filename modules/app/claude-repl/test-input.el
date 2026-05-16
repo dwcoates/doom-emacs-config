@@ -387,9 +387,9 @@ The numbered list items in the metaprompt must appear in this order."
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-header-changes-example ()
-  "TLDR spec must give a concrete parenthesized example of the annotation."
-  (should (string-match-p "'Convo TLDR (changes made)'" claude-repl-command-prefix))
-  (should (string-match-p "'Response TLDR (no changes made)'" claude-repl-command-prefix)))
+  "TLDR spec must give a concrete parenthesized example of the annotation with emoji."
+  (should (string-match-p "'Convo TLDR (✏️ changes made)'" claude-repl-command-prefix))
+  (should (string-match-p "'Response TLDR (👀 no changes made)'" claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-header-changes-defines-changes ()
   "TLDR spec must define what 'changes' means (edits/writes/commits, not reads/analysis)."
@@ -400,10 +400,19 @@ The numbered list items in the metaprompt must appear in this order."
            "read-only operations, analysis, and answers do NOT count as changes"
            claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-header-changes-exact-wording ()
-  "TLDR spec must mandate exactly 'changes made' or 'no changes made' — no other wording."
+(ert-deftest claude-repl-test-command-prefix-tldr-header-changes-emoji-required ()
+  "TLDR spec must mandate the ✏️ (changes) and 👀 (no changes) status emojis."
   (should (string-match-p
-           "exactly 'changes made' or 'no changes made'"
+           "✏️ when changes were made"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "👀 when no changes were made"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-header-changes-plain-english-after-emoji ()
+  "TLDR spec must allow plain english after the mandatory emoji."
+  (should (string-match-p
+           "Plain english after the emoji is permitted"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-emoji-only-in-tldr ()
