@@ -141,7 +141,7 @@ prompt being summarized is bounded separately by
    " one the user is still actively pursuing."
    "\n"
    "\n"
-   "EXAMPLE OF GOAL SHIFT (showing the granularity AND question-mood"
+   "EXAMPLE OF GOAL SHIFT (showing the granularity AND declarative-mood"
    " required):"
    "\n"
    "- Suppose CONTEXT shows the user was earlier working on sharing"
@@ -149,36 +149,39 @@ prompt being summarized is bounded separately by
    " transport layer to facilitate communication with their brother."
    "\n"
    "- WRONG (captures the OLD effort, blends old/new, or is too"
-   " granular): \"Simplify doom config sharing with brother\"."
+   " granular): \"Doom config sharing with brother is being"
+   " simplified.\"."
    "\n"
-   "- WRONG (right effort but wrong mood — not a question):"
-   " \"Implementing transport layer to facilitate communication with"
-   " brother\"."
+   "- WRONG (right effort but wrong mood — interrogative, not"
+   " declarative): \"How should the transport layer between machines be"
+   " built?\"."
    "\n"
    "- RIGHT (captures the CURRENT top-level effort, phrased as a"
-   " question): \"How should the transport layer for communicating"
-   " with brother be built?\"."
+   " declarative statement): \"Transport layer for communicating with"
+   " brother is being built.\"."
    "\n"
    "\n"
-   "MOOD: The reminder MUST ALWAYS be phrased as a QUESTION (interrogative"
-   " mood, ending with \"?\"). This is non-negotiable regardless of the"
-   " mood of the latest prompt — even if the user issued a command, a"
-   " statement, or a confirmation, the reminder is rewritten as the"
-   " question the user is implicitly trying to answer with their current"
-   " top-level effort. Examples:"
+   "MOOD: The reminder MUST ALWAYS be phrased as a DECLARATIVE STATEMENT"
+   " (indicative mood, ending with a single \".\"). This is"
+   " non-negotiable regardless of the mood of the latest prompt — even"
+   " if the user issued a question, a command, or a confirmation, the"
+   " reminder is rewritten as a declarative sentence describing the"
+   " user's current top-level effort. NEVER end with \"?\" — interrogative"
+   " mood is FORBIDDEN. Examples:"
    "\n"
    "- If the current effort is implementing a transport layer, write"
-   " \"How should the transport layer between machines be built?\"."
+   " \"Transport layer between machines is being built.\"."
    "\n"
-   "- If the current effort is fixing an auth bug, write \"Why is the"
-   " auth flow rejecting valid tokens?\" or \"How can the auth bug be"
-   " fixed?\"."
+   "- If the current effort is fixing an auth bug, write \"Auth flow"
+   " rejecting valid tokens is being fixed.\"."
    "\n"
-   "- If the current effort is a refactor, write \"How should the cache"
-   " layer be restructured?\"."
+   "- If the current effort is a refactor, write \"Cache layer is being"
+   " restructured.\"."
    "\n"
-   "Never use declarative narration about the user (\"The user wants…\","
-   " \"Asking about…\") and never use imperative or gerund mood."
+   "Never use narration that explicitly names the user (\"The user"
+   " wants…\", \"Asking about…\"), never use interrogative mood, and"
+   " never use a bare gerund phrase (\"Implementing X\", \"Fixing Y\")"
+   " in place of a full sentence."
    "\n"
    "\n"
    "NO PRONOUNS AS SUBJECT OR DIRECT OBJECT: The reminder MUST NOT use a"
@@ -198,7 +201,7 @@ prompt being summarized is bounded separately by
    "\n"
    "Output ONLY the reminder text — no quotes, no preamble like"
    " \"Title:\", no markdown. Single line. The reminder MUST end with a"
-   " single \"?\" (the question form is required, see MOOD)."
+   " single \".\" (the declarative form is required, see MOOD)."
    "\n"
    "\n"
    "Remember: identify the CURRENT TOP-LEVEL OBJECTIVE from the"
@@ -225,7 +228,8 @@ objective of the conversation — not merely summarize the latest prompt.
 It must track goal shifts (when the user pivots to a new effort) and
 roll tactical sub-steps up to their parent effort, so the segment
 captures the user's high-level intent rather than whichever sub-step
-happens to be in flight."
+happens to be in flight.  The reminder is rendered in declarative mood
+ending with a single period — interrogative mood is forbidden."
   :type 'string
   :group 'claude-repl)
 
@@ -342,7 +346,10 @@ short follow-ups in RAW."
 (defun claude-repl--prompt-summary-clean (out)
   "Normalize OUT (raw stdout from claude) into a single-line summary.
 Strips surrounding whitespace, drops surrounding ASCII or smart quotes,
-collapses internal whitespace, and trims any trailing terminal punctuation."
+collapses internal whitespace, and enforces declarative mood: any
+trailing \"?\", \"!\", \",\", \";\", or \":\" is stripped, and a single
+\".\" is appended when the cleaned string does not already end with
+one.  Trailing \".\" is preserved as-is."
   (let* ((s (or out ""))
          (s (string-trim s))
          ;; Drop a one-line preamble like "Title:" or "Summary:" if present.
@@ -354,7 +361,13 @@ collapses internal whitespace, and trims any trailing terminal punctuation."
              ((and (string-match-p "\\`'.*'\\'" s))   (substring s 1 -1))
              (t s)))
          (s (replace-regexp-in-string "[ \t\n\r]+" " " (string-trim s)))
-         (s (replace-regexp-in-string "[.!,;:]+\\'" "" s)))
+         ;; Strip disallowed trailing terminal punctuation.  Period is
+         ;; intentionally preserved — declarative mood requires it.
+         (s (replace-regexp-in-string "[?!,;:]+\\'" "" s))
+         ;; Ensure declarative mood: a single trailing "." when non-empty.
+         (s (if (or (string-empty-p s) (string-suffix-p "." s))
+                s
+              (concat s "."))))
     s))
 
 (defun claude-repl--prompt-summary-apply (ws raw summary)

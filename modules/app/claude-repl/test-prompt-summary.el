@@ -42,37 +42,56 @@
 ;;;; ---- Tests: prompt-summary-clean ----
 
 (ert-deftest claude-repl-test-prompt-summary-clean-trims ()
-  "Leading/trailing whitespace is removed."
-  (should (equal (claude-repl--prompt-summary-clean "  hello  \n") "hello")))
+  "Leading/trailing whitespace is removed (a declarative period is then
+appended since the cleaned input lacks one)."
+  (should (equal (claude-repl--prompt-summary-clean "  hello  \n") "hello.")))
 
 (ert-deftest claude-repl-test-prompt-summary-clean-strips-double-quotes ()
-  "Wrapping double quotes are stripped."
-  (should (equal (claude-repl--prompt-summary-clean "\"my title\"") "my title")))
+  "Wrapping double quotes are stripped (a declarative period is then
+appended since the cleaned input lacks one)."
+  (should (equal (claude-repl--prompt-summary-clean "\"my title\"") "my title.")))
 
 (ert-deftest claude-repl-test-prompt-summary-clean-strips-single-quotes ()
-  "Wrapping single quotes are stripped."
-  (should (equal (claude-repl--prompt-summary-clean "'my title'") "my title")))
+  "Wrapping single quotes are stripped (a declarative period is then
+appended since the cleaned input lacks one)."
+  (should (equal (claude-repl--prompt-summary-clean "'my title'") "my title.")))
 
 (ert-deftest claude-repl-test-prompt-summary-clean-strips-preamble ()
-  "Common preambles like `Title:' are stripped."
+  "Common preambles like `Title:' are stripped (a declarative period is
+then appended since the cleaned input lacks one)."
   (should (equal (claude-repl--prompt-summary-clean "Title: hello world")
-                 "hello world"))
+                 "hello world."))
   (should (equal (claude-repl--prompt-summary-clean "Summary: x")
-                 "x")))
+                 "x.")))
 
-(ert-deftest claude-repl-test-prompt-summary-clean-strips-trailing-punct ()
-  "Trailing terminal punctuation is removed."
-  (should (equal (claude-repl--prompt-summary-clean "hello world.") "hello world"))
-  (should (equal (claude-repl--prompt-summary-clean "hello!") "hello"))
-  (should (equal (claude-repl--prompt-summary-clean "hello;") "hello")))
+(ert-deftest claude-repl-test-prompt-summary-clean-preserves-trailing-period ()
+  "Trailing `.' is preserved — declarative mood requires the period to
+survive cleaning."
+  (should (equal (claude-repl--prompt-summary-clean "hello world.")
+                 "hello world.")))
 
-(ert-deftest claude-repl-test-prompt-summary-clean-preserves-trailing-question-mark ()
-  "Trailing `?' is preserved — the always-interrogative mood requires
-the question mark to survive cleaning."
+(ert-deftest claude-repl-test-prompt-summary-clean-strips-trailing-bang ()
+  "Trailing `!' is stripped and replaced with the declarative period."
+  (should (equal (claude-repl--prompt-summary-clean "hello!") "hello.")))
+
+(ert-deftest claude-repl-test-prompt-summary-clean-strips-trailing-semicolon ()
+  "Trailing `;' is stripped and replaced with the declarative period."
+  (should (equal (claude-repl--prompt-summary-clean "hello;") "hello.")))
+
+(ert-deftest claude-repl-test-prompt-summary-clean-strips-trailing-question-mark ()
+  "Trailing `?' is stripped — declarative mood forbids the question mark
+and the cleaner enforces it as a safety net against model disobedience."
   (should (equal (claude-repl--prompt-summary-clean "How does the cache work?")
-                 "How does the cache work?"))
+                 "How does the cache work."))
   (should (equal (claude-repl--prompt-summary-clean "Why is auth failing?")
-                 "Why is auth failing?")))
+                 "Why is auth failing.")))
+
+(ert-deftest claude-repl-test-prompt-summary-clean-adds-period-when-missing ()
+  "When the model output ends with no terminal punctuation, the cleaner
+appends a single `.' so the segment always reads as a declarative
+sentence."
+  (should (equal (claude-repl--prompt-summary-clean "Transport layer is being built")
+                 "Transport layer is being built.")))
 
 ;;;; ---- Tests: prompt-summary-skip-p ----
 
@@ -258,43 +277,48 @@ discard the OLD effort — never blend the two."
 
 (ert-deftest claude-repl-test-prompt-format-includes-worked-pivot-example ()
   "Format must contain the canonical worked example anchoring the
-required granularity AND question-mood: the doom-config-sharing →
+required granularity AND declarative-mood: the doom-config-sharing →
 transport-layer pivot case.  Both WRONG formulations (old effort, and
-right-effort-wrong-mood) and the RIGHT question-mood formulation are
+right-effort-wrong-mood) and the RIGHT declarative-mood formulation are
 pinned so the framing cannot be silently weakened."
   (let ((rendered (claude-repl--prompt-summary-build-input "the prompt")))
     ;; WRONG #1: captures the OLD effort.
-    (should (string-match-p "Simplify doom config sharing with brother" rendered))
-    ;; WRONG #2: right effort but wrong (non-question) mood.
-    (should (string-match-p "Implementing transport layer to facilitate communication with brother"
-                            rendered))
-    ;; RIGHT: question-mood phrasing of the current top-level effort.
     (should (string-match-p
-             "How should the transport layer for communicating with brother be built\\?"
+             "Doom config sharing with brother is being simplified"
+             rendered))
+    ;; WRONG #2: right effort but wrong (interrogative, not declarative) mood.
+    (should (string-match-p
+             "How should the transport layer between machines be built\\?"
+             rendered))
+    ;; RIGHT: declarative-mood phrasing of the current top-level effort.
+    (should (string-match-p
+             "Transport layer for communicating with brother is being built\\."
              rendered))))
 
-;;;; ---- Tests: prompt-format requires always-interrogative mood ----
+;;;; ---- Tests: prompt-format requires always-declarative mood ----
 
-(ert-deftest claude-repl-test-prompt-format-requires-always-question-mood ()
-  "Format must require the reminder to ALWAYS be phrased as a question,
-ending with `?', regardless of the mood of the latest prompt.  Pins the
-always-interrogative rule so a future relaxation back to mixed mood
-cannot land silently."
+(ert-deftest claude-repl-test-prompt-format-requires-always-declarative-mood ()
+  "Format must require the reminder to ALWAYS be phrased as a declarative
+statement, ending with `.', regardless of the mood of the latest prompt.
+Pins the always-declarative rule so a future relaxation back to mixed
+mood cannot land silently."
   (let ((rendered (claude-repl--prompt-summary-build-input "fix the auth bug")))
-    ;; The "ALWAYS" / "question" framing.
-    (should (string-match-p "ALWAYS be phrased as a QUESTION" rendered))
+    ;; The "ALWAYS" / "declarative" framing.
+    (should (string-match-p "ALWAYS be phrased as a DECLARATIVE" rendered))
     ;; Explicit override: not the mood of the latest prompt.
     (should (string-match-p "regardless of the mood of the latest prompt"
                             rendered))
-    ;; Imperative/gerund are explicitly forbidden.
-    (should (string-match-p "never use imperative or gerund mood" rendered))))
+    ;; Interrogative mood is explicitly forbidden.
+    (should (string-match-p
+             "\\(?:NEVER end with \"\\?\"\\|interrogative mood is FORBIDDEN\\)"
+             rendered))))
 
-(ert-deftest claude-repl-test-prompt-format-output-section-requires-trailing-question-mark ()
-  "Output-formatting section must require a trailing `?' on the reminder.
+(ert-deftest claude-repl-test-prompt-format-output-section-requires-trailing-period ()
+  "Output-formatting section must require a trailing `.' on the reminder.
 Pins the wire-format requirement so the output rule and the MOOD rule
 agree."
   (let ((rendered (claude-repl--prompt-summary-build-input "fix the auth bug")))
-    (should (string-match-p "MUST end with a single \"\\?\"" rendered))))
+    (should (string-match-p "MUST end with a single \"\\.\"" rendered))))
 
 ;;;; ---- Tests: prompt-format forbids pronouns as subject/direct object ----
 
