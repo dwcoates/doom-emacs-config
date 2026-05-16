@@ -2197,12 +2197,20 @@ PROJECT-ROOT."
 
 (defun claude-repl--project-state-summary (project-root)
   "Return a plist summarizing PROJECT-ROOT's persisted state.
-Keys: `:created-at' `:last-killed-at' `:priority' `:live-p' `:has-state'.
+Keys: `:created-at' `:last-killed-at' `:priority' `:live-p' `:has-state'
+`:workspace-name'.
 
 `:created-at' falls back to the state file's mtime when the persisted
 state lacks an explicit `:created-at' (state files predating the
 column-picker rollout).  Returns nil for all date keys when no state
-file exists."
+file exists.
+
+`:workspace-name' is the registered workspace name whose `:project-dir'
+canonicalizes to PROJECT-ROOT, or nil when no workspace points at the
+project.  Lets `--picker-status-emoji' mirror the drawer's per-workspace
+state glyph for projects that already have a live workspace, keeping
+emoji usage consistent between the project picker (`SPC p p') and the
+drawer."
   (let* ((state-file (and project-root
                           (claude-repl--state-file-for-read project-root)))
          (has-state (and state-file (file-exists-p state-file)))
@@ -2220,25 +2228,36 @@ file exists."
          (created-at (or (plist-get saved :created-at) file-mtime))
          (last-killed-at (plist-get saved :last-killed-at))
          (priority (plist-get saved :priority))
-         (live-p (claude-repl--project-has-live-workspace-p project-root)))
+         (live-p (claude-repl--project-has-live-workspace-p project-root))
+         (workspace-name (and project-root
+                              (claude-repl--ws-name-for-dir project-root))))
     (list :created-at created-at
           :last-killed-at last-killed-at
           :priority priority
           :live-p live-p
-          :has-state has-state)))
+          :has-state has-state
+          :workspace-name workspace-name)))
 
 (defun claude-repl--picker-status-emoji (summary)
   "Return the status-emoji prefix for a candidate with SUMMARY.
 SUMMARY is a plist from `claude-repl--project-state-summary'.
 
-  🟢 - currently has a live claude-repl workspace open
+When `:workspace-name' is non-nil, returns the same glyph the drawer
+would render for that workspace via `claude-repl-drawer--state-glyph'
+— keeps emoji usage for a given workspace consistent between the
+project picker (`SPC p p') and the drawer.
+
+Otherwise falls back to project-level indicators reflecting only
+persisted state:
+
   💀 - last recorded action was a kill/nuke
   📁 - has saved state but no live ws and no kill recorded
   🆕 - no state file (never opened with claude-repl)"
-  (cond ((plist-get summary :live-p)         "🟢")
-        ((plist-get summary :last-killed-at) "💀")
-        ((plist-get summary :has-state)      "📁")
-        (t                                   "🆕")))
+  (let ((ws (plist-get summary :workspace-name)))
+    (cond (ws (claude-repl-drawer--state-glyph ws))
+          ((plist-get summary :last-killed-at) "💀")
+          ((plist-get summary :has-state)      "📁")
+          (t                                   "🆕"))))
 
 (defun claude-repl--picker-format-date (time width face placeholder)
   "Return a propertized fixed-width date string for TIME.

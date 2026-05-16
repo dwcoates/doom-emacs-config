@@ -4365,25 +4365,55 @@ even if downstream teardown errors before the redundant save fires."
 
 ;;;; ---- Project picker (SPC p p) helpers ----
 
-(ert-deftest claude-repl-cmd-test-picker-status-emoji/live ()
-  "Live workspace beats every other state — wins even when state file
-records a prior kill."
-  (let ((summary '(:live-p t :last-killed-at (1 2 3) :has-state t)))
-    (should (equal (claude-repl--picker-status-emoji summary) "🟢"))))
+(ert-deftest claude-repl-cmd-test-picker-status-emoji/live-mirrors-drawer-glyph ()
+  "When the project has a workspace, picker mirrors the drawer's glyph
+for that workspace — keeps `SPC p p' and the drawer visually consistent
+per-workspace rather than collapsing every live ws to a single 🟢."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-live" :claude-state :thinking)
+    (let ((summary '(:workspace-name "ws-live" :live-p t
+                     :last-killed-at (1 2 3) :has-state t)))
+      (should (equal (claude-repl--picker-status-emoji summary)
+                     (alist-get :thinking claude-repl-drawer-state-icons))))))
+
+(ert-deftest claude-repl-cmd-test-picker-status-emoji/live-merge-conflict-wins ()
+  "Picker mirrors `:merge-conflict' badge for a workspace mid-conflict.
+Pins the drawer's repl-state precedence (💥 wins over :claude-state)
+through the picker's mirror path."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-conflict" :claude-state :thinking)
+    (claude-repl--ws-put "ws-conflict" :repl-state :merge-conflict)
+    (let ((summary '(:workspace-name "ws-conflict" :live-p t
+                     :has-state t)))
+      (should (equal (claude-repl--picker-status-emoji summary) "💥")))))
+
+(ert-deftest claude-repl-cmd-test-picker-status-emoji/live-dominates-killed-at ()
+  "A live workspace's drawer glyph wins over the persisted
+`:last-killed-at' fallback — the workspace-side state is the source of
+truth when a workspace exists at picker time."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws-respawned" :claude-state :done)
+    (let ((summary '(:workspace-name "ws-respawned"
+                     :last-killed-at (1 2 3) :has-state t)))
+      (should (equal (claude-repl--picker-status-emoji summary)
+                     (alist-get :done claude-repl-drawer-state-icons))))))
 
 (ert-deftest claude-repl-cmd-test-picker-status-emoji/killed ()
-  "When no live ws but `:last-killed-at' is set, picker shows the skull."
-  (let ((summary '(:live-p nil :last-killed-at (1 2 3) :has-state t)))
+  "When no workspace exists but `:last-killed-at' is set, picker shows the skull."
+  (let ((summary '(:workspace-name nil :live-p nil
+                   :last-killed-at (1 2 3) :has-state t)))
     (should (equal (claude-repl--picker-status-emoji summary) "💀"))))
 
 (ert-deftest claude-repl-cmd-test-picker-status-emoji/has-state-no-kill ()
-  "Has state file but no live ws and no recorded kill -> folder."
-  (let ((summary '(:live-p nil :last-killed-at nil :has-state t)))
+  "Has state file but no workspace and no recorded kill -> folder."
+  (let ((summary '(:workspace-name nil :live-p nil
+                   :last-killed-at nil :has-state t)))
     (should (equal (claude-repl--picker-status-emoji summary) "📁"))))
 
 (ert-deftest claude-repl-cmd-test-picker-status-emoji/never-opened ()
   "No state file at all -> NEW indicator."
-  (let ((summary '(:live-p nil :last-killed-at nil :has-state nil)))
+  (let ((summary '(:workspace-name nil :live-p nil
+                   :last-killed-at nil :has-state nil)))
     (should (equal (claude-repl--picker-status-emoji summary) "🆕"))))
 
 (ert-deftest claude-repl-cmd-test-picker-format-date/formats-real-time ()
@@ -4520,6 +4550,29 @@ files still get a creation column."
               (should-not (plist-get summary :last-killed-at))))
         (delete-directory tmpdir t)))))
 
+(ert-deftest claude-repl-cmd-test-project-state-summary/workspace-name-resolves ()
+  "Summary's `:workspace-name' is the registered ws whose `:project-dir'
+matches the queried root — picker uses this to mirror the drawer's
+per-workspace glyph."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-wsname-" t))))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws-x" :project-dir tmpdir)
+            (let ((summary (claude-repl--project-state-summary tmpdir)))
+              (should (equal (plist-get summary :workspace-name) "ws-x"))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-cmd-test-project-state-summary/workspace-name-nil-when-no-ws ()
+  "Summary's `:workspace-name' is nil when no workspace points at the
+queried root — picker falls back to the project-level emoji ladder."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-no-ws-" t))))
+      (unwind-protect
+          (let ((summary (claude-repl--project-state-summary tmpdir)))
+            (should-not (plist-get summary :workspace-name)))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest claude-repl-cmd-test-build-project-picker-candidates/sorted-by-killed-at ()
   "Picker sorts entries most-recently-killed first.  Older kill ranks
 below newer kill, even when older kill has a more recent created-at."
@@ -4609,6 +4662,25 @@ users can scan the list at a glance."
                  (display (substring-no-properties (car (car candidates)))))
             ;; A never-opened project should be tagged "🆕".
             (should (string-prefix-p "🆕" display)))
+        (delete-directory tmp t)))))
+
+(ert-deftest claude-repl-cmd-test-build-project-picker-candidates/display-mirrors-drawer-glyph ()
+  "When a workspace points at the project, the picker's candidate display
+opens with the drawer's per-workspace glyph rather than the legacy 🟢
+\"any live ws\" emoji — pins the consistency the picker promises with
+the drawer."
+  (claude-repl-test--with-clean-state
+    (let ((tmp (file-name-as-directory (make-temp-file "picker-glyph-mirror-" t))))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "live-ws" :project-dir tmp)
+            (claude-repl--ws-put "live-ws" :claude-state :idle)
+            (let* ((candidates (claude-repl--build-project-picker-candidates
+                                (list tmp)))
+                   (display (substring-no-properties (car (car candidates)))))
+              (should (string-prefix-p
+                       (alist-get :idle claude-repl-drawer-state-icons)
+                       display))))
         (delete-directory tmp t)))))
 
 (ert-deftest claude-repl-cmd-test-build-project-picker-candidates/display-aligns-columns ()
