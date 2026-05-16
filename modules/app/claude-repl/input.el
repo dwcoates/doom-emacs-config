@@ -597,9 +597,13 @@ committed (after all deferred actions complete)."
   (claude-repl--send-input-bracketed vterm-buf input on-settle))
 
 (defun claude-repl--mark-ws-thinking (ws)
-  "Mark workspace WS as thinking: set claude-state."
+  "Mark workspace WS as thinking: set claude-state.
+Also cancels any pending backoff-retry timer for WS — once Claude
+is actively thinking (whether due to a user prompt or a retry fire),
+a previously-armed retry would be stale or duplicative."
   (claude-repl--log ws "mark-ws-thinking ws=%s" ws)
-  (claude-repl--ws-set-claude-state ws :thinking))
+  (claude-repl--ws-set-claude-state ws :thinking)
+  (claude-repl--backoff-retry-cancel-timer ws))
 
 (defun claude-repl--increment-prefix-counter (ws)
   "Increment the metaprompt prefix counter for workspace WS."

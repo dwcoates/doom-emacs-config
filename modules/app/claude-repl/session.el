@@ -555,6 +555,7 @@ timestamp (orthogonal to `:repl-state'):
     selects the workspace."
   (claude-repl--log ws "mark-claude-done ws=%s" ws)
   (claude-repl--ws-set-claude-state ws :done)
+  (claude-repl--backoff-retry-reset ws)
   (let ((current (claude-repl--current-ws-p ws)))
     (claude-repl--ws-put ws :done-acked current)
     (claude-repl--ws-put ws :done-acked-at (and current (float-time)))))

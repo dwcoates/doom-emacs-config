@@ -296,10 +296,14 @@ the turn."
 Sets `:claude-state' to `:stop-failed' (visually distinct from `:dead'
 since the vterm session is still alive and re-promptable) and clears
 the Stop / SubagentStop tracking so a subsequent successful turn isn't
-gated on a stale pending-subagent counter from this aborted turn."
+gated on a stale pending-subagent counter from this aborted turn.
+Schedules an exponential-backoff `try again' retry via
+`claude-repl--backoff-retry-schedule' so transient API failures
+self-recover without user intervention."
   (claude-repl--log ws "on-stop-failure-event: ws=%s dir=%S" ws dir)
   (claude-repl--ws-clear-stop-tracking ws)
-  (claude-repl--ws-set-claude-state ws :stop-failed))
+  (claude-repl--ws-set-claude-state ws :stop-failed)
+  (claude-repl--backoff-retry-schedule ws))
 
 (defun claude-repl--on-prompt-submit-event (ws _dir)
   "Mark workspace WS as thinking after a prompt submission."

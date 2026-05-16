@@ -48,6 +48,7 @@
 (claude-repl--load-module "autosave")
 (claude-repl--load-module "sentinel")
 (claude-repl--load-module "input")
+(claude-repl--load-module "backoff-retry")
 (claude-repl--load-module "commands")
 (claude-repl--load-module "session")
 (claude-repl--load-module "prompt-summary")
