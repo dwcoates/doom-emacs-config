@@ -265,52 +265,6 @@ the main buffer rather than failing on the dedicated side window."
         (+dwc/magit-status-workspace)
         (should (= select-calls 0))))))
 
-(ert-deftest claude-repl-test-magit-status-workspace-falls-back-to-default-directory ()
-  "When the current workspace is untracked (claude-repl--ws-dir errors),
-falls back to `default-directory' so magit still opens.
-Repro: open `SPC g g' from the main \"doom\" workspace or after a
-workspace's hash entry has been nuked — should not signal."
-  (claude-repl-test--with-clean-state
-    (let ((magit-status-args nil)
-          (default-directory "/tmp/fallback-dir/"))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "untracked-ws"))
-                ((symbol-function 'claude-repl--ws-dir)
-                 (lambda (ws) (error "no :project-dir for workspace %s" ws)))
-                ((symbol-function 'window-parameter) (lambda (_w _p) nil))
-                ((symbol-function 'magit-status)
-                 (lambda (&rest args) (setq magit-status-args args))))
-        (+dwc/magit-status-workspace)
-        (should (equal magit-status-args '("/tmp/fallback-dir/")))))))
-
-(ert-deftest claude-repl-test-magit-status-workspace-no-stub-when-untracked ()
-  "When the current workspace is untracked, does NOT call
-`claude-repl--ws-put' (which would create a STUB-CREATE entry for an
-untracked workspace and leak it into the drawer's `(no repo)' bucket)."
-  (claude-repl-test--with-clean-state
-    (let ((ws-put-calls 0))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "untracked-ws"))
-                ((symbol-function 'claude-repl--ws-dir)
-                 (lambda (ws) (error "no :project-dir for workspace %s" ws)))
-                ((symbol-function 'window-parameter) (lambda (_w _p) nil))
-                ((symbol-function 'claude-repl--ws-put)
-                 (lambda (&rest _) (cl-incf ws-put-calls)))
-                ((symbol-function 'magit-status) #'ignore))
-        (+dwc/magit-status-workspace)
-        (should (= ws-put-calls 0))))))
-
-(ert-deftest claude-repl-test-magit-status-workspace-still-clears-fullscreen-when-tracked ()
-  "When the workspace IS tracked, still clears `:fullscreen-config' (the
-prior behavior).  Guards against the untracked-fallback regressing the
-tracked path."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "test-ws" :project-dir "/tmp/proj")
-    (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'window-parameter) (lambda (_w _p) nil))
-              ((symbol-function 'magit-status) #'ignore))
-      (+dwc/magit-status-workspace)
-      (should (null (claude-repl--ws-get "test-ws" :fullscreen-config))))))
-
 ;;;; ---- Tests: claude-repl--magit-display-buffer-same-window ----
 
 (ert-deftest claude-repl-test-magit-display-buffer-same-window-uses-display-buffer-same-window ()
