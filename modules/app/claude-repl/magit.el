@@ -35,40 +35,54 @@ First %s is the repo name, second %s is the commit SHA."
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-magit-show-tags-header nil
-  "Whether `magit-status' displays the tags header line.
-When nil (the default), `magit-insert-tags-header' is removed from
-`magit-status-headers-hook' so the \"Tags:\" header is omitted from
-status buffers.  Toggle interactively inside any magit-status
-buffer with `+dwc/magit-toggle-tags-header'."
+(defcustom claude-repl-magit-show-tags-in-log nil
+  "Whether magit commit listings include tag refs alongside branches.
+When nil (the default), `tag: ...' entries are stripped from the refs
+string fed to `magit-format-ref-labels' so the recent-commits, unpushed,
+and other status log sections show only branches and HEAD pointers.
+Toggle interactively with `+dwc/magit-toggle-tags-in-log' (bound to
+`g T' in `magit-status-mode-map')."
   :type 'boolean
   :group 'claude-repl)
 
 ;;;; --- magit settings and keybindings ---------------------------------------
 
-(defun claude-repl--magit-apply-tags-header-visibility ()
-  "Sync `magit-status-headers-hook' to `claude-repl-magit-show-tags-header'.
-Adds `magit-insert-tags-header' to the hook when the option is non-nil
-and removes it otherwise — the hook is the canonical place magit reads
-to assemble status buffer headers."
-  (if claude-repl-magit-show-tags-header
-      (add-hook 'magit-status-headers-hook #'magit-insert-tags-header t)
-    (remove-hook 'magit-status-headers-hook #'magit-insert-tags-header)))
+(defun claude-repl--magit-strip-tag-refs (args)
+  "Return ARGS with `tag: NAME' entries stripped from the refs string.
+ARGS is the argument list passed to `magit-format-ref-labels'; its
+sole element is the comma-separated refs string git emitted via `%D'.
+When `claude-repl-magit-show-tags-in-log' is non-nil, ARGS is returned
+unchanged; otherwise both `tag: NAME, ' (leading) and `, tag: NAME'
+\(trailing) patterns are removed so tag decorations disappear from
+commit lists in magit-status and magit-log buffers while branches,
+HEAD pointers, and remote refs remain intact.
 
-(defun +dwc/magit-toggle-tags-header ()
-  "Toggle whether `magit-status' displays the tags header line.
-Flips `claude-repl-magit-show-tags-header', syncs the hook via
-`claude-repl--magit-apply-tags-header-visibility', and refreshes the
-current buffer when invoked from a `magit-status-mode' buffer so the
-change becomes visible immediately."
+Used as `:filter-args' advice on `magit-format-ref-labels' rather than
+a `--decorate-refs-exclude' git arg so the filter applies uniformly to
+every section that decorates commits (status, log, diff inline) without
+having to thread args through each call site."
+  (if (or claude-repl-magit-show-tags-in-log
+          (null args)
+          (not (stringp (car args))))
+      args
+    (let ((s (car args)))
+      (setq s (replace-regexp-in-string
+               "\\(?:tag: [^,]+\\(?:, \\)?\\|, tag: [^,]+\\)"
+               "" s))
+      (cons s (cdr args)))))
+
+(defun +dwc/magit-toggle-tags-in-log ()
+  "Toggle whether magit commit listings include tag refs.
+Flips `claude-repl-magit-show-tags-in-log' and refreshes the current
+magit buffer (status, log, etc.) when invoked from a `magit-mode'
+buffer so the change becomes visible immediately."
   (interactive)
-  (setq claude-repl-magit-show-tags-header
-        (not claude-repl-magit-show-tags-header))
-  (claude-repl--magit-apply-tags-header-visibility)
-  (when (derived-mode-p 'magit-status-mode)
+  (setq claude-repl-magit-show-tags-in-log
+        (not claude-repl-magit-show-tags-in-log))
+  (when (derived-mode-p 'magit-mode)
     (magit-refresh))
-  (message "magit-status tags header %s"
-           (if claude-repl-magit-show-tags-header "shown" "hidden")))
+  (message "magit commit-list tags %s"
+           (if claude-repl-magit-show-tags-in-log "shown" "hidden")))
 
 (after! magit
   (setq magit-no-confirm (append magit-no-confirm claude-repl-magit-no-confirm-extras)
@@ -80,8 +94,9 @@ change becomes visible immediately."
           (stashes  . show)
           (untracked . show)))
 
-  ;; Apply the tags-header visibility preference (default: hidden).
-  (claude-repl--magit-apply-tags-header-visibility)
+  ;; Strip tag refs from commit-list decorations by default (toggle via `g T').
+  (advice-add 'magit-format-ref-labels :filter-args
+              #'claude-repl--magit-strip-tag-refs)
 
   (map! :map (magit-unstaged-section-map magit-staged-section-map magit-untracked-section-map magit-mode-map)
         :desc "Jump to recent commits"
@@ -248,7 +263,7 @@ transitions `:repl-state' to :inactive)."
 (map! :map magit-status-mode-map
       "g c" #'+dwc/magit-copy-commit-link
       "g C" #'+dwc/magit-open-commit-in-github
-      "g T" #'+dwc/magit-toggle-tags-header)
+      "g T" #'+dwc/magit-toggle-tags-in-log)
 
 (map! :map (magit-status-mode-map magit-diff-section-base-map magit-diff-section-map)
       "C-<return>" #'magit-diff-visit-file-other-window)

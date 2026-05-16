@@ -282,99 +282,135 @@ so the buffer replaces the selected window's content."
       (should (eq captured-buffer 'fake-buf))
       (should (equal captured-action '(display-buffer-same-window))))))
 
-;;;; ---- Tests: claude-repl-magit-show-tags-header (defcustom default) ----
+;;;; ---- Tests: claude-repl-magit-show-tags-in-log (defcustom default) ----
 
-(ert-deftest claude-repl-test-magit-show-tags-header-defaults-to-nil ()
-  "Tags header is hidden by default — the option ships off."
-  (should (null (default-value 'claude-repl-magit-show-tags-header))))
+(ert-deftest claude-repl-test-magit-show-tags-in-log-defaults-to-nil ()
+  "Commit-list tag refs are hidden by default — the option ships off."
+  (should (null (default-value 'claude-repl-magit-show-tags-in-log))))
 
-;;;; ---- Tests: claude-repl--magit-apply-tags-header-visibility ----
+;;;; ---- Tests: claude-repl--magit-strip-tag-refs (filter-args advice) ----
 
-(ert-deftest claude-repl-test-magit-apply-tags-header-removes-when-nil ()
-  "When the option is nil, `magit-insert-tags-header' is removed from the hook."
-  (let ((claude-repl-magit-show-tags-header nil)
-        (magit-status-headers-hook (list #'magit-insert-error-header
-                                          #'magit-insert-tags-header)))
-    (cl-letf (((symbol-function 'magit-insert-error-header)
-               (lambda (&rest _) nil)))
-      (claude-repl--magit-apply-tags-header-visibility)
-      (should-not (memq #'magit-insert-tags-header magit-status-headers-hook))
-      ;; Other hook members are not disturbed.
-      (should (memq #'magit-insert-error-header magit-status-headers-hook)))))
+(ert-deftest claude-repl-test-magit-strip-tag-refs-noop-when-shown ()
+  "Returns ARGS unchanged when `claude-repl-magit-show-tags-in-log' is non-nil."
+  (let ((claude-repl-magit-show-tags-in-log t))
+    (should (equal (claude-repl--magit-strip-tag-refs
+                    '("HEAD -> master, tag: v1.0, origin/master"))
+                   '("HEAD -> master, tag: v1.0, origin/master")))))
 
-(ert-deftest claude-repl-test-magit-apply-tags-header-adds-when-non-nil ()
-  "When the option is non-nil, `magit-insert-tags-header' is added to the hook."
-  (let ((claude-repl-magit-show-tags-header t)
-        (magit-status-headers-hook nil))
-    (claude-repl--magit-apply-tags-header-visibility)
-    (should (memq #'magit-insert-tags-header magit-status-headers-hook))))
+(ert-deftest claude-repl-test-magit-strip-tag-refs-strips-trailing-tag ()
+  "Strips `, tag: NAME' when the tag follows another ref."
+  (let ((claude-repl-magit-show-tags-in-log nil))
+    (should (equal (claude-repl--magit-strip-tag-refs
+                    '("HEAD -> master, tag: v1.0"))
+                   '("HEAD -> master")))))
 
-(ert-deftest claude-repl-test-magit-apply-tags-header-idempotent-on-add ()
-  "Adding when already present must not duplicate the hook entry."
-  (let ((claude-repl-magit-show-tags-header t)
-        (magit-status-headers-hook (list #'magit-insert-tags-header)))
-    (claude-repl--magit-apply-tags-header-visibility)
-    (should (equal (cl-count #'magit-insert-tags-header
-                             magit-status-headers-hook)
-                   1))))
+(ert-deftest claude-repl-test-magit-strip-tag-refs-strips-leading-tag ()
+  "Strips `tag: NAME, ' when the tag precedes another ref."
+  (let ((claude-repl-magit-show-tags-in-log nil))
+    (should (equal (claude-repl--magit-strip-tag-refs
+                    '("tag: v1.0, master"))
+                   '("master")))))
 
-(ert-deftest claude-repl-test-magit-apply-tags-header-idempotent-on-remove ()
-  "Removing when already absent is a no-op."
-  (let ((claude-repl-magit-show-tags-header nil)
-        (magit-status-headers-hook nil))
-    (claude-repl--magit-apply-tags-header-visibility)
-    (should (null magit-status-headers-hook))))
+(ert-deftest claude-repl-test-magit-strip-tag-refs-strips-middle-tag ()
+  "Strips a tag entry sandwiched between two other refs."
+  (let ((claude-repl-magit-show-tags-in-log nil))
+    (should (equal (claude-repl--magit-strip-tag-refs
+                    '("HEAD -> master, tag: v1.0, origin/master"))
+                   '("HEAD -> master, origin/master")))))
 
-;;;; ---- Tests: +dwc/magit-toggle-tags-header ----
+(ert-deftest claude-repl-test-magit-strip-tag-refs-strips-solo-tag ()
+  "Strips a bare `tag: NAME' with no surrounding refs to an empty string."
+  (let ((claude-repl-magit-show-tags-in-log nil))
+    (should (equal (claude-repl--magit-strip-tag-refs '("tag: v1.0"))
+                   '("")))))
 
-(ert-deftest claude-repl-test-magit-toggle-flips-from-nil-to-t ()
-  "Toggle flips the option from nil to t and adds the hook entry."
-  (let ((claude-repl-magit-show-tags-header nil)
-        (magit-status-headers-hook nil))
+(ert-deftest claude-repl-test-magit-strip-tag-refs-strips-multiple-tags ()
+  "Strips multiple tag entries in a single refs string."
+  (let ((claude-repl-magit-show-tags-in-log nil))
+    (should (equal (claude-repl--magit-strip-tag-refs
+                    '("tag: v1.0, tag: v2.0, master"))
+                   '("master")))))
+
+(ert-deftest claude-repl-test-magit-strip-tag-refs-handles-full-decoration ()
+  "Strips `tag: refs/tags/NAME' (the `--decorate=full' form magit uses)."
+  (let ((claude-repl-magit-show-tags-in-log nil))
+    (should (equal (claude-repl--magit-strip-tag-refs
+                    '("HEAD -> refs/heads/master, tag: refs/tags/v1.0, refs/remotes/origin/master"))
+                   '("HEAD -> refs/heads/master, refs/remotes/origin/master")))))
+
+(ert-deftest claude-repl-test-magit-strip-tag-refs-leaves-non-tag-refs-alone ()
+  "Branches, HEAD pointers, and remotes pass through untouched."
+  (let ((claude-repl-magit-show-tags-in-log nil))
+    (should (equal (claude-repl--magit-strip-tag-refs
+                    '("HEAD -> master, origin/master, upstream/master"))
+                   '("HEAD -> master, origin/master, upstream/master")))))
+
+(ert-deftest claude-repl-test-magit-strip-tag-refs-handles-nil-args ()
+  "Returns nil when ARGS is nil — never errors on empty arg lists."
+  (let ((claude-repl-magit-show-tags-in-log nil))
+    (should (null (claude-repl--magit-strip-tag-refs nil)))))
+
+(ert-deftest claude-repl-test-magit-strip-tag-refs-handles-non-string-arg ()
+  "Returns ARGS unchanged when the first arg isn't a string."
+  (let ((claude-repl-magit-show-tags-in-log nil))
+    (should (equal (claude-repl--magit-strip-tag-refs '(nil))
+                   '(nil)))))
+
+;;;; ---- Tests: advice registration on `magit-format-ref-labels' ----
+
+(ert-deftest claude-repl-test-magit-strip-tag-refs-advice-registered ()
+  "`magit-format-ref-labels' has the strip-tag-refs filter-args advice attached."
+  (let ((found nil))
+    (advice-mapc (lambda (fn _props)
+                   (when (eq fn #'claude-repl--magit-strip-tag-refs)
+                     (setq found t)))
+                 'magit-format-ref-labels)
+    (should found)))
+
+;;;; ---- Tests: +dwc/magit-toggle-tags-in-log ----
+
+(ert-deftest claude-repl-test-magit-toggle-tags-in-log-flips-from-nil-to-t ()
+  "Toggle flips the option from nil to t."
+  (let ((claude-repl-magit-show-tags-in-log nil))
     (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) nil))
               ((symbol-function 'message) (lambda (&rest _) nil)))
-      (+dwc/magit-toggle-tags-header)
-      (should (eq claude-repl-magit-show-tags-header t))
-      (should (memq #'magit-insert-tags-header magit-status-headers-hook)))))
+      (+dwc/magit-toggle-tags-in-log)
+      (should (eq claude-repl-magit-show-tags-in-log t)))))
 
-(ert-deftest claude-repl-test-magit-toggle-flips-from-t-to-nil ()
-  "Toggle flips the option from t to nil and removes the hook entry."
-  (let ((claude-repl-magit-show-tags-header t)
-        (magit-status-headers-hook (list #'magit-insert-tags-header)))
+(ert-deftest claude-repl-test-magit-toggle-tags-in-log-flips-from-t-to-nil ()
+  "Toggle flips the option from t to nil."
+  (let ((claude-repl-magit-show-tags-in-log t))
     (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) nil))
               ((symbol-function 'message) (lambda (&rest _) nil)))
-      (+dwc/magit-toggle-tags-header)
-      (should (null claude-repl-magit-show-tags-header))
-      (should-not (memq #'magit-insert-tags-header magit-status-headers-hook)))))
+      (+dwc/magit-toggle-tags-in-log)
+      (should (null claude-repl-magit-show-tags-in-log)))))
 
-(ert-deftest claude-repl-test-magit-toggle-refreshes-in-magit-status-mode ()
-  "Toggle calls `magit-refresh' when invoked from a `magit-status-mode' buffer."
-  (let ((claude-repl-magit-show-tags-header nil)
-        (magit-status-headers-hook nil)
+(ert-deftest claude-repl-test-magit-toggle-tags-in-log-refreshes-in-magit-mode ()
+  "Toggle calls `magit-refresh' when invoked from a `magit-mode' buffer."
+  (let ((claude-repl-magit-show-tags-in-log nil)
         (refresh-calls 0))
     (cl-letf (((symbol-function 'derived-mode-p)
-               (lambda (mode) (eq mode 'magit-status-mode)))
+               (lambda (mode) (eq mode 'magit-mode)))
               ((symbol-function 'magit-refresh)
                (lambda (&rest _) (cl-incf refresh-calls)))
               ((symbol-function 'message) (lambda (&rest _) nil)))
-      (+dwc/magit-toggle-tags-header)
+      (+dwc/magit-toggle-tags-in-log)
       (should (= refresh-calls 1)))))
 
-(ert-deftest claude-repl-test-magit-toggle-no-refresh-outside-magit-status ()
-  "Toggle does NOT call `magit-refresh' when invoked outside magit-status."
-  (let ((claude-repl-magit-show-tags-header nil)
-        (magit-status-headers-hook nil)
+(ert-deftest claude-repl-test-magit-toggle-tags-in-log-no-refresh-outside-magit ()
+  "Toggle does NOT call `magit-refresh' when invoked outside any magit buffer."
+  (let ((claude-repl-magit-show-tags-in-log nil)
         (refresh-calls 0))
     (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) nil))
               ((symbol-function 'magit-refresh)
                (lambda (&rest _) (cl-incf refresh-calls)))
               ((symbol-function 'message) (lambda (&rest _) nil)))
-      (+dwc/magit-toggle-tags-header)
+      (+dwc/magit-toggle-tags-in-log)
       (should (= refresh-calls 0)))))
 
-(ert-deftest claude-repl-test-magit-toggle-is-interactive ()
+(ert-deftest claude-repl-test-magit-toggle-tags-in-log-is-interactive ()
   "Toggle is an interactive command so it can be bound to a key."
-  (should (commandp #'+dwc/magit-toggle-tags-header)))
+  (should (commandp #'+dwc/magit-toggle-tags-in-log)))
 
 (provide 'test-magit)
 ;;; test-magit.el ends here

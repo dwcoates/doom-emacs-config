@@ -168,6 +168,8 @@
   (defun magit-insert-tags-header (&rest _args) "Stub." nil))
 (unless (fboundp 'magit-refresh)
   (defun magit-refresh (&rest _args) "Stub." nil))
+(unless (fboundp 'magit-format-ref-labels)
+  (defun magit-format-ref-labels (string) "Stub: identity." string))
 
 ;; magit variable stubs — `after!' is a no-op shim in tests, so the
 ;; `(after! magit ...)' body in magit.el executes and would reference
