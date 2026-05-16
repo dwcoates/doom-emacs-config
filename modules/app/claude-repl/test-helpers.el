@@ -218,6 +218,14 @@
   (defvar persp-mode nil "Stub."))
 (unless (boundp 'persp-names-cache)
   (defvar persp-names-cache nil "Stub: simulated persp-mode names cache."))
+;; Doom workspace existence helper.  Mirrors Doom's
+;; `+workspace-exists-p' (which checks `persp-names-cache' membership)
+;; so callers under test can use the production existence guard
+;; without a separate fboundp escape hatch firing first.
+(unless (fboundp '+workspace-exists-p)
+  (defun +workspace-exists-p (name)
+    "Stub: simulate Doom's `+workspace-exists-p' using `persp-names-cache'."
+    (and (member name persp-names-cache) t)))
 (unless (boundp 'persp-nil-name)
   (defvar persp-nil-name "main" "Stub: simulated persp-mode nil-persp name."))
 (unless (fboundp 'persp-persps)

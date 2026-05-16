@@ -1800,7 +1800,7 @@ No interrupt was actually delivered, so the state should not change."
                 ((symbol-function 'claude-repl--kill-session)
                  (lambda (ws) (setq session-killed ws)))
                 ((symbol-function '+workspace-current-name) (lambda () "other-ws"))
-                ((symbol-function 'persp-get-by-name) (lambda (_n) t))
+                ((symbol-function '+workspace-exists-p) (lambda (_n) t))
                 ((symbol-function '+workspace/kill)
                  (lambda (ws) (setq persp-killed ws)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
@@ -1862,7 +1862,7 @@ are recoverable by reopening the project."
                 ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
                 ((symbol-function 'claude-repl--kill-session) #'ignore)
                 ((symbol-function '+workspace-current-name) (lambda () "other"))
-                ((symbol-function 'persp-get-by-name) (lambda (_n) t))
+                ((symbol-function '+workspace-exists-p) (lambda (_n) t))
                 ((symbol-function '+workspace/kill)
                  (lambda (ws) (setq killed-ws ws)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
@@ -1877,10 +1877,49 @@ are recoverable by reopening the project."
                (lambda (_prompt _coll &rest _) "ghost"))
               ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
               ((symbol-function 'claude-repl--kill-session) #'ignore)
-              ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
+              ((symbol-function '+workspace-exists-p) (lambda (_n) nil))
               ((symbol-function 'force-mode-line-update) #'ignore))
       (claude-repl-nuke-workspace)
       (should-not (gethash "ghost" claude-repl--workspaces)))))
+
+(ert-deftest claude-repl-cmd-test-nuke-workspace/skips-persp-kill-when-workspace-already-gone ()
+  "When the persp is already gone from the cache, nuke MUST NOT call
+`+workspace/kill' — that call would emit the user-visible warning
+`'<ws>' workspace doesn't exist' in the echo area.
+
+Pins the regression seen after a successful workspace merge: the
+async merge flow double-closes the workspace (preemptive close in
+`--workspace-merge-async', then the deferred success-callback close
+in `--workspace-merge-do'), and the second close arrives with the
+persp already torn down.  The existence guard MUST short-circuit on
+this second pass instead of falling through to `+workspace/kill'.
+
+Crucial detail: persp-mode's real `persp-get-by-name' returns the
+keyword `:nil' (i.e. `persp-not-persp', a TRUTHY value) when the
+persp is missing — so a guard that gates on `(persp-get-by-name ws)'
+truthiness would NOT short-circuit.  The current implementation uses
+`+workspace-exists-p' (cache membership) instead, which correctly
+returns nil for a missing workspace."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ghost" :project-dir "/tmp/ghost")
+    (let ((kill-called nil)
+          (persp-mode t))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "ghost"))
+                ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                ((symbol-function 'claude-repl--kill-session) #'ignore)
+                ;; Simulate persp-mode's actual broken-guard behavior:
+                ;; persp-get-by-name returns `:nil' for a missing persp.
+                ((symbol-function 'persp-get-by-name)
+                 (lambda (&rest _) :nil))
+                ;; Workspace not in the names cache — the real signal
+                ;; for "doesn't exist" that `+workspace-exists-p' reads.
+                ((symbol-function '+workspace-exists-p) (lambda (_n) nil))
+                ((symbol-function '+workspace/kill)
+                 (lambda (_ws) (setq kill-called t)))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-nuke-workspace)
+        (should-not kill-called)))))
 
 (ert-deftest claude-repl-cmd-test-nuke-workspace/removes-hashmap-when-kill-session-errors ()
   "nuke-workspace still removes the hashmap entry when kill-session errors."
@@ -1891,7 +1930,7 @@ are recoverable by reopening the project."
               ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
               ((symbol-function 'claude-repl--kill-session)
                (lambda (_ws) (error "simulated kill-session failure")))
-              ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
+              ((symbol-function '+workspace-exists-p) (lambda (_n) nil))
               ((symbol-function 'force-mode-line-update) #'ignore))
       (claude-repl-nuke-workspace)
       (should-not (gethash "doomed" claude-repl--workspaces)))))
@@ -1905,7 +1944,7 @@ are recoverable by reopening the project."
               ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
               ((symbol-function 'claude-repl--kill-session) #'ignore)
               ((symbol-function '+workspace-current-name) (lambda () "other"))
-              ((symbol-function 'persp-get-by-name) (lambda (_n) t))
+              ((symbol-function '+workspace-exists-p) (lambda (_n) t))
               ((symbol-function '+workspace/kill)
                (lambda (_ws) (error "simulated workspace-kill failure")))
               ((symbol-function 'force-mode-line-update) #'ignore))
@@ -2007,8 +2046,8 @@ buffer sweep is not skipped by an earlier teardown failure."
 
 (ert-deftest claude-repl-cmd-test-nuke-workspace/workspace-kill-runs-after-buffer-sweep ()
   "nuke-workspace kills the persp buffers BEFORE tearing down the persp itself.
-Reversing the order would make the buffer sweep a no-op because
-`persp-get-by-name' returns nil once the persp is gone."
+Reversing the order would make the buffer sweep a no-op because the
+persp would already be gone before the buffer sweep ran."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
     (let ((call-order nil)
@@ -2019,7 +2058,7 @@ Reversing the order would make the buffer sweep a no-op because
                 ((symbol-function 'claude-repl--kill-session) #'ignore)
                 ((symbol-function 'claude-repl--kill-workspace-buffers)
                  (lambda (_ws) (push 'kwb call-order)))
-                ((symbol-function 'persp-get-by-name) (lambda (_n) t))
+                ((symbol-function '+workspace-exists-p) (lambda (_n) t))
                 ((symbol-function '+workspace/kill)
                  (lambda (_ws) (push 'persp-kill call-order)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
@@ -2350,7 +2389,7 @@ are recoverable by reopening the project."
                 ((symbol-function 'claude-repl--kill-session)
                  (lambda (ws) (setq session-killed ws)))
                 ((symbol-function '+workspace-current-name) (lambda () "other-ws"))
-                ((symbol-function 'persp-get-by-name) (lambda (_n) t))
+                ((symbol-function '+workspace-exists-p) (lambda (_n) t))
                 ((symbol-function '+workspace/kill)
                  (lambda (ws) (setq persp-killed ws)))
                 ((symbol-function 'force-mode-line-update) #'ignore))

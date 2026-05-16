@@ -1221,9 +1221,24 @@ on-disk state.el is up-to-date."
       (error (claude-repl--log ws "nuke-one-workspace: kill-workspace-buffers error: %S" err)))
     ;; Kill the persp workspace last so all internal state is already
     ;; cleaned up before the UI workspace disappears.
+    ;;
+    ;; Existence guard uses `+workspace-exists-p' (which checks
+    ;; `persp-names-cache' via `+workspace-list-names'), matching the
+    ;; same check `+workspace/kill' itself performs.  Earlier versions
+    ;; gated on `(persp-get-by-name ws)' — but persp-mode's
+    ;; `persp-get-by-name' returns the keyword `persp-not-persp' (i.e.
+    ;; `:nil', a truthy value) when the persp is missing, so that
+    ;; guard never short-circuited.  In the merge-async flow that
+    ;; double-closes the workspace (once preemptively in
+    ;; `--workspace-merge-async', then again in the deferred
+    ;; success callback of `--workspace-merge-do'), pass 2 would slip
+    ;; through the broken guard and call `+workspace/kill', which then
+    ;; emitted the user-visible warning `'<ws>' workspace doesn't
+    ;; exist' in the echo area after every successful merge.
     (condition-case err
         (when (and (bound-and-true-p persp-mode)
-                   (persp-get-by-name ws))
+                   (fboundp '+workspace-exists-p)
+                   (+workspace-exists-p ws))
           (claude-repl--log ws "nuke-one-workspace: pre-persp-kill ws=%s cache=%S"
                             ws persp-names-cache)
           (+workspace/kill ws)
