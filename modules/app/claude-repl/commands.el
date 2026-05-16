@@ -524,16 +524,37 @@ stale window, delete it."
    "  ⟦kbd⟧SPC j h c⟦/kbd⟧   ⟦file⟧modules/app/claude-repl/commands.el⟦/file⟧\n"
    "  ⟦sym⟧claude-repl-explain-config⟦/sym⟧\n"
    "\n"
+   "ESCAPE HATCH -- RAW EMACS LISP FACE PLISTS:\n"
+   "When no semantic tag above fits the styling you want, use the raw-face"
+   " tag: ⟦face PLIST⟧text⟦/face⟧ where PLIST is a raw Emacs Lisp face"
+   " plist.  Examples:\n"
+   "\n"
+   "  ⟦face :foreground \"#FF7F7F\" :weight bold⟧critical warning⟦/face⟧\n"
+   "  ⟦face :background \"#2A4A2A\" :foreground \"#8DE08D\"⟧success⟦/face⟧\n"
+   "  ⟦face :slant italic :underline t⟧emphasis⟦/face⟧\n"
+   "  ⟦face :box (:line-width 1 :color \"#888\")⟧boxed⟦/face⟧\n"
+   "\n"
+   "Permitted plist attributes: :foreground, :background, :weight, :slant,"
+   " :underline, :overline, :strike-through, :box, :height.  Any other"
+   " attribute is rejected and the tag renders verbatim.  Colors may be"
+   " any string Emacs accepts (`\"red\"`, `\"#FF0000\"`).  The close tag"
+   " is always plain ⟦/face⟧ -- do not repeat the plist.\n"
+   "\n"
    "Rules for face markup:\n"
    "  - Plain prose needs NO tags -- only tag the things that benefit"
    " from emphasis or semantic styling.\n"
+   "  - PREFER semantic tags over ⟦face …⟧.  Reach for the escape hatch"
+   " only when no semantic tag captures the styling you want (e.g. a"
+   " one-off color for a warning).\n"
    "  - Always close every tag you open.  Close in LIFO order when"
    " nesting.\n"
    "  - The ⟦ ⟧ brackets are U+27E6 / U+27E7 -- use those exact"
    " characters, not `[[` / `]]`.\n"
    "  - Do NOT emit literal `⟦` or `⟧` inside tagged content -- they"
-   " are reserved as tag delimiters.\n"
-   "  - Unknown tag names render verbatim, so stick to the list above.\n"
+   " are reserved as tag delimiters.  This applies inside ⟦face …⟧"
+   " plists too: do not embed `⟦` or `⟧` in plist values.\n"
+   "  - Unknown tag names render verbatim, so stick to the list above"
+   " (plus the ⟦face …⟧ escape hatch).\n"
    "  - Use ⟦block⟧ for any multi-line code or shell example; use"
    " ⟦code⟧ only for short inline references.\n"
    "\n"
@@ -641,13 +662,72 @@ contract for this entry point -- edit with care."
 Unknown tag names render verbatim and apply no face.")
 
 (defconst claude-repl--explain-config-tag-re
-  "⟦\\(/?\\)\\([a-z][a-z0-9]*\\)⟧"
-  "Regex matching one open (`⟦NAME⟧') or close (`⟦/NAME⟧') face tag.")
+  "⟦\\(/?\\)\\([a-z][a-z0-9]*\\)\\(\\(?: [^⟧]*\\)?\\)⟧"
+  "Regex matching one open (`⟦NAME[ ATTRS]⟧') or close (`⟦/NAME⟧') face tag.
+Capture groups: (1) slash-or-empty, (2) tag name, (3) optional attrs
+payload (leading space included; empty string when no attrs).  ATTRS
+is only meaningful for the `face' escape-hatch tag; semantic tags
+ignore it.")
 
 (defconst claude-repl--explain-config-partial-tag-re
-  "⟦/?[a-z0-9]*\\'"
+  "⟦/?[a-z0-9]*\\(?: [^⟧]*\\)?\\'"
   "Regex matching a possibly-incomplete tag at the very end of a string.
-Used to defer tag fragments across streaming chunk boundaries.")
+Used to defer tag fragments across streaming chunk boundaries.  Now
+also buffers `⟦face PLIST' fragments where the plist arrives split
+across chunks before the closing `⟧'.")
+
+(defconst claude-repl--explain-config-raw-face-tag-name "face"
+  "Magic tag name for the raw-face escape hatch (`⟦face PLIST⟧').
+Distinct from any semantic tag in `claude-repl--explain-config-face-map'
+so the parser can branch on it.")
+
+(defconst claude-repl--explain-config-face-attr-whitelist
+  '(:foreground :background :weight :slant :underline :overline
+    :strike-through :box :height)
+  "Permitted plist attributes inside a raw-face ⟦face PLIST⟧ tag.
+Any plist containing an attribute outside this list is rejected and
+the tag renders verbatim — the preamble documents this whitelist to
+the model.")
+
+(defun claude-repl--explain-config-parse-face-attrs (attrs)
+  "Parse ATTRS (the raw payload from `⟦face PLIST⟧') into a face plist.
+Returns the plist on success, or nil if parsing fails or the plist
+contains a non-whitelisted attribute.  ATTRS is the captured group 3
+from `claude-repl--explain-config-tag-re' — it includes the leading
+separating space (or is empty when no attrs were present).
+
+The payload is documented to the model as bare plist tokens (no
+surrounding parens), e.g. `:foreground \"red\" :weight bold'.  We
+wrap it in parens before `read-from-string' so the entire sequence
+parses as one list rather than as a single leading sexp.
+
+Rejecting unknown attributes (rather than silently dropping them)
+keeps the model honest about the documented surface and avoids
+silently misrendering when the model emits a stray attribute name."
+  (let ((trimmed (and attrs (string-trim attrs))))
+    (when (and trimmed (not (string-empty-p trimmed)))
+      (condition-case nil
+          (let* ((wrapped (concat "(" trimmed ")"))
+                 (read-result (read-from-string wrapped))
+                 (plist (car read-result))
+                 (consumed (cdr read-result))
+                 (tail (string-trim (substring wrapped consumed))))
+            (when (and (listp plist)
+                       (zerop (mod (length plist) 2))
+                       (string-empty-p tail)
+                       (claude-repl--explain-config-plist-keys-valid-p plist))
+              plist))
+        (error nil)))))
+
+(defun claude-repl--explain-config-plist-keys-valid-p (plist)
+  "Return non-nil if every key in PLIST is in the face-attr whitelist."
+  (let ((ok t)
+        (rest plist))
+    (while (and ok rest)
+      (unless (memq (car rest) claude-repl--explain-config-face-attr-whitelist)
+        (setq ok nil))
+      (setq rest (cddr rest)))
+    ok))
 
 (defvar-local claude-repl--explain-config-pending ""
   "Accumulated stream bytes not yet flushed to the buffer.
@@ -776,10 +856,36 @@ the new pending string (also stored buffer-locally)."
                (m-end   (match-end 0))
                (is-close (string= (match-string 1 input) "/"))
                (name    (match-string 2 input))
+               (attrs   (match-string 3 input))
+               (raw-face-p (string= name claude-repl--explain-config-raw-face-tag-name))
                (face    (cdr (assoc name claude-repl--explain-config-face-map))))
           (claude-repl--explain-config-insert-styled
            buf (substring input pos m-start) stack)
           (cond
+           ;; Raw-face escape hatch: ⟦face PLIST⟧ / ⟦/face⟧
+           (raw-face-p
+            (cond
+             ;; Close tag — pop the top entry if it is a plist (i.e. the
+             ;; opener pushed one).  Otherwise emit verbatim so an
+             ;; unmatched `⟦/face⟧' is visible rather than silently
+             ;; consumed.  `(listp (car stack))' distinguishes a plist
+             ;; top from a face-symbol top; nil stack falls through to
+             ;; the verbatim branch.
+             (is-close
+              (if (and stack (consp (car stack)))
+                  (setq stack (cdr stack))
+                (claude-repl--explain-config-insert-styled
+                 buf (substring input m-start m-end) stack)))
+             ;; Open tag — parse the plist, push if valid; else verbatim.
+             ;; On verbatim we deliberately do NOT push a sentinel, so a
+             ;; matching `⟦/face⟧' also renders verbatim — keeps open
+             ;; and close visible together when the model malformed the
+             ;; plist.
+             (t (let ((plist (claude-repl--explain-config-parse-face-attrs attrs)))
+                  (if plist
+                      (setq stack (cons plist stack))
+                    (claude-repl--explain-config-insert-styled
+                     buf (substring input m-start m-end) stack))))))
            ;; Unknown tag name -- emit verbatim, leave stack untouched.
            ((null face)
             (claude-repl--explain-config-insert-styled
@@ -788,7 +894,12 @@ the new pending string (also stored buffer-locally)."
            (is-close
             (when (eq (car stack) face)
               (setq stack (cdr stack))))
-           ;; Open tag -- push onto stack.
+           ;; Open tag -- push onto stack.  Reject stray attrs on
+           ;; semantic tags (the preamble says attrs are only for
+           ;; `⟦face …⟧') by emitting the open tag verbatim.
+           ((and attrs (not (string-empty-p attrs)))
+            (claude-repl--explain-config-insert-styled
+             buf (substring input m-start m-end) stack))
            (t (setq stack (cons face stack))))
           (setq pos m-end)))
       (let ((tail (substring input pos)))

@@ -946,6 +946,21 @@ Clean up the buffer after BODY runs."
     (should (string-match-p "⟦code⟧" rendered))
     (should (string-match-p "⟦block⟧" rendered))))
 
+(ert-deftest claude-repl-cmd-test-explain-config-preamble/documents-raw-face-escape-hatch ()
+  "Preamble documents the ⟦face PLIST⟧ raw-elisp escape hatch."
+  (let ((rendered (claude-repl--explain-config-build-input "anything")))
+    (should (string-match-p "ESCAPE HATCH" rendered))
+    (should (string-match-p "⟦face " rendered))
+    (should (string-match-p "⟦/face⟧" rendered))
+    (should (string-match-p ":foreground" rendered))
+    (should (string-match-p ":background" rendered))
+    (should (string-match-p ":weight" rendered))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-preamble/prefers-semantic-tags ()
+  "Preamble tells the model to prefer semantic tags over the escape hatch."
+  (let ((rendered (claude-repl--explain-config-build-input "anything")))
+    (should (string-match-p "PREFER semantic" rendered))))
+
 (ert-deftest claude-repl-cmd-test-explain-config-parse/plain-text-passes-through ()
   "Untagged text is inserted verbatim with no face property."
   (claude-repl-test--with-explain-config-buf buf
@@ -1041,6 +1056,140 @@ Clean up the buffer after BODY runs."
                     'claude-repl-explain-config-kbd))
         (should (eq (get-text-property sym-pos 'face s)
                     'claude-repl-explain-config-sym))))))
+
+;;;; ---- claude-repl explain-config raw-face escape hatch ----
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/raw-face-applies-plist ()
+  "⟦face PLIST⟧…⟦/face⟧ applies the raw plist as the text-face property."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk
+     buf "⟦face :foreground \"red\" :weight bold⟧danger⟦/face⟧")
+    (with-current-buffer buf
+      (should (equal (buffer-string) "danger"))
+      (should (equal (get-text-property 1 'face)
+                     '(:foreground "red" :weight bold))))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/raw-face-nested-inside-semantic ()
+  "⟦face …⟧ nested inside ⟦b⟧ merges as a list of face specs."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk
+     buf "⟦b⟧bold ⟦face :foreground \"red\"⟧red⟦/face⟧ end⟦/b⟧")
+    (with-current-buffer buf
+      (let* ((s (buffer-string))
+             (red-pos (string-match "red" s))
+             (red-face (get-text-property red-pos 'face s)))
+        (should (equal s "bold red end"))
+        (should (equal red-face
+                       '((:foreground "red")
+                         claude-repl-explain-config-bold)))))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/raw-face-malformed-plist-verbatim ()
+  "An unparseable plist inside ⟦face …⟧ emits the open tag verbatim."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk
+     buf "⟦face :foreground⟧x⟦/face⟧")
+    (with-current-buffer buf
+      ;; Open tag verbatim, body unstyled, close tag verbatim — since
+      ;; stack stays empty the matching close also lands verbatim.
+      (should (equal (buffer-string) "⟦face :foreground⟧x⟦/face⟧"))
+      (should-not (get-text-property 1 'face))
+      (should (null claude-repl--explain-config-face-stack)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/raw-face-unknown-attr-rejected ()
+  "A plist key outside the whitelist is rejected — open tag verbatim."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk
+     buf "⟦face :bogus 1⟧x⟦/face⟧")
+    (with-current-buffer buf
+      (should (equal (buffer-string) "⟦face :bogus 1⟧x⟦/face⟧"))
+      (should-not (get-text-property 1 'face)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/raw-face-partial-across-chunks ()
+  "A ⟦face PLIST⟧ split across chunks buffers until the closing ⟧ arrives."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk buf "before ⟦face :foreground ")
+    (with-current-buffer buf
+      (should (equal (buffer-string) "before "))
+      (should (equal claude-repl--explain-config-pending
+                     "⟦face :foreground ")))
+    (claude-repl--explain-config-parse-chunk buf "\"red\"⟧hot⟦/face⟧ tail")
+    (with-current-buffer buf
+      (let* ((s (buffer-string))
+             (hot-pos (string-match "hot" s))
+             (tail-pos (string-match " tail" s)))
+        (should (equal s "before hot tail"))
+        (should (equal (get-text-property hot-pos 'face s)
+                       '(:foreground "red")))
+        (should-not (get-text-property tail-pos 'face s))
+        (should (equal claude-repl--explain-config-pending ""))))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/raw-face-stray-close-verbatim ()
+  "A ⟦/face⟧ with no preceding open emits verbatim, stack untouched."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk buf "x⟦/face⟧y")
+    (with-current-buffer buf
+      (should (equal (buffer-string) "x⟦/face⟧y"))
+      (should (null claude-repl--explain-config-face-stack)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/raw-face-close-pops-only-plist-top ()
+  "⟦/face⟧ pops only when the stack top is a plist, not a face symbol."
+  (claude-repl-test--with-explain-config-buf buf
+    ;; ⟦b⟧ pushes the bold face symbol; ⟦/face⟧ must NOT pop it.
+    (claude-repl--explain-config-parse-chunk buf "⟦b⟧still⟦/face⟧bold⟦/b⟧")
+    (with-current-buffer buf
+      (let* ((s (buffer-string))
+             (bold-pos (string-match "bold" s)))
+        (should (equal s "still⟦/face⟧bold"))
+        (should (eq (get-text-property bold-pos 'face s)
+                    'claude-repl-explain-config-bold))
+        (should (null claude-repl--explain-config-face-stack))))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/raw-face-empty-attrs-verbatim ()
+  "⟦face⟧ with no attrs at all is treated as an unparseable plist."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk buf "⟦face⟧x⟦/face⟧")
+    (with-current-buffer buf
+      (should (equal (buffer-string) "⟦face⟧x⟦/face⟧"))
+      (should-not (get-text-property 1 'face)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse/semantic-tag-with-stray-attrs-verbatim ()
+  "A semantic tag carrying attrs (forbidden) renders the open tag verbatim.
+The matching close tag is then a stray close — handled by the existing
+silent-drop branch (see `stray-close-tag-is-noop'), so the close itself
+does not appear in the output."
+  (claude-repl-test--with-explain-config-buf buf
+    (claude-repl--explain-config-parse-chunk
+     buf "⟦b :foreground \"red\"⟧bold⟦/b⟧")
+    (with-current-buffer buf
+      (should (equal (buffer-string)
+                     "⟦b :foreground \"red\"⟧bold"))
+      (should-not (get-text-property 1 'face)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse-face-attrs/valid-plist ()
+  "A well-formed whitelisted plist is returned as-is."
+  (should (equal (claude-repl--explain-config-parse-face-attrs
+                  " :foreground \"red\" :weight bold")
+                 '(:foreground "red" :weight bold))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse-face-attrs/nil-on-extra-tokens ()
+  "Trailing junk after the plist sexp is rejected."
+  (should (null (claude-repl--explain-config-parse-face-attrs
+                 " :foreground \"red\" extra"))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse-face-attrs/nil-on-odd-length ()
+  "An odd-length plist (key without value) is rejected."
+  (should (null (claude-repl--explain-config-parse-face-attrs
+                 " :foreground \"red\" :weight"))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse-face-attrs/nil-on-unknown-key ()
+  "A plist containing a non-whitelisted key is rejected."
+  (should (null (claude-repl--explain-config-parse-face-attrs
+                 " :bogus 1"))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-parse-face-attrs/nil-on-empty ()
+  "Empty or whitespace-only attrs return nil (no plist)."
+  (should (null (claude-repl--explain-config-parse-face-attrs "")))
+  (should (null (claude-repl--explain-config-parse-face-attrs " "))))
 
 (ert-deftest claude-repl-cmd-test-explain-config-filter/routes-chunk-through-parser ()
   "Process filter forwards CHUNK to the parser using PROC's buffer."
