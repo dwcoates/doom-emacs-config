@@ -340,40 +340,45 @@
 
 ;;;; ---- Tests: command-prefix content ----
 
-(ert-deftest claude-repl-test-command-prefix-contains-convo-tldr ()
-  "`claude-repl-command-prefix' must instruct including a 'Convo TLDR' section."
-  (should (stringp claude-repl-command-prefix))
-  (should (string-match-p "Convo TLDR" claude-repl-command-prefix)))
-
 (ert-deftest claude-repl-test-command-prefix-contains-response-tldr ()
   "`claude-repl-command-prefix' must instruct including a 'Response TLDR' section."
+  (should (stringp claude-repl-command-prefix))
   (should (string-match-p "Response TLDR" claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-contains-tldr-tldr ()
-  "`claude-repl-command-prefix' must instruct including a 'Response TLDR's TLDR' section."
-  (should (string-match-p "Response TLDR's TLDR" claude-repl-command-prefix)))
+(ert-deftest claude-repl-test-command-prefix-omits-convo-tldr ()
+  "`claude-repl-command-prefix' must NOT reference a 'Convo TLDR' section."
+  (should-not (string-match-p "Convo TLDR" claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-tldr-is-last-instruction ()
-  "The 'Response TLDR's TLDR' instruction must mandate it be the very last item."
-  (should (string-match-p "Response TLDR's TLDR.*VERY LAST\\|VERY LAST.*Response TLDR's TLDR"
+(ert-deftest claude-repl-test-command-prefix-omits-tldr-tldr ()
+  "`claude-repl-command-prefix' must NOT reference a recursive 'Response TLDR's TLDR' section."
+  (should-not (string-match-p "Response TLDR's TLDR" claude-repl-command-prefix))
+  (should-not (string-match-p "TLDR's TLDR" claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-response-tldr-is-last ()
+  "The 'Response TLDR' instruction must mandate it be the very last section of the response."
+  (should (string-match-p "Response TLDR.*VERY LAST\\|VERY LAST.*Response TLDR"
                            claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-order ()
-  "The three TLDR sections must be specified in order: Convo -> Response -> Response's TLDR.
-The numbered list items in the metaprompt must appear in this order."
-  (let ((item1-pos (string-match "1\\. 'Convo TLDR'" claude-repl-command-prefix))
-        (item2-pos (string-match "2\\. 'Response TLDR'" claude-repl-command-prefix))
-        (item3-pos (string-match "3\\. 'Response TLDR's TLDR'" claude-repl-command-prefix)))
-    (should item1-pos)
-    (should item2-pos)
-    (should item3-pos)
-    (should (< item1-pos item2-pos))
-    (should (< item2-pos item3-pos))))
+(ert-deftest claude-repl-test-command-prefix-tldr-structure-top-level-emoji-bullets ()
+  "TLDR spec must describe a structure of top-level emoji-prefixed bullets giving high-level ideas."
+  (should (string-match-p
+           "top-level emoji-prefixed bullets"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "high-level ideas"
+           claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-tldr-recurses-spec ()
-  "The 'Response TLDR's TLDR' instruction must reference applying the spec recursively to the Response TLDR."
-  (should (string-match-p "recursively" claude-repl-command-prefix))
-  (should (string-match-p "TLDR of the Response TLDR" claude-repl-command-prefix)))
+(ert-deftest claude-repl-test-command-prefix-tldr-structure-subbullet-zoom-in ()
+  "TLDR spec must describe per-entry subbullets that zoom in on each top-level idea."
+  (should (string-match-p
+           "subbullets that zoom in"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-structure-subbullets-replace-recursion ()
+  "TLDR spec must state that the per-entry subbullet zoom-in replaces any recursive 'even shorter' TLDR section."
+  (should (string-match-p
+           "per-entry subbullet zoom-in IS the resolution detail"
+           claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-no-emoji-in-main-body ()
   "The metaprompt must explicitly disallow emoji-prefixed top-level bullets in the main response body."
@@ -381,14 +386,14 @@ The numbered list items in the metaprompt must appear in this order."
                           claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-header-changes-annotation ()
-  "TLDR spec must require each TLDR section header to indicate whether changes were made."
+  "TLDR spec must require the Response TLDR section header to indicate whether changes were made."
   (should (string-match-p
-           "Each TLDR section's header MUST indicate whether changes were made"
+           "Response TLDR section's header MUST indicate whether changes were made"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-header-changes-example ()
-  "TLDR spec must give a concrete parenthesized example of the annotation with emoji."
-  (should (string-match-p "'Convo TLDR (✏️ changes made)'" claude-repl-command-prefix))
+  "TLDR spec must give concrete parenthesized examples of the annotation with both status emojis."
+  (should (string-match-p "'Response TLDR (✏️ changes made)'" claude-repl-command-prefix))
   (should (string-match-p "'Response TLDR (👀 no changes made)'" claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-header-changes-defines-changes ()
