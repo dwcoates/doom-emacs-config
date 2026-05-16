@@ -38,6 +38,17 @@ all others use `claude-repl-personal-permission-flag'."
   :type 'string
   :group 'claude-repl)
 
+(defcustom claude-repl-system-prompt "."
+  "Custom system prompt for the main Claude REPL launched via `SPC o c'.
+When non-nil, passed to the Claude CLI as `--system-prompt <prompt>',
+which fully replaces the default system prompt.  When nil, no
+`--system-prompt' flag is added and Claude uses its default system
+prompt.  Defaults to a single period — the default system prompt has
+been judged worse than essentially-empty input."
+  :type '(choice (const :tag "Use Claude's default" nil)
+                 (string :tag "Custom system prompt"))
+  :group 'claude-repl)
+
 (defcustom claude-repl-notify-debounce-seconds 2.0
   "Minimum seconds between desktop notifications for the same workspace."
   :type 'number
@@ -333,7 +344,9 @@ should resume its most recent session via `--continue'.  FORK-SESSION-ID
 is a session UUID to fork from (used when a new worktree/env needs to
 carry a conversation across from another env — the target env has no
 local history yet, so `--continue' won't find anything).  PERM-FLAG is
-the permission flag string or nil.  Returns a trimmed flags string."
+the permission flag string or nil.  Also appends a `--system-prompt'
+flag when `claude-repl-system-prompt' is non-nil.  Returns a trimmed
+flags string."
   (let ((flags (string-trim
                 (mapconcat #'identity
                            (delq nil (list
@@ -343,7 +356,11 @@ the permission flag string or nil.  Returns a trimmed flags string."
                                       ;; Resume most recent session in this env's cwd.
                                       (when (and (not fork-session-id) session-id)
                                         "--continue")
-                                      perm-flag))
+                                      perm-flag
+                                      (when claude-repl-system-prompt
+                                        (format "--system-prompt %s"
+                                                (shell-quote-argument
+                                                 claude-repl-system-prompt)))))
                            " "))))
     (claude-repl--log nil "compute-claude-flags: flags=%s" flags)
     flags))

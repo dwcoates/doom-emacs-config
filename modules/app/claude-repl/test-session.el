@@ -331,37 +331,72 @@ by vterm-buf presence; the :done write is not."
 
 (ert-deftest claude-repl-test-compute-claude-flags-continue ()
   "compute-claude-flags should emit --continue when session-id is set and no fork."
-  (should (equal (claude-repl--compute-claude-flags "abc123" nil nil)
-                 "--continue")))
+  (let ((claude-repl-system-prompt nil))
+    (should (equal (claude-repl--compute-claude-flags "abc123" nil nil)
+                   "--continue"))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-no-continue-without-session-id ()
   "compute-claude-flags should not emit --continue when session-id is nil."
-  (should (equal (claude-repl--compute-claude-flags nil nil nil) "")))
+  (let ((claude-repl-system-prompt nil))
+    (should (equal (claude-repl--compute-claude-flags nil nil nil) ""))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-fork ()
   "compute-claude-flags should emit --resume <id> --fork-session for forks."
-  (should (equal (claude-repl--compute-claude-flags "current" "fork-id" nil)
-                 "--resume fork-id --fork-session")))
+  (let ((claude-repl-system-prompt nil))
+    (should (equal (claude-repl--compute-claude-flags "current" "fork-id" nil)
+                   "--resume fork-id --fork-session"))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-fork-ignores-session ()
   "compute-claude-flags with fork should not also emit --continue for session-id."
-  (let ((result (claude-repl--compute-claude-flags "current" "fork-id" nil)))
+  (let* ((claude-repl-system-prompt nil)
+         (result (claude-repl--compute-claude-flags "current" "fork-id" nil)))
     (should (string-match-p "--resume fork-id --fork-session" result))
     (should-not (string-match-p "--continue" result))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-perm-flag ()
   "compute-claude-flags should include permission flag when provided."
-  (should (equal (claude-repl--compute-claude-flags nil nil "--permission-mode auto")
-                 "--permission-mode auto")))
+  (let ((claude-repl-system-prompt nil))
+    (should (equal (claude-repl--compute-claude-flags nil nil "--permission-mode auto")
+                   "--permission-mode auto"))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-all-nil ()
   "compute-claude-flags should return empty string when all args are nil."
-  (should (equal (claude-repl--compute-claude-flags nil nil nil) "")))
+  (let ((claude-repl-system-prompt nil))
+    (should (equal (claude-repl--compute-claude-flags nil nil nil) ""))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-continue-plus-perm ()
   "compute-claude-flags should combine --continue and perm flag."
-  (should (equal (claude-repl--compute-claude-flags "sess1" nil "--dangerously-skip-permissions")
-                 "--continue --dangerously-skip-permissions")))
+  (let ((claude-repl-system-prompt nil))
+    (should (equal (claude-repl--compute-claude-flags "sess1" nil "--dangerously-skip-permissions")
+                   "--continue --dangerously-skip-permissions"))))
+
+(ert-deftest claude-repl-test-compute-claude-flags-system-prompt-period ()
+  "compute-claude-flags should emit --system-prompt . when var is the default period."
+  (let ((claude-repl-system-prompt "."))
+    (should (equal (claude-repl--compute-claude-flags nil nil nil)
+                   "--system-prompt ."))))
+
+(ert-deftest claude-repl-test-compute-claude-flags-system-prompt-nil ()
+  "compute-claude-flags should omit --system-prompt entirely when var is nil."
+  (let ((claude-repl-system-prompt nil))
+    (let ((result (claude-repl--compute-claude-flags nil nil nil)))
+      (should-not (string-match-p "--system-prompt" result)))))
+
+(ert-deftest claude-repl-test-compute-claude-flags-system-prompt-shell-quoted ()
+  "compute-claude-flags should shell-quote the system prompt to survive spaces/quotes."
+  (let ((claude-repl-system-prompt "be nice"))
+    (let ((result (claude-repl--compute-claude-flags nil nil nil)))
+      (should (string-match-p "--system-prompt " result))
+      ;; The argument must NOT appear as bare `be nice' — it would be
+      ;; interpreted as two shell tokens.  shell-quote-argument either
+      ;; quotes it or backslash-escapes the space.
+      (should-not (string-match-p "--system-prompt be nice\\'" result)))))
+
+(ert-deftest claude-repl-test-compute-claude-flags-system-prompt-combines-with-continue ()
+  "compute-claude-flags should append --system-prompt after --continue and perm flag."
+  (let ((claude-repl-system-prompt "."))
+    (should (equal (claude-repl--compute-claude-flags "sess1" nil "--dangerously-skip-permissions")
+                   "--continue --dangerously-skip-permissions --system-prompt ."))))
 
 (ert-deftest claude-repl-test-compute-perm-flag-sandboxed ()
   "compute-perm-flag should return nil when sandboxed."
@@ -1611,15 +1646,30 @@ restart (the lazy-start path applies its defaults instead)."
 (ert-deftest claude-repl-test-build-start-cmd-bare-metal-no-session ()
   "build-start-cmd for bare-metal with no session should produce claude --dangerously-skip-permissions."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws1" :active-env :bare-metal)
-    (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
-    (claude-repl--ws-put "ws1" :worktree-p nil)
-    (claude-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-    (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
-               (lambda (_ws) nil)))
-      (let ((result (claude-repl--build-start-cmd "ws1")))
-        (should (equal (plist-get result :cmd) "claude --dangerously-skip-permissions"))
-        (should-not (plist-get result :sandboxed-p))))))
+    (let ((claude-repl-system-prompt nil))
+      (claude-repl--ws-put "ws1" :active-env :bare-metal)
+      (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
+      (claude-repl--ws-put "ws1" :worktree-p nil)
+      (claude-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
+      (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
+                 (lambda (_ws) nil)))
+        (let ((result (claude-repl--build-start-cmd "ws1")))
+          (should (equal (plist-get result :cmd) "claude --dangerously-skip-permissions"))
+          (should-not (plist-get result :sandboxed-p)))))))
+
+(ert-deftest claude-repl-test-build-start-cmd-bare-metal-includes-system-prompt-default ()
+  "build-start-cmd for bare-metal with default `claude-repl-system-prompt' includes --system-prompt ."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-system-prompt "."))
+      (claude-repl--ws-put "ws1" :active-env :bare-metal)
+      (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
+      (claude-repl--ws-put "ws1" :worktree-p nil)
+      (claude-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
+      (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
+                 (lambda (_ws) nil)))
+        (let ((result (claude-repl--build-start-cmd "ws1")))
+          (should (equal (plist-get result :cmd)
+                         "claude --dangerously-skip-permissions --system-prompt .")))))))
 
 (ert-deftest claude-repl-test-build-start-cmd-sandbox-with-session ()
   "build-start-cmd for worktree sandbox with session should use sandbox script + --continue."

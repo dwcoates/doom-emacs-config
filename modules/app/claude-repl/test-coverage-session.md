@@ -25,7 +25,7 @@
 
 | Function | Covered | Tests |
 |----------|---------|-------|
-| `claude-repl--compute-claude-flags` | Yes | resume, fork, perm flag, all nil, combined resume+perm |
+| `claude-repl--compute-claude-flags` | Yes | resume, fork, perm flag, all nil, combined resume+perm, system-prompt default period, system-prompt nil, system-prompt shell-quoting, system-prompt combined |
 | `claude-repl--compute-perm-flag` | Yes | sandboxed, ChessCom, personal, nil dir |
 | `claude-repl--assemble-cmd` | Yes | sandboxed, bare metal, no flags |
 | `claude-repl--build-start-cmd` | **No** | see edge cases below |
@@ -206,13 +206,17 @@ Trivial wrapper: `(claude-repl--vterm-process-alive-p (or ws (+workspace-current
 - Ready + current workspace (opens panels)
 - Ready + other workspace (no panels)
 
-### `claude-repl--compute-claude-flags` (6 tests)
+### `claude-repl--compute-claude-flags` (10 tests)
 - Resume only
 - Fork only (takes precedence)
 - Fork ignores session-id
 - Perm flag only
 - All nil
 - Resume + perm flag combined
+- System-prompt default period emits `--system-prompt .`
+- System-prompt nil omits the flag entirely
+- System-prompt with spaces gets shell-quoted
+- System-prompt combines with `--continue` and perm flag
 
 ## Recommended Priority for Remaining Coverage
 
