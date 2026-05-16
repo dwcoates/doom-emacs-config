@@ -4537,33 +4537,34 @@ through the picker's mirror path."
       (should (equal (claude-repl--picker-status-emoji summary) "💥")))))
 
 (ert-deftest claude-repl-cmd-test-picker-status-emoji/live-dominates-killed-at ()
-  "A live workspace's drawer glyph wins over the persisted
-`:last-killed-at' fallback — the workspace-side state is the source of
-truth when a workspace exists at picker time."
+  "A live workspace's drawer glyph wins regardless of `:last-killed-at'
+data on the summary — when `:workspace-name' is set the picker reads
+the drawer glyph from the cached ws plist and never consults the
+non-live 📁 fallback branch."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws-respawned" :claude-state :done)
     (let ((summary '(:workspace-name "ws-respawned"
-                     :last-killed-at (1 2 3) :has-state t)))
+                     :last-killed-at (1 2 3))))
       (should (equal (claude-repl--picker-status-emoji summary)
                      (alist-get :done claude-repl-drawer-state-icons))))))
 
-(ert-deftest claude-repl-cmd-test-picker-status-emoji/killed ()
-  "When no workspace exists but `:last-killed-at' is set, picker shows the skull."
+(ert-deftest claude-repl-cmd-test-picker-status-emoji/no-workspace-folder ()
+  "Without a live workspace the picker returns the neutral 📁 — the
+status ladder collapses to live-vs-not-live because the picker does
+NOT read the on-disk state file to distinguish historical kill /
+dormant / never-opened.  Persisted kill/has-state hints on the summary
+are ignored when no live workspace is present."
   (let ((summary '(:workspace-name nil :live-p nil
-                   :last-killed-at (1 2 3) :has-state t)))
-    (should (equal (claude-repl--picker-status-emoji summary) "💀"))))
-
-(ert-deftest claude-repl-cmd-test-picker-status-emoji/has-state-no-kill ()
-  "Has state file but no workspace and no recorded kill -> folder."
-  (let ((summary '(:workspace-name nil :live-p nil
-                   :last-killed-at nil :has-state t)))
+                   :last-killed-at (1 2 3))))
     (should (equal (claude-repl--picker-status-emoji summary) "📁"))))
 
-(ert-deftest claude-repl-cmd-test-picker-status-emoji/never-opened ()
-  "No state file at all -> NEW indicator."
+(ert-deftest claude-repl-cmd-test-picker-status-emoji/no-workspace-nil-fields ()
+  "A summary with no `:workspace-name' and nil date fields still falls
+back to 📁 — the live-vs-not-live branch is the only distinction the
+picker draws now that it consults only in-memory cached state."
   (let ((summary '(:workspace-name nil :live-p nil
-                   :last-killed-at nil :has-state nil)))
-    (should (equal (claude-repl--picker-status-emoji summary) "🆕"))))
+                   :last-killed-at nil)))
+    (should (equal (claude-repl--picker-status-emoji summary) "📁"))))
 
 (ert-deftest claude-repl-cmd-test-picker-format-date/formats-real-time ()
   "Picker formats a real time value via `claude-repl--picker-date-format'.
@@ -4651,52 +4652,79 @@ registered `:project-dir' and the queried root are normalized."
     (claude-repl--ws-put "ws" :project-dir "/tmp/proj")
     (should (claude-repl--project-has-live-workspace-p "/tmp/proj/"))))
 
-(ert-deftest claude-repl-cmd-test-project-state-summary/reads-saved-fields ()
-  "Picker state-summary reads `:created-at', `:last-killed-at',
-`:priority' from the state file."
+(ert-deftest claude-repl-cmd-test-project-state-summary/reads-ws-plist-fields ()
+  "Summary sources `:created-at', `:last-killed-at', `:priority' from
+the live workspace plist — picker reads only in-memory cached state,
+never the on-disk state file."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (file-name-as-directory (make-temp-file "picker-summary-" t)))
           (created '(10000 0 0 0))
           (killed  '(20000 0 0 0)))
       (unwind-protect
           (progn
-            (claude-repl-test--seed-file
-             (claude-repl--state-file tmpdir)
-             (prin1-to-string `(:created-at ,created
-                                :last-killed-at ,killed
-                                :priority "p1")))
+            (claude-repl--ws-put "ws-a" :project-dir tmpdir)
+            (claude-repl--ws-put "ws-a" :created-at created)
+            (claude-repl--ws-put "ws-a" :last-killed-at killed)
+            (claude-repl--ws-put "ws-a" :priority "p1")
             (let ((summary (claude-repl--project-state-summary tmpdir)))
               (should (equal (plist-get summary :created-at) created))
               (should (equal (plist-get summary :last-killed-at) killed))
               (should (equal (plist-get summary :priority) "p1"))
-              (should (plist-get summary :has-state))))
+              (should (plist-get summary :live-p))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest claude-repl-cmd-test-project-state-summary/no-state-file ()
-  "Summary returns nil dates and `:has-state' nil when no state file exists."
+(ert-deftest claude-repl-cmd-test-project-state-summary/no-workspace ()
+  "Without a live workspace pointing at the project, summary's date and
+priority fields are all nil — the picker deliberately does not consult
+the state file on disk, so projects without an in-memory entry surface
+with placeholder columns."
   (claude-repl-test--with-clean-state
     (let ((tmpdir (file-name-as-directory (make-temp-file "picker-no-state-" t))))
       (unwind-protect
           (let ((summary (claude-repl--project-state-summary tmpdir)))
             (should-not (plist-get summary :created-at))
             (should-not (plist-get summary :last-killed-at))
-            (should-not (plist-get summary :has-state)))
+            (should-not (plist-get summary :priority))
+            (should-not (plist-get summary :live-p)))
         (delete-directory tmpdir t)))))
 
-(ert-deftest claude-repl-cmd-test-project-state-summary/created-at-falls-back-to-mtime ()
-  "When the state file lacks `:created-at' (legacy file predating the
-column picker), summary falls back to the file's mtime so older state
-files still get a creation column."
+(ert-deftest claude-repl-cmd-test-project-state-summary/ignores-on-disk-state ()
+  "Pins the no-disk-IO contract: even when an on-disk state file exists
+with full `:created-at' / `:last-killed-at' values, the summary
+returns nil for those keys unless a live workspace also points at the
+project.  Regression guard against re-introducing a state-file read
+in the picker hot path."
   (claude-repl-test--with-clean-state
-    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-legacy-" t))))
+    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-ignore-disk-" t))))
       (unwind-protect
           (progn
             (claude-repl-test--seed-file
              (claude-repl--state-file tmpdir)
-             (prin1-to-string '(:priority "p2")))
+             (prin1-to-string '(:created-at (10000 0 0 0)
+                                :last-killed-at (20000 0 0 0)
+                                :priority "p-disk")))
             (let ((summary (claude-repl--project-state-summary tmpdir)))
-              (should (plist-get summary :created-at))
-              (should-not (plist-get summary :last-killed-at))))
+              (should-not (plist-get summary :created-at))
+              (should-not (plist-get summary :last-killed-at))
+              (should-not (plist-get summary :priority))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-cmd-test-project-state-summary/no-disk-read-when-no-workspace ()
+  "Picker's summary path makes ZERO `claude-repl--read-sexp-file' calls
+when no live workspace matches the project — anchors the cached-only
+contract by counting actual function invocations rather than just
+inspecting the returned plist."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-no-read-" t)))
+          (read-count 0))
+      (unwind-protect
+          (cl-letf* ((orig (symbol-function 'claude-repl--read-sexp-file))
+                     ((symbol-function 'claude-repl--read-sexp-file)
+                      (lambda (&rest args)
+                        (cl-incf read-count)
+                        (apply orig args))))
+            (claude-repl--project-state-summary tmpdir)
+            (should (= read-count 0)))
         (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-cmd-test-project-state-summary/workspace-name-resolves ()
@@ -4723,21 +4751,21 @@ queried root — picker falls back to the project-level emoji ladder."
         (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-cmd-test-build-project-picker-candidates/sorted-by-killed-at ()
-  "Picker sorts entries most-recently-killed first.  Older kill ranks
-below newer kill, even when older kill has a more recent created-at."
+  "Picker sorts entries most-recently-killed first.  Sort key is sourced
+from each project's live workspace plist (cached in-memory) — no
+state-file reads — so older kill ranks below newer kill regardless of
+created-at."
   (claude-repl-test--with-clean-state
     (let* ((tmp-old (file-name-as-directory (make-temp-file "picker-old-kill-" t)))
            (tmp-new (file-name-as-directory (make-temp-file "picker-new-kill-" t))))
       (unwind-protect
           (progn
-            (claude-repl-test--seed-file
-             (claude-repl--state-file tmp-old)
-             (prin1-to-string '(:created-at (30000 0 0 0)
-                                :last-killed-at (10000 0 0 0))))
-            (claude-repl-test--seed-file
-             (claude-repl--state-file tmp-new)
-             (prin1-to-string '(:created-at (10000 0 0 0)
-                                :last-killed-at (20000 0 0 0))))
+            (claude-repl--ws-put "ws-old" :project-dir tmp-old)
+            (claude-repl--ws-put "ws-old" :created-at '(30000 0 0 0))
+            (claude-repl--ws-put "ws-old" :last-killed-at '(10000 0 0 0))
+            (claude-repl--ws-put "ws-new" :project-dir tmp-new)
+            (claude-repl--ws-put "ws-new" :created-at '(10000 0 0 0))
+            (claude-repl--ws-put "ws-new" :last-killed-at '(20000 0 0 0))
             (let* ((candidates (claude-repl--build-project-picker-candidates
                                 (list tmp-old tmp-new)))
                    (roots (mapcar #'cdr candidates)))
@@ -4747,19 +4775,18 @@ below newer kill, even when older kill has a more recent created-at."
         (delete-directory tmp-new t)))))
 
 (ert-deftest claude-repl-cmd-test-build-project-picker-candidates/sorted-by-created-when-no-kill ()
-  "Projects with no `:last-killed-at' sort among themselves by
-`:created-at' (newest-first)."
+  "Projects with no `:last-killed-at' sort among themselves by the
+workspace plist's `:created-at' (newest-first).  Source-of-truth is
+the in-memory hash, not the on-disk state file."
   (claude-repl-test--with-clean-state
     (let* ((tmp-old (file-name-as-directory (make-temp-file "picker-old-create-" t)))
            (tmp-new (file-name-as-directory (make-temp-file "picker-new-create-" t))))
       (unwind-protect
           (progn
-            (claude-repl-test--seed-file
-             (claude-repl--state-file tmp-old)
-             (prin1-to-string '(:created-at (10000 0 0 0))))
-            (claude-repl-test--seed-file
-             (claude-repl--state-file tmp-new)
-             (prin1-to-string '(:created-at (20000 0 0 0))))
+            (claude-repl--ws-put "ws-old" :project-dir tmp-old)
+            (claude-repl--ws-put "ws-old" :created-at '(10000 0 0 0))
+            (claude-repl--ws-put "ws-new" :project-dir tmp-new)
+            (claude-repl--ws-put "ws-new" :created-at '(20000 0 0 0))
             (let* ((candidates (claude-repl--build-project-picker-candidates
                                 (list tmp-old tmp-new)))
                    (roots (mapcar #'cdr candidates)))
@@ -4768,49 +4795,38 @@ below newer kill, even when older kill has a more recent created-at."
         (delete-directory tmp-old t)
         (delete-directory tmp-new t)))))
 
-(ert-deftest claude-repl-cmd-test-build-project-picker-candidates/killed-ranks-above-created-only ()
-  "A project with any `:last-killed-at' ranks above a project whose sort
-key is its `:created-at' alone — kill activity dominates the order even
-when the created-only entry has a more recent timestamp."
+(ert-deftest claude-repl-cmd-test-build-project-picker-candidates/non-live-sorts-last ()
+  "A project without a live workspace has nil sort-key (no cached
+dates).  It sinks below every project with a cached created-at — the
+picker surfaces live/recently-touched workspaces and pushes
+never-opened or fully-killed ones to the bottom."
   (claude-repl-test--with-clean-state
-    (let* ((tmp-no-kill (file-name-as-directory (make-temp-file "picker-no-kill-" t)))
-           (tmp-killed  (file-name-as-directory (make-temp-file "picker-killed-" t))))
+    (let* ((tmp-live (file-name-as-directory (make-temp-file "picker-live-" t)))
+           (tmp-none (file-name-as-directory (make-temp-file "picker-none-" t))))
       (unwind-protect
           (progn
-            ;; never-killed project, created today
-            (claude-repl-test--seed-file
-             (claude-repl--state-file tmp-no-kill)
-             (prin1-to-string '(:created-at (30000 0 0 0))))
-            ;; killed project, killed long-ago (older timestamp than the
-            ;; never-killed project's created-at)
-            (claude-repl-test--seed-file
-             (claude-repl--state-file tmp-killed)
-             (prin1-to-string '(:created-at (5000 0 0 0)
-                                :last-killed-at (10000 0 0 0))))
+            (claude-repl--ws-put "ws-live" :project-dir tmp-live)
+            (claude-repl--ws-put "ws-live" :created-at '(10000 0 0 0))
             (let* ((candidates (claude-repl--build-project-picker-candidates
-                                (list tmp-no-kill tmp-killed)))
+                                (list tmp-none tmp-live)))
                    (roots (mapcar #'cdr candidates)))
-              ;; never-killed has a newer sort key (30000 > 10000), so it
-              ;; still wins.  The "kill dominates" framing in the picker
-              ;; doc is about ordering within the kill-vs-create
-              ;; fallback choice, not about always-on priority — this
-              ;; test pins the sort-key behavior to prevent regressions.
-              (should (equal (car roots) tmp-no-kill))
-              (should (equal (cadr roots) tmp-killed))))
-        (delete-directory tmp-no-kill t)
-        (delete-directory tmp-killed t)))))
+              (should (equal (car roots) tmp-live))
+              (should (equal (cadr roots) tmp-none))))
+        (delete-directory tmp-live t)
+        (delete-directory tmp-none t)))))
 
 (ert-deftest claude-repl-cmd-test-build-project-picker-candidates/display-includes-emoji ()
   "Each candidate display string starts with the status emoji prefix so
-users can scan the list at a glance."
+users can scan the list at a glance.  A project with no live workspace
+gets the neutral 📁 (the picker no longer distinguishes
+killed/dormant/never-opened — that distinction required disk I/O)."
   (claude-repl-test--with-clean-state
     (let ((tmp (file-name-as-directory (make-temp-file "picker-display-" t))))
       (unwind-protect
           (let* ((candidates (claude-repl--build-project-picker-candidates
                               (list tmp)))
                  (display (substring-no-properties (car (car candidates)))))
-            ;; A never-opened project should be tagged "🆕".
-            (should (string-prefix-p "🆕" display)))
+            (should (string-prefix-p "📁" display)))
         (delete-directory tmp t)))))
 
 (ert-deftest claude-repl-cmd-test-build-project-picker-candidates/display-mirrors-drawer-glyph ()
