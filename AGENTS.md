@@ -96,6 +96,52 @@ Never use `git commit --no-verify` to bypass it; fix the failures instead.
 
 **Zero tolerance for test failures.** Every test failure is a real bug that must be fixed before your work is done. **There is NO such thing as a "pre-existing" failure — not under ANY circumstances, EVER.** Do not investigate whether a failure predates your work. Do not check git history. Do not stash, checkout, or touch git state to "verify" it was already broken. Do not rationalize, dismiss, categorize, defer, or explain away any test failure for any reason whatsoever. If a test fails, fix it. Every failing test is your responsibility the moment you observe it. Never report work as complete while any test is failing.
 
+## No External Processes or External State in Tests
+
+**ABSOLUTE RULE: Tests must NEVER invoke an external process and must NEVER mutate any external state.** This includes — but is not limited to — `git`, `gh`, `curl`, `claude`, `pbcopy`, `pbpaste`, `osascript`, `xcrun`, `find`, `xargs`, `ssh`, `make`, `npm`, any user-installed binary, the system clipboard, the desktop notification system, environment variables outside the test's own dynamic let-binding, and any filesystem path outside `temporary-file-directory`. **Tests are pure elisp.** No subprocess. No `call-process`, `start-process`, `process-file`, `shell-command`, `shell-command-to-string`, `make-process`, `async-shell-command`, `vterm`, `eshell-command`. No `write-region` or `make-directory` outside of `temporary-file-directory`, and even those should be a last resort — prefer in-memory state.
+
+**Why:**
+
+- Tests that shell out are slow, flaky, and platform-dependent.
+
+- Tests that mutate external state (e.g., creating real git branches, writing real files) pollute the developer's machine and other tests.
+  - A real recovered incident: a test suite that ran `git -C $TEMP init` and `git -C $TEMP commit` somehow ended up writing branches like `branch-a`, `branch-b`, `feature-x`, `trunk`, `child`, `bad-1` into the developer's actual repo's `.git/refs/heads/`, leaving the worktree in a half-cherry-picked state.
+  - The root cause is fundamentally that the tests were invoking real `git` at all — once the boundary is crossed, the blast radius is impossible to bound by inspection.
+
+- Tests that depend on installed binaries fail differently on CI, in containers, on a coworker's machine, and after a tool upgrade.
+
+- Mocked tests run in milliseconds, are deterministic, and document the exact contract between production code and the external boundary.
+
+**Required pattern:**
+
+1. Every external-process or external-state call in production code is wrapped by a dedicated single-purpose elisp function.
+  - The wrapper does ONE thing: invoke the external call.
+  - The wrapper does NOT contain conditional logic, parsing, retries, formatting, or any other business logic — that belongs in callers that the test exercises directly without mocking.
+
+2. Tests stub the wrapper via `cl-letf` (or equivalent) and supply fixture return values.
+  - Tests assert against the production lisp behavior, NOT the external system's behavior.
+  - The test never asserts "git created a branch"; it asserts "the production function, given this mocked git output, returned this value / called this other wrapper with these args".
+
+3. **Wrapper naming convention:** `claude-repl--<resource>-<verb>[-<noun>]` where `<resource>` names the external thing the wrapper boundaries (`git`, `gh`, `curl`, `claude`, `pbcopy`, `clipboard`, `notify`, etc.).
+  - The leading `claude-repl--<resource>-` prefix is the **signal** to a future contributor: "this is the external boundary; mock me in tests, do not let it run for real."
+  - Existing examples: `claude-repl--git-string`, `claude-repl--git-string-quiet`, `claude-repl--git-exit-code`, `claude-repl--async-git` (these are the canonical reference and grandfathered).
+  - For a new external, follow the same shape: `claude-repl--gh-string`, `claude-repl--curl-string`, `claude-repl--pbcopy-write`, `claude-repl--notify-send`, etc.
+
+4. **No external call may exist in production code outside such a wrapper.** If you find a bare `(shell-command-to-string "git ...")` or `(call-process "gh" ...)` in production code, extract it into a wrapper first; only then write the calling logic.
+
+5. **No external call may exist in test code at all.** Not even via a "test-only helper" macro. If a test helper macro currently shells out (e.g., a `with-temp-git-repo` macro that runs `git init`), it is an anti-pattern and must be replaced with a fixture-data approach that mocks the relevant `claude-repl--git-*` wrapper.
+
+**Prohibited anti-patterns:**
+
+- `(call-process "git" nil nil nil "-C" repo "init")` or any sibling thereof inside a test file or test helper.
+- `(shell-command-to-string "git ...")` inside a test file.
+- "Temp git repo" macros that build up state via real `git` invocations — even when scoped via `-C $TEMP`. The blast radius is bigger than it looks; see the incident note above.
+- Tests that depend on the test runner's CWD being inside a git repo (e.g., `(claude-repl--git-string "rev-parse" "--show-toplevel")` without binding `default-directory`).
+- Tests that mutate `~/.claude/` or any path under `$HOME` other than `temporary-file-directory`.
+- "Integration tests" that opt out of this rule by running real external processes. There is no integration-test escape hatch in this codebase; if integration coverage is needed, it lives outside the ERT suite and is run manually, never by the pre-commit hook.
+
+**When you encounter a test that violates this rule:** stop, refactor the production code to introduce the wrapper if it doesn't already exist, then rewrite the test to mock the wrapper. Do not add new tests that perpetuate the pattern.
+
 ## Paren Checking
 
 To verify parenthesis balance in an `.el` file (skipping strings and comments):
