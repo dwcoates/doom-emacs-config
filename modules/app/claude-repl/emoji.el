@@ -254,8 +254,12 @@ recent-emojis list through `--random-commit-emoji')."
 
 (defun claude-repl--git-hooks-dir ()
   "Return the git hooks directory for the current repository.
-Works for both normal repos (.git/hooks) and worktrees."
-  (let ((git-dir (string-trim (shell-command-to-string "git rev-parse --git-common-dir 2>/dev/null"))))
+Works for both normal repos (.git/hooks) and worktrees.  Routes
+through the mockable `claude-repl--git-string-quiet' wrapper so
+tests can stub it via `cl-letf' instead of invoking real git
+(see AGENTS.md \"No External Processes or External State in
+Tests\")."
+  (let ((git-dir (claude-repl--git-string-quiet "rev-parse" "--git-common-dir")))
     (when (and (not (string-empty-p git-dir))
                (not (string-prefix-p "fatal" git-dir)))
       (expand-file-name "hooks" git-dir))))

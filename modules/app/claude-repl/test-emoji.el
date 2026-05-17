@@ -412,16 +412,35 @@ a non-ASCII char is left unchanged."
       (should (equal (buffer-string) "feat(my-branch): new feature")))))
 
 ;;;; ---- Tests: git-hooks-dir ----
+;;
+;; `claude-repl--git-hooks-dir' routes through
+;; `claude-repl--git-string-quiet' (the external boundary); tests mock
+;; that wrapper instead of invoking real git.
 
 (ert-deftest claude-repl-test-git-hooks-dir-returns-path ()
-  "git-hooks-dir should return a path ending in /hooks when in a git repo."
-  (let ((result (claude-repl--git-hooks-dir)))
-    (should (stringp result))
-    (should (string-suffix-p "hooks" result))))
+  "git-hooks-dir should return PATH/hooks when git emits a git-dir."
+  (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+             (lambda (&rest args)
+               (should (equal args '("rev-parse" "--git-common-dir")))
+               "/tmp/repo/.git")))
+    (let ((result (claude-repl--git-hooks-dir)))
+      (should (stringp result))
+      (should (string-suffix-p "hooks" result))
+      (should (equal result "/tmp/repo/.git/hooks")))))
 
 (ert-deftest claude-repl-test-git-hooks-dir-outside-repo ()
-  "git-hooks-dir should return nil outside a git repository."
-  (let ((default-directory "/tmp/"))
+  "git-hooks-dir should return nil when git emits an empty string
+\(quiet-mode for an outside-repo failure)."
+  (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+             (lambda (&rest _args) "")))
+    (should-not (claude-repl--git-hooks-dir))))
+
+(ert-deftest claude-repl-test-git-hooks-dir-fatal-output ()
+  "git-hooks-dir should return nil when git's stderr leaks a `fatal:'
+prefix (defensive — the `-quiet' wrapper suppresses stderr, but the
+guard remains for older callers / wrapper changes)."
+  (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+             (lambda (&rest _args) "fatal: not a git repository")))
     (should-not (claude-repl--git-hooks-dir))))
 
 ;;;; ---- Tests: hook source constant ----
