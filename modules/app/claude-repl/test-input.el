@@ -374,6 +374,18 @@
            "subbullets that zoom in"
            claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-tldr-top-level-cap-of-three ()
+  "TLDR spec must cap the number of top-level bullets at 3.
+Additional detail must be pushed into subbullets (recursively) of those
+at-most-3 top-level bullets, so the top level remains a high-level vision
+of the response rather than an enumeration of every point."
+  (should (string-match-p
+           "top-level bullets MUST be capped at 3"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "additional detail belongs in subbullets"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-tldr-structure-subbullets-replace-recursion ()
   "TLDR spec must state that the per-entry subbullet zoom-in replaces any recursive 'even shorter' TLDR section."
   (should (string-match-p
