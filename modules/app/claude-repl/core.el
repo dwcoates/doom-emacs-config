@@ -554,9 +554,14 @@ A workspace is live when it has a hash entry AND no `:nuked-at'
 tombstone marker.  The single liveness predicate used by every hash
 iterator that previously relied on the implicit `presence == live'
 invariant (drawer, picker, periodic state updater, reverse-lookup) so
-tombstoned entries don't surface in any UI/runtime path."
-  (and (gethash ws claude-repl--workspaces)
-       (null (claude-repl--ws-get ws :nuked-at))))
+tombstoned entries don't surface in any UI/runtime path.
+
+Uses a sentinel default in `gethash' so a registered entry whose plist
+happens to be the empty list (`nil') is still counted as present —
+distinguishing `key absent' from `key bound to ()'."
+  (let ((plist (gethash ws claude-repl--workspaces 'claude-repl--ws-absent)))
+    (and (not (eq plist 'claude-repl--ws-absent))
+         (null (plist-get plist :nuked-at)))))
 
 (defun claude-repl--live-ws-names ()
   "Return the list of live workspace names (hash keys minus tombstones).
