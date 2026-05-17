@@ -113,11 +113,13 @@ buffer so the change becomes visible immediately."
 ;;;; --- GitHub URL helpers for magit commits -------------------------------
 
 (defun +dwc/magit-open-commit-in-github ()
-  "Open the current commit in GitHub browser."
+  "Open the current commit in GitHub browser.
+Routes git reads through `claude-repl--git-string' so the function
+is mockable per AGENTS.md."
   (interactive)
   (let* ((default-directory (claude-repl--ws-dir (+workspace-current-name)))
-         (commit-sha (string-trim (shell-command-to-string "git rev-parse HEAD")))
-         (remote-url (string-trim (shell-command-to-string "git config --get remote.origin.url")))
+         (commit-sha (claude-repl--git-string "rev-parse" "HEAD"))
+         (remote-url (claude-repl--git-string "config" "--get" "remote.origin.url"))
          (cleaned-url (replace-regexp-in-string claude-repl-magit-github-ssh-prefix-regexp claude-repl-magit-github-base-url
                                                 (replace-regexp-in-string "\\.git$" "" remote-url)))
          (repo-name (progn
@@ -128,11 +130,13 @@ buffer so the change becomes visible immediately."
     (browse-url github-url)))
 
 (defun +dwc/magit-copy-commit-link ()
-  "Copy GitHub link for commit at point in magit buffer."
+  "Copy GitHub link for commit at point in magit buffer.
+Routes git reads through `claude-repl--git-string' so the function
+is mockable per AGENTS.md."
   (interactive)
   (let* ((commit-sha (magit-commit-at-point))
          (default-directory (claude-repl--ws-dir (+workspace-current-name)))
-         (remote-url (string-trim (shell-command-to-string "git config --get remote.origin.url")))
+         (remote-url (claude-repl--git-string "config" "--get" "remote.origin.url"))
          (cleaned-url (replace-regexp-in-string claude-repl-magit-github-ssh-prefix-regexp claude-repl-magit-github-base-url
                                                 (replace-regexp-in-string "\\.git$" "" remote-url)))
          (repo-name (progn
@@ -148,16 +152,13 @@ buffer so the change becomes visible immediately."
 (defun claude-repl--gh-pr-url-for-branch (project-dir branch)
   "Return the GitHub PR URL for BRANCH in PROJECT-DIR, or nil if none.
 Resolves via `gh pr view BRANCH --json url --jq .url' run from
-PROJECT-DIR.  Returns nil when no PR is associated with BRANCH or when
-`gh' fails for any reason (stderr is suppressed).  Branch names are
-shell-quoted, so callers can pass any branch string safely."
+PROJECT-DIR.  Routes through `claude-repl--gh-string-quiet' (the
+external boundary for the GitHub CLI) so tests mock that wrapper
+rather than invoking real `gh' (see AGENTS.md \"No External
+Processes or External State in Tests\")."
   (let* ((default-directory (file-name-as-directory project-dir))
-         (cmd (concat (mapconcat #'shell-quote-argument
-                                 (list "gh" "pr" "view" branch
-                                       "--json" "url" "--jq" ".url")
-                                 " ")
-                      " 2>/dev/null"))
-         (output (string-trim (shell-command-to-string cmd))))
+         (output (claude-repl--gh-string-quiet
+                  "pr" "view" branch "--json" "url" "--jq" ".url")))
     (and (string-prefix-p "http" output) output)))
 
 (defun +dwc/open-workspace-pr-in-browser ()
@@ -165,13 +166,13 @@ shell-quoted, so callers can pass any branch string safely."
 Resolves the PR URL via `gh' against the workspace's project directory
 \(see `claude-repl--ws-dir'), not the buffer's `magit-toplevel' — so this
 works correctly from any buffer in the workspace.  Errors when no PR is
-associated with the current branch."
+associated with the current branch.  Routes git reads through
+`claude-repl--git-string' so the function is mockable per AGENTS.md."
   (interactive)
   (let* ((ws (+workspace-current-name))
          (project-dir (claude-repl--ws-dir ws))
          (default-directory (file-name-as-directory project-dir))
-         (branch (string-trim
-                  (shell-command-to-string "git rev-parse --abbrev-ref HEAD")))
+         (branch (claude-repl--git-string "rev-parse" "--abbrev-ref" "HEAD"))
          (pr-url (claude-repl--gh-pr-url-for-branch project-dir branch)))
     (unless pr-url
       (user-error "No PR found for branch '%s' in workspace '%s'" branch ws))
