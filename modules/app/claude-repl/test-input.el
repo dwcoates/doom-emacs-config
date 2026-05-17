@@ -489,6 +489,42 @@ work after a proposed change, or how they work now after a change just made."
            "Unless the response is inherently terse enough that a meaningful TLDR cannot be significantly shorter"
            claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-tldr-forbids-emdashes-and-semicolons ()
+  "TLDR spec must forbid emdashes and semicolons inside TLDR bullets, framing them as a sign that detail belongs in a (recursively-nested) subbullet."
+  (should (string-match-p
+           "TLDR bullets MUST never contain emdashes or semicolons"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "recursively-nested) subbullet"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-comma-awareness ()
+  "TLDR spec must require bullets to be cognizant of avoiding commas that bolt on additional/qualifying clauses, preferring subbullets instead."
+  (should (string-match-p
+           "cognizant of avoiding commas"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "would more cleanly live as a subbullet"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-parenthetical-awareness ()
+  "TLDR spec must require bullets to be cognizant of parenthetical asides that carry supplemental detail, preferring subbullets instead."
+  (should (string-match-p
+           "parenthetical asides inside a TLDR bullet"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "promoted to a (recursively-nested) subbullet"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-subbullets-only-attachment-mechanism ()
+  "TLDR spec must declare recursive subbullets the only permitted way to attach additional/qualifying info to a TLDR bullet, and forbid second sentences within a single bullet."
+  (should (string-match-p
+           "ONLY permissible way to attach additional or qualifying information"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "second sentences inside a single bullet are never allowed"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-emoji-only-in-tldr ()
   "Emoji prefixing must be prescribed for TLDR top-level bullets only.
 The first occurrence of 'emoji' in the prefix should be in a TLDR-only context
