@@ -64,6 +64,7 @@
 (claude-repl--load-module "magit")
 (claude-repl--load-module "emoji")
 (claude-repl--load-module "prevent-select")
+(claude-repl--load-module "caffeinate")
 
 (if claude-repl--load-errors
     (progn
