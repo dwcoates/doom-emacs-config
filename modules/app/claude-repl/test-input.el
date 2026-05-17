@@ -438,6 +438,45 @@ work after a proposed change, or how they work now after a change just made."
            "just changed in this response"
            claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-tldr-significantly-shorter ()
+  "TLDR spec must mandate the Response TLDR be significantly shorter than the response body."
+  (should (string-match-p
+           "Response TLDR MUST be significantly shorter than the response body"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "distillation and not a restatement"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-skip-when-inherently-terse ()
+  "TLDR spec must instruct skipping the TLDR entirely when the response is already inherently terse."
+  (should (string-match-p
+           "Skip the Response TLDR entirely whenever the response is already inherently terse"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-disruptive-distracting ()
+  "TLDR spec must justify the skip-when-terse rule with the disruptive/distracting framing."
+  (should (string-match-p
+           "disruptive and distracting"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-terse-examples ()
+  "TLDR spec must give concrete examples of what counts as inherently terse (1-5 sentences, short list, one-line answer)."
+  (should (string-match-p
+           "1-5 sentence response"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "single short list"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "direct one-line answer"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-skip-leading-clause ()
+  "The leading 'ALWAYS provide a Response TLDR' clause must carry the inherently-terse skip exception."
+  (should (string-match-p
+           "Unless the response is inherently terse enough that a meaningful TLDR cannot be significantly shorter"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-emoji-only-in-tldr ()
   "Emoji prefixing must be prescribed for TLDR top-level bullets only.
 The first occurrence of 'emoji' in the prefix should be in a TLDR-only context
