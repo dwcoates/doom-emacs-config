@@ -138,7 +138,10 @@ split, and we must never touch the drawer."
                                   :size-fix       'height
                                   :delete-protect t
                                   :preserve-size  'height)))
-  (claude-repl--update-all-workspace-states))
+  ;; Event-driven (user just opened panels) → kick a fresh update pass
+  ;; via the unguarded entrypoint, bypassing the 1Hz timer's in-flight
+  ;; reentry guard.  See `--update-all-workspace-states-now' docstring.
+  (claude-repl--update-all-workspace-states-now))
 
 (defun claude-repl--focus-input-panel ()
   "Focus the input panel window and enter insert state.
@@ -319,7 +322,10 @@ marked `:hidden' (via `SPC o C') are persp-killed when hide-mode is on
       (claude-repl--ws-put ws :done-acked t)
       (claude-repl--ws-put ws :done-acked-at (float-time)))
     (claude-repl--maybe-sweep-hidden-on-switch ws)
-    (claude-repl--update-all-workspace-states)
+    ;; Event-driven (workspace just activated) → kick a fresh pass via
+    ;; the unguarded entrypoint so the in-flight reentry guard from the
+    ;; 1Hz timer doesn't swallow the switch's refresh.
+    (claude-repl--update-all-workspace-states-now)
     (claude-repl--refresh-vterm)
     (claude-repl--reset-vterm-cursors)
     (claude-repl--drain-pending-magit ws)

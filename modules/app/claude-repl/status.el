@@ -69,6 +69,58 @@ recognized repo or the repo has no configured default."
   :type 'integer
   :group 'claude-repl)
 
+(defcustom claude-repl-state-git-tick-modulus 5
+  "Per-workspace git refreshes fire once every N timer ticks.
+The 1Hz `claude-repl--update-all-workspace-states' timer drives both
+the cheap state-machine work (claude-running-p, update-ws-state,
+mark-dead-vterm) and the expensive git work
+\(`claude-repl--async-refresh-git-status' and
+`claude-repl--async-refresh-branch-merged').  Cheap work runs every
+tick so transitions like `:done' -> `:idle' stay snappy.  Git work
+runs only when `(mod tick-counter N) == 0' so the per-ws fork load is
+amortized to one-in-N ticks; the on-disk reality git observes does
+not change at 1Hz, so polling that fast is wasteful.
+
+Lower values mean fresher cached git state at higher CPU cost;
+higher values do the inverse.  The default of 5 yields one git
+refresh per workspace per ~5 seconds, paired with the spread (see
+`claude-repl-state-spread-window') so even those refreshes are not
+bursty."
+  :type 'integer
+  :group 'claude-repl)
+
+(defcustom claude-repl-state-spread-window 1.0
+  "Seconds over which per-workspace state updates are spread per tick.
+Each tick, `claude-repl--update-all-workspace-states' snapshots the
+workspace list and processes one workspace at a time via
+`run-at-time' with gap `(max claude-repl-state-spread-min-gap (/ this
+N))', where N is the workspace count.  This flattens the per-tick
+burst (N forks landing simultaneously when the git modulus hits) into
+a smooth trickle paced across the window.
+
+Setting this to 0 collapses the spread to synchronous serial
+iteration, which is what tests want."
+  :type 'number
+  :group 'claude-repl)
+
+(defcustom claude-repl-state-spread-min-gap 0.05
+  "Floor on the per-step gap inside the workspace-state update chain.
+Computed as `(max this (/ claude-repl-state-spread-window N))' so
+high workspace counts can't spawn very-fast `run-at-time' timers."
+  :type 'number
+  :group 'claude-repl)
+
+(defcustom claude-repl-state-stale-threshold 5.0
+  "Seconds after which an in-flight update chain is considered wedged.
+`claude-repl--update-all-workspace-states' (the periodic timer
+entrypoint) skips its tick when the previous chain has not finished.
+If the in-flight marker is older than this threshold, the chain is
+treated as stuck (likely due to an error in a per-step body that
+escaped the `condition-case' net) and the flag is force-cleared so a
+new chain can start.  Belt-and-braces against permanent wedging."
+  :type 'number
+  :group 'claude-repl)
+
 (defcustom claude-repl-done-idle-delay 3
   "Seconds the user must focus a :done workspace before it decays to :idle.
 The countdown starts when the workspace becomes the active workspace
@@ -1322,39 +1374,186 @@ State table:
       (claude-repl--log-verbose ws "update-ws-state ws=%s state=%s acked=%s dwell=%s git-status=%s no-op"
                                 ws state acked dwell git-status)))))
 
+(defvar claude-repl--update-tick-counter 0
+  "Monotonic tick counter for the workspace-state update timer.
+Incremented at the top of every `claude-repl--update-all-workspace-states-now'
+pass.  Read by the inner per-workspace step to gate git work via
+`(zerop (mod counter claude-repl-state-git-tick-modulus))'.")
+
+(defvar claude-repl--update-in-flight nil
+  "Float-time of the most recent chain start, or nil when no chain is in flight.
+Set by `claude-repl--update-all-workspace-states-now' at chain
+kickoff and cleared by the terminal finalize step.  Read by
+`claude-repl--update-in-flight-p' so the periodic timer entrypoint
+can skip its tick when a previous chain has not finished.  Carries a
+timestamp rather than a plain `t' so stale flags from an errored
+chain (one that escaped the per-step `condition-case' and never
+finalized) can be detected and force-cleared via
+`claude-repl-state-stale-threshold'.")
+
+(defvar claude-repl--update-spread-sync nil
+  "When non-nil, the chain processes all workspaces synchronously.
+Test-only affordance: production code never sets this.  Tests bind it
+to `t' so multi-workspace dispatch assertions can read state
+immediately after the call, without having to advance time to let
+`run-at-time'-scheduled steps fire.")
+
+(defun claude-repl--update-in-flight-p ()
+  "Return non-nil when an update chain is in flight and not stale.
+A non-nil `claude-repl--update-in-flight' set within the last
+`claude-repl-state-stale-threshold' seconds means a chain is still
+running and a new tick should skip.  An older stamp is treated as a
+wedged chain (the per-step `condition-case' didn't catch some error
+path or the finalize never ran), force-cleared in place, and the
+caller is told to proceed."
+  (cond
+   ((null claude-repl--update-in-flight) nil)
+   ((< (- (float-time) claude-repl--update-in-flight)
+       claude-repl-state-stale-threshold)
+    t)
+   (t
+    (claude-repl--log nil "update-in-flight-p: stale flag (%.2fs old), force-clearing"
+                      (- (float-time) claude-repl--update-in-flight))
+    (setq claude-repl--update-in-flight nil)
+    nil)))
+
+(defun claude-repl--update-one-workspace-state (ws do-git-p)
+  "Run the per-workspace state-update body for WS.
+The cheap parts (`claude-repl--claude-running-p',
+`claude-repl--update-ws-state', `claude-repl--mark-dead-vterm') run
+every tick so transitions like `:done' -> `:idle' stay snappy.
+DO-GIT-P gates the expensive git refreshes
+\(`claude-repl--async-refresh-git-status' and
+`claude-repl--async-refresh-branch-merged') so they fire only on the
+mod-N tick selected by `claude-repl-state-git-tick-modulus'."
+  (if (claude-repl--claude-running-p ws)
+      (progn
+        (claude-repl--update-ws-state ws)
+        (when do-git-p
+          (claude-repl--async-refresh-git-status ws)))
+    ;; No live vterm process → clear non-thinking state
+    (claude-repl--mark-dead-vterm ws))
+  ;; Merged-ness is independent of claude/vterm liveness — refresh
+  ;; for every workspace so the drawer's flatten-through-merged
+  ;; rendering has fresh `:branch-merged' values.  Gated on DO-GIT-P
+  ;; because the refresh's preconditions and process spawn are
+  ;; comparable in cost to the diff refresh above.
+  (when (and do-git-p
+             (fboundp 'claude-repl--async-refresh-branch-merged))
+    (claude-repl--async-refresh-branch-merged ws)))
+
+(defun claude-repl--update-all-workspace-states--step (remaining do-git-p gap)
+  "Process the head of REMAINING; schedule self for the rest.
+DO-GIT-P is the precomputed mod-N gate for the whole pass (snapshotted
+at chain kickoff so every workspace in this pass sees the same value).
+GAP is the inter-step delay in seconds.
+
+Per-step `gethash' recheck against `claude-repl--workspaces' covers
+the snapshot-vs-live divergence: a workspace can be removed mid-chain
+\(`--ws-del' from a merge, kill, or sweep) and we must not act on
+ghost names.  The body itself is wrapped in `condition-case' so an
+error in one ws step never wedges the in-flight flag for subsequent
+ticks — the chain logs and keeps going.
+
+When `claude-repl--update-spread-sync' is non-nil (tests only),
+recurses directly instead of via `run-at-time'."
+  (cond
+   ((null remaining)
+    (claude-repl--update-all-workspace-states--finalize))
+   (t
+    (let ((ws (car remaining))
+          (rest (cdr remaining)))
+      (condition-case err
+          (when (gethash ws claude-repl--workspaces)
+            (claude-repl--update-one-workspace-state ws do-git-p))
+        (error
+         (claude-repl--log ws "update-all-workspace-states--step: error ws=%s err=%S"
+                           ws err)))
+      (if rest
+          (if claude-repl--update-spread-sync
+              (claude-repl--update-all-workspace-states--step rest do-git-p gap)
+            (run-at-time gap nil
+                         #'claude-repl--update-all-workspace-states--step
+                         rest do-git-p gap))
+        (claude-repl--update-all-workspace-states--finalize))))))
+
+(defun claude-repl--update-all-workspace-states--finalize ()
+  "Terminal step of the workspace-state update chain.
+Refreshes the drawer (only one renderer call per pass — internal
+signature short-circuit covers the no-change case) and clears the
+in-flight flag.  Wrapped in `unwind-protect' so the flag clears even
+if the drawer refresh errors, preventing permanent timer wedging."
+  (unwind-protect
+      (when (fboundp 'claude-repl-drawer--refresh-if-visible)
+        (claude-repl-drawer--refresh-if-visible))
+    (setq claude-repl--update-in-flight nil)))
+
+(defun claude-repl--update-all-workspace-states-now ()
+  "Unguarded entrypoint for the workspace-state update chain.
+Snapshots `(hash-table-keys claude-repl--workspaces)' so the chain
+iterates a stable list even as the hash mutates mid-pass; per-step
+`gethash' recheck (inside `--step') filters out workspaces deleted
+during the spread window.
+
+Increments `claude-repl--update-tick-counter' and computes DO-GIT-P
+once so every ws in this pass agrees on the mod-N decision.  Sets the
+in-flight marker; the terminal finalize step clears it.
+
+Polls the sentinel directory as a file-notify fallback (`--poll-
+workspace-notifications').  Does NOT flip the tabline space toggle —
+that's the periodic timer's job (`claude-repl--update-all-workspace-
+states', the guarded entrypoint), since event-driven callers
+\(frame-focus, workspace-switch, show-panels) already trigger a
+redisplay through other paths.
+
+For event-driven callers that want to kick a refresh independent of
+the 1Hz reentry guard.  Concurrent chains from rapid sync calls are
+permitted (rare in practice); each tracks its own snapshot and
+finalize, and the last to finalize clears the flag harmlessly."
+  (claude-repl--poll-workspace-notifications)
+  (setq claude-repl--update-tick-counter (1+ claude-repl--update-tick-counter))
+  (let* ((ws-names (hash-table-keys claude-repl--workspaces))
+         (n (length ws-names))
+         (do-git-p (zerop (mod claude-repl--update-tick-counter
+                               claude-repl-state-git-tick-modulus)))
+         (gap (if (and (> n 0) (> claude-repl-state-spread-window 0))
+                  (max claude-repl-state-spread-min-gap
+                       (/ claude-repl-state-spread-window (float n)))
+                claude-repl-state-spread-min-gap)))
+    (claude-repl--log-verbose nil "update-all-workspace-states-now: count=%d do-git=%s gap=%.3fs counter=%d"
+                              n do-git-p gap claude-repl--update-tick-counter)
+    (setq claude-repl--update-in-flight (float-time))
+    (claude-repl--update-all-workspace-states--step ws-names do-git-p gap)))
+
 (defun claude-repl--update-all-workspace-states ()
-  "Update state for claude-repl workspaces based on visibility and git status.
-Only iterates workspaces registered in `claude-repl--workspaces' (not all
-persp workspaces), since non-claude workspaces have no state to manage.
-Uses cached git status (`:git-clean') and kicks off async refreshes.
-Also polls for orphaned sentinel files that file-notify may have missed.
-State machine runs whenever a live vterm process exists, regardless of
-panel visibility (panels may be hidden via `SPC o c')."
+  "Periodic 1Hz timer entrypoint for workspace-state updates.
+Always flips `claude-repl--tabline-space-toggle' to force a tab-bar
+repaint (DO NOT REMOVE — see the block comment above the defvar).
+The toggle flip happens BEFORE the in-flight check so the tab-bar
+keeps animating even when the update chain is stacking and we skip a
+tick.
+
+When a previous chain is still in flight (per
+`claude-repl--update-in-flight-p'), skips this tick — the in-flight
+chain will catch up.  Stale flags older than
+`claude-repl-state-stale-threshold' are force-cleared so a wedged
+chain can't permanently disable the timer.
+
+Otherwise delegates to `claude-repl--update-all-workspace-states-now',
+which owns the actual per-workspace iteration with the mod-N git
+gate and the recursive serial spread.
+
+Event-driven callers (frame-focus, workspace-switch, show-panels)
+should call `-now' directly instead of this guarded entrypoint — they
+want to kick a fresh refresh and don't compete with the timer for
+the in-flight slot."
   ;; Flip the trailing-space toggle so the tab-bar string changes on every
   ;; tick, forcing a repaint.  DO NOT REMOVE — see the block comment above
-  ;; `claude-repl--tabline-space-toggle'.
+  ;; `claude-repl--tabline-space-toggle'.  Happens before the in-flight
+  ;; check so the animation survives long chains.
   (setq claude-repl--tabline-space-toggle (not claude-repl--tabline-space-toggle))
-  (claude-repl--poll-workspace-notifications)
-  (let ((ws-names (hash-table-keys claude-repl--workspaces)))
-    (claude-repl--log-verbose nil "update-all-workspace-states: count=%d" (length ws-names))
-    (dolist (ws ws-names)
-      (if (claude-repl--claude-running-p ws)
-          (progn
-            (claude-repl--update-ws-state ws)
-            (claude-repl--async-refresh-git-status ws))
-        ;; No live vterm process → clear non-thinking state
-        (claude-repl--mark-dead-vterm ws))
-      ;; Merged-ness is independent of claude/vterm liveness — refresh
-      ;; for every workspace so the drawer's flatten-through-merged
-      ;; rendering has fresh `:branch-merged' values.
-      (when (fboundp 'claude-repl--async-refresh-branch-merged)
-        (claude-repl--async-refresh-branch-merged ws))))
-  ;; Cross-workspace introspection (workspace-status.json) is written by
-  ;; the staggered scheduler in workspace-status-export.el — NOT on this
-  ;; 1-Hz tick.  Profiling showed json-encode of the full snapshot was
-  ;; the second-biggest memory hotspot when bundled here.
-  (when (fboundp 'claude-repl-drawer--refresh-if-visible)
-    (claude-repl-drawer--refresh-if-visible)))
+  (unless (claude-repl--update-in-flight-p)
+    (claude-repl--update-all-workspace-states-now)))
 
 ;; Periodically update all workspace states (catches git changes, etc.)
 (push (run-with-timer claude-repl-state-poll-interval claude-repl-state-poll-interval #'claude-repl--update-all-workspace-states)
@@ -1395,12 +1594,16 @@ No-op in four cases:
 ;;; Frame focus handler -------------------------------------------------------
 
 (defun claude-repl--on-frame-focus ()
-  "Refresh claude vterm and update all workspace states when Emacs regains focus."
+  "Refresh claude vterm and update all workspace states when Emacs regains focus.
+Calls `claude-repl--update-all-workspace-states-now' (the unguarded
+entrypoint) rather than the periodic-timer entrypoint: frame focus is
+an event-driven signal that the user is back and wants fresh data, so
+it should kick a refresh regardless of the in-flight reentry guard."
   (if (frame-focus-state)
       (progn
         (claude-repl--log (+workspace-current-name) "on-frame-focus: focused")
         (claude-repl--refresh-vterm)
-        (claude-repl--update-all-workspace-states))
+        (claude-repl--update-all-workspace-states-now))
     (claude-repl--log-verbose (+workspace-current-name) "on-frame-focus: not focused")))
 
 (add-function :after after-focus-change-function #'claude-repl--on-frame-focus)

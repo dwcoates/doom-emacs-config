@@ -1600,10 +1600,14 @@ trees; under the revised model only the Stop hook writes :done."
         (should-not update-called)))))
 
 (ert-deftest claude-repl-test-update-all-running-vterm ()
-  "update-all should call update-ws-state and async-refresh for ws with running vterm."
+  "update-all should call update-ws-state and async-refresh for ws with running vterm.
+Binds `claude-repl-state-git-tick-modulus' to 1 so every tick is a git tick;
+otherwise the mod-N gate would suppress `--async-refresh-git-status' on the
+first call (counter increments to 1, `(mod 1 5)' is non-zero)."
   (claude-repl-test--with-clean-state
     (let ((updated-ws nil)
-          (refreshed-ws nil))
+          (refreshed-ws nil)
+          (claude-repl-state-git-tick-modulus 1))
       ;; Register ws1 in the hashmap so the iterator finds it
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore)
@@ -1611,13 +1615,16 @@ trees; under the revised model only the Stop hook writes :done."
                 ((symbol-function 'claude-repl--update-ws-state)
                  (lambda (ws) (setq updated-ws ws)))
                 ((symbol-function 'claude-repl--async-refresh-git-status)
-                 (lambda (ws) (setq refreshed-ws ws))))
+                 (lambda (ws) (setq refreshed-ws ws)))
+                ((symbol-function 'claude-repl--async-refresh-branch-merged) #'ignore))
         (claude-repl--update-all-workspace-states)
         (should (equal updated-ws "ws1"))
         (should (equal refreshed-ws "ws1"))))))
 
 (ert-deftest claude-repl-test-update-all-no-vterm ()
-  "update-all should call mark-dead-vterm for ws without running vterm."
+  "update-all should call mark-dead-vterm for ws without running vterm.
+`mark-dead-vterm' fires every tick regardless of the mod-N gate, so no
+gate-tweak is needed here."
   (claude-repl-test--with-clean-state
     (let ((dead-ws nil))
       ;; Register ws1 in the hashmap so the iterator finds it
@@ -1625,7 +1632,8 @@ trees; under the revised model only the Stop hook writes :done."
       (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore)
                 ((symbol-function 'claude-repl--claude-running-p) (lambda (_ws) nil))
                 ((symbol-function 'claude-repl--mark-dead-vterm)
-                 (lambda (ws) (setq dead-ws ws))))
+                 (lambda (ws) (setq dead-ws ws)))
+                ((symbol-function 'claude-repl--async-refresh-branch-merged) #'ignore))
         (claude-repl--update-all-workspace-states)
         (should (equal dead-ws "ws1"))))))
 
@@ -1689,27 +1697,30 @@ this clobbered :init with :dead.  The :init guard prevents that."
 ;;;; ---- Tests: on-frame-focus ----
 
 (ert-deftest claude-repl-test-on-frame-focus-with-focus ()
-  "on-frame-focus should refresh vterm and update states when frame has focus."
+  "on-frame-focus should refresh vterm and update states when frame has focus.
+Mocks the unguarded `-now' entrypoint because frame-focus bypasses the
+periodic-timer in-flight guard — see `--on-frame-focus' docstring."
   (claude-repl-test--with-clean-state
     (let ((refresh-called nil)
           (update-called nil))
       (cl-letf (((symbol-function 'frame-focus-state) (lambda () t))
                 ((symbol-function 'claude-repl--refresh-vterm)
                  (lambda () (setq refresh-called t)))
-                ((symbol-function 'claude-repl--update-all-workspace-states)
+                ((symbol-function 'claude-repl--update-all-workspace-states-now)
                  (lambda () (setq update-called t))))
         (claude-repl--on-frame-focus)
         (should refresh-called)
         (should update-called)))))
 
 (ert-deftest claude-repl-test-on-frame-focus-no-focus ()
-  "on-frame-focus should be a no-op when frame does not have focus."
+  "on-frame-focus should be a no-op when frame does not have focus.
+Mocks the unguarded `-now' entrypoint; matches what production code calls."
   (claude-repl-test--with-clean-state
     (let ((refresh-called nil))
       (cl-letf (((symbol-function 'frame-focus-state) (lambda () nil))
                 ((symbol-function 'claude-repl--refresh-vterm)
                  (lambda () (setq refresh-called t)))
-                ((symbol-function 'claude-repl--update-all-workspace-states) #'ignore))
+                ((symbol-function 'claude-repl--update-all-workspace-states-now) #'ignore))
         (claude-repl--on-frame-focus)
         (should-not refresh-called)))))
 
@@ -1780,11 +1791,17 @@ this clobbered :init with :dead.  The :init guard prevents that."
 ;;;; ---- Tests: update-all-workspace-states multi-workspace dispatch ----
 
 (ert-deftest claude-repl-test-update-all-multiple-workspaces-dispatch ()
-  "update-all should dispatch correctly per workspace: update running, clear dead."
+  "update-all should dispatch correctly per workspace: update running, clear dead.
+Binds `claude-repl-state-git-tick-modulus' to 1 so git refreshes fire on the
+first tick.  Synchronous step chaining comes from `--with-clean-state' setting
+`claude-repl--update-spread-sync' to `t', so both workspaces are processed
+within a single function call rather than being spread across `run-at-time'
+timers that would never fire under ERT batch mode."
   (claude-repl-test--with-clean-state
     (let ((updated nil)
           (refreshed nil)
-          (cleared nil))
+          (cleared nil)
+          (claude-repl-state-git-tick-modulus 1))
       ;; Register both workspaces in the hashmap
       (claude-repl--ws-put "running-ws" :project-dir "/tmp/running")
       (claude-repl--ws-put "dead-ws" :project-dir "/tmp/dead")
@@ -1795,6 +1812,7 @@ this clobbered :init with :dead.  The :init guard prevents that."
                  (lambda (ws) (push ws updated)))
                 ((symbol-function 'claude-repl--async-refresh-git-status)
                  (lambda (ws) (push ws refreshed)))
+                ((symbol-function 'claude-repl--async-refresh-branch-merged) #'ignore)
                 ((symbol-function 'claude-repl--mark-dead-vterm)
                  (lambda (ws) (push ws cleared))))
         (claude-repl--update-all-workspace-states)
@@ -1806,6 +1824,287 @@ this clobbered :init with :dead.  The :init guard prevents that."
         (should (member "dead-ws" cleared))
         (should-not (member "dead-ws" updated))
         (should-not (member "dead-ws" refreshed))))))
+
+;;;; ---- Tests: mod-N git tick gate ----
+
+(ert-deftest claude-repl-test-update-all-git-gate-skips-non-modulus-tick ()
+  "Git refreshes do NOT fire on ticks where `(mod counter modulus) /= 0'.
+With modulus=5 and counter starting at 0, the first tick post-increment is
+counter=1, `(mod 1 5)' = 1, so the gate is closed.  update-ws-state still runs
+for the running ws because the cheap state-machine work is gate-independent."
+  (claude-repl-test--with-clean-state
+    (let ((git-refreshed nil)
+          (merge-refreshed nil)
+          (state-updated nil)
+          (claude-repl-state-git-tick-modulus 5))
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore)
+                ((symbol-function 'claude-repl--claude-running-p) (lambda (_ws) t))
+                ((symbol-function 'claude-repl--update-ws-state)
+                 (lambda (_ws) (setq state-updated t)))
+                ((symbol-function 'claude-repl--async-refresh-git-status)
+                 (lambda (_ws) (setq git-refreshed t)))
+                ((symbol-function 'claude-repl--async-refresh-branch-merged)
+                 (lambda (_ws) (setq merge-refreshed t))))
+        (claude-repl--update-all-workspace-states)
+        (should state-updated)
+        (should-not git-refreshed)
+        (should-not merge-refreshed)))))
+
+(ert-deftest claude-repl-test-update-all-git-gate-fires-on-modulus-tick ()
+  "Git refreshes DO fire when `(mod counter modulus) == 0'.
+Pre-seeding the counter to (modulus - 1) means the in-function increment
+lands on a multiple of modulus, opening the gate."
+  (claude-repl-test--with-clean-state
+    (let ((git-refreshed nil)
+          (merge-refreshed nil)
+          (claude-repl-state-git-tick-modulus 5)
+          (claude-repl--update-tick-counter 4))
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore)
+                ((symbol-function 'claude-repl--claude-running-p) (lambda (_ws) t))
+                ((symbol-function 'claude-repl--update-ws-state) #'ignore)
+                ((symbol-function 'claude-repl--async-refresh-git-status)
+                 (lambda (_ws) (setq git-refreshed t)))
+                ((symbol-function 'claude-repl--async-refresh-branch-merged)
+                 (lambda (_ws) (setq merge-refreshed t))))
+        (claude-repl--update-all-workspace-states)
+        (should git-refreshed)
+        (should merge-refreshed)))))
+
+(ert-deftest claude-repl-test-update-all-increments-tick-counter ()
+  "Every call to the periodic timer entrypoint increments the tick counter.
+The counter feeds the mod-N git gate."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore))
+      (let ((before claude-repl--update-tick-counter))
+        (claude-repl--update-all-workspace-states)
+        (claude-repl--update-all-workspace-states)
+        (claude-repl--update-all-workspace-states)
+        (should (= (+ before 3) claude-repl--update-tick-counter))))))
+
+;;;; ---- Tests: in-flight reentry guard ----
+
+(ert-deftest claude-repl-test-update-all-in-flight-guard-skips-tick ()
+  "Timer entrypoint skips its tick when a chain is already in flight.
+Setting `--update-in-flight' to a recent float-time simulates a chain that
+started just now and hasn't finalized; the next call should skip the actual
+pass (no poll-workspace-notifications), but the tabline toggle still flips."
+  (claude-repl-test--with-clean-state
+    (let ((poll-called nil)
+          (toggle-before claude-repl--tabline-space-toggle))
+      (setq claude-repl--update-in-flight (float-time))
+      (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications)
+                 (lambda () (setq poll-called t))))
+        (claude-repl--update-all-workspace-states)
+        (should-not poll-called)
+        ;; Toggle survives the in-flight guard so the tab-bar keeps animating.
+        (should-not (eq toggle-before claude-repl--tabline-space-toggle))))))
+
+(ert-deftest claude-repl-test-update-all-in-flight-stale-flag-recovers ()
+  "An `--update-in-flight' stamp older than the stale threshold is force-cleared.
+Without this, an error in a per-step body that escapes the `condition-case'
+net could wedge the periodic timer permanently."
+  (claude-repl-test--with-clean-state
+    (let ((poll-called nil)
+          (claude-repl-state-stale-threshold 5.0))
+      ;; Simulate a chain that started 10s ago and never finalized.
+      (setq claude-repl--update-in-flight (- (float-time) 10.0))
+      (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications)
+                 (lambda () (setq poll-called t))))
+        (claude-repl--update-all-workspace-states)
+        ;; Stale flag was cleared and the new chain ran.
+        (should poll-called)
+        ;; After the chain finalizes, in-flight is back to nil.
+        (should-not claude-repl--update-in-flight)))))
+
+(ert-deftest claude-repl-test-update-all-tabline-toggle-survives-in-flight-skip ()
+  "Tabline space toggle flips on every tick, even when the in-flight guard skips.
+This is critical: tab-bar repainting requires the toggle string to change
+between ticks; if a long chain skips multiple ticks, the animation must still
+advance.  Verified explicitly here so the entrypoint structure doesn't drift."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--tabline-space-toggle nil))
+      (setq claude-repl--update-in-flight (float-time))
+      (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore))
+        (claude-repl--update-all-workspace-states)
+        (should (eq claude-repl--tabline-space-toggle t))
+        (claude-repl--update-all-workspace-states)
+        (should (eq claude-repl--tabline-space-toggle nil))))))
+
+;;;; ---- Tests: update-in-flight-p ----
+
+(ert-deftest claude-repl-test-update-in-flight-p-nil-flag ()
+  "in-flight-p returns nil when no chain is running."
+  (claude-repl-test--with-clean-state
+    (should-not claude-repl--update-in-flight)
+    (should-not (claude-repl--update-in-flight-p))))
+
+(ert-deftest claude-repl-test-update-in-flight-p-recent-flag ()
+  "in-flight-p returns non-nil when the flag is recent (within stale threshold)."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-state-stale-threshold 5.0))
+      (setq claude-repl--update-in-flight (float-time))
+      (should (claude-repl--update-in-flight-p)))))
+
+(ert-deftest claude-repl-test-update-in-flight-p-stale-flag-clears ()
+  "in-flight-p clears a stale flag and returns nil.
+Stale-flag recovery is side-effecting: the flag is reset to nil so subsequent
+callers see a fresh state."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-state-stale-threshold 5.0))
+      (setq claude-repl--update-in-flight (- (float-time) 10.0))
+      (should-not (claude-repl--update-in-flight-p))
+      (should-not claude-repl--update-in-flight))))
+
+;;;; ---- Tests: sync entrypoint bypasses guard ----
+
+(ert-deftest claude-repl-test-update-all-now-bypasses-in-flight-flag ()
+  "The unguarded `-now' entrypoint runs even when a chain is in flight.
+Event-driven callers (frame-focus, workspace-switch, show-panels) want to
+kick a refresh regardless of the timer's in-flight reentry guard."
+  (claude-repl-test--with-clean-state
+    (let ((poll-called nil))
+      (setq claude-repl--update-in-flight (float-time))
+      (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications)
+                 (lambda () (setq poll-called t))))
+        (claude-repl--update-all-workspace-states-now)
+        (should poll-called)))))
+
+(ert-deftest claude-repl-test-update-all-now-does-not-flip-tabline-toggle ()
+  "Only the periodic-timer entrypoint flips the tabline toggle.
+Event-driven callers trigger redisplay through other paths, so duplicating
+the flip from `-now' would be needless churn and could double-flip when
+both the timer and a sync caller fire in the same instant."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--tabline-space-toggle nil))
+      (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore))
+        (claude-repl--update-all-workspace-states-now)
+        (should-not claude-repl--tabline-space-toggle)))))
+
+;;;; ---- Tests: finalize clears in-flight flag ----
+
+(ert-deftest claude-repl-test-update-all-finalize-clears-flag ()
+  "The terminal finalize step clears `--update-in-flight'.
+Verified end-to-end: after a synchronous-spread chain completes, the flag is
+back to nil and the next timer tick can run."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore))
+      (claude-repl--update-all-workspace-states-now)
+      (should-not claude-repl--update-in-flight))))
+
+(ert-deftest claude-repl-test-update-all-finalize-direct-clears-flag ()
+  "Calling finalize directly always clears the flag, even with no chain context.
+This isolates the finalize behavior from the chain-entry behavior, so a future
+refactor that wires finalize into a different code path can't silently break
+the flag-clear invariant."
+  (claude-repl-test--with-clean-state
+    (setq claude-repl--update-in-flight (float-time))
+    (claude-repl--update-all-workspace-states--finalize)
+    (should-not claude-repl--update-in-flight)))
+
+;;;; ---- Tests: mid-chain ws removal ----
+
+(ert-deftest claude-repl-test-update-all-step-skips-removed-ws ()
+  "The recursive step rechecks `gethash' before acting on each ws.
+A workspace can be deleted via `--ws-del' between the chain snapshot and the
+step that would process it; the per-step recheck filters out ghost names so
+the body never touches a removed workspace's stale plist (which would
+re-create the entry as a side effect of `claude-repl--ws-put')."
+  (claude-repl-test--with-clean-state
+    (let ((processed nil))
+      ;; Only register "alive-ws"; "removed-ws" is in the snapshot list but
+      ;; not in the hash, simulating mid-chain removal.
+      (claude-repl--ws-put "alive-ws" :project-dir "/tmp/alive")
+      (cl-letf (((symbol-function 'claude-repl--update-one-workspace-state)
+                 (lambda (ws _do-git-p) (push ws processed))))
+        (claude-repl--update-all-workspace-states--step
+         '("removed-ws" "alive-ws") nil 0.0)
+        (should (member "alive-ws" processed))
+        (should-not (member "removed-ws" processed))))))
+
+;;;; ---- Tests: per-step error isolation ----
+
+(ert-deftest claude-repl-test-update-all-step-error-does-not-wedge-chain ()
+  "An error in one per-ws step is logged and the chain continues.
+Without the `condition-case' wrap, an errored step would propagate, the
+finalize wouldn't run, and the in-flight flag would stay set until the stale
+threshold fires (5s of dead timer ticks)."
+  (claude-repl-test--with-clean-state
+    (let ((processed nil))
+      (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
+      (claude-repl--ws-put "ws-b" :project-dir "/tmp/b")
+      (cl-letf (((symbol-function 'claude-repl--update-one-workspace-state)
+                 (lambda (ws _do-git-p)
+                   (if (equal ws "ws-a")
+                       (error "boom")
+                     (push ws processed)))))
+        (claude-repl--update-all-workspace-states--step
+         '("ws-a" "ws-b") nil 0.0)
+        ;; ws-b still got processed after ws-a errored.
+        (should (member "ws-b" processed))
+        ;; And the in-flight flag was cleared by finalize.
+        (should-not claude-repl--update-in-flight)))))
+
+;;;; ---- Tests: per-workspace step ----
+
+(ert-deftest claude-repl-test-update-one-ws-no-git-when-gate-closed ()
+  "`--update-one-workspace-state' with DO-GIT-P nil skips git refreshes.
+The cheap state-machine work still runs."
+  (claude-repl-test--with-clean-state
+    (let ((git-fired nil)
+          (merge-fired nil)
+          (state-fired nil))
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (cl-letf (((symbol-function 'claude-repl--claude-running-p) (lambda (_ws) t))
+                ((symbol-function 'claude-repl--update-ws-state)
+                 (lambda (_ws) (setq state-fired t)))
+                ((symbol-function 'claude-repl--async-refresh-git-status)
+                 (lambda (_ws) (setq git-fired t)))
+                ((symbol-function 'claude-repl--async-refresh-branch-merged)
+                 (lambda (_ws) (setq merge-fired t))))
+        (claude-repl--update-one-workspace-state "ws1" nil)
+        (should state-fired)
+        (should-not git-fired)
+        (should-not merge-fired)))))
+
+(ert-deftest claude-repl-test-update-one-ws-fires-git-when-gate-open ()
+  "`--update-one-workspace-state' with DO-GIT-P non-nil fires both git refreshes."
+  (claude-repl-test--with-clean-state
+    (let ((git-fired nil)
+          (merge-fired nil))
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (cl-letf (((symbol-function 'claude-repl--claude-running-p) (lambda (_ws) t))
+                ((symbol-function 'claude-repl--update-ws-state) #'ignore)
+                ((symbol-function 'claude-repl--async-refresh-git-status)
+                 (lambda (_ws) (setq git-fired t)))
+                ((symbol-function 'claude-repl--async-refresh-branch-merged)
+                 (lambda (_ws) (setq merge-fired t))))
+        (claude-repl--update-one-workspace-state "ws1" t)
+        (should git-fired)
+        (should merge-fired)))))
+
+(ert-deftest claude-repl-test-update-one-ws-dead-vterm-skips-state-update ()
+  "When the vterm process is dead, `--update-one-workspace-state' calls
+`--mark-dead-vterm' instead of `--update-ws-state'.  Merge refresh still
+fires when DO-GIT-P is on because merged-ness is independent of vterm
+liveness — a dead workspace can still have a merge-completed parent."
+  (claude-repl-test--with-clean-state
+    (let ((dead-called nil)
+          (state-called nil)
+          (merge-called nil))
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (cl-letf (((symbol-function 'claude-repl--claude-running-p) (lambda (_ws) nil))
+                ((symbol-function 'claude-repl--update-ws-state)
+                 (lambda (_ws) (setq state-called t)))
+                ((symbol-function 'claude-repl--mark-dead-vterm)
+                 (lambda (_ws) (setq dead-called t)))
+                ((symbol-function 'claude-repl--async-refresh-branch-merged)
+                 (lambda (_ws) (setq merge-called t))))
+        (claude-repl--update-one-workspace-state "ws1" t)
+        (should dead-called)
+        (should-not state-called)
+        (should merge-called)))))
 
 ;;;; ---- Tests: priority-image (moved from core.el) ----
 

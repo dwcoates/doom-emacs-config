@@ -1267,7 +1267,7 @@ drawer with the parameter explicitly stripped."
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
-                    ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil)))
+                    ((symbol-function 'claude-repl--update-all-workspace-states-now) (lambda () nil)))
             (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
             (claude-repl--ws-put "test-ws" :input-buffer input-buf)
             (delete-other-windows)
@@ -1290,7 +1290,7 @@ are not created from a bottom popup like a regular vterm."
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
-                    ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil)))
+                    ((symbol-function 'claude-repl--update-all-workspace-states-now) (lambda () nil)))
             (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
             (claude-repl--ws-put "test-ws" :input-buffer input-buf)
             (delete-other-windows)
@@ -1318,7 +1318,7 @@ are not created from a bottom popup like a regular vterm."
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
-                    ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil)))
+                    ((symbol-function 'claude-repl--update-all-workspace-states-now) (lambda () nil)))
             (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
             (claude-repl--ws-put "test-ws" :input-buffer input-buf)
             (delete-other-windows)
@@ -1340,7 +1340,7 @@ so that commands like magit-status cannot destroy panel layout."
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
-                    ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil)))
+                    ((symbol-function 'claude-repl--update-all-workspace-states-now) (lambda () nil)))
             (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
             (claude-repl--ws-put "test-ws" :input-buffer input-buf)
             (delete-other-windows)
@@ -1363,7 +1363,7 @@ so that window management operations cannot shrink it."
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
-                    ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil)))
+                    ((symbol-function 'claude-repl--update-all-workspace-states-now) (lambda () nil)))
             (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
             (claude-repl--ws-put "test-ws" :input-buffer input-buf)
             (delete-other-windows)
@@ -1386,7 +1386,7 @@ bypassed by `window--resize-mini-window' (ignore=t), so the stronger
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
-                    ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil)))
+                    ((symbol-function 'claude-repl--update-all-workspace-states-now) (lambda () nil)))
             (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
             (claude-repl--ws-put "test-ws" :input-buffer input-buf)
             (delete-other-windows)
@@ -1533,7 +1533,7 @@ bypassed by `window--resize-mini-window' (ignore=t), so the stronger
   "on-workspace-switch does not error when workspace is nil."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
-              ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil))
+              ((symbol-function 'claude-repl--update-all-workspace-states-now) (lambda () nil))
               ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
               ((symbol-function 'claude-repl--reset-vterm-cursors) (lambda () nil))
               ((symbol-function 'claude-repl--drain-pending-magit) (lambda (_ws) nil))
@@ -1549,7 +1549,7 @@ on the ws plist (via `--latch-and-maybe-fire-loaded')."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
               ((symbol-function 'claude-repl--maybe-sweep-hidden-on-switch) #'ignore)
-              ((symbol-function 'claude-repl--update-all-workspace-states) #'ignore)
+              ((symbol-function 'claude-repl--update-all-workspace-states-now) #'ignore)
               ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
               ((symbol-function 'claude-repl--reset-vterm-cursors) #'ignore)
               ((symbol-function 'claude-repl--drain-pending-magit) #'ignore)
@@ -1567,7 +1567,7 @@ the ws-plist hash with a nil key in test/init environments."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
               ((symbol-function 'claude-repl--maybe-sweep-hidden-on-switch) #'ignore)
-              ((symbol-function 'claude-repl--update-all-workspace-states) #'ignore)
+              ((symbol-function 'claude-repl--update-all-workspace-states-now) #'ignore)
               ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
               ((symbol-function 'claude-repl--reset-vterm-cursors) #'ignore)
               ((symbol-function 'claude-repl--drain-pending-magit) #'ignore)
@@ -1585,7 +1585,7 @@ can start."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'claude-repl--maybe-sweep-hidden-on-switch) #'ignore)
-              ((symbol-function 'claude-repl--update-all-workspace-states) #'ignore)
+              ((symbol-function 'claude-repl--update-all-workspace-states-now) #'ignore)
               ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
               ((symbol-function 'claude-repl--reset-vterm-cursors) #'ignore)
               ((symbol-function 'claude-repl--drain-pending-magit) #'ignore)
@@ -1605,7 +1605,7 @@ can start."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'claude-repl--maybe-sweep-hidden-on-switch) #'ignore)
-              ((symbol-function 'claude-repl--update-all-workspace-states) #'ignore)
+              ((symbol-function 'claude-repl--update-all-workspace-states-now) #'ignore)
               ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
               ((symbol-function 'claude-repl--reset-vterm-cursors) #'ignore)
               ((symbol-function 'claude-repl--drain-pending-magit) #'ignore)
@@ -1659,7 +1659,7 @@ latest one."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "racing-current"))
                 ((symbol-function 'claude-repl--maybe-sweep-hidden-on-switch)
                  (lambda (ws) (push (cons :sweep ws) received-ws)))
-                ((symbol-function 'claude-repl--update-all-workspace-states) (lambda () nil))
+                ((symbol-function 'claude-repl--update-all-workspace-states-now) (lambda () nil))
                 ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
                 ((symbol-function 'claude-repl--reset-vterm-cursors) (lambda () nil))
                 ((symbol-function 'claude-repl--drain-pending-magit)
@@ -1949,7 +1949,7 @@ hooks are gone."
     (let ((reset-called nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'claude-repl--maybe-sweep-hidden-on-switch) #'ignore)
-                ((symbol-function 'claude-repl--update-all-workspace-states) #'ignore)
+                ((symbol-function 'claude-repl--update-all-workspace-states-now) #'ignore)
                 ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
                 ((symbol-function 'claude-repl--reset-vterm-cursors)
                  (lambda () (setq reset-called t)))
@@ -3281,7 +3281,7 @@ otherwise signal `Cannot split side window' and leave panels half-shown."
               (select-window drawer-win)
               (cl-letf (((symbol-function '+workspace-current-name) (lambda () ws))
                         ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
-                        ((symbol-function 'claude-repl--update-all-workspace-states) #'ignore))
+                        ((symbol-function 'claude-repl--update-all-workspace-states-now) #'ignore))
                 ;; Should NOT error.
                 (claude-repl--show-panels))
               ;; Drawer still alive.

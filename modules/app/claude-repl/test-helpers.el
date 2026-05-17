@@ -358,7 +358,14 @@ user's real snapshot during ERT runs."
          (claude-repl-events-file
           (expand-file-name (format "claude-events-%s.el" (random)) temporary-file-directory))
          (claude-repl--events-cache nil)
-         (claude-repl--events-cache-loaded t))
+         (claude-repl--events-cache-loaded t)
+         ;; Reset workspace-state update timer state so each test starts
+         ;; from a clean slate: counter at 0, no chain in flight, async
+         ;; spread disabled (tests want synchronous iteration so they
+         ;; can read state immediately after the call).
+         (claude-repl--update-tick-counter 0)
+         (claude-repl--update-in-flight nil)
+         (claude-repl--update-spread-sync t))
      (unwind-protect
          (progn ,@body)
        (when (file-exists-p claude-repl-workspace-snapshot-file)
