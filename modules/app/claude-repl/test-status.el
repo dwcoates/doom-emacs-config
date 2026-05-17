@@ -2557,6 +2557,53 @@ the terminator at col W is offscreen — but with the caller now passing
         (dolist (line lines)
           (should (<= (length line) (max 4 8))))))))
 
+;;;; ---- Tests: +workspace--message-body override (suppress tabline flash) ----
+
+(ert-deftest claude-repl-test-workspace-message-body-advice-strips-tabline ()
+  "Override returns ONLY the message text — no tabline prefix, no ` | ' separator.
+Pins the merge-teardown contract: when `+workspace/kill' (called via
+`claude-repl--nuke-one-workspace' during the merge-completed close) hits
+`+workspace--message-body', the resulting echo-area string must not flash
+the workspaces tabline."
+  (let ((result (claude-repl--workspace-message-body-advice
+                 "Deleted 'foo' workspace" 'success)))
+    (should (equal (substring-no-properties result) "Deleted 'foo' workspace"))
+    (should-not (string-match-p " | " result))))
+
+(ert-deftest claude-repl-test-workspace-message-body-advice-faces-by-type ()
+  "Override applies the correct face per TYPE (error/warn/success/info)."
+  (dolist (case '((error . error)
+                  (warn . warning)
+                  (success . success)
+                  (info . font-lock-comment-face)))
+    (let* ((type (car case))
+           (expected-face (cdr case))
+           (result (claude-repl--workspace-message-body-advice "msg" type)))
+      (should (equal (get-text-property 0 'face result) expected-face)))))
+
+(ert-deftest claude-repl-test-workspace-message-body-advice-installed ()
+  "The override is installed on `+workspace--message-body' at load time.
+Guards against accidental removal of the `advice-add' at the bottom of
+status.el — without it, the stock body (tabline + separator + message)
+would resurface."
+  (let ((advice-installed nil))
+    (advice-mapc (lambda (fn _props)
+                   (when (eq fn #'claude-repl--workspace-message-body-advice)
+                     (setq advice-installed t)))
+                 '+workspace--message-body)
+    (should advice-installed)))
+
+(ert-deftest claude-repl-test-workspace-message-body-advice-no-tabline-call ()
+  "Override must not invoke `+workspace--tabline' — the whole point is to
+avoid rendering the workspace list at all when the body is built for an
+echo-area message.  Counter-stubs `+workspace--tabline' to signal if
+called and verifies the advice runs cleanly."
+  (cl-letf (((symbol-function '+workspace--tabline)
+             (lambda (&optional _names)
+               (error "+workspace--tabline must not be called from the message-body override"))))
+    (let ((result (claude-repl--workspace-message-body-advice "ok" 'success)))
+      (should (equal (substring-no-properties result) "ok")))))
+
 (provide 'test-status)
 
 ;;; test-status.el ends here

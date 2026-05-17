@@ -1207,6 +1207,34 @@ Forces a tab-bar repaint so cycling-skip semantics update immediately."
 ;; already visible at the top, the bottom flash is redundant.
 (advice-add '+workspace/display :override #'ignore)
 
+(defun claude-repl--workspace-message-body-advice (message &optional type)
+  "Override for `+workspace--message-body' that strips the tabline prefix.
+
+Doom's stock `+workspace--message-body' builds the echo-area string as
+`<tabline> | <message>', so every `+workspace-message' / `+workspace-error'
+call (e.g. the `Deleted '<ws>' workspace' notification emitted by
+`+workspace/kill' inside `claude-repl--nuke-one-workspace's merge-teardown
+path) briefly flashes the full workspaces tabline in the minibuffer.
+
+Mirrors the rationale for the `+workspace/display' override above: the
+tab-bar is already painted at the top of the frame, so duplicating its
+contents in the echo area is redundant and visually disruptive — most
+noticeable right after a workspace merge, where the source workspace's
+teardown drops a tabline flash on top of an otherwise quiet UI.
+
+Returns only the propertized MESSAGE text, faced per TYPE
+\(`error' / `warn' / `success' / `info'), preserving the textual
+notification while dropping the leading workspace list."
+  (propertize (format "%s" message)
+              'face (pcase type
+                      ('error 'error)
+                      ('warn 'warning)
+                      ('success 'success)
+                      ('info 'font-lock-comment-face))))
+
+(advice-add '+workspace--message-body :override
+            #'claude-repl--workspace-message-body-advice)
+
 ;;; Claude panel visibility ---------------------------------------------------
 
 ;; Walk saved window-configuration tree to find claude buffers.

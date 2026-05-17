@@ -69,6 +69,15 @@
     "Stub: return empty string."
     ""))
 
+(unless (fboundp '+workspace--message-body)
+  (defun +workspace--message-body (message &optional _type)
+    "Stub: mimic Doom by prefixing the (stubbed) tabline + separator.
+Tests that exercise the override at
+`claude-repl--workspace-message-body-advice' assert that the advice
+strips this prefix, so the stub must include it (otherwise the
+advice's effect would be invisible)."
+    (concat (+workspace--tabline) " | " (format "%s" message))))
+
 (unless (fboundp '+workspace--protected-p)
   (defun +workspace--protected-p (name)
     "Stub: protected when NAME equals `persp-nil-name'."
