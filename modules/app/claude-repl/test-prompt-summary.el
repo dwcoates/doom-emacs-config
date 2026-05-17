@@ -228,6 +228,35 @@ overwriting the previous summary."
         (claude-repl--kickoff-prompt-summary "ws-target" "the prompt")
         (should (equal captured '("ws-target" "the prompt")))))))
 
+;;;; ---- Tests: prompt-format forbids tool use / external investigation ----
+
+(ert-deftest claude-repl-test-prompt-format-forbids-tool-use ()
+  "Format must explicitly forbid the model from using any tools.
+Pins the NO INVESTIGATION directive so the summarizer never spends
+tokens on agentic exploration when the supplied text is enough."
+  (let ((rendered (claude-repl--prompt-summary-build-input "the prompt")))
+    (should (string-match-p "NO INVESTIGATION" rendered))
+    (should (string-match-p "Do NOT use any tools" rendered))))
+
+(ert-deftest claude-repl-test-prompt-format-forbids-filesystem-investigation ()
+  "Format must explicitly forbid filesystem / external-state investigation.
+Pins the specific carve-outs (read files, run commands, fetch URLs, etc.)
+so a future tightening of the directive doesn't silently lose coverage of
+a vector."
+  (let ((rendered (claude-repl--prompt-summary-build-input "the prompt")))
+    (should (string-match-p "read files" rendered))
+    (should (string-match-p "run shell commands" rendered))
+    (should (string-match-p "fetch URLs" rendered))))
+
+(ert-deftest claude-repl-test-prompt-format-instructs-best-guess-on-ambiguity ()
+  "Format must instruct the model to give a best-guess summary when the
+supplied text is ambiguous rather than attempting to investigate.
+Prevents the model from rationalizing tool use under uncertainty."
+  (let ((rendered (claude-repl--prompt-summary-build-input "the prompt")))
+    (should (string-match-p "best-guess summary" rendered))
+    (should (string-match-p "never attempt to gather more information"
+                            rendered))))
+
 ;;;; ---- Tests: prompt-format guards against responding to embedded prompt ----
 
 (ert-deftest claude-repl-test-prompt-format-instructs-summarize-only ()
@@ -388,6 +417,15 @@ ellipsis so a single huge prior prompt can't dominate the prompt budget."
                      '("abcdefghijklmnop"))))
       (should (string-match-p "\\[1\\] abcdefghij…" rendered))
       (should-not (string-match-p "klmnop" rendered)))))
+
+;;;; ---- Tests: context-count default ----
+
+(ert-deftest claude-repl-test-prompt-summary-context-count-default-is-ten ()
+  "Default `claude-repl-prompt-summary-context-count' is 10.
+Pins the chosen default so future tweaks are deliberate — more context
+improves goal-shift detection and reduces the temptation for the model
+to investigate external state to fill in gaps."
+  (should (equal (default-value 'claude-repl-prompt-summary-context-count) 10)))
 
 ;;;; ---- Tests: collect-context reads buffer-local input history ----
 
