@@ -423,10 +423,51 @@ State in Tests\")."
     (concat (mapconcat #'shell-quote-argument (cons "gh" args) " ")
             " 2>/dev/null"))))
 
-;; FIXME: rename this to claude-repl--debug-git-bracnh. this is not meant for production code!
-(defvar claude-repl-git-branch
-  (claude-repl--git-string-quiet "rev-parse" "--abbrev-ref" "HEAD")
-  "The git branch active when claude-repl config was loaded.")
+;;;; --- External-boundary registry -----------------------------------------
+;;
+;; Every function that wraps an external process or external-state side
+;; effect MUST be listed here.  The test harness (`test-helpers.el')
+;; installs unmocked-call guards on every entry at load time so any test
+;; that fails to `cl-letf' over the wrapper fails LOUDLY rather than
+;; silently shelling out to the real binary.
+;;
+;; When adding a new wrapper:
+;;   1. Define it in core.el (or the closest production file).
+;;   2. Add its symbol here.
+;;   3. Update AGENTS.md "No External Processes or External State in
+;;      Tests" if a new naming-convention class is introduced (e.g.
+;;      first time we wrap a new resource like `curl` or `pbcopy`).
+
+(defvar claude-repl--external-boundary-functions
+  '(claude-repl--git-string
+    claude-repl--git-string-quiet
+    claude-repl--git-exit-code
+    claude-repl--git-branch-exists-p
+    claude-repl--git-tag-exists-p
+    claude-repl--async-git
+    claude-repl--gh-string-quiet)
+  "Symbols of every function that wraps an external process or external-state mutation.
+Each MUST be mocked by tests that reach it via production code.  The
+test harness installs guards so unmocked invocations fail loudly.
+
+Maintainer rule: when adding a new external-boundary wrapper, you
+MUST register it here in the same commit that introduces it.  CI's
+boundary lint (\".claude/check-external-boundaries.sh\") greps for
+raw `shell-command-to-string'/`call-process'/`start-process' uses of
+external binaries in non-wrapper production code and fails the build
+on hits; adding the wrapper to this list is the path that the lint
+expects you to take.")
+
+;; Lazily-populated debug accessor.  Originally a `defvar' whose default
+;; value shelled out to git at module load time — that real-git call
+;; fired during every test-suite run and violated AGENTS.md "No
+;; External Processes or External State in Tests" before any test had
+;; a chance to install a mock.  Now `nil' until first request via
+;; `claude-repl-print-git-branch', which caches the result.
+(defvar claude-repl-git-branch nil
+  "Cached git branch active when `claude-repl-print-git-branch' was first called.
+Populated lazily on first call; remains nil until then.  Do not rely
+on this being set at load time.")
 
 (defun claude-repl--resolve-current-git-root ()
   "Resolve the git root for the caller's current context.
@@ -446,8 +487,12 @@ working in (rather than wherever Emacs happened to be launched)."
     (file-name-as-directory raw)))
 
 (defun claude-repl-print-git-branch ()
-  "Print the git branch that was active when claude-repl config was loaded."
+  "Print the git branch that was active when claude-repl config was loaded.
+Lazily computes and caches the value on first invocation."
   (interactive)
+  (unless claude-repl-git-branch
+    (setq claude-repl-git-branch
+          (claude-repl--git-string-quiet "rev-parse" "--abbrev-ref" "HEAD")))
   (message "claude-repl loaded on branch: %s" claude-repl-git-branch))
 
 (defun claude-repl--path-canonical (path)

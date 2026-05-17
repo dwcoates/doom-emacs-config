@@ -126,8 +126,10 @@ Tears down any existing watch first to avoid duplicates on re-eval."
 ;;; Git helpers
 
 (defun claude-repl--git-exit-code (root &rest args)
-  "Run git in ROOT with ARGS, return exit code."
-  (apply #'call-process "git" nil nil nil "-C" root args))
+  "Run git in ROOT with ARGS, return exit code.
+This IS the external-boundary wrapper — tests mock it via `cl-letf'
+\(see `claude-repl--external-boundary-functions' in core.el)."
+  (apply #'call-process "git" nil nil nil "-C" root args)) ;; ALLOW-EXTERNAL-BOUNDARY
 
 (defun claude-repl--git-branch-exists-p (root branch)
   "Return non-nil if BRANCH exists in git repo at ROOT."
@@ -319,10 +321,12 @@ and invokes the callback stored as a process property."
 (defun claude-repl--async-git (label git-root args callback)
   "Run git -C GIT-ROOT with ARGS asynchronously.
 LABEL names the process and temp buffer.
-CALLBACK is called with (SUCCESS-P OUTPUT) when the process exits."
+CALLBACK is called with (SUCCESS-P OUTPUT) when the process exits.
+This IS the external-boundary wrapper — tests mock it via `cl-letf'
+\(see `claude-repl--external-boundary-functions' in core.el)."
   (claude-repl--log nil "async-git: label=%s git-root=%s args=%S" label git-root args)
   (let* ((buf (generate-new-buffer (format " *claude-repl-%s*" label)))
-         (proc (apply #'start-process
+         (proc (apply #'start-process ;; ALLOW-EXTERNAL-BOUNDARY
                       (format "claude-repl-%s" label)
                       buf
                       "git" "-C" git-root
