@@ -104,8 +104,13 @@ of the two activity signals consulted by
     (when (boundp 'claude-repl--workspaces)
       (maphash
        (lambda (_ws plist)
-         (when (memq (plist-get plist :claude-state)
-                     claude-repl-caffeinate-active-states)
+         ;; Skip tombstoned entries — a nuked workspace's residual
+         ;; `:claude-state' (e.g. `:thinking' captured pre-nuke) must
+         ;; not hold caffeinate alive.  Identity-only records are
+         ;; intentionally invisible to runtime predicates.
+         (when (and (null (plist-get plist :nuked-at))
+                    (memq (plist-get plist :claude-state)
+                          claude-repl-caffeinate-active-states))
            (setq active t)))
        claude-repl--workspaces))
     active))
@@ -127,8 +132,13 @@ exclusion principle as `:permission'), and a failed merge is terminal."
     (when (boundp 'claude-repl--workspaces)
       (maphash
        (lambda (_ws plist)
-         (when (or (eq (plist-get plist :merging) t)
-                   (eq (plist-get plist :repl-state) :merge-queued))
+         ;; Skip tombstoned entries — a workspace nuked mid-merge no
+         ;; longer needs caffeinate; the sentinel/cherry-pick that the
+         ;; `:merging' flag was guarding is moot once the entry is
+         ;; tombstoned.
+         (when (and (null (plist-get plist :nuked-at))
+                    (or (eq (plist-get plist :merging) t)
+                        (eq (plist-get plist :repl-state) :merge-queued)))
            (setq active t)))
        claude-repl--workspaces))
     active))
