@@ -5310,6 +5310,168 @@ the candidate list."
             (should (equal (claude-repl--read-project-via-picker) tmp)))
         (delete-directory tmp t)))))
 
+;;;; ---- Indexed workspace switchers (M-1..M-9, M-0) ----
+;;
+;; Tests cover `claude-repl--workspace-switch-by-index' (private core)
+;; and each of the public `claude-repl-workspace-switch-to-*' commands.
+;; The wrappers are thin persp wrappers that intentionally ignore
+;; `current-prefix-arg' — that's the property under test.
+
+(defmacro claude-repl-cmd-test--with-switch-stubs (names switched-to &rest body)
+  "Bind `+workspace-list-names' to NAMES and `+workspace-switch' to push
+into SWITCHED-TO so the test can assert the destination passed by the
+indexed switchers."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function '+workspace-list-names) (lambda () ,names))
+             ((symbol-function '+workspace-switch)
+              (lambda (name &optional _auto-create) (push name ,switched-to))))
+     ,@body))
+
+(ert-deftest claude-repl-cmd-test-switch-by-index/picks-nth-name ()
+  "switch-by-index dispatches `+workspace-switch' on the nth name."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d") switched
+      (claude-repl--workspace-switch-by-index 2)
+      (should (equal switched '("c"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-by-index/out-of-range-user-errors ()
+  "switch-by-index signals `user-error' when no workspace exists at INDEX."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b") switched
+      (should-error (claude-repl--workspace-switch-by-index 5)
+                    :type 'user-error)
+      (should-not switched))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-0/lands-on-first ()
+  "switch-to-0 routes to the 1st workspace."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c") switched
+      (claude-repl-workspace-switch-to-0)
+      (should (equal switched '("a"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-1/lands-on-second ()
+  "switch-to-1 routes to the 2nd workspace."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c") switched
+      (claude-repl-workspace-switch-to-1)
+      (should (equal switched '("b"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-2/lands-on-third ()
+  "switch-to-2 routes to the 3rd workspace."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c") switched
+      (claude-repl-workspace-switch-to-2)
+      (should (equal switched '("c"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-3/lands-on-fourth ()
+  "switch-to-3 routes to the 4th workspace."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d") switched
+      (claude-repl-workspace-switch-to-3)
+      (should (equal switched '("d"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-4/lands-on-fifth ()
+  "switch-to-4 routes to the 5th workspace."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e") switched
+      (claude-repl-workspace-switch-to-4)
+      (should (equal switched '("e"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-5/lands-on-sixth ()
+  "switch-to-5 routes to the 6th workspace."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e" "f") switched
+      (claude-repl-workspace-switch-to-5)
+      (should (equal switched '("f"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-6/lands-on-seventh ()
+  "switch-to-6 routes to the 7th workspace."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e" "f" "g") switched
+      (claude-repl-workspace-switch-to-6)
+      (should (equal switched '("g"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-7/lands-on-eighth ()
+  "switch-to-7 routes to the 8th workspace."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e" "f" "g" "h") switched
+      (claude-repl-workspace-switch-to-7)
+      (should (equal switched '("h"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-8/lands-on-ninth ()
+  "switch-to-8 routes to the 9th workspace — this is the regression
+target for the M-9 misbehavior where it sometimes landed on the
+final workspace instead."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e" "f" "g" "h" "i" "j") switched
+      (claude-repl-workspace-switch-to-8)
+      (should (equal switched '("i"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-8/ignores-prefix-arg ()
+  "switch-to-8 ignores `current-prefix-arg' — pressing a prefix-arg key
+beforehand must not redirect the jump to a different index."
+  (let ((switched (list))
+        (current-prefix-arg 99))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e" "f" "g" "h" "i") switched
+      (claude-repl-workspace-switch-to-8)
+      (should (equal switched '("i"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-final/lands-on-last ()
+  "switch-to-final routes to the last name in the workspace list."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d") switched
+      (claude-repl-workspace-switch-to-final)
+      (should (equal switched '("d"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-final/ignores-prefix-arg ()
+  "switch-to-final ignores `current-prefix-arg' — this is the regression
+target for the M-0 case where `+workspace/switch-to' would consult the
+prefix arg and the binding sometimes fell through to `text-scale-set'
+with the \"The font hasn't been resized\" message."
+  (let ((switched (list))
+        (current-prefix-arg 3))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e") switched
+      (claude-repl-workspace-switch-to-final)
+      (should (equal switched '("e"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-final/empty-list-user-errors ()
+  "switch-to-final signals `user-error' when no workspaces exist."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '() switched
+      (should-error (claude-repl-workspace-switch-to-final)
+                    :type 'user-error)
+      (should-not switched))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-N/is-interactive ()
+  "Each indexed switcher is an interactive command — required for keymap
+binding to invoke it via key press."
+  (dolist (fn '(claude-repl-workspace-switch-to-0
+                claude-repl-workspace-switch-to-1
+                claude-repl-workspace-switch-to-2
+                claude-repl-workspace-switch-to-3
+                claude-repl-workspace-switch-to-4
+                claude-repl-workspace-switch-to-5
+                claude-repl-workspace-switch-to-6
+                claude-repl-workspace-switch-to-7
+                claude-repl-workspace-switch-to-8
+                claude-repl-workspace-switch-to-final))
+    (should (commandp fn))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here
