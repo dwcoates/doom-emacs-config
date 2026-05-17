@@ -3,6 +3,13 @@
 # the live workspace-* impls, then stage the cache update so the
 # commit ships the refreshed copy.
 #
+# Also enforces claude-repl ERT suite when claude-repl files staged.
+# Per AGENTS.md zero-tolerance rule, ANY failing test blocks the commit.
+# Do not bypass with --no-verify; fix the failures.
+#
+# Install once per clone:
+#   git config core.hooksPath .githooks
+#
 # Installed by .claude/install.sh into the repo's git hooks dir.  The
 # marker string below lets install/uninstall recognize this script as
 # managed (so it can be refreshed or removed without touching foreign
@@ -16,21 +23,55 @@ CACHE_DIR="$REPO_ROOT/modules/app/claude-repl/skills-cache"
 
 if [ ! -x "$SYNC" ]; then
   echo "[pre-commit] sync.sh missing or not executable at $SYNC — skipping cache sync." >&2
-  exit 0
-fi
-
-# Run the sync.  Don't fail the commit on a transient sync error —
-# the cache itself is checked in, so we'd rather let an unrelated
-# commit proceed than block on a flaky rsync.  Surface the failure.
-if ! "$SYNC"; then
+elif ! "$SYNC"; then
+  # Don't fail the commit on a transient sync error — the cache is checked in,
+  # so we'd rather let an unrelated commit proceed than block on a flaky rsync.
   echo "[pre-commit] WARNING: skills-cache sync exited non-zero — continuing without staging." >&2
+else
+  # Stage anything sync produced.  Use --name-only against HEAD so we
+  # pick up both unstaged and untracked cache files in one pass.
+  mapfile -t changed < <(git -C "$REPO_ROOT" status --porcelain -- "$CACHE_DIR" | awk '{print $NF}')
+  if [ "${#changed[@]}" -gt 0 ]; then
+    echo "[pre-commit] Staging ${#changed[@]} skills-cache change(s)."
+    git -C "$REPO_ROOT" add -- "$CACHE_DIR"
+  fi
+fi
+
+# Only gate when claude-repl source or test files are staged.
+if ! git diff --cached --name-only | grep -qE '^modules/app/claude-repl/.*\.el$'; then
   exit 0
 fi
 
-# Stage anything sync produced.  Use --name-only against HEAD so we
-# pick up both unstaged and untracked cache files in one pass.
-mapfile -t changed < <(git -C "$REPO_ROOT" status --porcelain -- "$CACHE_DIR" | awk '{print $NF}')
-if [ "${#changed[@]}" -gt 0 ]; then
-  echo "[pre-commit] Staging ${#changed[@]} skills-cache change(s)."
-  git -C "$REPO_ROOT" add -- "$CACHE_DIR"
+TEST_FILE="$REPO_ROOT/modules/app/claude-repl/test-claude-repl.el"
+
+if [ ! -f "$TEST_FILE" ]; then
+  echo "[pre-commit] $TEST_FILE not found — refusing to commit." >&2
+  exit 1
 fi
+
+echo "[pre-commit] claude-repl files staged — running ERT suite..."
+
+# Run from repo root so relative `modules/...` paths in test loader resolve.
+cd "$REPO_ROOT"
+
+# Capture output to a temp file; only show the failure tail on error
+# (full output is enormous because of per-test STUB-CREATE log lines).
+TMP_OUT="$(mktemp -t claude-repl-precommit.XXXXXX)"
+trap 'rm -f "$TMP_OUT"' EXIT
+
+if ! emacs -batch -Q -l ert \
+       -l modules/app/claude-repl/test-claude-repl.el \
+       -f ert-run-tests-batch-and-exit \
+       >"$TMP_OUT" 2>&1; then
+  echo "[pre-commit] ✗ ERT tests failed — refusing commit." >&2
+  echo "[pre-commit] Failure tail:" >&2
+  echo "---" >&2
+  tail -50 "$TMP_OUT" >&2
+  echo "---" >&2
+  echo "[pre-commit] Per AGENTS.md zero-tolerance: fix the failures. Do not use --no-verify." >&2
+  exit 1
+fi
+
+# Trim noise; only print the final summary line.
+grep -E "^Ran [0-9]+ tests" "$TMP_OUT" >&2 || true
+echo "[pre-commit] ✓ claude-repl tests pass."
