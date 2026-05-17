@@ -1406,12 +1406,20 @@ does not appear in the output."
         (unwind-protect
             (progn
               (claude-repl--ws-put "test-ws" :vterm-buffer fake-vterm-buf)
+              ;; NOTE: do NOT stub `claude-repl--ws-get' here.  A blanket
+              ;; stub that returns `fake-vterm-buf' for every key collides
+              ;; with the post-f2560b6 interrupt path, which calls
+              ;; `--mark-claude-done' → `--backoff-retry-reset' →
+              ;; `(claude-repl--ws-get ws :backoff-retry-count)' and then
+              ;; `(> prev 0)' — comparing a buffer against an int errors
+              ;; with wrong-type-argument number-or-marker-p.  The real
+              ;; `--ws-get' reads the value `--ws-put' just stored for
+              ;; `:vterm-buffer' and returns nil for unknown keys, which
+              ;; is exactly what the interrupt path expects.
               (cl-letf (((symbol-function 'claude-repl--vterm-live-p)
                          (lambda () t))
                         ((symbol-function '+workspace-current-name)
                          (lambda () "test-ws"))
-                        ((symbol-function 'claude-repl--ws-get)
-                         (lambda (_ws _key) fake-vterm-buf))
                         ((symbol-function 'claude-repl--send-interrupt-escape)
                          (lambda (_ws _buf) (setq escape-called t)))
                         ((symbol-function 'run-at-time)
@@ -1913,8 +1921,11 @@ No interrupt was actually delivered, so the state should not change."
   (claude-repl-test--with-clean-state
     (should-error (claude-repl-nuke-workspace) :type 'user-error)))
 
-(ert-deftest claude-repl-cmd-test-nuke-workspace/kills-session-and-removes-hashmap ()
-  "nuke-workspace kills session, kills persp workspace, and removes hashmap entry."
+(ert-deftest claude-repl-cmd-test-nuke-workspace/kills-session-and-tombstones-hashmap ()
+  "nuke-workspace kills session, kills persp workspace, and tombstones hashmap entry.
+Post-tombstone-refactor, the hash entry survives with `:nuked-at' stamped
+rather than being removed; `--ws-live-p' is the predicate that filters
+tombstones out of the drawer/picker."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
     (claude-repl--ws-put "doomed" :status :done)
@@ -1934,7 +1945,8 @@ No interrupt was actually delivered, so the state should not change."
         (claude-repl-nuke-workspace)
         (should (equal session-killed "doomed"))
         (should (equal persp-killed "doomed"))
-        (should-not (gethash "doomed" claude-repl--workspaces))))))
+        (should-not (claude-repl--ws-live-p "doomed"))
+        (should (claude-repl--ws-get "doomed" :nuked-at))))))
 
 (ert-deftest claude-repl-cmd-test-nuke-workspace/no-confirmation-prompt ()
   "nuke-workspace MUST NOT prompt for confirmation.  Teardown is
@@ -1954,7 +1966,8 @@ are recoverable by reopening the project."
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (claude-repl-nuke-workspace)
         (should-not prompted)
-        (should-not (gethash "doomed" claude-repl--workspaces))))))
+        (should-not (claude-repl--ws-live-p "doomed"))
+        (should (claude-repl--ws-get "doomed" :nuked-at))))))
 
 (ert-deftest claude-repl-cmd-test-nuke-workspace/kills-git-proc ()
   "nuke-workspace kills an in-flight git-diff process."
@@ -1996,8 +2009,8 @@ are recoverable by reopening the project."
         (claude-repl-nuke-workspace)
         (should (equal killed-ws "doomed"))))))
 
-(ert-deftest claude-repl-cmd-test-nuke-workspace/no-persp-still-cleans-hashmap ()
-  "nuke-workspace removes hashmap entry even when persp workspace doesn't exist."
+(ert-deftest claude-repl-cmd-test-nuke-workspace/no-persp-still-tombstones-hashmap ()
+  "nuke-workspace tombstones hashmap entry even when persp workspace doesn't exist."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ghost" :project-dir "/tmp/ghost")
     (cl-letf (((symbol-function 'completing-read)
@@ -2007,7 +2020,8 @@ are recoverable by reopening the project."
               ((symbol-function '+workspace-exists-p) (lambda (_n) nil))
               ((symbol-function 'force-mode-line-update) #'ignore))
       (claude-repl-nuke-workspace)
-      (should-not (gethash "ghost" claude-repl--workspaces)))))
+      (should-not (claude-repl--ws-live-p "ghost"))
+      (should (claude-repl--ws-get "ghost" :nuked-at)))))
 
 (ert-deftest claude-repl-cmd-test-nuke-workspace/skips-persp-kill-when-workspace-already-gone ()
   "When the persp is already gone from the cache, nuke MUST NOT call
@@ -2048,8 +2062,11 @@ returns nil for a missing workspace."
         (claude-repl-nuke-workspace)
         (should-not kill-called)))))
 
-(ert-deftest claude-repl-cmd-test-nuke-workspace/removes-hashmap-when-kill-session-errors ()
-  "nuke-workspace still removes the hashmap entry when kill-session errors."
+(ert-deftest claude-repl-cmd-test-nuke-workspace/tombstones-hashmap-when-kill-session-errors ()
+  "nuke-workspace still tombstones the hashmap entry when kill-session errors.
+The teardown error must not prevent the tombstone — otherwise the entry
+would stay `live' from `--ws-live-p''s perspective while its runtime
+state is corrupted, leaving the drawer/picker showing a half-dead row."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
     (cl-letf (((symbol-function 'completing-read)
@@ -2060,10 +2077,11 @@ returns nil for a missing workspace."
               ((symbol-function '+workspace-exists-p) (lambda (_n) nil))
               ((symbol-function 'force-mode-line-update) #'ignore))
       (claude-repl-nuke-workspace)
-      (should-not (gethash "doomed" claude-repl--workspaces)))))
+      (should-not (claude-repl--ws-live-p "doomed"))
+      (should (claude-repl--ws-get "doomed" :nuked-at)))))
 
-(ert-deftest claude-repl-cmd-test-nuke-workspace/removes-hashmap-when-workspace-kill-errors ()
-  "nuke-workspace still removes the hashmap entry when +workspace/kill errors."
+(ert-deftest claude-repl-cmd-test-nuke-workspace/tombstones-hashmap-when-workspace-kill-errors ()
+  "nuke-workspace still tombstones the hashmap entry when +workspace/kill errors."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
     (cl-letf (((symbol-function 'completing-read)
@@ -2076,7 +2094,8 @@ returns nil for a missing workspace."
                (lambda (_ws) (error "simulated workspace-kill failure")))
               ((symbol-function 'force-mode-line-update) #'ignore))
       (claude-repl-nuke-workspace)
-      (should-not (gethash "doomed" claude-repl--workspaces)))))
+      (should-not (claude-repl--ws-live-p "doomed"))
+      (should (claude-repl--ws-get "doomed" :nuked-at)))))
 
 (ert-deftest claude-repl-cmd-test-nuke-workspace/preserves-state-file ()
   "nuke-workspace MUST preserve the per-project state.el so the
@@ -2225,7 +2244,9 @@ persp would already be gone before the buffer sweep ran."
         (should (member "ws1" torn-down))
         (should (member "ws2" torn-down))
         (should (member "ws3" torn-down))
-        (should (zerop (hash-table-count claude-repl--workspaces)))))))
+        ;; Post-tombstone: hash entries survive with `:nuked-at' but no
+        ;; entry remains live.  Use the live-name helper as the assertion.
+        (should-not (claude-repl--live-ws-names))))))
 
 (ert-deftest claude-repl-cmd-test-nuke-all/prompt-includes-count ()
   "nuke-all-workspaces' confirmation prompt includes the workspace count."
@@ -2272,9 +2293,16 @@ persp would already be gone before the buffer sweep ran."
         (should (member "restored1" torn-down))
         (should (member "restored2" torn-down))
         (should-not (member "manual" torn-down))
+        ;; Manual workspace must remain live with its identity intact.
+        (should (claude-repl--ws-live-p "manual"))
         (should (claude-repl--ws-get "manual" :project-dir))
-        (should-not (claude-repl--ws-get "restored1" :project-dir))
-        (should-not (claude-repl--ws-get "restored2" :project-dir))))))
+        ;; Restored entries are tombstoned, not removed — `:project-dir'
+        ;; is preserved across tombstone (identity key), so assert the
+        ;; live-p flip and the `:nuked-at' stamp instead.
+        (should-not (claude-repl--ws-live-p "restored1"))
+        (should-not (claude-repl--ws-live-p "restored2"))
+        (should (claude-repl--ws-get "restored1" :nuked-at))
+        (should (claude-repl--ws-get "restored2" :nuked-at))))))
 
 (ert-deftest claude-repl-cmd-test-nuke-restored/prompt-includes-count ()
   "nuke-restored-workspaces' confirmation prompt includes the restored count."
@@ -2330,17 +2358,20 @@ other teardown step still runs."
         (should (gethash "merged-ws" claude-repl--workspaces))
         (should (eq (claude-repl--ws-get "merged-ws" :merge-completed) t))))))
 
-(ert-deftest claude-repl-cmd-test-nuke-one/no-preserve-removes-hash ()
-  "Default `--nuke-one-workspace' (no PRESERVE-ENTRY) still removes the
+(ert-deftest claude-repl-cmd-test-nuke-one/no-preserve-tombstones-hash ()
+  "Default `--nuke-one-workspace' (no PRESERVE-ENTRY) tombstones the
 hash entry.  Guards against an accidental flip of the default that
-would leak ws plists into the live hash."
+would leak live ws plists past teardown.  Post-tombstone-refactor the
+entry survives with `:nuked-at' stamped — `--ws-live-p' is the
+predicate that keeps it out of every UI/runtime iterator."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (let ((persp-mode nil))
       (cl-letf (((symbol-function 'claude-repl--kill-session) #'ignore)
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (claude-repl--nuke-one-workspace "ws1")
-        (should-not (gethash "ws1" claude-repl--workspaces))))))
+        (should-not (claude-repl--ws-live-p "ws1"))
+        (should (claude-repl--ws-get "ws1" :nuked-at))))))
 
 ;;;; ---- register-merged-workspace + state-merge-completed-p ----
 
@@ -2500,10 +2531,13 @@ are recoverable by reopening the project."
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (claude-repl-kill-workspace)
         (should-not prompted)
-        (should-not (gethash "doomed" claude-repl--workspaces))))))
+        (should-not (claude-repl--ws-live-p "doomed"))
+        (should (claude-repl--ws-get "doomed" :nuked-at))))))
 
-(ert-deftest claude-repl-cmd-test-kill-workspace/kills-session-and-removes-hashmap ()
-  "kill-workspace kills session, kills persp workspace, and removes hashmap entry."
+(ert-deftest claude-repl-cmd-test-kill-workspace/kills-session-and-tombstones-hashmap ()
+  "kill-workspace kills session, kills persp workspace, and tombstones hashmap entry.
+Same tombstone semantics as nuke — `--ws-del' is the single teardown
+primitive both routes through."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "doomed" :project-dir "/tmp/doomed")
     (claude-repl--ws-put "doomed" :status :done)
@@ -2523,7 +2557,8 @@ are recoverable by reopening the project."
         (claude-repl-kill-workspace)
         (should (equal session-killed "doomed"))
         (should (equal persp-killed "doomed"))
-        (should-not (gethash "doomed" claude-repl--workspaces))))))
+        (should-not (claude-repl--ws-live-p "doomed"))
+        (should (claude-repl--ws-get "doomed" :nuked-at))))))
 
 (ert-deftest claude-repl-cmd-test-kill-workspace/preserves-state-file ()
   "kill-workspace must NOT unlink the .claude-repl-state file.

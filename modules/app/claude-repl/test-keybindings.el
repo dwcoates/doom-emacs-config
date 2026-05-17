@@ -461,17 +461,32 @@ contains no `modules/app/claude-repl/config.el', reload falls back to
 
 ;;;; ---- Tests: claude-repl-debug/obliterate ----
 
-(ert-deftest claude-repl-test-obliterate-removes-state ()
-  "obliterate should remove all workspace state."
+(ert-deftest claude-repl-test-obliterate-tombstones-state ()
+  "obliterate routes through `--ws-del', so it tombstones the workspace
+rather than truly removing every key.  Runtime state (e.g. `:claude-state'
+seeded via `--ws-set') is cleared, identity keys (`:priority') survive,
+and `--ws-live-p' flips to nil.  This is the same teardown contract as
+nuke/kill — obliterate just adds an owned-buffer sweep on top.
+
+NB: the obliterate function's docstring still says \"removes all state\",
+which now overstates what it does post-tombstone.  If the intent is for
+obliterate to genuinely remhash (vs tombstone), that's a code change
+this test doesn't pin."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws1" :status :thinking)
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (claude-repl--ws-set "ws1" :thinking)
     (claude-repl--ws-put "ws1" :priority "p1")
-    (should (claude-repl--ws-get "ws1" :status))
+    (should (claude-repl--ws-state "ws1"))
     (cl-letf (((symbol-function 'claude-repl--kill-owned-panel-buffers)
                (lambda (_ws) nil)))
       (claude-repl-debug/obliterate "ws1"))
-    (should-not (claude-repl--ws-get "ws1" :status))
-    (should-not (claude-repl--ws-get "ws1" :priority))))
+    ;; Runtime keys cleared, tombstone stamped, no longer live.
+    (should-not (claude-repl--ws-state "ws1"))
+    (should-not (claude-repl--ws-live-p "ws1"))
+    (should (claude-repl--ws-get "ws1" :nuked-at))
+    ;; Identity keys survive across tombstone.
+    (should (equal (claude-repl--ws-get "ws1" :priority) "p1"))
+    (should (equal (claude-repl--ws-get "ws1" :project-dir) "/tmp/ws1"))))
 
 ;;;; ---- Tests: claude-repl-debug/clear-state ----
 
