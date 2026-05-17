@@ -16,42 +16,6 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
-;;;; ---- Git test helpers ----
-
-(defmacro claude-repl-test--with-temp-git-repo (var &rest body)
-  "Create a temporary git repo, bind its path to VAR, execute BODY, then delete it."
-  (declare (indent 1))
-  `(let ((,var (make-temp-file "claude-repl-test-repo-" t)))
-     (unwind-protect
-         (progn
-           (call-process "git" nil nil nil "-C" ,var "init" "-q")
-           (call-process "git" nil nil nil "-C" ,var "config" "user.email" "test@test.com")
-           (call-process "git" nil nil nil "-C" ,var "config" "user.name" "Test")
-           (call-process "git" nil nil nil "-C" ,var "config" "commit.gpgsign" "false")
-           ,@body)
-       (delete-directory ,var t))))
-
-(defun claude-repl-test--git-commit (repo msg &optional content)
-  "Write CONTENT (default MSG) to a file named MSG in REPO, stage, and commit.
-Using a per-commit filename ensures cherry-picks never conflict by default.
-Returns the full SHA of the new commit."
-  (let ((file (expand-file-name msg repo)))
-    (write-region (or content msg) nil file)
-    (call-process "git" nil nil nil "-C" repo "add" msg)
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" msg))
-  (string-trim (shell-command-to-string
-                (format "git -C %s rev-parse HEAD" (shell-quote-argument repo)))))
-
-(defun claude-repl-test--git-checkout (repo branch &optional create-p)
-  "Checkout BRANCH in REPO. If CREATE-P, create it first."
-  (if create-p
-      (call-process "git" nil nil nil "-C" repo "checkout" "-qb" branch)
-    (call-process "git" nil nil nil "-C" repo "checkout" "-q" branch)))
-
-(defun claude-repl-test--git-cherry-pick-x (repo sha)
-  "Cherry-pick SHA into REPO with -x. Returns exit code."
-  (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha))
-
 ;;;; ---- Tests: extract-cherry-pick-shas ----
 
 (ert-deftest claude-repl-test-extract-cherry-pick-shas-empty ()
@@ -106,57 +70,59 @@ Returns the full SHA of the new commit."
   (should (equal (claude-repl--bare-workspace-name "DWC/foo/") "foo")))
 
 ;;;; ---- Tests: assert-clean-worktree ----
+;;
+;; `claude-repl--assert-clean-worktree' calls `claude-repl--git-exit-code'
+;; twice (unstaged + staged check).  Tests mock the wrapper.
 
 (ert-deftest claude-repl-test-assert-clean-worktree-clean ()
   "Clean worktree does not signal."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    ;; Should not error
-    (claude-repl--assert-clean-worktree "test-ws" repo)))
+  (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+             (lambda (&rest _args) 0)))
+    ;; Should not error.
+    (claude-repl--assert-clean-worktree "test-ws" "/tmp/repo")))
 
 (ert-deftest claude-repl-test-assert-clean-worktree-unstaged ()
   "Unstaged changes signal user-error."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (write-region "modified" nil (expand-file-name "initial" repo))
-    (should-error (claude-repl--assert-clean-worktree "test-ws" repo)
+  (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+             (lambda (_root &rest args)
+               (if (equal args '("diff" "--quiet")) 1 0))))
+    (should-error (claude-repl--assert-clean-worktree "test-ws" "/tmp/repo")
                   :type 'user-error)))
 
 (ert-deftest claude-repl-test-assert-clean-worktree-staged ()
   "Staged changes signal user-error."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (write-region "modified" nil (expand-file-name "initial" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "initial")
-    (should-error (claude-repl--assert-clean-worktree "test-ws" repo)
+  (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+             (lambda (_root &rest args)
+               (if (equal args '("diff" "--cached" "--quiet")) 1 0))))
+    (should-error (claude-repl--assert-clean-worktree "test-ws" "/tmp/repo")
                   :type 'user-error)))
 
 ;;;; ---- Tests: git-exit-code / git-branch-exists-p ----
-
-(ert-deftest claude-repl-test-git-exit-code-success ()
-  "Successful git command returns 0."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (should (= 0 (claude-repl--git-exit-code repo "status")))))
-
-(ert-deftest claude-repl-test-git-exit-code-failure ()
-  "Failed git command returns non-zero."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (should (/= 0 (claude-repl--git-exit-code repo "rev-parse" "--verify" "nonexistent-branch")))))
+;;
+;; The wrappers themselves (`claude-repl--git-exit-code',
+;; `claude-repl--git-branch-exists-p') are the external boundary; per
+;; AGENTS.md "No External Processes or External State in Tests", the
+;; wrappers are mocked in their callers' tests rather than exercised
+;; against a real git binary.  Below we keep tests for
+;; `claude-repl--git-branch-exists-p' that mock its sole dependency
+;; (`claude-repl--git-exit-code') and verify the predicate logic.
+;; The trivial wrapper-of-call-process functions are intentionally not
+;; tested in isolation — there is nothing to test that isn't a tautology
+;; against `call-process'.
 
 (ert-deftest claude-repl-test-git-branch-exists-p-true ()
-  "Existing branch returns non-nil."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (claude-repl-test--git-checkout repo "feature" t)
-    (should (claude-repl--git-branch-exists-p repo "feature"))))
+  "Existing branch returns non-nil (exit-code 0 from rev-parse --verify)."
+  (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+             (lambda (_root &rest args)
+               (should (equal args '("rev-parse" "--verify" "feature")))
+               0)))
+    (should (claude-repl--git-branch-exists-p "/tmp/repo" "feature"))))
 
 (ert-deftest claude-repl-test-git-branch-exists-p-false ()
-  "Non-existent branch returns nil."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (should-not (claude-repl--git-branch-exists-p repo "nonexistent"))))
+  "Non-existent branch returns nil (non-zero exit-code)."
+  (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+             (lambda (&rest _args) 128)))
+    (should-not (claude-repl--git-branch-exists-p "/tmp/repo" "nonexistent"))))
 
 ;;;; ---- Tests: parse-worktree-porcelain ----
 
@@ -208,51 +174,52 @@ Returns the full SHA of the new commit."
   (should (null (claude-repl--parse-worktree-porcelain "" "refs/heads/master"))))
 
 ;;;; ---- Tests: master-worktree-path ----
+;;
+;; `claude-repl--master-worktree-path' shells out via
+;; `claude-repl--git-string-quiet "-C" root "worktree" "list" "--porcelain"'
+;; and parses the porcelain output for the trunk branch.  Tests mock the
+;; wrapper and assert the parser/dispatch behavior, per AGENTS.md "No
+;; External Processes or External State in Tests".
 
 (ert-deftest claude-repl-test-master-worktree-path-single-worktree ()
   "In a single-worktree repo on master, returns that worktree's path."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (call-process "git" nil nil nil "-C" repo "branch" "-M" "master")
-    (let ((claude-repl-master-branch-name "master"))
-      (should (equal (file-truename (claude-repl--master-worktree-path repo))
-                     (file-truename repo))))))
+  (let ((claude-repl-master-branch-name "master")
+        (porcelain "worktree /tmp/repo\nHEAD abc\nbranch refs/heads/master\n"))
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (should (equal args '("-C" "/tmp/repo" "worktree" "list" "--porcelain")))
+                 porcelain)))
+      (should (equal (claude-repl--master-worktree-path "/tmp/repo")
+                     "/tmp/repo")))))
 
 (ert-deftest claude-repl-test-master-worktree-path-with-secondary ()
   "In a repo with main + secondary worktree, returns the main path."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (call-process "git" nil nil nil "-C" repo "branch" "-M" "master")
-    (let ((wt-dir (make-temp-file "claude-repl-test-wt-" t)))
-      (unwind-protect
-          (progn
-            (delete-directory wt-dir)
-            (call-process "git" nil nil nil "-C" repo "worktree" "add" "-b" "feature-x" wt-dir)
-            (let ((claude-repl-master-branch-name "master"))
-              (should (equal (file-truename (claude-repl--master-worktree-path repo))
-                             (file-truename repo)))
-              ;; Even when called from the secondary worktree, returns master path.
-              (should (equal (file-truename (claude-repl--master-worktree-path wt-dir))
-                             (file-truename repo)))))
-        (when (file-directory-p wt-dir)
-          (delete-directory wt-dir t))))))
+  (let ((claude-repl-master-branch-name "master")
+        (porcelain (concat "worktree /tmp/repo\nHEAD abc\nbranch refs/heads/master\n\n"
+                           "worktree /tmp/wt\nHEAD def\nbranch refs/heads/feature-x\n")))
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest _args) porcelain)))
+      ;; From the primary path.
+      (should (equal (claude-repl--master-worktree-path "/tmp/repo") "/tmp/repo"))
+      ;; Even when called from the secondary worktree, returns master path.
+      (should (equal (claude-repl--master-worktree-path "/tmp/wt") "/tmp/repo")))))
 
 (ert-deftest claude-repl-test-master-worktree-path-no-master ()
   "When no worktree is on the master branch, returns nil."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (call-process "git" nil nil nil "-C" repo "branch" "-M" "feature-only")
-    (let ((claude-repl-master-branch-name "master"))
-      (should (null (claude-repl--master-worktree-path repo))))))
+  (let ((claude-repl-master-branch-name "master")
+        (porcelain "worktree /tmp/repo\nHEAD abc\nbranch refs/heads/feature-only\n"))
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest _args) porcelain)))
+      (should (null (claude-repl--master-worktree-path "/tmp/repo"))))))
 
 (ert-deftest claude-repl-test-master-worktree-path-honors-defcustom ()
   "Uses `claude-repl-master-branch-name' as the trunk branch name."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (call-process "git" nil nil nil "-C" repo "branch" "-M" "trunk")
-    (let ((claude-repl-master-branch-name "trunk"))
-      (should (equal (file-truename (claude-repl--master-worktree-path repo))
-                     (file-truename repo))))))
+  (let ((claude-repl-master-branch-name "trunk")
+        (porcelain "worktree /tmp/repo\nHEAD abc\nbranch refs/heads/trunk\n"))
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest _args) porcelain)))
+      (should (equal (claude-repl--master-worktree-path "/tmp/repo")
+                     "/tmp/repo")))))
 
 ;;;; ---- Tests: apply-workspace-properties ----
 
@@ -1283,190 +1250,219 @@ UI, run the merge on a worker thread, and reopen on failure."
 
 (ert-deftest claude-repl-test-workspace-name-collides-p-fresh ()
   "Fresh name in a clean repo and empty workspaces hash → no collision."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
-          (claude-repl--workspace-names-in-flight nil)
-          (claude-repl-worktree-start-tag-prefix nil))
-      (should-not (claude-repl--workspace-name-collides-p "DWC/fresh" repo)))))
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+        (claude-repl--workspace-names-in-flight nil)
+        (claude-repl-worktree-start-tag-prefix nil))
+    (cl-letf (((symbol-function 'claude-repl--candidate-worktree-path)
+               (lambda (&rest _args) "/tmp/repo-worktrees/fresh"))
+              ((symbol-function 'file-directory-p) (lambda (_p) nil))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (&rest _args) 128)))
+      (should-not (claude-repl--workspace-name-collides-p "DWC/fresh" "/tmp/repo")))))
 
 (ert-deftest claude-repl-test-workspace-name-collides-p-in-flight ()
   "Name already reserved in `claude-repl--workspace-names-in-flight' → collision."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
-          (claude-repl--workspace-names-in-flight
-           (let ((h (make-hash-table :test 'equal)))
-             (puthash "DWC/dup" t h)
-             h))
-          (claude-repl-worktree-start-tag-prefix nil))
-      (should (claude-repl--workspace-name-collides-p "DWC/dup" repo)))))
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+        (claude-repl--workspace-names-in-flight
+         (let ((h (make-hash-table :test 'equal)))
+           (puthash "DWC/dup" t h)
+           h))
+        (claude-repl-worktree-start-tag-prefix nil))
+    ;; In-flight check fires first; subsequent probes should never run.
+    (cl-letf (((symbol-function 'claude-repl--candidate-worktree-path)
+               (lambda (&rest _args) (error "unexpected candidate-worktree-path call")))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (&rest _args) (error "unexpected git-exit-code call"))))
+      (should (claude-repl--workspace-name-collides-p "DWC/dup" "/tmp/repo")))))
 
 (ert-deftest claude-repl-test-workspace-name-collides-p-workspaces-hash ()
   "Bare name present in `claude-repl--workspaces' → collision."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
-          (claude-repl--workspace-names-in-flight nil)
-          (claude-repl-worktree-start-tag-prefix nil))
-      ;; Hash table keyed by bare name (matches `(+workspace-current-name)' style).
-      (puthash "existing" '(:project-dir "/tmp/x") claude-repl--workspaces)
-      (should (claude-repl--workspace-name-collides-p "DWC/existing" repo)))))
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+        (claude-repl--workspace-names-in-flight nil)
+        (claude-repl-worktree-start-tag-prefix nil))
+    ;; Hash table keyed by bare name (matches `(+workspace-current-name)' style).
+    (puthash "existing" '(:project-dir "/tmp/x") claude-repl--workspaces)
+    (cl-letf (((symbol-function 'claude-repl--candidate-worktree-path)
+               (lambda (&rest _args) "/tmp/repo-worktrees/existing"))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (&rest _args) (error "unexpected git-exit-code call"))))
+      (should (claude-repl--workspace-name-collides-p "DWC/existing" "/tmp/repo")))))
 
 (ert-deftest claude-repl-test-workspace-name-collides-p-on-disk-path ()
   "Existing on-disk path at the resolved worktree dir → collision."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (let* ((paths (claude-repl--resolve-worktree-paths repo "DWC/ondisk"))
-           (path (plist-get paths :path))
-           (claude-repl--workspaces (make-hash-table :test 'equal))
-           (claude-repl--workspace-names-in-flight nil)
-           (claude-repl-worktree-start-tag-prefix nil))
-      (make-directory path t)
-      (unwind-protect
-          (should (claude-repl--workspace-name-collides-p "DWC/ondisk" repo))
-        (delete-directory path t)))))
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+        (claude-repl--workspace-names-in-flight nil)
+        (claude-repl-worktree-start-tag-prefix nil))
+    (cl-letf (((symbol-function 'claude-repl--candidate-worktree-path)
+               (lambda (&rest _args) "/tmp/repo-worktrees/ondisk"))
+              ((symbol-function 'file-directory-p)
+               (lambda (p) (equal p "/tmp/repo-worktrees/ondisk")))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (&rest _args) (error "unexpected git-exit-code call"))))
+      (should (claude-repl--workspace-name-collides-p "DWC/ondisk" "/tmp/repo")))))
 
 (ert-deftest claude-repl-test-workspace-name-collides-p-git-branch ()
   "Existing git branch in repo → collision."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (claude-repl-test--git-checkout repo "DWC/existing-branch" t)
-    (claude-repl-test--git-checkout repo "master")
-    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
-          (claude-repl--workspace-names-in-flight nil)
-          (claude-repl-worktree-start-tag-prefix nil))
-      (should (claude-repl--workspace-name-collides-p "DWC/existing-branch" repo)))))
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+        (claude-repl--workspace-names-in-flight nil)
+        (claude-repl-worktree-start-tag-prefix nil))
+    (cl-letf (((symbol-function 'claude-repl--candidate-worktree-path)
+               (lambda (&rest _args) "/tmp/repo-worktrees/existing-branch"))
+              ((symbol-function 'file-directory-p) (lambda (_p) nil))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 ;; Only the branch-existence probe is reached here; return 0.
+                 (if (equal args '("rev-parse" "--verify" "DWC/existing-branch"))
+                     0
+                   (error "unexpected git-exit-code args: %S" args)))))
+      (should (claude-repl--workspace-name-collides-p "DWC/existing-branch" "/tmp/repo")))))
 
 (ert-deftest claude-repl-test-workspace-name-collides-p-start-tag ()
   "Existing start-tag for the resolved branch → collision."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (call-process "git" nil nil nil "-C" repo "tag" "start/DWC/has-tag")
-    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
-          (claude-repl--workspace-names-in-flight nil)
-          (claude-repl-worktree-start-tag-prefix "start/"))
-      (should (claude-repl--workspace-name-collides-p "DWC/has-tag" repo)))))
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+        (claude-repl--workspace-names-in-flight nil)
+        (claude-repl-worktree-start-tag-prefix "start/"))
+    (cl-letf (((symbol-function 'claude-repl--candidate-worktree-path)
+               (lambda (&rest _args) "/tmp/repo-worktrees/has-tag"))
+              ((symbol-function 'file-directory-p) (lambda (_p) nil))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (cond
+                  ;; Branch does not exist.
+                  ((equal args '("rev-parse" "--verify" "DWC/has-tag")) 128)
+                  ;; Start tag DOES exist.
+                  ((equal args '("rev-parse" "--verify" "refs/tags/start/DWC/has-tag")) 0)
+                  (t (error "unexpected git-exit-code args: %S" args))))))
+      (should (claude-repl--workspace-name-collides-p "DWC/has-tag" "/tmp/repo")))))
 
 (ert-deftest claude-repl-test-workspace-name-collides-p-tag-ignored-when-prefix-nil ()
   "When start-tag prefix is nil, a stray `start/<branch>' tag does not flag collision."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (call-process "git" nil nil nil "-C" repo "tag" "start/DWC/no-tag-check")
-    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
-          (claude-repl--workspace-names-in-flight nil)
-          (claude-repl-worktree-start-tag-prefix nil))
-      (should-not (claude-repl--workspace-name-collides-p "DWC/no-tag-check" repo)))))
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+        (claude-repl--workspace-names-in-flight nil)
+        (claude-repl-worktree-start-tag-prefix nil))
+    (cl-letf (((symbol-function 'claude-repl--candidate-worktree-path)
+               (lambda (&rest _args) "/tmp/repo-worktrees/no-tag-check"))
+              ((symbol-function 'file-directory-p) (lambda (_p) nil))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 ;; Branch probe is the only git call reached when prefix is nil.
+                 (if (equal args '("rev-parse" "--verify" "DWC/no-tag-check")) 128
+                   (error "unexpected git-exit-code args (start-tag check should be skipped): %S" args)))))
+      (should-not (claude-repl--workspace-name-collides-p "DWC/no-tag-check" "/tmp/repo")))))
 
 ;;;; ---- Tests: disambiguate-workspace-name ----
 
 (ert-deftest claude-repl-test-disambiguate-workspace-name-no-collision ()
   "When the name does not collide, it is returned unchanged (no suffix)."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
-          (claude-repl--workspace-names-in-flight nil)
-          (claude-repl-worktree-start-tag-prefix nil))
-      (should (equal "DWC/clean"
-                     (claude-repl--disambiguate-workspace-name "DWC/clean" repo))))))
+  (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
+             (lambda (&rest _args) nil)))
+    (should (equal "DWC/clean"
+                   (claude-repl--disambiguate-workspace-name "DWC/clean" "/tmp/repo")))))
 
 (ert-deftest claude-repl-test-disambiguate-workspace-name-collides-appends-suffix ()
   "When the name collides, the result is `NAME-XYZ' with a 3-char suffix."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (claude-repl-test--git-checkout repo "DWC/taken" t)
-    (claude-repl-test--git-checkout repo "master")
-    (let* ((claude-repl--workspaces (make-hash-table :test 'equal))
-           (claude-repl--workspace-names-in-flight nil)
-           (claude-repl-worktree-start-tag-prefix nil)
-           (result (claude-repl--disambiguate-workspace-name "DWC/taken" repo)))
-      (should (string-match-p "\\`DWC/taken-[a-z]\\{3\\}\\'" result)))))
+  ;; First call (bare name) collides, subsequent suffixed candidates do not.
+  (let ((call-count 0))
+    (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
+               (lambda (name &rest _args)
+                 (cl-incf call-count)
+                 (equal name "DWC/taken"))))
+      (let ((result (claude-repl--disambiguate-workspace-name "DWC/taken" "/tmp/repo")))
+        (should (string-match-p "\\`DWC/taken-[a-z]\\{3\\}\\'" result))))))
 
 (ert-deftest claude-repl-test-disambiguate-workspace-name-errors-when-max-attempts-exceeded ()
   "When every candidate keeps colliding, an error is signaled.
 Simulated by stubbing `claude-repl--workspace-name-collides-p' to always
 return t — the loop must exit and `error' rather than spin forever or
 silently return a colliding name."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-workspace-name-disambiguate-max-attempts 3))
-      (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
-                 (lambda (&rest _args) t)))
-        (should-error (claude-repl--disambiguate-workspace-name "DWC/x" repo))))))
+  (let ((claude-repl-workspace-name-disambiguate-max-attempts 3))
+    (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
+               (lambda (&rest _args) t)))
+      (should-error (claude-repl--disambiguate-workspace-name "DWC/x" "/tmp/repo")))))
 
 ;;;; ---- Tests: handle-create-command disambiguation integration ----
 
 (ert-deftest claude-repl-test-handle-create-command-passes-clean-name-through ()
   "When the desired name does not collide, the timer is scheduled with the original name."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
-          (claude-repl--workspace-names-in-flight (make-hash-table :test 'equal))
-          (claude-repl-worktree-start-tag-prefix nil)
-          (scheduled-args nil))
-      (cl-letf (((symbol-function 'run-with-timer)
-                 (lambda (_delay _repeat _fn &rest args)
-                   (setq scheduled-args args))))
-        (claude-repl--handle-create-command
-         `((type . "create") (name . "DWC/clean") (git_root . ,repo))
-         0)
-        ;; Args are (git-root name prompt priority fork-session-id base-commit)
-        (should (equal "DWC/clean" (nth 1 scheduled-args)))))))
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+        (claude-repl--workspace-names-in-flight (make-hash-table :test 'equal))
+        (claude-repl-worktree-start-tag-prefix nil)
+        (scheduled-args nil))
+    (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'run-with-timer)
+               (lambda (_delay _repeat _fn &rest args)
+                 (setq scheduled-args args))))
+      (claude-repl--handle-create-command
+       `((type . "create") (name . "DWC/clean") (git_root . "/tmp/repo"))
+       0)
+      ;; Args are (git-root name prompt priority fork-session-id base-commit)
+      (should (equal "DWC/clean" (nth 1 scheduled-args))))))
 
 (ert-deftest claude-repl-test-handle-create-command-disambiguates-collision ()
   "When the desired name collides (existing branch), the timer is scheduled with a suffixed name."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (claude-repl-test--git-checkout repo "DWC/taken" t)
-    (claude-repl-test--git-checkout repo "master")
-    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
-          (claude-repl--workspace-names-in-flight (make-hash-table :test 'equal))
-          (claude-repl-worktree-start-tag-prefix nil)
-          (scheduled-args nil))
-      (cl-letf (((symbol-function 'run-with-timer)
-                 (lambda (_delay _repeat _fn &rest args)
-                   (setq scheduled-args args))))
-        (claude-repl--handle-create-command
-         `((type . "create") (name . "DWC/taken") (git_root . ,repo))
-         0)
-        (should (string-match-p "\\`DWC/taken-[a-z]\\{3\\}\\'"
-                                (nth 1 scheduled-args)))))))
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+        (claude-repl--workspace-names-in-flight (make-hash-table :test 'equal))
+        (claude-repl-worktree-start-tag-prefix nil)
+        (scheduled-args nil))
+    (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
+               (lambda (name &rest _args)
+                 ;; Only the bare name collides; suffixed variants do not.
+                 (equal name "DWC/taken")))
+              ((symbol-function 'run-with-timer)
+               (lambda (_delay _repeat _fn &rest args)
+                 (setq scheduled-args args))))
+      (claude-repl--handle-create-command
+       `((type . "create") (name . "DWC/taken") (git_root . "/tmp/repo"))
+       0)
+      (should (string-match-p "\\`DWC/taken-[a-z]\\{3\\}\\'"
+                              (nth 1 scheduled-args))))))
 
 (ert-deftest claude-repl-test-handle-create-command-reserves-name-in-flight ()
   "After scheduling, the effective name is recorded in the in-flight hash so siblings see it."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
-          (claude-repl--workspace-names-in-flight (make-hash-table :test 'equal))
-          (claude-repl-worktree-start-tag-prefix nil))
-      (cl-letf (((symbol-function 'run-with-timer)
-                 (lambda (&rest _args) nil)))
-        (claude-repl--handle-create-command
-         `((type . "create") (name . "DWC/sibling") (git_root . ,repo))
-         0))
-      (should (gethash "DWC/sibling" claude-repl--workspace-names-in-flight)))))
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+        (claude-repl--workspace-names-in-flight (make-hash-table :test 'equal))
+        (claude-repl-worktree-start-tag-prefix nil))
+    (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'run-with-timer)
+               (lambda (&rest _args) nil)))
+      (claude-repl--handle-create-command
+       `((type . "create") (name . "DWC/sibling") (git_root . "/tmp/repo"))
+       0))
+    (should (gethash "DWC/sibling" claude-repl--workspace-names-in-flight))))
 
 (ert-deftest claude-repl-test-handle-create-command-second-sibling-gets-suffix ()
   "Two sibling creates in the same batch with the same name yield distinct effective names."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
-          (claude-repl--workspace-names-in-flight (make-hash-table :test 'equal))
-          (claude-repl-worktree-start-tag-prefix nil)
-          (scheduled-names nil))
-      (cl-letf (((symbol-function 'run-with-timer)
-                 (lambda (_delay _repeat _fn &rest args)
-                   (push (nth 1 args) scheduled-names))))
-        (claude-repl--handle-create-command
-         `((type . "create") (name . "DWC/dup") (git_root . ,repo))
-         0)
-        (claude-repl--handle-create-command
-         `((type . "create") (name . "DWC/dup") (git_root . ,repo))
-         5))
-      (setq scheduled-names (nreverse scheduled-names))
-      (should (= 2 (length scheduled-names)))
-      (should (equal "DWC/dup" (nth 0 scheduled-names)))
-      (should (string-match-p "\\`DWC/dup-[a-z]\\{3\\}\\'" (nth 1 scheduled-names)))
-      (should-not (equal (nth 0 scheduled-names) (nth 1 scheduled-names))))))
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+        (claude-repl--workspace-names-in-flight (make-hash-table :test 'equal))
+        (claude-repl-worktree-start-tag-prefix nil)
+        (scheduled-names nil))
+    ;; First create: name is collision-free.  The handler reserves it in
+    ;; `--workspace-names-in-flight'.  Second create with the same name
+    ;; consults that table via the real `--workspace-name-collides-p',
+    ;; so it MUST find the prior reservation and disambiguate.  We mock
+    ;; only the slower path probes (path/branch/start-tag) and let the
+    ;; in-flight check fall through to the real implementation.
+    (cl-letf (((symbol-function 'claude-repl--candidate-worktree-path)
+               (lambda (&rest _args) "/tmp/repo-worktrees/dup"))
+              ((symbol-function 'file-directory-p) (lambda (_p) nil))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (&rest _args) 128))
+              ((symbol-function 'run-with-timer)
+               (lambda (_delay _repeat _fn &rest args)
+                 (push (nth 1 args) scheduled-names))))
+      (claude-repl--handle-create-command
+       `((type . "create") (name . "DWC/dup") (git_root . "/tmp/repo"))
+       0)
+      (claude-repl--handle-create-command
+       `((type . "create") (name . "DWC/dup") (git_root . "/tmp/repo"))
+       5))
+    (setq scheduled-names (nreverse scheduled-names))
+    (should (= 2 (length scheduled-names)))
+    (should (equal "DWC/dup" (nth 0 scheduled-names)))
+    (should (string-match-p "\\`DWC/dup-[a-z]\\{3\\}\\'" (nth 1 scheduled-names)))
+    (should-not (equal (nth 0 scheduled-names) (nth 1 scheduled-names)))))
 
 ;;;; ---- Tests: worktree-add-callback ----
 
@@ -1527,141 +1523,180 @@ silently return a colliding name."
 
 ;;;; ---- Tests: maybe-fast-forward-master ----
 ;;
-;; Helpers below build a temp repo with a fake `origin/master' ref via
-;; `git update-ref' so we never need a real remote.  Each test verifies
-;; the resulting sha of `refs/heads/master' against the expected outcome.
-
-(defun claude-repl-test--sha (repo ref)
-  "Return SHA of REF in REPO, trimmed."
-  (claude-repl--git-string "-C" repo "rev-parse" ref))
+;; The production function calls four boundary primitives:
+;; - `claude-repl--git-exit-code' for: verify origin-ref, branch-exists-p,
+;;   merge-base --is-ancestor, merge --ff-only (when wt is on master), and
+;;   update-ref (when wt is not on master).
+;; - `claude-repl--git-string' for `rev-parse <branch>' and `rev-parse <origin>'.
+;; - `claude-repl--master-worktree-path' to discover the master worktree, if any.
+;; All four are stubbed so the tests exercise the dispatch logic, not git.
 
 (ert-deftest claude-repl-test-maybe-ff-master-advances-when-behind ()
   "Local master strictly behind origin/master is fast-forwarded (no wt on master)."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-master-branch-name "master"))
-      ;; Two commits on master.
-      (claude-repl-test--git-commit repo "c1" "a")
-      (call-process "git" nil nil nil "-C" repo "branch" "-M" "master")
-      (let ((c1 (claude-repl-test--sha repo "HEAD")))
-        (claude-repl-test--git-commit repo "c2" "b")
-        (let ((c2 (claude-repl-test--sha repo "HEAD")))
-          ;; Move HEAD off master so the trunk is not checked out anywhere.
-          (call-process "git" nil nil nil "-C" repo "checkout" "-qb" "other")
-          ;; origin/master at c2, local master at c1 (strictly behind).
-          (call-process "git" nil nil nil "-C" repo "update-ref"
-                        "refs/remotes/origin/master" c2)
-          (call-process "git" nil nil nil "-C" repo "update-ref"
-                        "refs/heads/master" c1)
-          (should (equal (claude-repl-test--sha repo "master") c1))
-          (claude-repl--maybe-fast-forward-master repo)
-          (should (equal (claude-repl-test--sha repo "master") c2)))))))
+  (let ((claude-repl-master-branch-name "master")
+        (update-ref-args nil))
+    (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   (`("rev-parse" "--verify" "--quiet" "origin/master") 0)
+                   (`("rev-parse" "--verify" "master") 0) ; via --git-branch-exists-p
+                   (`("merge-base" "--is-ancestor" "master" "origin/master") 0)
+                   (`("update-ref" "refs/heads/master" "refs/remotes/origin/master")
+                    (setq update-ref-args args)
+                    0)
+                   (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "rev-parse" "master")
+                    "1111111111111111111111111111111111111111")
+                   (`("-C" "/tmp/repo" "rev-parse" "origin/master")
+                    "2222222222222222222222222222222222222222")
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'claude-repl--master-worktree-path)
+               (lambda (_root) nil)))
+      (claude-repl--maybe-fast-forward-master "/tmp/repo")
+      (should (equal update-ref-args
+                     '("update-ref" "refs/heads/master" "refs/remotes/origin/master"))))))
 
 (ert-deftest claude-repl-test-maybe-ff-master-noop-when-diverged ()
   "Local master with commits origin/master lacks is NOT reset."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-master-branch-name "master"))
-      ;; Base commit on master.
-      (claude-repl-test--git-commit repo "c1" "a")
-      (call-process "git" nil nil nil "-C" repo "branch" "-M" "master")
-      ;; Build divergent origin/master via a side branch and a new file.
-      (call-process "git" nil nil nil "-C" repo "checkout" "-qb" "side")
-      (claude-repl-test--git-commit repo "side-c" "side-content")
-      (let ((side-sha (claude-repl-test--sha repo "HEAD")))
-        ;; Back to master and add a different file → divergent commit.
-        (call-process "git" nil nil nil "-C" repo "checkout" "-q" "master")
-        (claude-repl-test--git-commit repo "master-c" "master-content")
-        (let ((master-sha (claude-repl-test--sha repo "master")))
-          ;; Move HEAD off master so we exercise the ref-update path —
-          ;; if ff were (incorrectly) attempted, it'd hit update-ref.
-          (call-process "git" nil nil nil "-C" repo "checkout" "-q" "side")
-          (call-process "git" nil nil nil "-C" repo "update-ref"
-                        "refs/remotes/origin/master" side-sha)
-          ;; merge-base --is-ancestor master origin/master should fail
-          ;; (master has master-c which origin/master lacks).
-          (claude-repl--maybe-fast-forward-master repo)
-          (should (equal (claude-repl-test--sha repo "master") master-sha)))))))
+  (let ((claude-repl-master-branch-name "master")
+        (update-ref-called nil)
+        (merge-called nil))
+    (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   (`("rev-parse" "--verify" "--quiet" "origin/master") 0)
+                   (`("rev-parse" "--verify" "master") 0)
+                   ;; Non-zero means local master is NOT an ancestor — diverged.
+                   (`("merge-base" "--is-ancestor" "master" "origin/master") 1)
+                   (`("update-ref" . ,_) (setq update-ref-called t) 0)
+                   (`("merge" . ,_) (setq merge-called t) 0)
+                   (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args) (error "unmocked git-string args: %S" args)))
+              ((symbol-function 'claude-repl--master-worktree-path)
+               (lambda (_root) nil)))
+      (claude-repl--maybe-fast-forward-master "/tmp/repo")
+      (should-not update-ref-called)
+      (should-not merge-called))))
 
 (ert-deftest claude-repl-test-maybe-ff-master-noop-when-equal ()
   "When master == origin/master, the ref is unchanged."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-master-branch-name "master"))
-      (claude-repl-test--git-commit repo "c1" "a")
-      (call-process "git" nil nil nil "-C" repo "branch" "-M" "master")
-      (let ((sha (claude-repl-test--sha repo "master")))
-        (call-process "git" nil nil nil "-C" repo "checkout" "-qb" "other")
-        (call-process "git" nil nil nil "-C" repo "update-ref"
-                      "refs/remotes/origin/master" sha)
-        (claude-repl--maybe-fast-forward-master repo)
-        (should (equal (claude-repl-test--sha repo "master") sha))))))
+  (let ((claude-repl-master-branch-name "master")
+        (update-ref-called nil)
+        (merge-called nil))
+    (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   (`("rev-parse" "--verify" "--quiet" "origin/master") 0)
+                   (`("rev-parse" "--verify" "master") 0)
+                   (`("merge-base" "--is-ancestor" "master" "origin/master") 0)
+                   (`("update-ref" . ,_) (setq update-ref-called t) 0)
+                   (`("merge" . ,_) (setq merge-called t) 0)
+                   (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 ;; Same SHA on both sides → equal branch.
+                 (pcase args
+                   (`("-C" "/tmp/repo" "rev-parse" "master")
+                    "abcdef0123456789abcdef0123456789abcdef01")
+                   (`("-C" "/tmp/repo" "rev-parse" "origin/master")
+                    "abcdef0123456789abcdef0123456789abcdef01")
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'claude-repl--master-worktree-path)
+               (lambda (_root) nil)))
+      (claude-repl--maybe-fast-forward-master "/tmp/repo")
+      (should-not update-ref-called)
+      (should-not merge-called))))
 
 (ert-deftest claude-repl-test-maybe-ff-master-noop-when-origin-missing ()
   "No origin/master ref → function is a no-op (no error, master unchanged)."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-master-branch-name "master"))
-      (claude-repl-test--git-commit repo "c1" "a")
-      (call-process "git" nil nil nil "-C" repo "branch" "-M" "master")
-      (let ((sha (claude-repl-test--sha repo "master")))
-        ;; No origin/master ref configured.
-        (claude-repl--maybe-fast-forward-master repo)
-        (should (equal (claude-repl-test--sha repo "master") sha))))))
+  (let ((claude-repl-master-branch-name "master")
+        (other-calls 0))
+    (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   ;; Origin verify FAILS — first cond branch fires, function returns.
+                   (`("rev-parse" "--verify" "--quiet" "origin/master") 128)
+                   (_ (cl-incf other-calls) 0)))))
+      (claude-repl--maybe-fast-forward-master "/tmp/repo")
+      (should (= other-calls 0)))))
 
 (ert-deftest claude-repl-test-maybe-ff-master-noop-when-local-master-missing ()
   "No local master branch → function is a no-op (no error)."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-master-branch-name "master"))
-      (claude-repl-test--git-commit repo "c1" "a")
-      ;; Rename initial branch to something other than master so master
-      ;; does not exist locally.
-      (call-process "git" nil nil nil "-C" repo "branch" "-M" "trunk")
-      (let ((sha (claude-repl-test--sha repo "HEAD")))
-        ;; Make origin/master point somewhere so the first cond branch
-        ;; is satisfied and we reach the "local missing" guard.
-        (call-process "git" nil nil nil "-C" repo "update-ref"
-                      "refs/remotes/origin/master" sha)
-        ;; Should not signal.
-        (claude-repl--maybe-fast-forward-master repo)
-        ;; And local master still does not exist.
-        (should (not (= 0 (claude-repl--git-exit-code
-                           repo "rev-parse" "--verify" "--quiet" "master"))))))))
+  (let ((claude-repl-master-branch-name "master")
+        (extra-calls 0))
+    (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   (`("rev-parse" "--verify" "--quiet" "origin/master") 0)
+                   ;; Branch-exists-p says master is missing — second cond branch.
+                   (`("rev-parse" "--verify" "master") 128)
+                   (_ (cl-incf extra-calls) 0)))))
+      (claude-repl--maybe-fast-forward-master "/tmp/repo")
+      (should (= extra-calls 0)))))
 
 (ert-deftest claude-repl-test-maybe-ff-master-advances-when-checked-out ()
   "When master is checked out, ff happens via `merge --ff-only' in that worktree."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-master-branch-name "master"))
-      ;; Initial commit on master.
-      (claude-repl-test--git-commit repo "c1" "a")
-      (call-process "git" nil nil nil "-C" repo "branch" "-M" "master")
-      (let ((c1 (claude-repl-test--sha repo "master")))
-        ;; Build a future commit on a side branch (without touching master).
-        (call-process "git" nil nil nil "-C" repo "checkout" "-qb" "side")
-        (claude-repl-test--git-commit repo "future" "future-content")
-        (let ((future-sha (claude-repl-test--sha repo "HEAD")))
-          ;; Back to master so it is the checked-out branch.
-          (call-process "git" nil nil nil "-C" repo "checkout" "-q" "master")
-          (should (equal (claude-repl-test--sha repo "master") c1))
-          ;; Plant origin/master at future-sha — local master is strictly behind.
-          (call-process "git" nil nil nil "-C" repo "update-ref"
-                        "refs/remotes/origin/master" future-sha)
-          (claude-repl--maybe-fast-forward-master repo)
-          (should (equal (claude-repl-test--sha repo "master") future-sha)))))))
+  (let ((claude-repl-master-branch-name "master")
+        (merge-call nil)
+        (update-ref-called nil))
+    (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+               (lambda (root &rest args)
+                 (pcase args
+                   (`("rev-parse" "--verify" "--quiet" "origin/master") 0)
+                   (`("rev-parse" "--verify" "master") 0)
+                   (`("merge-base" "--is-ancestor" "master" "origin/master") 0)
+                   (`("merge" "--ff-only" "origin/master")
+                    (setq merge-call (list root args))
+                    0)
+                   (`("update-ref" . ,_) (setq update-ref-called t) 0)
+                   (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "rev-parse" "master")
+                    "1111111111111111111111111111111111111111")
+                   (`("-C" "/tmp/repo" "rev-parse" "origin/master")
+                    "2222222222222222222222222222222222222222")
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'claude-repl--master-worktree-path)
+               (lambda (_root) "/tmp/master-wt")))
+      (claude-repl--maybe-fast-forward-master "/tmp/repo")
+      (should (equal merge-call
+                     (list "/tmp/master-wt"
+                           '("merge" "--ff-only" "origin/master"))))
+      (should-not update-ref-called))))
 
 (ert-deftest claude-repl-test-maybe-ff-master-honors-custom-branch-name ()
   "`claude-repl-master-branch-name' selects which local/remote pair to ff."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-master-branch-name "trunk"))
-      (claude-repl-test--git-commit repo "c1" "a")
-      (call-process "git" nil nil nil "-C" repo "branch" "-M" "trunk")
-      (let ((c1 (claude-repl-test--sha repo "trunk")))
-        (claude-repl-test--git-commit repo "c2" "b")
-        (let ((c2 (claude-repl-test--sha repo "trunk")))
-          (call-process "git" nil nil nil "-C" repo "checkout" "-qb" "other")
-          (call-process "git" nil nil nil "-C" repo "update-ref"
-                        "refs/remotes/origin/trunk" c2)
-          (call-process "git" nil nil nil "-C" repo "update-ref"
-                        "refs/heads/trunk" c1)
-          (should (equal (claude-repl-test--sha repo "trunk") c1))
-          (claude-repl--maybe-fast-forward-master repo)
-          (should (equal (claude-repl-test--sha repo "trunk") c2)))))))
+  (let ((claude-repl-master-branch-name "trunk")
+        (update-ref-args nil))
+    (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   (`("rev-parse" "--verify" "--quiet" "origin/trunk") 0)
+                   (`("rev-parse" "--verify" "trunk") 0)
+                   (`("merge-base" "--is-ancestor" "trunk" "origin/trunk") 0)
+                   (`("update-ref" "refs/heads/trunk" "refs/remotes/origin/trunk")
+                    (setq update-ref-args args)
+                    0)
+                   (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "rev-parse" "trunk")
+                    "1111111111111111111111111111111111111111")
+                   (`("-C" "/tmp/repo" "rev-parse" "origin/trunk")
+                    "2222222222222222222222222222222222222222")
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'claude-repl--master-worktree-path)
+               (lambda (_root) nil)))
+      (claude-repl--maybe-fast-forward-master "/tmp/repo")
+      (should (equal update-ref-args
+                     '("update-ref" "refs/heads/trunk" "refs/remotes/origin/trunk"))))))
 
 ;;;; ---- Tests: validate-worktree-creation ----
 
@@ -1672,50 +1707,67 @@ silently return a colliding name."
 
 (ert-deftest claude-repl-test-validate-worktree-creation-existing-path ()
   "An existing directory at PATH signals user-error."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
+  (cl-letf (((symbol-function 'file-directory-p)
+             (lambda (p) (equal p "/tmp/repo")))
+            ((symbol-function 'claude-repl--git-exit-code)
+             (lambda (&rest _args) (error "should not probe git when path check fires"))))
     (should-error (claude-repl--validate-worktree-creation
-                   "name" repo "dir" "branch" repo)
+                   "name" "/tmp/repo" "dir" "branch" "/tmp/repo")
                   :type 'user-error)))
 
 (ert-deftest claude-repl-test-validate-worktree-creation-existing-branch ()
   "Existing branch signals user-error."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (claude-repl-test--git-checkout repo "feature" t)
-    (claude-repl-test--git-checkout repo "master")
+  (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) nil))
+            ((symbol-function 'claude-repl--git-exit-code)
+             (lambda (_root &rest args)
+               ;; Branch-exists-p probe: returning 0 means the branch exists.
+               (if (equal args '("rev-parse" "--verify" "feature")) 0
+                 (error "unmocked git-exit-code args: %S" args)))))
     (should-error (claude-repl--validate-worktree-creation
-                   "feature" repo "feature" "feature" "/nonexistent")
+                   "feature" "/tmp/repo" "feature" "feature" "/nonexistent")
                   :type 'user-error)))
 
 (ert-deftest claude-repl-test-validate-worktree-creation-passes ()
   "Valid inputs do not signal."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    ;; Should not error
-    (claude-repl--validate-worktree-creation
-     "new-feature" repo "new-feature" "new-feature" "/nonexistent")))
+  (let ((claude-repl-worktree-start-tag-prefix nil))
+    (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) nil))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 ;; Branch check: 128 = missing → no collision.
+                 (if (equal args '("rev-parse" "--verify" "new-feature")) 128
+                   (error "unmocked git-exit-code args: %S" args)))))
+      ;; Should not error
+      (claude-repl--validate-worktree-creation
+       "new-feature" "/tmp/repo" "new-feature" "new-feature" "/nonexistent"))))
 
 (ert-deftest claude-repl-test-validate-worktree-creation-existing-start-tag ()
   "Existing start tag (PREFIX+BRANCH) signals user-error."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    ;; Pre-create the start tag that validation should detect.
-    (call-process "git" nil nil nil "-C" repo "tag" "start/feature")
-    (let ((claude-repl-worktree-start-tag-prefix "start/"))
+  (let ((claude-repl-worktree-start-tag-prefix "start/"))
+    (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) nil))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   ;; Branch missing.
+                   (`("rev-parse" "--verify" "feature") 128)
+                   ;; Start tag EXISTS.
+                   (`("rev-parse" "--verify" "refs/tags/start/feature") 0)
+                   (_ (error "unmocked git-exit-code args: %S" args))))))
       (should-error (claude-repl--validate-worktree-creation
-                     "feature" repo "feature" "feature" "/nonexistent")
+                     "feature" "/tmp/repo" "feature" "feature" "/nonexistent")
                     :type 'user-error))))
 
 (ert-deftest claude-repl-test-validate-worktree-creation-start-tag-disabled ()
   "When start-tag prefix is nil, an existing 'start/feature' tag does not block."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (call-process "git" nil nil nil "-C" repo "tag" "start/feature")
-    (let ((claude-repl-worktree-start-tag-prefix nil))
+  (let ((claude-repl-worktree-start-tag-prefix nil))
+    (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) nil))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 ;; Branch missing.  Start-tag probe MUST NOT fire when prefix is nil.
+                 (if (equal args '("rev-parse" "--verify" "feature")) 128
+                   (error "unmocked git-exit-code args (start-tag probe should be skipped): %S" args)))))
       ;; Should not error
       (claude-repl--validate-worktree-creation
-       "feature" repo "feature" "feature" "/nonexistent"))))
+       "feature" "/tmp/repo" "feature" "feature" "/nonexistent"))))
 
 (ert-deftest claude-repl-test-validate-worktree-creation-nested-under-repo ()
   "Validation passes for a non-existent path nested under another git repo.
@@ -1723,181 +1775,150 @@ Regression: previously used `projectile-project-p', which walks UP from
 PATH and would find an ancestor `.git' (e.g. when the worktree-parent
 sits inside a separate repo), incorrectly flagging the new path as an
 existing worktree."
-  (claude-repl-test--with-temp-git-repo outer-repo
-    (claude-repl-test--git-commit outer-repo "initial" "content")
-    ;; outer-repo/inner is not itself a repo; outer-repo/inner/new-wt does
-    ;; not exist. With projectile-project-p this would have thrown because
-    ;; outer-repo has a .git ancestor; with file-directory-p it passes.
-    (let* ((inner (expand-file-name "inner" outer-repo))
-           (path (expand-file-name "new-wt" inner)))
-      (make-directory inner t)
+  ;; The function under test uses `file-directory-p' on PATH only — it
+  ;; never walks ancestors.  Asserting that an arbitrary nested path
+  ;; that does not exist passes validation is enough to pin the
+  ;; non-walking behavior.
+  (let ((claude-repl-worktree-start-tag-prefix nil))
+    (cl-letf (((symbol-function 'file-directory-p)
+               (lambda (p)
+                 ;; PATH passed in does not exist; only assertion.
+                 (cond ((equal p "/tmp/outer-repo/inner/new-wt") nil)
+                       (t (error "unexpected file-directory-p arg: %S" p)))))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (if (equal args '("rev-parse" "--verify" "new-wt")) 128
+                   (error "unmocked git-exit-code args: %S" args)))))
       ;; Should not error
       (claude-repl--validate-worktree-creation
-       "new-wt" outer-repo "new-wt" "new-wt" path))))
+       "new-wt" "/tmp/outer-repo" "new-wt" "new-wt" "/tmp/outer-repo/inner/new-wt"))))
 
 ;;;; ---- Tests: merge-fork (cherry-pick-base) ----
-;; These tests exercise claude-repl--cherry-pick-base (aliased as
-;; +dwc/workspace-merge--fork) against real git repos created in temp
-;; directories, since the function shells out to git entirely.
+;;
+;; `claude-repl--cherry-pick-base' (aliased as `+dwc/workspace-merge--fork')
+;; runs three git invocations through `claude-repl--git-string':
+;;   (1) `log --right-only --pretty=%H --no-merges HEAD...TARGET' — target's
+;;       unique commits, newest first, newline-separated.
+;;   (2) `log --left-only --pretty=%B HEAD...TARGET' — HEAD's commits' bodies,
+;;       which the parser scans for `(cherry picked from commit <sha>)' lines.
+;;   (3) `merge-base HEAD TARGET' — only consulted on fallback when no target
+;;       commit is found in the parsed cherry-pick annotations.
+;; The tests stub `--git-string' with fixture strings shaped exactly like
+;; real git output, so the dispatch logic is exercised end-to-end without
+;; touching git.
 
 (ert-deftest claude-repl-test-merge-fork-no-annotations-fallback ()
   "When HEAD has no -x annotations, fork falls back to merge-base HEAD TARGET."
-  ;; Arrange: M on branch-a, B1 on branch-b (no cherry-picks yet)
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((sha-m (claude-repl-test--git-commit repo "M" "base")))
-      (claude-repl-test--git-checkout repo "branch-b" t)
-      (claude-repl-test--git-commit repo "B1" "b1")
-      (claude-repl-test--git-checkout repo "master")
-      ;; Act
-      (let ((fork (+dwc/workspace-merge--fork repo "branch-b")))
-        ;; Assert: should be merge-base = sha-m
-        (should (equal fork sha-m))))))
+  (let ((sha-m "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   ;; Target has one unique commit (B1) — irrelevant SHA; the
+                   ;; parser only matches commits present in HEAD's log.
+                   (`("-C" "/tmp/repo" "log" "--right-only" "--pretty=%H" "--no-merges" "HEAD...branch-b")
+                    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+                   ;; HEAD's log has no cherry-pick annotations.
+                   (`("-C" "/tmp/repo" "log" "--left-only" "--pretty=%B" "HEAD...branch-b")
+                    "M\n\nA1\n")
+                   ;; Fallback to merge-base.
+                   (`("-C" "/tmp/repo" "merge-base" "HEAD" "branch-b")
+                    sha-m)
+                   (_ (error "unmocked git-string args: %S" args))))))
+      (should (equal (+dwc/workspace-merge--fork "/tmp/repo" "branch-b") sha-m)))))
 
 (ert-deftest claude-repl-test-merge-fork-clean-chain ()
   "After merging B (with -x), fork for C (descends from B) is B's tip SHA."
-  ;; Arrange:
-  ;;   branch-b: M -> B1 -> B2
-  ;;   branch-c: M -> B1 -> B2 -> C1   (branched from branch-b)
-  ;;   branch-a: M -> A1 -> B1'(-x B1) -> B2'(-x B2)
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "M" "base")
-    (claude-repl-test--git-checkout repo "branch-b" t)
-    (claude-repl-test--git-commit repo "B1" "b1")
-    (let ((sha-b2 (claude-repl-test--git-commit repo "B2" "b2")))
-      (claude-repl-test--git-checkout repo "branch-c" t)
-      (claude-repl-test--git-commit repo "C1" "c1")
-      (claude-repl-test--git-checkout repo "master")
-      (claude-repl-test--git-checkout repo "branch-a" t)
-      (claude-repl-test--git-commit repo "A1" "a1")
-      ;; Cherry-pick B1 then B2 with -x onto branch-a
-      (let ((sha-b1 (string-trim (shell-command-to-string
-                                  (format "git -C %s rev-parse branch-b~1"
-                                          (shell-quote-argument repo))))))
-        (claude-repl-test--git-cherry-pick-x repo sha-b1)
-        (claude-repl-test--git-cherry-pick-x repo sha-b2))
-      ;; Act: compute fork for branch-c
-      (let ((fork (+dwc/workspace-merge--fork repo "branch-c")))
-        ;; Assert: fork should be sha-b2 (last incorporated commit in branch-c's history)
-        (should (equal fork sha-b2))))))
+  ;; branch-c contains B1, B2, C1 (each unique vs HEAD).  HEAD's log carries
+  ;; `(cherry picked from commit B1)` and `(cherry picked from commit B2)`,
+  ;; but NOT C1.  The most recent target commit also present as a cherry-pick
+  ;; annotation in HEAD's log is B2 — that's the fork point.
+  (let ((sha-b1 "1111111111111111111111111111111111111111")
+        (sha-b2 "2222222222222222222222222222222222222222")
+        (sha-c1 "3333333333333333333333333333333333333333"))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   ;; `log --right-only` yields newest-first commits.
+                   (`("-C" "/tmp/repo" "log" "--right-only" "--pretty=%H" "--no-merges" "HEAD...branch-c")
+                    (concat sha-c1 "\n" sha-b2 "\n" sha-b1))
+                   (`("-C" "/tmp/repo" "log" "--left-only" "--pretty=%B" "HEAD...branch-c")
+                    (format "A1\n\nB1\n\n(cherry picked from commit %s)\n\nB2\n\n(cherry picked from commit %s)"
+                            sha-b1 sha-b2))
+                   (_ (error "unmocked git-string args: %S" args))))))
+      (should (equal (+dwc/workspace-merge--fork "/tmp/repo" "branch-c") sha-b2)))))
 
 (ert-deftest claude-repl-test-merge-fork-already-fully-merged ()
   "When all TARGET commits are incorporated, fork equals TARGET tip -> empty range."
-  ;; Arrange: same as clean-chain but test against branch-b directly
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "M" "base")
-    (claude-repl-test--git-checkout repo "branch-b" t)
-    (let ((sha-b1 (claude-repl-test--git-commit repo "B1" "b1"))
-          (sha-b2 (claude-repl-test--git-commit repo "B2" "b2")))
-      (claude-repl-test--git-checkout repo "master")
-      (claude-repl-test--git-checkout repo "branch-a" t)
-      (claude-repl-test--git-commit repo "A1" "a1")
-      (claude-repl-test--git-cherry-pick-x repo sha-b1)
-      (claude-repl-test--git-cherry-pick-x repo sha-b2)
-      ;; Act
-      (let* ((fork (+dwc/workspace-merge--fork repo "branch-b"))
-             (range-count (string-trim
-                           (shell-command-to-string
-                            (format "git -C %s rev-list --count %s..branch-b"
-                                    (shell-quote-argument repo)
-                                    fork)))))
-        ;; Assert: fork = sha-b2 (tip), range is empty
-        (should (equal fork sha-b2))
-        (should (equal range-count "0"))))))
+  ;; Every commit on branch-b (B1, B2) appears as a cherry-pick annotation in
+  ;; HEAD's log.  Newest-first target list is B2, B1, so B2 is returned.
+  (let ((sha-b1 "1111111111111111111111111111111111111111")
+        (sha-b2 "2222222222222222222222222222222222222222"))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "log" "--right-only" "--pretty=%H" "--no-merges" "HEAD...branch-b")
+                    (concat sha-b2 "\n" sha-b1))
+                   (`("-C" "/tmp/repo" "log" "--left-only" "--pretty=%B" "HEAD...branch-b")
+                    (format "A1\n\nB1\n\n(cherry picked from commit %s)\n\nB2\n\n(cherry picked from commit %s)"
+                            sha-b1 sha-b2))
+                   (_ (error "unmocked git-string args: %S" args))))))
+      (should (equal (+dwc/workspace-merge--fork "/tmp/repo" "branch-b") sha-b2)))))
 
 (ert-deftest claude-repl-test-merge-fork-growing-workspace ()
   "After B is merged, adding B3 to branch-b; fork stays at B2 -> only B3 is new."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "M" "base")
-    (claude-repl-test--git-checkout repo "branch-b" t)
-    (let ((sha-b1 (claude-repl-test--git-commit repo "B1" "b1"))
-          (sha-b2 (claude-repl-test--git-commit repo "B2" "b2")))
-      (claude-repl-test--git-checkout repo "master")
-      (claude-repl-test--git-checkout repo "branch-a" t)
-      (claude-repl-test--git-commit repo "A1" "a1")
-      (claude-repl-test--git-cherry-pick-x repo sha-b1)
-      (claude-repl-test--git-cherry-pick-x repo sha-b2)
-      ;; Simulate branch-b growing: add B3
-      (claude-repl-test--git-checkout repo "branch-b")
-      (claude-repl-test--git-commit repo "B3" "b3")
-      (claude-repl-test--git-checkout repo "branch-a")
-      ;; Act
-      (let* ((fork (+dwc/workspace-merge--fork repo "branch-b"))
-             (range-count (string-trim
-                           (shell-command-to-string
-                            (format "git -C %s rev-list --count %s..branch-b"
-                                    (shell-quote-argument repo)
-                                    fork)))))
-        ;; Assert: fork = sha-b2, only B3 is in range
-        (should (equal fork sha-b2))
-        (should (equal range-count "1"))))))
+  ;; branch-b's target-only commits are B3, B2, B1 (newest-first).  B3 is NOT
+  ;; in HEAD's cherry-pick annotations; B2 and B1 are.  `cl-find-if' walks
+  ;; the target list newest-first and returns the first match — B2.
+  (let ((sha-b1 "1111111111111111111111111111111111111111")
+        (sha-b2 "2222222222222222222222222222222222222222")
+        (sha-b3 "4444444444444444444444444444444444444444"))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "log" "--right-only" "--pretty=%H" "--no-merges" "HEAD...branch-b")
+                    (concat sha-b3 "\n" sha-b2 "\n" sha-b1))
+                   (`("-C" "/tmp/repo" "log" "--left-only" "--pretty=%B" "HEAD...branch-b")
+                    (format "A1\n\nB1\n\n(cherry picked from commit %s)\n\nB2\n\n(cherry picked from commit %s)"
+                            sha-b1 sha-b2))
+                   (_ (error "unmocked git-string args: %S" args))))))
+      (should (equal (+dwc/workspace-merge--fork "/tmp/repo" "branch-b") sha-b2)))))
 
 (ert-deftest claude-repl-test-merge-fork-deep-chain ()
   "After merging B then C, fork for D (descends from C) is C's tip SHA."
-  ;; branch-d: M -> B1 -> B2 -> C1 -> D1
-  ;; branch-a has cherry-picked B1, B2, C1 with -x
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "M" "base")
-    (claude-repl-test--git-checkout repo "branch-b" t)
-    (let ((sha-b1 (claude-repl-test--git-commit repo "B1" "b1"))
-          (sha-b2 (claude-repl-test--git-commit repo "B2" "b2")))
-      (claude-repl-test--git-checkout repo "branch-c" t)
-      (let ((sha-c1 (claude-repl-test--git-commit repo "C1" "c1")))
-        (claude-repl-test--git-checkout repo "branch-d" t)
-        (claude-repl-test--git-commit repo "D1" "d1")
-        (claude-repl-test--git-checkout repo "master")
-        (claude-repl-test--git-checkout repo "branch-a" t)
-        (claude-repl-test--git-commit repo "A1" "a1")
-        (claude-repl-test--git-cherry-pick-x repo sha-b1)
-        (claude-repl-test--git-cherry-pick-x repo sha-b2)
-        (claude-repl-test--git-cherry-pick-x repo sha-c1)
-        ;; Act
-        (let ((fork (+dwc/workspace-merge--fork repo "branch-d")))
-          ;; Assert: fork = sha-c1 (most recently incorporated commit in branch-d)
-          (should (equal fork sha-c1)))))))
+  ;; branch-d's target-only newest-first: D1, C1, B2, B1.  HEAD's annotations
+  ;; cover B1, B2, C1 (but not D1).  Newest match in target list is C1.
+  (let ((sha-b1 "1111111111111111111111111111111111111111")
+        (sha-b2 "2222222222222222222222222222222222222222")
+        (sha-c1 "3333333333333333333333333333333333333333")
+        (sha-d1 "5555555555555555555555555555555555555555"))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "log" "--right-only" "--pretty=%H" "--no-merges" "HEAD...branch-d")
+                    (concat sha-d1 "\n" sha-c1 "\n" sha-b2 "\n" sha-b1))
+                   (`("-C" "/tmp/repo" "log" "--left-only" "--pretty=%B" "HEAD...branch-d")
+                    (format "A1\n\nB1\n\n(cherry picked from commit %s)\n\nB2\n\n(cherry picked from commit %s)\n\nC1\n\n(cherry picked from commit %s)"
+                            sha-b1 sha-b2 sha-c1))
+                   (_ (error "unmocked git-string args: %S" args))))))
+      (should (equal (+dwc/workspace-merge--fork "/tmp/repo" "branch-d") sha-c1)))))
 
 (ert-deftest claude-repl-test-merge-fork-annotation-survives-conflict-resolution ()
   "Annotation is written even when cherry-pick required conflict resolution via --continue."
-  ;; Arrange: both branch-a and branch-b modify the same file explicitly -> conflict.
-  ;; We use a shared "conflict-file" written by both branches, unlike the normal helpers
-  ;; which use per-commit filenames to avoid conflicts.
-  (claude-repl-test--with-temp-git-repo repo
-    ;; M: create conflict-file with base content
-    (write-region "base" nil (expand-file-name "conflict-file" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "conflict-file")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (claude-repl-test--git-checkout repo "branch-b" t)
-    ;; B1: modify conflict-file on branch-b
-    (write-region "branch-b-content" nil (expand-file-name "conflict-file" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "conflict-file")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "B1")
-    (let ((sha-b1 (string-trim (shell-command-to-string
-                                (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "branch-c" t)
-      (claude-repl-test--git-commit repo "C1" "c1")
-      (claude-repl-test--git-checkout repo "master")
-      (claude-repl-test--git-checkout repo "branch-a" t)
-      ;; A1: also modify conflict-file on branch-a -> cherry-pick of B1 will conflict
-      (write-region "branch-a-content" nil (expand-file-name "conflict-file" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "conflict-file")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "A1")
-      ;; Cherry-pick B1 -> conflict (both modified conflict-file)
-      (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-b1)
-      ;; Resolve: write resolved content and stage
-      (write-region "resolved" nil (expand-file-name "conflict-file" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "conflict-file")
-      ;; Continue -- sequencer writes -x annotation on finalization
-      (call-process "git" nil nil nil
-                    "-C" repo "-c" "core.editor=true"
-                    "cherry-pick" "--continue" "--no-edit")
-      ;; Assert: annotation present despite conflict resolution
-      (let ((log-msg (shell-command-to-string
-                      (format "git -C %s log --pretty=%%B -1" (shell-quote-argument repo)))))
-        (should (string-match-p
-                 (format "(cherry picked from commit %s)" sha-b1)
-                 log-msg)))
-      ;; Fork computation for branch-c correctly identifies sha-b1 as incorporated
-      (let ((fork (+dwc/workspace-merge--fork repo "branch-c")))
-        (should (equal fork sha-b1))))))
+  ;; Behaviorally identical to the clean-chain case from the parser's
+  ;; perspective: HEAD's log contains the `(cherry picked from commit B1)`
+  ;; annotation regardless of whether B1 cherry-picked clean or via --continue.
+  ;; Fork for branch-c (which contains B1, C1) is therefore B1.
+  (let ((sha-b1 "1111111111111111111111111111111111111111")
+        (sha-c1 "3333333333333333333333333333333333333333"))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "log" "--right-only" "--pretty=%H" "--no-merges" "HEAD...branch-c")
+                    (concat sha-c1 "\n" sha-b1))
+                   (`("-C" "/tmp/repo" "log" "--left-only" "--pretty=%B" "HEAD...branch-c")
+                    (format "A1\n\nB1 (resolved)\n\n(cherry picked from commit %s)" sha-b1))
+                   (_ (error "unmocked git-string args: %S" args))))))
+      (should (equal (+dwc/workspace-merge--fork "/tmp/repo" "branch-c") sha-b1)))))
 
 ;;;; ---- Tests: detect-merge-actually-landed-p ----
 
@@ -1914,72 +1935,59 @@ to ❌ when the worktree dir is gone or unset."
 parent worktree to inspect cherry-pick annotations, so it defaults to
 landed/success rather than slandering a clean merge."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-git-repo project
-      (puthash "ws" `(:project-dir ,project) claude-repl--workspaces)
+    (puthash "ws" '(:project-dir "/tmp/project") claude-repl--workspaces)
+    ;; Production reads :source-ws-dir; absent → defaults to t before any git call.
+    (cl-letf (((symbol-function 'file-directory-p)
+               (lambda (p) (equal p "/tmp/project"))))
       (should (claude-repl--detect-merge-actually-landed-p "ws")))))
 
 (ert-deftest claude-repl-test-detect-merge-actually-landed-p-true-on-clean-merge ()
   "Returns t when every commit on WS's branch is referenced via
 cherry-pick -x in the parent's HEAD log.  Simulates a successful prior
-merge: parent worktree is the SAME repo as the workspace worktree
-\(same .git, two branches), so HEAD's log contains the picks."
+merge: parent's HEAD log carries `(cherry picked from commit <sha>)' for
+every target-only commit on WS's branch."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-git-repo repo
-      (let ((sha-m (claude-repl-test--git-commit repo "M" "base")))
-        (claude-repl-test--git-checkout repo "feature" t)
-        (claude-repl-test--git-commit repo "F1" "f1")
-        (let ((sha-f1 (string-trim
-                       (shell-command-to-string
-                        (format "git -C %s rev-parse HEAD"
-                                (shell-quote-argument repo))))))
-          (claude-repl-test--git-checkout repo "master")
-          (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
-          (ignore sha-m)
-          ;; Workspace's :project-dir is a separate dir checked out to
-          ;; "feature".  Cleanest: use a worktree of the same repo.
-          (let ((wt (make-temp-file "ws-wt-" t)))
-            (unwind-protect
-                (progn
-                  (delete-directory wt t)
-                  (call-process "git" nil nil nil "-C" repo
-                                "worktree" "add" wt "feature")
-                  (puthash "ws"
-                           `(:project-dir ,wt :source-ws-dir ,repo)
-                           claude-repl--workspaces)
-                  (should (claude-repl--detect-merge-actually-landed-p "ws")))
-              (ignore-errors
-                (call-process "git" nil nil nil "-C" repo
-                              "worktree" "remove" "-f" wt))
-              (when (file-directory-p wt) (delete-directory wt t)))))))))
+    (puthash "ws"
+             '(:project-dir "/tmp/wt" :source-ws-dir "/tmp/repo")
+             claude-repl--workspaces)
+    (let ((sha-f1 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+      (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) t))
+                ((symbol-function 'claude-repl--git-string-quiet)
+                 (lambda (&rest args)
+                   (pcase args
+                     (`("-C" "/tmp/wt" "rev-parse" "--abbrev-ref" "HEAD")
+                      "feature")
+                     ;; target-only commit list (newest-first).
+                     (`("-C" "/tmp/repo" "log" "--right-only" "--pretty=%H" "--no-merges" "HEAD...feature")
+                      sha-f1)
+                     ;; parent's HEAD log carries the cherry-pick annotation.
+                     (`("-C" "/tmp/repo" "log" "--left-only" "--pretty=%B" "HEAD...feature")
+                      (format "M\n\nMerged feature\n\n(cherry picked from commit %s)" sha-f1))
+                     (_ (error "unmocked git-string-quiet args: %S" args))))))
+        (should (claude-repl--detect-merge-actually-landed-p "ws"))))))
 
 (ert-deftest claude-repl-test-detect-merge-actually-landed-p-false-on-missing-pick ()
   "Returns nil when WS's branch has commits that are NOT referenced via
 cherry-pick -x in the parent's HEAD log — the silent-failure case the
 backward-compat probe is designed to detect."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-git-repo repo
-      (claude-repl-test--git-commit repo "M" "base")
-      (claude-repl-test--git-checkout repo "feature" t)
-      (claude-repl-test--git-commit repo "F1" "f1")
-      (claude-repl-test--git-checkout repo "master")
-      ;; Note: no cherry-pick has happened — F1 is on `feature' but
-      ;; nothing on master references it.  Simulates the silent-failure
-      ;; case: workspace was marked :merge-completed t but its commits
-      ;; never actually landed.
-      (let ((wt (make-temp-file "ws-wt-" t)))
-        (unwind-protect
-            (progn
-              (delete-directory wt t)
-              (call-process "git" nil nil nil "-C" repo
-                            "worktree" "add" wt "feature")
-              (puthash "ws"
-                       `(:project-dir ,wt :source-ws-dir ,repo)
-                       claude-repl--workspaces)
-              (should-not (claude-repl--detect-merge-actually-landed-p "ws")))
-          (ignore-errors
-            (call-process "git" nil nil nil "-C" repo
-                          "worktree" "remove" "-f" wt))
-          (when (file-directory-p wt) (delete-directory wt t)))))))
+    (puthash "ws"
+             '(:project-dir "/tmp/wt" :source-ws-dir "/tmp/repo")
+             claude-repl--workspaces)
+    (let ((sha-f1 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+      (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) t))
+                ((symbol-function 'claude-repl--git-string-quiet)
+                 (lambda (&rest args)
+                   (pcase args
+                     (`("-C" "/tmp/wt" "rev-parse" "--abbrev-ref" "HEAD")
+                      "feature")
+                     (`("-C" "/tmp/repo" "log" "--right-only" "--pretty=%H" "--no-merges" "HEAD...feature")
+                      sha-f1)
+                     ;; Parent log has NO cherry-pick annotation for F1 → silent failure.
+                     (`("-C" "/tmp/repo" "log" "--left-only" "--pretty=%B" "HEAD...feature")
+                      "M\n\nUnrelated parent commit")
+                     (_ (error "unmocked git-string-quiet args: %S" args))))))
+        (should-not (claude-repl--detect-merge-actually-landed-p "ws"))))))
 
 ;;;; ---- Tests: cherry-pick-commits ----
 
@@ -1988,170 +1996,188 @@ backward-compat probe is designed to detect."
 instead of erroring — the workspace's commits are already on the
 parent, so the merge is a successful no-op and the caller can proceed
 to auto-finish."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "M" "base")
-    (claude-repl-test--git-checkout repo "feature" t)
-    ;; HEAD and feature are at the same commit; range HEAD..feature is empty
-    (should (eq (claude-repl--cherry-pick-commits repo "feature" "HEAD" "feature")
+  ;; Production calls `git rev-list --count BASE..TARGET' once; "0" means
+  ;; empty range and short-circuits to the `already-incorporated' sentinel
+  ;; before any cherry-pick attempt.
+  (cl-letf (((symbol-function 'claude-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "rev-list" "--count" "HEAD..feature") "0")
+                 (_ (error "unmocked git-string args: %S" args)))))
+            ((symbol-function 'claude-repl--git-exit-code)
+             (lambda (&rest _args)
+               (error "git-exit-code must not be called for empty range"))))
+    (should (eq (claude-repl--cherry-pick-commits "/tmp/repo" "feature" "HEAD" "feature")
                 'already-incorporated))))
 
 (ert-deftest claude-repl-test-cherry-pick-commits-success ()
   "Successful cherry-pick with no conflicts."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((sha-m (claude-repl-test--git-commit repo "M" "base")))
-      (claude-repl-test--git-checkout repo "feature" t)
-      (claude-repl-test--git-commit repo "F1" "f1")
-      (claude-repl-test--git-checkout repo "master")
-      ;; Cherry-pick feature's commits onto master
-      (claude-repl--cherry-pick-commits repo "feature" sha-m "feature")
-      ;; Verify the commit was applied
-      (let ((log (string-trim
-                  (shell-command-to-string
-                   (format "git -C %s log --oneline -1" (shell-quote-argument repo))))))
-        (should (string-match-p "F1" log))))))
+  (let ((sha-m "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        (cherry-pick-called nil))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   ;; Non-empty range — one commit to pick.
+                   (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   (`("cherry-pick" "-x" ,_)
+                    (setq cherry-pick-called t)
+                    0)
+                   (_ (error "unmocked git-exit-code args: %S" args)))))
+              ;; No CHERRY_PICK_HEAD remains — clean cherry-pick.
+              ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+               (lambda (_root) nil)))
+      (should (null (claude-repl--cherry-pick-commits
+                     "/tmp/repo" "feature" sha-m "feature")))
+      (should cherry-pick-called))))
 
 (ert-deftest claude-repl-test-cherry-pick-commits-silent-failure-returns-failed ()
   "When `git cherry-pick' exits non-zero but no CHERRY_PICK_HEAD is left
 behind (silent failure — commits didn't land and no conflict resolution
-is in flight), `--cherry-pick-commits' returns `failed'.  Simulated by
-stubbing `--git-exit-code' to a non-zero return for the cherry-pick step
-while leaving `--check-cherry-pick-conflict' a no-op (no CHERRY_PICK_HEAD
-on disk).  The other git helpers run for real."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((sha-m (claude-repl-test--git-commit repo "M" "base")))
-      (claude-repl-test--git-checkout repo "feature" t)
-      (claude-repl-test--git-commit repo "F1" "f1")
-      (claude-repl-test--git-checkout repo "master")
-      (cl-letf* ((orig-exit (symbol-function 'claude-repl--git-exit-code))
-                 ((symbol-function 'claude-repl--git-exit-code)
-                  (lambda (root &rest args)
-                    (if (and (stringp (car args))
-                             (string= (car args) "cherry-pick"))
-                        128
-                      (apply orig-exit root args)))))
-        (should (eq (claude-repl--cherry-pick-commits
-                     repo "feature" sha-m "feature")
-                    'failed))))))
+is in flight), `--cherry-pick-commits' returns `failed'."
+  (let ((sha-m "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   ;; Non-zero exit but no conflict-head left behind.
+                   (`("cherry-pick" "-x" ,_) 128)
+                   (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+               (lambda (_root) nil)))
+      (should (eq (claude-repl--cherry-pick-commits
+                   "/tmp/repo" "feature" sha-m "feature")
+                  'failed)))))
 
 (ert-deftest claude-repl-test-cherry-pick-commits-conflict-signals ()
   "Cherry-pick conflict aborts the cherry-pick and signals user-error
 \(no magit pop — the abort clears CHERRY_PICK_HEAD so there's nothing
 left to resolve)."
-  (claude-repl-test--with-temp-git-repo repo
-    ;; Create base with shared file
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (let ((sha-m (string-trim (shell-command-to-string
-                               (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "feature" t)
-      (write-region "feature-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      ;; Cherry-pick should conflict
-      (should-error (claude-repl--cherry-pick-commits repo "feature" sha-m "feature")
+  (let ((sha-m "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        ;; Track in-progress state: t while CHERRY_PICK_HEAD exists,
+        ;; flipped to nil after `--check-cherry-pick-conflict' runs.
+        (in-progress t))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   (`("cherry-pick" "-x" ,_) 1)
+                   (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+               (lambda (_root) in-progress))
+              ;; The real check-cherry-pick-conflict would call git to abort;
+              ;; stub it to (a) clear the in-progress state and (b) signal.
+              ((symbol-function 'claude-repl--check-cherry-pick-conflict)
+               (lambda (_ws root _target-ws)
+                 (setq in-progress nil)
+                 (user-error "Conflict cherry-picking in %s" root))))
+      (should-error (claude-repl--cherry-pick-commits
+                     "/tmp/repo" "feature" sha-m "feature")
                     :type 'user-error)
-      ;; After the signal, the cherry-pick state must be cleared.
-      (should-not (claude-repl--cherry-pick-in-progress-p repo)))))
+      (should-not in-progress))))
 
 ;;;; ---- Tests: check-cherry-pick-conflict ----
 
 (ert-deftest claude-repl-test-check-cherry-pick-conflict-no-conflict ()
   "When no CHERRY_PICK_HEAD exists, returns nil (no error)."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "M" "base")
-    ;; No conflict in progress
-    (should-not (claude-repl--check-cherry-pick-conflict "test-ws" repo "test-ws"))))
+  (cl-letf (((symbol-function 'claude-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "rev-parse" "--absolute-git-dir") "/tmp/repo/.git")
+                 (_ (error "unmocked git-string args: %S" args)))))
+            ;; CHERRY_PICK_HEAD does not exist on disk.
+            ((symbol-function 'file-exists-p) (lambda (_p) nil))
+            ((symbol-function 'claude-repl--git-exit-code)
+             (lambda (&rest args) (error "abort should not run: %S" args))))
+    (should-not (claude-repl--check-cherry-pick-conflict "test-ws" "/tmp/repo" "test-ws"))))
 
 (ert-deftest claude-repl-test-check-cherry-pick-conflict-with-conflict ()
   "When CHERRY_PICK_HEAD exists, `git cherry-pick --abort' is run before
-user-error is signaled.  Verifies that the cherry-pick resolution state
-is cleared (no CHERRY_PICK_HEAD remaining) so the worktree is not left
-half-merged for the user to clean up."
-  (claude-repl-test--with-temp-git-repo repo
-    ;; Set up a conflicting cherry-pick
-    (write-region "base" nil (expand-file-name "file" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "file")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (claude-repl-test--git-checkout repo "feature" t)
-    (write-region "feature" nil (expand-file-name "file" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "file")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-    (let ((sha-f1 (string-trim (shell-command-to-string
-                                (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master" nil (expand-file-name "file" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "file")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      ;; Create a conflict
-      (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
-      ;; Now CHERRY_PICK_HEAD should exist
-      (should (claude-repl--cherry-pick-in-progress-p repo))
-      (should-error (claude-repl--check-cherry-pick-conflict "test-ws" repo "test-ws")
+user-error is signaled, then the on-disk state is cleared."
+  (let ((cherry-pick-head-exists t)
+        (abort-called nil))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "rev-parse" "--absolute-git-dir") "/tmp/repo/.git")
+                   (`("-C" "/tmp/repo" "rev-parse" "--short" "CHERRY_PICK_HEAD") "abcd123")
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'file-exists-p)
+               (lambda (p)
+                 (and (equal p "/tmp/repo/.git/CHERRY_PICK_HEAD")
+                      cherry-pick-head-exists)))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   (`("cherry-pick" "--abort")
+                    (setq abort-called t
+                          ;; Abort clears CHERRY_PICK_HEAD.
+                          cherry-pick-head-exists nil)
+                    0)
+                   (_ (error "unmocked git-exit-code args: %S" args))))))
+      (should-error (claude-repl--check-cherry-pick-conflict "test-ws" "/tmp/repo" "test-ws")
                     :type 'user-error)
-      ;; After the signal, the cherry-pick must have been aborted.
-      (should-not (claude-repl--cherry-pick-in-progress-p repo)))))
+      (should abort-called)
+      (should-not cherry-pick-head-exists))))
 
 ;;;; ---- Tests: cherry-pick-in-progress-p ----
 
 (ert-deftest claude-repl-test-cherry-pick-in-progress-p-false-on-clean-tree ()
   "No CHERRY_PICK_HEAD → returns nil."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "M" "base")
-    (should-not (claude-repl--cherry-pick-in-progress-p repo))))
+  (cl-letf (((symbol-function 'claude-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "rev-parse" "--absolute-git-dir") "/tmp/repo/.git")
+                 (_ (error "unmocked git-string args: %S" args)))))
+            ((symbol-function 'file-exists-p)
+             (lambda (p)
+               ;; The sole probe should be for CHERRY_PICK_HEAD; report missing.
+               (cond ((equal p "/tmp/repo/.git/CHERRY_PICK_HEAD") nil)
+                     (t (error "unexpected file-exists-p arg: %S" p))))))
+    (should-not (claude-repl--cherry-pick-in-progress-p "/tmp/repo"))))
 
 (ert-deftest claude-repl-test-cherry-pick-in-progress-p-true-during-conflict ()
   "CHERRY_PICK_HEAD present → returns t."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "f" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "f")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (claude-repl-test--git-checkout repo "feature" t)
-    (write-region "feature" nil (expand-file-name "f" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "f")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-    (let ((sha-f1 (string-trim
-                   (shell-command-to-string
-                    (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master" nil (expand-file-name "f" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "f")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
-      (should (claude-repl--cherry-pick-in-progress-p repo)))))
+  (cl-letf (((symbol-function 'claude-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "rev-parse" "--absolute-git-dir") "/tmp/repo/.git")
+                 (_ (error "unmocked git-string args: %S" args)))))
+            ((symbol-function 'file-exists-p)
+             (lambda (p) (equal p "/tmp/repo/.git/CHERRY_PICK_HEAD"))))
+    (should (claude-repl--cherry-pick-in-progress-p "/tmp/repo"))))
 
 ;;;; ---- Tests: cherry-pick-conflicted-files ----
 
 (ert-deftest claude-repl-test-cherry-pick-conflicted-files-empty ()
   "No conflict in flight → empty list."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "M" "base")
-    (should-not (claude-repl--cherry-pick-conflicted-files repo))))
+  (cl-letf (((symbol-function 'claude-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "diff" "--name-only" "--diff-filter=U") "")
+                 (_ (error "unmocked git-string args: %S" args))))))
+    (should-not (claude-repl--cherry-pick-conflicted-files "/tmp/repo"))))
 
 (ert-deftest claude-repl-test-cherry-pick-conflicted-files-lists-conflicts ()
   "Conflicted file is enumerated by name (relative to repo)."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (claude-repl-test--git-checkout repo "feature" t)
-    (write-region "feature" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-    (let ((sha-f1 (string-trim
-                   (shell-command-to-string
-                    (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
-      (should (equal (claude-repl--cherry-pick-conflicted-files repo)
-                     '("shared"))))))
+  (cl-letf (((symbol-function 'claude-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "diff" "--name-only" "--diff-filter=U") "shared")
+                 (_ (error "unmocked git-string args: %S" args))))))
+    (should (equal (claude-repl--cherry-pick-conflicted-files "/tmp/repo")
+                   '("shared")))))
 
 ;;;; ---- Tests: file-has-conflict-markers-p ----
 
@@ -2192,23 +2218,23 @@ half-merged for the user to clean up."
 
 (ert-deftest claude-repl-test-all-conflicts-resolved-p-empty-list ()
   "Empty FILES list treated as resolved — nothing left to clear."
-  (claude-repl-test--with-temp-git-repo repo
-    (should (claude-repl--all-conflicts-resolved-p repo nil))))
+  (cl-letf (((symbol-function 'claude-repl--file-has-conflict-markers-p)
+             (lambda (&rest _) (error "should not probe files on empty list"))))
+    (should (claude-repl--all-conflicts-resolved-p "/tmp/repo" nil))))
 
 (ert-deftest claude-repl-test-all-conflicts-resolved-p-true-when-markers-gone ()
   "Returns t when every listed file is clean of markers."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "plain\n" nil (expand-file-name "a" repo))
-    (write-region "also plain\n" nil (expand-file-name "b" repo))
-    (should (claude-repl--all-conflicts-resolved-p repo '("a" "b")))))
+  (cl-letf (((symbol-function 'claude-repl--file-has-conflict-markers-p)
+             (lambda (_path) nil)))
+    (should (claude-repl--all-conflicts-resolved-p "/tmp/repo" '("a" "b")))))
 
 (ert-deftest claude-repl-test-all-conflicts-resolved-p-false-when-any-file-has-markers ()
   "Any file still containing a marker → returns nil."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "plain\n" nil (expand-file-name "a" repo))
-    (write-region "<<<<<<< HEAD\nA\n=======\nB\n>>>>>>> x\n"
-                  nil (expand-file-name "b" repo))
-    (should-not (claude-repl--all-conflicts-resolved-p repo '("a" "b")))))
+  (cl-letf (((symbol-function 'claude-repl--file-has-conflict-markers-p)
+             (lambda (path)
+               ;; File "a" is clean; file "b" still has markers.
+               (string-suffix-p "b" path))))
+    (should-not (claude-repl--all-conflicts-resolved-p "/tmp/repo" '("a" "b")))))
 
 ;;;; ---- Tests: build-auto-resolve-prompt ----
 
@@ -2394,122 +2420,76 @@ logfile alone — the temp buffer is gone by the time anyone looks."
 ;;;; ---- Tests: auto-resolve-cherry-pick-conflict ----
 
 (ert-deftest claude-repl-test-auto-resolve-returns-nil-when-no-conflicted-files ()
-  "No conflicted files → resolver returns nil without spawning claude.
-Stubs `--invoke-auto-resolve-claude' to detect any (unwanted) call."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "M" "base")
-    (let ((invoked nil))
-      (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
-                 (lambda (&rest _) (setq invoked t) 0)))
-        (should-not (claude-repl--auto-resolve-cherry-pick-conflict "ws" repo))
-        (should-not invoked)))))
+  "No conflicted files → resolver returns nil without spawning claude."
+  (let ((invoked nil))
+    (cl-letf (((symbol-function 'claude-repl--cherry-pick-conflicted-files)
+               (lambda (_root) nil))
+              ((symbol-function 'claude-repl--invoke-auto-resolve-claude)
+               (lambda (&rest _) (setq invoked t) 0)))
+      (should-not (claude-repl--auto-resolve-cherry-pick-conflict "ws" "/tmp/repo"))
+      (should-not invoked))))
 
 (ert-deftest claude-repl-test-auto-resolve-accepts-when-markers-cleared ()
   "Resolver returns t when conflicted files no longer contain markers
 after the stubbed `claude -p' returns successfully."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (claude-repl-test--git-checkout repo "feature" t)
-    (write-region "feature-content" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-    (let ((sha-f1 (string-trim
-                   (shell-command-to-string
-                    (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
-      ;; Stubbed claude "resolves" by clearing markers on every conflicted file.
-      (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
-                 (lambda (root _prompt &optional _target-ws)
-                   (dolist (f (claude-repl--cherry-pick-conflicted-files root))
-                     (with-temp-file (expand-file-name f root)
-                       (insert "resolved\n")))
-                   0)))
-        (should (claude-repl--auto-resolve-cherry-pick-conflict "ws" repo))))))
+  (cl-letf (((symbol-function 'claude-repl--cherry-pick-conflicted-files)
+             (lambda (_root) '("shared")))
+            ((symbol-function 'claude-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "rev-parse" "--short" "CHERRY_PICK_HEAD") "abcd123")
+                 (_ (error "unmocked git-string args: %S" args)))))
+            ((symbol-function 'claude-repl--invoke-auto-resolve-claude)
+             (lambda (&rest _) 0))
+            ;; Files reported clean of markers after the resolver runs.
+            ((symbol-function 'claude-repl--all-conflicts-resolved-p)
+             (lambda (_root _files) t))
+            ;; No verify command configured → gate accepts.
+            ((symbol-function 'claude-repl--auto-resolve-verify-passes-p)
+             (lambda (_ws _root) t)))
+    (should (claude-repl--auto-resolve-cherry-pick-conflict "ws" "/tmp/repo"))))
 
 (ert-deftest claude-repl-test-auto-resolve-declines-when-markers-remain ()
   "Resolver returns nil when conflict markers still exist in any file
-after the stubbed `claude -p' exits — the resolver may have declined,
-or may have produced an incomplete resolution; either way the caller
-must fall back to the failure path."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (claude-repl-test--git-checkout repo "feature" t)
-    (write-region "feature-content" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-    (let ((sha-f1 (string-trim
-                   (shell-command-to-string
-                    (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
-      ;; Stubbed claude returns success but leaves markers untouched.
-      (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
-                 (lambda (&rest _) 0)))
-        (should-not (claude-repl--auto-resolve-cherry-pick-conflict "ws" repo))))))
+after the stubbed `claude -p' exits."
+  (cl-letf (((symbol-function 'claude-repl--cherry-pick-conflicted-files)
+             (lambda (_root) '("shared")))
+            ((symbol-function 'claude-repl--git-string)
+             (lambda (&rest _args) "abcd123"))
+            ((symbol-function 'claude-repl--invoke-auto-resolve-claude)
+             (lambda (&rest _) 0))
+            ;; Markers still present → decline.
+            ((symbol-function 'claude-repl--all-conflicts-resolved-p)
+             (lambda (_root _files) nil)))
+    (should-not (claude-repl--auto-resolve-cherry-pick-conflict "ws" "/tmp/repo"))))
 
 (ert-deftest claude-repl-test-auto-resolve-declines-on-timeout ()
-  "Resolver returns nil when invoked claude -p reports timeout — the
-exit status is the `timeout' symbol, not a number, so the caller cannot
-trust the working tree to be in a sane state."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (claude-repl-test--git-checkout repo "feature" t)
-    (write-region "feature-content" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-    (let ((sha-f1 (string-trim
-                   (shell-command-to-string
-                    (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
-      (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
-                 (lambda (&rest _) 'timeout)))
-        (should-not (claude-repl--auto-resolve-cherry-pick-conflict "ws" repo))))))
+  "Resolver returns nil when invoked claude -p reports timeout."
+  (cl-letf (((symbol-function 'claude-repl--cherry-pick-conflicted-files)
+             (lambda (_root) '("shared")))
+            ((symbol-function 'claude-repl--git-string)
+             (lambda (&rest _args) "abcd123"))
+            ((symbol-function 'claude-repl--invoke-auto-resolve-claude)
+             (lambda (&rest _) 'timeout))
+            ((symbol-function 'claude-repl--all-conflicts-resolved-p)
+             (lambda (&rest _args) (error "should not probe markers after timeout"))))
+    (should-not (claude-repl--auto-resolve-cherry-pick-conflict "ws" "/tmp/repo"))))
 
 (ert-deftest claude-repl-test-auto-resolve-declines-on-nonzero-exit ()
   "Resolver returns nil when invoked claude -p exits non-zero, even if
 the files happen to look clean afterward — a failure exit is the only
 honest signal that something went wrong inside the headless agent."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (claude-repl-test--git-checkout repo "feature" t)
-    (write-region "feature-content" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-    (let ((sha-f1 (string-trim
-                   (shell-command-to-string
-                    (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
-      (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
-                 ;; Pretend the resolver wrote clean files then exited non-zero.
-                 (lambda (root _prompt &optional _target-ws)
-                   (dolist (f (claude-repl--cherry-pick-conflicted-files root))
-                     (with-temp-file (expand-file-name f root)
-                       (insert "resolved\n")))
-                   1)))
-        (should-not (claude-repl--auto-resolve-cherry-pick-conflict "ws" repo))))))
+  (cl-letf (((symbol-function 'claude-repl--cherry-pick-conflicted-files)
+             (lambda (_root) '("shared")))
+            ((symbol-function 'claude-repl--git-string)
+             (lambda (&rest _args) "abcd123"))
+            ((symbol-function 'claude-repl--invoke-auto-resolve-claude)
+             (lambda (&rest _) 1))
+            ;; Even with clean files, the non-zero exit short-circuits.
+            ((symbol-function 'claude-repl--all-conflicts-resolved-p)
+             (lambda (&rest _args)
+               (error "should not probe markers after non-zero exit"))))
+    (should-not (claude-repl--auto-resolve-cherry-pick-conflict "ws" "/tmp/repo"))))
 
 ;;;; ---- Tests: auto-resolve-verify-cmd (config resolver) ----
 
@@ -2549,51 +2529,95 @@ honest signal that something went wrong inside the headless agent."
     (should-not (claude-repl--auto-resolve-verify-cmd "/tmp"))))
 
 ;;;; ---- Tests: invoke-auto-resolve-verify (subprocess) ----
+;;
+;; `claude-repl--invoke-auto-resolve-verify' spawns a process via
+;; `start-process'.  Per the no-subprocess policy these tests must stub
+;; that primitive — the production logic under test is the wait-loop,
+;; status-dispatch, and cwd-binding behavior around the spawn, not the
+;; spawn itself.  Each test replaces `start-process' (and adjacent
+;; primitives the wait-loop depends on) with deterministic fakes.
 
 (ert-deftest claude-repl-test-invoke-auto-resolve-verify-zero-exit ()
   "Verifier with exit-0 command returns 0."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-auto-resolve-verify-timeout 30))
-      (should (eql (claude-repl--invoke-auto-resolve-verify repo '("true"))
+  (let ((claude-repl-auto-resolve-verify-timeout 30))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name buf &rest _cmd)
+                 ;; Return a fake process plist — the wait loop only consults
+                 ;; `process-live-p' / `process-exit-status' / etc., which we
+                 ;; stub below.  The buffer must be a real live buffer so the
+                 ;; output-capture branch works.
+                 (list :proc :buffer buf :status 0)))
+              ((symbol-function 'set-process-query-on-exit-flag)
+               (lambda (&rest _) nil))
+              ((symbol-function 'process-live-p) (lambda (_p) nil))
+              ((symbol-function 'process-exit-status) (lambda (_p) 0))
+              ((symbol-function 'accept-process-output)
+               (lambda (&rest _) nil))
+              ((symbol-function 'delete-process) (lambda (_p) nil)))
+      (should (eql (claude-repl--invoke-auto-resolve-verify "/tmp/repo" '("true"))
                    0)))))
 
 (ert-deftest claude-repl-test-invoke-auto-resolve-verify-nonzero-exit ()
   "Verifier with exit-non-zero command returns the non-zero exit code."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-auto-resolve-verify-timeout 30))
-      (let ((rc (claude-repl--invoke-auto-resolve-verify repo '("false"))))
+  (let ((claude-repl-auto-resolve-verify-timeout 30))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name buf &rest _cmd) (list :proc :buffer buf)))
+              ((symbol-function 'set-process-query-on-exit-flag)
+               (lambda (&rest _) nil))
+              ((symbol-function 'process-live-p) (lambda (_p) nil))
+              ((symbol-function 'process-exit-status) (lambda (_p) 1))
+              ((symbol-function 'accept-process-output) (lambda (&rest _) nil))
+              ((symbol-function 'delete-process) (lambda (_p) nil)))
+      (let ((rc (claude-repl--invoke-auto-resolve-verify "/tmp/repo" '("false"))))
         (should (and (numberp rc) (not (zerop rc))))))))
 
 (ert-deftest claude-repl-test-invoke-auto-resolve-verify-timeout ()
-  "Verifier with a hung command returns `timeout' when the deadline elapses.
-Uses `sleep 30' with a sub-second timeout — the timeout is a deliberately
-short deadline (NOT a sleep-for-synchronization)."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((claude-repl-auto-resolve-verify-timeout 1))
+  "Verifier with a hung command returns `timeout' when the deadline elapses."
+  ;; Simulate the deadline-elapsed branch by making the process appear live
+  ;; while time advances past the timeout.  `float-time' is stubbed to return
+  ;; a monotonically increasing value so the wait loop fires the timeout exit.
+  (let ((claude-repl-auto-resolve-verify-timeout 1)
+        (now 0)
+        (delete-called nil))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name buf &rest _cmd) (list :proc :buffer buf)))
+              ((symbol-function 'set-process-query-on-exit-flag)
+               (lambda (&rest _) nil))
+              ((symbol-function 'process-live-p) (lambda (_p) t))
+              ((symbol-function 'float-time)
+               (lambda (&rest _)
+                 (let ((t-now now))
+                   (cl-incf now 10)
+                   t-now)))
+              ((symbol-function 'accept-process-output) (lambda (&rest _) nil))
+              ((symbol-function 'delete-process)
+               (lambda (_p) (setq delete-called t))))
       (should (eq (claude-repl--invoke-auto-resolve-verify
-                   repo '("sleep" "30"))
-                  'timeout)))))
+                   "/tmp/repo" '("sleep" "30"))
+                  'timeout))
+      (should delete-called))))
 
 (ert-deftest claude-repl-test-invoke-auto-resolve-verify-cwd-is-root ()
   "Verifier runs with `default-directory' set to ROOT.
-The spawned process inherits cwd; asserting via `pwd > marker' written
-into the repo proves the verifier shell-pwd matched ROOT."
-  (claude-repl-test--with-temp-git-repo repo
-    (let* ((claude-repl-auto-resolve-verify-timeout 30)
-           (marker (expand-file-name "pwd.marker" repo))
-           (rc (claude-repl--invoke-auto-resolve-verify
-                repo (list "sh" "-c"
-                           (format "pwd > %s" (shell-quote-argument marker))))))
-      (should (eql rc 0))
-      (should (file-exists-p marker))
-      (let ((captured (string-trim
-                       (with-temp-buffer
-                         (insert-file-contents marker)
-                         (buffer-string))))
-            (expected (string-trim
-                       (shell-command-to-string
-                        (format "cd %s && pwd" (shell-quote-argument repo))))))
-        (should (equal captured expected))))))
+The production function rebinds `default-directory' around the spawn;
+the stubbed `start-process' captures the binding to prove it."
+  (let ((claude-repl-auto-resolve-verify-timeout 30)
+        (captured-cwd nil))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name buf &rest _cmd)
+                 (setq captured-cwd default-directory)
+                 (list :proc :buffer buf)))
+              ((symbol-function 'set-process-query-on-exit-flag)
+               (lambda (&rest _) nil))
+              ((symbol-function 'process-live-p) (lambda (_p) nil))
+              ((symbol-function 'process-exit-status) (lambda (_p) 0))
+              ((symbol-function 'accept-process-output) (lambda (&rest _) nil))
+              ((symbol-function 'delete-process) (lambda (_p) nil)))
+      (let ((rc (claude-repl--invoke-auto-resolve-verify
+                 "/tmp/repo" '("sh" "-c" "true"))))
+        (should (eql rc 0))
+        (should (equal captured-cwd
+                       (file-name-as-directory "/tmp/repo")))))))
 
 ;;;; ---- Tests: auto-resolve-verify-passes-p ----
 
@@ -2633,335 +2657,278 @@ into the repo proves the verifier shell-pwd matched ROOT."
   "Even with markers cleared and resolver exit=0, a non-zero verify
 exit causes `--auto-resolve-cherry-pick-conflict' to return nil.
 Soundness gate: textual marker scan is necessary but not sufficient."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (claude-repl-test--git-checkout repo "feature" t)
-    (write-region "feature-content" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-    (let ((sha-f1 (string-trim
-                   (shell-command-to-string
-                    (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
-      (let ((claude-repl-auto-resolve-verify-command '("verify-cmd")))
-        (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
-                   (lambda (root _prompt &optional _target-ws)
-                     (dolist (f (claude-repl--cherry-pick-conflicted-files root))
-                       (with-temp-file (expand-file-name f root)
-                         (insert "resolved\n")))
-                     0))
-                  ((symbol-function 'claude-repl--invoke-auto-resolve-verify)
-                   (lambda (&rest _) 1)))
-          (should-not (claude-repl--auto-resolve-cherry-pick-conflict "ws" repo)))))))
+  (let ((claude-repl-auto-resolve-verify-command '("verify-cmd")))
+    (cl-letf (((symbol-function 'claude-repl--cherry-pick-conflicted-files)
+               (lambda (_root) '("shared")))
+              ((symbol-function 'claude-repl--git-string)
+               (lambda (&rest _args) "abcd123"))
+              ((symbol-function 'claude-repl--invoke-auto-resolve-claude)
+               (lambda (&rest _) 0))
+              ((symbol-function 'claude-repl--all-conflicts-resolved-p)
+               (lambda (_root _files) t))
+              ((symbol-function 'claude-repl--invoke-auto-resolve-verify)
+               (lambda (&rest _) 1)))
+      (should-not (claude-repl--auto-resolve-cherry-pick-conflict "ws" "/tmp/repo")))))
 
 (ert-deftest claude-repl-test-auto-resolve-accepts-when-verify-passes ()
   "Markers cleared AND verify exit=0 → `--auto-resolve-cherry-pick-conflict' returns t."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (claude-repl-test--git-checkout repo "feature" t)
-    (write-region "feature-content" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-    (let ((sha-f1 (string-trim
-                   (shell-command-to-string
-                    (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
-      (let ((claude-repl-auto-resolve-verify-command '("verify-cmd")))
-        (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
-                   (lambda (root _prompt &optional _target-ws)
-                     (dolist (f (claude-repl--cherry-pick-conflicted-files root))
-                       (with-temp-file (expand-file-name f root)
-                         (insert "resolved\n")))
-                     0))
-                  ((symbol-function 'claude-repl--invoke-auto-resolve-verify)
-                   (lambda (&rest _) 0)))
-          (should (claude-repl--auto-resolve-cherry-pick-conflict "ws" repo)))))))
+  (let ((claude-repl-auto-resolve-verify-command '("verify-cmd")))
+    (cl-letf (((symbol-function 'claude-repl--cherry-pick-conflicted-files)
+               (lambda (_root) '("shared")))
+              ((symbol-function 'claude-repl--git-string)
+               (lambda (&rest _args) "abcd123"))
+              ((symbol-function 'claude-repl--invoke-auto-resolve-claude)
+               (lambda (&rest _) 0))
+              ((symbol-function 'claude-repl--all-conflicts-resolved-p)
+               (lambda (_root _files) t))
+              ((symbol-function 'claude-repl--invoke-auto-resolve-verify)
+               (lambda (&rest _) 0)))
+      (should (claude-repl--auto-resolve-cherry-pick-conflict "ws" "/tmp/repo")))))
 
 ;;;; ---- Tests: cherry-pick-commits end-to-end with verify ----
 
 (ert-deftest claude-repl-test-cherry-pick-commits-verify-fail-aborts-and-signals ()
   "End-to-end: markers cleared by resolver but verify-fail → `cherry-pick
---commits' falls through to abort + user-error; no commit lands and
-CHERRY_PICK_HEAD is cleared."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (let ((sha-m (string-trim
-                  (shell-command-to-string
-                   (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "feature" t)
-      (write-region "feature-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      (let ((master-head-before
-             (string-trim
-              (shell-command-to-string
-               (format "git -C %s rev-parse HEAD" (shell-quote-argument repo)))))
-            (claude-repl-auto-resolve-verify-command '("verify-cmd")))
-        (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
-                   (lambda (root _prompt &optional _target-ws)
-                     (dolist (f (claude-repl--cherry-pick-conflicted-files root))
-                       (with-temp-file (expand-file-name f root)
-                         (insert "resolved\n")))
-                     0))
-                  ((symbol-function 'claude-repl--invoke-auto-resolve-verify)
-                   (lambda (&rest _) 1))
-                  ((symbol-function 'magit-status) (lambda (&rest _) nil)))
-          (should-error (claude-repl--cherry-pick-commits
-                         repo "feature" sha-m "feature" t)
-                        :type 'user-error)
-          (should-not (claude-repl--cherry-pick-in-progress-p repo))
-          (let ((master-head-after
-                 (string-trim
-                  (shell-command-to-string
-                   (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-            (should (equal master-head-before master-head-after))))))))
+--commits' falls through to `--check-cherry-pick-conflict' which aborts
+the cherry-pick and signals user-error."
+  (let ((sha-m "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        (in-progress t)
+        (check-called nil)
+        (claude-repl-auto-resolve-verify-command '("verify-cmd")))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   (`("cherry-pick" "-x" ,_) 1)
+                   (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+               (lambda (_root) in-progress))
+              ;; Auto-resolve decides to decline (verify fails).
+              ((symbol-function 'claude-repl--auto-resolve-cherry-pick-conflict)
+               (lambda (_target-ws _root) nil))
+              ;; Stub the abort path: marks the on-disk state cleared and signals.
+              ((symbol-function 'claude-repl--check-cherry-pick-conflict)
+               (lambda (_ws _root _target-ws)
+                 (setq check-called t
+                       in-progress nil)
+                 (user-error "Conflict cherry-picking from feature — aborted"))))
+      (should-error (claude-repl--cherry-pick-commits
+                     "/tmp/repo" "feature" sha-m "feature" t)
+                    :type 'user-error)
+      (should check-called)
+      (should-not in-progress))))
 
 ;;;; ---- Tests: cherry-pick-commits with auto-resolve ----
 
 (ert-deftest claude-repl-test-cherry-pick-commits-auto-resolve-success-advances-merge ()
   "When auto-resolve clears the markers, `--cherry-pick-commits' stages
 and runs `cherry-pick --continue', completing the merge cleanly.
-Returns nil (clean cherry-pick), and HEAD on master advances to a new
-commit carrying the cherry-pick -x annotation."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (let ((sha-m (string-trim
-                  (shell-command-to-string
-                   (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "feature" t)
-      (write-region "feature-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      ;; Stubbed claude resolves by writing a clean file.
-      (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
-                 (lambda (root _prompt &optional _target-ws)
-                   (dolist (f (claude-repl--cherry-pick-conflicted-files root))
-                     (with-temp-file (expand-file-name f root)
-                       (insert "resolved\n")))
-                   0)))
-        (let ((result (claude-repl--cherry-pick-commits
-                       repo "feature" sha-m "feature" t)))
-          (should (null result))
-          (should-not (claude-repl--cherry-pick-in-progress-p repo))
-          (let ((log (shell-command-to-string
-                      (format "git -C %s log --oneline -2"
-                              (shell-quote-argument repo)))))
-            (should (string-match-p "F1" log))))))))
+Returns nil (clean cherry-pick), and the loop exits when CHERRY_PICK_HEAD
+is gone."
+  (let ((sha-m "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        ;; First call returns t (conflict from initial cherry-pick), then
+        ;; nil after the resolver runs and continue lands.
+        (in-progress-states '(t nil))
+        (continue-called nil))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   (`("cherry-pick" "-x" ,_) 1)
+                   (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+               (lambda (_root) (pop in-progress-states)))
+              ((symbol-function 'claude-repl--auto-resolve-cherry-pick-conflict)
+               (lambda (_target-ws _root) t))
+              ((symbol-function 'claude-repl--continue-cherry-pick-after-resolve)
+               (lambda (_target-ws _root) (setq continue-called t) 0)))
+      (should (null (claude-repl--cherry-pick-commits
+                     "/tmp/repo" "feature" sha-m "feature" t)))
+      (should continue-called))))
 
 (ert-deftest claude-repl-test-cherry-pick-commits-auto-resolve-decline-falls-back-to-magit ()
   "When auto-resolve cannot clear the markers, `--cherry-pick-commits'
 falls through to `--check-cherry-pick-conflict' which aborts the
-cherry-pick and signals user-error — the underlying loop body signals
-regardless once auto-resolve declines."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (let ((sha-m (string-trim
-                  (shell-command-to-string
-                   (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "feature" t)
-      (write-region "feature-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      ;; Stubbed claude touches nothing.
-      (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
-                 (lambda (&rest _) 0))
-                ((symbol-function 'magit-status) (lambda (&rest _) nil)))
-        (should-error (claude-repl--cherry-pick-commits
-                       repo "feature" sha-m "feature" t)
-                      :type 'user-error)))))
+cherry-pick and signals user-error."
+  (let ((sha-m "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        (in-progress t))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   (`("cherry-pick" "-x" ,_) 1)
+                   (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+               (lambda (_root) in-progress))
+              ((symbol-function 'claude-repl--auto-resolve-cherry-pick-conflict)
+               (lambda (_target-ws _root) nil))
+              ((symbol-function 'claude-repl--check-cherry-pick-conflict)
+               (lambda (_ws _root _target-ws)
+                 (setq in-progress nil)
+                 (user-error "Conflict cherry-picking — aborted"))))
+      (should-error (claude-repl--cherry-pick-commits
+                     "/tmp/repo" "feature" sha-m "feature" t)
+                    :type 'user-error))))
 
 (ert-deftest claude-repl-test-cherry-pick-commits-auto-resolve-off-still-signals ()
   "With auto-resolve omitted (interactive `SPC TAB m'/`SPC TAB M' path),
 conflicts abort the cherry-pick and signal user-error.  Guards against
 the optional auto-resolve parameter accidentally flipping the default
 for existing callers."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (let ((sha-m (string-trim
-                  (shell-command-to-string
-                   (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "feature" t)
-      (write-region "feature-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      (let ((invoked nil))
-        (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
-                   (lambda (&rest _) (setq invoked t) 0))
-                  ((symbol-function 'magit-status) (lambda (&rest _) nil)))
-          (should-error (claude-repl--cherry-pick-commits
-                         repo "feature" sha-m "feature")
-                        :type 'user-error)
-          (should-not invoked))))))
+  (let ((sha-m "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        (in-progress t)
+        (resolver-called nil))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   (`("cherry-pick" "-x" ,_) 1)
+                   (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+               (lambda (_root) in-progress))
+              ((symbol-function 'claude-repl--auto-resolve-cherry-pick-conflict)
+               (lambda (&rest _args) (setq resolver-called t) t))
+              ((symbol-function 'claude-repl--check-cherry-pick-conflict)
+               (lambda (_ws _root _target-ws)
+                 (setq in-progress nil)
+                 (user-error "Conflict cherry-picking — aborted"))))
+      ;; No auto-resolve arg passed → the resolver MUST NOT be consulted.
+      (should-error (claude-repl--cherry-pick-commits
+                     "/tmp/repo" "feature" sha-m "feature")
+                    :type 'user-error)
+      (should-not resolver-called))))
 
 ;;;; ---- Tests: silent-mode conflict surfacing ----
 
 (ert-deftest claude-repl-test-cherry-pick-commits-silent-conflict-surfaces-not-aborts ()
   "When SILENT=t and the resolver declines, the conflict is surfaced via
 `--surface-silent-merge-conflict' (switch + magit pop + signal) instead
-of being aborted via `--check-cherry-pick-conflict'.  This is the
-visibility fix: skill-dispatched merges that hit conflicts land the
-user on magit instead of vanishing into the log."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (let ((sha-m (string-trim
-                  (shell-command-to-string
-                   (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "feature" t)
-      (write-region "feature-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      (let ((surface-called nil)
-            (abort-called nil))
-        (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
-                   (lambda (&rest _) 1))   ; resolver declines
-                  ((symbol-function 'claude-repl--surface-silent-merge-conflict)
-                   (lambda (_ws _root)
-                     (setq surface-called t)
-                     (user-error "surfaced")))
-                  ((symbol-function 'claude-repl--check-cherry-pick-conflict)
-                   (lambda (&rest _) (setq abort-called t))))
-          (should-error (claude-repl--cherry-pick-commits
-                         repo "feature" sha-m "feature" t t)
-                        :type 'user-error)
-          (should surface-called)
-          (should-not abort-called))))))
+of being aborted via `--check-cherry-pick-conflict'."
+  (let ((sha-m "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        (in-progress t)
+        (surface-called nil)
+        (abort-called nil))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   (`("cherry-pick" "-x" ,_) 1)
+                   (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+               (lambda (_root) in-progress))
+              ((symbol-function 'claude-repl--auto-resolve-cherry-pick-conflict)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'claude-repl--surface-silent-merge-conflict)
+               (lambda (_ws _root)
+                 (setq surface-called t
+                       in-progress nil)
+                 (user-error "surfaced")))
+              ((symbol-function 'claude-repl--check-cherry-pick-conflict)
+               (lambda (&rest _) (setq abort-called t))))
+      (should-error (claude-repl--cherry-pick-commits
+                     "/tmp/repo" "feature" sha-m "feature" t t)
+                    :type 'user-error)
+      (should surface-called)
+      (should-not abort-called))))
 
 (ert-deftest claude-repl-test-cherry-pick-commits-non-silent-conflict-aborts ()
   "When SILENT=nil and the resolver declines, the conflict is aborted
 via `--check-cherry-pick-conflict' (existing behavior) — the surface
 helper is not invoked.  Guards the interactive `SPC TAB M' path."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (let ((sha-m (string-trim
-                  (shell-command-to-string
-                   (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "feature" t)
-      (write-region "feature-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      (let ((surface-called nil))
-        (cl-letf (((symbol-function 'claude-repl--invoke-auto-resolve-claude)
-                   (lambda (&rest _) 1))
-                  ((symbol-function 'claude-repl--surface-silent-merge-conflict)
-                   (lambda (&rest _) (setq surface-called t)))
-                  ((symbol-function 'magit-status) (lambda (&rest _) nil)))
-          (should-error (claude-repl--cherry-pick-commits
-                         repo "feature" sha-m "feature" t nil)
-                        :type 'user-error)
-          (should-not surface-called))))))
+  (let ((sha-m "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        (in-progress t)
+        (surface-called nil))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
+                   (`("cherry-pick" "-x" ,_) 1)
+                   (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+               (lambda (_root) in-progress))
+              ((symbol-function 'claude-repl--auto-resolve-cherry-pick-conflict)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'claude-repl--surface-silent-merge-conflict)
+               (lambda (&rest _) (setq surface-called t)))
+              ((symbol-function 'claude-repl--check-cherry-pick-conflict)
+               (lambda (_ws _root _target-ws)
+                 (setq in-progress nil)
+                 (user-error "Conflict cherry-picking — aborted"))))
+      (should-error (claude-repl--cherry-pick-commits
+                     "/tmp/repo" "feature" sha-m "feature" t nil)
+                    :type 'user-error)
+      (should-not surface-called))))
 
 (ert-deftest claude-repl-test-surface-silent-merge-conflict-pops-magit-and-signals ()
   "`--surface-silent-merge-conflict' switches to ROOT, pops magit-status
 there, then signals `user-error'.  Does NOT call `git cherry-pick
 --abort' — that would erase the conflict the user is being asked to
 inspect."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (let ((sha-m (string-trim
-                  (shell-command-to-string
-                   (format "git -C %s rev-parse HEAD" (shell-quote-argument repo))))))
-      (claude-repl-test--git-checkout repo "feature" t)
-      (write-region "feature-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-      (claude-repl-test--git-checkout repo "master")
-      (write-region "master-content" nil (expand-file-name "shared" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "shared")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-      ;; Trigger a real cherry-pick conflict (CHERRY_PICK_HEAD will exist).
-      (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" "feature")
-      (should (claude-repl--cherry-pick-in-progress-p repo))
-      (let ((switched-to nil)
-            (magit-pop-root nil))
-        (cl-letf (((symbol-function 'claude-repl-switch-to-project)
-                   (lambda (dir) (setq switched-to dir)))
-                  ((symbol-function 'magit-status)
-                   (lambda (dir) (setq magit-pop-root dir))))
-          (should-error (claude-repl--surface-silent-merge-conflict
-                         "feature" repo)
-                        :type 'user-error)
-          (should (equal switched-to repo))
-          (should (equal magit-pop-root repo))
-          ;; CHERRY_PICK_HEAD must still exist — we did NOT abort.
-          (should (claude-repl--cherry-pick-in-progress-p repo)))))))
+  (let ((switched-to nil)
+        (magit-pop-root nil)
+        (abort-called nil))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "rev-parse" "--short" "CHERRY_PICK_HEAD") "abcd123")
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (&rest _args) (setq abort-called t) 0))
+              ;; The function defers UI ops; run the thunk synchronously so
+              ;; the test can assert the switch and magit-status calls.
+              ((symbol-function 'claude-repl--defer-to-main-thread)
+               (lambda (thunk) (funcall thunk)))
+              ((symbol-function 'claude-repl-switch-to-project)
+               (lambda (dir) (setq switched-to dir)))
+              ((symbol-function 'magit-status)
+               (lambda (dir) (setq magit-pop-root dir))))
+      (should-error (claude-repl--surface-silent-merge-conflict
+                     "feature" "/tmp/repo")
+                    :type 'user-error)
+      (should (equal switched-to "/tmp/repo"))
+      (should (equal magit-pop-root "/tmp/repo"))
+      ;; --abort must NOT have been issued — the conflict stays inspectable.
+      (should-not abort-called))))
 
 (ert-deftest claude-repl-test-surface-silent-merge-conflict-defers-ui-ops ()
   "UI ops (perspective switch + magit-status) are routed through
 `claude-repl--defer-to-main-thread'.  This is what makes the function
 safe to call from the worker thread spawned by
 `claude-repl--workspace-merge-async' — direct UI calls from a worker
-thread are undefined behavior in Emacs.  Pinning the helper call here
-so a future refactor cannot silently revert to direct invocation."
-  (claude-repl-test--with-temp-git-repo repo
-    (write-region "base" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-    (claude-repl-test--git-checkout repo "feature" t)
-    (write-region "feature-content" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-    (claude-repl-test--git-checkout repo "master")
-    (write-region "master-content" nil (expand-file-name "shared" repo))
-    (call-process "git" nil nil nil "-C" repo "add" "shared")
-    (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-    (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" "feature")
-    (let ((defer-calls 0))
-      (cl-letf (((symbol-function 'claude-repl--defer-to-main-thread)
-                 (lambda (_thunk) (cl-incf defer-calls))))
-        (should-error (claude-repl--surface-silent-merge-conflict
-                       "feature" repo)
-                      :type 'user-error)
-        (should (= defer-calls 1))))))
+thread are undefined behavior in Emacs."
+  (let ((defer-calls 0))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest _args) "abcd123"))
+              ((symbol-function 'claude-repl--defer-to-main-thread)
+               (lambda (_thunk) (cl-incf defer-calls))))
+      (should-error (claude-repl--surface-silent-merge-conflict
+                     "feature" "/tmp/repo")
+                    :type 'user-error)
+      (should (= defer-calls 1)))))
 
 ;;;; ---- Tests: resolver output is preserved in a side buffer ----
 
@@ -5258,42 +5225,33 @@ Covers the full call the interactive `SPC TAB n' path builds up."
 ;;;; ---- Tests: create-start-tag ----
 
 (ert-deftest claude-repl-test-create-start-tag-creates-at-base-commit ()
-  "create-start-tag creates a real git tag PREFIX+BRANCH pointing at BASE-COMMIT."
-  (claude-repl-test--with-temp-git-repo repo
-    (let ((sha (claude-repl-test--git-commit repo "initial" "content"))
-          (claude-repl-worktree-start-tag-prefix "start/"))
-      ;; Advance HEAD so we can verify the tag points at the OLD commit, not HEAD.
-      (claude-repl-test--git-commit repo "second" "more")
-      (claude-repl--create-start-tag repo "feature" sha)
-      (should (claude-repl--git-tag-exists-p repo "start/feature"))
-      ;; Confirm it is a tag, not a branch (regression: previously was a branch).
-      (should (zerop (claude-repl--git-exit-code
-                      repo "rev-parse" "--verify" "refs/tags/start/feature")))
-      (should-not (zerop (claude-repl--git-exit-code
-                          repo "rev-parse" "--verify" "refs/heads/start/feature")))
-      (let ((tag-sha (string-trim
-                      (shell-command-to-string
-                       (format "git -C %s rev-parse refs/tags/start/feature"
-                               (shell-quote-argument repo))))))
-        (should (equal tag-sha sha))))))
+  "create-start-tag invokes `git tag <prefix><branch> <base-commit>' in GIT-ROOT."
+  (let ((sha "abc123def456abc123def456abc123def4567890")
+        (claude-repl-worktree-start-tag-prefix "start/")
+        (captured-call nil))
+    (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+               (lambda (root &rest args)
+                 (setq captured-call (cons root args))
+                 0)))
+      (claude-repl--create-start-tag "/tmp/repo" "feature" sha)
+      (should (equal captured-call
+                     (list "/tmp/repo" "tag" "start/feature" sha))))))
 
 (ert-deftest claude-repl-test-create-start-tag-disabled-no-op ()
-  "When prefix is nil, no tag is created."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    (let ((claude-repl-worktree-start-tag-prefix nil))
-      (claude-repl--create-start-tag repo "feature" "HEAD")
-      (should-not (claude-repl--git-tag-exists-p repo "start/feature"))
-      (should-not (claude-repl--git-branch-exists-p repo "start/feature")))))
+  "When prefix is nil, no tag is created (no git call)."
+  (let ((claude-repl-worktree-start-tag-prefix nil)
+        (git-called nil))
+    (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+               (lambda (&rest _args) (setq git-called t) 0)))
+      (claude-repl--create-start-tag "/tmp/repo" "feature" "HEAD")
+      (should-not git-called))))
 
 (ert-deftest claude-repl-test-create-start-tag-signals-on-failure ()
-  "create-start-tag signals an error when git tag fails (e.g. tag exists)."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "initial" "content")
-    ;; Pre-create the start tag so the second `git tag' attempt fails.
-    (call-process "git" nil nil nil "-C" repo "tag" "start/feature")
-    (let ((claude-repl-worktree-start-tag-prefix "start/"))
-      (should-error (claude-repl--create-start-tag repo "feature" "HEAD")))))
+  "create-start-tag signals an error when git tag fails (non-zero exit)."
+  (let ((claude-repl-worktree-start-tag-prefix "start/"))
+    (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+               (lambda (&rest _args) 128)))
+      (should-error (claude-repl--create-start-tag "/tmp/repo" "feature" "HEAD")))))
 
 ;;;; ---- Tests: async-worktree-add start-tag integration ----
 
@@ -6419,21 +6377,18 @@ A freshly created child worktree starts at its parent's HEAD commit, so
 the two branches are commit-identical even though their names differ —
 the ancestry check would trivially succeed and mis-bucket the empty
 child as merged.  The helper must bail before that point."
-  (claude-repl-test--with-temp-git-repo repo
-    (claude-repl-test--git-commit repo "M0" "base")
-    (let ((child-wt (concat (make-temp-file "claude-repl-test-child-wt-" t)
-                            "-actual")))
-      (unwind-protect
-          (progn
-            (call-process "git" nil nil nil "-C" repo
-                          "worktree" "add" "-b" "child" child-wt "HEAD")
-            ;; repo HEAD is master, child-wt HEAD is `child' — both at M0.
-            (should (null (claude-repl--merge-base-ancestor-args
-                           child-wt repo))))
-        (ignore-errors
-          (call-process "git" nil nil nil "-C" repo
-                        "worktree" "remove" "-f" child-wt))
-        (ignore-errors (delete-directory child-wt t))))))
+  (let ((same-sha "abc123def456abc123def456abc123def4567890"))
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   ;; Distinct branch names but identical tip SHAs.
+                   (`("-C" "/tmp/child-wt" "rev-parse" "--abbrev-ref" "HEAD") "child")
+                   (`("-C" "/tmp/repo" "rev-parse" "--abbrev-ref" "HEAD") "master")
+                   (`("-C" "/tmp/child-wt" "rev-parse" "HEAD") same-sha)
+                   (`("-C" "/tmp/repo" "rev-parse" "HEAD") same-sha)
+                   (_ (error "unmocked git-string-quiet args: %S" args))))))
+      (should (null (claude-repl--merge-base-ancestor-args
+                     "/tmp/child-wt" "/tmp/repo"))))))
 
 ;;;; ---- Tests: branch-merged async cache ----
 
@@ -7083,33 +7038,22 @@ afterwards or later tests inherit stale state."
 (ert-deftest claude-repl-test-any-cherry-pick-in-progress-false-on-clean-tree ()
   "No CHERRY_PICK_HEAD in any registered ws dir → returns nil."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-git-repo repo
-      (claude-repl-test--git-commit repo "M" "base")
-      (claude-repl--ws-put "ws" :project-dir repo)
+    (claude-repl--ws-put "ws" :project-dir "/tmp/repo")
+    (cl-letf (((symbol-function 'file-directory-p)
+               (lambda (p) (equal p "/tmp/repo")))
+              ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+               (lambda (_root) nil)))
       (should-not (claude-repl--any-cherry-pick-in-progress-p)))))
 
 (ert-deftest claude-repl-test-any-cherry-pick-in-progress-true-during-conflict ()
   "Any registered ws dir with CHERRY_PICK_HEAD → returns t."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-git-repo repo
-      (write-region "base" nil (expand-file-name "f" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "f")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-      (claude-repl-test--git-checkout repo "feature" t)
-      (write-region "feature" nil (expand-file-name "f" repo))
-      (call-process "git" nil nil nil "-C" repo "add" "f")
-      (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-      (let ((sha-f1 (string-trim
-                     (shell-command-to-string
-                      (format "git -C %s rev-parse HEAD"
-                              (shell-quote-argument repo))))))
-        (claude-repl-test--git-checkout repo "master")
-        (write-region "master" nil (expand-file-name "f" repo))
-        (call-process "git" nil nil nil "-C" repo "add" "f")
-        (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-        (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
-        (claude-repl--ws-put "ws" :project-dir repo)
-        (should (claude-repl--any-cherry-pick-in-progress-p))))))
+    (claude-repl--ws-put "ws" :project-dir "/tmp/repo")
+    (cl-letf (((symbol-function 'file-directory-p)
+               (lambda (p) (equal p "/tmp/repo")))
+              ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+               (lambda (root) (equal root "/tmp/repo"))))
+      (should (claude-repl--any-cherry-pick-in-progress-p)))))
 
 (ert-deftest claude-repl-test-any-cherry-pick-in-progress-skips-missing-dir ()
   "Stale :project-dir entries (dir no longer exists) are skipped, not
@@ -7175,32 +7119,20 @@ queue untouched — another caller will drain after the live cherry-pick
 finishes."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
-      (claude-repl-test--with-temp-git-repo repo
-        (write-region "base" nil (expand-file-name "f" repo))
-        (call-process "git" nil nil nil "-C" repo "add" "f")
-        (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-        (claude-repl-test--git-checkout repo "feature" t)
-        (write-region "feature" nil (expand-file-name "f" repo))
-        (call-process "git" nil nil nil "-C" repo "add" "f")
-        (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-        (let ((sha-f1 (string-trim
-                       (shell-command-to-string
-                        (format "git -C %s rev-parse HEAD"
-                                (shell-quote-argument repo))))))
-          (claude-repl-test--git-checkout repo "master")
-          (write-region "master" nil (expand-file-name "f" repo))
-          (call-process "git" nil nil nil "-C" repo "add" "f")
-          (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-          (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
-          (claude-repl--ws-put "ws-blocker" :project-dir repo)
-          (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-          (claude-repl--enqueue-merge "ws1" t t)
-          (let ((called nil))
-            (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
-                       (lambda (&rest _) (setq called t))))
-              (claude-repl--drain-merge-queue)
-              (should-not called)
-              (should (= 1 (length claude-repl--merge-queue))))))))))
+      (claude-repl--ws-put "ws-blocker" :project-dir "/tmp/repo")
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (cl-letf (((symbol-function 'file-directory-p)
+                 (lambda (p) (member p '("/tmp/repo" "/tmp/ws1"))))
+                ;; Block: at least one ws dir has CHERRY_PICK_HEAD.
+                ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                 (lambda (root) (equal root "/tmp/repo"))))
+        (let ((called nil))
+          (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+                     (lambda (&rest _) (setq called t))))
+            (claude-repl--drain-merge-queue)
+            (should-not called)
+            (should (= 1 (length claude-repl--merge-queue)))))))))
 
 (ert-deftest claude-repl-test-drain-merge-queue-pops-oldest-first ()
   "Drain pops the oldest enqueued entry (FIFO)."
@@ -7307,35 +7239,22 @@ not propagate into the queue mutator and stall the merge flow."
 merge request is parked on the queue rather than running."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
-      (claude-repl-test--with-temp-git-repo repo
-        (write-region "base" nil (expand-file-name "f" repo))
-        (call-process "git" nil nil nil "-C" repo "add" "f")
-        (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M")
-        (claude-repl-test--git-checkout repo "feature" t)
-        (write-region "feature" nil (expand-file-name "f" repo))
-        (call-process "git" nil nil nil "-C" repo "add" "f")
-        (call-process "git" nil nil nil "-C" repo "commit" "-qm" "F1")
-        (let ((sha-f1 (string-trim
-                       (shell-command-to-string
-                        (format "git -C %s rev-parse HEAD"
-                                (shell-quote-argument repo))))))
-          (claude-repl-test--git-checkout repo "master")
-          (write-region "master" nil (expand-file-name "f" repo))
-          (call-process "git" nil nil nil "-C" repo "add" "f")
-          (call-process "git" nil nil nil "-C" repo "commit" "-qm" "M2")
-          (call-process "git" nil nil nil "-C" repo "cherry-pick" "-x" sha-f1)
-          (claude-repl--ws-put "ws-blocker" :project-dir repo)
-          ;; ws-pending has a registered project-dir so the "unknown ws"
-          ;; guard doesn't fire before the queue check.
-          (claude-repl--ws-put "ws-pending" :project-dir "/tmp/ws-pending")
-          (let ((merge-do-called nil))
-            (cl-letf (((symbol-function 'claude-repl--workspace-merge-do)
-                       (lambda (&rest _) (setq merge-do-called t))))
-              (claude-repl--workspace-merge-into-source "ws-pending" t t)
-              (should-not merge-do-called)
-              (should (= 1 (length claude-repl--merge-queue)))
-              (should (eq (claude-repl--ws-get "ws-pending" :repl-state)
-                          :merge-queued)))))))))
+      (claude-repl--ws-put "ws-blocker" :project-dir "/tmp/repo")
+      ;; ws-pending has a registered project-dir so the "unknown ws"
+      ;; guard doesn't fire before the queue check.
+      (claude-repl--ws-put "ws-pending" :project-dir "/tmp/ws-pending")
+      (cl-letf (((symbol-function 'file-directory-p)
+                 (lambda (p) (member p '("/tmp/repo" "/tmp/ws-pending"))))
+                ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                 (lambda (root) (equal root "/tmp/repo"))))
+        (let ((merge-do-called nil))
+          (cl-letf (((symbol-function 'claude-repl--workspace-merge-do)
+                     (lambda (&rest _) (setq merge-do-called t))))
+            (claude-repl--workspace-merge-into-source "ws-pending" t t)
+            (should-not merge-do-called)
+            (should (= 1 (length claude-repl--merge-queue)))
+            (should (eq (claude-repl--ws-get "ws-pending" :repl-state)
+                        :merge-queued))))))))
 
 ;;;; ---- Tests: claude-repl-create-explanation-engine-oneshot-workspace ----
 

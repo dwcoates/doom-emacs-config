@@ -658,53 +658,16 @@ environments without notification tools (terminal-notifier or osascript)."
             (should (claude-repl--git-root subdir))))
       (delete-directory tmpdir t))))
 
-;;;; ---- Tests: git-string ----
-
-(ert-deftest claude-repl-test-git-string-valid-command ()
-  "git-string with a valid command should return trimmed output."
-  (let ((result (claude-repl--git-string "rev-parse" "--show-toplevel")))
-    ;; We're in a git repo, so this should return a non-empty path
-    (should (stringp result))
-    (should (> (length result) 0))))
-
-(ert-deftest claude-repl-test-git-string-empty-result ()
-  "git-string with a command producing empty output returns empty string."
-  ;; `git tag -l nonexistent-tag-xxxxx` should produce nothing
-  (let ((result (claude-repl--git-string "tag" "-l" "nonexistent-tag-xxxxx-99999")))
-    (should (stringp result))
-    (should (equal result ""))))
-
-(ert-deftest claude-repl-test-git-string-invalid-command ()
-  "git-string with an invalid command should return a string (includes stderr)."
-  (let ((result (claude-repl--git-string "not-a-real-git-command-xyz")))
-    (should (stringp result))
-    ;; Should contain error text since stderr is included
-    (should (> (length result) 0))))
-
-;;;; ---- Tests: git-string-quiet ----
-
-(ert-deftest claude-repl-test-git-string-quiet-valid ()
-  "git-string-quiet with a valid command should return output."
-  (let ((result (claude-repl--git-string-quiet "rev-parse" "--show-toplevel")))
-    (should (stringp result))
-    (should (> (length result) 0))))
-
-(ert-deftest claude-repl-test-git-string-quiet-invalid ()
-  "git-string-quiet with an invalid command should return empty string."
-  (let ((default-directory "/tmp/"))
-    (let ((result (claude-repl--git-string-quiet "rev-parse" "--show-toplevel")))
-      ;; /tmp is not a git repo, so stderr is suppressed and result should be empty
-      (should (stringp result)))))
-
-(ert-deftest claude-repl-test-git-string-quiet-outside-repo ()
-  "git-string-quiet called outside any git repo should return empty string."
-  (let ((tmpdir (make-temp-file "test-no-git-" t)))
-    (unwind-protect
-        (let ((default-directory (file-name-as-directory tmpdir)))
-          (let ((result (claude-repl--git-string-quiet "rev-parse" "--show-toplevel")))
-            (should (stringp result))
-            (should (equal result ""))))
-      (delete-directory tmpdir t))))
+;;;; ---- Tests: git-string / git-string-quiet ----
+;;
+;; Intentionally none.  `claude-repl--git-string' and
+;; `claude-repl--git-string-quiet' are the external-boundary wrappers
+;; described by AGENTS.md "No External Processes or External State in
+;; Tests".  Per that policy they are not tested in isolation -- testing
+;; them would require either invoking real git (forbidden) or stubbing
+;; `shell-command-to-string' (tautological).  Their behavior is
+;; covered indirectly by the many callers that stub these wrappers
+;; via `cl-letf'.
 
 ;;;; ---- Tests: print-git-branch ----
 
