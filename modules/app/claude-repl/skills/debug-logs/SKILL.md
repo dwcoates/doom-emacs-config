@@ -14,6 +14,8 @@ Use them as your first source of truth when investigating any claude-repl bug �
 
 If the suspected problem is **performance** (Emacs feels slow, an operation hitches, a hot path is suspect) rather than logic / state, this skill is the wrong tool. Use `/profile` instead — it orchestrates a time-boxed capture of the Emacs profiler with auto-stop and analysis. `/debug-logs` is for reading history that already exists; `/profile` is for capturing fresh sampling data.
 
+If the relevant evidence is **not in the log** because the failing code is 3rd-party (magit, transient, doom-core, vterm, byte-compiler) and never calls `claude-repl--log`, the only on-host record is Emacs's `*Messages*` buffer. Use `/workspace-eval` to dump it to disk — see §9 below. `/workspace-eval` is also the right tool when you need to inspect live editor state (a value, a predicate, an internal data structure) that no logger has captured.
+
 ## 1. Where the log lives
 
 - Path: `~/.claude/emacs/doom-claude-repl.log` (current Emacs session)
@@ -234,6 +236,45 @@ Read the rolling log file (§1–§4) instead when:
 
 - Do not mutate the log file. It is append-only by the module.
 - Do not mutate `memory-state.el`. It is rewritten by Emacs on every state change; any edits will be clobbered.
-- Do not infer state by reading the live `*Messages*` buffer when the log file has the same data — the file survives session restarts and is the canonical record.
+- Do not infer state by reading `*Messages*` when the same data is in the log file — the log file is canonical for claude-repl events. (Reading `*Messages*` for 3rd-party output that the log does NOT carry is fine and covered in §9.)
 - Do not silently rotate or truncate the log unless the user explicitly asks; some bugs need historical context.
-- Do not skip step 5. If the log lacks coverage of the suspect code path, surface that emphatically and propose instrumentation — that IS the right next step.
+- Do not skip step 5. If the log lacks coverage of the suspect code path AND that path is in `modules/app/claude-repl/`, surface that emphatically and propose instrumentation — that IS the right next step. (If the path is 3rd-party, use §9 instead — you don't get to add `claude-repl--log` calls to magit.)
+
+## 9. Capturing 3rd-party output via the *Messages* buffer (`/workspace-eval`)
+
+The claude-repl log file contains ONLY messages emitted by `claude-repl--log` and friends. Output from 3rd-party packages — magit, transient, doom-core, vterm, the byte-compiler, package load failures — writes to Emacs's `*Messages*` buffer and is NOT mirrored to the log file. When a bug surfaces *through* claude-repl but is caused by 3rd-party code, the only on-host record of the upstream failure lives in `*Messages*`.
+
+Use `/workspace-eval` to dump `*Messages*` to disk, then read the dump from this session.
+
+### 9.1 Dump snippet
+
+Send this via `/workspace-eval` (workspace-eval routes the result back as a follow-up message):
+
+```elisp
+(let ((file (expand-file-name "messages-dump.txt" "~/.claude/emacs/")))
+  (make-directory (file-name-directory file) t)
+  (with-current-buffer "*Messages*"
+    (write-region (point-min) (point-max) file nil 'silent))
+  file)
+```
+
+The eval response prints the dump path. After it arrives:
+
+```bash
+tail -n 500 ~/.claude/emacs/messages-dump.txt
+grep -E 'Error|Warning|cannot|failed|void-function|void-variable' ~/.claude/emacs/messages-dump.txt
+```
+
+The dump path is stable (always `~/.claude/emacs/messages-dump.txt`) so subsequent dumps overwrite — read promptly or rename if you need to keep a copy.
+
+### 9.2 When to reach for this
+
+- The bug presents at Emacs startup or during a path where claude-repl is downstream of the failure (magit failing to load, transient redefinition warnings, byte-compile errors after a package bump).
+- The claude-repl log around the timestamp has no entry for the suspect path AND that path is NOT in `modules/app/claude-repl/`. §5-style instrumentation does not apply because the failing code is 3rd-party.
+- The user describes a symptom they saw flash in the echo area but the log file doesn't show.
+- Investigating package version drift, byte-compile breakage, or upstream API changes during a refactor or dep bump.
+
+### 9.3 What NOT to use this for
+
+- Replacing missing `claude-repl--log` instrumentation in claude-repl code. If the gap is in `modules/app/claude-repl/`, fix the instrumentation per §5; do not paper over it with a `*Messages*` dump.
+- "Just in case" dumps when you already have log evidence. The dump is an extra round-trip; prefer the log when it has the answer.
