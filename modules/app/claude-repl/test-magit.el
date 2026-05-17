@@ -94,44 +94,51 @@
     (should found)))
 
 ;;;; ---- Tests: claude-repl--gh-pr-url-for-branch ----
+;;
+;; Routes through `claude-repl--gh-string-quiet' (the external-boundary
+;; wrapper for the GitHub CLI).  Tests mock the wrapper rather than
+;; `shell-command-to-string' wholesale, per AGENTS.md.
 
 (ert-deftest claude-repl-test-gh-pr-url-for-branch-returns-url ()
   "Returns the URL emitted by `gh pr view --json url --jq .url'."
   (claude-repl-test--with-clean-state
-    (let ((captured-cmd nil))
-      (cl-letf (((symbol-function 'shell-command-to-string)
-                 (lambda (cmd)
-                   (setq captured-cmd cmd)
-                   "https://github.com/ChessCom/repo/pull/42\n")))
+    (let ((captured-args nil))
+      (cl-letf (((symbol-function 'claude-repl--gh-string-quiet)
+                 (lambda (&rest args)
+                   (setq captured-args args)
+                   "https://github.com/ChessCom/repo/pull/42")))
         (should (equal (claude-repl--gh-pr-url-for-branch "/tmp/proj" "feat/x")
                        "https://github.com/ChessCom/repo/pull/42"))
-        (should (string-match-p "gh pr view" captured-cmd))
-        (should (string-match-p "feat/x" captured-cmd))
-        (should (string-match-p "--json url" captured-cmd))
-        (should (string-match-p "2>/dev/null" captured-cmd))))))
+        (should (equal captured-args
+                       '("pr" "view" "feat/x" "--json" "url" "--jq" ".url")))))))
 
 (ert-deftest claude-repl-test-gh-pr-url-for-branch-no-pr-returns-nil ()
   "Returns nil when `gh' produces empty output (no PR for branch)."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'shell-command-to-string)
-               (lambda (_cmd) "")))
+    (cl-letf (((symbol-function 'claude-repl--gh-string-quiet)
+               (lambda (&rest _args) "")))
       (should (null (claude-repl--gh-pr-url-for-branch "/tmp/proj" "feat/x"))))))
 
 (ert-deftest claude-repl-test-gh-pr-url-for-branch-non-url-returns-nil ()
   "Returns nil when `gh' output isn't a URL (e.g. error text leaked)."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'shell-command-to-string)
-               (lambda (_cmd) "no pull requests found for branch \"feat/x\"")))
+    (cl-letf (((symbol-function 'claude-repl--gh-string-quiet)
+               (lambda (&rest _args) "no pull requests found for branch \"feat/x\"")))
       (should (null (claude-repl--gh-pr-url-for-branch "/tmp/proj" "feat/x"))))))
 
-(ert-deftest claude-repl-test-gh-pr-url-for-branch-shell-quotes-branch ()
-  "Branch names with shell metacharacters are quoted, not interpolated."
+(ert-deftest claude-repl-test-gh-pr-url-for-branch-passes-branch-as-arg ()
+  "Branch names are passed as a discrete arg to the wrapper, not interpolated
+into a shell string — the wrapper handles shell-quoting internally, so
+metacharacters are never reachable as shell syntax."
   (claude-repl-test--with-clean-state
-    (let ((captured-cmd nil))
-      (cl-letf (((symbol-function 'shell-command-to-string)
-                 (lambda (cmd) (setq captured-cmd cmd) "")))
+    (let ((captured-args nil))
+      (cl-letf (((symbol-function 'claude-repl--gh-string-quiet)
+                 (lambda (&rest args) (setq captured-args args) "")))
         (claude-repl--gh-pr-url-for-branch "/tmp/proj" "feat;rm -rf /")
-        (should (string-match-p "feat\\\\;rm" captured-cmd))))))
+        ;; The metacharacter-bearing branch name is the 3rd arg, exactly
+        ;; as-is — never spliced into a shell command at the production-
+        ;; code level.
+        (should (equal (nth 2 captured-args) "feat;rm -rf /"))))))
 
 ;;;; ---- Tests: +dwc/open-workspace-pr-in-browser ----
 
@@ -141,8 +148,10 @@
     (let ((browsed nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-1"))
                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
-                ((symbol-function 'shell-command-to-string)
-                 (lambda (_cmd) "feature-branch\n"))
+                ((symbol-function 'claude-repl--git-string)
+                 (lambda (&rest args)
+                   (should (equal args '("rev-parse" "--abbrev-ref" "HEAD")))
+                   "feature-branch"))
                 ((symbol-function 'claude-repl--gh-pr-url-for-branch)
                  (lambda (dir branch)
                    (should (equal dir "/tmp/proj"))
@@ -158,7 +167,8 @@
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-1"))
               ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
-              ((symbol-function 'shell-command-to-string) (lambda (_cmd) "main\n"))
+              ((symbol-function 'claude-repl--git-string)
+               (lambda (&rest _args) "main"))
               ((symbol-function 'claude-repl--gh-pr-url-for-branch)
                (lambda (_dir _branch) nil))
               ((symbol-function 'browse-url)

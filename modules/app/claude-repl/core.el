@@ -410,6 +410,19 @@ Suitable for init-time calls that may run outside a git repository."
     (concat (mapconcat #'shell-quote-argument (cons "git" args) " ")
             " 2>/dev/null"))))
 
+(defun claude-repl--gh-string-quiet (&rest args)
+  "Run a synchronous `gh' command and return its trimmed stdout, suppressing stderr.
+ARGS are the `gh' subcommand and arguments; each is shell-quoted.
+Returns an empty string when `gh' fails (no PR for branch, not
+authenticated, etc.).  The wrapper IS the external boundary for the
+GitHub CLI: tests must mock this function via `cl-letf' rather than
+invoke real `gh' (see AGENTS.md \"No External Processes or External
+State in Tests\")."
+  (string-trim
+   (shell-command-to-string
+    (concat (mapconcat #'shell-quote-argument (cons "gh" args) " ")
+            " 2>/dev/null"))))
+
 ;; FIXME: rename this to claude-repl--debug-git-bracnh. this is not meant for production code!
 (defvar claude-repl-git-branch
   (claude-repl--git-string-quiet "rev-parse" "--abbrev-ref" "HEAD")
