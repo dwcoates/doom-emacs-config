@@ -540,16 +540,20 @@ Focus remains on the current workspace."
 
 ;; Cmd+<numeral> workspace switching in insert mode
 ;; Doom binds s-1..s-9 with :n (normal only) on macOS. Add insert state.
-(map! :i "s-1" #'+workspace/switch-to-0
-      :i "s-2" #'+workspace/switch-to-1
-      :i "s-3" #'+workspace/switch-to-2
-      :i "s-4" #'+workspace/switch-to-3
-      :i "s-5" #'+workspace/switch-to-4
-      :i "s-6" #'+workspace/switch-to-5
-      :i "s-7" #'+workspace/switch-to-6
-      :i "s-8" #'+workspace/switch-to-7
-      :i "s-9" #'+workspace/switch-to-8
-      :i "s-0" #'+workspace/switch-to-final)
+;; Uses the prefix-arg-free `claude-repl-workspace-switch-to-*' wrappers
+;; (see modules/app/claude-repl/commands.el) so M-0 / s-0 cannot fall
+;; through to `text-scale-set' and M-9 / s-9 cannot land on the final
+;; workspace when a prefix arg is set.
+(map! :i "s-1" #'claude-repl-workspace-switch-to-0
+      :i "s-2" #'claude-repl-workspace-switch-to-1
+      :i "s-3" #'claude-repl-workspace-switch-to-2
+      :i "s-4" #'claude-repl-workspace-switch-to-3
+      :i "s-5" #'claude-repl-workspace-switch-to-4
+      :i "s-6" #'claude-repl-workspace-switch-to-5
+      :i "s-7" #'claude-repl-workspace-switch-to-6
+      :i "s-8" #'claude-repl-workspace-switch-to-7
+      :i "s-9" #'claude-repl-workspace-switch-to-8
+      :i "s-0" #'claude-repl-workspace-switch-to-final)
 
 ;; Open-most-recent-workspace: non-idempotent workspace switcher
 (defvar +dwc/workspace-history nil

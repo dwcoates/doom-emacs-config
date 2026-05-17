@@ -2837,3 +2837,84 @@ Drop-in replacement for `+workspace/switch-right' that honors
 `claude-repl-hide-mode-enabled'."
   (interactive)
   (claude-repl--workspace-cycle +1))
+
+;;;; Indexed workspace switchers (M-1..M-9, M-0 bindings)
+;;
+;; Thin persp wrappers around `+workspace-switch' used in place of the
+;; Doom `+workspace/switch-to-N' / `+workspace/switch-to-final' commands
+;; for the M-1..M-9 / M-0 bindings.  They were extracted to make the
+;; workspace-jump bindings ignore `current-prefix-arg' entirely — Doom's
+;; `+workspace/switch-to' inspects `current-prefix-arg' in its
+;; `interactive' form, which sporadically caused M-9 to land on the
+;; final workspace (when the previous key sequence had set a prefix
+;; arg) instead of the 9th, and M-0 to fall through to a no-op
+;; `text-scale-set' with the "The font hasn't been resized" message.
+;; These wrappers take no prefix argument and call `+workspace-switch'
+;; directly by name, so the behaviour is deterministic.
+;;
+;; `claude-repl--workspace-switch-by-index' is the shared core; the
+;; named commands below are the only entry points bound to keys.
+
+(defun claude-repl--workspace-switch-by-index (index)
+  "Switch to workspace at zero-based INDEX in `+workspace-list-names'.
+Signals `user-error' if INDEX is out of range.  Pure persp wrapper —
+does not consult `current-prefix-arg' and does not flash the tab."
+  (let* ((names (+workspace-list-names))
+         (dest (nth index names)))
+    (unless dest
+      (user-error "No workspace at #%s" (1+ index)))
+    (+workspace-switch dest)))
+
+(defun claude-repl-workspace-switch-to-0 ()
+  "Switch to the 1st workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 0))
+
+(defun claude-repl-workspace-switch-to-1 ()
+  "Switch to the 2nd workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 1))
+
+(defun claude-repl-workspace-switch-to-2 ()
+  "Switch to the 3rd workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 2))
+
+(defun claude-repl-workspace-switch-to-3 ()
+  "Switch to the 4th workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 3))
+
+(defun claude-repl-workspace-switch-to-4 ()
+  "Switch to the 5th workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 4))
+
+(defun claude-repl-workspace-switch-to-5 ()
+  "Switch to the 6th workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 5))
+
+(defun claude-repl-workspace-switch-to-6 ()
+  "Switch to the 7th workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 6))
+
+(defun claude-repl-workspace-switch-to-7 ()
+  "Switch to the 8th workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 7))
+
+(defun claude-repl-workspace-switch-to-8 ()
+  "Switch to the 9th workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 8))
+
+(defun claude-repl-workspace-switch-to-final ()
+  "Switch to the final (last) workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (let* ((names (+workspace-list-names))
+         (dest (car (last names))))
+    (unless dest
+      (user-error "No workspaces"))
+    (+workspace-switch dest)))

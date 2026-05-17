@@ -803,16 +803,31 @@ global drawer-mirror bindings win in vterm buffers."
       "s-}" #'claude-repl-switch-right)
 
 (map! :leader
-      :desc "Switch to 1st workspace"   "1" #'+workspace/switch-to-0
-      :desc "Switch to 2nd workspace"   "2" #'+workspace/switch-to-1
-      :desc "Switch to 3rd workspace"   "3" #'+workspace/switch-to-2
-      :desc "Switch to 4th workspace"   "4" #'+workspace/switch-to-3
-      :desc "Switch to 5th workspace"   "5" #'+workspace/switch-to-4
-      :desc "Switch to 6th workspace"   "6" #'+workspace/switch-to-5
-      :desc "Switch to 7th workspace"   "7" #'+workspace/switch-to-6
-      :desc "Switch to 8th workspace"   "8" #'+workspace/switch-to-7
-      :desc "Switch to 9th workspace"   "9" #'+workspace/switch-to-8
-      :desc "Switch to final workspace" "0" #'+workspace/switch-to-final)
+      :desc "Switch to 1st workspace"   "1" #'claude-repl-workspace-switch-to-0
+      :desc "Switch to 2nd workspace"   "2" #'claude-repl-workspace-switch-to-1
+      :desc "Switch to 3rd workspace"   "3" #'claude-repl-workspace-switch-to-2
+      :desc "Switch to 4th workspace"   "4" #'claude-repl-workspace-switch-to-3
+      :desc "Switch to 5th workspace"   "5" #'claude-repl-workspace-switch-to-4
+      :desc "Switch to 6th workspace"   "6" #'claude-repl-workspace-switch-to-5
+      :desc "Switch to 7th workspace"   "7" #'claude-repl-workspace-switch-to-6
+      :desc "Switch to 8th workspace"   "8" #'claude-repl-workspace-switch-to-7
+      :desc "Switch to 9th workspace"   "9" #'claude-repl-workspace-switch-to-8
+      :desc "Switch to final workspace" "0" #'claude-repl-workspace-switch-to-final)
+
+;; Override Doom's default M-1..M-9 / M-0 bindings so workspace jumps
+;; never consult `current-prefix-arg' and M-0 never falls through to
+;; `text-scale-set'.  See `claude-repl--workspace-switch-by-index' for
+;; rationale.
+(map! :g "M-1" #'claude-repl-workspace-switch-to-0
+      :g "M-2" #'claude-repl-workspace-switch-to-1
+      :g "M-3" #'claude-repl-workspace-switch-to-2
+      :g "M-4" #'claude-repl-workspace-switch-to-3
+      :g "M-5" #'claude-repl-workspace-switch-to-4
+      :g "M-6" #'claude-repl-workspace-switch-to-5
+      :g "M-7" #'claude-repl-workspace-switch-to-6
+      :g "M-8" #'claude-repl-workspace-switch-to-7
+      :g "M-9" #'claude-repl-workspace-switch-to-8
+      :g "M-0" #'claude-repl-workspace-switch-to-final)
 
 ;; SPC j -- Tell Claude to do a predefined thing
 (map! :leader
