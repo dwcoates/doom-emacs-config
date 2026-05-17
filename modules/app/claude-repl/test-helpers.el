@@ -345,13 +345,28 @@ behavior can rebind via `cl-letf'.")
 (defvar claude-repl-test--external-guards-installed nil
   "Non-nil after `claude-repl-test--install-external-guards' has fired.")
 
+(defvar claude-repl-test--external-original-functions nil
+  "Alist of (SYMBOL . ORIGINAL-FUNCTION) captured before guard install.
+Read by `claude-repl-test--verify-external-guards-installed' to assert
+each registered wrapper was actually reassigned away from its real
+implementation, and by any test that genuinely needs the real wrapper
+back (rare; usually a smell — see AGENTS.md).")
+
 (defun claude-repl-test--install-external-guards ()
   "Replace every symbol in `claude-repl--external-boundary-functions'
-with a guard that errors if invoked.  Tests stub these wrappers via
-`cl-letf' to satisfy production paths that reach them."
+with a guard that errors if invoked.  Captures the original function
+of each symbol into `claude-repl-test--external-original-functions'
+so the install can be verified after the fact by
+`claude-repl-test--verify-external-guards-installed' (proves the
+`fset' actually took for every registry entry)."
   (unless claude-repl-test--external-guards-installed
     (when (boundp 'claude-repl--external-boundary-functions)
       (dolist (sym claude-repl--external-boundary-functions)
+        ;; Capture the real impl FIRST so we can verify replacement
+        ;; afterwards (and so a rare test that needs the real impl
+        ;; back has a documented escape hatch).
+        (push (cons sym (and (fboundp sym) (symbol-function sym)))
+              claude-repl-test--external-original-functions)
         (let ((fn-name sym))
           (fset sym
                 (lambda (&rest args)
@@ -366,7 +381,44 @@ with a guard that errors if invoked.  Tests stub these wrappers via
                    fn-name args fn-name))))))
     (setq claude-repl-test--external-guards-installed t)))
 
+(defun claude-repl-test--verify-external-guards-installed ()
+  "Sanity-check that every symbol in `claude-repl--external-boundary-functions'
+has actually been reassigned away from its captured original.
+Signals `error' loudly listing every symbol whose `symbol-function'
+still matches the captured pre-guard implementation — that condition
+means the install loop missed an entry (registry/install bug), and
+running tests under that state would silently let production code
+shell out to the real binary."
+  (let ((missed nil))
+    (when (boundp 'claude-repl--external-boundary-functions)
+      (dolist (sym claude-repl--external-boundary-functions)
+        (let* ((cell (assq sym claude-repl-test--external-original-functions))
+               (orig (cdr cell))
+               (current (and (fboundp sym) (symbol-function sym))))
+          (cond
+           ((null cell)
+            ;; Symbol was registered but never seen by the install loop.
+            (push (cons sym 'never-captured) missed))
+           ((eq orig current)
+            ;; Symbol still bound to its real implementation — guard `fset` did not take.
+            (push (cons sym 'guard-not-installed) missed))))))
+    (when missed
+      (error
+       (concat
+        "External-boundary guards INVARIANT VIOLATED.  The test harness "
+        "tried to replace every wrapper in `claude-repl--external-boundary-functions' "
+        "with an unmocked-call guard, but the following entries are still bound "
+        "to their original implementation (or were skipped entirely): %S.  "
+        "Refusing to run tests in this state because production code would "
+        "silently shell out to real external binaries.")
+       missed))))
+
 (claude-repl-test--install-external-guards)
+;; Eager verification: if the install missed anything, abort BEFORE any
+;; test gets a chance to silently shell out.  Failure here means a
+;; bug in the install loop, the registry, or someone clobbered the
+;; guards between install and now.
+(claude-repl-test--verify-external-guards-installed)
 
 ;; Redirect the events log to a throwaway temp path so any test that
 ;; exercises a code path which records workspace lifecycle events does
@@ -447,6 +499,35 @@ that shells out to git from the cwd."
          (unless ,pre-sym
            (when (buffer-live-p ,buf-sym)
              (kill-buffer ,buf-sym)))))))
+
+;;;; ---- Visible-in-report sanity test for the registry+guard scheme ----
+;;
+;; The eager call to `claude-repl-test--verify-external-guards-installed'
+;; above already aborts test-helpers load if the invariant is violated.
+;; This `ert-deftest' duplicates that check inside the ert harness so
+;; the assertion shows up in the test report as a discrete green/red
+;; line — operators reading a CI failure log see immediately whether
+;; the guard machinery is intact.
+;;
+;; Naming: leading `AAA-' makes the test sort BEFORE every other
+;; `claude-repl-test-*' under default ert alphabetical ordering (`A' < `a'
+;; in ASCII), so a broken install fails the very first line of the report.
+
+(ert-deftest claude-repl-test-AAA-external-guards-installed-globally ()
+  "Every symbol in `claude-repl--external-boundary-functions' must be
+reassigned to the unmocked-call guard before any test runs.  Fails
+the report explicitly if the install loop missed an entry."
+  (should claude-repl-test--external-guards-installed)
+  (should claude-repl--external-boundary-functions)
+  (dolist (sym claude-repl--external-boundary-functions)
+    (let* ((cell (assq sym claude-repl-test--external-original-functions))
+           (orig (cdr cell))
+           (current (and (fboundp sym) (symbol-function sym))))
+      ;; A pre-install original was captured for this symbol.
+      (should cell)
+      ;; The current binding is NOT the captured original — i.e. the
+      ;; guard actually took.
+      (should-not (eq orig current)))))
 
 (provide 'test-helpers)
 
