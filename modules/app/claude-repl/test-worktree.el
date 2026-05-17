@@ -3178,7 +3178,10 @@ lookup — the registry is keyed by bare names so the lookup must agree."
 ;;;; ---- Tests: finish-workspace ----
 
 (ert-deftest claude-repl-test-finish-workspace-non-worktree ()
-  "Finishing a non-worktree workspace cleans state and kills persp."
+  "Finishing a non-worktree workspace tombstones state and kills persp.
+Post-tombstone-refactor, finish-workspace no longer removes the hash
+entry — it stamps `:nuked-at' via `--ws-del'.  This test pins both the
+persp-kill and the resulting tombstone marker."
   (claude-repl-test--with-clean-state
     (let ((persp-killed nil))
       (claude-repl--ws-put "ws1" :project-dir "/tmp/fake")
@@ -3187,8 +3190,9 @@ lookup — the registry is keyed by bare names so the lookup must agree."
                 ((symbol-function 'persp-kill) (lambda (ws) (setq persp-killed ws))))
         (claude-repl--finish-workspace "ws1")
         (should (equal persp-killed "ws1"))
-        ;; State should be removed
-        (should (null (gethash "ws1" claude-repl--workspaces)))))))
+        ;; Tombstoned: entry survives with `:nuked-at', not live.
+        (should (claude-repl--ws-get "ws1" :nuked-at))
+        (should-not (claude-repl--ws-live-p "ws1"))))))
 
 (ert-deftest claude-repl-test-finish-workspace-with-worktree ()
   "Finishing a worktree workspace removes the git worktree."
@@ -3210,14 +3214,18 @@ lookup — the registry is keyed by bare names so the lookup must agree."
           (delete-directory tmpdir t))))))
 
 (ert-deftest claude-repl-test-finish-workspace-normalizes-name ()
-  "Branch-style name 'DWC/foo' is normalized to 'foo'."
+  "Branch-style name 'DWC/foo' is normalized to 'foo' before tombstoning.
+The post-refactor invariant is that the hash entry is tombstoned (not
+removed); we pin both the name normalization and the resulting
+liveness flip."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "foo" :project-dir "/tmp/fake")
     (cl-letf (((symbol-function 'claude-repl--kill-vterm-process) (lambda (_b) nil))
               ((symbol-function '+workspace-list-names) (lambda () '("foo")))
               ((symbol-function 'persp-kill) (lambda (_ws) nil)))
       (claude-repl--finish-workspace "DWC/foo")
-      (should (null (gethash "foo" claude-repl--workspaces))))))
+      (should-not (claude-repl--ws-live-p "foo"))
+      (should (claude-repl--ws-get "foo" :nuked-at)))))
 
 (ert-deftest claude-repl-test-finish-workspace-kills-vterm ()
   "Vterm buffer process is killed when present."
