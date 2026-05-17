@@ -142,6 +142,20 @@ Never use `git commit --no-verify` to bypass it; fix the failures instead.
 
 **When you encounter a test that violates this rule:** stop, refactor the production code to introduce the wrapper if it doesn't already exist, then rewrite the test to mock the wrapper. Do not add new tests that perpetuate the pattern.
 
+### We test lisp, not external code
+
+The corollary to "no external processes in tests" is: **tests exist to cover elisp behavior, not external program behavior.** If a candidate test would exclusively exercise a non-elisp artifact (a shell script, an installed binary's command-line surface, a remote service, etc.), it does NOT belong in the ERT suite.
+
+Concretely: do not add a test whose body is "spawn the external thing, then assert on what it did." Mocking the external call in that situation reduces the test to asserting nothing of value (the entirety of the contract under test lives outside lisp). The right path is:
+
+- If lisp dispatches to the external thing, test the lisp dispatch — mock the wrapper and assert the dispatch logic.
+
+- If you genuinely want to cover the external thing's behavior, write that coverage as a separate runner (a `make test-install-bash` target, a CI job, a hand-run harness). It does not belong in the ERT batch invoked by the pre-commit hook.
+
+- If the external thing has been hard to test for a long time, that is a signal to port its essential logic into elisp — not a license to add an integration test to the ERT suite.
+
+This corollary is the policy reason `test-install.el` no longer ships its `bash install.sh`-spawning tests, and it is the reason no future revision of the suite should reintroduce them.
+
 ### How the rule is enforced (defense-in-depth)
 
 Static analysis of TESTS is necessary but not sufficient — tests pass through PRODUCTION code which may itself call external binaries. The rule is enforced by THREE coordinated mechanisms.
