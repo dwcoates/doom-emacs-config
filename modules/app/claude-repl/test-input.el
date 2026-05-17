@@ -420,6 +420,24 @@
            "Plain english after the emoji is permitted"
            claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-tldr-entries-state-clarity ()
+  "TLDR spec must require each entry's implicit language to disambiguate
+current vs. proposed/suggested vs. just-changed state, so the user never has
+to guess whether a bullet describes how things currently work, how they will
+work after a proposed change, or how they work now after a change just made."
+  (should (string-match-p
+           "make clear via its implicit language"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "current/existing state"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "proposed/suggested future state"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "just changed in this response"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-emoji-only-in-tldr ()
   "Emoji prefixing must be prescribed for TLDR top-level bullets only.
 The first occurrence of 'emoji' in the prefix should be in a TLDR-only context
