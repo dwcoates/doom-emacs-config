@@ -80,7 +80,16 @@ When in doubt: fail loudly. When a precondition fails: abort entirely. When temp
 
 ## Testing
 
-After any changes to `modules/app/claude-repl/`, always run the claude-repl test suite:
+After any changes to `modules/app/claude-repl/`, always run the claude-repl test suite. Prefer the safety-net wrapper:
+
+```bash
+.claude/safe-test-run.sh           # full suite
+.claude/safe-test-run.sh "^foo"    # ert selector regex
+```
+
+The wrapper drops a checkpoint tag at `HEAD` before invoking ert, then diffs the pre/post git state (HEAD, all refs/heads, all refs/tags, working-tree status). On any drift the checkpoint tag is **preserved** and the script prints the exact `git reset --hard <tag>` command to roll back; on a clean run the tag is auto-removed. Exit codes: `0` clean, `1` test failures, `2` drift detected, `3` environment error.
+
+You may invoke ert directly if you have a specific reason:
 
 ```bash
 emacs -batch -Q -l ert -l modules/app/claude-repl/test-claude-repl.el -f ert-run-tests-batch-and-exit
