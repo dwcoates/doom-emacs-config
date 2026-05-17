@@ -129,7 +129,7 @@ Tears down any existing watch first to avoid duplicates on re-eval."
   "Run git in ROOT with ARGS, return exit code.
 This IS the external-boundary wrapper — tests mock it via `cl-letf'
 \(see `claude-repl--external-boundary-functions' in core.el)."
-  (apply #'call-process "git" nil nil nil "-C" root args)) ;; ALLOW-EXTERNAL-BOUNDARY
+  (apply #'call-process "git" nil nil nil "-C" root args))
 
 (defun claude-repl--git-branch-exists-p (root branch)
   "Return non-nil if BRANCH exists in git repo at ROOT."
@@ -326,7 +326,7 @@ This IS the external-boundary wrapper — tests mock it via `cl-letf'
 \(see `claude-repl--external-boundary-functions' in core.el)."
   (claude-repl--log nil "async-git: label=%s git-root=%s args=%S" label git-root args)
   (let* ((buf (generate-new-buffer (format " *claude-repl-%s*" label)))
-         (proc (apply #'start-process ;; ALLOW-EXTERNAL-BOUNDARY
+         (proc (apply #'start-process
                       (format "claude-repl-%s" label)
                       buf
                       "git" "-C" git-root

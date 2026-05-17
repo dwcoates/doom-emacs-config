@@ -431,12 +431,21 @@ State in Tests\")."
 ;; that fails to `cl-letf' over the wrapper fails LOUDLY rather than
 ;; silently shelling out to the real binary.
 ;;
+;; **There is no automated backstop for missing wrappers.**  If you add
+;; a raw `(shell-command-to-string ...)' / `(call-process ...)' /
+;; `(start-process ...)' to production code without extracting it into
+;; a wrapper, NOTHING — not the test harness, not the pre-commit hook,
+;; not the registry — will catch you.  The agent's diligence on every
+;; diff IS the enforcement.  Audit every change for raw subprocess
+;; calls before committing; see AGENTS.md "No External Processes or
+;; External State in Tests" for the explicit per-diff checklist.
+;;
 ;; When adding a new wrapper:
-;;   1. Define it in core.el (or the closest production file).
-;;   2. Add its symbol here.
+;;   1. Define it in core.el (or the closest production file) — body
+;;      must do nothing but invoke the external thing.
+;;   2. Add its symbol here in the SAME commit.
 ;;   3. Update AGENTS.md "No External Processes or External State in
-;;      Tests" if a new naming-convention class is introduced (e.g.
-;;      first time we wrap a new resource like `curl` or `pbcopy`).
+;;      Tests" if a new naming-convention class is introduced.
 
 (defvar claude-repl--external-boundary-functions
   '(claude-repl--git-string
@@ -451,12 +460,9 @@ Each MUST be mocked by tests that reach it via production code.  The
 test harness installs guards so unmocked invocations fail loudly.
 
 Maintainer rule: when adding a new external-boundary wrapper, you
-MUST register it here in the same commit that introduces it.  CI's
-boundary lint (\".claude/check-external-boundaries.sh\") greps for
-raw `shell-command-to-string'/`call-process'/`start-process' uses of
-external binaries in non-wrapper production code and fails the build
-on hits; adding the wrapper to this list is the path that the lint
-expects you to take.")
+MUST register it here in the same commit that introduces it.  There
+is no static lint backstop — the agent's audit of every diff for
+raw subprocess calls is the only enforcement.")
 
 ;; Lazily-populated debug accessor.  Originally a `defvar' whose default
 ;; value shelled out to git at module load time — that real-git call

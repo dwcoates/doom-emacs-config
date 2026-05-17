@@ -156,47 +156,49 @@ Concretely: do not add a test whose body is "spawn the external thing, then asse
 
 This corollary is the policy reason `test-install.el` no longer ships its `bash install.sh`-spawning tests, and it is the reason no future revision of the suite should reintroduce them.
 
-### How the rule is enforced (defense-in-depth)
+### How the rule is enforced
 
-Static analysis of TESTS is necessary but not sufficient — tests pass through PRODUCTION code which may itself call external binaries. The rule is enforced by THREE coordinated mechanisms.
+**The agent's per-diff audit is the SOLE primary enforcement.** There is no static lint, no regex grep, no commit-time backstop that catches raw external calls in production code. If you (the agent) miss extracting a wrapper, the failure mode is silent — a test reaches the raw `shell-command-to-string`/`call-process`/`start-process` call, real `git`/`gh`/etc. runs, no alarm fires.
 
-#### (a) Wrapper registry (single source of truth)
+This is deliberate. A backstop would create moral hazard: the agent learns to rely on it ("the lint will catch me") and the primary obligation erodes. The system instead trusts the agent to do its job correctly, and the cost of a miss is borne immediately by the resulting silent state pollution — which is exactly the failure class that motivated this policy in the first place.
 
-Every external-boundary wrapper symbol is listed in `claude-repl--external-boundary-functions' (defvar in `modules/app/claude-repl/core.el'). When you introduce a new wrapper, you MUST add it to that list in the same commit. The list IS the registry of "what tests must mock".
+**Required agent workflow on every diff that touches `modules/app/claude-repl/`:**
 
-#### (b) Runtime guards (catch unmocked test paths)
+1. **Audit step (mandatory, explicit).** Before staging the commit, search the diff for every occurrence of `call-process`, `start-process`, `make-process`, `shell-command`, `shell-command-to-string`, `async-shell-command`, `process-file` — in production files (NOT test files; NOT the wrapper-definition file core.el).
 
-`modules/app/claude-repl/test-helpers.el' iterates the registry at load time and replaces every wrapper's function cell with a guard that errors with `EXTERNAL BOUNDARY UNMOCKED: ...' if invoked. Tests `cl-letf' over the guard to install their fixture; tests that forget fail loudly. This catches the case where the test exercises a production code path that reaches an unmocked wrapper — without the guard, such a test would silently shell out to real `git`/`gh`/etc.
+2. **Classify each hit.** Each one is either:
+  - (i) Inside a wrapper definition listed in `claude-repl--external-boundary-functions' (acceptable — the wrapper IS the external boundary).
+  - (ii) Raw production code that needs to be extracted into a new wrapper (NOT acceptable; refactor before committing).
 
-The guard fires AFTER the production module is fully loaded, so any module-load-time defvar that calls a wrapper (rare; see commit history for the `claude-repl-git-branch' lazification) is not blocked. If you genuinely need to compute a wrapper-derived value at module load, defer it (lazy variable + accessor function).
+3. **No exceptions.** Phrases like "this is just for X, it's safe" are never valid. If you find yourself reasoning "this one is fine because…", stop and extract the wrapper anyway.
 
-#### (c) Static lint (catch raw production-side calls)
+There IS one secondary safety net, but it covers a DIFFERENT failure mode:
 
-`.claude/check-external-boundaries.sh' greps non-wrapper production files for direct subprocess calls naming an external binary (`git`, `gh`, ...). The pre-commit hook runs this before the ERT suite — fast, fail-fast — and the hook fails on hits. A wrapper definition's own subprocess call is exempted by tagging that line with `;; ALLOW-EXTERNAL-BOUNDARY' (see `claude-repl--git-exit-code' in worktree.el for the canonical use). Adding a new binary to the lint's regex is part of the cost of introducing a new external boundary.
+#### Runtime guards (catch unmocked-WRAPPER test paths only)
 
-**The three layers form an interlocking chain:**
+`modules/app/claude-repl/test-helpers.el' iterates the registry at load time and replaces every wrapper's function cell with a guard that errors with `EXTERNAL BOUNDARY UNMOCKED: ...' if invoked. Tests `cl-letf' over the guard to install their fixture; tests that forget fail loudly.
 
-- (c) ensures production code can ONLY reach external state via a wrapper.
+This catches: a test that exercises a code path reaching a registered wrapper without mocking it. The test sees a loud error pointing at exactly which wrapper needs the `cl-letf` binding.
 
-- (a) ensures every wrapper is enumerated.
+This does NOT catch: a raw `(shell-command-to-string "git ...")` in production code that bypasses every registered wrapper. That class of bug is the agent's audit step's responsibility, and there is no automated tripwire.
 
-- (b) ensures every test that reaches a wrapper has mocked it.
+#### Wrapper registry (single source of truth)
 
-A bug that escapes one layer is caught by the next. Specifically: a test that mocks `shell-command-to-string` wholesale (instead of mocking the wrapper) would have masked the unwrapped raw call in production — under the new policy, (c) catches the raw production call at commit time and the mock-the-wrapper pattern in (b) becomes the only mock shape that satisfies the guard.
+`claude-repl--external-boundary-functions' (defvar in `modules/app/claude-repl/core.el') is the canonical list. The runtime guards iterate it. When you introduce a new wrapper, you MUST add it to that list in the same commit — otherwise the guard never installs for it and tests can silently shell out.
 
 ### Maintainer rule for new external wrappers
 
 When you wrap a new external binary `X`:
 
-1. Add `claude-repl--X-string` (or `--X-string-quiet`, etc.) to core.el. Tag the subprocess line with `;; ALLOW-EXTERNAL-BOUNDARY'.
+1. Define `claude-repl--X-string` (or `--X-string-quiet`, etc.) in core.el. The body does NOTHING but invoke the external thing — no conditional logic, no parsing, no retries.
 
-2. Add the wrapper symbol to `claude-repl--external-boundary-functions' in the same commit.
+2. Add the wrapper symbol to `claude-repl--external-boundary-functions' in the SAME commit. Skipping this step means no guard, no protection, silent leak.
 
-3. Extend the regex in `.claude/check-external-boundaries.sh' to include `X` in the alternation. (If you skip this, the lint will silently miss future raw `X` calls.)
+3. Update any existing production sites that already call `X` raw to route through the new wrapper.
 
-4. Update any existing production sites that already call `X` raw to route through the new wrapper.
+4. Update or add tests; per the policy they `cl-letf` the wrapper, not `shell-command-to-string`.
 
-5. Update or add tests; per the new pattern they `cl-letf` the wrapper, not `shell-command-to-string`.
+5. Re-run the agent audit step (mandatory step 1 above) on the final diff before committing, including the new files you just wrote.
 
 ## Paren Checking
 

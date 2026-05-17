@@ -42,18 +42,6 @@ if ! git diff --cached --name-only | grep -qE '^modules/app/claude-repl/.*\.el$'
   exit 0
 fi
 
-# Static lint: no raw external-process invocations outside the wrapper
-# layer.  See AGENTS.md "No External Processes or External State in
-# Tests".  Cheap (grep-only) so we run it before the much slower ert
-# suite — fail fast on policy violations.
-BOUNDARY_LINT="$REPO_ROOT/.claude/check-external-boundaries.sh"
-if [ -x "$BOUNDARY_LINT" ]; then
-  if ! "$BOUNDARY_LINT"; then
-    echo "[pre-commit] ✗ external-boundary lint failed — refusing commit." >&2
-    exit 1
-  fi
-fi
-
 TEST_FILE="$REPO_ROOT/modules/app/claude-repl/test-claude-repl.el"
 
 if [ ! -f "$TEST_FILE" ]; then
