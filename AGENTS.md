@@ -86,6 +86,14 @@ After any changes to `modules/app/claude-repl/`, always run the claude-repl test
 emacs -batch -Q -l ert -l modules/app/claude-repl/test-claude-repl.el -f ert-run-tests-batch-and-exit
 ```
 
+A repo-checked-in pre-commit hook enforces this automatically: when any `modules/app/claude-repl/**.el` file is staged, the suite runs and a failure blocks the commit. The hook lives at `.githooks/pre-commit`. Install once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Never use `git commit --no-verify` to bypass it; fix the failures instead.
+
 **Zero tolerance for test failures.** Every test failure is a real bug that must be fixed before your work is done. **There is NO such thing as a "pre-existing" failure — not under ANY circumstances, EVER.** Do not investigate whether a failure predates your work. Do not check git history. Do not stash, checkout, or touch git state to "verify" it was already broken. Do not rationalize, dismiss, categorize, defer, or explain away any test failure for any reason whatsoever. If a test fails, fix it. Every failing test is your responsibility the moment you observe it. Never report work as complete while any test is failing.
 
 ## Paren Checking
