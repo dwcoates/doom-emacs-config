@@ -327,6 +327,47 @@ behavior can rebind via `cl-letf'.")
 (when (boundp 'claude-repl-log-to-file)
   (setq claude-repl-log-to-file nil))
 
+;;;; ---- External-boundary guards ----
+;;
+;; The production module (loaded above) defines every external-process
+;; wrapper in `claude-repl--external-boundary-functions'.  Replace each
+;; with a guard that ERRORS if called during a test run — tests must
+;; `cl-letf' over the wrapper before exercising any production path
+;; that reaches it.  Without this, a test could silently shell out to
+;; real `git'/`gh'/etc. and either pollute external state (the
+;; original `branch-a` etc. incident) or pass for the wrong reason.
+;;
+;; This is the runtime half of the policy in AGENTS.md "No External
+;; Processes or External State in Tests".  The static half is
+;; `.claude/check-external-boundaries.sh' (pre-commit-installed lint).
+;;
+;; Idempotent — only installs once per Emacs session.
+(defvar claude-repl-test--external-guards-installed nil
+  "Non-nil after `claude-repl-test--install-external-guards' has fired.")
+
+(defun claude-repl-test--install-external-guards ()
+  "Replace every symbol in `claude-repl--external-boundary-functions'
+with a guard that errors if invoked.  Tests stub these wrappers via
+`cl-letf' to satisfy production paths that reach them."
+  (unless claude-repl-test--external-guards-installed
+    (when (boundp 'claude-repl--external-boundary-functions)
+      (dolist (sym claude-repl--external-boundary-functions)
+        (let ((fn-name sym))
+          (fset sym
+                (lambda (&rest args)
+                  (error
+                   (concat
+                    "EXTERNAL BOUNDARY UNMOCKED: `%s' called with %S during a test run.\n"
+                    "Per AGENTS.md \"No External Processes or External State in Tests\",\n"
+                    "every external-boundary wrapper must be stubbed via `cl-letf' before\n"
+                    "the production code under test reaches it.\n"
+                    "Fix: add `((symbol-function '%s) (lambda (&rest _args) <fixture>))`\n"
+                    "to your test's `cl-letf' bindings.")
+                   fn-name args fn-name))))))
+    (setq claude-repl-test--external-guards-installed t)))
+
+(claude-repl-test--install-external-guards)
+
 ;; Redirect the events log to a throwaway temp path so any test that
 ;; exercises a code path which records workspace lifecycle events does
 ;; not clobber the user's real `~/.claude/emacs/events.el'.  Per-test
