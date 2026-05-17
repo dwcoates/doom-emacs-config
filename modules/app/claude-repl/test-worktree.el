@@ -1268,9 +1268,16 @@ UI, run the merge on a worker thread, and reopen on failure."
            (puthash "DWC/dup" t h)
            h))
         (claude-repl-worktree-start-tag-prefix nil))
-    ;; In-flight check fires first; subsequent probes should never run.
+    ;; The production function eagerly computes the candidate path in
+    ;; its `let*' before any short-circuit check, so
+    ;; `claude-repl--candidate-worktree-path' DOES run and must return
+    ;; a string.  But after the in-flight hit wins, no other probe
+    ;; (file-directory-p, --git-exit-code) should fire — those stay
+    ;; error-on-call.
     (cl-letf (((symbol-function 'claude-repl--candidate-worktree-path)
-               (lambda (&rest _args) (error "unexpected candidate-worktree-path call")))
+               (lambda (&rest _args) "/tmp/repo-worktrees/dup"))
+              ((symbol-function 'file-directory-p)
+               (lambda (&rest _args) (error "unexpected file-directory-p call")))
               ((symbol-function 'claude-repl--git-exit-code)
                (lambda (&rest _args) (error "unexpected git-exit-code call"))))
       (should (claude-repl--workspace-name-collides-p "DWC/dup" "/tmp/repo")))))
