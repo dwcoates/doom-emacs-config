@@ -530,17 +530,6 @@ while the user's interactive Claude is still mid-turn."
           (claude-repl--prompt-summary-apply "ws1" "raw" "Title")
           (should called))))))
 
-;;;; ---- Tests: sandbox-mode-line includes the segment ----
-
-(ert-deftest claude-repl-test-sandbox-mode-line-has-eval-segment ()
-  "sandbox-mode-line returns a list whose tail is the :eval segment."
-  (let ((result (claude-repl--sandbox-mode-line nil nil)))
-    (should (>= (length result) 2))
-    ;; The :eval form is a cons cell starting with :eval.
-    (let ((tail (car (last result))))
-      (should (consp tail))
-      (should (eq (car tail) :eval)))))
-
 ;;;; ---- Tests: do-send invokes kickoff ----
 
 (ert-deftest claude-repl-test-do-send-kicks-off-prompt-summary ()

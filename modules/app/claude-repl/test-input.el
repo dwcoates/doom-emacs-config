@@ -1853,7 +1853,10 @@ buffer-string, not a trimmed view."
       (claude-input-mode))
     ;; Header line should be set
     (should (stringp header-line-format))
-    (should (string-match-p "RET" header-line-format))
+    ;; Match on "send" rather than a specific keybinding glyph (e.g. "RET")
+    ;; so the assertion stays decoupled from the chord chosen — the structural
+    ;; invariant is that the header advertises how to send.
+    (should (string-match-p "send" header-line-format))
     ;; Visual line mode should be enabled
     (should visual-line-mode)
     ;; pre-command-hook should include slash-intercept-backspace
