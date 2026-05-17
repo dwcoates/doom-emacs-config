@@ -339,10 +339,10 @@ from prompting for tool approval headlessly."
 (defcustom claude-repl-explain-config-width-fraction 0.5
   "Fraction of frame width for the explain-config right-side popup.
 Only applies when the popup falls back to its own side window (i.e.
-when no claude vterm output window is visible to take over).  Width
-is matched to the vterm window when the popup takes that window
-over — see `claude-repl--explain-config-show'.  The drawer is
-untouched in either branch."
+when the claude output window is not visible to take over).  Width
+is inherited from the claude output window when the popup takes
+that window over — see `claude-repl--explain-config-show'.  The
+drawer is untouched in either branch."
   :type 'float
   :group 'claude-repl)
 
@@ -362,8 +362,8 @@ host frame's width."
      (no-delete-other-windows . t)
      (no-other-window . nil)))
   "Fallback display action for the explain-config output buffer.
-Used only when no claude vterm output window is visible to take
-over — when a vterm window exists, `--show' reuses it directly via
+Used only when the claude output window is not visible to take
+over — when it is, `--show' reuses it directly via
 `set-window-buffer' and bypasses `display-buffer' entirely.  The
 drawer is never touched.  Reconciled across workspace switches via
 the persp-activated hook.")
@@ -379,13 +379,14 @@ per-workspace artifact — mirrors the drawer's own
 `--global-visible-p' pattern.")
 
 (defvar claude-repl--explain-config-replaced-window nil
-  "When the popup is hosted in a stolen vterm window, holds (WIN . PREV-BUF).
-WIN is the live vterm window the popup took over; PREV-BUF is the
-buffer that window was displaying before takeover (usually the
-claude vterm buffer).  Nil when the popup is hosted in its own
-side window (i.e. no vterm window was available at show time).
-Consumed by `claude-repl--explain-config-hide' to restore the
-prior buffer in the same window position when the popup closes.")
+  "When the popup has taken over the claude output window, holds (WIN . PREV-BUF).
+WIN is the live claude output window the popup took over; PREV-BUF
+is the buffer that window was displaying before takeover (the
+claude output buffer for the current workspace).  Nil when the
+popup is hosted in its own side window (i.e. the claude output
+window was not visible at show time).  Consumed by
+`claude-repl--explain-config-hide' to restore the prior buffer in
+the same window position when the popup closes.")
 
 (defun claude-repl--explain-config-apply-width (window)
   "Resize WINDOW to the configured explain-config width.
@@ -402,35 +403,37 @@ changed.  This forces the resize on every show — mirrors the drawer's
          ((> delta 0) (enlarge-window delta t))
          ((< delta 0) (shrink-window (abs delta) t)))))))
 
-(defun claude-repl--explain-config-current-vterm-window ()
-  "Return the live claude vterm window in the selected frame, or nil.
-Looks up the current workspace's `:vterm' panel via
-`claude-repl-window--panel-window'.  Guards on `fboundp' so callers
-in load order before panels.el (e.g. early test harnesses) get nil
-instead of a void-function error."
+(defun claude-repl--explain-config-current-claude-output-window ()
+  "Return the live claude output window in the selected frame, or nil.
+Looks up the current workspace's claude output panel via
+`claude-repl-window--panel-window' with the `:vterm' key (the
+existing panel-lookup key — note we do NOT introduce that name
+here, the popup itself only deals in \"claude output\").  Guards
+on `fboundp' so callers in load order before panels.el (e.g. early
+test harnesses) get nil instead of a void-function error."
   (and (fboundp 'claude-repl-window--panel-window)
        (claude-repl-window--panel-window :vterm)))
 
-(defun claude-repl--explain-config-take-over-vterm-window (vterm-win buf)
-  "Swap VTERM-WIN's buffer for BUF and record the original for restoration.
-Vterm panels are dedicated windows, so this temporarily clears
-`window-dedicated-p' before `set-window-buffer' — otherwise the swap
-errors.  The pre-swap buffer is stashed in
+(defun claude-repl--explain-config-take-over-claude-output-window (output-win buf)
+  "Swap OUTPUT-WIN's buffer for BUF and record the original for restoration.
+The claude output panel is a dedicated window, so this temporarily
+clears `window-dedicated-p' before `set-window-buffer' — otherwise
+the swap errors.  The pre-swap buffer is stashed in
 `claude-repl--explain-config-replaced-window' so
-`claude-repl--explain-config-hide' can restore it.  Returns VTERM-WIN."
-  (let ((prev-buf (window-buffer vterm-win)))
-    (set-window-dedicated-p vterm-win nil)
-    (set-window-buffer vterm-win buf)
+`claude-repl--explain-config-hide' can restore it.  Returns OUTPUT-WIN."
+  (let ((prev-buf (window-buffer output-win)))
+    (set-window-dedicated-p output-win nil)
+    (set-window-buffer output-win buf)
     (setq claude-repl--explain-config-replaced-window
-          (cons vterm-win prev-buf)))
-  vterm-win)
+          (cons output-win prev-buf)))
+  output-win)
 
 (defun claude-repl--explain-config-restore-replaced-window ()
   "Restore the buffer in the window the popup took over, if any.
 No-op when no window was replaced or when the window or its prior
-buffer is no longer live.  Re-applies the vterm window hardening
-(dedicate / size-fix / delete-protect) on success so the restored
-vterm window matches its original recipe."
+buffer is no longer live.  Re-applies the claude output window
+hardening (dedicate / size-fix / delete-protect) on success so the
+restored window matches its original recipe."
   (when-let ((cell claude-repl--explain-config-replaced-window))
     (setq claude-repl--explain-config-replaced-window nil)
     (let ((win (car cell))
@@ -450,10 +453,11 @@ Display priority:
 
   1. If a window already displays the buffer, leave it in place
      (and re-apply the side-window width unless it is the stolen
-     vterm window — stolen windows inherit the vterm width).
-  2. Otherwise, if a claude vterm output window is visible, take
-     that window over via `set-window-buffer' and record the
-     prior buffer so `--hide' can restore it.
+     claude output window — stolen windows inherit the prior
+     window's width).
+  2. Otherwise, if the claude output window is visible, take it
+     over via `set-window-buffer' and record the prior buffer so
+     `--hide' can restore it.
   3. Otherwise, fall back to the right-side popup display action.
 
 The drawer is never touched in any branch — its visibility is its
@@ -467,9 +471,9 @@ own concern.  Returns the displayed window or nil."
                      (eq existing (car claude-repl--explain-config-replaced-window)))
           (claude-repl--explain-config-apply-width existing))
         existing)
-       ((claude-repl--explain-config-current-vterm-window)
-        (claude-repl--explain-config-take-over-vterm-window
-         (claude-repl--explain-config-current-vterm-window) buf))
+       ((claude-repl--explain-config-current-claude-output-window)
+        (claude-repl--explain-config-take-over-claude-output-window
+         (claude-repl--explain-config-current-claude-output-window) buf))
        (t
         (let ((win (display-buffer buf claude-repl--explain-config-display-action)))
           (when (window-live-p win)
@@ -482,10 +486,10 @@ Clears the global visible-flag so the popup no longer auto-appears
 on workspace switches.  Keeps the buffer itself alive — only its
 visibility is toggled.
 
-If `--show' took over a vterm window, restores the prior buffer in
-that window via `--restore-replaced-window'.  Any remaining windows
-still displaying the explain-config buffer (e.g. side-window
-fallbacks) are deleted.  The drawer is never touched."
+If `--show' took over the claude output window, restores the prior
+buffer in that window via `--restore-replaced-window'.  Any
+remaining windows still displaying the explain-config buffer (e.g.
+side-window fallbacks) are deleted.  The drawer is never touched."
   (setq claude-repl--explain-config-global-visible-p nil)
   (claude-repl--explain-config-restore-replaced-window)
   (when-let ((buf (get-buffer claude-repl-explain-config-buffer-name)))
@@ -521,9 +525,9 @@ navigate-and-`C-x 0' the window in every workspace separately."
 Mirrors `claude-repl-drawer--ensure-visible-on-persp-switch' — when
 the flag says show but the popup is missing in the activated persp,
 re-display it via `claude-repl--explain-config-show' (which will
-take over the new persp's vterm window if visible, else fall back
-to the side-window display action).  When the flag says hide but
-persp-mode restored a stale window, delete it.
+take over the new persp's claude output window if visible, else
+fall back to the side-window display action).  When the flag says
+hide but persp-mode restored a stale window, delete it.
 
 Drops a stale `--replaced-window' whose target window is no longer
 live before re-showing — the cell belongs to the persp we left, not
