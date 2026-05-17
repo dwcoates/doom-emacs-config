@@ -513,21 +513,30 @@ that shells out to git from the cwd."
 ;; `claude-repl-test-*' under default ert alphabetical ordering (`A' < `a'
 ;; in ASCII), so a broken install fails the very first line of the report.
 
-(ert-deftest claude-repl-test-AAA-external-guards-installed-globally ()
-  "Every symbol in `claude-repl--external-boundary-functions' must be
+;; Guard registration: the aggregator loads test-helpers.el once per
+;; test file; modern ert errors on `ert-deftest' re-definition.  Set a
+;; flag the first time we run and skip the definition on subsequent
+;; loads.
+(defvar claude-repl-test--AAA-test-registered nil
+  "Non-nil once the AAA sanity ert-deftest below has been registered.")
+
+(unless claude-repl-test--AAA-test-registered
+  (setq claude-repl-test--AAA-test-registered t)
+  (ert-deftest claude-repl-test-AAA-external-guards-installed-globally ()
+    "Every symbol in `claude-repl--external-boundary-functions' must be
 reassigned to the unmocked-call guard before any test runs.  Fails
 the report explicitly if the install loop missed an entry."
-  (should claude-repl-test--external-guards-installed)
-  (should claude-repl--external-boundary-functions)
-  (dolist (sym claude-repl--external-boundary-functions)
-    (let* ((cell (assq sym claude-repl-test--external-original-functions))
-           (orig (cdr cell))
-           (current (and (fboundp sym) (symbol-function sym))))
-      ;; A pre-install original was captured for this symbol.
-      (should cell)
-      ;; The current binding is NOT the captured original — i.e. the
-      ;; guard actually took.
-      (should-not (eq orig current)))))
+    (should claude-repl-test--external-guards-installed)
+    (should claude-repl--external-boundary-functions)
+    (dolist (sym claude-repl--external-boundary-functions)
+      (let* ((cell (assq sym claude-repl-test--external-original-functions))
+             (orig (cdr cell))
+             (current (and (fboundp sym) (symbol-function sym))))
+        ;; A pre-install original was captured for this symbol.
+        (should cell)
+        ;; The current binding is NOT the captured original — i.e. the
+        ;; guard actually took.
+        (should-not (eq orig current))))))
 
 (provide 'test-helpers)
 
