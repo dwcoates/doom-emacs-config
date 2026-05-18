@@ -55,3 +55,6 @@
 (package! just-mode)
 
 (package! centered-cursor-mode)
+
+;; Upstream renamed default branch master -> main; pin recipe so straight can fetch.
+(package! iedit :recipe (:host github :repo "victorhge/iedit" :branch "main"))
