@@ -371,10 +371,10 @@ by vterm-buf presence; the :done write is not."
                    "--continue --dangerously-skip-permissions"))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-system-prompt-period ()
-  "compute-claude-flags should emit --system-prompt . when var is the default period."
+  "compute-claude-flags should emit --system-prompt \".\" with literal quotes."
   (let ((claude-repl-system-prompt "."))
     (should (equal (claude-repl--compute-claude-flags nil nil nil)
-                   "--system-prompt ."))))
+                   "--system-prompt \".\""))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-system-prompt-nil ()
   "compute-claude-flags should omit --system-prompt entirely when var is nil."
@@ -383,20 +383,28 @@ by vterm-buf presence; the :done write is not."
       (should-not (string-match-p "--system-prompt" result)))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-system-prompt-shell-quoted ()
-  "compute-claude-flags should shell-quote the system prompt to survive spaces/quotes."
+  "compute-claude-flags should wrap the system prompt in literal double quotes."
   (let ((claude-repl-system-prompt "be nice"))
-    (let ((result (claude-repl--compute-claude-flags nil nil nil)))
-      (should (string-match-p "--system-prompt " result))
-      ;; The argument must NOT appear as bare `be nice' — it would be
-      ;; interpreted as two shell tokens.  shell-quote-argument either
-      ;; quotes it or backslash-escapes the space.
-      (should-not (string-match-p "--system-prompt be nice\\'" result)))))
+    (should (equal (claude-repl--compute-claude-flags nil nil nil)
+                   "--system-prompt \"be nice\""))))
+
+(ert-deftest claude-repl-test-compute-claude-flags-system-prompt-escapes-dquote ()
+  "compute-claude-flags should backslash-escape embedded double quotes."
+  (let ((claude-repl-system-prompt "say \"hi\""))
+    (should (equal (claude-repl--compute-claude-flags nil nil nil)
+                   "--system-prompt \"say \\\"hi\\\"\""))))
+
+(ert-deftest claude-repl-test-compute-claude-flags-system-prompt-escapes-dollar ()
+  "compute-claude-flags should backslash-escape $ to prevent expansion."
+  (let ((claude-repl-system-prompt "$HOME"))
+    (should (equal (claude-repl--compute-claude-flags nil nil nil)
+                   "--system-prompt \"\\$HOME\""))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-system-prompt-combines-with-continue ()
   "compute-claude-flags should append --system-prompt after --continue and perm flag."
   (let ((claude-repl-system-prompt "."))
     (should (equal (claude-repl--compute-claude-flags "sess1" nil "--dangerously-skip-permissions")
-                   "--continue --dangerously-skip-permissions --system-prompt ."))))
+                   "--continue --dangerously-skip-permissions --system-prompt \".\""))))
 
 (ert-deftest claude-repl-test-compute-perm-flag-sandboxed ()
   "compute-perm-flag should return nil when sandboxed."
@@ -1658,7 +1666,7 @@ restart (the lazy-start path applies its defaults instead)."
           (should-not (plist-get result :sandboxed-p)))))))
 
 (ert-deftest claude-repl-test-build-start-cmd-bare-metal-includes-system-prompt-default ()
-  "build-start-cmd for bare-metal with default `claude-repl-system-prompt' includes --system-prompt ."
+  "build-start-cmd for bare-metal with default `claude-repl-system-prompt' includes --system-prompt \".\"."
   (claude-repl-test--with-clean-state
     (let ((claude-repl-system-prompt "."))
       (claude-repl--ws-put "ws1" :active-env :bare-metal)
@@ -1669,7 +1677,7 @@ restart (the lazy-start path applies its defaults instead)."
                  (lambda (_ws) nil)))
         (let ((result (claude-repl--build-start-cmd "ws1")))
           (should (equal (plist-get result :cmd)
-                         "claude --dangerously-skip-permissions --system-prompt .")))))))
+                         "claude --dangerously-skip-permissions --system-prompt \".\"")))))))
 
 (ert-deftest claude-repl-test-build-start-cmd-sandbox-with-session ()
   "build-start-cmd for worktree sandbox with session should use sandbox script + --continue."
