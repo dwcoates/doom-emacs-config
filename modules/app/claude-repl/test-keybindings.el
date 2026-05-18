@@ -1791,4 +1791,123 @@ binding without erroring."
     (should (eq (lookup-key general-override-mode-map (kbd "C-S-<return>"))
                 'claude-repl-drawer-global-visit))))
 
+;;;; ---- Tests: workspace-jump override install ----
+
+;;; `M-1..M-9 / M-0' and `s-1..s-9 / s-0' must win lookup above:
+;;;
+;;;   - Doom default's `:n "s-9" -> +workspace/switch-to-final' in
+;;;     `evil-normal-state-map' (last-workspace bug from normal state).
+;;;   - Doom default's `"s-0" -> doom/reset-font-size' (font-resize bug).
+;;;   - `vterm-mode-map's blanket `M-X' -> `vterm--self-insert-meta'.
+;;;
+;;; A plain `(map! :g ... )' global-map entry loses to all three; the
+;;; intercept-aux install is what wins.
+
+(ert-deftest claude-repl-test-workspace-jump-chords-cover-mod-and-super-digits ()
+  "`claude-repl--workspace-jump-chords' must enumerate the full 0-9 grid
+across BOTH `M-' (Meta/Alt) and `s-' (Super/Cmd), each mapped to the
+prefix-arg-free wrapper at the matching index.  Anything less leaves
+gaps that fall through to whatever Doom or `vterm-mode-map' bound."
+  (let ((expected
+         '(("M-1" . claude-repl-workspace-switch-to-0)
+           ("M-2" . claude-repl-workspace-switch-to-1)
+           ("M-3" . claude-repl-workspace-switch-to-2)
+           ("M-4" . claude-repl-workspace-switch-to-3)
+           ("M-5" . claude-repl-workspace-switch-to-4)
+           ("M-6" . claude-repl-workspace-switch-to-5)
+           ("M-7" . claude-repl-workspace-switch-to-6)
+           ("M-8" . claude-repl-workspace-switch-to-7)
+           ("M-9" . claude-repl-workspace-switch-to-8)
+           ("M-0" . claude-repl-workspace-switch-to-final)
+           ("s-1" . claude-repl-workspace-switch-to-0)
+           ("s-2" . claude-repl-workspace-switch-to-1)
+           ("s-3" . claude-repl-workspace-switch-to-2)
+           ("s-4" . claude-repl-workspace-switch-to-3)
+           ("s-5" . claude-repl-workspace-switch-to-4)
+           ("s-6" . claude-repl-workspace-switch-to-5)
+           ("s-7" . claude-repl-workspace-switch-to-6)
+           ("s-8" . claude-repl-workspace-switch-to-7)
+           ("s-9" . claude-repl-workspace-switch-to-8)
+           ("s-0" . claude-repl-workspace-switch-to-final))))
+    (dolist (pair expected)
+      (should (equal pair
+                     (assoc (car pair) claude-repl--workspace-jump-chords))))))
+
+(ert-deftest claude-repl-test-workspace-jump-s-9-routes-to-ninth-not-final ()
+  "Regression: `s-9' (Cmd+9) must map to `claude-repl-workspace-switch-to-8'
+\(NINTH workspace), not `+workspace/switch-to-final' or
+`claude-repl-workspace-switch-to-final' (LAST workspace).  Symptom of
+the regression was Cmd+9 landing on the last workspace from normal
+state because Doom's `:n s-9' default leaked through."
+  (should (eq (cdr (assoc "s-9" claude-repl--workspace-jump-chords))
+              'claude-repl-workspace-switch-to-8)))
+
+(ert-deftest claude-repl-test-workspace-jump-s-0-routes-to-final-not-font-resize ()
+  "Regression: `s-0' (Cmd+0) must map to `claude-repl-workspace-switch-to-final',
+not `doom/reset-font-size'.  Symptom of the regression was Cmd+0
+emitting \"The font hasn't been resized\" because Doom's global
+`s-0 -> doom/reset-font-size' default leaked through."
+  (should (eq (cdr (assoc "s-0" claude-repl--workspace-jump-chords))
+              'claude-repl-workspace-switch-to-final)))
+
+(ert-deftest claude-repl-test-install-workspace-jump-installs-top-level ()
+  "`--install-workspace-jump-overrides' must populate `general-override-mode-map'
+at top level so the chords work in non-evil contexts and win above
+any other minor-mode-map binding."
+  (let ((general-override-mode-map (make-sparse-keymap)))
+    (cl-letf (((symbol-function 'evil-get-auxiliary-keymap)
+               (lambda (&rest _) (make-sparse-keymap))))
+      (claude-repl--install-workspace-jump-overrides))
+    (dolist (entry claude-repl--workspace-jump-chords)
+      (should (eq (lookup-key general-override-mode-map (kbd (car entry)))
+                  (cdr entry))))))
+
+(ert-deftest claude-repl-test-install-workspace-jump-installs-intercept-aux ()
+  "`--install-workspace-jump-overrides' must populate the evil intercept
+aux map of `general-override-mode-map' for every state in
+`claude-repl--scroll-output-intercept-states' -- this is what beats
+both Doom default's `:n s-9' (normal-state-map) and `vterm-mode-map's
+blanket `M-X' bindings, regardless of which evil state is current."
+  (let* ((general-override-mode-map (make-sparse-keymap))
+         (aux-maps nil))
+    (cl-letf (((symbol-function 'evil-get-auxiliary-keymap)
+               (lambda (_keymap state &rest _)
+                 (or (cdr (assq state aux-maps))
+                     (let ((m (make-sparse-keymap)))
+                       (push (cons state m) aux-maps)
+                       m)))))
+      (claude-repl--install-workspace-jump-overrides))
+    (dolist (state claude-repl--scroll-output-intercept-states)
+      (let ((aux (cdr (assq state aux-maps))))
+        (should aux)
+        (dolist (entry claude-repl--workspace-jump-chords)
+          (should (eq (lookup-key aux (kbd (car entry)))
+                      (cdr entry))))))))
+
+(ert-deftest claude-repl-test-install-workspace-jump-skips-aux-without-evil ()
+  "When `evil-get-auxiliary-keymap' is unbound (evil not loaded),
+`--install-workspace-jump-overrides' must still install the top-level
+binding without erroring."
+  (let ((general-override-mode-map (make-sparse-keymap)))
+    (cl-letf (((symbol-function 'fboundp)
+               (lambda (sym) (not (eq sym 'evil-get-auxiliary-keymap)))))
+      (claude-repl--install-workspace-jump-overrides))
+    (dolist (entry claude-repl--workspace-jump-chords)
+      (should (eq (lookup-key general-override-mode-map (kbd (car entry)))
+                  (cdr entry))))))
+
+(ert-deftest claude-repl-test-install-workspace-jump-is-idempotent ()
+  "`--install-workspace-jump-overrides' must be idempotent -- the
+merge-sentinel reload triggers re-load of `keybindings.el', so the
+installer runs every reload.  Running it twice must leave the same
+final bindings, not error and not duplicate state."
+  (let ((general-override-mode-map (make-sparse-keymap)))
+    (cl-letf (((symbol-function 'evil-get-auxiliary-keymap)
+               (lambda (&rest _) (make-sparse-keymap))))
+      (claude-repl--install-workspace-jump-overrides)
+      (claude-repl--install-workspace-jump-overrides))
+    (dolist (entry claude-repl--workspace-jump-chords)
+      (should (eq (lookup-key general-override-mode-map (kbd (car entry)))
+                  (cdr entry))))))
+
 ;;; test-keybindings.el ends here
