@@ -1429,13 +1429,19 @@ when on.  So toggle-off must not end with two trailing unfaced spaces."
     (should-not (claude-repl--claude-visible-in-current-ws-p))))
 
 (ert-deftest claude-repl-test-claude-visible-in-current-ws-found ()
-  "claude-visible-in-current-ws-p should return non-nil when a visible claude buffer exists."
+  "claude-visible-in-current-ws-p should return non-nil when a visible claude buffer exists.
+
+The `get-buffer-window' mock takes an optional second arg because on
+Emacs 30 native-compiled callers pass the ALL-FRAMES slot explicitly
+(as nil) even when the source only writes `(get-buffer-window buf)' —
+without it, the test fails with `wrong-number-of-arguments' under AOT
+native-comp."
   (claude-repl-test--with-temp-buffer "*claude-panel-aabbccdd*"
     (let ((test-buf (current-buffer)))
       (cl-letf (((symbol-function 'buffer-list)
                  (lambda () (list test-buf)))
                 ((symbol-function 'get-buffer-window)
-                 (lambda (_buf) 'fake-window)))
+                 (lambda (_buf &optional _all-frames) 'fake-window)))
         (should (claude-repl--claude-visible-in-current-ws-p))))))
 
 ;;;; ---- Tests: claude-in-saved-wconf-p ----
