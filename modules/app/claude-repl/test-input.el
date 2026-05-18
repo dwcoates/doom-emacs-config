@@ -359,37 +359,121 @@
   (should (string-match-p "Response TLDR.*VERY LAST\\|VERY LAST.*Response TLDR"
                            claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-structure-top-level-emoji-bullets ()
-  "TLDR spec must describe a structure of top-level emoji-prefixed bullets giving high-level ideas."
+(ert-deftest claude-repl-test-command-prefix-tldr-structure-mece-numbered-ascii-tree ()
+  "TLDR spec must mandate rendering as a MECE numbered ASCII tree at depth 3."
   (should (string-match-p
-           "top-level emoji-prefixed bullets"
+           "MECE numbered ASCII tree at depth 3"
            claude-repl-command-prefix))
   (should (string-match-p
-           "high-level ideas"
+           "root branch, mid-level branch, leaf"
            claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-structure-subbullet-zoom-in ()
-  "TLDR spec must describe per-entry subbullets that zoom in on each top-level idea."
+(ert-deftest claude-repl-test-command-prefix-tldr-ascii-tree-connectors ()
+  "TLDR spec must call out the ASCII box-drawing connectors used to render the tree."
   (should (string-match-p
-           "subbullets that zoom in"
-           claude-repl-command-prefix)))
+           "ASCII box-drawing connectors"
+           claude-repl-command-prefix))
+  (should (string-match-p "├──" claude-repl-command-prefix))
+  (should (string-match-p "└──" claude-repl-command-prefix))
+  (should (string-match-p "│" claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-top-level-cap-of-three ()
-  "TLDR spec must cap the number of top-level bullets at 3.
-Additional detail must be pushed into subbullets (recursively) of those
-at-most-3 top-level bullets, so the top level remains a high-level vision
-of the response rather than an enumeration of every point."
+(ert-deftest claude-repl-test-command-prefix-tldr-dotted-hierarchical-numbering ()
+  "TLDR spec must call out dotted hierarchical numbering for the tree's node labels."
   (should (string-match-p
-           "top-level bullets MUST be capped at 3"
+           "dotted hierarchical numbering"
            claude-repl-command-prefix))
   (should (string-match-p
-           "additional detail belongs in subbullets"
+           "1\\.1\\. \\.\\.\\."
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "1\\.1\\.1\\. \\.\\.\\."
            claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-structure-subbullets-replace-recursion ()
-  "TLDR spec must state that the per-entry subbullet zoom-in replaces any recursive 'even shorter' TLDR section."
+(ert-deftest claude-repl-test-command-prefix-tldr-depth-three-non-negotiable ()
+  "TLDR spec must mark depth 3 as non-negotiable and forbid flattening to depth 2 or lower."
   (should (string-match-p
-           "per-entry subbullet zoom-in IS the resolution detail"
+           "Depth 3 is non-negotiable"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "MUST NOT be flattened to depth 2 or lower"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-depth-three-justify-each-leaf ()
+  "TLDR spec must say that if depth 3 feels excessive the assistant is wrong and must instead justify each leaf."
+  (should (string-match-p
+           "if you think a lower depth fits the response better you are wrong"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "justify why each leaf at depth 3 makes sense"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-root-branches-as-domain-vectors ()
+  "TLDR spec must say root branches are chosen by domain directions as vectors, not ad-hoc topic selection."
+  (should (string-match-p
+           "domain directions as vectors"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "orthogonal decomposition axes"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "not by ad-hoc topic selection"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-mece-branches ()
+  "TLDR spec must explicitly require branches to be MECE: mutually exclusive and collectively exhaustive."
+  (should (string-match-p
+           "branches MUST be MECE"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "mutually exclusive"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "collectively exhaustive"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-no-effort-impact-time-prioritization ()
+  "TLDR spec must forbid prioritizing content by effort/impact/time tradeoffs."
+  (should (string-match-p
+           "MUST NOT prioritize effort vs\\. impact or time"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-completeness-ideal-outcomes ()
+  "TLDR spec must direct focus to completeness and ideal future outcomes."
+  (should (string-match-p
+           "completeness and ideal future outcomes"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-grounded-code-or-gns-leaves ()
+  "TLDR spec must require leaves to be anchored by grounded pragmatic references to code (file:line) or GNS."
+  (should (string-match-p
+           "fully grounded pragmatic references to code"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "GNS knowledge at the leaves"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "(file:line)"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-leaves-are-resolution-detail ()
+  "TLDR spec must state the tree's leaves are where the resolution lands, replacing any recursive 'even shorter' section."
+  (should (string-match-p
+           "tree replaces any 'even shorter' or 'recursive' TLDR section"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "leaves are where the resolution finally lands"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-root-branches-emoji-after-number ()
+  "TLDR spec must require an emoji prefix on each root branch, immediately after its numeric label, and forbid emoji on mid-level branches and leaves."
+  (should (string-match-p
+           "Each root branch (depth-1 node) MUST be prefixed with a relevant prefixing emoji"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "immediately after its numeric label"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "mid-level branches and leaves are NOT emoji-prefixed"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-no-emoji-in-main-body ()
