@@ -538,31 +538,13 @@ Focus remains on the current workspace."
       (message "Pulled '%s' to second position." current)))
   (run-with-timer 1 1 #'+dwc/refresh-tab-bar))
 
-;; Cmd+<numeral> workspace switching in all evil states.
-;;
-;; Doom's default (modules/config/default/config.el:345-356) binds
-;; `s-1'..`s-8' to `+workspace/switch-to-{0..7}' but `s-9' to
-;; `+workspace/switch-to-final', AND only in `:n' (normal state).  That
-;; caused two cross-talk symptoms:
-;;
-;;   - Cmd+9 jumped to the LAST workspace from normal state instead of
-;;     the 9th, producing "Already in <last>" warnings when already on
-;;     the last workspace.
-;;   - Cmd+0 in normal state fell through to `doom/reset-font-size'.
-;;
-;; We bind `:g' (all states) so Cmd+N means the same thing regardless of
-;; evil state, using the prefix-arg-free wrappers from
-;; modules/app/claude-repl/commands.el.
-(map! :g "s-1" #'claude-repl-workspace-switch-to-0
-      :g "s-2" #'claude-repl-workspace-switch-to-1
-      :g "s-3" #'claude-repl-workspace-switch-to-2
-      :g "s-4" #'claude-repl-workspace-switch-to-3
-      :g "s-5" #'claude-repl-workspace-switch-to-4
-      :g "s-6" #'claude-repl-workspace-switch-to-5
-      :g "s-7" #'claude-repl-workspace-switch-to-6
-      :g "s-8" #'claude-repl-workspace-switch-to-7
-      :g "s-9" #'claude-repl-workspace-switch-to-8
-      :g "s-0" #'claude-repl-workspace-switch-to-final)
+;; Cmd+<numeral> AND Meta+<numeral> workspace switching live in
+;; `modules/app/claude-repl/keybindings.el' via
+;; `claude-repl--install-workspace-jump-overrides', so the merge-sentinel
+;; reload (which only reloads the claude-repl module's `config.el') picks
+;; them up automatically.  See that installer for the cross-talk
+;; rationale (Doom's `:n s-9' -> `+workspace/switch-to-final', `s-0' ->
+;; `doom/reset-font-size', etc.).
 
 ;; Open-most-recent-workspace: non-idempotent workspace switcher
 (defvar +dwc/workspace-history nil

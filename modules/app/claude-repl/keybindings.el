@@ -814,20 +814,74 @@ global drawer-mirror bindings win in vterm buffers."
       :desc "Switch to 9th workspace"   "9" #'claude-repl-workspace-switch-to-8
       :desc "Switch to final workspace" "0" #'claude-repl-workspace-switch-to-final)
 
-;; Override Doom's default M-1..M-9 / M-0 bindings so workspace jumps
-;; never consult `current-prefix-arg' and M-0 never falls through to
-;; `text-scale-set'.  See `claude-repl--workspace-switch-by-index' for
-;; rationale.
-(map! :g "M-1" #'claude-repl-workspace-switch-to-0
-      :g "M-2" #'claude-repl-workspace-switch-to-1
-      :g "M-3" #'claude-repl-workspace-switch-to-2
-      :g "M-4" #'claude-repl-workspace-switch-to-3
-      :g "M-5" #'claude-repl-workspace-switch-to-4
-      :g "M-6" #'claude-repl-workspace-switch-to-5
-      :g "M-7" #'claude-repl-workspace-switch-to-6
-      :g "M-8" #'claude-repl-workspace-switch-to-7
-      :g "M-9" #'claude-repl-workspace-switch-to-8
-      :g "M-0" #'claude-repl-workspace-switch-to-final)
+;; Workspace-jump chords (M-1..M-9 / M-0 and s-1..s-9 / s-0) must beat:
+;;
+;;   - Doom default's `:n "s-9" #'+workspace/switch-to-final'
+;;     (modules/config/default/config.el:356, normal state only) which
+;;     would otherwise route Cmd+9 to the LAST workspace from normal
+;;     state instead of the 9th.
+;;   - Doom default's `"s-0" #'doom/reset-font-size'
+;;     (modules/config/default/config.el:328) which would otherwise
+;;     route Cmd+0 to `text-scale-set' and emit "The font hasn't been
+;;     resized" when font size is already default.
+;;   - `vterm-mode-map's blanket `M-X' -> `vterm--self-insert-meta'
+;;     binding (vterm.el:633-660) which would swallow `M-1..M-9 / M-0'
+;;     inside vterm buffers and send the byte to the shell.
+;;
+;; A plain `(map! :g ...)' binding lands in `global-map' and loses to
+;; both the Doom `:n' entry (in `evil-normal-state-map') and the vterm
+;; major-mode entry.  Mirror the
+;; `claude-repl--install-drawer-visit-override' pattern instead:
+;; install the chord into `general-override-mode-map' at top-level AND
+;; into its evil aux maps for every evil state, so the binding wins
+;; lookup regardless of evil state and regardless of major mode.
+;;
+;; Sourced from the prefix-arg-free wrappers in
+;; `modules/app/claude-repl/commands.el' so `current-prefix-arg' cannot
+;; redirect the jump (the original M-9 -> final / M-0 -> font-resize
+;; bug).
+(defconst claude-repl--workspace-jump-chords
+  '(("M-1" . claude-repl-workspace-switch-to-0)
+    ("M-2" . claude-repl-workspace-switch-to-1)
+    ("M-3" . claude-repl-workspace-switch-to-2)
+    ("M-4" . claude-repl-workspace-switch-to-3)
+    ("M-5" . claude-repl-workspace-switch-to-4)
+    ("M-6" . claude-repl-workspace-switch-to-5)
+    ("M-7" . claude-repl-workspace-switch-to-6)
+    ("M-8" . claude-repl-workspace-switch-to-7)
+    ("M-9" . claude-repl-workspace-switch-to-8)
+    ("M-0" . claude-repl-workspace-switch-to-final)
+    ("s-1" . claude-repl-workspace-switch-to-0)
+    ("s-2" . claude-repl-workspace-switch-to-1)
+    ("s-3" . claude-repl-workspace-switch-to-2)
+    ("s-4" . claude-repl-workspace-switch-to-3)
+    ("s-5" . claude-repl-workspace-switch-to-4)
+    ("s-6" . claude-repl-workspace-switch-to-5)
+    ("s-7" . claude-repl-workspace-switch-to-6)
+    ("s-8" . claude-repl-workspace-switch-to-7)
+    ("s-9" . claude-repl-workspace-switch-to-8)
+    ("s-0" . claude-repl-workspace-switch-to-final))
+  "Alist of (KEY-STRING . COMMAND) for the workspace-jump chords that
+must win key lookup above Doom default's `:n s-9' / `s-0', above
+`vterm-mode-map's `M-X' blanket bindings, and across every evil
+state.  Each KEY-STRING is passed to `kbd' at install time.")
+
+(defun claude-repl--install-workspace-jump-overrides ()
+  "Install `claude-repl--workspace-jump-chords' into
+`general-override-mode-map' at top-level AND into its evil intercept
+aux maps for every state in `claude-repl--scroll-output-intercept-states'
+\(reused as the canonical \"all evil states\" list).  Idempotent."
+  (dolist (entry claude-repl--workspace-jump-chords)
+    (let ((seq (kbd (car entry)))
+          (cmd (cdr entry)))
+      (define-key general-override-mode-map seq cmd)
+      (when (fboundp 'evil-get-auxiliary-keymap)
+        (dolist (state claude-repl--scroll-output-intercept-states)
+          (define-key (evil-get-auxiliary-keymap
+                       general-override-mode-map state t t)
+                      seq cmd))))))
+
+(claude-repl--install-workspace-jump-overrides)
 
 ;; SPC j -- Tell Claude to do a predefined thing
 (map! :leader
