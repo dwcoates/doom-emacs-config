@@ -737,16 +737,24 @@ Handles input preparation, sending, history, and persistence."
            ;; Empty-string is truthy in Elisp -- guard explicitly so RET on
            ;; an empty input buffer doesn't dispatch a metaprompt-only send.
            (raw-empty (or (null raw) (string-empty-p (string-trim raw)))))
-      (when raw-empty
-        (claude-repl--log ws "send: early return -- empty raw input"))
       (unless vterm-buf
         (claude-repl--log ws "send: early return -- no vterm-buf for ws=%s" ws))
       (when (and vterm-buf (not (buffer-live-p vterm-buf)))
         (claude-repl--log ws "send: early return -- vterm-buf is dead for ws=%s" ws))
-      (when (and (not raw-empty) vterm-buf (buffer-live-p vterm-buf))
+      (cond
+       ;; Empty input on live vterm: send a bare RET to the terminal so
+       ;; pressing RET always reaches Claude (useful for permission
+       ;; prompts, menus, confirmations).  Skip the full send pipeline
+       ;; (metaprompt prefix, counter increment, posthooks, history)
+       ;; — there's no input to record.
+       ((and raw-empty vterm-buf (buffer-live-p vterm-buf))
+        (claude-repl--log ws "send: empty raw input -- forwarding bare RET to vterm")
+        (with-current-buffer vterm-buf
+          (claude-repl--vterm-send-return-logged "send-empty-bare-ret")))
+       ((and (not raw-empty) vterm-buf (buffer-live-p vterm-buf))
         (let ((input (claude-repl--prepare-input ws raw force-metaprompt)))
           (claude-repl--do-send ws input raw on-settle)
-          (claude-repl--commit-input-buffer ws input-buf raw from-buf))))))
+          (claude-repl--commit-input-buffer ws input-buf raw from-buf)))))))
 
 (defun claude-repl-send-and-hide ()
   "Send input to Claude and hide both panels."

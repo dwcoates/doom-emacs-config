@@ -1436,8 +1436,10 @@ behavior is preserved outside the :thinking state."
                              (buffer-string))
                            "original content"))))))))
 
-(ert-deftest claude-repl-test-send-noop-when-nil-raw ()
-  "`claude-repl--send' is a no-op when both prompt and input buffer are nil/empty."
+(ert-deftest claude-repl-test-send-skips-do-send-when-nil-raw ()
+  "`claude-repl--send' skips the full-send pipeline when both prompt and input buffer are nil/empty.
+Regression guard: empty input must not dispatch a metaprompt-only send via
+`claude-repl--do-send'.  Bare-RET forwarding is covered by a separate test."
   (claude-repl-test--with-clean-state
     (let ((do-send-called nil))
       (claude-repl-test--with-temp-buffer "*claude-panel-noop-vterm*"
@@ -1445,12 +1447,13 @@ behavior is preserved outside the :thinking state."
         ;; No input buffer registered
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'claude-repl--do-send)
-                   (lambda (&rest _) (setq do-send-called t))))
+                   (lambda (&rest _) (setq do-send-called t)))
+                  ((symbol-function 'claude-repl--vterm-send-return-logged) #'ignore))
           (claude-repl--send nil "ws1")
           (should-not do-send-called))))))
 
-(ert-deftest claude-repl-test-send-noop-when-input-buffer-empty ()
-  "`claude-repl--send' is a no-op when the input buffer is empty.
+(ert-deftest claude-repl-test-send-skips-do-send-when-input-buffer-empty ()
+  "`claude-repl--send' skips the full-send pipeline when the input buffer is empty.
 Regression: RET in an empty input buffer used to dispatch a metaprompt-only
 send whenever the prefix counter aligned with the period."
   (claude-repl-test--with-clean-state
@@ -1462,12 +1465,13 @@ send whenever the prefix counter aligned with the period."
           (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'claude-repl--do-send)
-                     (lambda (&rest _) (setq do-send-called t))))
+                     (lambda (&rest _) (setq do-send-called t)))
+                    ((symbol-function 'claude-repl--vterm-send-return-logged) #'ignore))
             (claude-repl--send nil "ws1")
             (should-not do-send-called)))))))
 
-(ert-deftest claude-repl-test-send-noop-when-input-buffer-whitespace-only ()
-  "`claude-repl--send' is a no-op when the input buffer holds only whitespace."
+(ert-deftest claude-repl-test-send-skips-do-send-when-input-buffer-whitespace-only ()
+  "`claude-repl--send' skips the full-send pipeline when the input buffer holds only whitespace."
   (claude-repl-test--with-clean-state
     (let ((do-send-called nil))
       (claude-repl-test--with-temp-buffer " *test-send-whitespace-input*"
@@ -1477,23 +1481,111 @@ send whenever the prefix counter aligned with the period."
           (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'claude-repl--do-send)
-                     (lambda (&rest _) (setq do-send-called t))))
+                     (lambda (&rest _) (setq do-send-called t)))
+                    ((symbol-function 'claude-repl--vterm-send-return-logged) #'ignore))
             (claude-repl--send nil "ws1")
             (should-not do-send-called)))))))
 
-(ert-deftest claude-repl-test-send-noop-when-explicit-prompt-empty ()
-  "`claude-repl--send' is a no-op when an empty PROMPT is passed explicitly."
+(ert-deftest claude-repl-test-send-skips-do-send-when-explicit-prompt-empty ()
+  "`claude-repl--send' skips the full-send pipeline when an empty PROMPT is passed explicitly."
   (claude-repl-test--with-clean-state
     (let ((do-send-called nil))
       (claude-repl-test--with-temp-buffer "*claude-panel-empty-prompt-vterm*"
         (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'claude-repl--do-send)
-                   (lambda (&rest _) (setq do-send-called t))))
+                   (lambda (&rest _) (setq do-send-called t)))
+                  ((symbol-function 'claude-repl--vterm-send-return-logged) #'ignore))
           (claude-repl--send "" "ws1")
           (should-not do-send-called)
           (claude-repl--send "   \n  " "ws1")
           (should-not do-send-called))))))
+
+(ert-deftest claude-repl-test-send-forwards-bare-ret-when-input-buffer-empty ()
+  "`claude-repl--send' forwards a bare RET to vterm when the input buffer is empty.
+RET on an empty input should still reach Claude — useful for navigating
+permission prompts, menus, and confirmations."
+  (claude-repl-test--with-clean-state
+    (let ((ret-buf nil))
+      (claude-repl-test--with-temp-buffer " *test-send-bare-ret-empty-input*"
+        (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+        (claude-repl-test--with-temp-buffer "*claude-panel-bare-ret-empty-vterm*"
+          (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                    ((symbol-function 'claude-repl--vterm-send-return-logged)
+                     (lambda (&rest _) (setq ret-buf (current-buffer)))))
+            (claude-repl--send nil "ws1")
+            (should (eq ret-buf (claude-repl--ws-get "ws1" :vterm-buffer)))))))))
+
+(ert-deftest claude-repl-test-send-forwards-bare-ret-when-input-buffer-whitespace-only ()
+  "`claude-repl--send' forwards a bare RET to vterm when the input buffer holds only whitespace."
+  (claude-repl-test--with-clean-state
+    (let ((ret-buf nil))
+      (claude-repl-test--with-temp-buffer " *test-send-bare-ret-whitespace-input*"
+        (insert "  \n\t  \n")
+        (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+        (claude-repl-test--with-temp-buffer "*claude-panel-bare-ret-whitespace-vterm*"
+          (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                    ((symbol-function 'claude-repl--vterm-send-return-logged)
+                     (lambda (&rest _) (setq ret-buf (current-buffer)))))
+            (claude-repl--send nil "ws1")
+            (should (eq ret-buf (claude-repl--ws-get "ws1" :vterm-buffer)))))))))
+
+(ert-deftest claude-repl-test-send-forwards-bare-ret-when-explicit-prompt-empty ()
+  "`claude-repl--send' forwards a bare RET to vterm when an empty PROMPT is passed explicitly."
+  (claude-repl-test--with-clean-state
+    (let ((ret-call-count 0))
+      (claude-repl-test--with-temp-buffer "*claude-panel-bare-ret-empty-prompt-vterm*"
+        (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                  ((symbol-function 'claude-repl--vterm-send-return-logged)
+                   (lambda (&rest _) (cl-incf ret-call-count))))
+          (claude-repl--send "" "ws1")
+          (should (= ret-call-count 1))
+          (claude-repl--send "   \n  " "ws1")
+          (should (= ret-call-count 2)))))))
+
+(ert-deftest claude-repl-test-send-forwards-bare-ret-when-nil-raw-no-input-buffer ()
+  "`claude-repl--send' forwards a bare RET to vterm when no input buffer is registered.
+Prompt is nil and no input buffer means raw is nil and the empty-input branch
+should still forward RET so the keystroke reaches Claude."
+  (claude-repl-test--with-clean-state
+    (let ((ret-buf nil))
+      (claude-repl-test--with-temp-buffer "*claude-panel-bare-ret-nil-raw-vterm*"
+        (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                  ((symbol-function 'claude-repl--vterm-send-return-logged)
+                   (lambda (&rest _) (setq ret-buf (current-buffer)))))
+          (claude-repl--send nil "ws1")
+          (should (eq ret-buf (claude-repl--ws-get "ws1" :vterm-buffer))))))))
+
+(ert-deftest claude-repl-test-send-skips-bare-ret-when-no-vterm-buffer ()
+  "`claude-repl--send' does NOT forward RET when no vterm buffer is registered.
+There's no terminal to receive the keystroke."
+  (claude-repl-test--with-clean-state
+    (let ((ret-called nil))
+      (claude-repl-test--with-temp-buffer " *test-send-bare-ret-no-vterm-input*"
+        (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+        ;; Note: no vterm-buffer registered.
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                  ((symbol-function 'claude-repl--vterm-send-return-logged)
+                   (lambda (&rest _) (setq ret-called t))))
+          (claude-repl--send nil "ws1")
+          (should-not ret-called))))))
+
+(ert-deftest claude-repl-test-send-skips-bare-ret-when-vterm-buffer-dead ()
+  "`claude-repl--send' does NOT forward RET when the vterm buffer is dead."
+  (claude-repl-test--with-clean-state
+    (let ((ret-called nil)
+          (dead-vterm (generate-new-buffer "*claude-panel-bare-ret-dead-vterm*")))
+      (claude-repl--ws-put "ws1" :vterm-buffer dead-vterm)
+      (kill-buffer dead-vterm)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'claude-repl--vterm-send-return-logged)
+                 (lambda (&rest _) (setq ret-called t))))
+        (claude-repl--send nil "ws1")
+        (should-not ret-called)))))
 
 ;;;; ---- Tests: bracketed paste pipeline ----
 
