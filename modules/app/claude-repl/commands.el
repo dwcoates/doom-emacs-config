@@ -1686,13 +1686,24 @@ the sexp is unreadable."
 
 (defun claude-repl--serialize-merge-queue (queue)
   "Return QUEUE (the live `claude-repl--merge-queue') stripped down to
-the keys that survive `read' round-trip.  Drops nothing today — every
-entry plist is plain strings/booleans — but the indirection keeps the
-on-disk format insulated from future plist-key additions."
+the keys that survive `read' round-trip.  Every entry plist is plain
+strings/booleans/nil today, so serialization is a key-pick.  The
+indirection keeps the on-disk format insulated from future plist-key
+additions.
+
+Carries the loop-guard metadata `:last-attempt-target-head' (HEAD SHA
+recorded at re-enqueue time after a failed merge) and the
+`:halt-until-human' flag (set on generic-failure re-enqueues to block
+auto-drain) so a restart preserves the same drain semantics as the
+live queue."
   (mapcar (lambda (entry)
             (list :source-ws (plist-get entry :source-ws)
                   :silent (and (plist-get entry :silent) t)
-                  :auto-resolve (and (plist-get entry :auto-resolve) t)))
+                  :auto-resolve (and (plist-get entry :auto-resolve) t)
+                  :last-attempt-target-head
+                  (plist-get entry :last-attempt-target-head)
+                  :halt-until-human
+                  (and (plist-get entry :halt-until-human) t)))
           queue))
 
 (defun claude-repl--write-workspace-snapshot (snapshot &optional merge-queue)
@@ -2383,6 +2394,12 @@ on-disk snapshot, or when a cherry-pick fails in a way that requires
 the user to repair the worktree by hand before the next queued merge
 can proceed.
 
+Clears `:halt-until-human' on the front queue entry before draining —
+`claude-repl--reenqueue-merge-on-failure' sets that flag on generic
+failures specifically so auto-drain does NOT retry them.  The
+interactive kick IS the human signal that re-dispatch should proceed,
+so the flag is dropped here and the entry becomes drainable.
+
 No-op (with a `message') when the queue is empty.  No-op (with a
 `message') when a cherry-pick is still in progress in any registered
 workspace — the user must clear `CHERRY_PICK_HEAD' first (commit,
@@ -2402,6 +2419,13 @@ cascades into the next drain."
    ((claude-repl--any-cherry-pick-in-progress-p)
     (user-error "claude-repl: a cherry-pick is still in progress — resolve it before draining"))
    (t
+    (let ((front (car claude-repl--merge-queue)))
+      (when (plist-get front :halt-until-human)
+        (claude-repl--log nil
+                          "drain-merge-queue: manual kick clearing :halt-until-human on front ws=%s"
+                          (plist-get front :source-ws))
+        (setcar claude-repl--merge-queue
+                (plist-put (copy-sequence front) :halt-until-human nil))))
     (claude-repl--log nil
                       "drain-merge-queue: manual kick queue-len=%d"
                       (length claude-repl--merge-queue))
