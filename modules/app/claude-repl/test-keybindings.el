@@ -174,6 +174,156 @@ current workspace, not NAME)."
         (claude-repl--read-known-workspace "Pick: ")
         (should-not captured-default)))))
 
+;;;; ---- Tests: claude-repl--nukeable-workspace-names ----
+
+(ert-deftest claude-repl-test-nukeable-workspace-names/union-live-and-tabbar ()
+  "nukeable-workspace-names returns the union of live ws and tab-bar names.
+Live entries appear before any tab-bar-only entries; tab-bar entries
+that duplicate a live name are dropped.  Order WITHIN the live set is
+not guaranteed (`hash-table-keys' is unordered), so the live block is
+checked as a set rather than a positional sequence."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "live1" :project-dir "/tmp/live1")
+    (claude-repl--ws-put "live2" :project-dir "/tmp/live2")
+    (cl-letf (((symbol-function '+workspace-list-names)
+               (lambda () '("live1" "tabbar-only" "live2" "stray"))))
+      (let* ((result (claude-repl--nukeable-workspace-names))
+             (live-prefix (cl-subseq result 0 2))
+             (extras-suffix (cl-subseq result 2)))
+        ;; The first 2 entries are exactly the live set (order-agnostic).
+        (should (equal (sort (copy-sequence live-prefix) #'string<)
+                       '("live1" "live2")))
+        ;; Tab-bar-only entries follow, in tab-bar order, with live names removed.
+        (should (equal extras-suffix '("tabbar-only" "stray")))
+        ;; No duplicates of live names.
+        (should (= 1 (cl-count "live1" result :test #'equal)))
+        (should (= 1 (cl-count "live2" result :test #'equal)))))))
+
+(ert-deftest claude-repl-test-nukeable-workspace-names/excludes-tombstoned ()
+  "nukeable-workspace-names omits tombstoned claude-repl entries whose
+persp is also gone from the tab-bar.  A tombstoned entry whose persp
+still exists IS included (via the tab-bar branch)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "tomb-no-persp" :project-dir "/tmp/a")
+    (claude-repl--ws-put "tomb-no-persp" :nuked-at (current-time))
+    (claude-repl--ws-put "tomb-with-persp" :project-dir "/tmp/b")
+    (claude-repl--ws-put "tomb-with-persp" :nuked-at (current-time))
+    (cl-letf (((symbol-function '+workspace-list-names)
+               (lambda () '("tomb-with-persp"))))
+      (let ((result (claude-repl--nukeable-workspace-names)))
+        (should-not (member "tomb-no-persp" result))
+        (should (member "tomb-with-persp" result))))))
+
+(ert-deftest claude-repl-test-nukeable-workspace-names/empty-when-nothing-registered ()
+  "nukeable-workspace-names returns empty when there are no live or tab-bar ws."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-list-names) (lambda () nil)))
+      (should-not (claude-repl--nukeable-workspace-names)))))
+
+;;;; ---- Tests: claude-repl--read-nukeable-workspace ----
+
+(ert-deftest claude-repl-test-read-nukeable-workspace/no-candidates ()
+  "read-nukeable-workspace signals user-error when no live or tab-bar ws exist."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-list-names) (lambda () nil)))
+      (should-error (claude-repl--read-nukeable-workspace "Pick: ")
+                    :type 'user-error))))
+
+(ert-deftest claude-repl-test-read-nukeable-workspace/includes-tabbar-only-ws ()
+  "read-nukeable-workspace offers tab-bar-only ws in the completion list."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-list-names)
+               (lambda () '("stray-persp")))
+              ((symbol-function '+workspace-current-name) (lambda () "main"))
+              ((symbol-function 'completing-read)
+               (lambda (_p coll &rest _) (car coll))))
+      (should (equal (claude-repl--read-nukeable-workspace "Pick: ")
+                     "stray-persp")))))
+
+(ert-deftest claude-repl-test-read-nukeable-workspace/defaults-to-current-when-tabbar-only ()
+  "read-nukeable-workspace defaults to current ws when it's in the tab-bar
+even if it has no live claude-repl entry."
+  (claude-repl-test--with-clean-state
+    (let ((captured-default nil))
+      (cl-letf (((symbol-function '+workspace-list-names)
+                 (lambda () '("other" "current-persp")))
+                ((symbol-function '+workspace-current-name)
+                 (lambda () "current-persp"))
+                ((symbol-function 'completing-read)
+                 (lambda (_p _c _pr _r _h _hv default)
+                   (setq captured-default default)
+                   default)))
+        (claude-repl--read-nukeable-workspace "Pick: ")
+        (should (equal captured-default "current-persp"))))))
+
+;;;; ---- Tests: claude-repl--nuke-or-kill-workspace ----
+
+(ert-deftest claude-repl-test-nuke-or-kill-workspace/live-ws-runs-nuke ()
+  "nuke-or-kill-workspace runs the full nuke teardown for a live ws."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "live" :project-dir "/tmp/live")
+    (let ((nuked nil)
+          (persp-killed nil))
+      (cl-letf (((symbol-function 'claude-repl--nuke-one-workspace)
+                 (lambda (ws &optional _preserve) (setq nuked ws)))
+                ((symbol-function '+workspace/kill)
+                 (lambda (ws) (setq persp-killed ws))))
+        (let ((result (claude-repl--nuke-or-kill-workspace "live")))
+          (should (eq result 'nuke))
+          (should (equal nuked "live"))
+          (should-not persp-killed))))))
+
+(ert-deftest claude-repl-test-nuke-or-kill-workspace/tombstoned-ws-runs-persp-kill ()
+  "nuke-or-kill-workspace falls back to +workspace/kill for a tombstoned ws
+whose persp still exists.  MUST NOT call --nuke-one-workspace — there
+is no live claude-repl session to tear down."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "tomb" :project-dir "/tmp/tomb")
+    (claude-repl--ws-put "tomb" :nuked-at (current-time))
+    (let ((nuked nil)
+          (persp-killed nil)
+          (persp-mode t))
+      (cl-letf (((symbol-function 'claude-repl--nuke-one-workspace)
+                 (lambda (ws &optional _preserve) (setq nuked ws)))
+                ((symbol-function '+workspace-exists-p) (lambda (_n) t))
+                ((symbol-function '+workspace/kill)
+                 (lambda (ws) (setq persp-killed ws))))
+        (let ((result (claude-repl--nuke-or-kill-workspace "tomb")))
+          (should (eq result 'kill))
+          (should (equal persp-killed "tomb"))
+          (should-not nuked))))))
+
+(ert-deftest claude-repl-test-nuke-or-kill-workspace/never-registered-ws-runs-persp-kill ()
+  "nuke-or-kill-workspace handles a persp that was never claude-repl-registered.
+Routes through +workspace/kill (no live entry, nothing to nuke)."
+  (claude-repl-test--with-clean-state
+    (let ((nuked nil)
+          (persp-killed nil)
+          (persp-mode t))
+      (cl-letf (((symbol-function 'claude-repl--nuke-one-workspace)
+                 (lambda (ws &optional _preserve) (setq nuked ws)))
+                ((symbol-function '+workspace-exists-p) (lambda (_n) t))
+                ((symbol-function '+workspace/kill)
+                 (lambda (ws) (setq persp-killed ws))))
+        (let ((result (claude-repl--nuke-or-kill-workspace "never-known")))
+          (should (eq result 'kill))
+          (should (equal persp-killed "never-known"))
+          (should-not nuked))))))
+
+(ert-deftest claude-repl-test-nuke-or-kill-workspace/skips-persp-kill-when-persp-gone ()
+  "nuke-or-kill-workspace MUST NOT call +workspace/kill when the persp is
+already missing from the cache — that would emit the spurious
+`'<ws>' workspace doesn't exist' warning in the echo area."
+  (claude-repl-test--with-clean-state
+    (let ((persp-killed nil)
+          (persp-mode t))
+      (cl-letf (((symbol-function '+workspace-exists-p) (lambda (_n) nil))
+                ((symbol-function '+workspace/kill)
+                 (lambda (ws) (setq persp-killed ws))))
+        (let ((result (claude-repl--nuke-or-kill-workspace "ghost")))
+          (should (eq result 'kill))
+          (should-not persp-killed))))))
+
 ;;;; ---- Tests: claude-repl--write-output-json ----
 
 (ert-deftest claude-repl-test-write-output-json-creates-file ()
