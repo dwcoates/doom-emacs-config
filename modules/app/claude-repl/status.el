@@ -121,7 +121,7 @@ new chain can start.  Belt-and-braces against permanent wedging."
   :type 'number
   :group 'claude-repl)
 
-(defcustom claude-repl-done-idle-delay 3
+(defcustom claude-repl-done-idle-delay 1
   "Seconds the user must focus a :done workspace before it decays to :idle.
 The countdown starts when the workspace becomes the active workspace
 \(or when :done arrives while it is already active).  Switching away
