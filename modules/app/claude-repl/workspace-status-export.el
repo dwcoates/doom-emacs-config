@@ -186,12 +186,21 @@ that emits compact JSON with dramatically lower allocation."
            (dir  (file-name-directory file)))
       (when (and dir (not (file-directory-p dir)))
         (make-directory dir t))
-      (with-temp-file file
-        (insert (json-serialize
-                 (claude-repl--snapshot->json-serializable snapshot)
-                 :null-object :null
-                 :false-object :json-false))
-        (insert "\n")))))
+      ;; Force utf-8-unix on the write.  On Emacs 30, `with-temp-file' without an
+      ;; explicit coding system can land in `select-safe-coding-system' when the
+      ;; serialized JSON contains characters whose default encoding is ambiguous
+      ;; (e.g. U+FFFD from upstream-corrupted byte sequences in last-prompt
+      ;; summaries).  Hitting the interactive "Select coding system:" prompt is
+      ;; especially bad here because this writer fires from a 1-Hz timer, so the
+      ;; prompt instantly re-pops the moment focus shifts away.  utf-8-unix is
+      ;; the only encoding that round-trips json-serialize's output, so pin it.
+      (let ((coding-system-for-write 'utf-8-unix))
+        (with-temp-file file
+          (insert (json-serialize
+                   (claude-repl--snapshot->json-serializable snapshot)
+                   :null-object :null
+                   :false-object :json-false))
+          (insert "\n"))))))
 
 ;;;; Staggered write scheduler --------------------------------------------------
 

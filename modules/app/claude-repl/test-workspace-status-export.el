@@ -168,6 +168,32 @@ encode."
             (should (file-exists-p tmp)))
         (when (file-exists-p tmp) (delete-file tmp))))))
 
+(ert-deftest claude-repl-test-write-workspace-status-forces-utf-8 ()
+  "Writer pins `coding-system-for-write' to utf-8-unix.
+
+Regression guard: on Emacs 30 the default `with-temp-file' path can
+land in `select-safe-coding-system' when the serialized JSON includes
+bytes whose default encoding is ambiguous (e.g. a U+FFFD that snuck
+into a `:last-prompt-summary' upstream).  The interactive prompt then
+re-fires every workspace-status-write tick (1 Hz via the staggered
+scheduler), which is unusable.  Detect a regression by intercepting
+`write-region' and asserting the active coding system at write time."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp (make-temp-file "claude-repl-status-" nil ".json"))
+           (claude-repl-workspace-status-file tmp)
+           (observed-coding nil)
+           (advice (lambda (orig start end filename &optional append visit lockname mustbenew)
+                     (setq observed-coding coding-system-for-write)
+                     (funcall orig start end filename append visit lockname mustbenew))))
+      (unwind-protect
+          (progn
+            (advice-add 'write-region :around advice)
+            (claude-repl--ws-set-claude-state "ws-codec" :idle)
+            (claude-repl--write-workspace-status)
+            (should (eq observed-coding 'utf-8-unix)))
+        (advice-remove 'write-region advice)
+        (when (file-exists-p tmp) (delete-file tmp))))))
+
 (ert-deftest claude-repl-test-write-workspace-status-parses-back ()
   "The written file is valid JSON and contains the workspace state."
   (claude-repl-test--with-clean-state
