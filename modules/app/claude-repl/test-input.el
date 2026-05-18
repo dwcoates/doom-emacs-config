@@ -419,6 +419,45 @@
            "skipped entirely rather than coerced into a degenerate shallow tree"
            claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-tldr-depth-may-vary-across-branches ()
+  "TLDR spec must permit (not require) depth to vary across branches within the same tree."
+  (should (string-match-p
+           "TLDR tree's depth MAY vary across branches within the same tree"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-branch-depth-reflects-warranted-explanation ()
+  "TLDR spec must say per-branch depth reflects how much that branch warrants further explanation."
+  (should (string-match-p
+           "depth used under any given branch reflecting how much that branch warrants further explanation"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-deeper-subtrees-as-visual-cue ()
+  "TLDR spec must frame deeper subtrees as a visual cue that those areas deserve more attention or warrant more detail (and perhaps more complication)."
+  (should (string-match-p
+           "deeper subtrees act as a visual cue"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "deserve more attention or warrant more detail"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "perhaps involve more complication"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-shallower-subtrees-signal-self-contained ()
+  "TLDR spec must frame shallower subtrees as a signal that the topic is comparatively self-contained."
+  (should (string-match-p
+           "shallower subtrees signal a comparatively self-contained topic"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-per-branch-variability-permitted-not-required ()
+  "TLDR spec must say per-branch variability is permitted and encouraged wherever useful but never required for its own sake."
+  (should (string-match-p
+           "permitted and encouraged wherever useful but never required for its own sake"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "forcing uniform depth across siblings defeats the purpose of using depth as a salience signal"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-tldr-per-level-concision ()
   "TLDR spec must require entries at the same level of the tree to be a bit more concise than the equivalent sentence would be in the response body, without sacrificing meaning."
   (should (string-match-p
