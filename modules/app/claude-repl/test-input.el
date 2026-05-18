@@ -397,6 +397,27 @@ of the response rather than an enumeration of every point."
   (should (string-match-p "Do NOT prefix top-level bullets with emojis in the main response body"
                           claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-main-body-comma-paren-subbullet-rule ()
+  "Main body must extend the subbullet-instead-of-semicolons/emdashes rule to also cover commas and parenthetical asides that bolt on additional/qualifying content."
+  (should (string-match-p
+           "same standard applies to commas and parenthetical asides that bolt on additional or qualifying content"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "any comma, semicolon, emdash, or paren that attaches extra detail to a bullet"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-main-body-comma-strong-reason-exception ()
+  "Main body comma/paren rule must carry an explicit 'strong reason' inline-exception clause so the rule is emphatic but not absolute."
+  (should (string-match-p
+           "unless there's a strong reason to keep them inline"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-main-body-grammatical-structure-principle ()
+  "Main body must state the guiding principle: keep bullets short not by simplifying content but by recursively subbulleting along english grammatical structure."
+  (should (string-match-p
+           "keep each bullet short not by simplifying content but by subbulleting along english grammatical structure, recursively"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-tldr-header-changes-annotation ()
   "TLDR spec must require the Response TLDR section header to indicate whether changes were made."
   (should (string-match-p
