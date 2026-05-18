@@ -213,9 +213,11 @@ Trivial wrapper: `(claude-repl--vterm-process-alive-p (or ws (+workspace-current
 - Perm flag only
 - All nil
 - Resume + perm flag combined
-- System-prompt default period emits `--system-prompt .`
+- System-prompt default period emits `--system-prompt "."` (literal double quotes)
 - System-prompt nil omits the flag entirely
-- System-prompt with spaces gets shell-quoted
+- System-prompt with spaces wrapped in literal double quotes
+- System-prompt with embedded `"` backslash-escapes
+- System-prompt with `$` backslash-escapes to prevent expansion
 - System-prompt combines with `--continue` and perm flag
 
 ## Recommended Priority for Remaining Coverage

@@ -363,8 +363,15 @@ flags string."
                                         "--continue")
                                       perm-flag
                                       (when claude-repl-system-prompt
-                                        (format "--system-prompt %s"
-                                                (shell-quote-argument
+                                        ;; Wrap value in literal double quotes
+                                        ;; (instead of `shell-quote-argument',
+                                        ;; which leaves shell-safe values like
+                                        ;; "." bare).  Empirically, the Claude
+                                        ;; CLI mis-parses the bare period when
+                                        ;; spawning from another Claude session.
+                                        (format "--system-prompt \"%s\""
+                                                (replace-regexp-in-string
+                                                 "\\([\"\\$`]\\)" "\\\\\\1"
                                                  claude-repl-system-prompt)))))
                            " "))))
     (claude-repl--log nil "compute-claude-flags: flags=%s" flags)
