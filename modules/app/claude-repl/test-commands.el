@@ -1917,9 +1917,11 @@ No interrupt was actually delivered, so the state should not change."
 ;;;; ---- claude-repl-nuke-workspace ----
 
 (ert-deftest claude-repl-cmd-test-nuke-workspace/no-workspaces ()
-  "nuke-workspace signals user-error when hashmap is empty."
+  "nuke-workspace signals user-error when no live claude-repl ws AND no
+tab-bar ws are available — the picker has no candidates to offer."
   (claude-repl-test--with-clean-state
-    (should-error (claude-repl-nuke-workspace) :type 'user-error)))
+    (cl-letf (((symbol-function '+workspace-list-names) (lambda () nil)))
+      (should-error (claude-repl-nuke-workspace) :type 'user-error))))
 
 (ert-deftest claude-repl-cmd-test-nuke-workspace/kills-session-and-tombstones-hashmap ()
   "nuke-workspace kills session, kills persp workspace, and tombstones hashmap entry.
@@ -2509,9 +2511,11 @@ route-to-register-merged branch."
 ;;;; ---- claude-repl-kill-workspace ----
 
 (ert-deftest claude-repl-cmd-test-kill-workspace/no-workspaces ()
-  "kill-workspace signals user-error when hashmap is empty."
+  "kill-workspace signals user-error when no live claude-repl ws AND no
+tab-bar ws are available — the picker has no candidates to offer."
   (claude-repl-test--with-clean-state
-    (should-error (claude-repl-kill-workspace) :type 'user-error)))
+    (cl-letf (((symbol-function '+workspace-list-names) (lambda () nil)))
+      (should-error (claude-repl-kill-workspace) :type 'user-error))))
 
 (ert-deftest claude-repl-cmd-test-kill-workspace/no-confirmation-prompt ()
   "kill-workspace MUST NOT prompt for confirmation.  Teardown is
@@ -2616,6 +2620,80 @@ kill so the workspace can be re-opened with its identity intact."
                  (lambda (p) (setq proc-deleted p))))
         (claude-repl-kill-workspace)
         (should proc-deleted)))))
+
+(ert-deftest claude-repl-cmd-test-nuke-workspace/tabbar-only-routes-to-persp-kill ()
+  "nuke-workspace on a tab-bar-only ws (claude already killed) routes
+through `+workspace/kill' and does NOT call the claude-repl teardown.
+The ws has no live `claude-repl--workspaces' entry but its persp is
+still in `+workspace-list-names', so the picker offers it and the
+dispatcher chooses the plain-kill branch."
+  (claude-repl-test--with-clean-state
+    (let ((persp-killed nil)
+          (kill-session-called nil)
+          (persp-mode t))
+      (cl-letf (((symbol-function '+workspace-list-names)
+                 (lambda () '("stray-persp")))
+                ((symbol-function '+workspace-current-name) (lambda () "main"))
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "stray-persp"))
+                ((symbol-function '+workspace-exists-p) (lambda (_n) t))
+                ((symbol-function '+workspace/kill)
+                 (lambda (ws) (setq persp-killed ws)))
+                ((symbol-function 'claude-repl--kill-session)
+                 (lambda (_ws) (setq kill-session-called t)))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-nuke-workspace)
+        (should (equal persp-killed "stray-persp"))
+        ;; The claude-repl teardown MUST NOT run for a non-live ws.
+        (should-not kill-session-called)))))
+
+(ert-deftest claude-repl-cmd-test-kill-workspace/tabbar-only-routes-to-persp-kill ()
+  "kill-workspace on a tab-bar-only ws routes through `+workspace/kill'
+\(symmetric with the nuke-workspace test above)."
+  (claude-repl-test--with-clean-state
+    (let ((persp-killed nil)
+          (kill-session-called nil)
+          (persp-mode t))
+      (cl-letf (((symbol-function '+workspace-list-names)
+                 (lambda () '("stray-persp")))
+                ((symbol-function '+workspace-current-name) (lambda () "main"))
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "stray-persp"))
+                ((symbol-function '+workspace-exists-p) (lambda (_n) t))
+                ((symbol-function '+workspace/kill)
+                 (lambda (ws) (setq persp-killed ws)))
+                ((symbol-function 'claude-repl--kill-session)
+                 (lambda (_ws) (setq kill-session-called t)))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-kill-workspace)
+        (should (equal persp-killed "stray-persp"))
+        (should-not kill-session-called)))))
+
+(ert-deftest claude-repl-cmd-test-nuke-workspace/tombstoned-with-persp-routes-to-persp-kill ()
+  "nuke-workspace on a tombstoned ws (claude killed but persp still in
+tab-bar) routes through `+workspace/kill'.  The hash entry already has
+`:nuked-at' set so `--ws-live-p' returns nil; the picker still offers
+the ws via the tab-bar branch and the dispatcher does the plain kill."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "tomb" :project-dir "/tmp/tomb")
+    (claude-repl--ws-put "tomb" :nuked-at (current-time))
+    (let ((persp-killed nil)
+          (kill-session-called nil)
+          (persp-mode t))
+      (cl-letf (((symbol-function '+workspace-list-names)
+                 (lambda () '("tomb")))
+                ((symbol-function '+workspace-current-name) (lambda () "main"))
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &rest _) "tomb"))
+                ((symbol-function '+workspace-exists-p) (lambda (_n) t))
+                ((symbol-function '+workspace/kill)
+                 (lambda (ws) (setq persp-killed ws)))
+                ((symbol-function 'claude-repl--kill-session)
+                 (lambda (_ws) (setq kill-session-called t)))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (claude-repl-nuke-workspace)
+        (should (equal persp-killed "tomb"))
+        (should-not kill-session-called)))))
 
 ;;;; ---- Tests: workspace snapshot save/load ----
 

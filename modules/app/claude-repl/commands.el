@@ -1310,23 +1310,64 @@ on-disk state.el is up-to-date."
                             ws (if (member ws persp-names-cache) "t" "nil") persp-names-cache))
       (error (claude-repl--log ws "nuke-one-workspace: workspace-kill error: %S" err)))))
 
+(defun claude-repl--nuke-or-kill-workspace (ws)
+  "Dispatch a nuke vs. plain persp-kill on WS based on liveness.
+
+When WS is a live claude-repl workspace
+\(`claude-repl--ws-live-p'), runs the full
+`claude-repl--nuke-one-workspace' teardown and returns the symbol
+`nuke'.  Otherwise WS is a tab-bar-only workspace (either a
+tombstoned claude-repl entry whose persp still exists or a persp
+that was never registered with claude-repl); in that case runs a
+bare `+workspace/kill' guarded by `+workspace-exists-p' and returns
+the symbol `kill'.
+
+Shared by the interactive `claude-repl-nuke-workspace' and
+`claude-repl-kill-workspace' commands so the picker (which
+deliberately offers both kinds of candidates via
+`claude-repl--nukeable-workspace-names') can hand the chosen WS to a
+single routing point."
+  (cond
+   ((claude-repl--ws-live-p ws)
+    (claude-repl--nuke-one-workspace ws)
+    'nuke)
+   (t
+    (claude-repl--log ws "nuke-or-kill: ws not live, routing to +workspace/kill")
+    (when (and (bound-and-true-p persp-mode)
+               (fboundp '+workspace-exists-p)
+               (+workspace-exists-p ws))
+      (condition-case err
+          (+workspace/kill ws)
+        (error (claude-repl--log ws "nuke-or-kill: +workspace/kill error: %S" err))))
+    'kill)))
+
 (defun claude-repl-nuke-workspace (&optional ws)
   "Tear down a claude-repl workspace: session, buffers, persp, and hashmap entry.
 Persisted state.el (priority, per-environment session-id) is preserved
 so the workspace can be re-opened later and resume its Claude session.
-When called interactively without WS, prompts to select from
-workspaces registered in `claude-repl--workspaces', defaulting to the
-current workspace when registered.  Programmatic callers (e.g. the
-drawer) pass WS directly to skip the prompt.
+When called interactively without WS, prompts to select from the union
+of live claude-repl workspaces and tab-bar workspaces
+\(`claude-repl--nukeable-workspace-names'), defaulting to the current
+workspace when it appears in that candidate list.  Programmatic
+callers (e.g. the drawer) pass WS directly to skip the prompt.
+
+If the selected workspace is NOT a live claude-repl workspace (its
+claude has already been killed but the persp/doom workspace is still
+in the tab-bar), the operation falls back to a plain `+workspace/kill'
+— there is no claude-repl session to tear down, so a normal persp kill
+is the correct operation.
 
 No confirmation prompt: teardown is immediate.  Persisted state.el is
 preserved, so re-opening the workspace later resumes the Claude
 session — accidental invocations are easily recoverable."
   (interactive)
-  (let ((ws (or ws (claude-repl--read-known-workspace "Nuke workspace: "))))
-    (claude-repl--nuke-one-workspace ws)
+  (let* ((ws (or ws (claude-repl--read-nukeable-workspace "Nuke workspace: ")))
+         (action (claude-repl--nuke-or-kill-workspace ws)))
     (force-mode-line-update t)
-    (message "Nuked workspace: %s" ws)))
+    (message (if (eq action 'nuke)
+                 "Nuked workspace: %s"
+               "Killed persp workspace: %s")
+             ws)))
 
 (defun claude-repl-nuke-all-workspaces ()
   "Tear down ALL claude-repl workspaces.
@@ -1378,23 +1419,29 @@ proceeding.  Same per-workspace teardown as
 (defun claude-repl-kill-workspace (&optional ws)
   "Tear down a claude-repl workspace and preserve its persisted state.
 Alias for `claude-repl-nuke-workspace' — both functions go through
-`claude-repl--nuke-one-workspace', which always preserves the on-disk
-per-project state file.  Retained as a separate command for callers /
+`claude-repl--nuke-or-kill-workspace', which preserves the on-disk
+per-project state file on the live-claude-repl path and falls back to
+a plain `+workspace/kill' for tab-bar workspaces whose claude has
+already been killed.  Retained as a separate command for callers /
 muscle-memory that bind `kill' semantics distinctly from `nuke'.
 
-Prompts to select from workspaces registered in
-`claude-repl--workspaces', defaulting to the current workspace
-when registered.  Programmatic callers (e.g. the drawer) pass WS
-directly to skip the prompt.
+Prompts to select from the union of live claude-repl workspaces and
+tab-bar workspaces (`claude-repl--nukeable-workspace-names'),
+defaulting to the current workspace when it appears in that candidate
+list.  Programmatic callers (e.g. the drawer) pass WS directly to
+skip the prompt.
 
 No confirmation prompt: teardown is immediate.  Persisted state.el is
 preserved, so re-opening the workspace later resumes the Claude
 session — accidental invocations are easily recoverable."
   (interactive)
-  (let ((ws (or ws (claude-repl--read-known-workspace "Kill workspace: "))))
-    (claude-repl--nuke-one-workspace ws)
+  (let* ((ws (or ws (claude-repl--read-nukeable-workspace "Kill workspace: ")))
+         (action (claude-repl--nuke-or-kill-workspace ws)))
     (force-mode-line-update t)
-    (message "Killed workspace: %s" ws)))
+    (message (if (eq action 'nuke)
+                 "Killed workspace: %s"
+               "Killed persp workspace: %s")
+             ws)))
 
 ;;;; Hide-mode sweep
 

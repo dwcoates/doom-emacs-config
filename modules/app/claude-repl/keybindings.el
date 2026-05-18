@@ -228,6 +228,35 @@ nuked workspace's identity record survives in the hash for
     (unless known (user-error "No claude-repl workspaces registered"))
     (completing-read prompt known nil t nil nil default)))
 
+(defun claude-repl--nukeable-workspace-names ()
+  "Return candidate names for the nuke/kill picker.
+Union of live claude-repl workspaces (`claude-repl--live-ws-names')
+and tab-bar workspaces (`+workspace-list-names'), preserving the live
+entries first.  Tab-bar entries whose claude-repl session has been
+torn down (or never existed) are included so the user can dispatch a
+plain persp/doom kill on stray tabs through the same picker — the
+dispatcher (`claude-repl--nuke-or-kill-workspace') decides per-entry
+whether to run the claude-repl teardown or a bare `+workspace/kill'."
+  (let* ((live (claude-repl--live-ws-names))
+         (tabbar (and (fboundp '+workspace-list-names)
+                      (+workspace-list-names)))
+         (extras (cl-remove-if (lambda (n) (member n live)) tabbar)))
+    (append live extras)))
+
+(defun claude-repl--read-nukeable-workspace (prompt)
+  "Prompt for a workspace to nuke/kill.
+Candidates come from `claude-repl--nukeable-workspace-names': live
+claude-repl workspaces plus tab-bar workspaces whose claude has
+already been killed.  Defaults to the current workspace when it
+appears in the candidate list.  Signals `user-error' when no
+candidates exist."
+  (let* ((known (claude-repl--nukeable-workspace-names))
+         (current (and (fboundp '+workspace-current-name)
+                       (+workspace-current-name)))
+         (default (and current (member current known) current)))
+    (unless known (user-error "No workspaces available to nuke/kill"))
+    (completing-read prompt known nil t nil nil default)))
+
 (defun claude-repl--write-output-json (filename content)
   "Write CONTENT as JSON to FILENAME inside `claude-repl--output-dir'.
 Ensures the output directory exists.  Returns the full path of the written file."
