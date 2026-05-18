@@ -1255,6 +1255,94 @@ it is normalized to the dirname before lookup."
       (claude-repl--remove-git-worktree project-dir))
     (message "Finished workspace: %s" ws)))
 
+(defun claude-repl--abort-cherry-pick-if-in-flight (ws dir)
+  "If a cherry-pick is in flight at DIR, run `git cherry-pick --abort'.
+WS is the workspace name (for logging only).  No-op when DIR is nil,
+not a string, does not exist, or has no `CHERRY_PICK_HEAD' —
+distinguishes a pre-flight failure (no cherry-pick had begun) from a
+mid-flight failure (cherry-pick must be aborted to leave a clean tree)."
+  (cond
+   ((or (null dir)
+        (not (stringp dir))
+        (not (file-directory-p dir)))
+    (claude-repl--log ws
+                      "abort-cherry-pick-if-in-flight: ws=%s dir=%s — no-op (dir absent)"
+                      ws (or dir "nil")))
+   ((not (claude-repl--cherry-pick-in-progress-p dir))
+    (claude-repl--log ws
+                      "abort-cherry-pick-if-in-flight: ws=%s dir=%s — no CHERRY_PICK_HEAD"
+                      ws dir))
+   (t
+    (let ((ec (claude-repl--git-exit-code dir "cherry-pick" "--abort")))
+      (claude-repl--log ws
+                        "abort-cherry-pick-if-in-flight: ws=%s dir=%s exit=%d"
+                        ws dir ec)))))
+
+(defun claude-repl--format-merge-failure-prompt (err)
+  "Format the prompt sent to a workspace's claude after a failed merge.
+ERR is the elisp error tuple caught by `--workspace-merge-async'.
+The directive at the tail is intentional — Claude should analyze the
+failure, not attempt to retry or repair it.  Re-dispatch of the merge
+is a separate human-initiated step."
+  (format
+   (concat
+    "A merge attempt for this workspace just failed with the following error:\n\n"
+    "```\n%S\n```\n\n"
+    "Analyze this merge failure. Do NOT take any action — analysis only.")
+   err))
+
+(defun claude-repl--current-head-sha (dir)
+  "Return the current HEAD SHA at DIR, or nil if DIR is nil/non-git.
+Used by the merge-queue loop guard to record the target branch tip
+at the time of a failed attempt and to compare against the current
+tip on the next drain peek."
+  (when (and dir (stringp dir) (file-directory-p dir))
+    (let ((sha (claude-repl--git-string "-C" dir "rev-parse" "HEAD")))
+      (and sha (not (string-empty-p sha)) sha))))
+
+(defun claude-repl--reenqueue-merge-on-failure (ws conflict-rejection target-dir)
+  "Re-enqueue WS onto `claude-repl--merge-queue' after a merge attempt failed.
+CONFLICT-REJECTION non-nil means the failure was Claude rejecting the
+cherry-pick conflict resolution (signal class
+`claude-repl-merge-conflict-error') — entry goes to the BACK of the
+queue so siblings can be tried first.  Nil means the failure was
+generic (anything else) — entry goes to the FRONT with
+`:halt-until-human t', halting auto-drain until a human kicks the
+queue via `claude-repl-drain-merge-queue'.
+
+TARGET-DIR is the resolved cherry-pick destination at the time of
+the failed attempt; its current HEAD SHA is recorded on the entry as
+`:last-attempt-target-head' so `claude-repl--drain-merge-queue's loop
+guard can detect a no-progress retry: if the target HEAD has not
+advanced since, retrying the same workspace would just fail the same
+way.
+
+Marks WS with `:repl-state :merge-queued' so the drawer surfaces the
+entry under MERGING with the queued-state badge, and clears
+`:claude-state' for the same reason `--mark-merge-failed' does (state
+glyph precedence reads `:repl-state' first, but a stale claude-state
+would still color the name)."
+  (let* ((target-head (claude-repl--current-head-sha target-dir))
+         (entry (list :source-ws ws
+                      :silent t
+                      :auto-resolve t
+                      :last-attempt-target-head target-head
+                      :halt-until-human (not conflict-rejection))))
+    (if conflict-rejection
+        (setq claude-repl--merge-queue
+              (append claude-repl--merge-queue (list entry)))
+      (setq claude-repl--merge-queue
+            (cons entry claude-repl--merge-queue)))
+    (claude-repl--ws-put ws :repl-state :merge-queued)
+    (claude-repl--ws-put ws :claude-state nil)
+    (claude-repl--log ws
+                      "reenqueue-merge-on-failure: ws=%s conflict-rejection=%s target-head=%s position=%s queue-len=%d"
+                      ws (if conflict-rejection "t" "nil")
+                      (or target-head "nil")
+                      (if conflict-rejection "back" "front")
+                      (length claude-repl--merge-queue))
+    (claude-repl--persist-merge-queue)))
+
 (defun claude-repl--workspace-merge-async (ws repo-root)
   "Run a workspace merge asynchronously.  Single unified entry for both
 the interactive `SPC TAB M' path and the `/workspace-merge' skill
@@ -1278,12 +1366,26 @@ Flow:
          close-workspace via `--defer-to-main-thread') has already
          scheduled the final cleanup.
        - Failure (`claude-repl-merge-conflict-error' or generic
-         `error'): post `claude-repl--reopen-workspace-from-state' to
-         the main thread so the user gets the source workspace back
-         and can finish the merge manually.  The merge body's
-         `--surface-silent-merge-conflict' has already deferred the
-         magit-status pop in the parent worktree, so the user has
-         both: workspace restored AND the conflict visible in magit.
+         `error'): centralized failure handling runs on the worker
+         thread (queue mutation + cherry-pick abort are non-UI ops
+         and safe) and UI ops (reopen, claude-send) are deferred to
+         the main thread.  Specifically:
+           a. `--abort-cherry-pick-if-in-flight' on the resolved
+              target dir (no-op if CHERRY_PICK_HEAD absent).
+           b. `--reenqueue-merge-on-failure' classifies the error:
+              `claude-repl-merge-conflict-error' → BACK of queue
+              (recoverable; siblings get a turn).  Anything else →
+              FRONT with `:halt-until-human t' (no auto-drain).
+           c. Deferred to main thread: `--reopen-workspace-from-state'
+              to restore the source workspace, then
+              `--dispatch-prompt-command' to send the formatted error
+              to the workspace's claude with the analyze-only
+              directive so the user and claude can diagnose together.
+           d. For conflict-rejection, calls `--drain-merge-queue' so a
+              sibling workspace can attempt its own merge while this
+              one waits at the back.  Generic failures skip the drain
+              call (the front entry's `:halt-until-human' would block
+              the drain anyway, but skipping the call is cheaper).
 
 All UI ops INSIDE the merge body must use `--defer-to-main-thread'
 because they run from the worker thread; the existing call sites in
@@ -1303,11 +1405,28 @@ do this."
                              ws))
        (error
         (claude-repl--log ws
-                          "workspace-merge-async: ws=%s thread caught err=%S — scheduling reopen"
+                          "workspace-merge-async: ws=%s thread caught err=%S — handling failure"
                           ws err)
-        (run-at-time 0 nil
-                     (lambda ()
-                       (claude-repl--reopen-workspace-from-state ws))))))
+        (let* ((conflict-rejection (eq (car err) 'claude-repl-merge-conflict-error))
+               (target-dir (claude-repl--ws-get ws :resolved-target-dir)))
+          ;; (a) Abort any in-flight cherry-pick at the target dir.
+          (claude-repl--abort-cherry-pick-if-in-flight ws target-dir)
+          ;; (b) Re-enqueue with classification + loop-guard metadata.
+          (claude-repl--reenqueue-merge-on-failure ws conflict-rejection target-dir)
+          ;; (c) Restore the workspace UI and send the error to its
+          ;; claude with the analyze-only directive — both are UI ops,
+          ;; so defer to the main thread.
+          (run-at-time
+           0 nil
+           (lambda ()
+             (claude-repl--reopen-workspace-from-state ws)
+             (claude-repl--dispatch-prompt-command
+              ws (claude-repl--format-merge-failure-prompt err))))
+          ;; (d) Only continue the drain on a recoverable conflict
+          ;; rejection — generic failures park at the front of the queue
+          ;; with `:halt-until-human' set.
+          (when conflict-rejection
+            (claude-repl--drain-merge-queue))))))
    (format "claude-repl-merge-%s" ws)))
 
 (defun claude-repl--reopen-workspace-from-state (ws)
@@ -3363,8 +3482,25 @@ propagate into the queue mutators."
 (defun claude-repl--drain-merge-queue ()
   "Dispatch the next queued merge when no cherry-pick is in flight.
 No-op when the queue is empty or when a cherry-pick remains in flight
-\(another caller will drain after that completes).  Pops one entry,
-clears its `:merge-queued' marker, and re-enters
+\(another caller will drain after that completes).
+
+Peeks the front entry before popping and HALTS the drain (without
+popping) when either of the following holds:
+
+  - `:halt-until-human' on the front entry is non-nil — set by
+    `claude-repl--reenqueue-merge-on-failure' for generic
+    (non-conflict-rejection) failures.  Cleared by the interactive
+    `claude-repl-drain-merge-queue' command (the human kick).
+
+  - `:last-attempt-target-head' on the front entry equals the current
+    HEAD SHA of the workspace's `:resolved-target-dir' — loop guard
+    for Claude-rejection retries; if no sibling has advanced the
+    target tip since the last failed attempt, retrying the same
+    workspace would just fail the same way.  Only halts when both
+    the recorded SHA and the current SHA are present and equal.
+
+When neither halt applies, pops the entry, clears its
+`:merge-queued' marker, and re-enters
 `claude-repl--workspace-merge-into-source'.  Errors raised by the
 deferred merge are caught and logged so a single failure does not
 leave the queue stuck — `--workspace-merge-do' already calls drain
@@ -3375,23 +3511,43 @@ after the pop so a crash mid-merge does not resurrect an entry that
 has already been dispatched."
   (when (and claude-repl--merge-queue
              (not (claude-repl--any-cherry-pick-in-progress-p)))
-    (let* ((next (pop claude-repl--merge-queue))
-           (ws (plist-get next :source-ws))
-           (silent (plist-get next :silent))
-           (auto-resolve (plist-get next :auto-resolve)))
-      (when (eq (claude-repl--ws-get ws :repl-state) :merge-queued)
-        (claude-repl--ws-put ws :repl-state nil))
-      (claude-repl--log ws
-                        "merge-queue: draining ws=%s silent=%s auto-resolve=%s remaining=%d"
-                        ws (if silent "t" "nil") (if auto-resolve "t" "nil")
-                        (length claude-repl--merge-queue))
-      (claude-repl--persist-merge-queue)
-      (condition-case err
-          (claude-repl--workspace-merge-into-source ws silent auto-resolve)
-        (error
-         (claude-repl--log ws
-                           "merge-queue: deferred merge failed ws=%s err=%S"
-                           ws err))))))
+    (let* ((front (car claude-repl--merge-queue))
+           (front-ws (plist-get front :source-ws))
+           (halt (plist-get front :halt-until-human))
+           (recorded-head (plist-get front :last-attempt-target-head))
+           (target-dir (and front-ws
+                            (claude-repl--ws-get front-ws :resolved-target-dir)))
+           (current-head (claude-repl--current-head-sha target-dir))
+           (loop-guard (and recorded-head
+                            current-head
+                            (string= recorded-head current-head))))
+      (cond
+       (halt
+        (claude-repl--log front-ws
+                          "drain-merge-queue: halt-until-human ws=%s queue-len=%d — not draining"
+                          front-ws (length claude-repl--merge-queue)))
+       (loop-guard
+        (claude-repl--log front-ws
+                          "drain-merge-queue: loop-guard ws=%s target-head=%s unchanged — not draining"
+                          front-ws current-head))
+       (t
+        (let* ((next (pop claude-repl--merge-queue))
+               (ws (plist-get next :source-ws))
+               (silent (plist-get next :silent))
+               (auto-resolve (plist-get next :auto-resolve)))
+          (when (eq (claude-repl--ws-get ws :repl-state) :merge-queued)
+            (claude-repl--ws-put ws :repl-state nil))
+          (claude-repl--log ws
+                            "merge-queue: draining ws=%s silent=%s auto-resolve=%s remaining=%d"
+                            ws (if silent "t" "nil") (if auto-resolve "t" "nil")
+                            (length claude-repl--merge-queue))
+          (claude-repl--persist-merge-queue)
+          (condition-case err
+              (claude-repl--workspace-merge-into-source ws silent auto-resolve)
+            (error
+             (claude-repl--log ws
+                               "merge-queue: deferred merge failed ws=%s err=%S"
+                               ws err)))))))))
 
 (defun claude-repl--branch-merge-sentinel (ws proc _event)
   "Process sentinel for the async `:branch-merged' refresh of WS.
@@ -3643,6 +3799,12 @@ this function once the in-flight cherry-pick clears."
         (claude-repl--assert-clean-worktree source-ws source-dir)
         (unless silent
           (claude-repl-switch-to-project target-dir))
+        ;; Stash the resolved target on the workspace plist so the failure
+        ;; handler in `--workspace-merge-async' can find the cherry-pick
+        ;; destination (for `cherry-pick --abort' and for recording the
+        ;; target HEAD on the merge-queue entry's loop guard) without
+        ;; re-running target resolution from the worker thread.
+        (claude-repl--ws-put source-ws :resolved-target-dir target-dir)
         ;; After (the optional) switch, default-directory may still point at the
         ;; source ws — bind it to the target so cherry-pick paths resolve there.
         ;; Pass target-dir explicitly to --workspace-merge-do so the cherry-pick

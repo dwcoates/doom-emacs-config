@@ -3073,27 +3073,36 @@ both end up here via the same dispatch."
   "When the dispatch handler signals (conflict or any error), the wrapper's
 condition-case catches it and schedules `--reopen-workspace-from-state'
 on the main thread via `run-at-time'.  Without this, a failed merge
-leaves the user with a closed workspace and no way to recover."
-  (let ((scheduled nil))
-    (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
-               claude-repl-test--orig-workspace-merge-async)
-              ((symbol-function 'claude-repl--close-workspace) #'ignore)
-              ((symbol-function 'make-thread)
-               (lambda (thunk &optional _name) (funcall thunk) nil))
-              ((symbol-function 'claude-repl--dispatch-merge-handler)
-               (lambda (&rest _) (error "boom")))
-              ((symbol-function 'run-at-time)
-               (lambda (_when _repeat thunk)
-                 (push thunk scheduled))))
-      (claude-repl--workspace-merge-async "ws1" "/tmp/repo"))
-    (should (= (length scheduled) 1))
-    ;; Invoking the scheduled thunk should call --reopen-workspace-from-state
-    ;; with the workspace name.
-    (let ((reopened nil))
-      (cl-letf (((symbol-function 'claude-repl--reopen-workspace-from-state)
-                 (lambda (ws) (setq reopened ws))))
-        (funcall (car scheduled)))
-      (should (equal reopened "ws1")))))
+leaves the user with a closed workspace and no way to recover.
+
+The failure arm also re-enqueues onto the merge queue and dispatches a
+claude-send prompt; this test asserts only the reopen scheduling and
+stubs the rest."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (let ((scheduled nil))
+        (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+                   claude-repl-test--orig-workspace-merge-async)
+                  ((symbol-function 'claude-repl--close-workspace) #'ignore)
+                  ((symbol-function 'make-thread)
+                   (lambda (thunk &optional _name) (funcall thunk) nil))
+                  ((symbol-function 'claude-repl--dispatch-merge-handler)
+                   (lambda (&rest _) (error "boom")))
+                  ((symbol-function 'claude-repl--dispatch-prompt-command) #'ignore)
+                  ((symbol-function 'claude-repl--persist-merge-queue) #'ignore)
+                  ((symbol-function 'run-at-time)
+                   (lambda (_when _repeat thunk)
+                     (push thunk scheduled))))
+          (claude-repl--workspace-merge-async "ws1" "/tmp/repo"))
+        (should (= (length scheduled) 1))
+        ;; Invoking the scheduled thunk should call --reopen-workspace-from-state
+        ;; with the workspace name.
+        (let ((reopened nil))
+          (cl-letf (((symbol-function 'claude-repl--reopen-workspace-from-state)
+                     (lambda (ws) (setq reopened ws)))
+                    ((symbol-function 'claude-repl--dispatch-prompt-command) #'ignore))
+            (funcall (car scheduled)))
+          (should (equal reopened "ws1")))))))
 
 (ert-deftest claude-repl-test-workspace-merge-async-on-success-does-not-schedule-reopen ()
   "When dispatch completes without signaling, the wrapper does NOT schedule
@@ -3109,6 +3118,242 @@ a reopen — the merge body's own deferred teardown is the cleanup path."
                (lambda (_when _repeat thunk) (push thunk scheduled))))
       (claude-repl--workspace-merge-async "ws1" "/tmp/repo"))
     (should-not scheduled)))
+
+(ert-deftest claude-repl-test-workspace-merge-async-on-error-aborts-cherry-pick-when-in-flight ()
+  "When the dispatch handler signals AND a cherry-pick is in flight at the
+resolved target dir, the error arm runs `git cherry-pick --abort' before
+re-enqueueing.  Without the abort the target tree would stay half-merged
+on the next attempt."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (let ((aborted nil))
+        (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+        (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
+        (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+                   claude-repl-test--orig-workspace-merge-async)
+                  ((symbol-function 'claude-repl--close-workspace) #'ignore)
+                  ((symbol-function 'make-thread)
+                   (lambda (thunk &optional _name) (funcall thunk) nil))
+                  ((symbol-function 'claude-repl--dispatch-merge-handler)
+                   (lambda (&rest _) (error "boom")))
+                  ((symbol-function 'file-directory-p) (lambda (_) t))
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) t))
+                  ((symbol-function 'claude-repl--git-exit-code)
+                   (lambda (dir &rest args)
+                     (when (and (string= dir "/tmp/target")
+                                (equal args '("cherry-pick" "--abort")))
+                       (setq aborted t))
+                     0))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) "deadbeef"))
+                  ((symbol-function 'run-at-time) #'ignore)
+                  ((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+          (claude-repl--workspace-merge-async "ws1" "/tmp/ws1"))
+        (should aborted)))))
+
+(ert-deftest claude-repl-test-workspace-merge-async-on-error-does-not-abort-when-no-cherry-pick ()
+  "Pre-flight failure (no CHERRY_PICK_HEAD at target) must NOT invoke
+`cherry-pick --abort'.  Calling abort when nothing is mid-flight would
+emit a spurious git error."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (let ((abort-called nil))
+        (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+        (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
+        (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+                   claude-repl-test--orig-workspace-merge-async)
+                  ((symbol-function 'claude-repl--close-workspace) #'ignore)
+                  ((symbol-function 'make-thread)
+                   (lambda (thunk &optional _name) (funcall thunk) nil))
+                  ((symbol-function 'claude-repl--dispatch-merge-handler)
+                   (lambda (&rest _) (error "boom")))
+                  ((symbol-function 'file-directory-p) (lambda (_) t))
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--git-exit-code)
+                   (lambda (_dir &rest args)
+                     (when (equal args '("cherry-pick" "--abort"))
+                       (setq abort-called t))
+                     0))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) "deadbeef"))
+                  ((symbol-function 'run-at-time) #'ignore)
+                  ((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+          (claude-repl--workspace-merge-async "ws1" "/tmp/ws1"))
+        (should-not abort-called)))))
+
+(ert-deftest claude-repl-test-workspace-merge-async-on-conflict-error-reenqueues-to-back ()
+  "A `claude-repl-merge-conflict-error' is the Claude-rejected-the-conflict
+case; the workspace re-enters the queue at the BACK so sibling workspaces
+get a turn before this one is retried."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws-front" :project-dir "/tmp/wsf")
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
+      (setq claude-repl--merge-queue
+            (list (list :source-ws "ws-front" :silent t :auto-resolve t)))
+      (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+                 claude-repl-test--orig-workspace-merge-async)
+                ((symbol-function 'claude-repl--close-workspace) #'ignore)
+                ((symbol-function 'make-thread)
+                 (lambda (thunk &optional _name) (funcall thunk) nil))
+                ((symbol-function 'claude-repl--dispatch-merge-handler)
+                 (lambda (&rest _)
+                   (signal 'claude-repl-merge-conflict-error '("rejected"))))
+                ((symbol-function 'file-directory-p) (lambda (_) t))
+                ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                 (lambda (_) nil))
+                ((symbol-function 'claude-repl--current-head-sha)
+                 (lambda (_) "deadbeef"))
+                ((symbol-function 'run-at-time) #'ignore)
+                ((symbol-function 'claude-repl--drain-merge-queue) #'ignore)
+                ((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+        (claude-repl--workspace-merge-async "ws1" "/tmp/ws1"))
+      (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
+                             claude-repl--merge-queue)
+                     '("ws-front" "ws1")))
+      ;; Back-pushed entry carries no halt flag — drain may continue.
+      (should-not (plist-get (nth 1 claude-repl--merge-queue) :halt-until-human))
+      ;; Loop-guard SHA is recorded so a same-tip retry can be detected.
+      (should (equal (plist-get (nth 1 claude-repl--merge-queue)
+                                :last-attempt-target-head)
+                     "deadbeef")))))
+
+(ert-deftest claude-repl-test-workspace-merge-async-on-generic-error-reenqueues-to-front-with-halt-flag ()
+  "Generic (non-conflict) failure goes to the FRONT of the queue with
+`:halt-until-human t' so auto-drain does not retry until a human kick.
+Without the halt flag the next drain would pop the same entry right
+back out and loop the same failure."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws-existing" :project-dir "/tmp/wse")
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
+      (setq claude-repl--merge-queue
+            (list (list :source-ws "ws-existing" :silent t :auto-resolve t)))
+      (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+                 claude-repl-test--orig-workspace-merge-async)
+                ((symbol-function 'claude-repl--close-workspace) #'ignore)
+                ((symbol-function 'make-thread)
+                 (lambda (thunk &optional _name) (funcall thunk) nil))
+                ((symbol-function 'claude-repl--dispatch-merge-handler)
+                 (lambda (&rest _) (error "boom")))
+                ((symbol-function 'file-directory-p) (lambda (_) t))
+                ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                 (lambda (_) nil))
+                ((symbol-function 'claude-repl--current-head-sha)
+                 (lambda (_) "cafef00d"))
+                ((symbol-function 'run-at-time) #'ignore)
+                ((symbol-function 'claude-repl--drain-merge-queue) #'ignore)
+                ((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+        (claude-repl--workspace-merge-async "ws1" "/tmp/ws1"))
+      (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
+                             claude-repl--merge-queue)
+                     '("ws1" "ws-existing")))
+      (should (plist-get (car claude-repl--merge-queue) :halt-until-human))
+      (should (equal (plist-get (car claude-repl--merge-queue)
+                                :last-attempt-target-head)
+                     "cafef00d")))))
+
+(ert-deftest claude-repl-test-workspace-merge-async-on-error-dispatches-claude-send-with-analyze-directive ()
+  "The deferred main-thread thunk calls
+`claude-repl--dispatch-prompt-command' with a prompt that embeds the
+error and ends with the analyze-only directive.  Without this the
+workspace's claude has no in-band signal that a merge failed."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (let ((deferred-thunks nil)
+            (dispatched-prompt nil))
+        (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+        (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
+        (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+                   claude-repl-test--orig-workspace-merge-async)
+                  ((symbol-function 'claude-repl--close-workspace) #'ignore)
+                  ((symbol-function 'make-thread)
+                   (lambda (thunk &optional _name) (funcall thunk) nil))
+                  ((symbol-function 'claude-repl--dispatch-merge-handler)
+                   (lambda (&rest _) (error "boom")))
+                  ((symbol-function 'file-directory-p) (lambda (_) t))
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) "deadbeef"))
+                  ((symbol-function 'claude-repl--reopen-workspace-from-state)
+                   #'ignore)
+                  ((symbol-function 'claude-repl--dispatch-prompt-command)
+                   (lambda (_ws prompt) (setq dispatched-prompt prompt)))
+                  ((symbol-function 'run-at-time)
+                   (lambda (_when _repeat thunk) (push thunk deferred-thunks)))
+                  ((symbol-function 'claude-repl--drain-merge-queue) #'ignore)
+                  ((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+          (claude-repl--workspace-merge-async "ws1" "/tmp/ws1")
+          (should (= 1 (length deferred-thunks)))
+          (funcall (car deferred-thunks)))
+        (should (stringp dispatched-prompt))
+        (should (string-match-p "merge attempt for this workspace just failed"
+                                dispatched-prompt))
+        (should (string-match-p "Do NOT take any action — analysis only"
+                                dispatched-prompt))
+        (should (string-match-p "boom" dispatched-prompt))))))
+
+(ert-deftest claude-repl-test-workspace-merge-async-on-conflict-error-drains-queue ()
+  "Conflict-rejection is recoverable; the wrapper calls
+`--drain-merge-queue' so a sibling workspace can attempt its own merge
+while the rejecting workspace waits at the back."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (let ((drained nil))
+        (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+        (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
+        (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+                   claude-repl-test--orig-workspace-merge-async)
+                  ((symbol-function 'claude-repl--close-workspace) #'ignore)
+                  ((symbol-function 'make-thread)
+                   (lambda (thunk &optional _name) (funcall thunk) nil))
+                  ((symbol-function 'claude-repl--dispatch-merge-handler)
+                   (lambda (&rest _)
+                     (signal 'claude-repl-merge-conflict-error '("rejected"))))
+                  ((symbol-function 'file-directory-p) (lambda (_) t))
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) "deadbeef"))
+                  ((symbol-function 'run-at-time) #'ignore)
+                  ((symbol-function 'claude-repl--drain-merge-queue)
+                   (lambda () (setq drained t)))
+                  ((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+          (claude-repl--workspace-merge-async "ws1" "/tmp/ws1"))
+        (should drained)))))
+
+(ert-deftest claude-repl-test-workspace-merge-async-on-generic-error-does-not-drain ()
+  "Generic failure must NOT trigger an auto-drain — the front entry's
+`:halt-until-human' flag would block drain anyway, but skipping the
+call is cheaper and makes the asymmetry explicit at the call site."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (let ((drained nil))
+        (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+        (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
+        (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+                   claude-repl-test--orig-workspace-merge-async)
+                  ((symbol-function 'claude-repl--close-workspace) #'ignore)
+                  ((symbol-function 'make-thread)
+                   (lambda (thunk &optional _name) (funcall thunk) nil))
+                  ((symbol-function 'claude-repl--dispatch-merge-handler)
+                   (lambda (&rest _) (error "boom")))
+                  ((symbol-function 'file-directory-p) (lambda (_) t))
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) "deadbeef"))
+                  ((symbol-function 'run-at-time) #'ignore)
+                  ((symbol-function 'claude-repl--drain-merge-queue)
+                   (lambda () (setq drained t)))
+                  ((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+          (claude-repl--workspace-merge-async "ws1" "/tmp/ws1"))
+        (should-not drained)))))
 
 ;;;; ---- Tests: reopen-workspace-from-state ----
 
@@ -7262,6 +7507,281 @@ merge request is parked on the queue rather than running."
             (should (= 1 (length claude-repl--merge-queue)))
             (should (eq (claude-repl--ws-get "ws-pending" :repl-state)
                         :merge-queued))))))))
+
+;;;; ---- Tests: drain-merge-queue loop guards ----
+
+(ert-deftest claude-repl-test-drain-merge-queue-halts-on-halt-until-human ()
+  "Front entry with `:halt-until-human t' must NOT be popped during an
+auto-drain — the queue stays untouched until a human kicks it via
+`claude-repl-drain-merge-queue'."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (setq claude-repl--merge-queue
+            (list (list :source-ws "ws1" :silent t :auto-resolve t
+                        :halt-until-human t)))
+      (let ((called nil))
+        (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (&rest _) (setq called t)))
+                  ((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
+                   (lambda () nil)))
+          (claude-repl--drain-merge-queue)
+          (should-not called)
+          (should (= 1 (length claude-repl--merge-queue))))))))
+
+(ert-deftest claude-repl-test-drain-merge-queue-halts-on-matching-target-head ()
+  "Loop guard: front entry whose recorded `:last-attempt-target-head'
+equals the current HEAD of its `:resolved-target-dir' is skipped —
+nothing on that branch has advanced, so retrying would just re-fail."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
+      (setq claude-repl--merge-queue
+            (list (list :source-ws "ws1" :silent t :auto-resolve t
+                        :last-attempt-target-head "abc123")))
+      (let ((called nil))
+        (cl-letf (((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
+                   (lambda () nil))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) "abc123"))
+                  ((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (&rest _) (setq called t))))
+          (claude-repl--drain-merge-queue)
+          (should-not called)
+          (should (= 1 (length claude-repl--merge-queue))))))))
+
+(ert-deftest claude-repl-test-drain-merge-queue-proceeds-when-target-head-advanced ()
+  "Loop guard releases when the target HEAD has changed since the failed
+attempt — a sibling workspace successfully advanced the branch, so this
+workspace's retry is no longer redundant."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
+      (setq claude-repl--merge-queue
+            (list (list :source-ws "ws1" :silent t :auto-resolve t
+                        :last-attempt-target-head "abc123")))
+      (let ((called nil))
+        (cl-letf (((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
+                   (lambda () nil))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) "def456"))
+                  ((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (ws &rest _) (setq called ws))))
+          (claude-repl--drain-merge-queue)
+          (should (equal called "ws1"))
+          (should (= 0 (length claude-repl--merge-queue))))))))
+
+(ert-deftest claude-repl-test-drain-merge-queue-proceeds-when-no-recorded-head ()
+  "An entry that has never been attempted (no recorded
+`:last-attempt-target-head') must not trip the loop guard — that field
+is only set by `--reenqueue-merge-on-failure', not by normal first-time
+enqueues."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (let ((called nil))
+        (cl-letf (((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
+                   (lambda () nil))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) "abc123"))
+                  ((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (ws &rest _) (setq called ws))))
+          (claude-repl--drain-merge-queue)
+          (should (equal called "ws1")))))))
+
+;;;; ---- Tests: claude-repl-drain-merge-queue (interactive kick) ----
+
+(ert-deftest claude-repl-test-interactive-drain-clears-halt-flag-then-drains ()
+  "The interactive `claude-repl-drain-merge-queue' is the human signal
+that re-dispatch should proceed.  It clears `:halt-until-human' on the
+front entry and then runs the drain — the same drain that would
+otherwise have halted on the flag."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (setq claude-repl--merge-queue
+            (list (list :source-ws "ws1" :silent t :auto-resolve t
+                        :halt-until-human t)))
+      (let ((called nil))
+        (cl-letf (((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
+                   (lambda () nil))
+                  ((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (ws &rest _) (setq called ws))))
+          (claude-repl-drain-merge-queue)
+          (should (equal called "ws1"))
+          (should (= 0 (length claude-repl--merge-queue))))))))
+
+(ert-deftest claude-repl-test-interactive-drain-leaves-non-halted-front-untouched ()
+  "When the front entry has no `:halt-until-human' flag, the interactive
+drain runs as-is — it must not spuriously rewrite the entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (let ((entry-before (car claude-repl--merge-queue))
+            (dispatched nil))
+        (cl-letf (((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
+                   (lambda () nil))
+                  ((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (&rest _) (setq dispatched t))))
+          (claude-repl-drain-merge-queue)
+          (should dispatched)
+          (should-not (plist-get entry-before :halt-until-human)))))))
+
+;;;; ---- Tests: helpers for merge-async failure handling ----
+
+(ert-deftest claude-repl-test-current-head-sha-returns-nil-for-nil-dir ()
+  "Helper is robust to nil — the failure arm may have no resolved target."
+  (should (null (claude-repl--current-head-sha nil))))
+
+(ert-deftest claude-repl-test-current-head-sha-returns-nil-for-missing-dir ()
+  "Helper is robust to a path that doesn't exist on disk."
+  (cl-letf (((symbol-function 'file-directory-p) (lambda (_) nil)))
+    (should (null (claude-repl--current-head-sha "/nonexistent/dir/xyz")))))
+
+(ert-deftest claude-repl-test-current-head-sha-returns-rev-parse-output ()
+  "Helper returns the trimmed `git rev-parse HEAD' output via the wrapper.
+Mocks `--git-string' rather than spawning a real git subprocess (per
+AGENTS.md `No External Processes or External State in Tests')."
+  (cl-letf (((symbol-function 'file-directory-p) (lambda (_) t))
+            ((symbol-function 'claude-repl--git-string)
+             (lambda (&rest _)
+               "deadbeefcafef00ddeadbeefcafef00ddeadbeef")))
+    (should (equal (claude-repl--current-head-sha "/tmp/repo")
+                   "deadbeefcafef00ddeadbeefcafef00ddeadbeef"))))
+
+(ert-deftest claude-repl-test-format-merge-failure-prompt-embeds-error ()
+  "Prompt includes the error tuple via `%S' so claude sees the full shape
+\(symbol + data) for analysis."
+  (let ((prompt (claude-repl--format-merge-failure-prompt
+                 '(error "boom"))))
+    (should (string-match-p "boom" prompt))
+    (should (string-match-p "error" prompt))))
+
+(ert-deftest claude-repl-test-format-merge-failure-prompt-ends-with-analyze-only-directive ()
+  "Prompt ends with the analyze-only directive — re-dispatch is human-
+initiated, claude must not attempt repair on its own."
+  (let ((prompt (claude-repl--format-merge-failure-prompt
+                 '(error "boom"))))
+    (should (string-match-p "Do NOT take any action — analysis only"
+                            prompt))))
+
+(ert-deftest claude-repl-test-abort-cherry-pick-if-in-flight-noop-on-nil-dir ()
+  "Robustness: nil dir → no-op (no call to git, no error)."
+  (let ((git-called nil))
+    (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+               (lambda (&rest _) (setq git-called t) 0)))
+      (claude-repl--abort-cherry-pick-if-in-flight "ws1" nil)
+      (should-not git-called))))
+
+(ert-deftest claude-repl-test-abort-cherry-pick-if-in-flight-noop-when-no-head ()
+  "When CHERRY_PICK_HEAD is absent, the helper must not call abort —
+calling abort with nothing in flight emits a spurious git error."
+  (let ((git-called nil))
+    (cl-letf (((symbol-function 'file-directory-p) (lambda (_) t))
+              ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+               (lambda (_) nil))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (&rest _) (setq git-called t) 0)))
+      (claude-repl--abort-cherry-pick-if-in-flight "ws1" "/tmp/target")
+      (should-not git-called))))
+
+(ert-deftest claude-repl-test-abort-cherry-pick-if-in-flight-runs-abort-when-head-exists ()
+  "When CHERRY_PICK_HEAD exists at dir, helper invokes
+`git -C dir cherry-pick --abort'."
+  (let ((args nil))
+    (cl-letf (((symbol-function 'file-directory-p) (lambda (_) t))
+              ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+               (lambda (_) t))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (dir &rest a) (setq args (cons dir a)) 0)))
+      (claude-repl--abort-cherry-pick-if-in-flight "ws1" "/tmp/target")
+      (should (equal args '("/tmp/target" "cherry-pick" "--abort"))))))
+
+(ert-deftest claude-repl-test-reenqueue-merge-on-failure-back-on-conflict-rejection ()
+  "Conflict-rejection re-enqueue appends to the BACK of the queue and
+does NOT set `:halt-until-human' — auto-drain may proceed to siblings."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (setq claude-repl--merge-queue
+            (list (list :source-ws "ws-existing" :silent t :auto-resolve t)))
+      (cl-letf (((symbol-function 'claude-repl--current-head-sha)
+                 (lambda (_) "abc"))
+                ((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+        (claude-repl--reenqueue-merge-on-failure "ws1" t "/tmp/target"))
+      (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
+                             claude-repl--merge-queue)
+                     '("ws-existing" "ws1")))
+      (should-not (plist-get (nth 1 claude-repl--merge-queue)
+                             :halt-until-human))
+      (should (equal (plist-get (nth 1 claude-repl--merge-queue)
+                                :last-attempt-target-head)
+                     "abc")))))
+
+(ert-deftest claude-repl-test-reenqueue-merge-on-failure-front-on-generic ()
+  "Generic failure re-enqueue prepends to the FRONT and sets
+`:halt-until-human t' so auto-drain stops there."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (setq claude-repl--merge-queue
+            (list (list :source-ws "ws-existing" :silent t :auto-resolve t)))
+      (cl-letf (((symbol-function 'claude-repl--current-head-sha)
+                 (lambda (_) "abc"))
+                ((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+        (claude-repl--reenqueue-merge-on-failure "ws1" nil "/tmp/target"))
+      (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
+                             claude-repl--merge-queue)
+                     '("ws1" "ws-existing")))
+      (should (plist-get (car claude-repl--merge-queue) :halt-until-human)))))
+
+(ert-deftest claude-repl-test-reenqueue-merge-on-failure-marks-ws-merge-queued ()
+  "Re-enqueue marks the workspace with `:repl-state :merge-queued' so the
+drawer routes it under MERGING with the queued badge."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--ws-put "ws1" :claude-state :thinking)
+      (cl-letf (((symbol-function 'claude-repl--current-head-sha)
+                 (lambda (_) nil))
+                ((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+        (claude-repl--reenqueue-merge-on-failure "ws1" t "/tmp/target"))
+      (should (eq (claude-repl--ws-get "ws1" :repl-state) :merge-queued))
+      ;; Claude-state cleared so the queued badge wins the glyph precedence.
+      (should (null (claude-repl--ws-get "ws1" :claude-state))))))
+
+;;;; ---- Tests: workspace-merge-into-source stashes resolved target dir ----
+
+(ert-deftest claude-repl-test-workspace-merge-into-source-stashes-resolved-target-dir ()
+  "After successful target resolution, `--workspace-merge-into-source'
+stashes the target dir on the source workspace plist so the failure
+handler in `--workspace-merge-async' can run `cherry-pick --abort' and
+record the loop-guard head without redoing target resolution from the
+worker thread."
+  (claude-repl-test--with-clean-state
+    (let ((merge-do-args nil))
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--ws-put "ws1" :source-ws-dir "/tmp/parent")
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_) "/tmp/master"))
+                ((symbol-function 'claude-repl--resolve-merge-into-source-target)
+                 (lambda (parent _master) parent))
+                ((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function 'file-directory-p) (lambda (_) t))
+                ((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
+                 (lambda () nil))
+                ((symbol-function 'claude-repl--assert-clean-worktree) #'ignore)
+                ((symbol-function 'claude-repl--workspace-merge-do)
+                 (lambda (ws target &rest _)
+                   (push (list ws target) merge-do-args))))
+        (claude-repl--workspace-merge-into-source "ws1" t t)
+        (should (equal (claude-repl--ws-get "ws1" :resolved-target-dir)
+                       "/tmp/parent"))
+        (should (equal merge-do-args '(("ws1" "/tmp/parent"))))))))
 
 ;;;; ---- Tests: claude-repl-create-explanation-engine-oneshot-workspace ----
 
