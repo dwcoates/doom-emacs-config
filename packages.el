@@ -59,3 +59,8 @@
 ;; Upstream renamed default branch master -> main; pin recipe so straight can fetch.
 (package! iedit :recipe (:host github :repo "victorhge/iedit" :branch "main"))
 (package! package-lint :recipe (:host github :repo "purcell/package-lint" :branch "main"))
+
+;; magit 4.5 added a transitive dep on llama that doom's tools/magit module
+;; hasn't declared, so straight installs llama but it never lands on load-path.
+;; Declaring it here puts build-29.3/llama on load-path so (require 'llama) works.
+(package! llama)
