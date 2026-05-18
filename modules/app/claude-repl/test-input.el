@@ -360,12 +360,12 @@
                            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-structure-mece-numbered-ascii-tree ()
-  "TLDR spec must mandate rendering as a MECE numbered ASCII tree at depth 3."
+  "TLDR spec must mandate rendering as a MECE numbered ASCII tree with a dynamically determined depth in range 1-4."
   (should (string-match-p
-           "MECE numbered ASCII tree at depth 3"
+           "MECE numbered ASCII tree whose depth is dynamically determined"
            claude-repl-command-prefix))
   (should (string-match-p
-           "root branch, mid-level branch, leaf"
+           "permitted range of 1 to 4 inclusive"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-ascii-tree-connectors ()
@@ -378,7 +378,7 @@
   (should (string-match-p "│" claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-dotted-hierarchical-numbering ()
-  "TLDR spec must call out dotted hierarchical numbering for the tree's node labels."
+  "TLDR spec must call out dotted hierarchical numbering for the tree's node labels, with examples up through the depth-4 cap."
   (should (string-match-p
            "dotted hierarchical numbering"
            claude-repl-command-prefix))
@@ -387,24 +387,48 @@
            claude-repl-command-prefix))
   (should (string-match-p
            "1\\.1\\.1\\. \\.\\.\\."
-           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-tldr-depth-three-non-negotiable ()
-  "TLDR spec must mark depth 3 as non-negotiable and forbid flattening to depth 2 or lower."
-  (should (string-match-p
-           "Depth 3 is non-negotiable"
            claude-repl-command-prefix))
   (should (string-match-p
-           "MUST NOT be flattened to depth 2 or lower"
+           "1\\.1\\.1\\.1\\. \\.\\.\\."
            claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-depth-three-justify-each-leaf ()
-  "TLDR spec must say that if depth 3 feels excessive the assistant is wrong and must instead justify each leaf."
+(ert-deftest claude-repl-test-command-prefix-tldr-depth-scales-with-response-length ()
+  "TLDR spec must mandate that tree depth scales with the length of the response itself."
   (should (string-match-p
-           "if you think a lower depth fits the response better you are wrong"
+           "TLDR tree depth MUST scale with the length of the response"
            claude-repl-command-prefix))
   (should (string-match-p
-           "justify why each leaf at depth 3 makes sense"
+           "very short responses use a shallow tree (depth 1 or 2)"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "medium-length responses use depth 3"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "long, multi-section, or analysis-heavy responses use depth 4"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-depth-range-and-hard-cap ()
+  "TLDR spec must mandate the 1-4 depth range with depth 4 as a hard cap, and direct the assistant to skip the TLDR rather than degenerate to a shallow tree for terse responses."
+  (should (string-match-p
+           "MUST stay within the range 1 to 4 inclusive"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "depth 4 as the hard cap"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "skipped entirely rather than coerced into a degenerate shallow tree"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-per-level-concision ()
+  "TLDR spec must require entries at the same level of the tree to be a bit more concise than the equivalent sentence would be in the response body, without sacrificing meaning."
+  (should (string-match-p
+           "Entries at the same level of the tree SHOULD be a bit more concise"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "not so much more concise that meaning is shed"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "each level reads as a quick scan of its siblings"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-root-branches-as-domain-vectors ()
@@ -465,7 +489,7 @@
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-root-branches-emoji-after-number ()
-  "TLDR spec must require an emoji prefix on each root branch, immediately after its numeric label, and forbid emoji on mid-level branches and leaves."
+  "TLDR spec must require an emoji prefix on each root branch, immediately after its numeric label, and forbid emoji on non-root nodes (independent of the tree's chosen depth)."
   (should (string-match-p
            "Each root branch (depth-1 node) MUST be prefixed with a relevant prefixing emoji"
            claude-repl-command-prefix))
@@ -473,7 +497,7 @@
            "immediately after its numeric label"
            claude-repl-command-prefix))
   (should (string-match-p
-           "mid-level branches and leaves are NOT emoji-prefixed"
+           "non-root nodes are NOT emoji-prefixed"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-no-emoji-in-main-body ()
