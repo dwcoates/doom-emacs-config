@@ -36,6 +36,130 @@
       (push (cons ,file err) claude-repl--load-errors)
       (message "[claude-repl] FAILED to load %s.el: %S" ,file err))))
 
+;; ---- Early orphan cherry-pick recovery ----
+;;
+;; When Emacs is hard-killed mid-cherry-pick (the synchronous headless
+;; `claude -p' auto-resolve is the canonical blocker — the worker thread
+;; busy-waits on `accept-process-output' and can't run its
+;; `condition-case' cleanup if the whole process dies), the in-flight
+;; cherry-pick is left orphaned: CHERRY_PICK_HEAD lingers in the target
+;; worktree's git dir and conflict markers may remain in working-tree
+;; files.  When the target IS this Emacs's master worktree and the
+;; marker-bearing files are `.el' under `modules/app/claude-repl/', the
+;; next Emacs start can't load the claude-repl module at all because
+;; the elisp reader rejects `<<<<<<<' markers.
+;;
+;; This block runs BEFORE any module file is `require'd — its only
+;; dependencies are built-in Elisp (`read', `call-process', `with-temp-file')
+;; and the persisted workspace snapshot at `~/.claude/emacs/workspaces.el'.
+;; That keeps it loadable even when every other claude-repl module file
+;; has conflict markers.  Each in-flight entry persisted by
+;; `claude-repl--push-in-flight-merge' is processed:
+;;
+;;   1. If CHERRY_PICK_HEAD is still present at the recorded `:target-dir',
+;;      run `git -C target-dir cherry-pick --abort' to clear conflict
+;;      markers from working-tree files.  The source workspace is moved
+;;      onto `:merge-queue' (BACK, no halt) so the normal drain retries
+;;      it once the rest of the config has loaded.
+;;   2. If CHERRY_PICK_HEAD is absent: the prior merge actually completed
+;;      between the push and the crash — nothing to abort, just clear
+;;      the bookkeeping.
+;;
+;; The snapshot file is rewritten in place: `:in-flight-merges' becomes
+;; nil and recovered entries are appended to `:merge-queue'.  All errors
+;; are caught and surfaced via `message' so a broken snapshot or missing
+;; `git' binary cannot block Emacs startup.
+
+(defun claude-repl--early-cherry-pick-head-at (target-dir)
+  "Return the path to CHERRY_PICK_HEAD for TARGET-DIR's repo, or nil.
+Resolves the git dir via `git rev-parse --absolute-git-dir' so a linked
+worktree (whose `.git' is a file pointing into the parent
+`.git/worktrees/<name>') is handled correctly."
+  (when (and target-dir (file-directory-p target-dir))
+    (with-temp-buffer
+      (let ((exit-code (call-process "git" nil t nil
+                                     "-C" target-dir
+                                     "rev-parse" "--absolute-git-dir")))
+        (when (zerop exit-code)
+          (let ((git-dir (string-trim (buffer-string))))
+            (and (not (string-empty-p git-dir))
+                 (let ((cp-head (expand-file-name "CHERRY_PICK_HEAD" git-dir)))
+                   (and (file-exists-p cp-head) cp-head)))))))))
+
+(defun claude-repl--early-abort-cherry-pick (target-dir)
+  "Run `git -C TARGET-DIR cherry-pick --abort'; return the exit code."
+  (call-process "git" nil nil nil
+                "-C" target-dir "cherry-pick" "--abort"))
+
+(defun claude-repl--early-recover-orphan-cherry-picks ()
+  "Process every in-flight-merge entry in the on-disk workspace snapshot.
+See the commentary at the top of `config.el' for the full rationale.
+Reads `~/.claude/emacs/workspaces.el', iterates `:in-flight-merges',
+aborts each entry whose `:target-dir' still has a `CHERRY_PICK_HEAD',
+and rewrites the snapshot with `:in-flight-merges' cleared and the
+recovered source workspaces appended to `:merge-queue' for retry."
+  (let ((snap-file (expand-file-name "~/.claude/emacs/workspaces.el")))
+    (when (file-exists-p snap-file)
+      (condition-case err
+          (let* ((raw (with-temp-buffer
+                        (insert-file-contents snap-file)
+                        (goto-char (point-min))
+                        (read (current-buffer))))
+                 (in-flight (and (consp raw) (keywordp (car raw))
+                                 (plist-get raw :in-flight-merges))))
+            (when in-flight
+              (message "[claude-repl] early-recovery: scanning %d in-flight merge entries"
+                       (length in-flight))
+              (let ((recovered nil))
+                (dolist (entry in-flight)
+                  (let* ((source-ws (plist-get entry :source-ws))
+                         (target-dir (plist-get entry :target-dir)))
+                    ;; Short-circuit malformed entries BEFORE probing
+                    ;; the target dir — a botched prior write must not
+                    ;; spawn `git' subprocesses against the partial
+                    ;; entry's stale path.
+                    (cond
+                     ((or (null source-ws) (null target-dir))
+                      (message "[claude-repl] early-recovery: malformed entry %S — skipping"
+                               entry))
+                     (t
+                      (let ((cp-head (claude-repl--early-cherry-pick-head-at target-dir)))
+                        (cond
+                         (cp-head
+                          (let ((exit-code (claude-repl--early-abort-cherry-pick target-dir)))
+                            (message "[claude-repl] early-recovery: ws=%s aborted cherry-pick in %s (exit=%d) — re-enqueueing"
+                                     source-ws target-dir exit-code)
+                            (push source-ws recovered)))
+                         (t
+                          (message "[claude-repl] early-recovery: ws=%s no orphan CHERRY_PICK_HEAD at %s — clearing bookkeeping"
+                                   source-ws target-dir))))))))
+                ;; Rewrite the snapshot: clear :in-flight-merges and
+                ;; append recovered entries to :merge-queue.
+                (let* ((workspaces (plist-get raw :workspaces))
+                       (merge-queue (plist-get raw :merge-queue))
+                       (new-entries
+                        (mapcar (lambda (ws)
+                                  (list :source-ws ws
+                                        :silent t
+                                        :auto-resolve t
+                                        :last-attempt-target-head nil
+                                        :halt-until-human nil))
+                                (reverse recovered)))
+                       (new-queue (append merge-queue new-entries))
+                       (new-raw (list :workspaces workspaces
+                                      :merge-queue new-queue
+                                      :in-flight-merges nil)))
+                  (with-temp-file snap-file
+                    (let ((print-length nil)
+                          (print-level nil))
+                      (prin1 new-raw (current-buffer))))
+                  (message "[claude-repl] early-recovery: snapshot rewritten — merge-queue=%d in-flight=0 recovered=%d"
+                           (length new-queue) (length recovered))))))
+        (error
+         (message "[claude-repl] early-recovery: failed err=%S" err))))))
+
+(claude-repl--early-recover-orphan-cherry-picks)
+
 (claude-repl--load-module "core")
 (claude-repl--load-module "install")
 (claude-repl--load-module "notifications")

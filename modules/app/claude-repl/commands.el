@@ -7,6 +7,7 @@
 ;; file refer to these symbols, so the names must be readable here at
 ;; compile/load time.
 (defvar claude-repl--merge-queue)
+(defvar claude-repl--in-flight-merges)
 (declare-function claude-repl--drain-merge-queue "worktree")
 (declare-function claude-repl--any-cherry-pick-in-progress-p "worktree")
 
@@ -1715,8 +1716,19 @@ predates merge-queue persistence) or carries no `:merge-queue' key."
     (:plist (plist-get raw :merge-queue))
     (_ nil)))
 
+(defun claude-repl--snapshot-in-flight-merges-from-raw (raw)
+  "Return the persisted in-flight-merges list from RAW (a parsed snapshot sexp).
+Returns nil when RAW predates the in-flight-merge persistence (legacy
+list-of-entries or a plist without `:in-flight-merges')."
+  (pcase (claude-repl--snapshot-raw-format raw)
+    (:plist (plist-get raw :in-flight-merges))
+    (_ nil)))
+
 (defun claude-repl--read-workspace-snapshot (file)
-  "Read FILE and return (:workspaces ENTRIES :merge-queue QUEUE).
+  "Read FILE and return a plist with the parsed snapshot contents.
+Returned shape: `(:workspaces ENTRIES :merge-queue QUEUE
+:in-flight-merges IN-FLIGHT)'.
+
 Normalizes both legacy (`((ws :project-dir dir) ...)') and current
 plist-shaped files into the plist return shape so callers don't need
 to branch on disk layout.  Returns nil when FILE does not exist or
@@ -1725,7 +1737,8 @@ the sexp is unreadable."
     (condition-case err
         (let ((raw (claude-repl--read-sexp-file file)))
           (list :workspaces (claude-repl--snapshot-entries-from-raw raw)
-                :merge-queue (claude-repl--snapshot-merge-queue-from-raw raw)))
+                :merge-queue (claude-repl--snapshot-merge-queue-from-raw raw)
+                :in-flight-merges (claude-repl--snapshot-in-flight-merges-from-raw raw)))
       (error
        (claude-repl--log nil "read-workspace-snapshot: read err file=%s err=%S"
                          file err)
@@ -1753,13 +1766,26 @@ live queue."
                   (and (plist-get entry :halt-until-human) t)))
           queue))
 
-(defun claude-repl--write-workspace-snapshot (snapshot &optional merge-queue)
-  "Write SNAPSHOT (a list of workspace entries) and MERGE-QUEUE to
-`claude-repl-workspace-snapshot-file' in the plist format
-`(:workspaces SNAPSHOT :merge-queue MERGE-QUEUE)'.
+(defun claude-repl--serialize-in-flight-merges (in-flight)
+  "Return IN-FLIGHT (the live `claude-repl--in-flight-merges') stripped
+down to the keys that survive `read' round-trip.  Mirrors
+`claude-repl--serialize-merge-queue' so the persisted format stays
+insulated from future plist-key additions on the live entries."
+  (mapcar (lambda (entry)
+            (list :source-ws (plist-get entry :source-ws)
+                  :target-dir (plist-get entry :target-dir)
+                  :started-at (plist-get entry :started-at)))
+          in-flight))
 
-When MERGE-QUEUE is omitted, defaults to `claude-repl--merge-queue' so
-every snapshot write captures the live FIFO alongside the roster.
+(defun claude-repl--write-workspace-snapshot (snapshot &optional merge-queue in-flight-merges)
+  "Write SNAPSHOT (a list of workspace entries) and queue state to
+`claude-repl-workspace-snapshot-file' in the plist format
+`(:workspaces SNAPSHOT :merge-queue MERGE-QUEUE
+:in-flight-merges IN-FLIGHT-MERGES)'.
+
+When MERGE-QUEUE / IN-FLIGHT-MERGES are omitted, defaults to the live
+`claude-repl--merge-queue' / `claude-repl--in-flight-merges' so every
+snapshot write captures the live state alongside the roster.
 
 Creates the parent directory if missing and archives the previous file
 before overwriting.  Caller is responsible for any pre-write checks
@@ -1772,7 +1798,11 @@ before overwriting.  Caller is responsible for any pre-write checks
   (let* ((queue (claude-repl--serialize-merge-queue
                  (or merge-queue
                      (and (boundp 'claude-repl--merge-queue)
-                          claude-repl--merge-queue)))))
+                          claude-repl--merge-queue))))
+         (in-flight (claude-repl--serialize-in-flight-merges
+                     (or in-flight-merges
+                         (and (boundp 'claude-repl--in-flight-merges)
+                              claude-repl--in-flight-merges)))))
     (with-temp-file claude-repl-workspace-snapshot-file
       (insert "(:workspaces (")
       (let ((first t))
@@ -1784,6 +1814,12 @@ before overwriting.  Caller is responsible for any pre-write checks
       (let ((first t))
         (dolist (entry queue)
           (unless first (insert "\n                "))
+          (setq first nil)
+          (prin1 entry (current-buffer))))
+      (insert ")\n :in-flight-merges (")
+      (let ((first t))
+        (dolist (entry in-flight)
+          (unless first (insert "\n                     "))
           (setq first nil)
           (prin1 entry (current-buffer))))
       (insert "))"))))
@@ -2067,6 +2103,25 @@ the user has manually resolved before re-entering the loop)."
                         "snapshot-restore-merge-queue: restored=%d dropped=%d"
                         (length claude-repl--merge-queue) dropped))))
 
+(defun claude-repl--snapshot-restore-in-flight-merges (saved-in-flight)
+  "Repopulate `claude-repl--in-flight-merges' from SAVED-IN-FLIGHT (read from disk).
+The early-recovery in `config.el' should have already drained on-disk
+in-flight entries (aborted any orphan cherry-pick and moved each to
+`:merge-queue').  This restoration is a safety net: if early-recovery
+was skipped or failed silently, the live var still reflects the on-disk
+state so subsequent `--push-in-flight-merge' / `--clear-in-flight-merge'
+mutations have a consistent base."
+  (when (and saved-in-flight (boundp 'claude-repl--in-flight-merges))
+    (setq claude-repl--in-flight-merges
+          (mapcar (lambda (entry)
+                    (list :source-ws (plist-get entry :source-ws)
+                          :target-dir (plist-get entry :target-dir)
+                          :started-at (plist-get entry :started-at)))
+                  saved-in-flight))
+    (claude-repl--log nil
+                      "snapshot-restore-in-flight-merges: restored=%d"
+                      (length claude-repl--in-flight-merges))))
+
 (defun claude-repl--snapshot-load-finish ()
   "Finalize the recursive load: detach hook, return to origin, message.
 Idempotent: re-entry with `claude-repl--snapshot-load-state' already
@@ -2081,8 +2136,10 @@ can call finish without worrying whether a normal finish already ran."
            (loaded (plist-get state :loaded))
            (skipped (plist-get state :skipped))
            (load-error (or (plist-get state :load-error) 0))
-           (saved-mq (plist-get state :saved-merge-queue)))
+           (saved-mq (plist-get state :saved-merge-queue))
+           (saved-ifm (plist-get state :saved-in-flight-merges)))
       (claude-repl--snapshot-restore-merge-queue saved-mq)
+      (claude-repl--snapshot-restore-in-flight-merges saved-ifm)
       ;; persp-mode saved origin's window-config when the loader's first
       ;; `--establish-workspace' switched away from it, so this switch-back
       ;; replays that layout — and persp-mode's restore filters foreign
@@ -2316,7 +2373,8 @@ Returns to the workspace that was active when the load began."
   (let* ((file (or file (claude-repl--workspace-snapshot-file-for-read)))
          (parsed (claude-repl--read-workspace-snapshot file))
          (snapshot (plist-get parsed :workspaces))
-         (saved-mq (plist-get parsed :merge-queue)))
+         (saved-mq (plist-get parsed :merge-queue))
+         (saved-ifm (plist-get parsed :in-flight-merges)))
     (unless snapshot
       (user-error "No workspace snapshot at %s" file))
     (let* ((normalized (mapcar #'claude-repl--snapshot-entry-normalize snapshot))
@@ -2349,7 +2407,8 @@ Returns to the workspace that was active when the load began."
                   :load-error 0
                   :total (length queue)
                   :timeout-timer nil
-                  :saved-merge-queue saved-mq))
+                  :saved-merge-queue saved-mq
+                  :saved-in-flight-merges saved-ifm))
       (add-hook 'claude-repl-ws-fully-loaded-functions
                 #'claude-repl--snapshot-load-on-loaded)
       (claude-repl--log nil

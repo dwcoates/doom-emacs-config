@@ -8527,4 +8527,88 @@ the new oneshot."
         (claude-repl-amend-explanation-engine-oneshot-prompt)
         (should (eq captured-flavor :explanation-engine))))))
 
+;;;; ---- Tests: in-flight merge bookkeeping ----
+
+(defmacro claude-repl-test--with-empty-in-flight-merges (&rest body)
+  "Run BODY with `claude-repl--in-flight-merges' freshly empty.
+Top-level defvar — tests that push MUST scrub it afterwards or later
+tests inherit stale state."
+  (declare (indent 0))
+  `(let ((claude-repl--in-flight-merges nil))
+     (unwind-protect (progn ,@body)
+       (setq claude-repl--in-flight-merges nil))))
+
+(ert-deftest claude-repl-test-push-in-flight-merge-adds-entry ()
+  "Pushing a fresh entry appends a plist with the recorded ws/dir/timestamp."
+  (claude-repl-test--with-empty-in-flight-merges
+    (cl-letf (((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+      (claude-repl--push-in-flight-merge "ws-a" "/tmp/a")
+      (should (= 1 (length claude-repl--in-flight-merges)))
+      (let ((entry (car claude-repl--in-flight-merges)))
+        (should (equal (plist-get entry :source-ws) "ws-a"))
+        (should (equal (plist-get entry :target-dir) "/tmp/a"))
+        (should (numberp (plist-get entry :started-at)))))))
+
+(ert-deftest claude-repl-test-push-in-flight-merge-replaces-prior-entry-for-same-ws ()
+  "A second push for the same source-ws replaces the prior entry — the
+bookkeeping must never stack on retries."
+  (claude-repl-test--with-empty-in-flight-merges
+    (cl-letf (((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+      (claude-repl--push-in-flight-merge "ws-a" "/tmp/a-old")
+      (claude-repl--push-in-flight-merge "ws-a" "/tmp/a-new")
+      (should (= 1 (length claude-repl--in-flight-merges)))
+      (should (equal (plist-get (car claude-repl--in-flight-merges) :target-dir)
+                     "/tmp/a-new")))))
+
+(ert-deftest claude-repl-test-push-in-flight-merge-noop-on-nil-args ()
+  "Defensive: nil source-ws or nil target-dir → no entry added."
+  (claude-repl-test--with-empty-in-flight-merges
+    (cl-letf (((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+      (claude-repl--push-in-flight-merge nil "/tmp/a")
+      (claude-repl--push-in-flight-merge "ws-a" nil)
+      (should (= 0 (length claude-repl--in-flight-merges))))))
+
+(ert-deftest claude-repl-test-push-in-flight-merge-persists ()
+  "Push must call `--persist-merge-queue' so the entry reaches disk
+before the cherry-pick has a chance to be interrupted."
+  (claude-repl-test--with-empty-in-flight-merges
+    (let ((persist-called 0))
+      (cl-letf (((symbol-function 'claude-repl--persist-merge-queue)
+                 (lambda () (cl-incf persist-called))))
+        (claude-repl--push-in-flight-merge "ws-a" "/tmp/a")
+        (should (= 1 persist-called))))))
+
+(ert-deftest claude-repl-test-clear-in-flight-merge-removes-entry ()
+  "Clearing an existing entry removes it from the live list."
+  (claude-repl-test--with-empty-in-flight-merges
+    (cl-letf (((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+      (setq claude-repl--in-flight-merges
+            (list (list :source-ws "ws-a" :target-dir "/tmp/a" :started-at 1)
+                  (list :source-ws "ws-b" :target-dir "/tmp/b" :started-at 2)))
+      (claude-repl--clear-in-flight-merge "ws-a")
+      (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
+                             claude-repl--in-flight-merges)
+                     '("ws-b"))))))
+
+(ert-deftest claude-repl-test-clear-in-flight-merge-noop-when-absent ()
+  "Clearing a workspace that has no entry leaves the list untouched."
+  (claude-repl-test--with-empty-in-flight-merges
+    (cl-letf (((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+      (setq claude-repl--in-flight-merges
+            (list (list :source-ws "ws-b" :target-dir "/tmp/b" :started-at 2)))
+      (claude-repl--clear-in-flight-merge "ws-a")
+      (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
+                             claude-repl--in-flight-merges)
+                     '("ws-b"))))))
+
+(ert-deftest claude-repl-test-clear-in-flight-merge-persists ()
+  "Clear always persists — even on no-op — so the on-disk state mirrors
+the in-memory state regardless of the path taken."
+  (claude-repl-test--with-empty-in-flight-merges
+    (let ((persist-called 0))
+      (cl-letf (((symbol-function 'claude-repl--persist-merge-queue)
+                 (lambda () (cl-incf persist-called))))
+        (claude-repl--clear-in-flight-merge "ws-a") ; no-op clear
+        (should (= 1 persist-called))))))
+
 ;;; test-worktree.el ends here
