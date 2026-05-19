@@ -48,7 +48,9 @@ definition without leaving stale function references behind."
         (cons (cons symbol fn)
               (assq-delete-all symbol claude-repl--merge-handler-registry))))
 
-(defcustom claude-repl-workspace-merge-handler-overrides nil
+(defcustom claude-repl-workspace-merge-handler-overrides
+  '(("~/workspace/ChessCom/explanation-engine"
+     . ((handler . refresh-master-from-origin))))
   "User-side fallback merge handler config, keyed by repo root path.
 Each entry is `(REPO-ROOT . CONFIG)' where CONFIG is an alist with
 keys `handler' (registered symbol) and optional `args' (plist passed
@@ -57,7 +59,13 @@ to the handler).  Path matching is canonical (`file-truename' +
 normalised.
 
 Consulted only when the repo itself does not provide
-`.claude-repl/workspace-merge.eld' — the repo-local file always wins."
+`.claude-repl/workspace-merge.eld' — the repo-local file always wins.
+
+Default entry routes `~/workspace/ChessCom/explanation-engine' to
+`refresh-master-from-origin' because that repo's `/workspace-merge'
+contract is \"the PR has already landed via merge queue, just bring
+the local master worktree up to date with origin\" rather than the
+cherry-pick-into-source default."
   :type '(alist :key-type directory
                 :value-type (alist :key-type symbol :value-type sexp))
   :group 'claude-repl)
@@ -184,6 +192,94 @@ merges.  Ignores ARGS (none defined for this handler)."
 
 (claude-repl--register-merge-handler 'cherry-pick
                                      #'claude-repl--merge-handler-cherry-pick)
+
+(defun claude-repl--merge-handler-refresh-master-from-origin
+    (target-ws &optional _args)
+  "Refresh local master from `origin/master' for TARGET-WS's repo, then close.
+
+Handler for repos whose `/workspace-merge' contract is \"the PR has
+already landed via merge queue, just bring the local master worktree
+up to date with origin\" — opposite of the cherry-pick default.  The
+explanation-engine repo opts into this via
+`claude-repl-workspace-merge-handler-overrides'.
+
+Steps:
+  1. Resolve the master worktree path of TARGET-WS's repo via
+     `claude-repl--master-worktree-path', starting from the workspace's
+     own `:project-dir' (which lives inside the same repo as a sibling
+     worktree).  Skip the git work with a log line when neither the
+     repo nor a master worktree can be resolved.
+  2. Skip the fetch + fast-forward entirely when the master worktree
+     has uncommitted changes (`claude-repl--worktree-dirty-p').  The
+     contract is explicit: never touch a dirty trunk checkout.
+  3. Run `git fetch origin <master-branch-name>' in the master
+     worktree synchronously — this thread runs on the merge worker, so
+     blocking git here does not freeze the main UI thread.
+  4. Hand off to `claude-repl--maybe-fast-forward-master', which runs
+     `git merge --ff-only origin/<master>' in the master worktree and
+     no-ops on diverged history, equal HEADs, or missing refs.
+
+After the optional git work, marks TARGET-WS `:merge-completed t' /
+`:repl-state :merged' so the drawer renders the 🔀 badge, then defers
+`claude-repl--gns-sockets-close-then' + `claude-repl--close-workspace'
+to the main thread so the workspace UI tears down cleanly — same
+teardown chain the cherry-pick handler uses on success.
+
+ARGS is currently unused; reserved for future tuning.
+
+Deliberately does NOT signal on git failures (fetch hiccup, dirty
+trunk, diverged history): the PR has already landed upstream, so the
+workspace's job is done regardless of whether the local mirror could
+be advanced this run."
+  (let* ((source-dir (or (claude-repl--ws-get target-ws :project-dir)
+                         (claude-repl--ws-get target-ws :source-ws-dir)))
+         (master-dir (and source-dir
+                          (claude-repl--master-worktree-path source-dir))))
+    (claude-repl--log target-ws
+                      "merge-handler-refresh-master-from-origin: ws=%s source-dir=%s master-dir=%s"
+                      target-ws (or source-dir "nil") (or master-dir "nil"))
+    (cond
+     ((not master-dir)
+      (claude-repl--log target-ws
+                        "merge-handler-refresh-master-from-origin: ws=%s no master worktree resolvable — skipping ff"
+                        target-ws))
+     ((claude-repl--worktree-dirty-p master-dir)
+      (claude-repl--log target-ws
+                        "merge-handler-refresh-master-from-origin: ws=%s master worktree %s is dirty — skipping ff"
+                        target-ws master-dir))
+     (t
+      (let ((ec (claude-repl--git-exit-code
+                 master-dir "fetch" "origin"
+                 claude-repl-master-branch-name)))
+        (claude-repl--log target-ws
+                          "merge-handler-refresh-master-from-origin: ws=%s fetch origin %s exit=%d"
+                          target-ws claude-repl-master-branch-name ec))
+      (claude-repl--maybe-fast-forward-master master-dir)))
+    ;; Mark merged regardless of whether the local ff succeeded — the
+    ;; PR has already landed upstream, the workspace's contribution is
+    ;; on master either way.
+    (claude-repl--ws-put target-ws :merging nil)
+    (claude-repl--ws-put target-ws :merge-completed t)
+    (claude-repl--ws-put target-ws :merge-completed-at (float-time))
+    (claude-repl--ws-put target-ws :merge-failed nil)
+    (when (fboundp 'claude-repl--events-record)
+      (claude-repl--events-record target-ws :merge))
+    (claude-repl--ws-put target-ws :repl-state :merged)
+    (claude-repl--ws-put target-ws :claude-state nil)
+    ;; Defer the UI teardown to the main thread — this handler runs on
+    ;; the merge worker thread spawned by
+    ;; `claude-repl--workspace-merge-async', and persp/vterm kills must
+    ;; happen on main.
+    (claude-repl--defer-to-main-thread
+     (lambda ()
+       (claude-repl--gns-sockets-close-then
+        target-ws
+        (lambda ()
+          (claude-repl--close-workspace target-ws 'preserve-entry)))))))
+
+(claude-repl--register-merge-handler
+ 'refresh-master-from-origin
+ #'claude-repl--merge-handler-refresh-master-from-origin)
 
 (provide 'merge-handlers)
 
