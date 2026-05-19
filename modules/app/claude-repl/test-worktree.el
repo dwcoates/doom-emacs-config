@@ -6764,13 +6764,18 @@ on workspace switch in repos with many worktrees."
       (delete-process proc))))
 
 (ert-deftest claude-repl-test-async-refresh-branch-merged-skips-when-in-progress ()
-  "No new process is spawned when one is already live for the workspace."
+  "No new process is spawned when one is already live for the workspace.
+Stubs the registered wrapper `claude-repl--make-process-git' rather
+than raw `make-process' — production code now routes async git
+invocations through the wrapper, and the runtime guards installed by
+test-helpers.el would otherwise fire UNMOCKED if the production code
+were reached without the wrapper stub."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws" :project-dir "/some/")
     (let ((spawned nil))
       (cl-letf (((symbol-function 'claude-repl--branch-merge-check-in-progress-p)
                  (lambda (_) t))
-                ((symbol-function 'make-process)
+                ((symbol-function 'claude-repl--make-process-git)
                  (lambda (&rest _) (setq spawned t) :proc)))
         (claude-repl--async-refresh-branch-merged "ws")
         (should-not spawned)))))

@@ -513,34 +513,39 @@ guard remains for older callers / wrapper changes)."
 ;;;; ---- Tests: recent-commit-emojis ----
 
 (ert-deftest claude-repl-test-recent-emojis-extracts-leading-emoji ()
-  "recent-commit-emojis should pull the leading emoji token from each subject line."
-  (cl-letf (((symbol-function 'shell-command-to-string)
-             (lambda (_cmd)
+  "recent-commit-emojis should pull the leading emoji token from each subject line.
+Stubs the registered external-boundary wrapper
+`claude-repl--git-string-quiet' — the runtime guards installed by
+test-helpers.el make a raw `shell-command-to-string' stub insufficient
+(production code now goes through the wrapper, which would fire the
+guard's UNMOCKED error if not `cl-letf'-ed)."
+  (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+             (lambda (&rest _args)
                (concat "🩹 fix(claude-repl): one\n"
                        "✨ feat(claude-repl): two\n"
-                       "🐛 fix(claude-repl): three\n"))))
+                       "🐛 fix(claude-repl): three"))))
     (should (equal (claude-repl--recent-commit-emojis 50)
                    '("🩹" "✨" "🐛")))))
 
 (ert-deftest claude-repl-test-recent-emojis-skips-ascii-prefix ()
   "recent-commit-emojis should drop entries whose first token is plain ASCII."
-  (cl-letf (((symbol-function 'shell-command-to-string)
-             (lambda (_cmd)
+  (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+             (lambda (&rest _args)
                (concat "tweak: bump version\n"
-                       "✨ feat(claude-repl): real one\n"))))
+                       "✨ feat(claude-repl): real one"))))
     (should (equal (claude-repl--recent-commit-emojis 50)
                    '("✨")))))
 
 (ert-deftest claude-repl-test-recent-emojis-empty-output ()
   "recent-commit-emojis should return nil for empty git output."
-  (cl-letf (((symbol-function 'shell-command-to-string)
-             (lambda (_cmd) "")))
+  (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+             (lambda (&rest _args) "")))
     (should-not (claude-repl--recent-commit-emojis 50))))
 
 (ert-deftest claude-repl-test-recent-emojis-handles-error ()
-  "recent-commit-emojis should return nil if git invocation errors out."
-  (cl-letf (((symbol-function 'shell-command-to-string)
-             (lambda (_cmd) (error "git not found"))))
+  "recent-commit-emojis should return nil if the git wrapper errors out."
+  (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+             (lambda (&rest _args) (error "git not found"))))
     (should-not (claude-repl--recent-commit-emojis 50))))
 
 ;;;; ---- Tests: emoji-prefix-commit-message integration with recents ----

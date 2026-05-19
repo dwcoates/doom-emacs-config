@@ -336,7 +336,7 @@ This IS the external-boundary wrapper — tests mock it via `cl-letf'
 \(see `claude-repl--external-boundary-functions' in core.el)."
   (claude-repl--log nil "async-git: label=%s git-root=%s args=%S" label git-root args)
   (let* ((buf (generate-new-buffer (format " *claude-repl-%s*" label)))
-         (proc (apply #'start-process
+         (proc (apply #'start-process ;; ALLOW-EXTERNAL-BOUNDARY
                       (format "claude-repl-%s" label)
                       buf
                       "git" "-C" git-root
@@ -3886,15 +3886,11 @@ ran within `claude-repl-branch-merged-refresh-interval' seconds."
         (when-let* ((branches (claude-repl--merge-base-ancestor-args
                                ws-dir parent-dir)))
           (let* ((default-directory ws-dir)
-                 (proc (make-process
-                        :name (format "claude-repl-merge-%s" ws)
-                        :command (list "git" "merge-base" "--is-ancestor"
-                                       (car branches) (cdr branches))
-                        :connection-type 'pipe
-                        :noquery t
-                        :buffer nil
-                        :sentinel (apply-partially
-                                   #'claude-repl--branch-merge-sentinel ws))))
+                 (proc (claude-repl--make-process-git
+                        (format "claude-repl-merge-%s" ws)
+                        (list "merge-base" "--is-ancestor"
+                              (car branches) (cdr branches))
+                        (apply-partially #'claude-repl--branch-merge-sentinel ws))))
             (claude-repl--ws-put ws :merge-proc proc)))))))
 
 (defun claude-repl--branch-merged-into-p (source-dir target-dir)

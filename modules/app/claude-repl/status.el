@@ -572,14 +572,10 @@ A no-op if a check is already in progress for WS."
         (claude-repl--log-verbose ws "async-refresh-git-status: ws=%s skipped (already in progress)" ws)
       (claude-repl--log-verbose ws "async-refresh-git-status: ws=%s starting git diff" ws)
       (let* ((default-directory dir)
-             (proc (make-process
-                    :name (format "claude-repl-git-%s" ws)
-                    :command '("git" "diff" "--quiet")
-                    :connection-type 'pipe
-                    :noquery t
-                    :buffer nil
-                    :sentinel (apply-partially
-                               #'claude-repl--git-diff-sentinel ws))))
+             (proc (claude-repl--make-process-git
+                    (format "claude-repl-git-%s" ws)
+                    '("diff" "--quiet")
+                    (apply-partially #'claude-repl--git-diff-sentinel ws))))
         (claude-repl--ws-put ws :git-proc proc)))))
 
 ;;; Buffer/workspace resolution -----------------------------------------------

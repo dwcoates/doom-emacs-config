@@ -274,15 +274,18 @@ by vterm-buf presence; the :done write is not."
     (should-not (claude-repl--find-install-script "/repo"))))
 
 (ert-deftest claude-repl-test-docker-image-exists-p-true ()
-  "docker-image-exists-p should return non-nil when docker inspect returns 0."
-  (cl-letf (((symbol-function 'call-process)
-             (lambda (_prog _infile _dest _display &rest _args) 0)))
+  "docker-image-exists-p should return non-nil when docker inspect returns 0.
+Stubs the registered external-boundary wrapper, not `call-process'
+directly — the runtime guards installed by test-helpers.el fset the
+wrapper to an error-on-call lambda."
+  (cl-letf (((symbol-function 'claude-repl--docker-exit-code)
+             (lambda (&rest _args) 0)))
     (should (claude-repl--docker-image-exists-p "my-image:latest"))))
 
 (ert-deftest claude-repl-test-docker-image-exists-p-false ()
   "docker-image-exists-p should return nil when docker inspect returns non-zero."
-  (cl-letf (((symbol-function 'call-process)
-             (lambda (_prog _infile _dest _display &rest _args) 1)))
+  (cl-letf (((symbol-function 'claude-repl--docker-exit-code)
+             (lambda (&rest _args) 1)))
     (should-not (claude-repl--docker-image-exists-p "no-such-image"))))
 
 (ert-deftest claude-repl-test-resolve-sandbox-config-no-launcher ()
