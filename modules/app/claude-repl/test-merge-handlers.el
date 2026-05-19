@@ -230,6 +230,176 @@ Restores the prior registry on exit so tests don't bleed."
       (claude-repl--merge-handler-cherry-pick "DWC/foo")
       (should (equal captured '("DWC/foo" t t))))))
 
+;;;; ---- Tests: refresh-master-from-origin handler ----
+;;
+;; Each test mocks every external boundary the handler reaches:
+;;   - `--master-worktree-path' (master worktree resolution)
+;;   - `--worktree-dirty-p' (clean check)
+;;   - `--git-exit-code' (the fetch call)
+;;   - `--maybe-fast-forward-master' (the ff call)
+;;   - `--gns-sockets-close-then' and `--close-workspace' (teardown)
+;; so the test surface stays inside elisp.
+
+(defmacro claude-repl-test--with-refresh-mocks
+    (&rest body)
+  "Run BODY with the refresh-master handler's external calls captured.
+Binds a `captured' alist available to BODY so each test can assert on
+exactly which side effects fired (and which were skipped).  Always
+mocks `claude-repl--events-record' to a no-op since the events file
+write is incidental to handler semantics."
+  (declare (indent 0))
+  `(let ((captured (list :fetch nil :ff nil :close-then nil :close nil)))
+     (cl-letf
+         (((symbol-function 'claude-repl--events-record) (lambda (&rest _) nil))
+          ((symbol-function 'claude-repl--git-exit-code)
+           (lambda (&rest args)
+             (push args (plist-get captured :fetch))
+             0))
+          ((symbol-function 'claude-repl--maybe-fast-forward-master)
+           (lambda (dir) (plist-put captured :ff dir)))
+          ((symbol-function 'claude-repl--gns-sockets-close-then)
+           (lambda (ws thunk)
+             (plist-put captured :close-then ws)
+             (funcall thunk)))
+          ((symbol-function 'claude-repl--close-workspace)
+           (lambda (ws &optional preserve)
+             (plist-put captured :close (list ws preserve)))))
+       ,@body)))
+
+(ert-deftest claude-repl-test-refresh-master-marks-ws-merged-on-success ()
+  "Successful refresh sets :merge-completed t and :repl-state :merged."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) nil)))
+        (claude-repl-test--with-refresh-mocks
+          (claude-repl--merge-handler-refresh-master-from-origin "foo")
+          (should (eq (claude-repl--ws-get "foo" :merge-completed) t))
+          (should (eq (claude-repl--ws-get "foo" :repl-state) :merged))
+          (should-not (claude-repl--ws-get "foo" :merging)))))))
+
+(ert-deftest claude-repl-test-refresh-master-fetches-origin-when-clean ()
+  "When the master worktree is clean, the handler runs `git fetch origin master'."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) nil)))
+        (claude-repl-test--with-refresh-mocks
+          (claude-repl--merge-handler-refresh-master-from-origin "foo")
+          (let ((calls (plist-get captured :fetch)))
+            (should (= 1 (length calls)))
+            (should (equal (car calls)
+                           (list "/repo/main" "fetch" "origin"
+                                 claude-repl-master-branch-name)))))))))
+
+(ert-deftest claude-repl-test-refresh-master-calls-ff-after-fetch ()
+  "When clean, the handler delegates the advance to `--maybe-fast-forward-master'."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) nil)))
+        (claude-repl-test--with-refresh-mocks
+          (claude-repl--merge-handler-refresh-master-from-origin "foo")
+          (should (equal (plist-get captured :ff) "/repo/main")))))))
+
+(ert-deftest claude-repl-test-refresh-master-skips-ff-when-dirty ()
+  "A dirty master worktree skips both the fetch and the fast-forward."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) t)))
+        (claude-repl-test--with-refresh-mocks
+          (claude-repl--merge-handler-refresh-master-from-origin "foo")
+          (should-not (plist-get captured :fetch))
+          (should-not (plist-get captured :ff)))))))
+
+(ert-deftest claude-repl-test-refresh-master-marks-merged-even-when-dirty ()
+  "Dirty trunk still flips the workspace to :merged — the PR already landed."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) t)))
+        (claude-repl-test--with-refresh-mocks
+          (claude-repl--merge-handler-refresh-master-from-origin "foo")
+          (should (eq (claude-repl--ws-get "foo" :merge-completed) t))
+          (should (eq (claude-repl--ws-get "foo" :repl-state) :merged)))))))
+
+(ert-deftest claude-repl-test-refresh-master-skips-ff-when-no-master-dir ()
+  "When no master worktree can be resolved, fetch and ff are skipped."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) (error "should not be called"))))
+        (claude-repl-test--with-refresh-mocks
+          (claude-repl--merge-handler-refresh-master-from-origin "foo")
+          (should-not (plist-get captured :fetch))
+          (should-not (plist-get captured :ff)))))))
+
+(ert-deftest claude-repl-test-refresh-master-still-marks-merged-when-no-master-dir ()
+  "Even with no resolvable master worktree the workspace gets :merged + close."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) nil)))
+        (claude-repl-test--with-refresh-mocks
+          (claude-repl--merge-handler-refresh-master-from-origin "foo")
+          (should (eq (claude-repl--ws-get "foo" :merge-completed) t))
+          (should (eq (claude-repl--ws-get "foo" :repl-state) :merged))
+          (should (equal (plist-get captured :close)
+                         '("foo" preserve-entry))))))))
+
+(ert-deftest claude-repl-test-refresh-master-defers-close-via-gns-sockets ()
+  "Teardown is funnelled through `--gns-sockets-close-then' for the named workspace."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) nil)))
+        (claude-repl-test--with-refresh-mocks
+          (claude-repl--merge-handler-refresh-master-from-origin "foo")
+          (should (equal (plist-get captured :close-then) "foo"))
+          (should (equal (plist-get captured :close)
+                         '("foo" preserve-entry))))))))
+
+(ert-deftest claude-repl-test-refresh-master-handler-registered ()
+  "The handler symbol is wired into the registry."
+  (should (assq 'refresh-master-from-origin
+                claude-repl--merge-handler-registry)))
+
+;;;; ---- Tests: explanation-engine default override ----
+
+(ert-deftest claude-repl-test-explanation-engine-default-routes-to-refresh-master ()
+  "The default value of `--workspace-merge-handler-overrides' routes the
+explanation-engine repo to `refresh-master-from-origin'."
+  (let ((default (eval (car (get 'claude-repl-workspace-merge-handler-overrides
+                                  'standard-value)))))
+    (should (assoc "~/workspace/ChessCom/explanation-engine" default))
+    (should (eq (alist-get
+                 'handler
+                 (cdr (assoc "~/workspace/ChessCom/explanation-engine" default)))
+                'refresh-master-from-origin))))
+
 (provide 'test-merge-handlers)
 
 ;;; test-merge-handlers.el ends here
