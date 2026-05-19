@@ -47,6 +47,7 @@
 (claude-repl--load-module "events")
 (claude-repl--load-module "autosave")
 (claude-repl--load-module "sentinel")
+(claude-repl--load-module "vterm-freeze")
 (claude-repl--load-module "input")
 (claude-repl--load-module "backoff-retry")
 (claude-repl--load-module "commands")

@@ -123,6 +123,8 @@ advice's effect would be invisible)."
   (defun vterm-reset-cursor-point () "Stub." nil))
 (unless (fboundp 'vterm--redraw)
   (defun vterm--redraw (&rest _args) "Stub." nil))
+(unless (fboundp 'vterm--invalidate)
+  (defun vterm--invalidate (&rest _args) "Stub." nil))
 (unless (fboundp 'vterm--set-title)
   (defun vterm--set-title (&rest _args) "Stub." nil))
 
