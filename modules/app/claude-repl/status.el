@@ -136,7 +136,8 @@ so a quick transit through the tab does not silently strip the green
 
 ;; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ;; !! DO NOT REMOVE `claude-repl--tabline-space-toggle' OR ITS USAGE   !!
-;; !! IN `claude-repl--tabline-advice' AND                             !!
+;; !! IN `claude-repl--tabline-advice',                                !!
+;; !! `claude-repl--force-tab-bar-redraw', AND                         !!
 ;; !! `claude-repl--update-all-workspace-states'.                      !!
 ;; !!                                                                  !!
 ;; !! The tab-bar will NOT repaint unless the string it displays       !!
@@ -146,15 +147,37 @@ so a quick transit through the tab does not silently strip the green
 ;; !! this, state-color changes (thinking → done, etc.) are invisible  !!
 ;; !! until the user manually triggers a redisplay.                    !!
 ;; !!                                                                  !!
+;; !! The toggle is read on TWO rendering paths:                       !!
+;; !!  - `claude-repl--tabline-advice' (override of `+workspace--      !!
+;; !!    tabline'), used by callers that still go through Doom's       !!
+;; !!    workspace tabline API (e.g. echo-area helpers, tests).        !!
+;; !!  - `+dwc/workspace-tabline-formatted' / `+dwc/current-workspace- !!
+;; !!    name' in user config, which is the function installed in     !!
+;; !!    `tab-bar-format' and therefore drives the visible tab-bar.    !!
+;; !!    These read the toggle directly via `boundp' so the package    !!
+;; !!    works without that wrapper too.                               !!
+;; !!                                                                  !!
+;; !! Just flipping the toggle is NOT enough — Emacs's tab-bar caches  !!
+;; !! the format result and will keep painting the cached value until  !!
+;; !! something forces a re-read.  `claude-repl--force-tab-bar-redraw' !!
+;; !! flips the toggle AND drives `tab-bar-tabs-set' /                 !!
+;; !! `tab-bar--update-tab-bar-lines' / `force-mode-line-update' so    !!
+;; !! the alternating string actually reaches the display.  The 1Hz   !!
+;; !! `claude-repl--update-all-workspace-states' timer calls            !!
+;; !! `--force-tab-bar-redraw' every tick.                              !!
+;; !!                                                                  !!
 ;; !! This has been accidentally removed multiple times.  DO NOT       !!
 ;; !! remove it again.  It is NOT dead code.  It is NOT cosmetic.     !!
 ;; !! It is the mechanism that makes tab-bar updates work.             !!
 ;; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 (defvar claude-repl--tabline-space-toggle nil
   "Non-nil means append an extra trailing space to the tabline string.
-Flipped every poll cycle by `claude-repl--update-all-workspace-states'.
-Read by `claude-repl--tabline-advice' to produce an alternating string
-that forces the tab-bar to repaint.  DO NOT REMOVE — see comment above.")
+Flipped on every poll cycle by `claude-repl--update-all-workspace-states'
+\(via `claude-repl--force-tab-bar-redraw').  Read by
+`claude-repl--tabline-advice' AND by `+dwc/workspace-tabline-formatted' /
+`+dwc/current-workspace-name' in user config so both rendering paths
+produce an alternating string that forces the tab-bar to repaint.
+DO NOT REMOVE — see comment above.")
 
 (defvar claude-repl-hide-mode-enabled nil
   "Non-nil means persp-kill `:hidden' workspaces on workspace switch.
@@ -1529,11 +1552,21 @@ finalize, and the last to finalize clears the flag harmlessly."
 
 (defun claude-repl--update-all-workspace-states ()
   "Periodic 1Hz timer entrypoint for workspace-state updates.
-Always flips `claude-repl--tabline-space-toggle' to force a tab-bar
-repaint (DO NOT REMOVE — see the block comment above the defvar).
-The toggle flip happens BEFORE the in-flight check so the tab-bar
-keeps animating even when the update chain is stacking and we skip a
-tick.
+Always drives `claude-repl--force-tab-bar-redraw' to force a tab-bar
+repaint (DO NOT REMOVE — see the block comment above
+`claude-repl--tabline-space-toggle').  The redraw happens BEFORE the
+in-flight check so the tab-bar keeps animating even when the update
+chain is stacking and we skip a tick.
+
+Flipping `claude-repl--tabline-space-toggle' alone is not enough:
+since commit 4dc0ecb the active tab-bar format function
+\(`+dwc/workspace-tabline-formatted' in user config) calls
+`claude-repl--tabline-rendered-entries' directly and bypasses
+`+workspace--tabline', so the `claude-repl--tabline-advice' path is
+no longer on the displayed-rendering hot path.  `--force-tab-bar-
+redraw' flips the toggle AND drives `tab-bar-tabs-set' /
+`tab-bar--update-tab-bar-lines' / `force-mode-line-update' so the
+alternating-string cache-bust actually reaches the display.
 
 When a previous chain is still in flight (per
 `claude-repl--update-in-flight-p'), skips this tick — the in-flight
@@ -1549,11 +1582,12 @@ Event-driven callers (frame-focus, workspace-switch, show-panels)
 should call `-now' directly instead of this guarded entrypoint — they
 want to kick a fresh refresh and don't compete with the timer for
 the in-flight slot."
-  ;; Flip the trailing-space toggle so the tab-bar string changes on every
-  ;; tick, forcing a repaint.  DO NOT REMOVE — see the block comment above
+  ;; Drive the tab-bar redraw on every tick so face-only status
+  ;; transitions (:thinking -> :done, etc.) actually reach the display.
+  ;; DO NOT REMOVE — see the block comment above
   ;; `claude-repl--tabline-space-toggle'.  Happens before the in-flight
   ;; check so the animation survives long chains.
-  (setq claude-repl--tabline-space-toggle (not claude-repl--tabline-space-toggle))
+  (claude-repl--force-tab-bar-redraw)
   (unless (claude-repl--update-in-flight-p)
     (claude-repl--update-all-workspace-states-now)))
 

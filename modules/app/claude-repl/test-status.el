@@ -1364,6 +1364,44 @@ when on.  So toggle-off must not end with two trailing unfaced spaces."
         (claude-repl--update-all-workspace-states)
         (should (eq claude-repl--tabline-space-toggle nil))))))
 
+(ert-deftest claude-repl-test-update-all-drives-force-tab-bar-redraw ()
+  "update-all-workspace-states calls `claude-repl--force-tab-bar-redraw' on every tick.
+Just flipping `claude-repl--tabline-space-toggle' is NOT enough to make
+the visible tab-bar repaint — Emacs's tab-bar-format cache will keep
+painting the cached value until something forces a re-read.  The 1Hz
+timer must drive the full redraw (toggle + tab-bar primitives +
+force-mode-line-update), which is what `--force-tab-bar-redraw' does.
+Verified explicitly here so the entrypoint doesn't regress to a
+toggle-only flip again (which silently breaks live status colors,
+since commit 4dc0ecb moved the active rendering off the
+`+workspace--tabline' advice path)."
+  (claude-repl-test--with-clean-state
+    (let ((redraw-calls 0))
+      (cl-letf (((symbol-function 'claude-repl--force-tab-bar-redraw)
+                 (lambda () (cl-incf redraw-calls)))
+                ((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore)
+                ((symbol-function 'hash-table-keys) (lambda (_ht) nil)))
+        (claude-repl--update-all-workspace-states)
+        (should (= 1 redraw-calls))
+        (claude-repl--update-all-workspace-states)
+        (should (= 2 redraw-calls))))))
+
+(ert-deftest claude-repl-test-update-all-redraw-fires-even-when-in-flight ()
+  "The 1Hz timer drives `--force-tab-bar-redraw' BEFORE the in-flight check.
+If a previous chain is still in flight we skip the per-workspace work for
+this tick, but the tab-bar must still animate so :thinking spinners and
+state-color transitions remain visible.  This is the structural mirror
+of `claude-repl-test-update-all-tabline-toggle-survives-in-flight-skip',
+extended to assert the redraw force fires alongside the toggle flip."
+  (claude-repl-test--with-clean-state
+    (let ((redraw-calls 0))
+      (setq claude-repl--update-in-flight (float-time))
+      (cl-letf (((symbol-function 'claude-repl--force-tab-bar-redraw)
+                 (lambda () (cl-incf redraw-calls)))
+                ((symbol-function 'claude-repl--poll-workspace-notifications) #'ignore))
+        (claude-repl--update-all-workspace-states)
+        (should (= 1 redraw-calls))))))
+
 ;;;; ---- Tests: wconf-has-claude-p ----
 
 (ert-deftest claude-repl-test-wconf-has-claude-nil ()
