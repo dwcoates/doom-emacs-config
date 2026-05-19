@@ -412,7 +412,7 @@
   ;;
   ;; The claude-repl status colors (red thinking, green done, etc.) are
   ;; applied as faces on the tab-bar string produced by
-  ;; `claude-repl--tabline-advice' (status.el).  Emacs's tab-bar maintains
+  ;; `+dwc/workspace-tabline-formatted' below.  Emacs's tab-bar maintains
   ;; a per-segment content cache: if the string returned by a tab-bar-format
   ;; entry compares `equal' to what it returned last time, the segment is
   ;; not repainted.  Text-property-only changes — including face changes —
@@ -421,19 +421,23 @@
   ;; (typically a workspace switch) forces a full re-layout.
   ;;
   ;; The workaround is to make the segment's raw string content actually
-  ;; change every refresh tick.  `+dwc/tab-bar-refresh-toggle' flips each
-  ;; second (driven by the 1-Hz timer at the bottom of this block), and
-  ;; both the left-aligned tabline and the right-aligned status name
-  ;; append a trailing space or not based on it.  This defeats the cache
-  ;; and lets the current faces actually reach the display.
+  ;; change every refresh tick.  `claude-repl--tabline-space-toggle'
+  ;; (defined in modules/app/claude-repl/status.el) flips each second,
+  ;; driven by the 1-Hz timer in `claude-repl--update-all-workspace-states'
+  ;; via `claude-repl--force-tab-bar-redraw' (which both flips the toggle
+  ;; AND calls the tab-bar / mode-line redraw primitives).  Both the
+  ;; left-aligned tabline and the right-aligned status name below append
+  ;; a trailing space or not based on the toggle.  This defeats the
+  ;; cache and lets the current faces actually reach the display.
+  ;;
+  ;; The toggle and the redraw force live in the claude-repl module so
+  ;; both rendering paths (the visible tab-bar via the functions below
+  ;; AND `claude-repl--tabline-advice' for any caller that still goes
+  ;; through `+workspace--tabline') stay in sync, and so the package
+  ;; ships with its own working hack rather than depending on user code.
   ;;
   ;; If you remove the toggle, tabs will appear to get stuck on their old
   ;; colors until you switch workspaces.  Keep it.
-
-  (defvar +dwc/tab-bar-refresh-toggle nil
-    "Toggled each call to `+dwc/refresh-tab-bar' to force tab-bar redraw.
-See the block comment above `+dwc/workspace-tabline-formatted' for why
-this trick is necessary.")
 
   (defun +dwc/workspace-tabline-formatted ()
     "Format workspace list for tab-bar display.
@@ -446,8 +450,8 @@ padding from `+doom-dashboard--center' doesn't push the row back to
 the right edge.  Joins via `claude-repl--join-tabline-rows' so the
 per-row face extension does not paint the rightmost tab's background
 to the right edge.  Appends a toggled trailing space tied to
-`+dwc/tab-bar-refresh-toggle' so the left-aligned tab-bar segment's
-string content actually changes across refresh ticks (the
+`claude-repl--tabline-space-toggle' so the left-aligned tab-bar
+segment's string content actually changes across refresh ticks (the
 alternating-space trick — see the block comment above).  Without the
 toggle, face-only status transitions (e.g. :thinking -> :done) stay
 invisible until a workspace switch."
@@ -466,14 +470,18 @@ invisible until a workspace switch."
                        (claude-repl--join-tabline-rows centered-lines)
                      (mapconcat #'identity centered-lines " \n"))))
       (concat joined
-              (if +dwc/tab-bar-refresh-toggle " " ""))))
+              (if (and (boundp 'claude-repl--tabline-space-toggle)
+                       claude-repl--tabline-space-toggle)
+                  " " ""))))
 
   (defun +dwc/current-workspace-name ()
     "Return current workspace name as an invisible tab-bar segment.
 Same alternating-space trick as `+dwc/workspace-tabline-formatted': the
-trailing space toggles each second via `+dwc/tab-bar-refresh-toggle' to
-force the right-aligned segment to repaint too."
-    (propertize (if +dwc/tab-bar-refresh-toggle
+trailing space toggles each second via
+`claude-repl--tabline-space-toggle' to force the right-aligned
+segment to repaint too."
+    (propertize (if (and (boundp 'claude-repl--tabline-space-toggle)
+                         claude-repl--tabline-space-toggle)
                     (concat (safe-persp-name (get-current-persp)) " ")
                   (safe-persp-name (get-current-persp)))
                 'invisible t))
@@ -488,14 +496,18 @@ force the right-aligned segment to repaint too."
   (tab-bar-mode 1)
 
   (defun +dwc/refresh-tab-bar ()
-    "Force the tab-bar to re-render with current face/theme colors."
+    "Force the tab-bar to re-render with current face/theme colors.
+Delegates to `claude-repl--force-tab-bar-redraw' so the toggle flip
+\(`claude-repl--tabline-space-toggle') and the redraw primitives
+\(`tab-bar-tabs-set' / `tab-bar--update-tab-bar-lines' /
+`force-mode-line-update') stay co-located in the claude-repl module.
+Kept as a thin wrapper for the workspace-push / pull callsites below
+and for interactive use."
     (interactive)
-    (when (and (bound-and-true-p tab-bar-mode) (display-graphic-p))
-      (setq +dwc/tab-bar-refresh-toggle (not +dwc/tab-bar-refresh-toggle))
-      (when (fboundp 'claude-repl--log-verbose)
-        (claude-repl--log-verbose nil "refresh-tab-bar: toggle=%s" +dwc/tab-bar-refresh-toggle))
-      (tab-bar-tabs-set (tab-bar-tabs))
-      (tab-bar--update-tab-bar-lines t)))
+    (when (and (bound-and-true-p tab-bar-mode)
+               (display-graphic-p)
+               (fboundp 'claude-repl--force-tab-bar-redraw))
+      (claude-repl--force-tab-bar-redraw)))
 
   (defun +dwc/workspace-push-to-back (&optional keep-focus)
     "Push the current workspace to the second-to-last position in the tab-bar.
@@ -535,8 +547,7 @@ Focus remains on the current workspace."
       (persp-update-names-cache reordered)
       (+dwc/refresh-tab-bar)
       (+workspace/switch-to current)
-      (message "Pulled '%s' to second position." current)))
-  (run-with-timer 1 1 #'+dwc/refresh-tab-bar))
+      (message "Pulled '%s' to second position." current))))
 
 ;; Cmd+<numeral> AND Meta+<numeral> workspace switching live in
 ;; `modules/app/claude-repl/keybindings.el' via
