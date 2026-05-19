@@ -678,6 +678,21 @@ work after a proposed change, or how they work now after a change just made."
            "recursively-nested) subbullet"
            claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-tldr-forbids-greek-letters ()
+  "TLDR spec must forbid Greek letters inside TLDR bullets, even though the multilevel numbering invites a mathy aesthetic."
+  (should (string-match-p
+           "TLDR bullets MUST never use Greek letters"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "α, β, γ"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "multilevel numbering"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "mathy aesthetic"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-tldr-comma-awareness ()
   "TLDR spec must require bullets to be cognizant of avoiding commas that bolt on additional/qualifying clauses, preferring subbullets instead."
   (should (string-match-p
