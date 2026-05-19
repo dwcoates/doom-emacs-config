@@ -29,6 +29,7 @@
   (load (expand-file-name "test-input.el" dir) nil t)
   (load (expand-file-name "test-keybindings.el" dir) nil t)
   (load (expand-file-name "test-magit.el" dir) nil t)
+  (load (expand-file-name "test-merge-handlers.el" dir) nil t)
   (load (expand-file-name "test-notifications.el" dir) nil t)
   (load (expand-file-name "test-overlay.el" dir) nil t)
   (load (expand-file-name "test-panels.el" dir) nil t)
