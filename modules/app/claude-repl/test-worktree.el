@@ -97,6 +97,32 @@
     (should-error (claude-repl--assert-clean-worktree "test-ws" "/tmp/repo")
                   :type 'user-error)))
 
+;;;; ---- Tests: worktree-dirty-p ----
+;;
+;; `claude-repl--worktree-dirty-p' is the predicate counterpart to
+;; `--assert-clean-worktree' — same git probes, but returns nil/t
+;; instead of signaling.
+
+(ert-deftest claude-repl-test-worktree-dirty-p-returns-nil-when-clean ()
+  "Clean worktree (both git probes exit 0) returns nil."
+  (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+             (lambda (&rest _args) 0)))
+    (should-not (claude-repl--worktree-dirty-p "/tmp/repo"))))
+
+(ert-deftest claude-repl-test-worktree-dirty-p-returns-t-when-unstaged ()
+  "Unstaged changes (diff --quiet non-zero) flip the predicate to t."
+  (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+             (lambda (_root &rest args)
+               (if (equal args '("diff" "--quiet")) 1 0))))
+    (should (claude-repl--worktree-dirty-p "/tmp/repo"))))
+
+(ert-deftest claude-repl-test-worktree-dirty-p-returns-t-when-staged ()
+  "Staged changes (diff --cached --quiet non-zero) flip the predicate to t."
+  (cl-letf (((symbol-function 'claude-repl--git-exit-code)
+             (lambda (_root &rest args)
+               (if (equal args '("diff" "--cached" "--quiet")) 1 0))))
+    (should (claude-repl--worktree-dirty-p "/tmp/repo"))))
+
 ;;;; ---- Tests: git-exit-code / git-branch-exists-p ----
 ;;
 ;; The wrappers themselves (`claude-repl--git-exit-code',

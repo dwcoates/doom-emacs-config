@@ -279,6 +279,16 @@ WS is used only for the error message."
       (user-error "Uncommitted changes in workspace '%s' (dir: %s) [unstaged=%s staged=%s] — stash or commit before merging"
                   ws project-root unstaged staged))))
 
+(defun claude-repl--worktree-dirty-p (project-root)
+  "Return non-nil if PROJECT-ROOT has uncommitted changes.
+Predicate counterpart to `claude-repl--assert-clean-worktree' — same
+git probes (`diff --quiet' and `diff --cached --quiet'), but returns
+nil or t instead of signaling.  Suitable for handlers that need to
+skip work on a dirty trunk rather than abort the caller."
+  (let ((unstaged (/= 0 (claude-repl--git-exit-code project-root "diff" "--quiet")))
+        (staged   (/= 0 (claude-repl--git-exit-code project-root "diff" "--cached" "--quiet"))))
+    (or unstaged staged)))
+
 ;;; Worktree registration and session setup
 
 (defun claude-repl--register-worktree-ws (ws-id &optional ws)
