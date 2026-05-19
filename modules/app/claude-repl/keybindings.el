@@ -918,6 +918,8 @@ aux maps for every state in `claude-repl--scroll-output-intercept-states'
        :desc "Enqueue input as deferred prompt"        "RET" #'claude-repl-queue-deferred-prompt
        :desc "One-shot doom edit (from master)"        "o" #'claude-repl-create-doom-oneshot-workspace
        :desc "One-shot explanation-engine edit (PR on success)" "O" #'claude-repl-create-explanation-engine-oneshot-workspace
+       :desc "Amend last doom one-shot (send/queue)"   "C-o" #'claude-repl-amend-doom-oneshot-prompt
+       :desc "Amend last explanation-engine one-shot (send/queue)" "C-S-o" #'claude-repl-amend-explanation-engine-oneshot-prompt
        :desc "Kill workspace"           "d" #'claude-repl-kill-workspace
        :desc "Update GitHub PR description"  "r" #'claude-repl-update-pr
        :desc "Rebase branch onto origin/master" "b" #'claude-repl-rebase-onto-origin-master

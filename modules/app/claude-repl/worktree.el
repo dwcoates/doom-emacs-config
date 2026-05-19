@@ -487,6 +487,156 @@ explanation-engine one-shot flow.  Two-stage gate:
      this workspace back into its source.  On CICD FAIL the agent must
      STOP rather than invoke `/workspace-merge'.")
 
+;;; Amended-oneshot tracking and per-flavor prompt queue
+
+(defvar claude-repl--oneshot-last-ws nil
+  "Plist mapping oneshot flavor (`:doom', `:explanation-engine') to
+either nil, the symbol `:generating', or the dirname of the workspace
+most recently created via `claude-repl--create-pinned-oneshot-workspace'
+for that flavor.
+
+`:generating' is the in-flight sentinel set by
+`claude-repl--oneshot-reset-flavor' before the headless workspace
+generation spawn begins, and replaced with the new workspace's dirname
+by `claude-repl--oneshot-track-workspace' once finalize fires for a path
+that matches the flavor's pinned dir.  nil means no oneshot has been
+created for the flavor in this Emacs session.
+
+Consumed by `claude-repl-amend-doom-oneshot-prompt' /
+`claude-repl-amend-explanation-engine-oneshot-prompt' (`SPC j C-o' /
+`SPC j C-O') to route an amended prompt either to the existing
+workspace (when a real dirname is present) or onto
+`claude-repl--oneshot-amended-prompts' (when still `:generating').")
+
+(defvar claude-repl--oneshot-amended-prompts nil
+  "Plist mapping oneshot flavor (`:doom', `:explanation-engine') to a
+FIFO list of amended-oneshot prompts that arrived via `SPC j C-o' /
+`SPC j C-O' BEFORE the corresponding workspace materialized.  Each
+flavor's list is drained by `claude-repl--oneshot-track-workspace' into
+the new workspace's `:pending-prompts' so they are delivered in the
+same burst as the original preemptive prompt.")
+
+(defun claude-repl--oneshot-flavor-for-git-root (git-root)
+  "Return the oneshot flavor keyword for GIT-ROOT, or nil if not a pinned dir.
+Comparison is performed on `file-name-as-directory'-normalized absolute
+paths so trailing-slash and `~' differences do not break recognition."
+  (when git-root
+    (let ((norm (file-name-as-directory (expand-file-name git-root))))
+      (cond
+       ((equal norm claude-repl--doom-config-dir) :doom)
+       ((equal norm claude-repl--explanation-engine-dir) :explanation-engine)
+       (t nil)))))
+
+(defun claude-repl--oneshot-reset-flavor (flavor)
+  "Mark FLAVOR as in-flight: clear any queued amended prompts and set
+`claude-repl--oneshot-last-ws[FLAVOR]' to `:generating'.  Called at the
+start of `claude-repl--create-pinned-oneshot-workspace' so a subsequent
+`SPC j C-o' / `SPC j C-O' enqueues onto the new generation rather than
+the previous one's workspace."
+  (when flavor
+    (setq claude-repl--oneshot-last-ws
+          (plist-put claude-repl--oneshot-last-ws flavor :generating))
+    (setq claude-repl--oneshot-amended-prompts
+          (plist-put claude-repl--oneshot-amended-prompts flavor nil))
+    (claude-repl--log nil "oneshot-reset-flavor: flavor=%s -> :generating" flavor)))
+
+(defun claude-repl--oneshot-track-workspace (path dirname)
+  "When PATH matches a pinned-oneshot dir AND that flavor's last-ws is
+`:generating', record DIRNAME as the flavor's last workspace and drain
+any prompts queued on `claude-repl--oneshot-amended-prompts' for the
+flavor onto WS's `:pending-prompts' so they ride the same delivery
+burst as the original preemptive prompt.
+
+Idempotent and safe to call from `claude-repl--finalize-worktree-workspace'
+regardless of whether the workspace is a oneshot — it no-ops when PATH
+isn't a pinned-oneshot dir, or when the flavor isn't currently marked
+`:generating' (e.g. when a non-oneshot worktree happens to be created
+inside one of the pinned repos)."
+  (let ((flavor (claude-repl--oneshot-flavor-for-git-root path)))
+    (when (and flavor
+               (eq (plist-get claude-repl--oneshot-last-ws flavor) :generating))
+      (setq claude-repl--oneshot-last-ws
+            (plist-put claude-repl--oneshot-last-ws flavor dirname))
+      (let ((amended (plist-get claude-repl--oneshot-amended-prompts flavor)))
+        (when amended
+          (claude-repl--log dirname
+                            "oneshot-track-workspace: draining %d amended prompt(s) for flavor=%s onto ws=%s"
+                            (length amended) flavor dirname)
+          (claude-repl--ws-put
+           dirname :pending-prompts
+           (append (claude-repl--ws-get dirname :pending-prompts) amended))
+          (setq claude-repl--oneshot-amended-prompts
+                (plist-put claude-repl--oneshot-amended-prompts flavor nil))))
+      (claude-repl--log dirname
+                        "oneshot-track-workspace: flavor=%s now ws=%s"
+                        flavor dirname))))
+
+(defun claude-repl--oneshot-amend (flavor prompt)
+  "Route an amended-oneshot PROMPT to FLAVOR's last workspace, or queue
+it on `claude-repl--oneshot-amended-prompts' if generation is still
+in-flight.
+
+PROMPT must be a non-empty string.  Calls into
+`claude-repl--dispatch-prompt-command' when a real workspace dirname is
+recorded so the prompt either sends immediately (when Claude is ready)
+or rides on the workspace's `:pending-prompts' (when it isn't), matching
+the user-visible expectation that an `already-created' workspace
+receives the prompt directly rather than via the global queue.
+
+Signals `user-error' when no oneshot has been created for FLAVOR yet, or
+when the recorded workspace dirname no longer exists (e.g. user killed
+it) — surfacing the situation instead of silently dropping the prompt
+or creating ghost state."
+  (when (or (null prompt) (string-empty-p (string-trim prompt)))
+    (user-error "Amended-oneshot prompt is required"))
+  (let ((state (plist-get claude-repl--oneshot-last-ws flavor)))
+    (cond
+     ((null state)
+      (user-error "No oneshot workspace tracked for flavor=%s — press `SPC j %s' first"
+                  flavor (if (eq flavor :doom) "o" "O")))
+     ((eq state :generating)
+      (claude-repl--log nil
+                        "oneshot-amend: flavor=%s still :generating — queueing prompt"
+                        flavor)
+      (setq claude-repl--oneshot-amended-prompts
+            (plist-put claude-repl--oneshot-amended-prompts
+                       flavor
+                       (append (plist-get claude-repl--oneshot-amended-prompts flavor)
+                               (list prompt))))
+      (message "Amended-oneshot prompt queued for in-flight %s workspace." flavor))
+     ((stringp state)
+      (unless (claude-repl--ws-get state :vterm-buffer)
+        (unless (member state (and (fboundp '+workspace-list-names)
+                                   (+workspace-list-names)))
+          (user-error "Tracked oneshot workspace '%s' no longer exists — press `SPC j %s' to create a new one"
+                      state (if (eq flavor :doom) "o" "O"))))
+      (claude-repl--log state
+                        "oneshot-amend: dispatching prompt to flavor=%s ws=%s"
+                        flavor state)
+      (claude-repl--dispatch-prompt-command state prompt))
+     (t
+      (user-error "Unexpected oneshot tracking state for flavor=%s: %S" flavor state)))))
+
+(defun claude-repl-amend-doom-oneshot-prompt ()
+  "Send (or enqueue) an additional prompt to the last `SPC j o' workspace.
+Prompts for a string and routes it to the doom-oneshot flavor via
+`claude-repl--oneshot-amend': dispatched directly if the workspace
+already exists, otherwise queued onto
+`claude-repl--oneshot-amended-prompts' for delivery once the workspace
+materializes (drained alongside the original preemptive prompt by
+`claude-repl--oneshot-track-workspace')."
+  (interactive)
+  (let ((prompt (read-string "Amended doom-oneshot prompt: ")))
+    (claude-repl--oneshot-amend :doom prompt)))
+
+(defun claude-repl-amend-explanation-engine-oneshot-prompt ()
+  "Send (or enqueue) an additional prompt to the last `SPC j O' workspace.
+Explanation-engine flavor counterpart of
+`claude-repl-amend-doom-oneshot-prompt'."
+  (interactive)
+  (let ((prompt (read-string "Amended explanation-engine-oneshot prompt: ")))
+    (claude-repl--oneshot-amend :explanation-engine prompt)))
+
 ;;; Async workspace-name generation via headless `claude -p'
 
 (defcustom claude-repl-workspace-generation-program "claude"
@@ -723,6 +873,13 @@ perspective rather than the caller's."
     (claude-repl--ws-put ws :pending-magit t)
     (claude-repl--ws-put ws :pending-initial-buffers t)
     (claude-repl--enqueue-preemptive-prompt ws preemptive-prompt)
+    ;; If this finalize matches an in-flight oneshot flavor, record the
+    ;; workspace name and append any amended prompts queued by `SPC j C-o'
+    ;; / `SPC j C-O' onto `:pending-prompts'.  Must run AFTER
+    ;; `--enqueue-preemptive-prompt' (which overwrites `:pending-prompts'
+    ;; with the lone preemptive prompt) so the amended prompts ride after
+    ;; it rather than getting clobbered.
+    (claude-repl--oneshot-track-workspace path dirname)
     (claude-repl--apply-workspace-properties ws
       :priority effective-priority
       :fork-session-id fork-session-id
@@ -1022,6 +1179,11 @@ explicit."
                                     suffixed-raw)))
       (claude-repl--log nil "%s: base=%s git-root=%s base-commit=%s"
                         tag base git-root base-commit)
+      ;; Reset tracking BEFORE the spawn so any `SPC j C-o' / `SPC j C-O'
+      ;; pressed while generation is in-flight queues onto this oneshot
+      ;; rather than the previous one's workspace.
+      (claude-repl--oneshot-reset-flavor
+       (claude-repl--oneshot-flavor-for-git-root git-root))
       (message "Generating %s workspace name via `claude -p --model %s'..."
                tag claude-repl-workspace-generation-model)
       (claude-repl--spawn-workspace-generation
