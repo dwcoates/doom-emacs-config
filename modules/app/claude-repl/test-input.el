@@ -392,6 +392,18 @@
            "1\\.1\\.1\\.1\\. \\.\\.\\."
            claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-tldr-entries-wrap-at-column-110 ()
+  "TLDR spec must require each entry in the tree to be hard-wrapped at a maximum column width of 110 characters."
+  (should (string-match-p
+           "Each entry in the TLDR tree MUST be hard-wrapped at a maximum column width of 110 characters"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "broken onto continuation lines that align under the entry's text"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "not under the ASCII connectors"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-tldr-depth-scales-with-response-length ()
   "TLDR spec must mandate that tree depth scales with the length of the response itself."
   (should (string-match-p
