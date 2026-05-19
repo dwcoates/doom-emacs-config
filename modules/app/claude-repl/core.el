@@ -454,7 +454,9 @@ State in Tests\")."
     claude-repl--git-branch-exists-p
     claude-repl--git-tag-exists-p
     claude-repl--async-git
-    claude-repl--gh-string-quiet)
+    claude-repl--gh-string-quiet
+    claude-repl--early-git-string
+    claude-repl--early-git-exit-code)
   "Symbols of every function that wraps an external process or external-state mutation.
 Each MUST be mocked by tests that reach it via production code.  The
 test harness installs guards so unmocked invocations fail loudly.

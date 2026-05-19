@@ -70,26 +70,49 @@
 ;; are caught and surfaced via `message' so a broken snapshot or missing
 ;; `git' binary cannot block Emacs startup.
 
+(defun claude-repl--early-git-string (&rest args)
+  "Run `git ARGS' synchronously and return its trimmed stdout.
+Returns the empty string on non-zero exit — early recovery callers
+need a tolerant probe, not a hard fail, mirroring the
+`claude-repl--git-string-quiet' contract.
+
+This IS the external-boundary wrapper for the early-recovery code
+path.  Defined locally because `config.el's early recovery executes
+at module-loader top level — BEFORE `core.el' loads and the regular
+`claude-repl--git-*' family becomes available.  Same role,
+separately defined so the recovery is self-contained.  Registered in
+`claude-repl--external-boundary-functions' (core.el) so the
+test-time runtime guards see it and tests cannot accidentally shell
+out to real `git'."
+  (with-temp-buffer
+    (let ((exit-code (apply #'call-process "git" nil t nil args))) ;; ALLOW-EXTERNAL-BOUNDARY
+      (if (zerop exit-code)
+          (string-trim (buffer-string))
+        ""))))
+
+(defun claude-repl--early-git-exit-code (&rest args)
+  "Run `git ARGS' synchronously and return its exit code (stdout discarded).
+Sibling to `claude-repl--early-git-string'; see that function's
+docstring for the architectural context.  Registered in
+`claude-repl--external-boundary-functions' (core.el)."
+  (apply #'call-process "git" nil nil nil args)) ;; ALLOW-EXTERNAL-BOUNDARY
+
 (defun claude-repl--early-cherry-pick-head-at (target-dir)
   "Return the path to CHERRY_PICK_HEAD for TARGET-DIR's repo, or nil.
 Resolves the git dir via `git rev-parse --absolute-git-dir' so a linked
 worktree (whose `.git' is a file pointing into the parent
 `.git/worktrees/<name>') is handled correctly."
   (when (and target-dir (file-directory-p target-dir))
-    (with-temp-buffer
-      (let ((exit-code (call-process "git" nil t nil
-                                     "-C" target-dir
-                                     "rev-parse" "--absolute-git-dir")))
-        (when (zerop exit-code)
-          (let ((git-dir (string-trim (buffer-string))))
-            (and (not (string-empty-p git-dir))
-                 (let ((cp-head (expand-file-name "CHERRY_PICK_HEAD" git-dir)))
-                   (and (file-exists-p cp-head) cp-head)))))))))
+    (let ((git-dir (claude-repl--early-git-string
+                    "-C" target-dir "rev-parse" "--absolute-git-dir")))
+      (and (not (string-empty-p git-dir))
+           (let ((cp-head (expand-file-name "CHERRY_PICK_HEAD" git-dir)))
+             (and (file-exists-p cp-head) cp-head))))))
 
 (defun claude-repl--early-abort-cherry-pick (target-dir)
   "Run `git -C TARGET-DIR cherry-pick --abort'; return the exit code."
-  (call-process "git" nil nil nil
-                "-C" target-dir "cherry-pick" "--abort"))
+  (claude-repl--early-git-exit-code
+   "-C" target-dir "cherry-pick" "--abort"))
 
 (defun claude-repl--early-recover-orphan-cherry-picks ()
   "Process every in-flight-merge entry in the on-disk workspace snapshot.
