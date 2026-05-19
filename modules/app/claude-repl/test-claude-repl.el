@@ -37,6 +37,7 @@
   (load (expand-file-name "test-sentinel.el" dir) nil t)
   (load (expand-file-name "test-session.el" dir) nil t)
   (load (expand-file-name "test-status.el" dir) nil t)
+  (load (expand-file-name "test-vterm-freeze.el" dir) nil t)
   (load (expand-file-name "test-worktree.el" dir) nil t))
 
 (provide 'test-claude-repl)

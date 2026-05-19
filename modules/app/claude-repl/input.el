@@ -394,7 +394,12 @@ input window and disturbs redisplay.  Going through `set-window-start'
                           (forward-line lines)
                           (point)))))
        (set-window-start vterm-win new-start t)
-       (set-window-point vterm-win new-start)))))
+       (set-window-point vterm-win new-start)))
+   ;; Freeze the vterm buffer for a short window so subsequent process
+   ;; output from Claude doesn't yank the scroll back to the prompt
+   ;; while the user is still scrolling.  Each scroll-bump re-arms the
+   ;; timer; once it fires the buffer is force-redrawn to catch up.
+   (claude-repl--vterm-freeze-bump vterm-buf)))
 
 (defun claude-repl-scroll-output-up ()
   "Scroll the Claude vterm output window up (toward older output)."
