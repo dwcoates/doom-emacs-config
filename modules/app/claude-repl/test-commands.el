@@ -5550,6 +5550,65 @@ binding to invoke it via key press."
                 claude-repl-workspace-switch-to-final))
     (should (commandp fn))))
 
+;;;; ---- Tests: workspace tab-order shuffles (extracted from +dwc/) ----
+
+(ert-deftest claude-repl-test-workspace-push-to-back-is-command ()
+  "claude-repl-workspace-push-to-back is interactively invokable."
+  (should (commandp 'claude-repl-workspace-push-to-back)))
+
+(ert-deftest claude-repl-test-workspace-pull-to-front-is-command ()
+  "claude-repl-workspace-pull-to-front is interactively invokable."
+  (should (commandp 'claude-repl-workspace-pull-to-front)))
+
+(ert-deftest claude-repl-test-workspace-push-to-back-reorders-list ()
+  "push-to-back moves the current workspace to the second-to-last position.
+With ws-list (a b c d) and current=b, the result should be (a c b d)."
+  (claude-repl-test--with-clean-state
+    (let ((updated-names nil)
+          (flash-called 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "b"))
+                ((symbol-function 'persp-names-current-frame-fast-ordered)
+                 (lambda () '("a" "b" "c" "d")))
+                ((symbol-function 'persp-update-names-cache)
+                 (lambda (names) (setq updated-names names)))
+                ((symbol-function 'claude-repl--force-tab-bar-redraw) #'ignore)
+                ((symbol-function '+workspace/switch-to) #'ignore)
+                ((symbol-function 'claude-repl-flash-tab)
+                 (lambda (_ws) (cl-incf flash-called))))
+        (claude-repl-workspace-push-to-back)
+        (should (equal updated-names '("a" "c" "b" "d")))
+        (should (= flash-called 1))))))
+
+(ert-deftest claude-repl-test-workspace-push-to-back-keeps-focus-when-asked ()
+  "With KEEP-FOCUS non-nil, the function does NOT call +workspace/switch-to."
+  (claude-repl-test--with-clean-state
+    (let ((switched-to nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "b"))
+                ((symbol-function 'persp-names-current-frame-fast-ordered)
+                 (lambda () '("a" "b" "c" "d")))
+                ((symbol-function 'persp-update-names-cache) #'ignore)
+                ((symbol-function 'claude-repl--force-tab-bar-redraw) #'ignore)
+                ((symbol-function '+workspace/switch-to)
+                 (lambda (ws) (setq switched-to ws)))
+                ((symbol-function 'claude-repl-flash-tab) #'ignore))
+        (claude-repl-workspace-push-to-back t)
+        (should-not switched-to)))))
+
+(ert-deftest claude-repl-test-workspace-pull-to-front-reorders-list ()
+  "pull-to-front moves the current workspace to the second position.
+With ws-list (a b c d) and current=c, the result should be (a c b d)."
+  (claude-repl-test--with-clean-state
+    (let ((updated-names nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "c"))
+                ((symbol-function 'persp-names-current-frame-fast-ordered)
+                 (lambda () '("a" "b" "c" "d")))
+                ((symbol-function 'persp-update-names-cache)
+                 (lambda (names) (setq updated-names names)))
+                ((symbol-function 'claude-repl--force-tab-bar-redraw) #'ignore)
+                ((symbol-function '+workspace/switch-to) #'ignore))
+        (claude-repl-workspace-pull-to-front)
+        (should (equal updated-names '("a" "c" "b" "d")))))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here

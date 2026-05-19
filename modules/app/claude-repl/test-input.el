@@ -2659,7 +2659,13 @@ Claude input buffer."
       (cl-letf (((symbol-function 'claude-repl--send)
                  (lambda (&rest _) (push 'send calls)))
                 ((symbol-function 'claude-repl--hide-panels)
-                 (lambda () (push 'hide calls))))
+                 (lambda () (push 'hide calls)))
+                ;; `claude-repl-send-and-hide' delegates to
+                ;; `claude-repl--on-close', which (post-extraction) calls
+                ;; `claude-repl-workspace-push-to-back' unconditionally
+                ;; rather than under an `fboundp' guard.  Mock it so the
+                ;; test doesn't depend on persp-mode being loaded.
+                ((symbol-function 'claude-repl-workspace-push-to-back) #'ignore))
         (claude-repl-send-and-hide)
         (should (equal (reverse calls) '(send hide)))))))
 
