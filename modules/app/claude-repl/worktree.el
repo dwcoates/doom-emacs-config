@@ -2999,19 +2999,37 @@ without spawning an actual `claude' process."
                       "auto-resolve: invoking claude -p root=%s cmd=%S"
                       root cmd)
     (set-process-query-on-exit-flag proc nil)
-    (let ((deadline (+ (float-time) claude-repl-auto-resolve-conflicts-timeout))
-          (timed-out nil))
+    (let* ((started-at (float-time))
+           (deadline (+ started-at claude-repl-auto-resolve-conflicts-timeout))
+           (timed-out nil)
+           ;; Heartbeat cadence: log every Nth iteration of the busy-wait
+           ;; so a multi-minute hang shows lifeness inside the loop.  N=25
+           ;; iterations × 0.2s ≈ 5s between heartbeats.  Cheap (one log
+           ;; line per heartbeat) and bounded (only fires while looping).
+           (iter 0))
       (while (and (process-live-p proc) (not timed-out))
         (accept-process-output proc 0.2)
+        (setq iter (1+ iter))
+        (when (zerop (mod iter 25))
+          (claude-repl--log target-ws
+                            "auto-resolve: busy-wait alive iter=%d elapsed=%.1fs proc-live=%s"
+                            iter (- (float-time) started-at)
+                            (if (process-live-p proc) "t" "nil")))
         (when (> (float-time) deadline)
           (setq timed-out t)
           (delete-process proc)))
+      (claude-repl--log target-ws
+                        "auto-resolve: busy-wait exited iters=%d elapsed=%.1fs timed-out=%s proc-status=%s"
+                        iter (- (float-time) started-at)
+                        (if timed-out "t" "nil")
+                        (process-status proc))
       (let* ((status (if timed-out 'timeout (process-exit-status proc)))
              ;; Capture the process output BEFORE annotating the side
              ;; buffer so our own "# exit:" marker does not leak into
              ;; the logged text.  Strip the inserted header block in
              ;; the target-ws case so only the resolver's actual
              ;; stdout/stderr makes it into the log.
+             (extract-started (float-time))
              (process-output
               (when (buffer-live-p out-buf)
                 (with-current-buffer out-buf
@@ -3025,6 +3043,10 @@ without spawning an actual `claude' process."
                          (point) (point-max)))
                     (buffer-substring-no-properties
                      (point-min) (point-max)))))))
+        (claude-repl--log target-ws
+                          "auto-resolve: process-output extracted chars=%d in %.2fs"
+                          (length (or process-output ""))
+                          (- (float-time) extract-started))
         (when (and target-ws (buffer-live-p out-buf))
           (with-current-buffer out-buf
             (let ((inhibit-read-only t))
@@ -3034,11 +3056,15 @@ without spawning an actual `claude' process."
         ;; resolver's response is greppable and survives session
         ;; restart — the side buffer (when present) is only for live
         ;; inspection, not the canonical record.
-        (claude-repl--log target-ws
-                          "auto-resolve: claude -p exited status=%S output-chars=%d output follows:\n%s"
-                          status
-                          (length (or process-output ""))
-                          (or process-output ""))
+        (let ((log-started (float-time)))
+          (claude-repl--log target-ws
+                            "auto-resolve: claude -p exited status=%S output-chars=%d output follows:\n%s"
+                            status
+                            (length (or process-output ""))
+                            (or process-output ""))
+          (claude-repl--log target-ws
+                            "auto-resolve: log-write took %.2fs"
+                            (- (float-time) log-started)))
         (cond
          (target-ws status)
          (t
@@ -4170,3 +4196,70 @@ errored\" UX."
     (claude-repl--workspace-merge-async ws repo-root)))
 
 (defalias '+dwc/workspace-merge-current-into-source #'claude-repl-workspace-merge-current-into-source)
+
+;;; Main-thread heartbeat (diagnostic instrumentation)
+;;
+;; A periodic `run-with-timer' that writes a single log line each tick.
+;; Its callback runs ON THE MAIN THREAD — so the heartbeat firing
+;; reliably means the main thread reached its event loop and serviced
+;; the timer.  If a hang is investigated and the rolling log shows
+;; this heartbeat going SILENT for the duration, the main thread is
+;; the offender (a hot Lisp loop, a self-rescheduling hook, etc.).
+;; If the heartbeat keeps firing during a hang, the main thread is
+;; fine and the worker thread (or some downstream subprocess) is the
+;; offender.  Distinguishing those two cases is the entire point of
+;; this instrumentation — without it, both look identical from
+;; outside (sustained CPU, no visible progress).
+;;
+;; Cost: one `claude-repl--log' line every
+;; `claude-repl-debug-heartbeat-interval' seconds — negligible at the
+;; default 5s cadence (≈12 lines/min) and bounded by the existing log
+;; size cap (1 GiB, truncates first-80% on overflow).
+
+(defcustom claude-repl-debug-heartbeat-interval 5
+  "Seconds between main-thread heartbeat log lines.
+nil disables the heartbeat entirely.  Set to a small value (3-10s)
+during diagnosis of hang reports; the heartbeat writes one log line
+per tick from `claude-repl--debug-heartbeat-tick' so a silent gap in
+the log identifies a wedged main thread."
+  :type '(choice (const :tag "Disabled" nil) integer)
+  :group 'claude-repl)
+
+(defvar claude-repl--debug-heartbeat-timer nil
+  "The active main-thread heartbeat timer, or nil when disabled.
+Set by `claude-repl--debug-heartbeat-install', cancelled by
+`claude-repl--debug-heartbeat-uninstall'.")
+
+(defun claude-repl--debug-heartbeat-tick ()
+  "Heartbeat callback: write one `claude-repl--log' line.
+Runs on the main thread because `run-with-timer' callbacks always
+do.  A silent gap in the log of `claude-repl-debug-heartbeat-interval'
+or more seconds means the main thread did not reach its event loop
+during that gap — diagnostic gold during a hang investigation."
+  (claude-repl--log nil "debug-heartbeat: main-thread tick t=%.3f" (float-time)))
+
+(defun claude-repl--debug-heartbeat-install ()
+  "Schedule the main-thread heartbeat timer.
+No-op when already installed or when
+`claude-repl-debug-heartbeat-interval' is nil."
+  (when (and claude-repl-debug-heartbeat-interval
+             (null claude-repl--debug-heartbeat-timer))
+    (setq claude-repl--debug-heartbeat-timer
+          (run-with-timer claude-repl-debug-heartbeat-interval
+                          claude-repl-debug-heartbeat-interval
+                          #'claude-repl--debug-heartbeat-tick))
+    (claude-repl--log nil "debug-heartbeat: installed interval=%ss"
+                      claude-repl-debug-heartbeat-interval)))
+
+(defun claude-repl--debug-heartbeat-uninstall ()
+  "Cancel the main-thread heartbeat timer, if active."
+  (when (timerp claude-repl--debug-heartbeat-timer)
+    (cancel-timer claude-repl--debug-heartbeat-timer))
+  (setq claude-repl--debug-heartbeat-timer nil))
+
+;; Auto-install only outside batch mode — keeps the heartbeat off
+;; during the ERT suite (where its tick writes would contaminate the
+;; `*Messages*' / log file rebindings).  Interactive Emacs sessions
+;; get the heartbeat by default.
+(unless noninteractive
+  (claude-repl--debug-heartbeat-install))

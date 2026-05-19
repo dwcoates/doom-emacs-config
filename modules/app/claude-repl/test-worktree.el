@@ -8739,4 +8739,77 @@ the in-memory state regardless of the path taken."
         (claude-repl--clear-in-flight-merge "ws-a") ; no-op clear
         (should (= 1 persist-called))))))
 
+;;;; ---- Tests: main-thread heartbeat ----
+
+(defmacro claude-repl-test--with-clean-heartbeat (&rest body)
+  "Run BODY with the heartbeat timer fresh — uninstall any preexisting
+timer, run BODY, then uninstall again on the way out.  Test isolation
+matters because the heartbeat is a global timer."
+  (declare (indent 0))
+  `(let ((claude-repl--debug-heartbeat-timer nil))
+     (unwind-protect (progn ,@body)
+       (claude-repl--debug-heartbeat-uninstall))))
+
+(ert-deftest claude-repl-test-debug-heartbeat-install-schedules-timer ()
+  "Install schedules a `run-with-timer' at the configured interval."
+  (claude-repl-test--with-clean-heartbeat
+    (let ((scheduled nil))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (delay repeat fn)
+                   (setq scheduled (list :delay delay :repeat repeat :fn fn))
+                   :timer-handle))
+                (claude-repl-debug-heartbeat-interval 5))
+        (claude-repl--debug-heartbeat-install)
+        (should (equal 5 (plist-get scheduled :delay)))
+        (should (equal 5 (plist-get scheduled :repeat)))
+        (should (eq #'claude-repl--debug-heartbeat-tick
+                    (plist-get scheduled :fn)))
+        (should (eq :timer-handle claude-repl--debug-heartbeat-timer))))))
+
+(ert-deftest claude-repl-test-debug-heartbeat-install-is-idempotent ()
+  "A second install while a timer is already active is a no-op — no
+double-schedule."
+  (claude-repl-test--with-clean-heartbeat
+    (let ((call-count 0))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (&rest _args) (cl-incf call-count) :timer))
+                (claude-repl-debug-heartbeat-interval 5))
+        (claude-repl--debug-heartbeat-install)
+        (claude-repl--debug-heartbeat-install)
+        (should (= 1 call-count))))))
+
+(ert-deftest claude-repl-test-debug-heartbeat-install-nil-interval-disables ()
+  "When `claude-repl-debug-heartbeat-interval' is nil, install is a no-op
+\(no timer scheduled).  Lets the user disable heartbeats globally."
+  (claude-repl-test--with-clean-heartbeat
+    (let ((scheduled nil))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (&rest _args) (setq scheduled t) :timer))
+                (claude-repl-debug-heartbeat-interval nil))
+        (claude-repl--debug-heartbeat-install)
+        (should-not scheduled)
+        (should (null claude-repl--debug-heartbeat-timer))))))
+
+(ert-deftest claude-repl-test-debug-heartbeat-uninstall-cancels-timer ()
+  "Uninstall calls `cancel-timer' on the active timer and clears the slot."
+  (claude-repl-test--with-clean-heartbeat
+    (let ((cancelled nil))
+      (cl-letf (((symbol-function 'timerp) (lambda (_) t))
+                ((symbol-function 'cancel-timer)
+                 (lambda (timer) (setq cancelled timer))))
+        (setq claude-repl--debug-heartbeat-timer :a-timer)
+        (claude-repl--debug-heartbeat-uninstall)
+        (should (eq :a-timer cancelled))
+        (should (null claude-repl--debug-heartbeat-timer))))))
+
+(ert-deftest claude-repl-test-debug-heartbeat-uninstall-noop-when-nil ()
+  "Uninstall is safe when no timer is active — no `cancel-timer' call."
+  (claude-repl-test--with-clean-heartbeat
+    (let ((cancelled nil))
+      (cl-letf (((symbol-function 'cancel-timer)
+                 (lambda (_) (setq cancelled t))))
+        (setq claude-repl--debug-heartbeat-timer nil)
+        (claude-repl--debug-heartbeat-uninstall)
+        (should-not cancelled)))))
+
 ;;; test-worktree.el ends here
