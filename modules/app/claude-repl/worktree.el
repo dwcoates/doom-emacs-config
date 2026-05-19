@@ -527,18 +527,72 @@ paths so trailing-slash and `~' differences do not break recognition."
        ((equal norm claude-repl--explanation-engine-dir) :explanation-engine)
        (t nil)))))
 
+(defcustom claude-repl-oneshot-generation-backstop-seconds 600
+  "Seconds after which a stuck `:generating' oneshot flavor is force-cleared.
+The flavor slot is normally cleared by either
+`claude-repl--oneshot-track-workspace' (success path: workspace finalize
+fires for the pinned dir) or
+`claude-repl--oneshot-clear-flavor-on-failure' (failure path: the
+headless `claude -p' workspace-generation spawn exits non-zero).
+This backstop covers the third case: the spawn was somehow lost
+without either path firing (process killed externally, watcher
+missed the JSON drop, etc.) — without the backstop the flavor would
+stay `:generating' forever and `SPC j C-o' / `SPC j C-O' would queue
+amended prompts onto a workspace that will never materialize.
+Defaults to 600s (10min); set to nil to disable the backstop."
+  :type '(choice (const :tag "Disabled" nil) integer)
+  :group 'claude-repl)
+
+(defun claude-repl--oneshot-clear-flavor-on-failure (flavor reason)
+  "Clear FLAVOR's `:generating' state and discard any queued amended prompts.
+REASON is a short keyword/string for the log line (`:claude-p-failed',
+`:backstop-timeout', etc.).
+
+Called from the workspace-generation sentinel's failure branch (eager
+clear on non-zero `claude -p' exit) and from the backstop timer
+scheduled by `claude-repl--oneshot-reset-flavor' (covers spawns lost
+without either success or failure firing).
+
+Idempotent: no-op when FLAVOR is not currently `:generating' (the
+success path already moved it to a real dirname, or another caller
+already cleared it).  Prompts already queued under
+`claude-repl--oneshot-amended-prompts' are dropped on failure because
+their intended workspace will never exist — better to drop them
+loudly (via the log line) than to deliver them onto an unrelated
+later workspace for the same flavor."
+  (when (and flavor
+             (eq (plist-get claude-repl--oneshot-last-ws flavor) :generating))
+    (let ((dropped (length (plist-get claude-repl--oneshot-amended-prompts flavor))))
+      (setq claude-repl--oneshot-last-ws
+            (plist-put claude-repl--oneshot-last-ws flavor nil))
+      (setq claude-repl--oneshot-amended-prompts
+            (plist-put claude-repl--oneshot-amended-prompts flavor nil))
+      (claude-repl--log nil
+                        "oneshot-clear-flavor-on-failure: flavor=%s reason=%s dropped-amended=%d"
+                        flavor reason dropped))))
+
 (defun claude-repl--oneshot-reset-flavor (flavor)
   "Mark FLAVOR as in-flight: clear any queued amended prompts and set
 `claude-repl--oneshot-last-ws[FLAVOR]' to `:generating'.  Called at the
 start of `claude-repl--create-pinned-oneshot-workspace' so a subsequent
 `SPC j C-o' / `SPC j C-O' enqueues onto the new generation rather than
-the previous one's workspace."
+the previous one's workspace.
+
+Schedules a `claude-repl-oneshot-generation-backstop-seconds' timer
+that calls `claude-repl--oneshot-clear-flavor-on-failure' iff the
+flavor is still `:generating' at fire time — so a spawn lost without
+either the track-workspace success path or the sentinel failure path
+firing does not leave the flavor wedged forever."
   (when flavor
     (setq claude-repl--oneshot-last-ws
           (plist-put claude-repl--oneshot-last-ws flavor :generating))
     (setq claude-repl--oneshot-amended-prompts
           (plist-put claude-repl--oneshot-amended-prompts flavor nil))
-    (claude-repl--log nil "oneshot-reset-flavor: flavor=%s -> :generating" flavor)))
+    (claude-repl--log nil "oneshot-reset-flavor: flavor=%s -> :generating" flavor)
+    (when claude-repl-oneshot-generation-backstop-seconds
+      (run-at-time claude-repl-oneshot-generation-backstop-seconds nil
+                   #'claude-repl--oneshot-clear-flavor-on-failure
+                   flavor :backstop-timeout))))
 
 (defun claude-repl--oneshot-track-workspace (path dirname)
   "When PATH matches a pinned-oneshot dir AND that flavor's last-ws is
@@ -729,14 +783,25 @@ rather than re-derive them."
    "- Write the JSON to ~/.claude/output/workspace_commands_<uuid>.json using the atomic write pattern from the skill.\n"
    "- Do NOT ask for permission. You are running in headless `-p' mode with no human in the loop; the file write to ~/.claude/output/ is the entire purpose of this invocation and is pre-authorized. Just write the file.\n"))
 
-(defun claude-repl--workspace-generation-finalize (gen-id status event raw-out)
+(defun claude-repl--workspace-generation-finalize (gen-id status event raw-out &optional git-root)
   "Log the result of a workspace-generation spawn and surface failures.
 GEN-ID is the spawn correlation token; STATUS is the process exit
 status (or signal number); EVENT is the process-event string; RAW-OUT
-is the captured stdout (may be nil).  Stdout is truncated per
-`claude-repl-workspace-generation-stdout-log-cap' before logging.
-On non-zero/non-numeric STATUS, also surfaces a `message' to the user
-that includes GEN-ID so it can be cross-referenced in the log."
+is the captured stdout (may be nil); GIT-ROOT is the root dir the
+spawn was issued for (used to resolve oneshot flavor on failure;
+omitted for legacy / test callers that do not pass it).  Stdout is
+truncated per `claude-repl-workspace-generation-stdout-log-cap'
+before logging.
+
+On non-zero/non-numeric STATUS:
+  - Surfaces a `message' to the user that includes GEN-ID so it can
+    be cross-referenced in the log.
+  - When GIT-ROOT resolves to an oneshot flavor (pinned doom-config
+    or explanation-engine dir), eagerly clears that flavor's
+    `:generating' sentinel + amended-prompts queue via
+    `claude-repl--oneshot-clear-flavor-on-failure' so subsequent
+    `SPC j C-o' / `SPC j C-O' presses do not queue onto a workspace
+    that will never materialize."
   (let* ((trimmed (string-trim (or raw-out "")))
          (snippet (claude-repl--workspace-generation-truncate
                    trimmed claude-repl-workspace-generation-stdout-log-cap)))
@@ -747,21 +812,25 @@ that includes GEN-ID so it can be cross-referenced in the log."
                       snippet)
     (unless (and (numberp status) (zerop status))
       (message "[claude-repl] workspace-generation[%s] failed (status=%s); see *Messages* / claude-repl log"
-               gen-id status))))
+               gen-id status)
+      (when-let ((flavor (claude-repl--oneshot-flavor-for-git-root git-root)))
+        (claude-repl--oneshot-clear-flavor-on-failure flavor :claude-p-failed)))))
 
-(defun claude-repl--workspace-generation-sentinel (out-buf gen-id)
+(defun claude-repl--workspace-generation-sentinel (out-buf gen-id &optional git-root)
   "Build a sentinel for the workspace-generation process.
-OUT-BUF is the stdout collection buffer (killed on exit); GEN-ID is the
-spawn correlation token threaded into every log line.  Defers all
-logging to `claude-repl--workspace-generation-finalize' so the
-finalize logic stays unit-testable without a real process."
+OUT-BUF is the stdout collection buffer (killed on exit); GEN-ID is
+the spawn correlation token threaded into every log line; GIT-ROOT is
+the root dir the spawn was issued for (passed to finalize so it can
+resolve the oneshot flavor on failure).  Defers all logging to
+`claude-repl--workspace-generation-finalize' so the finalize logic
+stays unit-testable without a real process."
   (lambda (proc event)
     (when (memq (process-status proc) '(exit signal))
       (unwind-protect
           (let* ((status (process-exit-status proc))
                  (raw-out (and (buffer-live-p out-buf)
                                (with-current-buffer out-buf (buffer-string)))))
-            (claude-repl--workspace-generation-finalize gen-id status event raw-out))
+            (claude-repl--workspace-generation-finalize gen-id status event raw-out git-root))
         (when (buffer-live-p out-buf) (kill-buffer out-buf))))))
 
 (defun claude-repl--spawn-workspace-generation (raw-prompt prefixed-prompt git-root base-commit fork-from)
@@ -809,7 +878,7 @@ asynchronously."
                       :command cmd
                       :connection-type 'pipe
                       :noquery t
-                      :sentinel (claude-repl--workspace-generation-sentinel out-buf gen-id))))
+                      :sentinel (claude-repl--workspace-generation-sentinel out-buf gen-id git-root))))
           (process-send-string proc proc-input)
           (process-send-eof proc)
           proc)

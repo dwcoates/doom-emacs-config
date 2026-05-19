@@ -8327,10 +8327,17 @@ workspace-name slug clean across every one-shot variant."
   "Execute BODY with empty global amended-oneshot tracking + queue.
 Rebinds `claude-repl--oneshot-last-ws' and
 `claude-repl--oneshot-amended-prompts' to nil so each test starts from a
-known-clean baseline regardless of any leftover state from a prior test."
+known-clean baseline regardless of any leftover state from a prior test.
+
+Also rebinds `claude-repl-oneshot-generation-backstop-seconds' to nil
+so the default reset path doesn't `run-at-time' a real 600s timer in
+the test run (that would leak persistent timers across the suite).
+Tests that exercise the backstop scheduling explicitly set it
+themselves AND stub `run-at-time' to observe the schedule call."
   (declare (indent 0))
   `(let ((claude-repl--oneshot-last-ws nil)
-         (claude-repl--oneshot-amended-prompts nil))
+         (claude-repl--oneshot-amended-prompts nil)
+         (claude-repl-oneshot-generation-backstop-seconds nil))
      ,@body))
 
 (ert-deftest claude-repl-test-oneshot-flavor-for-git-root-doom ()
@@ -8422,6 +8429,122 @@ previously recorded dirname is left intact."
             (plist-put claude-repl--oneshot-last-ws :doom "prev-ws"))
       (claude-repl--oneshot-track-workspace claude-repl--doom-config-dir "intruder")
       (should (equal (plist-get claude-repl--oneshot-last-ws :doom) "prev-ws")))))
+
+;;;; ---- Tests: --oneshot-clear-flavor-on-failure + backstop timer ----
+
+(ert-deftest claude-repl-test-oneshot-clear-flavor-on-failure-resets-generating ()
+  "Clears `:generating' state when the flavor is in-flight."
+  (claude-repl-test--with-oneshot-tracking-state
+    (setq claude-repl--oneshot-last-ws
+          (plist-put claude-repl--oneshot-last-ws :doom :generating))
+    (claude-repl--oneshot-clear-flavor-on-failure :doom :claude-p-failed)
+    (should (null (plist-get claude-repl--oneshot-last-ws :doom)))))
+
+(ert-deftest claude-repl-test-oneshot-clear-flavor-on-failure-drops-queued-amends ()
+  "Drops any prompts queued under `--oneshot-amended-prompts' for the
+failed flavor — their workspace will never exist, so they must not
+later leak onto an unrelated workspace for the same flavor."
+  (claude-repl-test--with-oneshot-tracking-state
+    (setq claude-repl--oneshot-last-ws
+          (plist-put claude-repl--oneshot-last-ws :doom :generating))
+    (setq claude-repl--oneshot-amended-prompts
+          (plist-put claude-repl--oneshot-amended-prompts :doom '("queued-a" "queued-b")))
+    (claude-repl--oneshot-clear-flavor-on-failure :doom :claude-p-failed)
+    (should (null (plist-get claude-repl--oneshot-amended-prompts :doom)))))
+
+(ert-deftest claude-repl-test-oneshot-clear-flavor-on-failure-noop-on-non-generating ()
+  "No-op when the flavor is not currently `:generating' — either the
+success path already moved it to a real dirname (don't clobber the
+recorded workspace) or the slot was already nil."
+  (claude-repl-test--with-oneshot-tracking-state
+    (setq claude-repl--oneshot-last-ws
+          (plist-put claude-repl--oneshot-last-ws :doom "real-ws"))
+    (claude-repl--oneshot-clear-flavor-on-failure :doom :backstop-timeout)
+    (should (equal (plist-get claude-repl--oneshot-last-ws :doom) "real-ws"))))
+
+(ert-deftest claude-repl-test-oneshot-clear-flavor-on-failure-nil-flavor-is-noop ()
+  "Passing nil FLAVOR is a no-op — defensive against
+`--oneshot-flavor-for-git-root' returning nil for non-pinned dirs."
+  (claude-repl-test--with-oneshot-tracking-state
+    (setq claude-repl--oneshot-last-ws
+          (plist-put claude-repl--oneshot-last-ws :doom :generating))
+    (claude-repl--oneshot-clear-flavor-on-failure nil :claude-p-failed)
+    (should (eq (plist-get claude-repl--oneshot-last-ws :doom) :generating))))
+
+(ert-deftest claude-repl-test-oneshot-reset-flavor-schedules-backstop ()
+  "When `claude-repl-oneshot-generation-backstop-seconds' is non-nil,
+`--oneshot-reset-flavor' calls `run-at-time' with that delay and the
+clear-on-failure callback so a lost spawn cannot wedge the flavor."
+  (claude-repl-test--with-oneshot-tracking-state
+    (let ((scheduled nil)
+          (claude-repl-oneshot-generation-backstop-seconds 600))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (delay _repeat fn &rest args)
+                   (setq scheduled (list :delay delay :fn fn :args args)))))
+        (claude-repl--oneshot-reset-flavor :doom)
+        (should (= 600 (plist-get scheduled :delay)))
+        (should (eq #'claude-repl--oneshot-clear-flavor-on-failure
+                    (plist-get scheduled :fn)))
+        (should (equal '(:doom :backstop-timeout) (plist-get scheduled :args)))))))
+
+(ert-deftest claude-repl-test-oneshot-reset-flavor-nil-backstop-disables-timer ()
+  "When the backstop is `nil', reset-flavor does NOT call `run-at-time'."
+  (claude-repl-test--with-oneshot-tracking-state
+    (let ((scheduled nil)
+          (claude-repl-oneshot-generation-backstop-seconds nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (&rest _args) (setq scheduled t))))
+        (claude-repl--oneshot-reset-flavor :doom)
+        (should-not scheduled)))))
+
+;;;; ---- Tests: --workspace-generation-finalize failure → flavor clear ----
+
+(ert-deftest claude-repl-test-workspace-generation-finalize-nonzero-clears-matching-flavor ()
+  "Non-zero exit + GIT-ROOT matching a pinned oneshot dir → eagerly clear
+the flavor's `:generating' state via `--oneshot-clear-flavor-on-failure'."
+  (claude-repl-test--with-oneshot-tracking-state
+    (setq claude-repl--oneshot-last-ws
+          (plist-put claude-repl--oneshot-last-ws :doom :generating))
+    (cl-letf (((symbol-function 'message) #'ignore))
+      (claude-repl--workspace-generation-finalize
+       "gen-id-1" 1 "exited abnormally\n" "" claude-repl--doom-config-dir))
+    (should (null (plist-get claude-repl--oneshot-last-ws :doom)))))
+
+(ert-deftest claude-repl-test-workspace-generation-finalize-zero-exit-leaves-flavor ()
+  "Zero exit (success) must NOT clear the flavor — the workspace
+will materialize and the track-workspace success path handles the
+transition out of `:generating'."
+  (claude-repl-test--with-oneshot-tracking-state
+    (setq claude-repl--oneshot-last-ws
+          (plist-put claude-repl--oneshot-last-ws :doom :generating))
+    (claude-repl--workspace-generation-finalize
+     "gen-id-1" 0 "finished\n" "" claude-repl--doom-config-dir)
+    (should (eq (plist-get claude-repl--oneshot-last-ws :doom) :generating))))
+
+(ert-deftest claude-repl-test-workspace-generation-finalize-nonzero-unrelated-root-noop ()
+  "Non-zero exit but GIT-ROOT not a pinned oneshot dir → no flavor
+clear (the spawn was for a non-oneshot creation; no flavor state to
+touch).  Confirms the failure-clear is gated on
+`--oneshot-flavor-for-git-root' returning non-nil."
+  (claude-repl-test--with-oneshot-tracking-state
+    (setq claude-repl--oneshot-last-ws
+          (plist-put claude-repl--oneshot-last-ws :doom :generating))
+    (cl-letf (((symbol-function 'message) #'ignore))
+      (claude-repl--workspace-generation-finalize
+       "gen-id-1" 1 "exited abnormally\n" "" "/tmp/unrelated/"))
+    (should (eq (plist-get claude-repl--oneshot-last-ws :doom) :generating))))
+
+(ert-deftest claude-repl-test-workspace-generation-finalize-nil-git-root-noop ()
+  "Omitted GIT-ROOT (legacy / test callers) → no flavor clear,
+preserves the old single-arg-form behavior for callers that don't
+care about oneshot bookkeeping."
+  (claude-repl-test--with-oneshot-tracking-state
+    (setq claude-repl--oneshot-last-ws
+          (plist-put claude-repl--oneshot-last-ws :doom :generating))
+    (cl-letf (((symbol-function 'message) #'ignore))
+      (claude-repl--workspace-generation-finalize
+       "gen-id-1" 1 "exited abnormally\n" "" nil))
+    (should (eq (plist-get claude-repl--oneshot-last-ws :doom) :generating))))
 
 ;;;; ---- Tests: --oneshot-amend ----
 
