@@ -8316,4 +8316,215 @@ workspace-name slug clean across every one-shot variant."
        '((type . "eval") (code . "(+ 1 2)") (workspace . "ws1") (note . "tick"))))
     (should (string-match-p "note: tick" (cdr (car sent))))))
 
+;;;; ---- Tests: amended-oneshot tracking + queue ----
+
+(defmacro claude-repl-test--with-oneshot-tracking-state (&rest body)
+  "Execute BODY with empty global amended-oneshot tracking + queue.
+Rebinds `claude-repl--oneshot-last-ws' and
+`claude-repl--oneshot-amended-prompts' to nil so each test starts from a
+known-clean baseline regardless of any leftover state from a prior test."
+  (declare (indent 0))
+  `(let ((claude-repl--oneshot-last-ws nil)
+         (claude-repl--oneshot-amended-prompts nil))
+     ,@body))
+
+(ert-deftest claude-repl-test-oneshot-flavor-for-git-root-doom ()
+  "`--oneshot-flavor-for-git-root' returns `:doom' for the pinned doom dir."
+  (should (eq (claude-repl--oneshot-flavor-for-git-root
+               claude-repl--doom-config-dir)
+              :doom)))
+
+(ert-deftest claude-repl-test-oneshot-flavor-for-git-root-explanation-engine ()
+  "`--oneshot-flavor-for-git-root' returns `:explanation-engine' for the
+pinned explanation-engine dir."
+  (should (eq (claude-repl--oneshot-flavor-for-git-root
+               claude-repl--explanation-engine-dir)
+              :explanation-engine)))
+
+(ert-deftest claude-repl-test-oneshot-flavor-for-git-root-unrelated-nil ()
+  "Unrelated git roots return nil — only the two pinned dirs are recognized."
+  (should-not (claude-repl--oneshot-flavor-for-git-root "/tmp/unrelated/")))
+
+(ert-deftest claude-repl-test-oneshot-flavor-for-git-root-nil ()
+  "Passing nil returns nil rather than signaling — defensive against
+unset git-root args from upstream callers."
+  (should-not (claude-repl--oneshot-flavor-for-git-root nil)))
+
+(ert-deftest claude-repl-test-oneshot-reset-flavor-sets-generating ()
+  "`--oneshot-reset-flavor' sets the flavor's last-ws entry to `:generating'."
+  (claude-repl-test--with-oneshot-tracking-state
+    (claude-repl--oneshot-reset-flavor :doom)
+    (should (eq (plist-get claude-repl--oneshot-last-ws :doom) :generating))))
+
+(ert-deftest claude-repl-test-oneshot-reset-flavor-clears-queue ()
+  "Reset clears any previously queued amended prompts for the flavor —
+each new `SPC j o' starts with a fresh queue."
+  (claude-repl-test--with-oneshot-tracking-state
+    (setq claude-repl--oneshot-amended-prompts
+          (plist-put claude-repl--oneshot-amended-prompts :doom '("old")))
+    (claude-repl--oneshot-reset-flavor :doom)
+    (should (null (plist-get claude-repl--oneshot-amended-prompts :doom)))))
+
+(ert-deftest claude-repl-test-oneshot-reset-flavor-nil-is-noop ()
+  "Reset is a no-op when flavor is nil (e.g. caller passed an
+unrecognized git-root) — does not corrupt the plist."
+  (claude-repl-test--with-oneshot-tracking-state
+    (claude-repl--oneshot-reset-flavor nil)
+    (should (null claude-repl--oneshot-last-ws))
+    (should (null claude-repl--oneshot-amended-prompts))))
+
+(ert-deftest claude-repl-test-oneshot-track-workspace-records-dirname ()
+  "`--oneshot-track-workspace' replaces the `:generating' sentinel with
+the new workspace's dirname when path matches the flavor."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-oneshot-tracking-state
+      (claude-repl--oneshot-reset-flavor :doom)
+      (claude-repl--oneshot-track-workspace claude-repl--doom-config-dir "doom-ws-1")
+      (should (equal (plist-get claude-repl--oneshot-last-ws :doom) "doom-ws-1")))))
+
+(ert-deftest claude-repl-test-oneshot-track-workspace-drains-amended ()
+  "Track drains queued amended prompts onto the workspace's
+`:pending-prompts' and clears the global queue."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-oneshot-tracking-state
+      (claude-repl--oneshot-reset-flavor :doom)
+      (setq claude-repl--oneshot-amended-prompts
+            (plist-put claude-repl--oneshot-amended-prompts
+                       :doom '("amend-1" "amend-2")))
+      (claude-repl--ws-put "doom-ws-1" :pending-prompts '("preemptive"))
+      (claude-repl--oneshot-track-workspace claude-repl--doom-config-dir "doom-ws-1")
+      (should (equal (claude-repl--ws-get "doom-ws-1" :pending-prompts)
+                     '("preemptive" "amend-1" "amend-2")))
+      (should (null (plist-get claude-repl--oneshot-amended-prompts :doom))))))
+
+(ert-deftest claude-repl-test-oneshot-track-workspace-unrelated-path-noop ()
+  "Track is a no-op when path is not a pinned-oneshot dir — non-oneshot
+worktrees flowing through `--finalize-worktree-workspace' do not
+clobber the tracker."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-oneshot-tracking-state
+      (claude-repl--oneshot-reset-flavor :doom)
+      (claude-repl--oneshot-track-workspace "/tmp/unrelated/" "other-ws")
+      (should (eq (plist-get claude-repl--oneshot-last-ws :doom) :generating)))))
+
+(ert-deftest claude-repl-test-oneshot-track-workspace-not-generating-noop ()
+  "Track is a no-op when the flavor isn't currently `:generating' (e.g.
+a non-oneshot worktree was created inside the pinned doom dir) — the
+previously recorded dirname is left intact."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-oneshot-tracking-state
+      (setq claude-repl--oneshot-last-ws
+            (plist-put claude-repl--oneshot-last-ws :doom "prev-ws"))
+      (claude-repl--oneshot-track-workspace claude-repl--doom-config-dir "intruder")
+      (should (equal (plist-get claude-repl--oneshot-last-ws :doom) "prev-ws")))))
+
+;;;; ---- Tests: --oneshot-amend ----
+
+(ert-deftest claude-repl-test-oneshot-amend-errors-on-empty-prompt ()
+  "Empty/whitespace prompt is rejected up front."
+  (claude-repl-test--with-oneshot-tracking-state
+    (should-error (claude-repl--oneshot-amend :doom "   ")
+                  :type 'user-error)
+    (should-error (claude-repl--oneshot-amend :doom "")
+                  :type 'user-error)
+    (should-error (claude-repl--oneshot-amend :doom nil)
+                  :type 'user-error)))
+
+(ert-deftest claude-repl-test-oneshot-amend-errors-when-no-tracking ()
+  "Amend signals when no oneshot has been created for the flavor —
+better than silently dropping the prompt."
+  (claude-repl-test--with-oneshot-tracking-state
+    (should-error (claude-repl--oneshot-amend :doom "hello")
+                  :type 'user-error)))
+
+(ert-deftest claude-repl-test-oneshot-amend-queues-while-generating ()
+  "While the workspace is still being generated, amend pushes the
+prompt onto `claude-repl--oneshot-amended-prompts' (FIFO)."
+  (claude-repl-test--with-oneshot-tracking-state
+    (claude-repl--oneshot-reset-flavor :doom)
+    (claude-repl--oneshot-amend :doom "first")
+    (claude-repl--oneshot-amend :doom "second")
+    (should (equal (plist-get claude-repl--oneshot-amended-prompts :doom)
+                   '("first" "second")))))
+
+(ert-deftest claude-repl-test-oneshot-amend-dispatches-when-ws-exists ()
+  "When a real workspace dirname is recorded, amend routes through
+`--dispatch-prompt-command' rather than touching the global queue."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-oneshot-tracking-state
+      (setq claude-repl--oneshot-last-ws
+            (plist-put claude-repl--oneshot-last-ws :doom "doom-ws-1"))
+      (let ((dispatched nil))
+        (cl-letf (((symbol-function 'claude-repl--dispatch-prompt-command)
+                   (lambda (ws prompt) (push (cons ws prompt) dispatched)))
+                  ((symbol-function '+workspace-list-names)
+                   (lambda () '("doom-ws-1"))))
+          (claude-repl--oneshot-amend :doom "go")
+          (should (equal dispatched '(("doom-ws-1" . "go"))))
+          (should (null (plist-get claude-repl--oneshot-amended-prompts :doom))))))))
+
+(ert-deftest claude-repl-test-oneshot-amend-errors-when-ws-gone ()
+  "When the recorded workspace dirname no longer exists (no vterm
+buffer AND not in the perspective list), amend surfaces a user-error
+rather than persisting a ghost `:pending-prompts' entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-oneshot-tracking-state
+      (setq claude-repl--oneshot-last-ws
+            (plist-put claude-repl--oneshot-last-ws :doom "dead-ws"))
+      (cl-letf (((symbol-function '+workspace-list-names)
+                 (lambda () '("other"))))
+        (should-error (claude-repl--oneshot-amend :doom "go")
+                      :type 'user-error)))))
+
+;;;; ---- Tests: --create-pinned-oneshot-workspace resets flavor ----
+
+(ert-deftest claude-repl-test-create-pinned-oneshot-resets-flavor ()
+  "Invoking the pinned-oneshot helper resets the corresponding flavor's
+last-ws to `:generating' and clears any queued amended prompts —
+before the headless spawn begins, so amend invocations enqueue onto
+the new oneshot."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-oneshot-tracking-state
+      (setq claude-repl--oneshot-amended-prompts
+            (plist-put claude-repl--oneshot-amended-prompts :doom '("stale"))
+            claude-repl--oneshot-last-ws
+            (plist-put claude-repl--oneshot-last-ws :doom "old-ws"))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (&rest _) nil)))
+        (claude-repl-create-doom-oneshot-workspace)
+        (should (eq (plist-get claude-repl--oneshot-last-ws :doom) :generating))
+        (should (null (plist-get claude-repl--oneshot-amended-prompts :doom)))))))
+
+;;;; ---- Tests: amend commands route to correct flavor ----
+
+(ert-deftest claude-repl-test-amend-doom-oneshot-uses-doom-flavor ()
+  "`claude-repl-amend-doom-oneshot-prompt' routes through
+`--oneshot-amend' with `:doom'."
+  (claude-repl-test--with-oneshot-tracking-state
+    (let ((captured-flavor :unset)
+          (captured-prompt :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "amend me"))
+                ((symbol-function 'claude-repl--oneshot-amend)
+                 (lambda (flavor prompt)
+                   (setq captured-flavor flavor
+                         captured-prompt prompt))))
+        (claude-repl-amend-doom-oneshot-prompt)
+        (should (eq captured-flavor :doom))
+        (should (equal captured-prompt "amend me"))))))
+
+(ert-deftest claude-repl-test-amend-explanation-engine-oneshot-uses-ee-flavor ()
+  "`claude-repl-amend-explanation-engine-oneshot-prompt' routes through
+`--oneshot-amend' with `:explanation-engine'."
+  (claude-repl-test--with-oneshot-tracking-state
+    (let ((captured-flavor :unset))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "amend me"))
+                ((symbol-function 'claude-repl--oneshot-amend)
+                 (lambda (flavor _prompt) (setq captured-flavor flavor))))
+        (claude-repl-amend-explanation-engine-oneshot-prompt)
+        (should (eq captured-flavor :explanation-engine))))))
+
 ;;; test-worktree.el ends here
