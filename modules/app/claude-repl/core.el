@@ -423,6 +423,37 @@ State in Tests\")."
     (concat (mapconcat #'shell-quote-argument (cons "gh" args) " ")
             " 2>/dev/null"))))
 
+(defun claude-repl--docker-exit-code (&rest args)
+  "Run `docker ARGS' synchronously and return its exit code (stdout discarded).
+This IS the external-boundary wrapper for the Docker CLI: tests must
+mock this function via `cl-letf' rather than invoke real `docker'
+\(see AGENTS.md \"No External Processes or External State in Tests\")."
+  (apply #'call-process "docker" nil nil nil args)) ;; ALLOW-EXTERNAL-BOUNDARY
+
+(defun claude-repl--make-process-git (name args sentinel)
+  "Async git via `make-process'.
+NAME is the process name (a string); ARGS is the git subcommand
+argument list (no leading \"git\"); SENTINEL is the process sentinel.
+Returns the live process so the caller can record / kill / inspect it.
+
+This IS the external-boundary wrapper for `make-process'-style async
+git invocations — distinct from `claude-repl--async-git', which uses
+the older `start-process' API with a process-PUT callback.  Tests must
+mock this function via `cl-letf' rather than spawn real git (see
+AGENTS.md \"No External Processes or External State in Tests\").
+
+`:connection-type 'pipe' / `:noquery t' / `:buffer nil' are baked in
+because every existing caller wants the same shape; if a future
+caller needs different keywords, extend the signature rather than
+introducing a sibling raw `make-process' site."
+  (make-process ;; ALLOW-EXTERNAL-BOUNDARY
+   :name name
+   :command (cons "git" args)
+   :connection-type 'pipe
+   :noquery t
+   :buffer nil
+   :sentinel sentinel))
+
 ;;;; --- External-boundary registry -----------------------------------------
 ;;
 ;; Every function that wraps an external process or external-state side
@@ -456,7 +487,9 @@ State in Tests\")."
     claude-repl--async-git
     claude-repl--gh-string-quiet
     claude-repl--early-git-string
-    claude-repl--early-git-exit-code)
+    claude-repl--early-git-exit-code
+    claude-repl--docker-exit-code
+    claude-repl--make-process-git)
   "Symbols of every function that wraps an external process or external-state mutation.
 Each MUST be mocked by tests that reach it via production code.  The
 test harness installs guards so unmocked invocations fail loudly.

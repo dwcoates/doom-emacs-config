@@ -31,11 +31,10 @@ The `wildcard' category provides maximum variety for any commit type.")
 (defun claude-repl--current-branch ()
   "Return the current git branch name (string), or nil if unresolvable.
 Returns nil when the working tree is not in a git repo, when HEAD is
-detached, or when the branch name is empty.  Shells out to git so the
-function is available without requiring magit to be loaded."
-  (let ((out (string-trim
-              (shell-command-to-string
-               "git rev-parse --abbrev-ref HEAD 2>/dev/null"))))
+detached, or when the branch name is empty.  Routes through
+`claude-repl--git-string-quiet' (the registered external-boundary
+wrapper) so the call is mocked by the test-time runtime guards."
+  (let ((out (claude-repl--git-string-quiet "rev-parse" "--abbrev-ref" "HEAD")))
     (cond ((string-empty-p out) nil)
           ((string= out "HEAD") nil)
           (t out))))
@@ -108,9 +107,14 @@ to a branch-as-scope convention means filtering by a literal scope
 string would miss commits authored under the new format."
   (let* ((n (or lookback claude-repl-emoji-lookback))
          ;; Match any conventional-commit subject (any scope) via -E.
-         (cmd (format "git log -n %d -E --grep='^[a-z]+\\(.+\\):' --format=%%s 2>/dev/null"
-                      n))
-         (output (ignore-errors (shell-command-to-string cmd)))
+         ;; Route through `claude-repl--git-string-quiet' so the call is
+         ;; the registered external-boundary wrapper; tests mock the
+         ;; wrapper rather than `shell-command-to-string' directly.
+         (output (ignore-errors
+                   (claude-repl--git-string-quiet
+                    "log" "-n" (number-to-string n) "-E"
+                    "--grep=^[a-z]+\\(.+\\):"
+                    "--format=%s")))
          (lines (and (stringp output) (split-string output "\n" t)))
          (emojis '()))
     (dolist (line lines)

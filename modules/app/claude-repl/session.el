@@ -97,8 +97,12 @@ rather than looping forever."
   :group 'claude-repl)
 
 (defun claude-repl--docker-image-exists-p (image)
-  "Return non-nil if IMAGE exists in the local Docker image store."
-  (let ((result (= 0 (call-process "docker" nil nil nil "image" "inspect" "--format" "." image))))
+  "Return non-nil if IMAGE exists in the local Docker image store.
+Routes through `claude-repl--docker-exit-code' (the registered
+external-boundary wrapper) so the call is mocked by the test-time
+runtime guards."
+  (let ((result (= 0 (claude-repl--docker-exit-code
+                      "image" "inspect" "--format" "." image))))
     (claude-repl--log nil "docker-image-exists-p: image=%s exists=%s" image (if result "yes" "no"))
     result))
 
