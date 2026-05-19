@@ -3303,6 +3303,15 @@ off so the user resolves in magit directly."
       (claude-repl--ws-put target-ws :merging t)
       (claude-repl--log target-ws "workspace-merge-do: ws=%s -> :merging t"
                         target-ws)
+      ;; Record the in-flight cherry-pick BEFORE invoking it.  If Emacs
+      ;; is hard-killed during the synchronous `claude -p' auto-resolve
+      ;; (the only step in the merge that can block long enough to be
+      ;; interrupted), the persisted entry lets
+      ;; `claude-repl--early-recover-orphan-cherry-picks' detect the
+      ;; orphan on the next Emacs start, run `git cherry-pick --abort',
+      ;; and re-enqueue the source workspace to the BACK of the merge
+      ;; queue for retry.
+      (claude-repl--push-in-flight-merge target-ws project-root)
       (condition-case err
           (let* ((base (claude-repl--cherry-pick-base project-root target-branch))
                  (result (claude-repl--cherry-pick-commits
@@ -3377,6 +3386,10 @@ off so the user resolves in magit directly."
              (t
               (message "Merged workspace '%s' -> '%s'." target-ws current-ws)))
             (load-file claude-repl--config-file)
+            ;; Cherry-pick reached a terminal state (success / already /
+            ;; silent-fail) — clear the in-flight bookkeeping so the
+            ;; next-start recovery doesn't see a stale orphan.
+            (claude-repl--clear-in-flight-merge target-ws)
             ;; Cherry-pick complete (success/already/silent-fail) — the
             ;; in-flight gate is now clear from this merge's perspective,
             ;; so attempt to drain any merges parked behind this one.
@@ -3388,10 +3401,16 @@ off so the user resolves in magit directly."
          ;; before the generic `error' handler so the more specific
          ;; signal takes precedence (per Emacs's condition-case rules).
          (claude-repl--mark-merge-conflict target-ws err)
+         ;; Conflict resolution is now the user's responsibility (the
+         ;; abort + magit pop already ran), so the in-flight gate is
+         ;; conceptually clear from the recovery's perspective — drop
+         ;; the bookkeeping.
+         (claude-repl--clear-in-flight-merge target-ws)
          (claude-repl--drain-merge-queue)
          (signal (car err) (cdr err)))
         (error
          (claude-repl--mark-merge-failed target-ws err)
+         (claude-repl--clear-in-flight-merge target-ws)
          ;; Drain before re-signaling: the in-flight gate is clear and a
          ;; queued merge should not be blocked by this one's failure.
          ;; `--drain-merge-queue' catches errors from the deferred call,
@@ -3650,6 +3669,72 @@ propagate into the queue mutators."
         (claude-repl-save-workspace-snapshot)
       (error
        (claude-repl--log nil "persist-merge-queue: save-workspace-snapshot err=%S" err)))))
+
+(defvar claude-repl--in-flight-merges nil
+  "List of cherry-picks currently mid-flight in this Emacs session.
+Each element is a plist of the form
+`(:source-ws WS :target-dir DIR :started-at TIME)' recording a
+cherry-pick that has been started but not yet committed or aborted.
+
+Pushed by `claude-repl--push-in-flight-merge' before
+`claude-repl--cherry-pick-commits' fires and cleared by
+`claude-repl--clear-in-flight-merge' on both the success and failure
+branches of `claude-repl--workspace-merge-do'.
+
+Persisted alongside `claude-repl--merge-queue' in the workspace snapshot
+file so that a hard Emacs termination mid-cherry-pick (e.g. during the
+synchronous headless `claude -p' auto-resolve, which the worker thread
+busy-waits on with `accept-process-output') can be detected and
+recovered by `claude-repl--early-recover-orphan-cherry-picks' at the
+top of `config.el' on the next Emacs start.  The early recovery runs
+BEFORE any module file is required, so even when the orphan has left
+`<<<<<<<' markers in `.el' files in the master worktree (which would
+otherwise crash module load via the elisp reader), the abort fires
+first and the conflict is cleared.")
+
+(defun claude-repl--push-in-flight-merge (source-ws target-dir)
+  "Record that a cherry-pick for SOURCE-WS into TARGET-DIR has started.
+Appends an entry to `claude-repl--in-flight-merges' and persists the
+snapshot so a crash before the corresponding `--clear-in-flight-merge'
+fires leaves the entry on disk for the next-start recovery.
+
+A duplicate push for the same SOURCE-WS replaces any prior entry — a
+retry should not stack bookkeeping.  No-op when either argument is
+nil (defensive — the caller is expected to have a resolved target
+dir before pushing)."
+  (when (and source-ws target-dir)
+    (setq claude-repl--in-flight-merges
+          (cl-remove-if (lambda (e)
+                          (equal (plist-get e :source-ws) source-ws))
+                        claude-repl--in-flight-merges))
+    (setq claude-repl--in-flight-merges
+          (append claude-repl--in-flight-merges
+                  (list (list :source-ws source-ws
+                              :target-dir target-dir
+                              :started-at (float-time)))))
+    (claude-repl--log source-ws
+                      "push-in-flight-merge: ws=%s target-dir=%s in-flight-count=%d"
+                      source-ws target-dir
+                      (length claude-repl--in-flight-merges))
+    (claude-repl--persist-merge-queue)))
+
+(defun claude-repl--clear-in-flight-merge (source-ws)
+  "Remove the in-flight bookkeeping entry for SOURCE-WS and persist.
+No-op when SOURCE-WS has no entry — both the success and failure
+paths call this, and one of them is redundant on any given run.
+Persists unconditionally so the on-disk file matches the in-memory
+state even after the no-op case."
+  (when source-ws
+    (let ((before (length claude-repl--in-flight-merges)))
+      (setq claude-repl--in-flight-merges
+            (cl-remove-if (lambda (e)
+                            (equal (plist-get e :source-ws) source-ws))
+                          claude-repl--in-flight-merges))
+      (claude-repl--log source-ws
+                        "clear-in-flight-merge: ws=%s removed=%d remaining=%d"
+                        source-ws (- before (length claude-repl--in-flight-merges))
+                        (length claude-repl--in-flight-merges)))
+    (claude-repl--persist-merge-queue)))
 
 (defun claude-repl--drain-merge-queue ()
   "Dispatch the next queued merge when no cherry-pick is in flight.

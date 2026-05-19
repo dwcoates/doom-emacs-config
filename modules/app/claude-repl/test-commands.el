@@ -3475,6 +3475,89 @@ are dropped (a workspace was removed between sessions)."
       ;; Existing queue is unchanged.
       (should (= 1 (length claude-repl--merge-queue))))))
 
+;;;; ---- Tests: in-flight-merges persistence (round-trip + restore) ----
+
+(ert-deftest claude-repl-cmd-test-read-workspace-snapshot/in-flight-merges-round-trip ()
+  "Plist files with `:in-flight-merges' round-trip through the reader."
+  (let ((file (make-temp-file "claude-snap-")))
+    (unwind-protect
+        (progn
+          (claude-repl--write-sexp-file
+           file '(:workspaces (("ws-a" :project-dir "/tmp/a"))
+                  :merge-queue nil
+                  :in-flight-merges ((:source-ws "ws-a" :target-dir "/tmp/a" :started-at 12345.0))))
+          (let ((parsed (claude-repl--read-workspace-snapshot file)))
+            (should (equal (plist-get parsed :in-flight-merges)
+                           '((:source-ws "ws-a" :target-dir "/tmp/a" :started-at 12345.0))))))
+      (delete-file file))))
+
+(ert-deftest claude-repl-cmd-test-read-workspace-snapshot/in-flight-merges-absent-returns-nil ()
+  "Files predating `:in-flight-merges' (or without that key) yield nil."
+  (let ((file (make-temp-file "claude-snap-")))
+    (unwind-protect
+        (progn
+          (claude-repl--write-sexp-file
+           file '(:workspaces (("ws-a" :project-dir "/tmp/a"))
+                  :merge-queue nil))
+          (let ((parsed (claude-repl--read-workspace-snapshot file)))
+            (should (null (plist-get parsed :in-flight-merges)))))
+      (delete-file file))))
+
+(ert-deftest claude-repl-cmd-test-write-workspace-snapshot/persists-in-flight-merges ()
+  "Writer captures the live `claude-repl--in-flight-merges' alongside the roster."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-")))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file)
+                (claude-repl--merge-queue nil)
+                (claude-repl--in-flight-merges
+                 '((:source-ws "ws-a" :target-dir "/tmp/a" :started-at 1.0)
+                   (:source-ws "ws-b" :target-dir "/tmp/b" :started-at 2.0))))
+            (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
+            (claude-repl-save-workspace-snapshot)
+            (let* ((parsed (claude-repl--read-workspace-snapshot snapshot-file))
+                   (ifm (plist-get parsed :in-flight-merges)))
+              (should (= 2 (length ifm)))
+              (should (equal (plist-get (nth 0 ifm) :source-ws) "ws-a"))
+              (should (equal (plist-get (nth 0 ifm) :target-dir) "/tmp/a"))
+              (should (equal (plist-get (nth 1 ifm) :source-ws) "ws-b"))))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-write-workspace-snapshot/empty-in-flight-merges ()
+  "An empty live in-flight list writes `:in-flight-merges' as an empty
+list — present, not omitted."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-")))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file)
+                (claude-repl--merge-queue nil)
+                (claude-repl--in-flight-merges nil))
+            (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
+            (claude-repl-save-workspace-snapshot)
+            (let ((parsed (claude-repl--read-workspace-snapshot snapshot-file)))
+              (should (plist-member parsed :in-flight-merges))
+              (should (null (plist-get parsed :in-flight-merges)))))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-restore-in-flight-merges/repopulates-live-list ()
+  "Restore copies saved entries into `claude-repl--in-flight-merges' as plain plists."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--in-flight-merges nil))
+      (claude-repl--snapshot-restore-in-flight-merges
+       '((:source-ws "ws-a" :target-dir "/tmp/a" :started-at 1.0)
+         (:source-ws "ws-b" :target-dir "/tmp/b" :started-at 2.0)))
+      (should (= 2 (length claude-repl--in-flight-merges)))
+      (should (equal (plist-get (nth 0 claude-repl--in-flight-merges) :source-ws) "ws-a"))
+      (should (equal (plist-get (nth 1 claude-repl--in-flight-merges) :target-dir) "/tmp/b")))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-restore-in-flight-merges/empty-input-noop ()
+  "Restore with nil input leaves the live list untouched."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--in-flight-merges
+           '((:source-ws "preexisting" :target-dir "/tmp/p" :started-at 1.0))))
+      (claude-repl--snapshot-restore-in-flight-merges nil)
+      (should (= 1 (length claude-repl--in-flight-merges))))))
+
 ;;;; ---- Tests: load-workspace-snapshot (merge-queue restoration) ----
 
 (ert-deftest claude-repl-cmd-test-load-workspace-snapshot/restores-merge-queue ()

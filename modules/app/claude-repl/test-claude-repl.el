@@ -24,6 +24,7 @@
   (load (expand-file-name "test-autosave.el" dir) nil t)
   (load (expand-file-name "test-caffeinate.el" dir) nil t)
   (load (expand-file-name "test-commands.el" dir) nil t)
+  (load (expand-file-name "test-config.el" dir) nil t)
   (load (expand-file-name "test-core.el" dir) nil t)
   (load (expand-file-name "test-history.el" dir) nil t)
   (load (expand-file-name "test-input.el" dir) nil t)
