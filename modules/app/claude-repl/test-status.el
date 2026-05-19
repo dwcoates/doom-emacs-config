@@ -1402,6 +1402,66 @@ extended to assert the redraw force fires alongside the toggle flip."
         (claude-repl--update-all-workspace-states)
         (should (= 1 redraw-calls))))))
 
+;;;; ---- Tests: workspace-tabline-formatted (extracted from +dwc/) ----
+
+(ert-deftest claude-repl-test-workspace-tabline-formatted-alternates-across-toggle ()
+  "Consecutive renders with opposite toggle values produce different strings.
+This is the core cache-bust property of the alternating-space hack — Emacs's
+tab-bar caches on string equality, so the format function must return strings
+that differ each tick or no repaint happens."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-list-names) (lambda () '("ws1" "ws2")))
+              ((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'frame-width) (lambda () 80)))
+      (let* ((claude-repl--tabline-space-toggle nil)
+             (r-off (claude-repl-workspace-tabline-formatted))
+             (claude-repl--tabline-space-toggle t)
+             (r-on (claude-repl-workspace-tabline-formatted)))
+        (should (stringp r-off))
+        (should (stringp r-on))
+        (should-not (equal r-off r-on))
+        ;; Toggle-on is exactly one space longer than toggle-off — the
+        ;; only delta is the trailing-space append, not anything else.
+        (should (= (1+ (length r-off)) (length r-on)))))))
+
+(ert-deftest claude-repl-test-workspace-tabline-formatted-toggle-on-appends-one-extra-trailing-space ()
+  "When the toggle is non-nil, the result has one MORE trailing space than
+when the toggle is nil; rendering and join already contribute some trailing
+whitespace from the unfaced terminators in `claude-repl--render-tab' and
+`claude-repl--join-tabline-rows', and the toggle layers exactly one more."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-list-names) (lambda () '("ws1")))
+              ((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'frame-width) (lambda () 80)))
+      (let* ((claude-repl--tabline-space-toggle nil)
+             (off (claude-repl-workspace-tabline-formatted))
+             (claude-repl--tabline-space-toggle t)
+             (on (claude-repl-workspace-tabline-formatted)))
+        (should (string-suffix-p " " on))
+        (should (string-suffix-p (concat off " ") on))))))
+
+;;;; ---- Tests: current-workspace-name-segment (extracted from +dwc/) ----
+
+(ert-deftest claude-repl-test-current-workspace-name-segment-is-invisible ()
+  "The right-aligned current-workspace segment carries `invisible t' so its only
+purpose is the alternating-space cache-bust."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'safe-persp-name) (lambda (_p) "ws1"))
+              ((symbol-function 'get-current-persp) (lambda () nil)))
+      (let ((result (claude-repl-current-workspace-name-segment)))
+        (should (get-text-property 0 'invisible result))))))
+
+(ert-deftest claude-repl-test-current-workspace-name-segment-alternates-across-toggle ()
+  "Consecutive renders with opposite toggle values produce different segment strings."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'safe-persp-name) (lambda (_p) "ws1"))
+              ((symbol-function 'get-current-persp) (lambda () nil)))
+      (let* ((claude-repl--tabline-space-toggle nil)
+             (r-off (claude-repl-current-workspace-name-segment))
+             (claude-repl--tabline-space-toggle t)
+             (r-on (claude-repl-current-workspace-name-segment)))
+        (should-not (equal r-off r-on))))))
+
 ;;;; ---- Tests: wconf-has-claude-p ----
 
 (ert-deftest claude-repl-test-wconf-has-claude-nil ()

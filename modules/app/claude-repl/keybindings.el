@@ -824,8 +824,8 @@ global drawer-mirror bindings win in vterm buffers."
        :desc "Merge workspace into current" "m" #'+dwc/workspace-merge
        :desc "Merge current workspace into source" "M" #'+dwc/workspace-merge-current-into-source
        :desc "Rename current workspace" "r" #'+dwc/workspace-rename
-       :desc "Push workspace to second-to-last" "p" #'+dwc/workspace-push-to-back
-       :desc "Pull workspace to second" "P" #'+dwc/workspace-pull-to-front
+       :desc "Push workspace to second-to-last" "p" #'claude-repl-workspace-push-to-back
+       :desc "Pull workspace to second" "P" #'claude-repl-workspace-pull-to-front
        :desc "Open most recent workspace" "R" #'+dwc/open-most-recent-workspace))
 
 (map! "s-{" #'claude-repl-switch-left

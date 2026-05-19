@@ -408,146 +408,32 @@
   ;; Only show buffers belonging to the current workspace in buffer lists (SPC ,)
   (setq persp-set-frame-buffer-predicate t)
 
-  ;; --- Tab-bar cache-busting, aka the alternating-space trick ----------
+  ;; NOTE: the claude-repl tab-bar (alternating-space hack, status
+  ;; colors, per-workspace face transitions) and the `SPC TAB p' /
+  ;; `SPC TAB P' tab-shuffle commands live entirely in
+  ;; `modules/app/claude-repl/' now:
   ;;
-  ;; The claude-repl status colors (red thinking, green done, etc.) are
-  ;; applied as faces on the tab-bar string produced by
-  ;; `+dwc/workspace-tabline-formatted' below.  Emacs's tab-bar maintains
-  ;; a per-segment content cache: if the string returned by a tab-bar-format
-  ;; entry compares `equal' to what it returned last time, the segment is
-  ;; not repainted.  Text-property-only changes — including face changes —
-  ;; *do* compare equal in some paths, so a :thinking -> :done transition
-  ;; can be completely invisible until a `window-configuration-change'
-  ;; (typically a workspace switch) forces a full re-layout.
+  ;;   - `claude-repl-workspace-tabline-formatted' /
+  ;;     `claude-repl-current-workspace-name-segment' (status.el) —
+  ;;     installed into `tab-bar-format' from the module's own
+  ;;     `(after! persp-mode …)' block.
   ;;
-  ;; The workaround is to make the segment's raw string content actually
-  ;; change every refresh tick.  `claude-repl--tabline-space-toggle'
-  ;; (defined in modules/app/claude-repl/status.el) flips each second,
-  ;; driven by the 1-Hz timer in `claude-repl--update-all-workspace-states'
-  ;; via `claude-repl--force-tab-bar-redraw' (which both flips the toggle
-  ;; AND calls the tab-bar / mode-line redraw primitives).  Both the
-  ;; left-aligned tabline and the right-aligned status name below append
-  ;; a trailing space or not based on the toggle.  This defeats the
-  ;; cache and lets the current faces actually reach the display.
+  ;;   - `claude-repl-workspace-push-to-back' /
+  ;;     `claude-repl-workspace-pull-to-front' (commands.el) — bound in
+  ;;     `keybindings.el'.
   ;;
-  ;; The toggle and the redraw force live in the claude-repl module so
-  ;; both rendering paths (the visible tab-bar via the functions below
-  ;; AND `claude-repl--tabline-advice' for any caller that still goes
-  ;; through `+workspace--tabline') stay in sync, and so the package
-  ;; ships with its own working hack rather than depending on user code.
+  ;;   - `claude-repl--force-tab-bar-redraw' (status.el) — flips the
+  ;;     alternating-space toggle and drives the tab-bar / mode-line
+  ;;     redraw primitives, called by the 1Hz
+  ;;     `claude-repl--update-all-workspace-states' timer.
   ;;
-  ;; If you remove the toggle, tabs will appear to get stuck on their old
-  ;; colors until you switch workspaces.  Keep it.
-
-  (defun +dwc/workspace-tabline-formatted ()
-    "Format workspace list for tab-bar display.
-Packs entries into lines no wider than `(1- (frame-width))' so the
-tab-bar wraps only between entries (never mid-name) AND so the
-unfaced terminator that `claude-repl--join-tabline-rows' appends to
-each row lands within the visible columns (col < `frame-width').
-Centers each packed line to the same reserved width so left-only
-padding from `+doom-dashboard--center' doesn't push the row back to
-the right edge.  Joins via `claude-repl--join-tabline-rows' so the
-per-row face extension does not paint the rightmost tab's background
-to the right edge.  Appends a toggled trailing space tied to
-`claude-repl--tabline-space-toggle' so the left-aligned tab-bar
-segment's string content actually changes across refresh ticks (the
-alternating-space trick — see the block comment above).  Without the
-toggle, face-only status transitions (e.g. :thinking -> :done) stay
-invisible until a workspace switch."
-    (let* ((width (frame-width))
-           (line-width (max 1 (1- width)))
-           (entries (if (fboundp 'claude-repl--tabline-rendered-entries)
-                        (claude-repl--tabline-rendered-entries)
-                      (list (+workspace--tabline))))
-           (lines (if (fboundp 'claude-repl--pack-tabline-entries)
-                      (claude-repl--pack-tabline-entries entries line-width)
-                    (list (mapconcat #'identity entries " "))))
-           (centered-lines (mapcar (lambda (line)
-                                     (+doom-dashboard--center line-width line))
-                                   lines))
-           (joined (if (fboundp 'claude-repl--join-tabline-rows)
-                       (claude-repl--join-tabline-rows centered-lines)
-                     (mapconcat #'identity centered-lines " \n"))))
-      (concat joined
-              (if (and (boundp 'claude-repl--tabline-space-toggle)
-                       claude-repl--tabline-space-toggle)
-                  " " ""))))
-
-  (defun +dwc/current-workspace-name ()
-    "Return current workspace name as an invisible tab-bar segment.
-Same alternating-space trick as `+dwc/workspace-tabline-formatted': the
-trailing space toggles each second via
-`claude-repl--tabline-space-toggle' to force the right-aligned
-segment to repaint too."
-    (propertize (if (and (boundp 'claude-repl--tabline-space-toggle)
-                         claude-repl--tabline-space-toggle)
-                    (concat (safe-persp-name (get-current-persp)) " ")
-                  (safe-persp-name (get-current-persp)))
-                'invisible t))
-
-  (setq tab-bar-format '(+dwc/workspace-tabline-formatted
-                         tab-bar-format-align-right
-                         +dwc/current-workspace-name))
-
-  (setq tab-bar-show t
-        tab-bar-new-button-show nil
-        tab-bar-close-button-show nil)
-  (tab-bar-mode 1)
-
-  (defun +dwc/refresh-tab-bar ()
-    "Force the tab-bar to re-render with current face/theme colors.
-Delegates to `claude-repl--force-tab-bar-redraw' so the toggle flip
-\(`claude-repl--tabline-space-toggle') and the redraw primitives
-\(`tab-bar-tabs-set' / `tab-bar--update-tab-bar-lines' /
-`force-mode-line-update') stay co-located in the claude-repl module.
-Kept as a thin wrapper for the workspace-push / pull callsites below
-and for interactive use."
-    (interactive)
-    (when (and (bound-and-true-p tab-bar-mode)
-               (display-graphic-p)
-               (fboundp 'claude-repl--force-tab-bar-redraw))
-      (claude-repl--force-tab-bar-redraw)))
-
-  (defun +dwc/workspace-push-to-back (&optional keep-focus)
-    "Push the current workspace to the second-to-last position in the tab-bar.
-By default switches focus to the workspace that now occupies the old
-slot — the SPC TAB p UX, where the user keeps navigating the slot they
-were sitting on.  When KEEP-FOCUS is non-nil, focus stays on the moved
-workspace; this is what the on-close auto-deprio path wants, since the
-user just closed claude in this workspace and shouldn't get yanked
-away from it.  If `claude-repl-flash-tab' is available, pulse the
-moved tab so the user can visually track it to its new home."
-    (interactive)
-    (let* ((current (+workspace-current-name))
-           (names (persp-names-current-frame-fast-ordered))
-           (old-index (cl-position current names :test #'string=))
-           (without-current (remove current names))
-           (reordered (append (butlast without-current) (list current) (last without-current)))
-           (next-name (nth (min old-index (1- (length without-current))) without-current)))
-      (persp-update-names-cache reordered)
-      (+dwc/refresh-tab-bar)
-      (when (and next-name (not keep-focus))
-        (+workspace/switch-to next-name))
-      (when (fboundp 'claude-repl-flash-tab)
-        (claude-repl-flash-tab current))
-      (if keep-focus
-          (message "Pushed '%s' to second-to-last." current)
-        (message "Pushed '%s' to second-to-last; switched to '%s'."
-                 current (or next-name current)))))
-
-  (defun +dwc/workspace-pull-to-front ()
-    "Pull the current workspace to the second position in the tab-bar.
-Focus remains on the current workspace."
-    (interactive)
-    (let* ((current (+workspace-current-name))
-           (names (persp-names-current-frame-fast-ordered))
-           (without-current (remove current names))
-           (reordered (append (list (car without-current)) (list current) (cdr without-current))))
-      (persp-update-names-cache reordered)
-      (+dwc/refresh-tab-bar)
-      (+workspace/switch-to current)
-      (message "Pulled '%s' to second position." current))))
+  ;; Do NOT re-introduce `+dwc/' tab-bar code here.  Top-level
+  ;; `config.el' is NOT reloaded by `M-x doom/reload' / the
+  ;; workspace-merge sentinel reload the same way the module is, so
+  ;; edits here silently fail to take effect in the running Emacs
+  ;; until a full restart.  See AGENTS.md "HARD GATE: never edit the
+  ;; top-level doomdir `config.el' without explicit permission".
+  )
 
 ;; Cmd+<numeral> AND Meta+<numeral> workspace switching live in
 ;; `modules/app/claude-repl/keybindings.el' via

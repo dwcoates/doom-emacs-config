@@ -2989,3 +2989,59 @@ does not consult `current-prefix-arg' and does not flash the tab."
     (unless dest
       (user-error "No workspaces"))
     (+workspace-switch dest)))
+
+;;;; Workspace tab-order shuffles
+;;
+;; These rearrange `persp-names-cache' (the order persp-mode uses to
+;; render the tab-bar) without touching the active workspace's identity.
+;; They are claude-repl module commands rather than user-config defuns
+;; so the workspace-merge reload picks up changes here, and so the
+;; module's `claude-repl--on-close' deprio path (panels.el) can call
+;; them directly without an `fboundp' user-config guard.
+
+(defun claude-repl-workspace-push-to-back (&optional keep-focus)
+  "Push the current workspace to the second-to-last position in the tab-bar.
+By default switches focus to the workspace that now occupies the old
+slot — the `SPC TAB p' UX, where the user keeps navigating the slot
+they were sitting on.  When KEEP-FOCUS is non-nil, focus stays on the
+moved workspace; this is what the on-close auto-deprio path wants,
+since the user just closed claude in this workspace and shouldn't get
+yanked away from it.  Pulses the moved tab via `claude-repl-flash-tab'
+so the user can visually track it to its new home."
+  (interactive)
+  (let* ((current (+workspace-current-name))
+         (names (persp-names-current-frame-fast-ordered))
+         (old-index (cl-position current names :test #'string=))
+         (without-current (remove current names))
+         (reordered (append (butlast without-current)
+                            (list current)
+                            (last without-current)))
+         (next-name (nth (min old-index (1- (length without-current)))
+                         without-current)))
+    (claude-repl--log current "workspace-push-to-back: ws=%s old-index=%s next=%s keep-focus=%s"
+                      current old-index next-name keep-focus)
+    (persp-update-names-cache reordered)
+    (claude-repl--force-tab-bar-redraw)
+    (when (and next-name (not keep-focus))
+      (+workspace/switch-to next-name))
+    (claude-repl-flash-tab current)
+    (if keep-focus
+        (message "Pushed '%s' to second-to-last." current)
+      (message "Pushed '%s' to second-to-last; switched to '%s'."
+               current (or next-name current)))))
+
+(defun claude-repl-workspace-pull-to-front ()
+  "Pull the current workspace to the second position in the tab-bar.
+Focus remains on the current workspace."
+  (interactive)
+  (let* ((current (+workspace-current-name))
+         (names (persp-names-current-frame-fast-ordered))
+         (without-current (remove current names))
+         (reordered (append (list (car without-current))
+                            (list current)
+                            (cdr without-current))))
+    (claude-repl--log current "workspace-pull-to-front: ws=%s" current)
+    (persp-update-names-cache reordered)
+    (claude-repl--force-tab-bar-redraw)
+    (+workspace/switch-to current)
+    (message "Pulled '%s' to second position." current)))

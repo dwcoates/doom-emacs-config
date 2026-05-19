@@ -465,10 +465,10 @@ captures a fresh baseline.  No-op when no index is saved or when persp
 helpers are unavailable.  Index is clamped to the current names list
 length so a saved index past the new tail is handled gracefully.
 
-Drives `claude-repl--force-tab-bar-redraw' (NOT `+dwc/refresh-tab-bar')
-so the trailing-space-toggle is flipped — the tab-bar's string-equality
-cache otherwise risks holding the pre-restore order if the new tabline
-string happens to compare equal under propertized-string semantics."
+Drives `claude-repl--force-tab-bar-redraw' so the trailing-space
+toggle is flipped — the tab-bar's string-equality cache otherwise
+risks holding the pre-restore order if the new tabline string happens
+to compare equal under propertized-string semantics."
   (when-let ((idx (claude-repl--ws-get ws :saved-tab-index)))
     (when (and (fboundp 'persp-names-current-frame-fast-ordered)
                (fboundp 'persp-update-names-cache))
@@ -511,14 +511,13 @@ simple-close path) so the workspace becomes a kill candidate for the
 next sweep when `claude-repl-hide-mode-enabled' is on.  See
 `claude-repl--ws-set-repl-state' for the `:hidden' contract.  Then
 hides panels and pushes WS to the second-to-last tab position via
-`+dwc/workspace-push-to-back', snapshotting the tab index first via
-`claude-repl--save-tab-index' so a future reopen can restore the
-position.
+`claude-repl-workspace-push-to-back', snapshotting the tab index
+first via `claude-repl--save-tab-index' so a future reopen can
+restore the position.
 
 Bound to `SPC o C' (the deprio toggle); also fires from
 `claude-repl-send-and-hide' since send-and-hide is semantically
-\"I'm done with this prompt, move on\".  Push-to-back is guarded by
-`fboundp' so the module remains usable when the helper is not loaded.
+\"I'm done with this prompt, move on\".
 
 WS defaults to the current workspace; when WS is nil the function still
 hides panels but skips the bookkeeping write and the tab shuffle."
@@ -530,12 +529,10 @@ hides panels but skips the bookkeeping write and the tab shuffle."
                         ws (claude-repl--ws-claude-state ws))
       (claude-repl--ws-set-repl-state ws :hidden))
     (claude-repl--hide-panels)
-    (when (and ws
-               (equal ws (+workspace-current-name))
-               (fboundp '+dwc/workspace-push-to-back))
+    (when (and ws (equal ws (+workspace-current-name)))
       (claude-repl--save-tab-index ws)
       (claude-repl--log ws "on-close: pushing ws=%s to second-to-last" ws)
-      (+dwc/workspace-push-to-back))))
+      (claude-repl-workspace-push-to-back))))
 
 (defun claude-repl--unhide-workspace (ws)
   "Reverse `claude-repl--on-close' for WS by setting `:repl-state' to `:active'.

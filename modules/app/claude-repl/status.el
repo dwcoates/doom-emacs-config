@@ -151,11 +151,10 @@ so a quick transit through the tab does not silently strip the green
 ;; !!  - `claude-repl--tabline-advice' (override of `+workspace--      !!
 ;; !!    tabline'), used by callers that still go through Doom's       !!
 ;; !!    workspace tabline API (e.g. echo-area helpers, tests).        !!
-;; !!  - `+dwc/workspace-tabline-formatted' / `+dwc/current-workspace- !!
-;; !!    name' in user config, which is the function installed in     !!
-;; !!    `tab-bar-format' and therefore drives the visible tab-bar.    !!
-;; !!    These read the toggle directly via `boundp' so the package    !!
-;; !!    works without that wrapper too.                               !!
+;; !!  - `claude-repl-workspace-tabline-formatted' /                   !!
+;; !!    `claude-repl-current-workspace-name-segment', installed in    !!
+;; !!    `tab-bar-format' below and therefore driving the visible      !!
+;; !!    tab-bar.                                                      !!
 ;; !!                                                                  !!
 ;; !! Just flipping the toggle is NOT enough — Emacs's tab-bar caches  !!
 ;; !! the format result and will keep painting the cached value until  !!
@@ -174,10 +173,12 @@ so a quick transit through the tab does not silently strip the green
   "Non-nil means append an extra trailing space to the tabline string.
 Flipped on every poll cycle by `claude-repl--update-all-workspace-states'
 \(via `claude-repl--force-tab-bar-redraw').  Read by
-`claude-repl--tabline-advice' AND by `+dwc/workspace-tabline-formatted' /
-`+dwc/current-workspace-name' in user config so both rendering paths
-produce an alternating string that forces the tab-bar to repaint.
-DO NOT REMOVE — see comment above.")
+`claude-repl--tabline-advice' AND by
+`claude-repl-workspace-tabline-formatted' /
+`claude-repl-current-workspace-name-segment' (the functions installed
+into `tab-bar-format') so both rendering paths produce an alternating
+string that forces the tab-bar to repaint.  DO NOT REMOVE — see
+comment above.")
 
 (defvar claude-repl-hide-mode-enabled nil
   "Non-nil means persp-kill `:hidden' workspaces on workspace switch.
@@ -1172,8 +1173,8 @@ workspaces disappear naturally once the next workspace switch triggers
 Each element is the propertized output of `claude-repl--render-tab-entry'
 for the corresponding workspace, 1-indexed.  Used by both
 `claude-repl--tabline-advice' (which mapconcats with a space separator)
-and `+dwc/workspace-tabline-formatted' (which packs entries into lines
-so wrapping happens between entries, not mid-name)."
+and `claude-repl-workspace-tabline-formatted' (which packs entries
+into lines so wrapping happens between entries, not mid-name)."
   (let* ((names (if names-supplied-p names (+workspace-list-names)))
          (current-name (+workspace-current-name)))
     (cl-loop for name in names
@@ -1263,6 +1264,76 @@ naturally."
      (if claude-repl--tabline-space-toggle " " ""))))
 
 (advice-add '+workspace--tabline :override #'claude-repl--tabline-advice)
+
+;; --- Visible tab-bar installation -----------------------------------------
+;;
+;; The functions below are what `tab-bar-format' actually invokes to produce
+;; the visible tab-bar.  They live here (next to `claude-repl--tabline-*'
+;; entries that they call) rather than in the user-config layer so the
+;; package ships with its own working tab-bar, and so the package's
+;; workspace-merge reload picks up changes to them.  See the block comment
+;; above `claude-repl--tabline-space-toggle' for the alternating-space hack
+;; rationale.
+
+(defun claude-repl-workspace-tabline-formatted ()
+  "Format workspace list for tab-bar display.
+Packs entries into lines no wider than `(1- (frame-width))' so the
+tab-bar wraps only between entries (never mid-name) AND so the
+unfaced terminator that `claude-repl--join-tabline-rows' appends to
+each row lands within the visible columns (col < `frame-width').
+Centers each packed line to the same reserved width so left-only
+padding from `+doom-dashboard--center' doesn't push the row back to
+the right edge.  Joins via `claude-repl--join-tabline-rows' so the
+per-row face extension does not paint the rightmost tab's background
+to the right edge.  Appends a toggled trailing space tied to
+`claude-repl--tabline-space-toggle' so the left-aligned tab-bar
+segment's string content actually changes across refresh ticks (the
+alternating-space trick — see the block comment above the toggle's
+defvar).  Without the toggle, face-only status transitions
+\(e.g. :thinking -> :done) stay invisible until a workspace switch."
+  (let* ((width (frame-width))
+         (line-width (max 1 (1- width)))
+         (entries (claude-repl--tabline-rendered-entries))
+         (lines (claude-repl--pack-tabline-entries entries line-width))
+         (centered-lines (mapcar (lambda (line)
+                                   (if (fboundp '+doom-dashboard--center)
+                                       (+doom-dashboard--center line-width line)
+                                     line))
+                                 lines))
+         (joined (claude-repl--join-tabline-rows centered-lines)))
+    (concat joined
+            (if claude-repl--tabline-space-toggle " " ""))))
+
+(defun claude-repl-current-workspace-name-segment ()
+  "Return current workspace name as an invisible tab-bar segment.
+Same alternating-space trick as
+`claude-repl-workspace-tabline-formatted': the trailing space toggles
+each second via `claude-repl--tabline-space-toggle' to force the
+right-aligned segment to repaint too.
+
+The segment's actual text is invisible (`'invisible t' text property)
+so its only purpose is the cache-busting role."
+  (let ((name (if (fboundp 'safe-persp-name)
+                  (safe-persp-name (and (fboundp 'get-current-persp)
+                                        (get-current-persp)))
+                "")))
+    (propertize (if claude-repl--tabline-space-toggle
+                    (concat name " ")
+                  name)
+                'invisible t)))
+
+;; Install the tab-bar after persp-mode loads so `safe-persp-name' /
+;; `get-current-persp' resolve cleanly at render time; persp-mode is the
+;; dep that the workspace-list entries read in
+;; `claude-repl--tabline-rendered-entries' and below.
+(after! persp-mode
+  (setq tab-bar-format '(claude-repl-workspace-tabline-formatted
+                         tab-bar-format-align-right
+                         claude-repl-current-workspace-name-segment)
+        tab-bar-show t
+        tab-bar-new-button-show nil
+        tab-bar-close-button-show nil)
+  (tab-bar-mode 1))
 
 (defun claude-repl-toggle-hide-mode ()
   "Toggle `claude-repl-hide-mode-enabled'.
@@ -1559,8 +1630,8 @@ in-flight check so the tab-bar keeps animating even when the update
 chain is stacking and we skip a tick.
 
 Flipping `claude-repl--tabline-space-toggle' alone is not enough:
-since commit 4dc0ecb the active tab-bar format function
-\(`+dwc/workspace-tabline-formatted' in user config) calls
+the active tab-bar format function
+\(`claude-repl-workspace-tabline-formatted') calls
 `claude-repl--tabline-rendered-entries' directly and bypasses
 `+workspace--tabline', so the `claude-repl--tabline-advice' path is
 no longer on the displayed-rendering hot path.  `--force-tab-bar-

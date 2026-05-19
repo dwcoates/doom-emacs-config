@@ -418,7 +418,8 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
     (let ((hide-called nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'claude-repl--hide-panels)
-                 (lambda () (setq hide-called t))))
+                 (lambda () (setq hide-called t)))
+                ((symbol-function 'claude-repl-workspace-push-to-back) #'ignore))
         (claude-repl--on-close)
         (should hide-called)))))
 
@@ -447,7 +448,8 @@ sweep candidate when hide-mode is enabled.  Distinct from on-simple-close
 which writes :inactive."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
+              ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
+              ((symbol-function 'claude-repl-workspace-push-to-back) #'ignore))
       (claude-repl--on-close)
       (should (eq (claude-repl--ws-get "test-ws" :repl-state) :hidden)))))
 
@@ -456,18 +458,19 @@ which writes :inactive."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set-claude-state "test-ws" :thinking)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
+              ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
+              ((symbol-function 'claude-repl-workspace-push-to-back) #'ignore))
       (claude-repl--on-close)
       (should (eq (claude-repl--ws-claude-state "test-ws") :thinking))
       (should (eq (claude-repl--ws-get "test-ws" :repl-state) :hidden)))))
 
 (ert-deftest claude-repl-test-panels-on-close-pushes-current-ws-to-back ()
-  "on-close calls `+dwc/workspace-push-to-back' when WS is the current workspace."
+  "on-close calls `claude-repl-workspace-push-to-back' when WS is the current workspace."
   (claude-repl-test--with-clean-state
     (let ((push-called 0))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
-                ((symbol-function '+dwc/workspace-push-to-back)
+                ((symbol-function 'claude-repl-workspace-push-to-back)
                  (lambda (&optional _keep) (cl-incf push-called))))
         (claude-repl--on-close)
         (should (= push-called 1))))))
@@ -478,7 +481,7 @@ which writes :inactive."
     (let ((received-args 'unset))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
-                ((symbol-function '+dwc/workspace-push-to-back)
+                ((symbol-function 'claude-repl-workspace-push-to-back)
                  (lambda (&rest args) (setq received-args args))))
         (claude-repl--on-close)
         (should (equal received-args nil))))))
@@ -489,7 +492,7 @@ which writes :inactive."
     (let ((push-called 0))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
                 ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
-                ((symbol-function '+dwc/workspace-push-to-back)
+                ((symbol-function 'claude-repl-workspace-push-to-back)
                  (lambda (&optional _keep) (cl-incf push-called))))
         (claude-repl--on-close "other-ws")
         (should (= push-called 0))))))
@@ -500,7 +503,7 @@ which writes :inactive."
     (let ((push-called 0))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
                 ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
-                ((symbol-function '+dwc/workspace-push-to-back)
+                ((symbol-function 'claude-repl-workspace-push-to-back)
                  (lambda (&optional _keep) (cl-incf push-called))))
         (claude-repl--on-close)
         (should (= push-called 0))))))
@@ -513,7 +516,7 @@ which writes :inactive."
                 ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
                 ((symbol-function 'claude-repl--save-tab-index)
                  (lambda (_ws) (push 'save calls)))
-                ((symbol-function '+dwc/workspace-push-to-back)
+                ((symbol-function 'claude-repl-workspace-push-to-back)
                  (lambda (&optional _keep) (push 'push calls))))
         (claude-repl--on-close)
         (should (equal (reverse calls) '(save push)))))))
@@ -555,7 +558,7 @@ which writes :inactive."
     (let ((push-called 0))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
-                ((symbol-function '+dwc/workspace-push-to-back)
+                ((symbol-function 'claude-repl-workspace-push-to-back)
                  (lambda (&rest _) (cl-incf push-called))))
         (claude-repl--on-simple-close)
         (should (= 0 push-called))))))
@@ -698,7 +701,8 @@ which writes :inactive."
 is on."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'claude-repl--hide-panels) (lambda () nil)))
+              ((symbol-function 'claude-repl--hide-panels) (lambda () nil))
+              ((symbol-function 'claude-repl-workspace-push-to-back) #'ignore))
       (claude-repl--hide-and-preserve-status)
       (should (eq (claude-repl--ws-get "test-ws" :repl-state) :hidden)))))
 
