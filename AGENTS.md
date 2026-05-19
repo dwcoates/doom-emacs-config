@@ -6,7 +6,30 @@ Begin the persistence message with ✅ if the changes are not persistent after r
 
 ## Claude REPL
 
-**Never put claude-repl code in the top-level doomdir `config.el`.** All claude-repl code — defuns, advice, hooks, keybindings, magit integration — lives under `modules/app/claude-repl/*.el`. The top-level `config.el` is not reloaded by `M-x doom/reload-lisp-config` the same way the module is, and instrumentation added there routinely fails to take effect, wasting debugging cycles.
+### HARD GATE: never edit the top-level doomdir `config.el` without explicit permission
+
+**Top-level `config.el` (i.e. `$DOOMDIR/config.el`, the file at the repo root) is off-limits to agents by default.** Before making ANY edit to that file — even a one-character edit, even refactoring an existing block, even "while you're already in there" — STOP and ask the user for explicit permission, in this turn, for this specific edit. Implicit permission (e.g. a previous session, a related task, a generic "fix this bug") does not count. Permission must be explicit and per-edit.
+
+Why this is a hard gate rather than a soft preference:
+
+- Workspace-merge reload (the `M-x doom/reload`-equivalent fired by the merge sentinel) reloads `modules/app/claude-repl/*.el` but does **not** re-evaluate the top-level `config.el`.
+  - Top-level edits silently fail to take effect in the running Emacs until the user manually restarts or does a full reload.
+  - The agent and the user then waste real time debugging "why didn't my fix land" when the fix is correct but unloaded.
+- Top-level `config.el` is the user's personal scope (`+dwc/...`).
+  - Anything claude-repl-related that lives there is almost certainly mis-placed and should be inside the module.
+  - Editing it conflates user-scope and package-scope, which makes future extraction harder.
+
+If you find yourself about to edit top-level `config.el` for a claude-repl-related concern (anything touching `tab-bar`, `persp-mode`, `+workspace-*`, `safe-persp-name`, claude faces, claude commands, claude keybindings, claude hooks, etc.), STOP and:
+
+1. Do not edit `config.el`.
+2. Surface the situation to the user in your next message. Include:
+   - Exactly what change you were about to make and on which lines.
+   - Why the change wants to live in `config.el` (e.g. it reads a `+dwc/` toggle, it depends on a `(after! persp-mode ...)` block, it sets `tab-bar-format`, etc.).
+   - A concrete proposal for extracting the existing surrounding code into `modules/app/claude-repl/` so the new change can live in the module too.
+   - A brief justification: why extraction is the right move, what it unblocks, and what the risk is of leaving it in `config.el`.
+3. Wait for the user to decide between: (a) approve the top-level edit anyway, (b) approve the extraction, (c) something else.
+
+**Never put new claude-repl code in the top-level doomdir `config.el`.** All claude-repl code — defuns, advice, hooks, keybindings, magit integration — lives under `modules/app/claude-repl/*.el`. The top-level `config.el` is not reloaded by `M-x doom/reload-lisp-config` the same way the module is, and instrumentation added there routinely fails to take effect, wasting debugging cycles.
 
 When adding a new concern:
 
