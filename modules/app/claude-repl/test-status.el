@@ -1208,14 +1208,20 @@ appended *after* the faced padding, not merged into it."
 
 ;;;; ---- Tests: tabline-advice edge cases ----
 
-(ert-deftest claude-repl-test-tabline-advice-defaults-from-list-names ()
-  "tabline-advice with no args should default names from +workspace-list-names."
+(ert-deftest claude-repl-test-tabline-advice-defaults-from-ws-list-names ()
+  "tabline-advice with no args defaults to `claude-repl--ws-list-names'
+(the persp-mode integration wrapper in workspace.el), NOT
+`+workspace-list-names' directly.  The wrapper intersects the cache
+with claude-repl's own registration so the tab-bar reflects
+claude-repl's worldview."
   (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-a"))
-              ((symbol-function '+workspace-list-names) (lambda () '("ws-a" "ws-b"))))
-      (let ((result (claude-repl--tabline-advice)))
-        (should (string-match-p "ws-a" result))
-        (should (string-match-p "ws-b" result))))))
+    (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
+    (claude-repl--ws-put "ws-b" :project-dir "/tmp/b")
+    (let ((persp-names-cache '("ws-a" "ws-b")))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-a")))
+        (let ((result (claude-repl--tabline-advice)))
+          (should (string-match-p "ws-a" result))
+          (should (string-match-p "ws-b" result)))))))
 
 (ert-deftest claude-repl-test-tabline-advice-empty-names ()
   "tabline-advice with an empty names list should return an empty string."

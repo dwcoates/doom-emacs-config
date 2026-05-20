@@ -1119,8 +1119,13 @@ No hide-project-dirs filtering happens here: that mode hides matching
 workspaces at the persp layer (they are killed and leave
 `persp-names-cache' entirely — see `claude-repl-toggle-hide-project-dirs'),
 so the raw persp list this renders is already the visible set and the
-1-indexed positions match `SPC <n>'."
-  (let* ((names (if names-supplied-p names (+workspace-list-names)))
+1-indexed positions match `SPC <n>'.
+
+When NAMES is not supplied, defaults to `claude-repl--ws-list-names'
+(the persp-mode integration wrapper in `workspace.el') rather than
+`+workspace-list-names' directly — the tab-bar reflects claude-repl's
+own notion of which workspaces it owns, not persp-mode's raw cache."
+  (let* ((names (if names-supplied-p names (claude-repl--ws-list-names)))
          (current-name (+workspace-current-name)))
     (cl-loop for name in names
              for i from 1
@@ -1188,18 +1193,20 @@ visible glyph is still the faced one.  Pack and center to
 (cl-defun claude-repl--tabline-advice (&optional (names nil names-supplied-p))
   "Override for `+workspace--tabline' to color tabs by Claude status.
 
-The tab-bar reflects every workspace in NAMES (the raw persp list);
-no hide-mode filtering is applied here.  Hide-mode operates at the
-persp level — `:hidden' workspaces get persp-killed by
-`claude-repl--sweep-hidden-workspaces' on the next workspace switch
-and disappear from `persp-names-cache' (and therefore the tab-bar)
-naturally."
-  (let* ((entries (claude-repl--tabline-rendered-entries
-                   (if names-supplied-p names (+workspace-list-names))))
+The tab-bar reflects every workspace in NAMES (defaulting to
+`claude-repl--ws-list-names' — the persp-mode integration wrapper
+in `workspace.el', which intersects `persp-names-cache' with
+claude-repl's own registration); no hide-mode filtering is applied
+here.  Hide-mode operates at the persp level — `:hidden' workspaces
+get persp-killed by `claude-repl--sweep-hidden-workspaces' on the
+next workspace switch and disappear from `persp-names-cache' (and
+therefore the tab-bar) naturally."
+  (let* ((resolved-names (if names-supplied-p names (claude-repl--ws-list-names)))
+         (entries (claude-repl--tabline-rendered-entries resolved-names))
          (current-name (+workspace-current-name))
          (states (mapcar (lambda (n)
                            (cons n (claude-repl--ws-display-state n)))
-                         (if names-supplied-p names (+workspace-list-names)))))
+                         resolved-names)))
     (claude-repl--log-verbose nil "tabline-advice: current=%s hide=%s states=%S"
                               current-name claude-repl-hide-mode-enabled states)
     (concat

@@ -143,6 +143,63 @@
         ;; on the unbound state.
         (setq persp-names-cache nil)))))
 
+;;;; ---- Tests: --ws-list-names ------------------------------------------
+
+(ert-deftest claude-repl-test-ws-list-names-intersects-cache-and-known ()
+  "Returns names that are BOTH in persp-names-cache AND --ws-known-p."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "known-and-open" :project-dir "/tmp/a")
+    (claude-repl--ws-put "known-not-open" :project-dir "/tmp/b")
+    (let ((persp-names-cache '("known-and-open" "unknown-in-cache")))
+      (let ((result (claude-repl--ws-list-names)))
+        (should (member "known-and-open" result))
+        (should-not (member "known-not-open" result))
+        (should-not (member "unknown-in-cache" result))))))
+
+(ert-deftest claude-repl-test-ws-list-names-excludes-persp-nil-name ()
+  "The persp-nil-name sentinel is filtered out even when it appears in cache and would be known."
+  (claude-repl-test--with-clean-state
+    ;; Arrange a ws whose name equals the nil sentinel (pathological but
+    ;; documented elsewhere as a guard pattern).
+    (let ((persp-nil-name "none"))
+      (claude-repl--ws-put "none" :project-dir "/tmp/x")
+      (let ((persp-names-cache '("none" "real-ws")))
+        (claude-repl--ws-put "real-ws" :project-dir "/tmp/y")
+        (let ((result (claude-repl--ws-list-names)))
+          (should-not (member "none" result))
+          (should (member "real-ws" result)))))))
+
+(ert-deftest claude-repl-test-ws-list-names-preserves-cache-order ()
+  "Order of results follows persp-names-cache order so tab-bar order is stable."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "a" :project-dir "/tmp/a")
+    (claude-repl--ws-put "b" :project-dir "/tmp/b")
+    (claude-repl--ws-put "c" :project-dir "/tmp/c")
+    (let ((persp-names-cache '("c" "a" "b")))
+      (should (equal '("c" "a" "b") (claude-repl--ws-list-names))))))
+
+(ert-deftest claude-repl-test-ws-list-names-returns-nil-when-cache-unbound ()
+  "Returns nil rather than erroring when persp-names-cache is unbound."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/x")
+    (let (persp-names-cache)
+      (makunbound 'persp-names-cache)
+      (unwind-protect
+          (should-not (claude-repl--ws-list-names))
+        (setq persp-names-cache nil)))))
+
+(ert-deftest claude-repl-test-ws-list-names-includes-tombstoned-if-in-cache ()
+  "A tombstoned ws that still appears in persp-names-cache is listed.
+This case is rare in production (the nuke path removes from cache
+before tombstoning), but the predicate is `--ws-known-p' which is
+true for tombstoned, so the list includes it.  Documents the
+contract explicitly so a renderer relying on it stays predictable."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/x")
+    (claude-repl--ws-del "ws1")
+    (let ((persp-names-cache '("ws1")))
+      (should (member "ws1" (claude-repl--ws-list-names))))))
+
 ;;;; ---- Tests: --ws-render-status (closed-set return) -------------------
 
 (ert-deftest claude-repl-test-ws-render-status-errors-for-unknown ()

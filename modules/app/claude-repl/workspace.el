@@ -267,6 +267,37 @@ when `persp-names-cache' is unbound (vanilla Emacs / pre-persp init)."
        (member ws persp-names-cache)
        t))
 
+(defun claude-repl--ws-list-names ()
+  "Return the list of workspace names visible in the tab-bar.
+Intersection of `persp-names-cache' membership and
+`claude-repl--workspaces' registration, minus the `persp-nil-name'
+sentinel.  Equivalent to \"all names for which `--ws-open-p' returns
+non-nil\" but computed in one pass.
+
+This is the canonical iteration source for any renderer that
+enumerates the tab-bar (e.g. `status.el's tabline render functions).
+Callers should prefer it over `+workspace-list-names' so claude-repl
+never depends on persp-mode's notion of \"all persps\" — only on its
+own notion of \"workspaces this module owns\".
+
+Divergence note: a persp in `persp-names-cache' that is NOT
+registered in `claude-repl--workspaces' (e.g. one created without
+going through claude-repl's establishment path) is excluded.  In
+normal claude-repl operation every persp goes through
+`--establish-workspace' or `--new-workspace' before reaching the
+cache, so the two are equivalent.  Unregistered persps would
+previously appear in the tab-bar with no glyph or state coloring;
+they now silently drop out — intentional, since the tab-bar is a
+claude-repl UI and should reflect claude-repl's worldview.
+
+Returns nil when `persp-names-cache' is unbound."
+  (when (boundp 'persp-names-cache)
+    (let ((nil-name (and (boundp 'persp-nil-name) persp-nil-name)))
+      (cl-loop for name in persp-names-cache
+               when (and (not (and nil-name (equal name nil-name)))
+                         (claude-repl--ws-known-p name))
+               collect name))))
+
 ;;;; ---- Render-state unification ----------------------------------------
 ;;
 ;; `claude-repl--ws-render-status' is the single source of truth for
