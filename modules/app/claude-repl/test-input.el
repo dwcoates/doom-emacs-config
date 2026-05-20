@@ -829,35 +829,31 @@ reflect any edits to `claude-repl-command-prefix' after a reload."
           (should (equal claude-repl--command-prefix orig)))
       (setq claude-repl--command-prefix orig))))
 
-(ert-deftest claude-repl-test-internal-command-prefix-reload-reflects-source-edit ()
-  "Reload must propagate a `claude-repl-command-prefix' edit into the derived prefix.
-Simulates editing the metaprompt by mutating `standard-value' (what
-`defcustom' updates on every reload) and verifies the derived
-`claude-repl--command-prefix' picks up the new content."
+(ert-deftest claude-repl-test-command-prefix-reload-reflects-md-file-edit ()
+  "Reload must propagate edits to the metaprompt .md file into `claude-repl-command-prefix'.
+Simulates editing the canonical metaprompt source by mutating
+`standard-value' (which the defcustom value form re-reads from disk on
+reload) to a literal sentinel string, and verifies the reload's setq
+path picks it up.  This replaces the legacy inline-content test now
+that the metaprompt body lives in `claude-repl-metaprompt-file' rather
+than inline in input.el."
   (let ((orig-value claude-repl-command-prefix)
         (orig-derived claude-repl--command-prefix)
         (orig-standard (get 'claude-repl-command-prefix 'standard-value))
         (input-el claude-repl-test--input-el))
     (unwind-protect
         (progn
-          ;; Simulate a source-file edit by replacing the standard-value
-          ;; (which defcustom re-sets on every load) with a sentinel.
+          ;; Simulate a metaprompt.md edit by replacing the standard-value
+          ;; (which defcustom re-sets on every load) with a sentinel — the
+          ;; file's content as seen by the defcustom's `with-temp-buffer'.
           (put 'claude-repl-command-prefix 'standard-value
                '((funcall (lambda () "EDITED-METAPROMPT-CONTENT"))))
-          ;; The setq lines we added must run on load and pick this up.
-          ;; Loading input.el will re-run the defcustom (which overwrites
-          ;; standard-value back to the file's value) and then the setqs.
-          ;; So to test the setq path in isolation, eval the setqs by hand
-          ;; against the doctored standard-value:
+          ;; Test the setq path in isolation against the doctored
+          ;; standard-value (a real reload would overwrite it from disk).
           (setq claude-repl-command-prefix
                 (eval (car (get 'claude-repl-command-prefix 'standard-value))))
-          (setq claude-repl--command-prefix
-                (format claude-repl-command-prefix-template
-                        claude-repl-command-prefix))
           (should (equal claude-repl-command-prefix "EDITED-METAPROMPT-CONTENT"))
-          (should (string-match-p "EDITED-METAPROMPT-CONTENT"
-                                  claude-repl--command-prefix))
-          ;; Now verify a real reload restores the file's content.
+          ;; A real reload restores the file's content.
           (put 'claude-repl-command-prefix 'standard-value orig-standard)
           (load input-el nil t)
           (should (equal claude-repl-command-prefix orig-value))
@@ -865,6 +861,60 @@ Simulates editing the metaprompt by mutating `standard-value' (what
       (put 'claude-repl-command-prefix 'standard-value orig-standard)
       (setq claude-repl-command-prefix orig-value)
       (setq claude-repl--command-prefix orig-derived))))
+
+(ert-deftest claude-repl-test-internal-command-prefix-is-pure-wrapper ()
+  "`claude-repl--command-prefix' must be the wrapper directive only.
+The metaprompt body is now read by Claude from
+`claude-repl-metaprompt-file-symlink'; the body must NOT be embedded
+inline in the derived prefix string."
+  (should (stringp claude-repl--command-prefix))
+  ;; Wrapper bookends are present.
+  (should (string-match-p "start of metaprompt-read-directive" claude-repl--command-prefix))
+  (should (string-match-p "metaprompt-read-directive over" claude-repl--command-prefix))
+  ;; Body content (a substring unique to the metaprompt body) is NOT present.
+  (should-not (string-match-p "Response TLDR MUST be rendered as a MECE"
+                              claude-repl--command-prefix))
+  (should-not (string-match-p "MECE numbered ASCII tree"
+                              claude-repl--command-prefix)))
+
+(ert-deftest claude-repl-test-internal-command-prefix-references-symlink ()
+  "`claude-repl--command-prefix' must embed `claude-repl-metaprompt-file-symlink'.
+The wrapper's job is to point Claude at the user-facing symlink path so
+the metaprompt body is loaded from there."
+  (should (string-match-p
+           (regexp-quote claude-repl-metaprompt-file-symlink)
+           claude-repl--command-prefix)))
+
+(ert-deftest claude-repl-test-internal-command-prefix-read-directive-is-unconditional ()
+  "The wrapper directive must tell Claude to read the file 'invariably and without question'."
+  (should (string-match-p "invariably and without question"
+                          claude-repl--command-prefix))
+  (should (string-match-p "read (or re-read)" claude-repl--command-prefix)))
+
+(ert-deftest claude-repl-test-metaprompt-file-exists ()
+  "`claude-repl-metaprompt-file' must resolve to a readable file on disk."
+  (should (stringp claude-repl-metaprompt-file))
+  (should (file-readable-p claude-repl-metaprompt-file)))
+
+(ert-deftest claude-repl-test-metaprompt-file-name-is-metaprompt-md ()
+  "`claude-repl-metaprompt-file' must point at a file named `metaprompt.md'."
+  (should (equal (file-name-nondirectory claude-repl-metaprompt-file)
+                 "metaprompt.md")))
+
+(ert-deftest claude-repl-test-metaprompt-file-symlink-default ()
+  "`claude-repl-metaprompt-file-symlink' should default to the user-facing path."
+  (should (equal (default-value 'claude-repl-metaprompt-file-symlink)
+                 "~/.config/claude/emacs/metaprompt.md")))
+
+(ert-deftest claude-repl-test-command-prefix-matches-md-file-content ()
+  "`claude-repl-command-prefix' must equal the on-disk metaprompt.md content.
+The defcustom's value form reads the file, and the reload-time setq
+forces a fresh read on each reload.  Any drift between the variable and
+the file means a stale variable that won't reflect file edits."
+  (let ((file-content (with-temp-buffer
+                        (insert-file-contents claude-repl-metaprompt-file)
+                        (buffer-string))))
+    (should (equal claude-repl-command-prefix file-content))))
 
 ;;;; ---- Tests: should-prepend-metaprompt-p ----
 
