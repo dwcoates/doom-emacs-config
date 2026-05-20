@@ -348,6 +348,28 @@ read as :merging in the drawer until cherry-pick resolves."
     (claude-repl--ws-put "ws1" :claude-state :thinking)
     (should (eq :thinking (claude-repl--ws-render-status "ws1")))))
 
+(ert-deftest claude-repl-test-ws-render-status-merge-completed-flag-yields-merged ()
+  "`:merge-completed t' alone yields :merged even when :repl-state is unset.
+Covers the transition window between setting `:merge-completed t'
+and writing `:repl-state :merged' (which the production setter does
+in two separate `--ws-put' calls), and the legacy on-disk shape that
+register-merged-workspace reclassifies on snapshot load."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/x")
+    (claude-repl--ws-put "ws1" :merge-completed t)
+    (should (eq :merged (claude-repl--ws-render-status "ws1")))))
+
+(ert-deftest claude-repl-test-ws-render-status-merge-completed-beats-merging-flag ()
+  "`:merge-completed t' wins over `:merging t' even when both are set.
+Covers the transition window: production sets :merging nil before
+:merge-completed t, but a fixture (or a future code path) that sets
+the two in the other order must still resolve to :merged."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/x")
+    (claude-repl--ws-put "ws1" :merge-completed t)
+    (claude-repl--ws-put "ws1" :merging t)
+    (should (eq :merged (claude-repl--ws-render-status "ws1")))))
+
 (ert-deftest claude-repl-test-ws-render-status-tombstone-suppresses-merge-state ()
   "A tombstoned workspace returns nil even if :repl-state :merged is set.
 The tombstone gate is checked before any state read; renderers should

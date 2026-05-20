@@ -522,31 +522,37 @@ Legacy two-section partition; tree-aware sectioning lives in
 ;;;; Section + tree helpers -------------------------------------------------
 
 (defun claude-repl-drawer--workspace-section (ws)
-  "Return :main, :hidden, :merging, or :merged for WS based on its plist state.
-Precedence (highest first): :merged → :merging (in-flight or queued)
-→ :hidden → :main.
-- :merged is reserved for workspaces whose explicit merge command
-  completed successfully (`:merge-completed' t).
-- :merging is the in-flight workflow signal — set when
-  `claude-repl--workspace-merge-do' begins a merge attempt and
-  cleared on success (alongside `:merge-completed t') or failure
-  (alongside `--mark-merge-failed').  Git ancestry no longer drives
-  this bucket: an empty child whose parent advanced past it used to
-  mis-bucket here, and ancestry is now reserved for tree flattening.
-  Workspaces parked on `claude-repl--merge-queue' (`:repl-state'
-  `:merge-queued') also surface here so the user sees pending merges
-  alongside the active one.
-- :hidden / :main are unchanged.
+  "Return :main, :hidden, :merging, or :merged for WS based on render-status.
+Sections are layout buckets, not appearance.  But the merge buckets
+map 1:1 onto `claude-repl--ws-render-status' values — the same
+keyword that drives the icon also drives the section — so the merge
+branches delegate to render-status for the source of truth.
 
-A completed merge dominates an in-flight or queued one (transition
-state during the brief window between setting `:merge-completed t' and
-clearing `:merging') and all dominate hidden."
-  (cond
-   ((claude-repl--ws-merge-completed-p ws)            :merged)
-   ((claude-repl--ws-merge-in-progress-p ws)          :merging)
-   ((claude-repl--ws-merge-queued-p ws)               :merging)
-   ((eq (claude-repl--ws-get ws :repl-state) :hidden) :hidden)
-   (t :main)))
+Mapping:
+  render-status :merged                → :merged section
+  render-status :merging               → :merging section (in flight)
+  render-status :merge-queued          → :merging section (parked)
+  render-status :merge-conflict        → :merging section (needs
+                                          attention but bucket-wise
+                                          belongs with the others)
+  render-status :merge-failed          → :merged section (the historical
+                                          MERGED-with-⛔ bucket; the
+                                          workspace did `complete' the
+                                          merge command, just failed at
+                                          the cherry-pick level)
+  otherwise + `:repl-state :hidden'    → :hidden
+  otherwise                            → :main
+
+Precedence is encoded in `--ws-render-status' itself."
+  (let ((status (and (claude-repl--ws-known-p ws)
+                     (claude-repl--ws-render-status ws))))
+    (cond
+     ((eq status :merged)                              :merged)
+     ((eq status :merge-failed)                        :merged)
+     ((memq status '(:merging :merge-queued :merge-conflict))
+                                                       :merging)
+     ((eq (claude-repl--ws-get ws :repl-state) :hidden) :hidden)
+     (t                                                 :main))))
 
 (defvar claude-repl-drawer--dir->name-map nil
   "Dynamic-binding cache: canonical project-dir → workspace name.
@@ -718,28 +724,15 @@ CHILDREN is a list of trees.  Roots and siblings are sorted by
 
 (defun claude-repl-drawer--state-glyph (ws)
   "Return the indicator glyph for workspace WS.
-`:repl-state' `:merge-conflict' takes precedence over every other
-state so a workspace whose merge collided with master surfaces the 💥
-badge regardless of subsequent vterm activity.  `:merged' next, so a
-successfully-merged workspace whose vterm has since died still shows
-the 🔀 badge.  `:merge-failed' surfaces ❌ while remaining in the
-MERGED bucket — a workspace whose cherry-pick silently failed but
-which the merge flow still bookkept as completed.  `:merge-queued'
-surfaces 🕒 for workspaces parked behind an in-flight cherry-pick on
-`claude-repl--merge-queue'.  `:dead' falls through last."
-  (let ((repl-state (claude-repl--ws-get ws :repl-state))
-        (claude-state (claude-repl--ws-get ws :claude-state)))
-    (or (and (eq repl-state :merge-conflict)
-             (alist-get :merge-conflict claude-repl-drawer-state-icons))
-        (and (eq repl-state :merge-failed)
-             (alist-get :merge-failed claude-repl-drawer-state-icons))
-        (and (eq repl-state :merged)
-             (alist-get :merged claude-repl-drawer-state-icons))
-        (and (eq repl-state :merge-queued)
-             (alist-get :merge-queued claude-repl-drawer-state-icons))
-        (and (eq repl-state :dead)
-             (alist-get :dead claude-repl-drawer-state-icons))
-        (alist-get claude-state claude-repl-drawer-state-icons)
+Delegates render-state selection to `claude-repl--ws-render-status'
+(the single source of truth for visual state across drawer, tab-bar,
+and project picker) and maps the resulting keyword through
+`claude-repl-drawer-state-icons'.  When render-status returns nil
+(tombstoned or no signals), falls back to
+`claude-repl-drawer-state-icon-default' (the middot placeholder)."
+  (let* ((status (and (claude-repl--ws-known-p ws)
+                      (claude-repl--ws-render-status ws))))
+    (or (alist-get status claude-repl-drawer-state-icons)
         claude-repl-drawer-state-icon-default)))
 
 (defun claude-repl-drawer--priority-display (priority)
@@ -755,25 +748,24 @@ workspaces don't carry a phantom space."
    (t priority)))
 
 (defun claude-repl-drawer--name-face (ws)
-  "Return the face spec for WS's name, colored by claude-state.
-:dead, :merged, :merge-failed, :merge-conflict, and :merge-queued fall
-through to the default workspace-name face (the existing hidden/dim
-treatment provides the muting).  Unrecognized states render as plain
-bold."
-  (let* ((repl-state   (claude-repl--ws-get ws :repl-state))
-         (claude-state (claude-repl--ws-get ws :claude-state))
+  "Return the face spec for WS's name, colored by render-status.
+Delegates to `claude-repl--ws-render-status' for the underlying state
+keyword, then maps claude-activity states to colored bold-foreground
+specs.  Merge-states and :dead intentionally fall through to the
+default workspace-name face — the icon column already carries the
+distinguishing signal (🔀/⛔/💥/🔄/🕒/❌), so the name itself can stay
+uncolored while the hidden/dim treatment provides the muting.
+:merging (the new in-flight signal) also falls through for the same
+reason."
+  (let* ((status (and (claude-repl--ws-known-p ws)
+                      (claude-repl--ws-render-status ws)))
          (color (cond
-                 ((eq repl-state :merged)         nil)
-                 ((eq repl-state :merge-failed)   nil)
-                 ((eq repl-state :merge-conflict) nil)
-                 ((eq repl-state :merge-queued)   nil)
-                 ((eq repl-state :dead)           nil)
-                 ((eq claude-state :init)      claude-repl--color-init-blue)
-                 ((eq claude-state :thinking)  claude-repl--color-thinking-red)
-                 ((memq claude-state '(:done :permission))
+                 ((eq status :init)         claude-repl--color-init-blue)
+                 ((eq status :thinking)     claude-repl--color-thinking-red)
+                 ((memq status '(:done :permission))
                   claude-repl--color-done-green)
-                 ((eq claude-state :idle)      claude-repl--color-idle-orange)
-                 ((eq claude-state :stop-failed)
+                 ((eq status :idle)         claude-repl--color-idle-orange)
+                 ((eq status :stop-failed)
                   claude-repl--color-stop-failed-magenta))))
     (if color
         `(:foreground ,color :weight bold)
