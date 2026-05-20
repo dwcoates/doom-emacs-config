@@ -288,11 +288,16 @@ Returns one of (in precedence order; first match wins):
                     cherry-pick abort, no CHERRY_PICK_HEAD remaining).
                     Same actionable rationale as :merge-conflict.
 
-  :merged         — `:repl-state' is `:merged' (workspace's branch
-                    landed in its source; terminal positive).
-                    `:merge-completed t' is set in lockstep with this
-                    by `--workspace-merge-do' so either signal works,
-                    but `:repl-state' is the canonical read.
+  :merged         — `:repl-state' is `:merged' OR `:merge-completed'
+                    is t (workspace's branch landed in its source;
+                    terminal positive).  The setter writes both in
+                    lockstep — either signal alone suffices.
+                    Accepting `:merge-completed' as equivalent here
+                    preserves the original drawer behavior across the
+                    brief transition window where `:merge-completed t'
+                    is set before `:repl-state :merged' has been
+                    written (and where `:merging' may not yet be
+                    cleared).
 
   :merging        — `:merging' plist key is `t' (worker thread is
                     actively running cherry-pick).  Beats :dead so a
@@ -334,13 +339,19 @@ than whether Claude was thinking when the merge hit it)."
   (cond
    ((claude-repl--ws-tombstoned-p ws) nil)
    (t
-    (let ((repl   (claude-repl--ws-get ws :repl-state))
-          (claude (claude-repl--ws-get ws :claude-state))
-          (merging (claude-repl--ws-get ws :merging)))
+    (let ((repl       (claude-repl--ws-get ws :repl-state))
+          (claude     (claude-repl--ws-get ws :claude-state))
+          (merging    (claude-repl--ws-get ws :merging))
+          (completed  (claude-repl--ws-get ws :merge-completed)))
       (cond
        ((eq repl :merge-conflict)         :merge-conflict)
        ((eq repl :merge-failed)           :merge-failed)
-       ((eq repl :merged)                 :merged)
+       ;; `:merge-completed t' is accepted as equivalent to
+       ;; `:repl-state :merged' so the transition window between the
+       ;; two writes (and any tests fixtures that set only one of
+       ;; them) still resolves to :merged.  See `--ws-render-status'
+       ;; docstring for the rationale.
+       ((or (eq repl :merged) (eq completed t)) :merged)
        ;; :merging plist key (in-flight worker) dominates :dead so
        ;; the merge UI signal survives the pre-merge UI teardown.
        ((eq merging t)                    :merging)
