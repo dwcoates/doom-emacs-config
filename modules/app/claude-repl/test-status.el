@@ -129,127 +129,33 @@ default at restart and shouldn't pin behavior."
   "ws-claude-state-clear-if signals error on nil workspace."
   (should-error (claude-repl--ws-claude-state-clear-if nil :thinking) :type 'error))
 
-;;;; ---- Tests: composed-state 8-cell product space ----
-
-(ert-deftest claude-repl-test-composed-nil-nil ()
-  "Composed (nil, nil) → nil (default face)."
-  (should-not (claude-repl--composed-state nil nil)))
-
-(ert-deftest claude-repl-test-composed-thinking-init ()
-  "Composed (:thinking, :init) → :thinking."
-  (should (eq :thinking (claude-repl--composed-state :thinking :init))))
-
-(ert-deftest claude-repl-test-composed-thinking-inactive ()
-  ":thinking dominates even when repl-state is :inactive (work-in-progress visibility)."
-  (should (eq :thinking (claude-repl--composed-state :thinking :inactive))))
-
-(ert-deftest claude-repl-test-composed-permission-init ()
-  "Composed (:permission, :init) → :permission."
-  (should (eq :permission (claude-repl--composed-state :permission :init))))
-
-(ert-deftest claude-repl-test-composed-permission-inactive ()
-  ":permission dominates even with repl-state :inactive (❓ label, not orange)."
-  (should (eq :permission (claude-repl--composed-state :permission :inactive))))
-
-(ert-deftest claude-repl-test-composed-done-init ()
-  "Composed (:done, :init) → :done (green)."
-  (should (eq :done (claude-repl--composed-state :done :init))))
-
-(ert-deftest claude-repl-test-composed-done-inactive ()
-  "Composed (:done, :inactive) → :done — :repl-state contributes no color."
-  (should (eq :done (claude-repl--composed-state :done :inactive))))
-
-(ert-deftest claude-repl-test-composed-nil-inactive ()
-  "Composed (nil, :inactive) → nil — :repl-state alone is colorless."
-  (should-not (claude-repl--composed-state nil :inactive)))
-
-(ert-deftest claude-repl-test-composed-init ()
-  "Composed (:init, any) → :init (blue — Claude initializing)."
-  (should (eq :init (claude-repl--composed-state :init nil)))
-  (should (eq :init (claude-repl--composed-state :init :inactive))))
-
-(ert-deftest claude-repl-test-composed-idle ()
-  "Composed (:idle, any) → :idle — idle Claude renders via explicit palette entry (orange)."
-  (should (eq :idle (claude-repl--composed-state :idle nil)))
-  (should (eq :idle (claude-repl--composed-state :idle :inactive))))
-
-(ert-deftest claude-repl-test-composed-nil-dead ()
-  "Composed (nil, :dead) → :dead — vterm died, show ❌ badge."
-  (should (eq :dead (claude-repl--composed-state nil :dead))))
-
-(ert-deftest claude-repl-test-composed-thinking-dead ()
-  "Composed (:thinking, :dead) → :thinking — claude-state dominates repl-state."
-  (should (eq :thinking (claude-repl--composed-state :thinking :dead))))
-
-(ert-deftest claude-repl-test-composed-nil-merged ()
-  "Composed (nil, :merged) → :merged — branch merged into source, show 🔀 badge."
-  (should (eq :merged (claude-repl--composed-state nil :merged))))
-
-(ert-deftest claude-repl-test-composed-nil-merge-conflict ()
-  "Composed (nil, :merge-conflict) → :merge-conflict — cherry-pick
-conflict left unresolved, show 💥 badge."
-  (should (eq :merge-conflict (claude-repl--composed-state nil :merge-conflict))))
-
-(ert-deftest claude-repl-test-composed-thinking-merge-conflict ()
-  "Composed (:thinking, :merge-conflict) → :thinking — claude-state
-dominates repl-state.  The conflict badge surfaces in the drawer via
-`--state-glyph', which reads repl-state directly; the tab-bar palette
-flows through `composed-state' and follows claude-state."
-  (should (eq :thinking
-              (claude-repl--composed-state :thinking :merge-conflict))))
+;;;; ---- Tests: composed-state mapping ----
+;;
+;; The legacy `claude-repl--composed-state' pure-mapping tests were
+;; removed along with that function.  The render-state contract is
+;; now owned by `claude-repl--ws-render-status' in workspace.el and
+;; its tests live in test-workspace.el.  The tests below cover only
+;; the palette/label tab-bar wiring + the `--ws-display-state' panel-
+;; visibility layer that sits on top of the unified render-state.
 
 (ert-deftest claude-repl-test-tab-palette-has-merge-conflict-label ()
   "Palette has a `:merge-conflict' entry that maps to the 💥 label so
-the tab-bar renders the new badge when `composed-state' yields
-`:merge-conflict' (vterm dead + repl-state = :merge-conflict)."
+the tab-bar renders the badge when render-status yields
+`:merge-conflict'."
   (should (equal (plist-get
                   (alist-get :merge-conflict claude-repl--tab-palette)
                   :label)
                  "💥")))
 
-(ert-deftest claude-repl-test-composed-nil-merge-failed ()
-  "Composed (nil, :merge-failed) → :merge-failed — silent cherry-pick
-abort surfaces ⛔ in the tab bar so a stuck merge is not invisible."
-  (should (eq :merge-failed (claude-repl--composed-state nil :merge-failed))))
-
-(ert-deftest claude-repl-test-composed-thinking-merge-failed ()
-  "Composed (:thinking, :merge-failed) → :thinking — claude-state
-dominates repl-state for tab color, same precedence rule as
-:merge-conflict and :dead."
-  (should (eq :thinking
-              (claude-repl--composed-state :thinking :merge-failed))))
-
 (ert-deftest claude-repl-test-tab-palette-has-merge-failed-label ()
   "Palette has a `:merge-failed' entry that maps to the ⛔ label so the
-tab-bar renders the badge when `composed-state' yields `:merge-failed'.
+tab-bar renders the badge when render-status yields `:merge-failed'.
 Distinct from `:dead' (❌) so a blocked merge is not mistaken for a
 dead vterm."
   (should (equal (plist-get
                   (alist-get :merge-failed claude-repl--tab-palette)
                   :label)
                  "⛔")))
-
-(ert-deftest claude-repl-test-composed-unknown-returns-nil ()
-  "DIAGNOSTIC: unknown claude-state currently logs + returns nil (temporary —
-to be reverted to should-error once the leaking writer is found)."
-  (should-not (claude-repl--composed-state :bogus nil)))
-
-(ert-deftest claude-repl-test-composed-unknown-threads-ws-to-log ()
-  "The UNKNOWN-state diagnostic log call receives the WS argument."
-  (let ((logged-ws 'unset))
-    (cl-letf (((symbol-function 'claude-repl--log)
-               (lambda (ws &rest _) (setq logged-ws ws))))
-      (claude-repl--composed-state :bogus nil "diag-ws")
-      (should (equal logged-ws "diag-ws")))))
-
-(ert-deftest claude-repl-test-display-state-passes-ws-to-composed ()
-  "ws-display-state forwards its ws into composed-state so diagnostics carry context."
-  (let ((received-ws 'unset))
-    (cl-letf (((symbol-function 'claude-repl--ws-claude-open-p) (lambda (_ws) t))
-              ((symbol-function 'claude-repl--composed-state)
-               (lambda (_c _r &optional ws) (setq received-ws ws) nil)))
-      (claude-repl--ws-display-state "diag-ws")
-      (should (equal received-ws "diag-ws")))))
 
 ;;;; ---- Tests: ws-display-state suppresses all coloring when panels closed ----
 
@@ -2723,13 +2629,12 @@ in the same shape (still leftmost, nil-name still at head)."
   "clear-stop-tracking with nil ws signals error."
   (should-error (claude-repl--ws-clear-stop-tracking nil) :type 'error))
 
-;;;; ---- Tests: :stop-failed composed-state mapping ----
-
-(ert-deftest claude-repl-test-composed-stop-failed ()
-  "Composed (:stop-failed, any) -> :stop-failed."
-  (should (eq :stop-failed (claude-repl--composed-state :stop-failed nil)))
-  (should (eq :stop-failed (claude-repl--composed-state :stop-failed :inactive)))
-  (should (eq :stop-failed (claude-repl--composed-state :stop-failed :dead))))
+;;;; ---- Tests: :stop-failed ws-display-state behavior ----
+;;
+;; The legacy `--composed-state' pure-mapping coverage for
+;; `:stop-failed' moved into test-workspace.el's `--ws-render-status'
+;; coverage.  Only the display-state (panel-gated) wrapper assertion
+;; remains here.
 
 (ert-deftest claude-repl-test-display-state-stop-failed ()
   "ws-display-state returns :stop-failed when claude-state is :stop-failed and panels visible."
