@@ -77,6 +77,7 @@ the indent change — no other knobs needed."
     (:merged         . "🔀")
     (:merge-failed   . "⛔")
     (:merge-conflict . "💥")
+    (:merging        . "🔄")
     (:merge-queued   . "🕒"))
   "Alist mapping claude-state keyword to an indicator glyph.
 The :dead entry is used when `:repl-state' is `:dead' (overrides
