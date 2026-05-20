@@ -54,6 +54,35 @@ Two exceptions are grandfathered inside `core.el` itself: `claude-repl--ws-id-ca
 
 Per-diff audit (mandatory on every diff touching `modules/app/claude-repl/`): grep the diff for `(gethash` / `(puthash` / `(maphash` against `claude-repl--workspaces` in any file other than `workspace.el`. If you find one, extract a wrapper into `workspace.el` first; only then write the calling logic.
 
+## NEVER manipulate third-party internals from a high-level layer
+
+**ABSOLUTE RULE: Outside of `workspace.el`, no claude-repl file may read or write persp-mode internals directly.** This includes (non-exhaustive):
+
+- `persp-names-cache` (read OR write — `(member ws persp-names-cache)`, `persp-update-names-cache`, `setq persp-names-cache`).
+- `persp-add-new`, `persp-frame-switch`, `persp-kill`, `persp-get-by-name`, `persp-remove-by-name`, `+workspace/new`, `+workspace/kill`, `+workspace-exists-p`, `+workspace-list-names`, `+workspace-switch`.
+- Any other persp-mode or Doom-workspace API that touches the persp data structure.
+
+The rule applies symmetrically to every third-party dependency claude-repl wraps (currently persp-mode; eventually also magit, vterm — anywhere claude-repl owns the integration boundary). The owning module for persp-mode is `workspace.el`. If a new persp-mode boundary surfaces and the right wrapper does not yet exist in `workspace.el`, STOP and surface to the user with:
+
+1. The exact persp-mode (or other 3rd-party) API the code wants to call.
+2. The call site (file:line) that would call it.
+3. A proposed wrapper name in `workspace.el` (or whichever file owns the integration).
+4. A note on whether any existing wrapper looks close enough to extend.
+
+Wait for the user to decide whether to extend an existing wrapper, add a new one, or take a different approach. Do NOT silently sprinkle the third-party call at the high-level site.
+
+Why this is absolute:
+
+- Manipulating persp-mode internals from `commands.el` / `status.el` / `drawer.el` / etc. is an abstraction leak. The high-level code is supposed to express claude-repl semantics ("open this workspace", "remove this from the tab-bar"), not persp-mode bookkeeping ("splice this name into `persp-names-cache' at this index").
+
+- The leak creates load-bearing dependencies on persp-mode's undocumented behavior (e.g. `persp-get-by-name` returning a truthy `:nil` sentinel for missing persps — the bug commands.el:1290-1302 patches around) which then live in N call sites instead of one wrapper.
+
+- It also means a future swap of persp-mode for a different workspace backend touches N files instead of one.
+
+- The "we test lisp, not external code" corollary applies here too: persp-mode behavior changes between versions, and integration tests can't catch leaks at high-level sites because the wrappers (if they existed) would be the mock boundary. Without wrappers, every call site has to be mocked independently.
+
+Pre-existing call sites are grandfathered until they migrate. New ones are not.
+
 ## Claude REPL instrumentation
 
 New code added to the claude-repl module must include instrumentation via `claude-repl--log`. Every dynamic aspect of the call site must be included in the log message — variable values, resolved paths, computed flags, branch outcomes, etc. The goal is that a log trace alone should be sufficient to diagnose any behavioral issue without needing to add instrumentation after the fact.
