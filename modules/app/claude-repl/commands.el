@@ -2891,18 +2891,24 @@ Keys:
   "Return the status-emoji prefix for a candidate with SUMMARY.
 SUMMARY is a plist from `claude-repl--project-state-summary'.
 
-When `:workspace-name' is non-nil, returns the same glyph the drawer
-would render for that workspace via `claude-repl-drawer--state-glyph'
-— keeps emoji usage for a given workspace consistent between the
-project picker (`SPC p p') and the drawer.
+When `:workspace-name' is non-nil, delegates to
+`claude-repl--ws-render-status' for the render-state keyword and
+looks up the glyph in `claude-repl-drawer-state-icons'.  This is the
+same path the drawer's `--state-glyph' takes, so the project picker
+(`SPC p p') and the drawer always agree on the emoji for a given
+workspace.  Calling render-status directly (instead of going through
+`claude-repl-drawer--state-glyph') keeps the picker free of drawer
+internals.
 
 For projects without a live workspace returns a neutral 📁.  No
 historical kill/dormant distinction is drawn because the picker
 deliberately avoids disk I/O — the on-disk state file is NOT read on
 every invocation."
   (let ((ws (plist-get summary :workspace-name)))
-    (if ws
-        (claude-repl-drawer--state-glyph ws)
+    (if (and ws (claude-repl--ws-known-p ws))
+        (or (alist-get (claude-repl--ws-render-status ws)
+                       claude-repl-drawer-state-icons)
+            claude-repl-drawer-state-icon-default)
       "📁")))
 
 (defun claude-repl--picker-format-date (time width face placeholder)
