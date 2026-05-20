@@ -56,32 +56,40 @@ Per-diff audit (mandatory on every diff touching `modules/app/claude-repl/`): gr
 
 ## NEVER manipulate third-party internals from a high-level layer
 
-**ABSOLUTE RULE: Outside of `workspace.el`, no claude-repl file may read or write persp-mode internals directly.** This includes (non-exhaustive):
+**ABSOLUTE RULE: a high-level layer in `modules/app/claude-repl/` must never touch a third-party dependency's internals directly. Every third-party API call must go through a dedicated wrapper module that owns the integration boundary.** "Third-party" here means anything outside `modules/app/claude-repl/` itself — external Emacs packages, Doom helpers, language-tool integrations, shell programs, etc.
 
-- `persp-names-cache` (read OR write — `(member ws persp-names-cache)`, `persp-update-names-cache`, `setq persp-names-cache`).
-- `persp-add-new`, `persp-frame-switch`, `persp-kill`, `persp-get-by-name`, `persp-remove-by-name`, `+workspace/new`, `+workspace/kill`, `+workspace-exists-p`, `+workspace-list-names`, `+workspace-switch`.
-- Any other persp-mode or Doom-workspace API that touches the persp data structure.
+The shape is always the same, regardless of which dependency is in play:
 
-The rule applies symmetrically to every third-party dependency claude-repl wraps (currently persp-mode; eventually also magit, vterm — anywhere claude-repl owns the integration boundary). The owning module for persp-mode is `workspace.el`. If a new persp-mode boundary surfaces and the right wrapper does not yet exist in `workspace.el`, STOP and surface to the user with:
+- One claude-repl file owns the integration boundary for a given dependency.
+- Every other claude-repl file expresses its intent in terms of claude-repl semantics (verbs like "register workspace", "render this status", "tag this commit") and routes through the owning file's wrapper API.
+- The dependency-specific bookkeeping (data-structure shape, naming conventions, undocumented-behavior workarounds, version skew) lives inside the owning file, never sprinkled across the high-level layer.
 
-1. The exact persp-mode (or other 3rd-party) API the code wants to call.
+If a high-level call site needs a behavior the owning file does not yet expose, STOP and surface to the user with:
+
+1. The exact third-party API the code wants to call.
 2. The call site (file:line) that would call it.
-3. A proposed wrapper name in `workspace.el` (or whichever file owns the integration).
+3. A proposed wrapper name + signature in the owning file, or the owning file itself if no owner exists yet.
 4. A note on whether any existing wrapper looks close enough to extend.
 
-Wait for the user to decide whether to extend an existing wrapper, add a new one, or take a different approach. Do NOT silently sprinkle the third-party call at the high-level site.
+Wait for the user to decide whether to extend an existing wrapper, add a new one, or take a different approach. Do NOT silently sprinkle the third-party call at the high-level site, even "just this once".
 
 Why this is absolute:
 
-- Manipulating persp-mode internals from `commands.el` / `status.el` / `drawer.el` / etc. is an abstraction leak. The high-level code is supposed to express claude-repl semantics ("open this workspace", "remove this from the tab-bar"), not persp-mode bookkeeping ("splice this name into `persp-names-cache' at this index").
+- Direct third-party calls at high-level sites are abstraction leaks. High-level code is supposed to express claude-repl semantics, not the dependency's internal bookkeeping.
 
-- The leak creates load-bearing dependencies on persp-mode's undocumented behavior (e.g. `persp-get-by-name` returning a truthy `:nil` sentinel for missing persps — the bug commands.el:1290-1302 patches around) which then live in N call sites instead of one wrapper.
+- Leaks create load-bearing dependencies on a third party's undocumented or version-specific behavior. The fix for any one such quirk then has to be applied at N call sites instead of one wrapper.
 
-- It also means a future swap of persp-mode for a different workspace backend touches N files instead of one.
+- They also pin claude-repl to the current dependency choice. A future swap (different workspace backend, different git frontend, different terminal emulator) touches N files instead of one.
 
-- The "we test lisp, not external code" corollary applies here too: persp-mode behavior changes between versions, and integration tests can't catch leaks at high-level sites because the wrappers (if they existed) would be the mock boundary. Without wrappers, every call site has to be mocked independently.
+- They defeat the testing model. The wrappers ARE the mock boundary — without them, every call site has to be mocked independently, and tests of high-level logic end up encoding dependency-specific behavior that drifts when the dependency upgrades.
 
-Pre-existing call sites are grandfathered until they migrate. New ones are not.
+Examples of integration boundaries already established or in progress:
+
+- Persp-mode / Doom-workspace API (`persp-names-cache`, `persp-add-new`, `+workspace/new`, `+workspace/kill`, `+workspace-list-names`, etc.) → owned by `workspace.el`.
+- Shell / subprocess invocations (`git`, `gh`, `claude -p`, etc.) → owned via the `claude-repl--<resource>-<verb>` wrapper convention documented under "No External Processes or External State in Tests".
+- (Future) magit, vterm, projectile integration points should follow the same pattern when they grow non-trivial bookkeeping.
+
+Pre-existing call sites are grandfathered until they migrate. New ones are not, and migration of the existing ones is in progress (see commit history for the current wave).
 
 ## Claude REPL instrumentation
 
