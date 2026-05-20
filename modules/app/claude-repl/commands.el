@@ -513,13 +513,48 @@ again with the new question's output appended."
     map)
   "Keymap for `claude-repl-explain-config-mode'.")
 
+(defconst claude-repl--explain-config-insert-entry-keys
+  '("i" "I" "a" "A" "o" "O" "s" "S" "c" "C" "R")
+  "Evil normal/motion-state keys that would normally enter insert state.
+Bound to `ignore' in the explain-config popup so the buffer can never
+flip into evil insert state -- the popup is strictly read-only Q&A
+output and there is nothing meaningful the user could type into it.")
+
+(defun claude-repl--explain-config-install-evil-bindings ()
+  "Install evil-mode bindings on `claude-repl-explain-config-mode-map'.
+Binds `q' in normal/motion state to the close command so the popup
+dismisses uniformly whether evil is enabled or not (the
+`define-key' on `q' alone would be shadowed by
+`evil-normal-state-map' otherwise).  Also blocks every insert-entry
+key so the buffer never flips into evil insert state -- the popup is
+read-only and there is nothing meaningful to type into it.
+
+No-op when evil is not loaded."
+  (when (fboundp 'evil-define-key)
+    (evil-define-key '(normal motion) claude-repl-explain-config-mode-map
+      "q" #'claude-repl-explain-config-close)
+    (dolist (key claude-repl--explain-config-insert-entry-keys)
+      (evil-define-key '(normal motion) claude-repl-explain-config-mode-map
+        key #'ignore))))
+
+(claude-repl--explain-config-install-evil-bindings)
+
 (define-minor-mode claude-repl-explain-config-mode
   "Minor mode enabled in the explain-config output popup.
 Provides a buffer-local `q' binding to dismiss the popup globally via
 `claude-repl-explain-config-close', so the user does not need to
-navigate-and-`C-x 0' the window in every workspace separately."
+navigate-and-`C-x 0' the window in every workspace separately.
+
+When evil is loaded, forces the buffer into motion state on enable so
+`q' (bound via `claude-repl--explain-config-install-evil-bindings')
+fires immediately without the user first hitting ESC, and so the
+buffer never starts in normal state where insert-entry keys could
+trigger before the ignore-bindings take effect."
   :lighter " ExplainCfg"
-  :keymap claude-repl-explain-config-mode-map)
+  :keymap claude-repl-explain-config-mode-map
+  (when (and claude-repl-explain-config-mode
+             (fboundp 'evil-motion-state))
+    (evil-motion-state)))
 
 (defun claude-repl--explain-config-ensure-visible-on-persp-switch (&rest _)
   "Reconcile explain-config visibility with the global state on workspace switch.
