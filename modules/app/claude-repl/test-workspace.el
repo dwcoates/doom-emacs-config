@@ -14,6 +14,275 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
+;;;; ---- Tests: ws-get / ws-put (moved from test-core.el) ----
+
+(ert-deftest claude-repl-test-ws-get-nonexistent-workspace ()
+  "ws-get on non-existent workspace should return nil."
+  (claude-repl-test--with-clean-state
+    (should-not (claude-repl--ws-get "nonexistent" :status))))
+
+(ert-deftest claude-repl-test-ws-get-nonexistent-key ()
+  "ws-get for non-existent key on existing workspace should return nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :status "active")
+    (should-not (claude-repl--ws-get "ws1" :nonexistent-key))))
+
+(ert-deftest claude-repl-test-ws-get-zero-value ()
+  "ws-get should return 0 when key is set to 0 (not confuse with nil)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :counter 0)
+    (should (equal (claude-repl--ws-get "ws1" :counter) 0))))
+
+(ert-deftest claude-repl-test-ws-get-empty-string-value ()
+  "ws-get should return empty string when key is set to empty string."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :name "")
+    (should (equal (claude-repl--ws-get "ws1" :name) ""))))
+
+(ert-deftest claude-repl-test-ws-put-new-workspace ()
+  "ws-put to a brand new workspace should create the entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "new-ws" :status "ready")
+    (should (equal (claude-repl--ws-get "new-ws" :status) "ready"))))
+
+(ert-deftest claude-repl-test-ws-put-overwrite ()
+  "ws-put should overwrite an existing key."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :status "old")
+    (claude-repl--ws-put "ws1" :status "new")
+    (should (equal (claude-repl--ws-get "ws1" :status) "new"))))
+
+(ert-deftest claude-repl-test-ws-put-nil-value ()
+  "ws-put with nil value should set key to nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :status "active")
+    (claude-repl--ws-put "ws1" :status nil)
+    (should-not (claude-repl--ws-get "ws1" :status))))
+
+(ert-deftest claude-repl-test-ws-put-multiple-keys ()
+  "ws-put should support multiple keys on the same workspace."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :status "ready")
+    (claude-repl--ws-put "ws1" :priority "p1")
+    (claude-repl--ws-put "ws1" :counter 42)
+    (should (equal (claude-repl--ws-get "ws1" :status) "ready"))
+    (should (equal (claude-repl--ws-get "ws1" :priority) "p1"))
+    (should (equal (claude-repl--ws-get "ws1" :counter) 42))))
+
+(ert-deftest claude-repl-test-ws-put-stub-create-emits-noisy-log ()
+  "ws-put that creates a fresh entry with a non-:project-dir key should
+emit a noisy unconditional log via `claude-repl--do-log'."
+  (claude-repl-test--with-clean-state
+    (let ((log-calls nil))
+      (cl-letf (((symbol-function 'claude-repl--do-log)
+                 (lambda (ws fmt args &optional _err)
+                   (push (list ws fmt args) log-calls))))
+        (claude-repl--ws-put "stub-ws" :priority "p1"))
+      (should (= 1 (length log-calls)))
+      (should (string-match-p "STUB-CREATE" (nth 1 (car log-calls)))))))
+
+(ert-deftest claude-repl-test-ws-put-project-dir-first-no-log ()
+  "ws-put that creates an entry by setting :project-dir as the first key
+should not emit the stub-create log."
+  (claude-repl-test--with-clean-state
+    (let ((log-calls nil))
+      (cl-letf (((symbol-function 'claude-repl--do-log)
+                 (lambda (ws fmt args &optional _err)
+                   (push (list ws fmt args) log-calls))))
+        (claude-repl--ws-put "good-ws" :project-dir "/some/dir"))
+      (should (null log-calls)))))
+
+(ert-deftest claude-repl-test-ws-put-existing-entry-no-log ()
+  "ws-put on an existing entry should not emit the stub-create log
+even when writing a non-:project-dir key on an entry that itself
+has no :project-dir (no new entry is being created)."
+  (claude-repl-test--with-clean-state
+    ;; Seed an entry via :project-dir first so it exists.
+    (claude-repl--ws-put "ws1" :project-dir "/some/dir")
+    (let ((log-calls nil))
+      (cl-letf (((symbol-function 'claude-repl--do-log)
+                 (lambda (ws fmt args &optional _err)
+                   (push (list ws fmt args) log-calls))))
+        (claude-repl--ws-put "ws1" :priority "p1"))
+      (should (null log-calls)))))
+
+(ert-deftest claude-repl-test-ws-put-stub-log-includes-caller-trace ()
+  "Stub-create log payload should include a caller-trace string so the
+producer of the leak can be identified from the message alone."
+  (claude-repl-test--with-clean-state
+    (let ((log-calls nil))
+      (cl-letf (((symbol-function 'claude-repl--do-log)
+                 (lambda (ws fmt args &optional _err)
+                   (push (list ws fmt args) log-calls))))
+        (claude-repl--ws-put "stub-ws" :priority "p1"))
+      (should (= 1 (length log-calls)))
+      (let* ((args (nth 2 (car log-calls)))
+             (trace (car (last args))))
+        (should (stringp trace))
+        (should (> (length trace) 0))))))
+
+;;;; ---- Tests: ws-del (tombstone semantics; moved from test-core.el) ----
+
+(ert-deftest claude-repl-test-ws-del-clears-runtime-key ()
+  "ws-del clears every key listed in `claude-repl--ws-runtime-keys'.
+Asserts a representative runtime key (`:flashing') is reset to nil so
+post-nuke render passes don't paint a stale flash on a tombstoned tab."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (claude-repl--ws-put "ws1" :flashing t)
+    (claude-repl--ws-del "ws1")
+    (should-not (claude-repl--ws-get "ws1" :flashing))))
+
+(ert-deftest claude-repl-test-ws-del-nonexistent ()
+  "ws-del on a non-existent workspace should be a no-op."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-del "nonexistent")
+    ;; Should not error and should not synthesize an entry.
+    (should-not (gethash "nonexistent" claude-repl--workspaces))))
+
+(ert-deftest claude-repl-test-ws-del-preserves-project-dir ()
+  "ws-del preserves `:project-dir' across the tombstone — the entire
+point of the tombstone model.  Without this guarantee, `--ws-dir'
+callers would resume firing `no :project-dir for workspace X' errors
+on persps that outlive their claude-repl session."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (claude-repl--ws-del "ws1")
+    (should (equal (claude-repl--ws-get "ws1" :project-dir) "/tmp/ws1"))))
+
+(ert-deftest claude-repl-test-ws-del-preserves-priority ()
+  "ws-del preserves `:priority' — identity/historical key, not runtime.
+Re-creating a workspace with the same name should resume at its prior
+priority badge without the user having to re-rank it."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (claude-repl--ws-put "ws1" :priority :p1)
+    (claude-repl--ws-del "ws1")
+    (should (eq (claude-repl--ws-get "ws1" :priority) :p1))))
+
+(ert-deftest claude-repl-test-ws-del-stamps-nuked-at ()
+  "ws-del stamps `:nuked-at' with a non-nil time value — the marker
+read by `--ws-live-p' and the snapshot persistence layer to distinguish
+tombstones from live entries."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (claude-repl--ws-del "ws1")
+    (should (claude-repl--ws-get "ws1" :nuked-at))))
+
+(ert-deftest claude-repl-test-ws-del-bumps-last-killed-at ()
+  "ws-del bumps `:last-killed-at' so the picker's sort-by-last-killed
+sees the tombstone immediately rather than waiting for an external
+caller to stamp the timestamp."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (claude-repl--ws-del "ws1")
+    (should (claude-repl--ws-get "ws1" :last-killed-at))))
+
+(ert-deftest claude-repl-test-ws-del-keeps-entry-in-hash ()
+  "ws-del leaves the hash entry in place (tombstone, not remhash).
+This is the structural inverse of the pre-tombstone behavior — pinning
+so a regression that brings remhash back is caught immediately."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (claude-repl--ws-del "ws1")
+    (should (gethash "ws1" claude-repl--workspaces))))
+
+(ert-deftest claude-repl-test-ws-del-logs-had-entry-true ()
+  "ws-del logs `had-entry=t' when the workspace was registered."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'claude-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (setq logged (apply #'format fmt args)))))
+        (claude-repl--ws-del "ws1")
+        (should (string-match-p "ws-del:" logged))
+        (should (string-match-p "had-entry=t" logged))))))
+
+(ert-deftest claude-repl-test-ws-del-logs-had-entry-nil ()
+  "ws-del logs `had-entry=nil' when the workspace was not registered."
+  (claude-repl-test--with-clean-state
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'claude-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (setq logged (apply #'format fmt args)))))
+        (claude-repl--ws-del "nonexistent")
+        (should (string-match-p "ws-del:" logged))
+        (should (string-match-p "had-entry=nil" logged))))))
+
+(ert-deftest claude-repl-test-ws-del-clears-peer-source-ws-name-cache ()
+  "`--ws-del' must clear `:source-ws-name' on peers that cached the
+deleted ws as their resolved source.  Without the sweep, a future
+workspace re-using the deleted name would be returned as a parent it
+isn't (different `:project-dir').  Asserts the sweep targets exactly
+the affected peers."
+  (claude-repl-test--with-clean-state
+    (puthash "parent" '(:project-dir "/tmp/parent")
+             claude-repl--workspaces)
+    (puthash "child"  '(:project-dir "/tmp/child"
+                                     :source-ws-dir "/tmp/parent"
+                                     :source-ws-name "parent")
+             claude-repl--workspaces)
+    (puthash "unrelated" '(:project-dir "/tmp/u"
+                                        :source-ws-name "someone-else")
+             claude-repl--workspaces)
+    (claude-repl--ws-del "parent")
+    (should-not (claude-repl--ws-get "child" :source-ws-name))
+    (should (equal (claude-repl--ws-get "unrelated" :source-ws-name)
+                   "someone-else"))))
+
+(ert-deftest claude-repl-test-ws-del-tombstones-entry-not-removes ()
+  "`--ws-del' tombstones the target's own entry rather than removing it —
+the post-tombstone-refactor invariant.  The peer-cache sweep above still
+fires; this test pins that the same call also leaves the target entry
+intact (just with `:nuked-at' stamped)."
+  (claude-repl-test--with-clean-state
+    (puthash "doomed" '(:project-dir "/tmp/x") claude-repl--workspaces)
+    (claude-repl--ws-del "doomed")
+    (should (gethash "doomed" claude-repl--workspaces))
+    (should (claude-repl--ws-get "doomed" :nuked-at))
+    (should (equal (claude-repl--ws-get "doomed" :project-dir) "/tmp/x"))))
+
+;;;; ---- Tests: ws-live-p (moved from test-core.el) ----
+
+(ert-deftest claude-repl-test-ws-live-p-returns-t-for-live-entry ()
+  "ws-live-p returns non-nil for a fresh hash entry with no tombstone."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (should (claude-repl--ws-live-p "ws1"))))
+
+(ert-deftest claude-repl-test-ws-live-p-returns-nil-for-tombstone ()
+  "ws-live-p returns nil for a tombstoned entry — the predicate that
+keeps drawer/picker/state-updater from surfacing nuked workspaces."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (claude-repl--ws-del "ws1")
+    (should-not (claude-repl--ws-live-p "ws1"))))
+
+(ert-deftest claude-repl-test-ws-live-p-returns-nil-for-unknown ()
+  "ws-live-p returns nil when no hash entry exists at all."
+  (claude-repl-test--with-clean-state
+    (should-not (claude-repl--ws-live-p "never-seen"))))
+
+;;;; ---- Tests: live-ws-names (moved from test-core.el) ----
+
+(ert-deftest claude-repl-test-live-ws-names-excludes-tombstones ()
+  "live-ws-names returns only non-tombstoned hash keys, regardless of
+insertion order — the single helper every hash iterator routes through
+to avoid surfacing nuked workspaces."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "alive" :project-dir "/tmp/alive")
+    (claude-repl--ws-put "dead" :project-dir "/tmp/dead")
+    (claude-repl--ws-del "dead")
+    (let ((names (claude-repl--live-ws-names)))
+      (should (member "alive" names))
+      (should-not (member "dead" names)))))
+
+(ert-deftest claude-repl-test-live-ws-names-empty-hash ()
+  "live-ws-names returns nil (not an error) when the hash has no entries."
+  (claude-repl-test--with-clean-state
+    (should-not (claude-repl--live-ws-names))))
+
 ;;;; ---- Tests: --ws-known-p ----
 
 (ert-deftest claude-repl-test-ws-known-p-returns-t-for-live-entry ()
