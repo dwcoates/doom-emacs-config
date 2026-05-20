@@ -184,6 +184,11 @@ recovered source workspaces appended to `:merge-queue' for retry."
 (claude-repl--early-recover-orphan-cherry-picks)
 
 (claude-repl--load-module "core")
+;; WHY: workspace.el owns `claude-repl--workspaces' and the hash
+;; accessors that nearly every other module uses.  Must load right
+;; after core.el (which provides the logging primitives workspace.el
+;; calls) and before everything else.
+(claude-repl--load-module "workspace")
 (claude-repl--load-module "install")
 (claude-repl--load-module "notifications")
 (claude-repl--load-module "history")
