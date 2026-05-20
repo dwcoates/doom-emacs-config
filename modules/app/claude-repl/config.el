@@ -40,7 +40,7 @@
 ;;
 ;; When Emacs is hard-killed mid-cherry-pick (the synchronous headless
 ;; `claude -p' auto-resolve is the canonical blocker — the worker thread
-;; busy-waits on `accept-process-output' and can't run its
+;; blocks via `claude-repl--wait-for-process-exit' and can't run its
 ;; `condition-case' cleanup if the whole process dies), the in-flight
 ;; cherry-pick is left orphaned: CHERRY_PICK_HEAD lingers in the target
 ;; worktree's git dir and conflict markers may remain in working-tree
