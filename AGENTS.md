@@ -340,3 +340,15 @@ When facing a bug that resists immediate root-cause identification, **do not spe
 
 8. **Choosing standard vs verbose.**
    Events that fire on every timer tick, every window change, or every keystroke MUST use `claude-repl--log-verbose`. Events that fire on discrete user actions or state transitions use `claude-repl--log`. Rule of thumb: if it fires more than once per second across all workspaces, it's verbose.
+
+## `accept-process-output` gotcha — always pass `JUST-THIS-ONE` for busy-waits
+
+Any `(accept-process-output proc TIMEOUT)` that targets a specific subprocess in a busy-wait MUST pass `JUST-THIS-ONE` as the 4th arg (typically `t`):
+
+```elisp
+(accept-process-output proc 0.2 nil t)  ;; ← restrict to PROC only
+```
+
+**Why:** with `JUST-THIS-ONE` nil (the default), the C-level read loop also services pending output from **every other subprocess Emacs has open** (vterms across all workspaces, async git, notification helpers, etc.) while waiting on `proc`. In setups with many chatty subprocesses — e.g. 100+ active workspaces each with a vterm — the inner C loop is fed enough foreign output that it never reaches the timeout boundary. The worker thread holds the global Lisp lock through that aggregate work, and the main thread starves on `pthread_mutex_firstfit_lock_slow` indefinitely. The hang's signature on macOS is the worker stuck in `wait_reading_process_output → __NSCFString appendFormat:` doing byte-decode for the foreign subprocesses.
+
+Skip the flag only when the busy-wait genuinely needs to drain the global subprocess fleet (rare — the merge / verify busy-waits in `worktree.el` do not). Wherever you add a new busy-wait, prefer `JUST-THIS-ONE = t` by default and document any deviation.
