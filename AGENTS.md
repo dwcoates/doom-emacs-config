@@ -341,14 +341,77 @@ When facing a bug that resists immediate root-cause identification, **do not spe
 8. **Choosing standard vs verbose.**
    Events that fire on every timer tick, every window change, or every keystroke MUST use `claude-repl--log-verbose`. Events that fire on discrete user actions or state transitions use `claude-repl--log`. Rule of thumb: if it fires more than once per second across all workspaces, it's verbose.
 
-## `accept-process-output` gotcha — always pass `JUST-THIS-ONE` for busy-waits
+## `ns_select_1` worker-thread trap — never call `accept-process-output` from a non-main thread on macOS
 
-Any `(accept-process-output proc TIMEOUT)` that targets a specific subprocess in a busy-wait MUST pass `JUST-THIS-ONE` as the 4th arg (typically `t`):
+**TL;DR:** if your code runs inside `(make-thread ...)` and needs to wait for a subprocess, **do not** call `accept-process-output`, `call-process`, `shell-command-to-string`, or anything else that routes through `wait_reading_process_output`. Use a process sentinel + condition variable instead. The convenience helpers `claude-repl--wait-for-process-exit` and `claude-repl--spawn-and-wait` in `modules/app/claude-repl/worktree.el` already encapsulate the correct pattern — prefer those.
 
-```elisp
-(accept-process-output proc 0.2 nil t)  ;; ← restrict to PROC only
+### The structural cause (Emacs 30.2 source)
+
+On macOS, `wait_reading_process_output` unconditionally routes through `ns_select` at `process.c:5753`:
+
+```c
+#elif defined HAVE_NS
+        /* And NS builds call thread_select in ns_select. */
+        nfds = ns_select (max_desc + 1, &Available, ...);
 ```
 
-**Why:** with `JUST-THIS-ONE` nil (the default), the C-level read loop also services pending output from **every other subprocess Emacs has open** (vterms across all workspaces, async git, notification helpers, etc.) while waiting on `proc`. In setups with many chatty subprocesses — e.g. 100+ active workspaces each with a vterm — the inner C loop is fed enough foreign output that it never reaches the timeout boundary. The worker thread holds the global Lisp lock through that aggregate work, and the main thread starves on `pthread_mutex_firstfit_lock_slow` indefinitely. The hang's signature on macOS is the worker stuck in `wait_reading_process_output → __NSCFString appendFormat:` doing byte-decode for the foreign subprocesses.
+`ns_select` calls `ns_select_1` in `nsterm.m`. `ns_select_1` has a non-main-thread check at line 4876 — but it only picks which `thread_select` variant to call. The function then falls through to:
 
-Skip the flag only when the busy-wait genuinely needs to drain the global subprocess fleet (rare — the merge / verify busy-waits in `worktree.el` do not). Wherever you add a new busy-wait, prefer `JUST-THIS-ONE = t` by default and document any deviation.
+```c
+// nsterm.m:4951-4962
+block_input ();
+ns_init_events (&event);
+[NSApp run];              // ← MAIN-THREAD-ONLY AppKit API
+ns_finish_events ();
+...
+unblock_input ();
+```
+
+`[NSApp run]` is documented main-thread-only. Calling it from a worker thread is undefined behavior on macOS and produces two failure modes we've seen in practice:
+
+1. **Long monopolization**: the worker thread gets stuck servicing NSCFString work AppKit isn't thread-safe for, holding the global Lisp lock (more accurately the select-serialization side of it) for tens of seconds while the main thread starves in `wait_reading_process_output → really_call_select → pthread_mutex_firstfit_lock_slow`. Symptom: Emacs feels frozen during a workspace merge.
+
+2. **Hard abort**: when `unblock_input` runs on the worker thread and finds `interrupt_input_blocked` underflowed (it's a process-global counter that the main thread also touches), Emacs aborts via `emacs_abort`. Crash report shows the worker thread crashed in `unblock_input + 44`, called from `ns_select_1 + 1084`.
+
+### The pattern that works
+
+```elisp
+(make-thread
+ (lambda ()
+   (let* ((proc (start-process "my-task" buf "my-cmd" ...))
+          (status (claude-repl--wait-for-process-exit
+                   proc TIMEOUT "my-tag" target-ws)))
+     ;; ... use status ...
+     )))
+```
+
+Or — if you need spawn + wait + log + buffer-cleanup as one unit — use the higher-level helper:
+
+```elisp
+(claude-repl--spawn-and-wait
+ cmd out-buf
+ :process-name "my-task"
+ :timeout 30
+ :log-tag "my-task"
+ :log-ws ws
+ :extract #'claude-repl--extract-buffer-whole       ; or skip-header-comments
+ :on-completed (lambda (status output) ...)        ; optional
+ :keep-buffer nil)                                  ; t to preserve OUT-BUF
+```
+
+Both helpers dispatch on `current-thread`:
+
+- **Main thread**: legacy `accept-process-output` busy-wait. Safe because the main thread is the only one allowed to drive `[NSApp run]`. Preserved so ert tests (which run on main) and any direct main-thread caller behave identically to before.
+- **Worker thread**: process sentinel + condition variable. The worker blocks on `condition-wait`, which **does** release the global Lisp lock (unlike `accept-process-output` via `ns_select_1`). The sentinel fires on the main thread (legal location for `[NSApp run]`) when the process exits, signals the condvar, and the worker wakes up to return.
+
+### What to avoid
+
+- ❌ `(accept-process-output proc TIMEOUT)` inside `(make-thread ...)` — even with `JUST-THIS-ONE=t`, the syscall still routes through `ns_select_1`. The flag only restricts which process's filters fire, not which select implementation is used.
+- ❌ `(call-process ...)`, `(shell-command-to-string ...)`, `(process-file ...)` inside `(make-thread ...)` when the call captures stdout — same path, same trap. `call-process` with `destination=nil` (output discarded, e.g. `(apply #'call-process "git" nil nil nil "-C" root args)`) is fine because Emacs doesn't need to read the child's pipes.
+- ❌ Polling via `sit-for` / `sleep-for` in a worker thread — same path.
+
+### What's fine
+
+- ✓ Calling `accept-process-output` from the main thread (the historical default; the main-thread branch of `--wait-for-process-exit` does this).
+- ✓ Calling `call-process` from the main thread, with the understanding that it blocks the UI for the duration.
+- ✓ Async `make-process` + `:sentinel` / `:filter` from any thread — sentinels and filters fire on whichever thread is currently servicing events (usually main), not the caller of `make-process`.

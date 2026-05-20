@@ -2,6 +2,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'filenotify)
 (require 'profiler)
 
@@ -1598,9 +1599,11 @@ Flow:
   2. `make-thread' that runs `claude-repl--dispatch-merge-handler ws
      repo-root' — the standard handler-routing entry, which lands on
      the default `cherry-pick' handler (silent=t auto-resolve=t) for
-     repos without a custom handler.  Emacs threads yield during
-     `accept-process-output' (the `claude -p' busy-wait), keeping the
-     main thread responsive throughout.
+     repos without a custom handler.  The worker thread yields to
+     the main thread via `condition-wait' (inside
+     `claude-repl--wait-for-process-exit') while the resolver runs,
+     keeping the main thread responsive — see AGENTS.md
+     `ns_select_1 worker-thread trap' for why this path matters.
   3. `condition-case' inside the thread catches any signal:
        - Success: post a no-op to the main thread.  The merge body's
          own deferred teardown (gns-sockets-close-then ->
@@ -2969,6 +2972,192 @@ working tree allows `git cherry-pick --continue' to fire."
   "Return the stable side-buffer name for TARGET-WS's resolver output."
   (format "*claude-repl-merge-resolver-%s*" target-ws))
 
+;;;; ---- Cross-thread process wait helper ----
+;;
+;; The merge worker thread (spawned by `claude-repl--workspace-merge-async')
+;; must NOT call `accept-process-output' on macOS.  Emacs's NS build routes
+;; every process-output wait through `ns_select_1' (nsterm.m), which calls
+;; `[NSApp run]' — a main-thread-only AppKit API.  When that runs on a
+;; worker thread it monopolizes the global Lisp lock and starves the main
+;; thread for the duration of the wait (often pathologically long because
+;; the worker is also doing NSCFString work AppKit isn't thread-safe for).
+;;
+;; `claude-repl--wait-for-process-exit' dispatches by caller thread:
+;; - Main thread → historical busy-wait (safe; main thread owns NSApp run).
+;; - Worker thread → process sentinel + condition variable.  The worker
+;;   blocks on `condition-wait', which DOES release the global Lisp lock,
+;;   and the sentinel fires on the main thread (where `[NSApp run]' is
+;;   legal) when PROC exits, signalling the condvar to wake the worker.
+;;
+;; See AGENTS.md "ns_select_1 worker-thread trap" for the full citations.
+
+(defun claude-repl--wait-for-process-exit (proc timeout-seconds &optional log-tag log-ws)
+  "Synchronously block until PROC exits or TIMEOUT-SECONDS elapses.
+Returns the process exit status (integer) on clean exit, or the symbol
+`timeout' when the deadline elapses (PROC is `delete-process'd as a
+side effect on timeout).
+
+Dispatches by caller thread to avoid the macOS worker-thread hazard
+described in this section's preamble.  LOG-TAG and LOG-WS, when both
+non-nil, are used to emit a single completion log line at the end of
+the wait."
+  (if (eq (current-thread) main-thread)
+      (claude-repl--wait-for-process-exit--main proc timeout-seconds log-tag log-ws)
+    (claude-repl--wait-for-process-exit--worker proc timeout-seconds log-tag log-ws)))
+
+(defun claude-repl--wait-for-process-exit--main (proc timeout-seconds log-tag log-ws)
+  "Main-thread implementation of `claude-repl--wait-for-process-exit'.
+Busy-waits via `accept-process-output'.  Safe on the main thread because
+`[NSApp run]' is legal there."
+  (let* ((started-at (float-time))
+         (deadline (+ started-at timeout-seconds))
+         (timed-out nil))
+    (while (and (process-live-p proc) (not timed-out))
+      (accept-process-output proc 0.2 nil t)
+      (when (> (float-time) deadline)
+        (setq timed-out t)
+        (delete-process proc)))
+    (let ((status (if timed-out 'timeout (process-exit-status proc))))
+      (when (and log-tag log-ws)
+        (claude-repl--log log-ws
+                          "%s: process exited status=%S elapsed=%.1fs (main-thread wait)"
+                          log-tag status (- (float-time) started-at)))
+      status)))
+
+(defun claude-repl--wait-for-process-exit--worker (proc timeout-seconds log-tag log-ws)
+  "Worker-thread implementation of `claude-repl--wait-for-process-exit'.
+Blocks on a condition variable signalled by a process sentinel and a
+timeout timer.  Does NOT call `accept-process-output' (which would
+route through `ns_select_1' and trap the worker in main-thread-only
+AppKit code on macOS)."
+  (let* ((started-at (float-time))
+         (mutex (make-mutex
+                 (format "claude-repl-await-%s"
+                         (or (ignore-errors (process-name proc)) "proc"))))
+         (condvar (make-condition-variable mutex))
+         (done nil)
+         (status nil)
+         (timeout-timer nil))
+    (set-process-sentinel
+     proc
+     (lambda (p _event)
+       (when (memq (process-status p) '(exit signal))
+         (with-mutex mutex
+           (unless done
+             (setq done t)
+             (setq status (process-exit-status p))
+             (condition-notify condvar))))))
+    (setq timeout-timer
+          (run-at-time
+           timeout-seconds nil
+           (lambda ()
+             (with-mutex mutex
+               (unless done
+                 (setq done t)
+                 (setq status 'timeout)
+                 (ignore-errors (delete-process proc))
+                 (condition-notify condvar))))))
+    (unwind-protect
+        (with-mutex mutex
+          (while (not done)
+            (condition-wait condvar)))
+      (when (timerp timeout-timer) (cancel-timer timeout-timer)))
+    (when (and log-tag log-ws)
+      (claude-repl--log log-ws
+                        "%s: process exited status=%S elapsed=%.1fs (worker-thread wait)"
+                        log-tag status (- (float-time) started-at)))
+    status))
+
+;;;; ---- High-level spawn + wait + extract + log ----
+;;
+;; `claude-repl--invoke-auto-resolve-claude' and
+;; `claude-repl--invoke-auto-resolve-verify' share the same shape:
+;; spawn a process, wait for it (via the thread-aware helper above),
+;; extract its captured stdout/stderr from a buffer, log the result,
+;; and (sometimes) kill the buffer.  `claude-repl--spawn-and-wait'
+;; below is that shared shape; the two extractor helpers handle the
+;; two extraction policies in use (whole-buffer vs. header-stripped).
+
+(defun claude-repl--extract-buffer-whole (buf)
+  "Return the entire contents of live buffer BUF as a string."
+  (with-current-buffer buf
+    (buffer-substring-no-properties (point-min) (point-max))))
+
+(defun claude-repl--extract-buffer-skip-header-comments (buf)
+  "Return BUF contents with leading `#'/blank header lines stripped.
+The merge auto-resolve flow inserts a `# claude-repl merge resolver
+— ...' header block at the top of its side buffer before spawning
+the resolver, so the actual resolver stdout/stderr begins after that
+block.  This extractor skips the header so only the resolver's real
+output makes it into the log (the header is decorative and leaking
+it adds noise to post-mortems)."
+  (with-current-buffer buf
+    (save-excursion
+      (goto-char (point-min))
+      (while (and (not (eobp))
+                  (looking-at "^#\\|^$"))
+        (forward-line 1))
+      (buffer-substring-no-properties (point) (point-max)))))
+
+(cl-defun claude-repl--spawn-and-wait
+    (cmd out-buf
+         &key process-name timeout log-tag log-ws
+              (extract #'claude-repl--extract-buffer-whole)
+              on-completed
+              keep-buffer)
+  "Spawn CMD via `start-process' (named PROCESS-NAME) in the current
+`default-directory', writing output into OUT-BUF.  Block via
+`claude-repl--wait-for-process-exit' (thread-aware, safe on worker
+threads on macOS) until the process exits or TIMEOUT seconds elapse.
+Then run the EXTRACT callback on OUT-BUF, log the exit status + the
+extracted output via `claude-repl--log' under LOG-TAG / LOG-WS, run
+the optional ON-COMPLETED callback, and finally kill OUT-BUF unless
+KEEP-BUFFER is non-nil.
+
+Returns the process exit status (integer) on completion, or the
+symbol `timeout' when the deadline elapses.
+
+Keyword args:
+- :PROCESS-NAME — string name for `start-process'.
+- :TIMEOUT — seconds before forced termination + `timeout' return.
+- :LOG-TAG — prefix string for invocation/exit log lines (e.g.
+  \"auto-resolve\" or \"auto-resolve-verify\").
+- :LOG-WS — workspace argument forwarded to `claude-repl--log'.
+- :EXTRACT — `(lambda (buf) ...)' returning the string to log.
+  Default: `claude-repl--extract-buffer-whole'.  Pass
+  `claude-repl--extract-buffer-skip-header-comments' to strip a
+  caller-inserted `#'-prefixed header block before logging.
+- :ON-COMPLETED — optional `(lambda (status output) ...)' called
+  AFTER the exit log line but BEFORE buffer cleanup.  Use for
+  annotations the caller wants to write into OUT-BUF (e.g. the
+  `# exit: %S' marker in the merge resolver side buffer).
+- :KEEP-BUFFER — when non-nil, OUT-BUF is left alive after return.
+  Otherwise OUT-BUF is killed (only if still live)."
+  (let ((proc (apply #'start-process process-name out-buf cmd)))
+    (claude-repl--log log-ws
+                      "%s: invoking dir=%s cmd=%S"
+                      log-tag default-directory cmd)
+    (set-process-query-on-exit-flag proc nil)
+    (let* ((status (claude-repl--wait-for-process-exit
+                    proc timeout log-tag log-ws))
+           (extract-started (float-time))
+           (output (when (buffer-live-p out-buf)
+                     (funcall extract out-buf))))
+      (claude-repl--log log-ws
+                        "%s: output extracted chars=%d in %.2fs"
+                        log-tag (length (or output ""))
+                        (- (float-time) extract-started))
+      (claude-repl--log log-ws
+                        "%s: exited status=%S output-chars=%d output follows:\n%s"
+                        log-tag status
+                        (length (or output ""))
+                        (or output ""))
+      (when on-completed
+        (funcall on-completed status output))
+      (unwind-protect status
+        (unless keep-buffer
+          (when (buffer-live-p out-buf) (kill-buffer out-buf)))))))
+
 (defun claude-repl--invoke-auto-resolve-claude (root prompt &optional target-ws)
   "Synchronously invoke the auto-resolution `claude -p' in repo at ROOT.
 PROMPT is appended as the final positional argument to `claude -p' —
@@ -3020,94 +3209,33 @@ without spawning an actual `claude' process."
                             (insert (format "# cmd: %S\n\n" cmd))))
                         buf)
                     (generate-new-buffer " *claude-auto-resolve*")))
-         (default-directory (file-name-as-directory root))
-         (proc (apply #'start-process
-                      "claude-auto-resolve" out-buf cmd)))
-    (claude-repl--log target-ws
-                      "auto-resolve: invoking claude -p root=%s cmd=%S"
-                      root cmd)
-    (set-process-query-on-exit-flag proc nil)
-    (let* ((started-at (float-time))
-           (deadline (+ started-at claude-repl-auto-resolve-conflicts-timeout))
-           (timed-out nil)
-           ;; Heartbeat cadence: log every Nth iteration of the busy-wait
-           ;; so a multi-minute hang shows lifeness inside the loop.  N=25
-           ;; iterations × 0.2s ≈ 5s between heartbeats.  Cheap (one log
-           ;; line per heartbeat) and bounded (only fires while looping).
-           (iter 0))
-      (while (and (process-live-p proc) (not timed-out))
-        ;; JUST-THIS-ONE=t restricts the C-level read loop to PROC's
-        ;; output only — without it, this call also services output
-        ;; from every other subprocess Emacs has open (vterms across
-        ;; all workspaces, async git, etc.), holding the global Lisp
-        ;; lock through that aggregate workload.  In setups with many
-        ;; chatty subprocesses (e.g. ~100+ vterms), the inner C loop
-        ;; never reaches its timeout boundary because foreign output
-        ;; keeps arriving, the worker thread holds the lock
-        ;; indefinitely, and the main thread starves on it.  See
-        ;; AGENTS.md "accept-process-output gotcha".
-        (accept-process-output proc 0.2 nil t)
-        (setq iter (1+ iter))
-        (when (zerop (mod iter 25))
-          (claude-repl--log target-ws
-                            "auto-resolve: busy-wait alive iter=%d elapsed=%.1fs proc-live=%s"
-                            iter (- (float-time) started-at)
-                            (if (process-live-p proc) "t" "nil")))
-        (when (> (float-time) deadline)
-          (setq timed-out t)
-          (delete-process proc)))
-      (claude-repl--log target-ws
-                        "auto-resolve: busy-wait exited iters=%d elapsed=%.1fs timed-out=%s proc-status=%s"
-                        iter (- (float-time) started-at)
-                        (if timed-out "t" "nil")
-                        (ignore-errors (process-status proc)))
-      (let* ((status (if timed-out 'timeout (process-exit-status proc)))
-             ;; Capture the process output BEFORE annotating the side
-             ;; buffer so our own "# exit:" marker does not leak into
-             ;; the logged text.  Strip the inserted header block in
-             ;; the target-ws case so only the resolver's actual
-             ;; stdout/stderr makes it into the log.
-             (extract-started (float-time))
-             (process-output
-              (when (buffer-live-p out-buf)
-                (with-current-buffer out-buf
-                  (if target-ws
-                      (save-excursion
-                        (goto-char (point-min))
-                        (while (and (not (eobp))
-                                    (looking-at "^#\\|^$"))
-                          (forward-line 1))
-                        (buffer-substring-no-properties
-                         (point) (point-max)))
-                    (buffer-substring-no-properties
-                     (point-min) (point-max)))))))
-        (claude-repl--log target-ws
-                          "auto-resolve: process-output extracted chars=%d in %.2fs"
-                          (length (or process-output ""))
-                          (- (float-time) extract-started))
-        (when (and target-ws (buffer-live-p out-buf))
-          (with-current-buffer out-buf
-            (let ((inhibit-read-only t))
-              (goto-char (point-max))
-              (insert (format "\n# exit: %S\n" status)))))
-        ;; Mirror captured stdout/stderr into the logfile so the
-        ;; resolver's response is greppable and survives session
-        ;; restart — the side buffer (when present) is only for live
-        ;; inspection, not the canonical record.
-        (let ((log-started (float-time)))
-          (claude-repl--log target-ws
-                            "auto-resolve: claude -p exited status=%S output-chars=%d output follows:\n%s"
-                            status
-                            (length (or process-output ""))
-                            (or process-output ""))
-          (claude-repl--log target-ws
-                            "auto-resolve: log-write took %.2fs"
-                            (- (float-time) log-started)))
-        (cond
-         (target-ws status)
-         (t
-          (unwind-protect status
-            (when (buffer-live-p out-buf) (kill-buffer out-buf)))))))))
+         (default-directory (file-name-as-directory root)))
+    (claude-repl--spawn-and-wait
+     cmd out-buf
+     :process-name "claude-auto-resolve"
+     :timeout claude-repl-auto-resolve-conflicts-timeout
+     :log-tag "auto-resolve"
+     :log-ws target-ws
+     ;; The target-ws case populates a header block at the top of
+     ;; the side buffer (lines starting with `#'); strip those from
+     ;; the log so only the resolver's actual stdout/stderr is
+     ;; logged.  Non-target-ws case has no header to strip.
+     :extract (if target-ws
+                  #'claude-repl--extract-buffer-skip-header-comments
+                #'claude-repl--extract-buffer-whole)
+     ;; When the side buffer survives (target-ws case), annotate it
+     ;; with the final exit status so a human inspecting the buffer
+     ;; sees how the resolver finished without consulting the log.
+     :on-completed (when target-ws
+                     (lambda (status _output)
+                       (when (buffer-live-p out-buf)
+                         (with-current-buffer out-buf
+                           (let ((inhibit-read-only t))
+                             (goto-char (point-max))
+                             (insert (format "\n# exit: %S\n" status)))))))
+     ;; Keep the side buffer alive for live inspection in the
+     ;; target-ws case; kill the anonymous temp buffer otherwise.
+     :keep-buffer target-ws)))
 
 (defun claude-repl--auto-resolve-verify-cmd (root)
   "Resolve `claude-repl-auto-resolve-verify-command' to a concrete command list.
@@ -3146,48 +3274,14 @@ the merge) can be diagnosed from the persistent logfile alone.
 
 Factored out as its own function so tests can stub the subprocess
 without spawning the project's real test runner."
-  (let* ((out-buf (generate-new-buffer " *claude-auto-resolve-verify*"))
-         (default-directory (file-name-as-directory root))
-         (proc (apply #'start-process
-                      "claude-auto-resolve-verify" out-buf command)))
-    (claude-repl--log nil
-                      "auto-resolve-verify: invoking root=%s cmd=%S"
-                      root command)
-    (set-process-query-on-exit-flag proc nil)
-    (let* ((started-at (float-time))
-           (deadline (+ started-at claude-repl-auto-resolve-verify-timeout))
-           (timed-out nil)
-           (iter 0))
-      (while (and (process-live-p proc) (not timed-out))
-        ;; JUST-THIS-ONE=t — see the sibling fix in
-        ;; `claude-repl--invoke-auto-resolve-claude' for rationale.
-        ;; Same hazard: without it, the verify busy-wait services the
-        ;; global subprocess fleet and starves the main thread.
-        (accept-process-output proc 0.2 nil t)
-        (setq iter (1+ iter))
-        (when (zerop (mod iter 25))
-          (claude-repl--log nil
-                            "auto-resolve-verify: busy-wait alive iter=%d elapsed=%.1fs proc-live=%s"
-                            iter (- (float-time) started-at)
-                            (if (process-live-p proc) "t" "nil")))
-        (when (> (float-time) deadline)
-          (setq timed-out t)
-          (delete-process proc)))
-      (claude-repl--log nil
-                        "auto-resolve-verify: busy-wait exited iters=%d elapsed=%.1fs timed-out=%s proc-status=%s"
-                        iter (- (float-time) started-at)
-                        (if timed-out "t" "nil")
-                        (ignore-errors (process-status proc)))
-      (let ((status (if timed-out 'timeout (process-exit-status proc)))
-            (output (when (buffer-live-p out-buf)
-                      (with-current-buffer out-buf
-                        (buffer-substring-no-properties
-                         (point-min) (point-max))))))
-        (claude-repl--log nil
-                          "auto-resolve-verify: exited status=%S output-chars=%d output follows:\n%s"
-                          status (length (or output "")) (or output ""))
-        (unwind-protect status
-          (when (buffer-live-p out-buf) (kill-buffer out-buf)))))))
+  (let ((out-buf (generate-new-buffer " *claude-auto-resolve-verify*"))
+        (default-directory (file-name-as-directory root)))
+    (claude-repl--spawn-and-wait
+     command out-buf
+     :process-name "claude-auto-resolve-verify"
+     :timeout claude-repl-auto-resolve-verify-timeout
+     :log-tag "auto-resolve-verify"
+     :log-ws nil)))
 
 (defun claude-repl--auto-resolve-verify-passes-p (target-ws root)
   "Run the configured verify command and return t when it passes.
@@ -3753,10 +3847,12 @@ side-effect of asynchronous ancestry polling."
 ;; Using CHERRY_PICK_HEAD directly (rather than a tracked flag) trades a
 ;; miniscule race window for a much simpler invariant: the in-flight
 ;; signal is whatever git itself reports.  Emacs is single-threaded, so
-;; the only re-entrancy window is the `accept-process-output' wait
-;; inside `claude-repl--invoke-auto-resolve-claude' (auto-resolve mode),
-;; during which file-watcher callbacks can fire and dispatch a second
-;; merge command.  The queue is the serialization point for that case.
+;; the only re-entrancy window is the process-wait inside
+;; `claude-repl--invoke-auto-resolve-claude' (auto-resolve mode) —
+;; whether that's the historical `accept-process-output' busy-wait or
+;; the worker-thread `condition-wait', the main thread is free to
+;; dispatch file-watcher callbacks (and thus another merge command)
+;; during it.  The queue is the serialization point for that case.
 
 (defvar claude-repl--merge-queue nil
   "FIFO queue of merge requests deferred behind an in-flight cherry-pick.
@@ -3777,8 +3873,8 @@ Iterates `claude-repl--workspaces' and checks each `:project-dir' for
 CHERRY_PICK_HEAD via `claude-repl--cherry-pick-in-progress-p'.  Used
 as the gate for `claude-repl--workspace-merge-into-source' so a second
 merge request arriving while one is mid-cherry-pick (e.g. via the
-auto-resolve `accept-process-output' window) is deferred onto the
-queue rather than racing the live cherry-pick."
+auto-resolve process-wait window) is deferred onto the queue rather
+than racing the live cherry-pick."
   (catch 'found
     (maphash
      (lambda (_ws plist)
@@ -3843,8 +3939,8 @@ branches of `claude-repl--workspace-merge-do'.
 Persisted alongside `claude-repl--merge-queue' in the workspace snapshot
 file so that a hard Emacs termination mid-cherry-pick (e.g. during the
 synchronous headless `claude -p' auto-resolve, which the worker thread
-busy-waits on with `accept-process-output') can be detected and
-recovered by `claude-repl--early-recover-orphan-cherry-picks' at the
+blocks on via `claude-repl--wait-for-process-exit') can be detected
+and recovered by `claude-repl--early-recover-orphan-cherry-picks' at the
 top of `config.el' on the next Emacs start.  The early recovery runs
 BEFORE any module file is required, so even when the orphan has left
 `<<<<<<<' markers in `.el' files in the master worktree (which would

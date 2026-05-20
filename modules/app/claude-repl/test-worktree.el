@@ -2299,6 +2299,134 @@ make no edits when uncertain."
     (should (string-match-p "CONCEPTUALLY ORTHOGONAL" p))
     (should (string-match-p "make NO edits" p))))
 
+;;;; ---- Tests: spawn + wait helpers ----
+
+(ert-deftest claude-repl-test-extract-buffer-whole-returns-whole-contents ()
+  "`claude-repl--extract-buffer-whole' returns the entire buffer
+contents, including any leading `#'-style header lines.  Used as the
+default extractor for `claude-repl--spawn-and-wait' when no header is
+expected."
+  (let ((buf (generate-new-buffer " *test-extract-whole*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (insert "# header line\nactual content\n"))
+          (should (equal (claude-repl--extract-buffer-whole buf)
+                         "# header line\nactual content\n")))
+      (kill-buffer buf))))
+
+(ert-deftest claude-repl-test-extract-buffer-skip-header-comments-strips-header ()
+  "`claude-repl--extract-buffer-skip-header-comments' skips leading
+`#'-prefixed lines and leading blank lines, returning only the
+content after the header block.  The merge resolver flow uses this
+to avoid logging its own decorative header alongside the resolver's
+real output."
+  (let ((buf (generate-new-buffer " *test-extract-skip*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (insert "# claude-repl merge resolver — ws1\n")
+            (insert "# root: /tmp\n")
+            (insert "# cmd: (claude -p ...)\n")
+            (insert "\n")
+            (insert "ACTUAL RESOLVER OUTPUT\n"))
+          (should (equal
+                   (claude-repl--extract-buffer-skip-header-comments buf)
+                   "ACTUAL RESOLVER OUTPUT\n")))
+      (kill-buffer buf))))
+
+(ert-deftest claude-repl-test-extract-buffer-skip-header-empty-when-only-header ()
+  "When the buffer contains only header lines (no real content), the
+skip-header extractor returns an empty string rather than the
+header text — header lines must never leak into the log."
+  (let ((buf (generate-new-buffer " *test-extract-only-header*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (insert "# only header\n# nothing else\n"))
+          (should (equal
+                   (claude-repl--extract-buffer-skip-header-comments buf)
+                   "")))
+      (kill-buffer buf))))
+
+(ert-deftest claude-repl-test-wait-for-process-exit-dispatches-main-thread-to-main-impl ()
+  "On the main thread (ert tests run here) `--wait-for-process-exit'
+dispatches to `--wait-for-process-exit--main' rather than the
+worker-thread sentinel + condvar implementation.  Verifies the
+thread-check guard is wired correctly."
+  (let ((called-main nil)
+        (called-worker nil))
+    (cl-letf (((symbol-function 'claude-repl--wait-for-process-exit--main)
+               (lambda (&rest _) (setq called-main t) 0))
+              ((symbol-function 'claude-repl--wait-for-process-exit--worker)
+               (lambda (&rest _) (setq called-worker t) 0)))
+      (claude-repl--wait-for-process-exit nil 1))
+    (should called-main)
+    (should-not called-worker)))
+
+(ert-deftest claude-repl-test-spawn-and-wait-kills-buffer-when-keep-buffer-nil ()
+  "Default behavior of `claude-repl--spawn-and-wait' is to kill OUT-BUF
+after extracting + logging output.  Callers (e.g. verify) rely on this
+to avoid leaking temp buffers."
+  (let* ((out-buf (generate-new-buffer " *test-spawn-and-wait-kill*"))
+         (real-start (symbol-function 'start-process)))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name _buf &rest _cmd)
+                 (funcall real-start "stub"
+                          (generate-new-buffer " *stub*") "true")))
+              ((symbol-function 'claude-repl--log) (lambda (&rest _) nil)))
+      (claude-repl--spawn-and-wait
+       '("true") out-buf
+       :process-name "test" :timeout 5
+       :log-tag "test" :log-ws nil)
+      (should-not (buffer-live-p out-buf)))))
+
+(ert-deftest claude-repl-test-spawn-and-wait-preserves-buffer-when-keep-buffer-t ()
+  "When :KEEP-BUFFER is non-nil, `claude-repl--spawn-and-wait' leaves
+OUT-BUF alive after return so callers can use it for live inspection
+(the merge resolver side-buffer case)."
+  (let* ((out-buf (generate-new-buffer " *test-spawn-and-wait-keep*"))
+         (real-start (symbol-function 'start-process)))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name _buf &rest _cmd)
+                 (funcall real-start "stub"
+                          (generate-new-buffer " *stub*") "true")))
+              ((symbol-function 'claude-repl--log) (lambda (&rest _) nil)))
+      (unwind-protect
+          (progn
+            (claude-repl--spawn-and-wait
+             '("true") out-buf
+             :process-name "test" :timeout 5
+             :log-tag "test" :log-ws nil
+             :keep-buffer t)
+            (should (buffer-live-p out-buf)))
+        (when (buffer-live-p out-buf) (kill-buffer out-buf))))))
+
+(ert-deftest claude-repl-test-spawn-and-wait-calls-on-completed-callback ()
+  "When :ON-COMPLETED is supplied, `claude-repl--spawn-and-wait' invokes
+it with (status output) AFTER the exit log line BEFORE buffer cleanup.
+Used by the merge resolver to annotate the side buffer with the final
+`# exit:' marker."
+  (let* ((out-buf (generate-new-buffer " *test-spawn-and-wait-cb*"))
+         (real-start (symbol-function 'start-process))
+         (captured nil))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name _buf &rest _cmd)
+                 (funcall real-start "stub"
+                          (generate-new-buffer " *stub*") "true")))
+              ((symbol-function 'claude-repl--log) (lambda (&rest _) nil)))
+      (claude-repl--spawn-and-wait
+       '("true") out-buf
+       :process-name "test" :timeout 5
+       :log-tag "test" :log-ws nil
+       :on-completed (lambda (status output)
+                       (setq captured (list status output)))))
+    (should (numberp (car captured)))
+    (should (eql (car captured) 0))
+    ;; Output captured pre-cleanup; not asserting exact content because
+    ;; the stub doesn't write anything meaningful to out-buf.
+    (should (stringp (or (cadr captured) "")))))
+
 ;;;; ---- Tests: auto-resolve-conflicts-extra-args default ----
 
 (ert-deftest claude-repl-test-auto-resolve-extra-args-includes-dangerously-skip-permissions ()
@@ -2381,7 +2509,7 @@ buffer name."
       (claude-repl--invoke-auto-resolve-claude "/tmp" "prompt" "ws1"))
     (should (cl-some (lambda (l) (string-match-p "RESOLVER STDOUT" l)) logged))
     (should (cl-some (lambda (l)
-                       (string-match-p "auto-resolve: claude -p exited status=" l))
+                       (string-match-p "auto-resolve: exited status=" l))
                      logged))))
 
 (ert-deftest claude-repl-test-invoke-auto-resolve-claude-log-omits-header-block ()
