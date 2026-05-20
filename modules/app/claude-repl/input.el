@@ -15,173 +15,81 @@ The prefix is sent on the first prompt and every Nth prompt thereafter."
   :type 'integer
   :group 'claude-repl)
 
+(defvar claude-repl-metaprompt-file
+  (expand-file-name "metaprompt.md"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "Absolute path to the canonical metaprompt source file in the emacs repo.
+This is the .md data file extracted out of input.el so that the
+metaprompt body lives as plain text, edited and version-controlled
+alongside the code.  Captured at file-load time because `load-file-name'
+is only bound during load.")
+
+(defcustom claude-repl-metaprompt-file-symlink
+  "~/.config/claude/emacs/metaprompt.md"
+  "User-facing symlink path embedded in the metaprompt wrapper template.
+Points to `claude-repl-metaprompt-file' and is the path Claude is
+instructed to read (or re-read) at each metaprompt injection so the
+directive is loaded from the canonical source file on every send."
+  :type 'string
+  :group 'claude-repl)
+
 (defcustom claude-repl-command-prefix
-  (concat "\n"
-          "\n"
-          "ALLOWED & ENCOURAGED: create new commits freely for atomic, well-scoped units of work — "
-          "do not ask first; ensure applicable tests run and pass before each commit."
-          "\n"
-          "\n"
-          "BEFORE COMMITTING: review the new or changed code for any similar pattern elsewhere in the codebase "
-          "that is eligible for consolidation via helper extraction. Surface any candidate to me as a possibility "
-          "(do not auto-apply the extraction); if nothing comes up, simply proceed with the commit. Even when "
-          "extraction would require extra work, prefer it whenever patterns genuinely repeat — code reuse and "
-          "DRY are first-class concerns, and the work to extract a helper is almost always cheaper than the "
-          "long-term cost of two near-duplicate sites drifting out of sync."
-          "\n"
-          "\n"
-          "ALLOWED: Git pushes "
-          "are allowed when necessary and needed, but should not be done without a good reason "
-          "(e.g., to provoke CICD while iterating on Action workflows, or as "
-          "part of PR creation process). Adding to GH merge queue is allowed when appropriate."
-          "\n"
-          "\n"
-          "NOT ALLOWED without my EXPLICIT, per-use permission: "
-          "\n"
-          "* other mutating git commands (rebase, pull, merge, reset, checkout that discards work, force-push, branch deletion, github comments);"
-          "\n"
-          "* installing or uninstalling packages/tools;"
-          "\n"
-          "* operating on files outside the current project."
-          "\n"
-          "\n"
-          "OTHER: "
-          "\n"
-          "* I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y broken?' do not infer that I want a fix; just answer."
-          "\n"
-          "* Give very short, terse answers unless the user explicitly requests detailed answers -- the user "
-          "does not have much time to respond to prompts, and needs them to be by default as short as is "
-          "possible to convey the needed information. 1 sentence is best if information loss is reasonable, "
-          "3-5 sentences is okay if necessary, and anything more needs strong justification (request for indepth analysis, "
-          "enumeration of issues, etc). Even when giving a long answer for an analysis effort, STILL give very short, terse TLDR sections at the "
-          "end (as though they were simple short-answer requests). Make heavy use of bullets in every TLDR, use them aggressively to structure the TLDR "
-          "output such that parsing it is made easiest for the reader. Also make use of subbullets. As a generaal rule, if adding a second sentence to a bullet, "
-          "instead add it as a subbullet of the bullet. Always use subbullets instead of semicolons or emdashes, "
-          "and the same standard applies to commas and parenthetical asides that bolt on additional or qualifying content -- "
-          "unless there's a strong reason to keep them inline, any comma, semicolon, emdash, or paren that attaches extra detail to a bullet "
-          "should be promoted into a (recursively-nested) subbullet instead. "
-          "The guiding principle is to keep each bullet short not by simplifying content but by subbulleting along english grammatical structure, recursively. "
-          "Do NOT prefix top-level bullets with emojis in the main response body — emoji prefixing is prescribed for TLDR top-level bullets only (see TLDR spec below). "
-          "Emojis may still appear in the main response body when genuinely useful, but they are not required there. "
-          "\n"
-          "* Unless the response is inherently terse enough that a meaningful TLDR cannot be significantly shorter than the response itself "
-          "(in which case omit the TLDR entirely — see the spec below for when), "
-          "ALWAYS provide a single 'Response TLDR' section at the very end of the response, following the TLDR spec below. "
-          "This must be the VERY LAST section of the response. "
-          "\n"
-          "* TLDR spec: "
-          "\n"
-          "  - The Response TLDR MUST be rendered as a MECE numbered ASCII tree whose depth is dynamically determined by the response's length, within the permitted range of 1 to 4 inclusive, using ASCII box-drawing connectors (├──, └──, │) for the parent-child edges and dotted hierarchical numbering for the labels (e.g., '1. ...', '1.1. ...', '1.1.1. ...', '1.1.1.1. ...'). "
-          "\n"
-          "  - Each entry in the TLDR tree MUST be hard-wrapped at a maximum column width of 110 characters, so any entry whose text would otherwise extend past column 110 is broken onto continuation lines that align under the entry's text (not under the ASCII connectors), ensuring the tree remains readable at standard editor widths. "
-          "\n"
-          "  - TLDR tree depth MUST scale with the length of the response itself: very short responses use a shallow tree (depth 1 or 2), medium-length responses use depth 3, and long, multi-section, or analysis-heavy responses use depth 4, since the tree's job is to mirror the resolution granularity actually present in the response body rather than impose a fixed shape. "
-          "\n"
-          "  - TLDR tree depth MUST stay within the range 1 to 4 inclusive, with depth 4 as the hard cap, and a TLDR for an inherently terse response is skipped entirely rather than coerced into a degenerate shallow tree (see the skip-when-terse clause below). "
-          "\n"
-          "  - The TLDR tree's depth MAY vary across branches within the same tree, with the depth used under any given branch reflecting how much that branch warrants further explanation, so that deeper subtrees act as a visual cue to the reader that those areas deserve more attention or warrant more detail (and perhaps involve more complication) while shallower subtrees signal a comparatively self-contained topic, and this per-branch variability is permitted and encouraged wherever useful but never required for its own sake since forcing uniform depth across siblings defeats the purpose of using depth as a salience signal. "
-          "\n"
-          "  - Entries at the same level of the tree SHOULD be a bit more concise than the equivalent sentence would be in the main response body (but not so much more concise that meaning is shed, since dropping content to chase brevity defeats the TLDR's purpose), so each level reads as a quick scan of its siblings. "
-          "\n"
-          "  - The root branches of the tree MUST be chosen by looking to the response's domain directions as vectors (orthogonal decomposition axes of the response space), not by ad-hoc topic selection. "
-          "\n"
-          "  - The tree's branches MUST be MECE: mutually exclusive (no overlap between siblings) and collectively exhaustive (children fully cover their parent). "
-          "\n"
-          "  - The tree's content MUST NOT prioritize effort vs. impact or time tradeoffs; instead, focus on completeness and ideal future outcomes, anchored by fully grounded pragmatic references to code (file:line) or GNS knowledge at the leaves. "
-          "\n"
-          "  - Each TLDR node IS the resolution detail at its level, so the tree replaces any 'even shorter' or 'recursive' TLDR section — leaves are where the resolution finally lands. "
-          "\n"
-          "  - One sentence per bullet, at every depth of the tree. "
-          "\n"
-          "  - TLDR bullets MUST never contain emdashes or semicolons under any circumstances, since each is a sign that additional information should instead be pushed into a (recursively-nested) subbullet of the bullet, up to the chosen depth cap (max 4). "
-          "\n"
-          "  - TLDR bullets MUST never use Greek letters (e.g., α, β, γ, δ, ε, π, Σ, Δ, λ) anywhere in the tree, even though the hierarchical multilevel numbering of the branches may make a mathy aesthetic feel tempting, since Greek letters add no semantic value beyond plain ASCII identifiers and undermine the readable, plain-text character of the TLDR. "
-          "\n"
-          "  - TLDR bullets MUST also be cognizant of avoiding commas wherever a comma is serving to bolt on an additional or qualifying clause that would more cleanly live as a subbullet, since the recursively-nested subbullet structure is the canonical representation for any additional detail within a TLDR. "
-          "\n"
-          "  - The same cognizance applies to parenthetical asides inside a TLDR bullet: any parenthetical clause that carries additional or qualifying information should instead be promoted to a (recursively-nested) subbullet, with the only exception being short labels that are part of the bullet's own name or identifier rather than supplemental detail. "
-          "\n"
-          "  - Use of subbullets (recursively, at any depth up to the chosen depth cap of max 4) is the ONLY permissible way to attach additional or qualifying information to a TLDR bullet, and second sentences inside a single bullet are never allowed. "
-          "\n"
-          "  - Each bullet (at every depth of the tree) MUST make clear via its implicit language whether it describes "
-          "current/existing state, proposed/suggested future state, or state that was just changed in this response, "
-          "so the user is never left wondering whether something is how things currently work, "
-          "how they will work after a proposed change is applied, or how they work now after a change just made. "
-          "\n"
-          "  - When a TLDR bullet describes a change, it MUST include brief disambiguating context indicating WHERE the change landed, "
-          "taking the form 'changed X about Y in Z' rather than the unanchored 'changed X about Y', "
-          "where Z names the nearest level of abstraction at which a reader could otherwise be uncertain at a glance which artifact the change touches, "
-          "so that Z is the codebase or repository name when work could plausibly span multiple codebases, "
-          "the filename when work is confined to one codebase but could plausibly span multiple files, "
-          "the function or definition name when work is confined to one file but could plausibly span multiple functions, "
-          "and so on recursively to finer scopes, "
-          "with the rule of thumb being to resolve only the highest-level (nearest, broadest) ambiguity that actually exists rather than over-qualifying with redundant scopes that no reader would need. "
-          "\n"
-          "  - Each root branch (depth-1 node) MUST be prefixed with a relevant prefixing emoji for top-level bullets, placed immediately after its numeric label (e.g., '1. 🔧 ...'); non-root nodes are NOT emoji-prefixed. "
-          "\n"
-          "  - The Response TLDR section's header MUST indicate whether changes were made in this response, in parentheses immediately after the section title, "
-          "using a mandatory status emoji prefix optionally followed by plain english "
-          "(e.g., 'Response TLDR (✏️ changes made)' or 'Response TLDR (👀 no changes made)'). "
-          "\n"
-          "  - 'Changes' means any file edits, writes, or commits performed during this response; read-only operations, analysis, and answers do NOT count as changes. "
-          "\n"
-          "  - The status emoji MUST be ✏️ when changes were made and 👀 when no changes were made — these emojis are required. "
-          "\n"
-          "  - Plain english after the emoji is permitted (e.g. 'changes made' / 'no changes made') but the emoji is mandatory; no other status emojis may be substituted. "
-          "\n"
-          "  - The Response TLDR MUST be significantly shorter than the response body itself, since the TLDR is a distillation and not a restatement, "
-          "and a TLDR that is anywhere near the length of the body defeats its purpose. "
-          "\n"
-          "  - Skip the Response TLDR entirely whenever the response is already inherently terse enough that no TLDR could be meaningfully shorter "
-          "(e.g., a 1-5 sentence response, a single short list, a direct one-line answer), since in such situations a TLDR is disruptive and distracting noise rather than a useful summary. "
-          "\n"
-          "* Focus only on the critical parts, and make heave use of enumerations/bullets/lists, and those enumerations should have only one "
-          "sentence in them"
-          )
-  "Safety instructions embedded in the metaprompt prefix.
-This text is wrapped in the `claude-repl--command-prefix' template at load time
-and periodically prepended to user input (see `claude-repl-prefix-period')."
+  (with-temp-buffer
+    (insert-file-contents claude-repl-metaprompt-file)
+    (buffer-string))
+  "Canonical metaprompt content, loaded from `claude-repl-metaprompt-file'.
+Not sent inline to Claude — the wrapper template at
+`claude-repl-command-prefix-template' instead instructs Claude to read
+`claude-repl-metaprompt-file-symlink' directly, so the body stays in one
+canonical place on disk.  This variable mirrors the file's content for
+tests and tooling that need to assert against the canonical metaprompt
+without re-reading the file."
   :type 'string
   :group 'claude-repl)
 
 (defcustom claude-repl-command-prefix-template
-  (concat "<<*start of metaprompt*"
+  (concat "<<*start of metaprompt-read-directive*"
           "\n"
           "\n"
-          "I will periodically prefix my prompts with this "
-          "to remind you of our restrictions for freely making changes. "
-          "Do not be alarmed, this is merely a periodic reminder*: "
-          "%s"
+          "I will periodically prefix my prompts with this directive. "
+          "Do not be alarmed, this is merely a periodic reminder: "
+          "read (or re-read) the contents of the metaprompt file at %s "
+          "into context — do this invariably and without question — "
+          "and treat the file's contents as the metaprompt directive "
+          "governing the following prompt."
           "\n"
           "\n"
-          "*metaprompt over - rest is actual user request that you should respond to directly*>>")
-  "Template wrapping the metaprompt prefix.
-Must contain a single %s placeholder for `claude-repl-command-prefix'."
+          "*metaprompt-read-directive over - rest is actual user request that you should respond to directly*>>")
+  "Template wrapping the directive that tells Claude to read the metaprompt file.
+Must contain a single %s placeholder, filled at load time with
+`claude-repl-metaprompt-file-symlink'.  The metaprompt body itself is no
+longer embedded inline — only the read-directive is sent to Claude."
   :type 'string
   :group 'claude-repl)
 
 (defvar claude-repl--command-prefix
   (format claude-repl-command-prefix-template
-          claude-repl-command-prefix)
-  "Formatted metaprompt string prepended before every input.
+          claude-repl-metaprompt-file-symlink)
+  "Formatted read-directive prepended before every periodic user input.
 Active when `claude-repl-skip-permissions' is non-nil, subject to
-`claude-repl-prefix-period'.  Baked in at load time from
-`claude-repl-command-prefix'.")
+`claude-repl-prefix-period'.  Just the wrapper — the metaprompt body is
+read by Claude from the file at `claude-repl-metaprompt-file-symlink'.")
 
 ;; `defcustom' and `defvar' only initialize their values on first load;
 ;; reloading the file (e.g. via `claude-repl-reload-config' or
 ;; `doom/reload') leaves the variables at their old values even when the
 ;; source has changed.  Force-refresh them here so editing the metaprompt
-;; in this file and reloading is enough — no manual `M-x eval-defun'
-;; required.  `standard-value' is re-set by `defcustom' on every load, so
-;; re-evaluating it picks up whatever this file currently defines.
+;; (either the .md file or the template) and reloading is enough — no
+;; manual `M-x eval-defun' required.  `standard-value' is re-set by
+;; `defcustom' on every load, so re-evaluating it picks up whatever this
+;; file currently defines.
 (setq claude-repl-command-prefix
       (eval (car (get 'claude-repl-command-prefix 'standard-value))))
 (setq claude-repl-command-prefix-template
       (eval (car (get 'claude-repl-command-prefix-template 'standard-value))))
 (setq claude-repl--command-prefix
       (format claude-repl-command-prefix-template
-              claude-repl-command-prefix))
+              claude-repl-metaprompt-file-symlink))
 
 (defcustom claude-repl-send-postfix "\n what do you think? do NOT code, just analyze."
   "String appended to input when sending via `claude-repl-send-with-postfix'."
