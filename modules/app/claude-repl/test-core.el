@@ -784,8 +784,14 @@ before return so we don't accumulate hidden buffers across many git calls."
 
 (ert-deftest claude-repl-test-print-git-branch-message ()
   "print-git-branch should include the git branch value in its message."
-  (let ((captured-msg nil))
-    (cl-letf (((symbol-function 'message)
+  ;; Reset the lazy cache so the cl-letf'd boundary wrapper actually fires
+  ;; (otherwise a populated `claude-repl-git-branch' from a prior session
+  ;; or earlier test short-circuits the only call this test exercises).
+  (let ((claude-repl-git-branch nil)
+        (captured-msg nil))
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest _args) "test-branch"))
+              ((symbol-function 'message)
                (lambda (fmt &rest args) (setq captured-msg (apply #'format fmt args)))))
       (claude-repl-print-git-branch)
       (should (stringp captured-msg))
