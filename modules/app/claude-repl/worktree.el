@@ -3036,7 +3036,17 @@ without spawning an actual `claude' process."
            ;; line per heartbeat) and bounded (only fires while looping).
            (iter 0))
       (while (and (process-live-p proc) (not timed-out))
-        (accept-process-output proc 0.2)
+        ;; JUST-THIS-ONE=t restricts the C-level read loop to PROC's
+        ;; output only — without it, this call also services output
+        ;; from every other subprocess Emacs has open (vterms across
+        ;; all workspaces, async git, etc.), holding the global Lisp
+        ;; lock through that aggregate workload.  In setups with many
+        ;; chatty subprocesses (e.g. ~100+ vterms), the inner C loop
+        ;; never reaches its timeout boundary because foreign output
+        ;; keeps arriving, the worker thread holds the lock
+        ;; indefinitely, and the main thread starves on it.  See
+        ;; AGENTS.md "accept-process-output gotcha".
+        (accept-process-output proc 0.2 nil t)
         (setq iter (1+ iter))
         (when (zerop (mod iter 25))
           (claude-repl--log target-ws
@@ -3149,7 +3159,11 @@ without spawning the project's real test runner."
            (timed-out nil)
            (iter 0))
       (while (and (process-live-p proc) (not timed-out))
-        (accept-process-output proc 0.2)
+        ;; JUST-THIS-ONE=t — see the sibling fix in
+        ;; `claude-repl--invoke-auto-resolve-claude' for rationale.
+        ;; Same hazard: without it, the verify busy-wait services the
+        ;; global subprocess fleet and starves the main thread.
+        (accept-process-output proc 0.2 nil t)
         (setq iter (1+ iter))
         (when (zerop (mod iter 25))
           (claude-repl--log nil
