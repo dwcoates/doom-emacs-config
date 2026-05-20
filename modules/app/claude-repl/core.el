@@ -391,37 +391,99 @@ Checks for both .git directory and .git file (worktrees)."
     (claude-repl--log-verbose nil "git-root: dir=%s root=%s" dir root)
     (when root (claude-repl--path-canonical root))))
 
+(defun claude-repl--capture-process-output (program args &optional suppress-stderr timeout)
+  "Run PROGRAM with ARGS, capture stdout, return its trimmed contents.
+Internal helper used by the per-binary capturing wrappers below
+\(`claude-repl--git-string', `claude-repl--git-string-quiet',
+`claude-repl--gh-string-quiet').  Not registered as an external
+boundary in its own right because tests mock the per-binary wrappers,
+which sit one layer above it.
+
+Worker-thread safe: routes the wait through
+`claude-repl--wait-for-process-exit', so on macOS this does NOT trap
+in `ns_select_1' + `[NSApp run]' when called from a non-main thread
+\(unlike `shell-command-to-string', which always does — that was the
+historical hang source for the merge worker).  See AGENTS.md
+`ns_select_1 worker-thread trap'.
+
+SUPPRESS-STDERR controls stderr handling:
+- nil (default): stderr is merged into the same buffer as stdout
+  (matches `shell-command-to-string''s default).
+- non-nil: stderr is captured to a separate throwaway buffer and
+  discarded (matches the `2>/dev/null' piping that the legacy
+  `--git-string-quiet' / `--gh-string-quiet' relied on).
+
+TIMEOUT defaults to 60 seconds.  On expiry the process is killed and
+an empty string is returned — no exception is signalled.  This
+matches the silent-failure contract that the quiet variants rely on:
+init-time callers that may run outside a git repository must not
+explode."
+  (let* ((timeout (or timeout 60))
+         (stdout-buf (generate-new-buffer
+                      (format " *claude-repl-capture-%s*" program)))
+         (stderr-buf (when suppress-stderr
+                       (generate-new-buffer
+                        (format " *claude-repl-capture-%s-stderr*"
+                                program)))))
+    (unwind-protect
+        (let ((proc (if suppress-stderr
+                        (make-process ;; ALLOW-EXTERNAL-BOUNDARY
+                         :name (format "claude-repl-capture-%s" program)
+                         :command (cons program args)
+                         :buffer stdout-buf
+                         :stderr stderr-buf
+                         :connection-type 'pipe
+                         :noquery t)
+                      (apply #'start-process ;; ALLOW-EXTERNAL-BOUNDARY
+                             (format "claude-repl-capture-%s" program)
+                             stdout-buf
+                             program args))))
+          (set-process-query-on-exit-flag proc nil)
+          (let ((status (claude-repl--wait-for-process-exit
+                         proc timeout nil nil)))
+            (cond
+             ((eq status 'timeout) "")
+             (t
+              (with-current-buffer stdout-buf
+                (string-trim
+                 (buffer-substring-no-properties
+                  (point-min) (point-max))))))))
+      (when (buffer-live-p stdout-buf) (kill-buffer stdout-buf))
+      (when (and stderr-buf (buffer-live-p stderr-buf))
+        (kill-buffer stderr-buf)))))
+
 (defun claude-repl--git-string (&rest args)
   "Run a synchronous git command and return its trimmed output.
-ARGS are the git subcommand and arguments.  Each argument is shell-quoted
-before being passed to `shell-command-to-string'.
+ARGS are the git subcommand and arguments.
 Note: stderr is included in the output (Emacs default).  Use
-`claude-repl--git-string-quiet' when errors should be silently swallowed."
-  (string-trim
-   (shell-command-to-string
-    (mapconcat #'shell-quote-argument (cons "git" args) " "))))
+`claude-repl--git-string-quiet' when errors should be silently swallowed.
+
+Routes through `claude-repl--capture-process-output' so this is safe
+to call from worker threads on macOS — `shell-command-to-string'
+would trap in `ns_select_1' + `[NSApp run]'.  See AGENTS.md
+`ns_select_1 worker-thread trap'."
+  (claude-repl--capture-process-output "git" args nil))
 
 (defun claude-repl--git-string-quiet (&rest args)
   "Like `claude-repl--git-string' but suppress stderr.
 Returns an empty string when git fails, rather than error text.
-Suitable for init-time calls that may run outside a git repository."
-  (string-trim
-   (shell-command-to-string
-    (concat (mapconcat #'shell-quote-argument (cons "git" args) " ")
-            " 2>/dev/null"))))
+Suitable for init-time calls that may run outside a git repository.
+
+Routes through `claude-repl--capture-process-output' for worker-thread
+safety on macOS; see `claude-repl--git-string'."
+  (claude-repl--capture-process-output "git" args t))
 
 (defun claude-repl--gh-string-quiet (&rest args)
   "Run a synchronous `gh' command and return its trimmed stdout, suppressing stderr.
-ARGS are the `gh' subcommand and arguments; each is shell-quoted.
-Returns an empty string when `gh' fails (no PR for branch, not
-authenticated, etc.).  The wrapper IS the external boundary for the
-GitHub CLI: tests must mock this function via `cl-letf' rather than
-invoke real `gh' (see AGENTS.md \"No External Processes or External
-State in Tests\")."
-  (string-trim
-   (shell-command-to-string
-    (concat (mapconcat #'shell-quote-argument (cons "gh" args) " ")
-            " 2>/dev/null"))))
+ARGS are the `gh' subcommand and arguments.  Returns an empty string
+when `gh' fails (no PR for branch, not authenticated, etc.).  The
+wrapper IS the external boundary for the GitHub CLI: tests must mock
+this function via `cl-letf' rather than invoke real `gh' (see
+AGENTS.md \"No External Processes or External State in Tests\").
+
+Routes through `claude-repl--capture-process-output' for worker-thread
+safety on macOS; see `claude-repl--git-string'."
+  (claude-repl--capture-process-output "gh" args t))
 
 (defun claude-repl--docker-exit-code (&rest args)
   "Run `docker ARGS' synchronously and return its exit code (stdout discarded).
