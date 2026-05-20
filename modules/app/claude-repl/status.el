@@ -1068,95 +1068,50 @@ For unselected tabs, uses the palette row's `:face' or falls back to
     (when-let ((img (claude-repl--priority-image priority)))
       (propertize " " 'display img))))
 
-(defun claude-repl--composed-state (claude repl &optional ws)
-  "Project CLAUDE and REPL onto the palette's display key.
-Tab color is primarily a function of `:claude-state'.  Two
-`:repl-state' values contribute: `:merged' (workspace's branch has
-been merged into its source, shows the 🔀 badge) and `:dead' (vterm
-died, shows the ❌ badge).  `:merged' takes precedence over `:dead'
-so a merged workspace whose vterm has since died still reads as
-merged.
-
-Optional WS is threaded through for diagnostic logging only; it does
-not affect the mapping.
-
-Every known claude-state is mapped explicitly.  Unknown states error
-hard — no silent fallback.
-
-Rule:
-  :thinking    → :thinking                  (red)
-  :permission  → :permission                 (green + ❓)
-  :init        → :init                       (blue — Claude starting)
-  :done        → :done                       (green — unacknowledged work)
-  :idle        → :idle                       (orange)
-  :stop-failed → :stop-failed                (magenta + ⚠ — turn errored)
-  nil + :merged         → :merged            (default + 🔀)
-  nil + :merge-conflict → :merge-conflict    (default + 💥)
-  nil + :merge-failed   → :merge-failed      (default + ⛔)
-  nil + :dead           → :dead              (default + ❌)
-  nil                   → nil                (no session / unborn)"
-  (cond
-   ((eq claude :thinking)    :thinking)
-   ((eq claude :permission)  :permission)
-   ((eq claude :init)        :init)
-   ((eq claude :done)        :done)
-   ((eq claude :idle)        :idle)
-   ((eq claude :stop-failed) :stop-failed)
-   ((and (null claude) (eq repl :merged)) :merged)
-   ;; `:merge-conflict' takes precedence over `:dead' so a workspace
-   ;; whose vterm later dies still surfaces the conflict signal — the
-   ;; merge failure is the more actionable badge.
-   ((and (null claude) (eq repl :merge-conflict)) :merge-conflict)
-   ;; `:merge-failed' (silent cherry-pick abort, no CHERRY_PICK_HEAD)
-   ;; ranks above `:dead' for the same reason: a blocked merge is the
-   ;; actionable signal, the dead vterm is incidental.
-   ((and (null claude) (eq repl :merge-failed)) :merge-failed)
-   ((and (null claude) (eq repl :dead)) :dead)
-   ((null claude)           nil)
-   (t
-    ;; DIAG: we expected this branch to be unreachable — every writer of
-    ;; :claude-state goes through the typed setter and passes one of the
-    ;; documented keywords. If we hit this, some other path is leaking an
-    ;; unexpected value into the hashmap. Log once per value and return
-    ;; nil so redisplay doesn't blank the tab-bar while we investigate.
-    (claude-repl--log ws
-                      "composed-state: UNKNOWN claude-state %S (type=%s) — returning nil"
-                      claude (type-of claude))
-    nil)))
-
 (defun claude-repl--ws-display-state (ws)
   "Return the palette display key for WS.
-Reads `:claude-state' as the source of truth for tab color when the
-panels are visible.  When the composed state is non-nil AND no Claude
-panel is present in WS's live-or-saved window layout, returns nil
-regardless of state — this suppresses full-tab coloring (state-colored
-name and label badges like ❓/❌/⚠) for workspaces whose panels the
-user has dismissed.  `:claude-state' is preserved on the plist so the
-original color reappears the next time the user reopens panels.  The
-nil-state shortcut avoids calling `claude-repl--ws-claude-open-p' on
+Delegates to `claude-repl--ws-render-status' (the single source of
+truth for visual state across the drawer, tab-bar, and project
+picker), then layers panel-visibility suppression on top: when the
+render-state is non-nil AND no Claude panel is present in WS's
+live-or-saved window layout, returns nil regardless of state — this
+suppresses full-tab coloring (state-colored name and label badges
+like ❓/❌/⚠) for workspaces whose panels the user has dismissed.
+`:claude-state' is preserved on the plist so the original color
+reappears the next time the user reopens panels.  The nil-state
+shortcut avoids calling `claude-repl--ws-claude-open-p' on
 workspaces that have no state to suppress in the first place.
 
-NOTE: this function answers the question \"what state should drive the
-full tab appearance?\".  The orthogonal question \"what state should
-color the [N] bracket alone?\" is answered by
-`claude-repl--ws-bracket-state', which ignores panel visibility so the
-bracket keeps its color when panels are closed."
-  (let ((state (claude-repl--composed-state (claude-repl--ws-claude-state ws)
-                                            (claude-repl--ws-repl-state ws)
-                                            ws)))
-    (if (and state (not (claude-repl--ws-claude-open-p ws)))
-        nil
-      state)))
+UI-boundary tolerance: the tab-bar iterates `persp-names-cache',
+which can briefly contain names the workspace hash doesn't yet know
+about (a mid-creation persp, the `none' sentinel persp).
+`--ws-render-status' would signal `user-error' for those; here we
+short-circuit to nil so rendering proceeds without color or badge.
+This is the documented exception to the no-fallback rule, scoped
+to the renderer-input boundary.
+
+NOTE: this function answers the question \"what state should drive
+the full tab appearance?\".  The orthogonal question \"what state
+should color the [N] bracket alone?\" is answered by
+`claude-repl--ws-bracket-state', which ignores panel visibility so
+the bracket keeps its color when panels are closed."
+  (when (claude-repl--ws-known-p ws)
+    (let ((state (claude-repl--ws-render-status ws)))
+      (if (and state (not (claude-repl--ws-claude-open-p ws)))
+          nil
+        state))))
 
 (defun claude-repl--ws-bracket-state (ws)
-  "Return WS's underlying composed state for [N]-bracket coloring.
+  "Return WS's render-state for [N]-bracket coloring.
 Unlike `claude-repl--ws-display-state', this does NOT suppress when
 panels are closed: the bracket should retain the state's color even
 for workspaces whose Claude panels have been dismissed, so the
-claude-state remains visible at a glance."
-  (claude-repl--composed-state (claude-repl--ws-claude-state ws)
-                               (claude-repl--ws-repl-state ws)
-                               ws))
+render-state remains visible at a glance.
+
+UI-boundary tolerance: returns nil for unknown ws (see
+`--ws-display-state' docstring for rationale)."
+  (when (claude-repl--ws-known-p ws)
+    (claude-repl--ws-render-status ws)))
 
 (defun claude-repl--render-tab-entry (name current-name index)
   "Render a single tab entry for workspace NAME.
