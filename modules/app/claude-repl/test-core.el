@@ -660,14 +660,125 @@ environments without notification tools (terminal-notifier or osascript)."
 
 ;;;; ---- Tests: git-string / git-string-quiet ----
 ;;
-;; Intentionally none.  `claude-repl--git-string' and
-;; `claude-repl--git-string-quiet' are the external-boundary wrappers
-;; described by AGENTS.md "No External Processes or External State in
-;; Tests".  Per that policy they are not tested in isolation -- testing
-;; them would require either invoking real git (forbidden) or stubbing
-;; `shell-command-to-string' (tautological).  Their behavior is
-;; covered indirectly by the many callers that stub these wrappers
-;; via `cl-letf'.
+;; Intentionally none for the wrappers themselves.
+;; `claude-repl--git-string' and `claude-repl--git-string-quiet' are
+;; the external-boundary wrappers described by AGENTS.md "No External
+;; Processes or External State in Tests".  Per that policy they are
+;; not tested in isolation — testing them would require either
+;; invoking real git (forbidden) or stubbing
+;; `claude-repl--capture-process-output' (tautological).  Their
+;; behavior is covered indirectly by the many callers that stub these
+;; wrappers via `cl-letf'.
+;;
+;; The shared implementation, `claude-repl--capture-process-output',
+;; IS tested below — it carries the worker-thread safety contract
+;; (routes through `claude-repl--wait-for-process-exit' instead of
+;; `shell-command-to-string') and the silent-on-timeout contract that
+;; the quiet variants rely on, both of which are worth pinning.
+
+;;;; ---- Tests: capture-process-output ----
+
+(ert-deftest claude-repl-test-capture-process-output-returns-trimmed-buffer ()
+  "On clean exit, `--capture-process-output' returns the stdout buffer's
+contents with leading/trailing whitespace trimmed."
+  (let ((captured-buf nil))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name buf &rest _cmd)
+                 (setq captured-buf buf)
+                 (with-current-buffer buf
+                   (insert "  trimmed result  \n"))
+                 (list :fake-proc buf)))
+              ((symbol-function 'set-process-query-on-exit-flag)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--wait-for-process-exit)
+               (lambda (&rest _) 0)))
+      (should (equal (claude-repl--capture-process-output
+                      "git" '("rev-parse" "HEAD"))
+                     "trimmed result"))
+      (should-not (buffer-live-p captured-buf)))))
+
+(ert-deftest claude-repl-test-capture-process-output-returns-empty-on-timeout ()
+  "On timeout, `--capture-process-output' returns an empty string.
+This is load-bearing for the silent-failure contract of the `--quiet'
+wrappers: init-time callers that may run outside a git repository
+must not explode when git hangs or doesn't terminate in time."
+  (cl-letf (((symbol-function 'start-process)
+             (lambda (_name buf &rest _cmd)
+               (with-current-buffer buf
+                 (insert "partial output that should not be returned\n"))
+               (list :fake-proc buf)))
+            ((symbol-function 'set-process-query-on-exit-flag)
+             (lambda (&rest _) nil))
+            ((symbol-function 'claude-repl--wait-for-process-exit)
+             (lambda (&rest _) 'timeout)))
+    (should (equal (claude-repl--capture-process-output
+                    "git" '("rev-parse" "HEAD"))
+                   ""))))
+
+(ert-deftest claude-repl-test-capture-process-output-uses-make-process-when-suppress-stderr ()
+  "When SUPPRESS-STDERR is non-nil, `--capture-process-output' uses
+`make-process' with `:stderr' set to a separate buffer so stderr is
+discarded — matches the `2>/dev/null' contract the quiet wrappers
+depend on."
+  (let ((make-process-called nil)
+        (start-process-called nil)
+        (stderr-buf-arg nil))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest args)
+                 (setq make-process-called t
+                       stderr-buf-arg (plist-get args :stderr))
+                 (list :fake-proc (plist-get args :buffer))))
+              ((symbol-function 'start-process)
+               (lambda (&rest _)
+                 (setq start-process-called t)
+                 (list :fake-proc nil)))
+              ((symbol-function 'set-process-query-on-exit-flag)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--wait-for-process-exit)
+               (lambda (&rest _) 0)))
+      (claude-repl--capture-process-output "git" '("status") t))
+    (should make-process-called)
+    (should-not start-process-called)
+    (should (bufferp stderr-buf-arg))))
+
+(ert-deftest claude-repl-test-capture-process-output-uses-start-process-when-no-suppress-stderr ()
+  "When SUPPRESS-STDERR is nil (default), `--capture-process-output' uses
+`start-process', which merges stderr into the same buffer as stdout
+\(matches `shell-command-to-string''s default and the existing
+`--git-string' contract that includes stderr in the returned text)."
+  (let ((make-process-called nil)
+        (start-process-called nil))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest _)
+                 (setq make-process-called t)
+                 (list :fake-proc nil)))
+              ((symbol-function 'start-process)
+               (lambda (_name buf &rest _cmd)
+                 (setq start-process-called t)
+                 (list :fake-proc buf)))
+              ((symbol-function 'set-process-query-on-exit-flag)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--wait-for-process-exit)
+               (lambda (&rest _) 0)))
+      (claude-repl--capture-process-output "git" '("status") nil))
+    (should start-process-called)
+    (should-not make-process-called)))
+
+(ert-deftest claude-repl-test-capture-process-output-kills-stderr-buffer ()
+  "The temporary stderr buffer (when SUPPRESS-STDERR is non-nil) is killed
+before return so we don't accumulate hidden buffers across many git calls."
+  (let ((stderr-buf-arg nil))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest args)
+                 (setq stderr-buf-arg (plist-get args :stderr))
+                 (list :fake-proc (plist-get args :buffer))))
+              ((symbol-function 'set-process-query-on-exit-flag)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--wait-for-process-exit)
+               (lambda (&rest _) 0)))
+      (claude-repl--capture-process-output "git" '("status") t))
+    (should stderr-buf-arg)
+    (should-not (buffer-live-p stderr-buf-arg))))
 
 ;;;; ---- Tests: print-git-branch ----
 
