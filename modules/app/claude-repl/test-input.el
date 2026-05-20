@@ -630,6 +630,48 @@ work after a proposed change, or how they work now after a change just made."
            "just changed in this response"
            claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-tldr-change-bullets-include-disambiguating-context ()
+  "TLDR spec must require change-describing bullets to include brief disambiguating context indicating where the change landed."
+  (should (string-match-p
+           "When a TLDR bullet describes a change, it MUST include brief disambiguating context"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-change-bullets-x-y-z-form ()
+  "TLDR spec must prescribe the 'changed X about Y in Z' bullet form for change-describing bullets, in contrast to the unanchored 'changed X about Y'."
+  (should (string-match-p
+           "'changed X about Y in Z'"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "'changed X about Y'"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-change-bullets-nearest-ambiguity ()
+  "TLDR spec must direct the assistant to resolve only the nearest/highest-level ambiguity rather than over-qualifying with redundant scopes."
+  (should (string-match-p
+           "nearest level of abstraction"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "highest-level (nearest, broadest) ambiguity that actually exists"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "rather than over-qualifying with redundant scopes"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-change-bullets-scope-ladder ()
+  "TLDR spec must enumerate the scope ladder for Z: codebase/repo, then filename, then function/definition, recursively to finer scopes."
+  (should (string-match-p
+           "codebase or repository name when work could plausibly span multiple codebases"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "filename when work is confined to one codebase but could plausibly span multiple files"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "function or definition name when work is confined to one file but could plausibly span multiple functions"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "and so on recursively to finer scopes"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-tldr-significantly-shorter ()
   "TLDR spec must mandate the Response TLDR be significantly shorter than the response body."
   (should (string-match-p
