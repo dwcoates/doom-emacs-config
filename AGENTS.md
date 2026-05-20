@@ -42,6 +42,18 @@ Naming: internals use `claude-repl--` prefix, public entry points use `claude-re
 
 **Never add `+dwc/` functions or variables inside the claude-repl module.** If a feature needs state that currently lives in `config.el` (e.g. `+dwc/workspace-history`), define a `claude-repl--` equivalent inside the module and wire it up there. The `+dwc/` namespace belongs to the doomdir config layer; the module must be self-contained and not introduce new `+dwc/` symbols.
 
+## Workspace state encapsulation — go through `workspace.el`
+
+The `claude-repl--workspaces` hash table is owned by `modules/app/claude-repl/workspace.el`. **All new code touching workspace state must go through `workspace.el`'s wrapper API**: `claude-repl--ws-get`, `claude-repl--ws-put`, `claude-repl--ws-del`, `claude-repl--ws-live-p`, `claude-repl--ws-known-p`, `claude-repl--ws-tombstoned-p`, `claude-repl--ws-open-p`, `claude-repl--ws-render-status`, `claude-repl--live-ws-names`, `claude-repl--ws-require-known`.
+
+**Forbidden in any file other than `workspace.el`:** direct `gethash`, `puthash`, `maphash`, `hash-table-keys`, `hash-table-count`, `remhash`, or `clrhash` against `claude-repl--workspaces`. Doc-strings and `:argument` references to the symbol name are fine; runtime hash ops are not.
+
+Two exceptions are grandfathered inside `core.el` itself: `claude-repl--ws-id-cached` and `claude-repl--format-ws-metadata` directly read the hash because they are logging primitives that `--ws-put` calls on stub-create — routing them through the wrapper would create a logging-to-workspace cycle. These exceptions live inside the encapsulation boundary, not outside it; do not add new ones.
+
+**Render-state unification:** every renderer (drawer state-glyph, drawer name-face, drawer workspace-section, tab-bar composed-state via `--ws-display-state`/`--ws-bracket-state`, project picker emoji) MUST call `claude-repl--ws-render-status` to determine what state to display. Never re-derive status from `:claude-state` / `:repl-state` / `:merging` / `:merge-completed` in a renderer — that's what the unification eliminated. New visual states added to the system go in `--ws-render-status`'s `cond` (with a documented precedence comment) and in `claude-repl-drawer-state-icons`; renderers automatically pick them up.
+
+Per-diff audit (mandatory on every diff touching `modules/app/claude-repl/`): grep the diff for `(gethash` / `(puthash` / `(maphash` against `claude-repl--workspaces` in any file other than `workspace.el`. If you find one, extract a wrapper into `workspace.el` first; only then write the calling logic.
+
 ## Claude REPL instrumentation
 
 New code added to the claude-repl module must include instrumentation via `claude-repl--log`. Every dynamic aspect of the call site must be included in the log message — variable values, resolved paths, computed flags, branch outcomes, etc. The goal is that a log trace alone should be sufficient to diagnose any behavioral issue without needing to add instrumentation after the fact.
