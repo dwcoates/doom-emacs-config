@@ -251,5 +251,108 @@ when `persp-names-cache' is unbound (vanilla Emacs / pre-persp init)."
        (member ws persp-names-cache)
        t))
 
+;;;; ---- Render-state unification ----------------------------------------
+;;
+;; `claude-repl--ws-render-status' is the single source of truth for
+;; what visual state every renderer (drawer state-glyph, drawer
+;; name-face, tab-bar composed-state, project picker emoji) should
+;; display for a workspace.  Renderers used to each re-derive this
+;; from `:claude-state' + `:repl-state' + the `:merging' /
+;; `:merge-completed' plist keys, and they disagreed: the drawer's
+;; precedence had merge-state dominating claude-state, the tab-bar's
+;; precedence had claude-state dominating merge-state, and the
+;; `:merging' (in-flight) workflow signal had no visual at all.  The
+;; unified function below is the new canonical precedence; the
+;; rendering convergence is intentional.
+
+(defun claude-repl--ws-render-status (ws)
+  "Return the closed-set render-state keyword for workspace WS.
+This is the SINGLE SOURCE OF TRUTH for what renderers (drawer,
+tab-bar, project picker, mode-line) should display for a workspace's
+status.  Every renderer reads this — none should re-derive status
+from `:claude-state' / `:repl-state' / `:merging' / `:merge-completed'
+on its own.
+
+Precondition: WS must be `--ws-known-p'.  Unknown WS signals
+`user-error' via `--ws-require-known' — there is no silent fallback
+per AGENTS.md.
+
+Returns one of (in precedence order; first match wins):
+
+  :merge-conflict — `:repl-state' is `:merge-conflict' (cherry-pick
+                    hit a non-orthogonal conflict; user action
+                    required).  Dominates everything else because it
+                    is the most actionable signal.
+
+  :merge-failed   — `:repl-state' is `:merge-failed' (silent
+                    cherry-pick abort, no CHERRY_PICK_HEAD remaining).
+                    Same actionable rationale as :merge-conflict.
+
+  :merged         — `:repl-state' is `:merged' (workspace's branch
+                    landed in its source; terminal positive).
+                    `:merge-completed t' is set in lockstep with this
+                    by `--workspace-merge-do' so either signal works,
+                    but `:repl-state' is the canonical read.
+
+  :merging        — `:merging' plist key is `t' (worker thread is
+                    actively running cherry-pick).  Beats :dead so a
+                    workspace whose vterm has been torn down (the
+                    standard pre-merge `--close-workspace'
+                    `preserve-entry' path) still surfaces the
+                    in-flight signal until cherry-pick resolves.
+
+  :merge-queued   — `:repl-state' is `:merge-queued' (parked on
+                    `claude-repl--merge-queue' waiting for an
+                    in-flight cherry-pick to clear).
+
+  :dead           — `:repl-state' is `:dead' (vterm process is gone).
+                    Ranks below merge-states because merge state is
+                    more actionable; ranks above claude-states
+                    because no live process means no claude activity
+                    to color over.
+
+  Claude-states (when no merge or dead signal applies):
+    :thinking, :permission, :init, :done, :stop-failed, :idle
+    — read from `:claude-state' in order of precedence.  Each is set
+    by `claude-repl--ws-set-claude-state' through the typed setter.
+
+  nil             — tombstoned workspace (`--ws-tombstoned-p' t), or
+                    no session / unborn (every signal above absent).
+                    The two cases are intentionally collapsed: a
+                    renderer should skip both equally (the drawer's
+                    `--live-ws-names' filter already excludes
+                    tombstones before this function is called).
+
+Precedence rationale: a workspace that crashed its vterm *while a
+merge was in flight* still needs to surface the merge signal — the
+merge is the actionable concern.  Same logic stacks all the way up:
+merge-conflict is more important than merge-failed (an active
+conflict can be resolved; a silent abort has already aborted), and
+both dominate claude-state (an active conflict is more important
+than whether Claude was thinking when the merge hit it)."
+  (claude-repl--ws-require-known ws "ws-render-status")
+  (cond
+   ((claude-repl--ws-tombstoned-p ws) nil)
+   (t
+    (let ((repl   (claude-repl--ws-get ws :repl-state))
+          (claude (claude-repl--ws-get ws :claude-state))
+          (merging (claude-repl--ws-get ws :merging)))
+      (cond
+       ((eq repl :merge-conflict)         :merge-conflict)
+       ((eq repl :merge-failed)           :merge-failed)
+       ((eq repl :merged)                 :merged)
+       ;; :merging plist key (in-flight worker) dominates :dead so
+       ;; the merge UI signal survives the pre-merge UI teardown.
+       ((eq merging t)                    :merging)
+       ((eq repl :merge-queued)           :merge-queued)
+       ((eq repl :dead)                   :dead)
+       ((eq claude :thinking)             :thinking)
+       ((eq claude :permission)           :permission)
+       ((eq claude :init)                 :init)
+       ((eq claude :done)                 :done)
+       ((eq claude :stop-failed)          :stop-failed)
+       ((eq claude :idle)                 :idle)
+       (t                                 nil))))))
+
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here
