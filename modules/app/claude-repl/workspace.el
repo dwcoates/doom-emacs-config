@@ -198,5 +198,58 @@ log line preserves the pre-existing diagnostic shape."
       (claude-repl--ws-put ws :last-killed-at (current-time))
       (claude-repl--ws-put ws :nuked-at (current-time)))))
 
+;;;; ---- Membership predicates -------------------------------------------
+
+(defun claude-repl--ws-known-p (ws)
+  "Return non-nil iff WS has a hash entry, live or tombstoned.
+The membership question without the liveness filter — true for every
+ws that has ever been registered and not hard-removed.  Wrappers that
+must distinguish unknown from tombstoned (e.g. `--ws-render-status')
+call this first to validate that the caller's WS argument refers to a
+ws the module knows about at all.
+
+Uses the same `claude-repl--ws-absent' sentinel as `--ws-live-p' so a
+ws whose plist happens to be the empty list (`nil') still counts as
+present."
+  (not (eq (gethash ws claude-repl--workspaces 'claude-repl--ws-absent)
+           'claude-repl--ws-absent)))
+
+(defun claude-repl--ws-require-known (ws context)
+  "Signal `user-error' unless WS is `--ws-known-p'.
+CONTEXT is a short string identifying the caller for the message body,
+e.g. `\"ws-render-status\"' or `\"ws-open-p\"'.  Used by wrappers that
+contractually refuse to operate on an unknown ws (per the AGENTS.md
+no-silent-fallback rule).  Returns nil on success."
+  (unless (claude-repl--ws-known-p ws)
+    (user-error "claude-repl: %s: workspace %S is not registered" context ws)))
+
+(defun claude-repl--ws-tombstoned-p (ws)
+  "Return non-nil iff WS is known AND has `:nuked-at' set.
+Complementary to `--ws-live-p' over `--ws-known-p': a known ws is
+either live or tombstoned, never both.  Unknown ws returns nil."
+  (and (claude-repl--ws-known-p ws)
+       (not (null (claude-repl--ws-get ws :nuked-at)))))
+
+(defun claude-repl--ws-open-p (ws)
+  "Return non-nil iff WS is currently visible in the tab-bar.
+\"Open\" means `persp-names-cache' membership — the persp-mode hash
+that drives the tab-bar's rendered names.  This is intentionally
+DECOUPLED from `claude-repl--workspaces' membership because the two
+can legitimately diverge:
+
+  - During snapshot-restore, hash entries exist before
+    `persp-add-new' runs.
+  - After a successful merge with `preserve-entry', the hash entry
+    survives `+workspace/kill' so the drawer's MERGED bucket can keep
+    rendering.
+
+Errors via `--ws-require-known' on an unknown ws so the caller never
+silently asks about a name the module never heard of.  Returns nil
+when `persp-names-cache' is unbound (vanilla Emacs / pre-persp init)."
+  (claude-repl--ws-require-known ws "ws-open-p")
+  (and (boundp 'persp-names-cache)
+       (member ws persp-names-cache)
+       t))
+
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here
