@@ -2704,16 +2704,30 @@ surface depends on SILENT:
         ;; resolver declines, `--check-cherry-pick-conflict' signals
         ;; user-error (existing behavior).  The loop body either
         ;; advances state or exits via signal, so it cannot spin.
-        (while (claude-repl--cherry-pick-in-progress-p root)
-          (cond
-           ((and auto-resolve
-                 (claude-repl--auto-resolve-cherry-pick-conflict target-ws root))
-            (setq exit-code
-                  (claude-repl--continue-cherry-pick-after-resolve target-ws root)))
-           (silent
-            (claude-repl--surface-silent-merge-conflict target-ws root))
-           (t
-            (claude-repl--check-cherry-pick-conflict target-ws root target-ws))))
+        (let ((cpc-iter 0))
+          (while (claude-repl--cherry-pick-in-progress-p root)
+            (setq cpc-iter (1+ cpc-iter))
+            (claude-repl--log target-ws
+                              "cherry-pick-commits outer-loop iter=%d auto-resolve=%s silent=%s"
+                              cpc-iter (if auto-resolve "t" "nil") (if silent "t" "nil"))
+            (cond
+             ((and auto-resolve
+                   (claude-repl--auto-resolve-cherry-pick-conflict target-ws root))
+              (claude-repl--log target-ws
+                                "cherry-pick-commits iter=%d branch=auto-resolve-success"
+                                cpc-iter)
+              (setq exit-code
+                    (claude-repl--continue-cherry-pick-after-resolve target-ws root)))
+             (silent
+              (claude-repl--log target-ws
+                                "cherry-pick-commits iter=%d branch=surface-silent-conflict"
+                                cpc-iter)
+              (claude-repl--surface-silent-merge-conflict target-ws root))
+             (t
+              (claude-repl--log target-ws
+                                "cherry-pick-commits iter=%d branch=check-conflict-abort"
+                                cpc-iter)
+              (claude-repl--check-cherry-pick-conflict target-ws root target-ws)))))
         ;; No CHERRY_PICK_HEAD remains.  Non-zero exit without conflict
         ;; means git aborted before producing a conflict file (dirty
         ;; tree, empty-after-empty commits, -x rejection) — surface a
@@ -2892,10 +2906,24 @@ unresolved conflict region remains.  Returns nil if PATH is unreadable."
 (defun claude-repl--all-conflicts-resolved-p (root files)
   "Return non-nil when none of FILES (relative to ROOT) contain conflict markers.
 Empty FILES is treated as resolved — there is nothing left to clear."
-  (cl-every (lambda (rel)
-              (not (claude-repl--file-has-conflict-markers-p
-                    (expand-file-name rel root))))
-            files))
+  (claude-repl--log nil
+                    "all-conflicts-resolved-p: ENTER root=%s files-count=%d files=%S"
+                    root (length files) files)
+  (let ((result
+         (cl-every (lambda (rel)
+                     (let* ((abs (expand-file-name rel root))
+                            (started (float-time))
+                            (has-markers (claude-repl--file-has-conflict-markers-p abs))
+                            (elapsed (- (float-time) started)))
+                       (claude-repl--log nil
+                                         "all-conflicts-resolved-p: scanned file=%s has-markers=%s in %.3fs"
+                                         abs (if has-markers "t" "nil") elapsed)
+                       (not has-markers)))
+                   files)))
+    (claude-repl--log nil
+                      "all-conflicts-resolved-p: EXIT result=%s"
+                      (if result "t" "nil"))
+    result))
 
 (defun claude-repl--build-auto-resolve-prompt (target-ws conflicting-commit files)
   "Build the prompt sent to `claude -p' for auto-resolving conflicts.
@@ -3022,7 +3050,7 @@ without spawning an actual `claude' process."
                         "auto-resolve: busy-wait exited iters=%d elapsed=%.1fs timed-out=%s proc-status=%s"
                         iter (- (float-time) started-at)
                         (if timed-out "t" "nil")
-                        (process-status proc))
+                        (ignore-errors (process-status proc)))
       (let* ((status (if timed-out 'timeout (process-exit-status proc)))
              ;; Capture the process output BEFORE annotating the side
              ;; buffer so our own "# exit:" marker does not leak into
@@ -3116,13 +3144,26 @@ without spawning the project's real test runner."
                       "auto-resolve-verify: invoking root=%s cmd=%S"
                       root command)
     (set-process-query-on-exit-flag proc nil)
-    (let ((deadline (+ (float-time) claude-repl-auto-resolve-verify-timeout))
-          (timed-out nil))
+    (let* ((started-at (float-time))
+           (deadline (+ started-at claude-repl-auto-resolve-verify-timeout))
+           (timed-out nil)
+           (iter 0))
       (while (and (process-live-p proc) (not timed-out))
         (accept-process-output proc 0.2)
+        (setq iter (1+ iter))
+        (when (zerop (mod iter 25))
+          (claude-repl--log nil
+                            "auto-resolve-verify: busy-wait alive iter=%d elapsed=%.1fs proc-live=%s"
+                            iter (- (float-time) started-at)
+                            (if (process-live-p proc) "t" "nil")))
         (when (> (float-time) deadline)
           (setq timed-out t)
           (delete-process proc)))
+      (claude-repl--log nil
+                        "auto-resolve-verify: busy-wait exited iters=%d elapsed=%.1fs timed-out=%s proc-status=%s"
+                        iter (- (float-time) started-at)
+                        (if timed-out "t" "nil")
+                        (ignore-errors (process-status proc)))
       (let ((status (if timed-out 'timeout (process-exit-status proc)))
             (output (when (buffer-live-p out-buf)
                       (with-current-buffer out-buf
@@ -3244,17 +3285,26 @@ whether to keep going (another conflict landed) or finish (clean tree).
 The commit message is taken from CHERRY_PICK_MSG (git's default for
 `--continue'), which preserves the original commit's message including
 the `-x' annotation that the parent cherry-pick was invoked with."
-  (let ((add-ec (claude-repl--git-exit-code root "add" "-u"))
-        ;; --no-edit keeps the original commit message verbatim so the
-        ;; (cherry picked from commit SHA) annotation that `-x' added
-        ;; survives the auto-resolution.  Without it git would open
-        ;; $EDITOR, which has no terminal in a headless merge.
-        (continue-ec (claude-repl--git-exit-code
-                      root "-c" "core.editor=true"
-                      "cherry-pick" "--continue" "--no-edit")))
+  (claude-repl--log target-ws
+                    "continue-cherry-pick-after-resolve: ENTER target-ws=%s root=%s"
+                    target-ws root)
+  (let* ((add-started (float-time))
+         (add-ec (claude-repl--git-exit-code root "add" "-u"))
+         (_ (claude-repl--log target-ws
+                              "continue-cherry-pick-after-resolve: git add -u exit=%d in %.2fs"
+                              add-ec (- (float-time) add-started)))
+         (cont-started (float-time))
+         ;; --no-edit keeps the original commit message verbatim so the
+         ;; (cherry picked from commit SHA) annotation that `-x' added
+         ;; survives the auto-resolution.  Without it git would open
+         ;; $EDITOR, which has no terminal in a headless merge.
+         (continue-ec (claude-repl--git-exit-code
+                       root "-c" "core.editor=true"
+                       "cherry-pick" "--continue" "--no-edit")))
     (claude-repl--log target-ws
-                      "auto-resolve: target-ws=%s git add -u exit=%d, cherry-pick --continue exit=%d"
-                      target-ws add-ec continue-ec)
+                      "continue-cherry-pick-after-resolve: EXIT target-ws=%s add-exit=%d continue-exit=%d continue-time=%.2fs"
+                      target-ws add-ec continue-ec
+                      (- (float-time) cont-started))
     continue-ec))
 
 (defun claude-repl--tag-merge-completion (project-root source-ws)
