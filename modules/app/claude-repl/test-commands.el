@@ -882,6 +882,72 @@ claude output window regains its dedicate/size-fix/delete-protect recipe."
   (should (eq (lookup-key claude-repl-explain-config-mode-map (kbd "q"))
               #'claude-repl-explain-config-close)))
 
+(ert-deftest claude-repl-cmd-test-explain-config-install-evil-bindings/binds-q-in-normal-and-motion ()
+  "Evil install binds `q' -> close in (normal motion) state on the mode-map.
+Without this binding, `q' in evil normal state would dispatch to
+`evil-record-macro' rather than the popup's close command."
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'evil-define-key)
+               (lambda (&rest args) (push args calls))))
+      (claude-repl--explain-config-install-evil-bindings)
+      (should (cl-some (lambda (call)
+                         (and (equal (nth 0 call) '(normal motion))
+                              (eq    (nth 1 call) claude-repl-explain-config-mode-map)
+                              (equal (nth 2 call) "q")
+                              (eq    (nth 3 call) #'claude-repl-explain-config-close)))
+                       calls)))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-install-evil-bindings/blocks-each-insert-entry-key ()
+  "Evil install binds every insert-entry key to `ignore' in (normal motion)."
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'evil-define-key)
+               (lambda (&rest args) (push args calls))))
+      (claude-repl--explain-config-install-evil-bindings)
+      (dolist (key claude-repl--explain-config-insert-entry-keys)
+        (should (cl-some (lambda (call)
+                           (and (equal (nth 0 call) '(normal motion))
+                                (eq    (nth 1 call) claude-repl-explain-config-mode-map)
+                                (equal (nth 2 call) key)
+                                (eq    (nth 3 call) #'ignore)))
+                         calls))))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-install-evil-bindings/insert-entry-key-list-is-canonical ()
+  "Insert-entry key list covers the standard evil normal->insert transitions."
+  (should (equal claude-repl--explain-config-insert-entry-keys
+                 '("i" "I" "a" "A" "o" "O" "s" "S" "c" "C" "R"))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-mode/forces-motion-state-on-enable ()
+  "Enabling the minor mode flips the buffer into evil motion state."
+  (let ((motion-calls 0))
+    (cl-letf (((symbol-function 'evil-motion-state)
+               (lambda (&rest _) (cl-incf motion-calls))))
+      (with-temp-buffer
+        (claude-repl-explain-config-mode 1)
+        (should (= motion-calls 1))))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-mode/no-motion-state-on-disable ()
+  "Disabling the minor mode does not call evil-motion-state."
+  (let ((motion-calls 0))
+    (cl-letf (((symbol-function 'evil-motion-state)
+               (lambda (&rest _) (cl-incf motion-calls))))
+      (with-temp-buffer
+        (claude-repl-explain-config-mode 1)
+        (claude-repl-explain-config-mode -1)
+        (should (= motion-calls 1))))))
+
+(ert-deftest claude-repl-cmd-test-explain-config-mode/no-error-when-evil-absent ()
+  "Enabling the mode without evil loaded does not error.
+Guards against the mode body unconditionally calling
+`evil-motion-state', which would explode in any non-evil session."
+  (let ((real-fboundp (symbol-function 'fboundp)))
+    (cl-letf (((symbol-function 'fboundp)
+               (lambda (sym)
+                 (and (not (eq sym 'evil-motion-state))
+                      (funcall real-fboundp sym)))))
+      (with-temp-buffer
+        (claude-repl-explain-config-mode 1)
+        (should claude-repl-explain-config-mode)))))
+
 (ert-deftest claude-repl-cmd-test-explain-config-init-buffer/enables-minor-mode ()
   "init-buffer activates `claude-repl-explain-config-mode' in the output buffer."
   (let* ((claude-repl-explain-config-buffer-name " *test-explain-config-mode*")
