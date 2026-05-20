@@ -2229,6 +2229,84 @@ buffer-string, not a trimmed view."
     ;; after-change-functions should include history-on-change
     (should (memq #'claude-repl--history-on-change after-change-functions))))
 
+;;; claude-input-mode: visual-line evil integration
+
+(ert-deftest claude-repl-test-claude-input-mode-respects-visual-line-mode ()
+  "`claude-input-mode' sets `evil-respect-visual-line-mode' buffer-locally to t.
+This is the runtime flag that makes Evil's line-based operators (yy, dd,
+cc, Y, D, C) operate on screen lines rather than logical lines, which is
+what users expect when composing wrapping prose in the input buffer."
+  (claude-repl-test--with-temp-buffer " *test-input-mode-vline-var*"
+    (cl-letf (((symbol-function 'claude-repl--set-buffer-background) #'ignore))
+      (claude-input-mode))
+    (should (local-variable-p 'evil-respect-visual-line-mode))
+    (should (eq evil-respect-visual-line-mode t))))
+
+;;; The bindings below are declared as data in
+;;; `claude-repl--visual-line-bindings' (an alist of `(STATE KEY COMMAND)'
+;;; triples) and then applied via `evil-define-key'.  The tests assert the
+;;; data is well-formed and contains the intended pairs, since
+;;; `evil-define-key' is a no-op stub in this test harness and cannot be
+;;; queried back through `lookup-key'.
+
+(ert-deftest claude-repl-test-visual-line-bindings-cover-three-evil-states ()
+  "Each motion key in `claude-repl--visual-line-bindings' is bound in normal,
+motion, and visual state.  This makes the visual-line behavior consistent
+across all three states the user might trigger a motion from."
+  (let ((keys '("j" "k" "0" "^" "$" "gj" "gk" "g0" "g$")))
+    (dolist (key keys)
+      (dolist (state '(normal motion visual))
+        (should
+         (cl-find-if (lambda (b)
+                       (and (eq (nth 0 b) state)
+                            (string= (nth 1 b) key)))
+                     claude-repl--visual-line-bindings))))))
+
+(ert-deftest claude-repl-test-visual-line-bindings-j-is-next-visual-line ()
+  "`j' is bound to `evil-next-visual-line' in normal state."
+  (should (member '(normal "j" evil-next-visual-line)
+                  claude-repl--visual-line-bindings)))
+
+(ert-deftest claude-repl-test-visual-line-bindings-k-is-previous-visual-line ()
+  "`k' is bound to `evil-previous-visual-line' in normal state."
+  (should (member '(normal "k" evil-previous-visual-line)
+                  claude-repl--visual-line-bindings)))
+
+(ert-deftest claude-repl-test-visual-line-bindings-0-is-beginning-of-visual-line ()
+  "`0' is bound to `evil-beginning-of-visual-line' in normal state."
+  (should (member '(normal "0" evil-beginning-of-visual-line)
+                  claude-repl--visual-line-bindings)))
+
+(ert-deftest claude-repl-test-visual-line-bindings-dollar-is-end-of-visual-line ()
+  "`$' is bound to `evil-end-of-visual-line' in normal state."
+  (should (member '(normal "$" evil-end-of-visual-line)
+                  claude-repl--visual-line-bindings)))
+
+(ert-deftest claude-repl-test-visual-line-bindings-caret-is-first-non-blank-of-visual-line ()
+  "`^' is bound to `evil-first-non-blank-of-visual-line' in normal state."
+  (should (member '(normal "^" evil-first-non-blank-of-visual-line)
+                  claude-repl--visual-line-bindings)))
+
+(ert-deftest claude-repl-test-visual-line-bindings-capital-V-is-screen-line ()
+  "`V' is bound to `evil-visual-screen-line' in normal state.
+This makes `V' select by screen line rather than logical line, matching
+the rest of the visual-line motion family."
+  (should (member '(normal "V" evil-visual-screen-line)
+                  claude-repl--visual-line-bindings)))
+
+(ert-deftest claude-repl-test-visual-line-bindings-gj-is-logical-next-line ()
+  "`gj' is bound to `evil-next-line' as the logical-line escape hatch
+counterpart to the rebound `j' (mirroring evil's standard
+`evil-respect-visual-line-mode' integration)."
+  (should (member '(normal "gj" evil-next-line)
+                  claude-repl--visual-line-bindings)))
+
+(ert-deftest claude-repl-test-visual-line-bindings-gk-is-logical-previous-line ()
+  "`gk' is bound to `evil-previous-line' as the logical-line escape hatch
+counterpart to the rebound `k'."
+  (should (member '(normal "gk" evil-previous-line)
+                  claude-repl--visual-line-bindings)))
+
 ;;; discard-input with active slash mode
 
 (ert-deftest claude-repl-test-discard-input-exits-slash-mode ()
