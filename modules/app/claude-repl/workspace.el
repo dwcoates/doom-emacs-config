@@ -48,6 +48,13 @@
 
 (require 'cl-lib)
 
+;; Forward declarations for symbols defined later in the load order (status.el).
+;; Workspace.el loads before status.el; these calls fire only at runtime so
+;; the cross-file reference is safe, but byte-compile-time would otherwise
+;; warn about a free variable / unknown function.
+(declare-function claude-repl--priority-rank "claude-repl-status" (priority))
+(defvar persp-nil-name)
+
 (cl-defstruct claude-repl-instantiation
   "Per-environment session state for a Claude REPL workspace.
 Each workspace has one instantiation for :sandbox and one for :bare-metal."
@@ -364,6 +371,86 @@ than whether Claude was thinking when the merge hit it)."
        ((eq claude :stop-failed)          :stop-failed)
        ((eq claude :idle)                 :idle)
        (t                                 nil))))))
+
+;;;; ---- Persp-mode integration boundary ---------------------------------
+;;
+;; The functions below are the ONLY place inside claude-repl that touches
+;; `persp-names-cache' (or, by extension, the persp-mode API that mutates
+;; it).  See AGENTS.md "NEVER manipulate third-party internals from a
+;; high-level layer" — the wrappers in this section ARE the integration
+;; boundary they describe.  Callers in `commands.el', `status.el',
+;; `drawer.el', etc. must route through these, not poke persp-mode
+;; directly.
+
+(defun claude-repl--reorder-workspace-by-priority (ws)
+  "Reorder workspace WS in `persp-names-cache' by its `:priority'.
+Order: p05 < p1 < p2 < p3 < unprioritized.  WS is placed after every
+existing workspace of equal-or-higher priority and before every
+lower-priority one, so a new entry never displaces an existing peer or
+higher-priority sibling.  No-op when WS has no `:priority', when the
+cache does not contain WS, or when persp-mode is not loaded — those
+fall back to the persp-mode default of appending at the end.
+
+Each entry, every bail-out, and the post-mutation cache state are
+logged so the silent no-op paths are observable when reproducing
+ordering bugs.
+
+This function is part of the persp-mode integration boundary owned
+by `workspace.el' (see file Commentary and AGENTS.md).  Callers must
+route through it; they may not mutate `persp-names-cache' directly."
+  (let ((priority (claude-repl--ws-get ws :priority))
+        (cache-snapshot (if (boundp 'persp-names-cache) persp-names-cache "(unbound)")))
+    (claude-repl--log ws "reorder-workspace-by-priority: ENTRY ws=%s priority=%s cache=%S"
+                      ws priority cache-snapshot)
+    (cond
+     ((null priority)
+      (claude-repl--log ws "reorder-workspace-by-priority: BAIL ws=%s reason=no-priority" ws))
+     ((not (boundp 'persp-names-cache))
+      (claude-repl--log ws "reorder-workspace-by-priority: BAIL ws=%s reason=cache-unbound" ws))
+     ((not (member ws persp-names-cache))
+      (claude-repl--log ws "reorder-workspace-by-priority: BAIL ws=%s reason=not-in-cache cache=%S"
+                        ws persp-names-cache))
+     (t
+      ;; Use the canonical string already in persp-names-cache as the
+      ;; identity we splice in.  persp-mode's `persp-remove-from-menu' calls
+      ;; `(cl-delete name cache :count 1)' with the default `:test #'eql' —
+      ;; for strings, eql is identity comparison.  If we substitute a fresh
+      ;; string here (e.g. one returned by `completing-read' in
+      ;; `claude-repl-set-priority'), the cache ends up holding a different
+      ;; object than the persp's stored name, and `persp-kill' silently
+      ;; fails to remove the workspace from the cache later.  The result
+      ;; is a tab-bar entry that survives nuke and re-duplicates on
+      ;; subsequent recreations.  Recovering the canonical string via
+      ;; `(car (member ws cache))' (which uses `equal') keeps identity
+      ;; aligned with the persp internal name.
+      (let* ((nil-name (and (boundp 'persp-nil-name) persp-nil-name))
+             (rank (claude-repl--priority-rank priority))
+             (canonical-ws (car (member ws persp-names-cache)))
+             (without-ws (cl-remove canonical-ws persp-names-cache :test #'eq :count 1))
+             (visible (if nil-name
+                          (cl-remove nil-name without-ws :test #'equal :count 1)
+                        without-ws))
+             (insert-at (cl-position-if
+                         (lambda (n)
+                           (> (claude-repl--priority-rank
+                               (claude-repl--ws-get n :priority))
+                              rank))
+                         visible))
+             (new-visible (if insert-at
+                              (append (cl-subseq visible 0 insert-at)
+                                      (list canonical-ws)
+                                      (cl-subseq visible insert-at))
+                            (append visible (list canonical-ws))))
+             (new-cache (if (and nil-name (member nil-name persp-names-cache))
+                            (cons nil-name new-visible)
+                          new-visible)))
+        (claude-repl--log ws "reorder-workspace-by-priority: APPLY ws=%s canonical-eq-input=%s priority=%s rank=%s position=%s new-cache=%S"
+                          ws (if (eq canonical-ws ws) "t" "nil")
+                          priority rank (or insert-at "end") new-cache)
+        (if (fboundp 'persp-update-names-cache)
+            (persp-update-names-cache new-cache)
+          (claude-repl--log ws "reorder-workspace-by-priority: SKIP-APPLY ws=%s reason=persp-update-names-cache-unbound"
+                            ws)))))))
 
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here
