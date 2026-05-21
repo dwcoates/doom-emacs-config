@@ -472,14 +472,25 @@ status syncs — this is the drawer-side safety net so it never renders.
 
 Also filters out tombstoned entries (`:nuked-at' set) so nuked
 workspaces don't linger as drawer ghosts despite their identity
-records surviving in the hash."
-  (let ((nil-name (and (boundp 'persp-nil-name) persp-nil-name)))
-    (cl-remove-if
-     (lambda (ws)
-       (and nil-name
-            (or (equal ws nil-name)
-                (equal (claude-repl--bare-workspace-name ws) nil-name))))
-     (claude-repl--live-ws-names))))
+records surviving in the hash.
+
+When `claude-repl-hide-project-dirs-enabled' is non-nil, additionally
+drops workspaces whose `:project-dir' lives under any prefix listed in
+`claude-repl-hide-project-dirs' (default `~/workspace/ChessCom') so
+the drawer matches the tab-bar's hidden set.  The current workspace
+is never filtered out."
+  (let* ((nil-name (and (boundp 'persp-nil-name) persp-nil-name))
+         (base (cl-remove-if
+                (lambda (ws)
+                  (and nil-name
+                       (or (equal ws nil-name)
+                           (equal (claude-repl--bare-workspace-name ws) nil-name))))
+                (claude-repl--live-ws-names)))
+         (current-name (and (fboundp '+workspace-current-name)
+                            (+workspace-current-name))))
+    (if (fboundp 'claude-repl--filter-hide-project-dir-names)
+        (claude-repl--filter-hide-project-dir-names base current-name)
+      base)))
 
 (defun claude-repl-drawer--workspace-hidden-p (ws)
   "Return non-nil if workspace WS is in the `:hidden' repl-state."
