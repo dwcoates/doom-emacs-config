@@ -61,9 +61,9 @@ The doom-claude-repl ecosystem ships several Claude Code skills for debugging. P
   - Reads `~/.claude/emacs/doom-claude-repl.log` and per-workspace `memory-state.el` snapshots.
   - First stop for reproducible bugs originating in `modules/app/claude-repl/`.
 
-- `/workspace-eval` — inspect or mutate live editor state by sending elisp to the running Emacs.
+- `/runtime-eval-code` — inspect or mutate live editor state by sending elisp to the running Emacs, scoped to the current workspace.
   - Use when you need a value, predicate, or state inspection not captured by any logger.
-  - Use to dump `*Messages*` to disk when the bug is signaled by 3rd-party output that the claude-repl log does NOT capture (magit/transient/doom-core warnings, byte-compile errors during refactor or dep bumps, package-init failures). Dump snippet is documented in the `debug-logs` skill §9.
+  - Use to dump `*Messages*` to disk when the bug is signaled by 3rd-party output that the claude-repl log does NOT capture (magit/transient/doom-core warnings, byte-compile errors during refactor or dep bumps, package-init failures). The dump snippet and its grep recipes live in the `/runtime-eval-code` skill itself; `debug-logs` §9 just points there.
   - Use to drive a specific elisp snippet during a profiling session.
 
 - `/profile` — capture a fresh sample with auto-stop.
@@ -73,9 +73,9 @@ The doom-claude-repl ecosystem ships several Claude Code skills for debugging. P
 - `/workspace-profile` — manual profiler toggle.
   - Use when you want to start/stop on your own cadence rather than time-boxed.
 
-Rule of thumb: read first (`/debug-logs`), then inspect live (`/workspace-eval`), then measure (`/profile`).
+Rule of thumb: read first (`/debug-logs`), then inspect live (`/runtime-eval-code`), then measure (`/profile`).
 
-When build or compilation errors surface during refactor or dep-bump work, the failing output typically lives in `*Messages*` — not in the claude-repl log file. Use `/workspace-eval` to dump `*Messages*` (snippet in `debug-logs` §9), then grep the dump for the failure.
+When build or compilation errors surface during refactor or dep-bump work, the failing output typically lives in `*Messages*` — not in the claude-repl log file. Use `/runtime-eval-code` to dump `*Messages*` (its SKILL.md has the snippet and grep recipes), then read the dump.
 
 ## No Silent Fallbacks — Fail Hard on Invariant Violations
 
