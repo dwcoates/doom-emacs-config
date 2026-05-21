@@ -3,9 +3,10 @@
 # entry's "name" field, then writes the result atomically to
 # ~/.claude/output/workspace_commands_<uuid>.json.
 #
-# Requires CLAUDE_WORKSPACE_PREFIX to be set in the environment; there is
-# no fallback. Callers must arrange for it to be exported before invoking
-# this script.
+# When CLAUDE_WORKSPACE_PREFIX is set in the environment, it is prepended
+# to each create entry's name as "PREFIX/name-<suffix>". When unset or
+# empty, no prefix is added and the name is emitted as "name-<suffix>".
+# There is no derivation or fallback — absent env var means no prefix.
 set -e
 
 if ! command -v uuidgen &>/dev/null; then
@@ -20,8 +21,7 @@ fi
 
 WS_PREFIX="${CLAUDE_WORKSPACE_PREFIX:-}"
 if [[ -z "$WS_PREFIX" ]]; then
-  echo "ERROR: CLAUDE_WORKSPACE_PREFIX is unset — export it in the environment before running this skill." >&2
-  exit 1
+  echo "NOTICE: CLAUDE_WORKSPACE_PREFIX is unset — emitting workspace name(s) with no branch prefix. Export CLAUDE_WORKSPACE_PREFIX=<your-prefix> in the calling environment if you want one prepended (e.g. 'JB/<slug>')." >&2
 fi
 
 mkdir -p ~/.claude/output
@@ -41,9 +41,6 @@ import subprocess
 import sys
 
 prefix = os.environ.get("WS_PREFIX", "")
-if not prefix:
-    print("ERROR: WS_PREFIX env var is empty inside run.sh python step", file=sys.stderr)
-    sys.exit(2)
 
 try:
     data = json.load(sys.stdin)
@@ -103,7 +100,7 @@ for entry in data:
     ):
         name = entry["name"]
         suffix = "".join(secrets.choice(string.ascii_lowercase) for _ in range(3))
-        entry["name"] = f"{prefix}/{name}-{suffix}"
+        entry["name"] = f"{prefix}/{name}-{suffix}" if prefix else f"{name}-{suffix}"
 
         # Auto-resolve `base_commit` for non-fork creates that didn't
         # specify one, so the downstream consumer never falls back to a

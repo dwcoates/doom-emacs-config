@@ -208,6 +208,7 @@ recovered source workspaces appended to `:merge-queue' for retry."
 (claude-repl--load-module "worktree")
 (claude-repl--load-module "rename")
 (claude-repl--load-module "drawer")
+(claude-repl--load-module "hide-project-dirs")
 (claude-repl--load-module "keybindings")
 (claude-repl--load-module "magit")
 (claude-repl--load-module "emoji")

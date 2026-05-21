@@ -809,6 +809,7 @@ global drawer-mirror bindings win in vterm buffers."
       :desc "Copy file reference" "o r" #'claude-repl-copy-reference
       :desc "Switch sandbox/bare-metal" "o s" #'claude-repl-switch-environment
       :desc "Toggle hide-mode (closed-REPL workspaces)" "o h" #'claude-repl-toggle-hide-mode
+      :desc "Toggle hide-project-dirs (ChessCom workspaces)" "o H" #'claude-repl-toggle-hide-project-dirs
       :desc "Toggle workspace drawer" "o d" #'claude-repl-drawer-toggle)
 
 (map! :leader

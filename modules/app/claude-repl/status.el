@@ -1218,9 +1218,19 @@ Each element is the propertized output of `claude-repl--render-tab-entry'
 for the corresponding workspace, 1-indexed.  Used by both
 `claude-repl--tabline-advice' (which mapconcats with a space separator)
 and `claude-repl-workspace-tabline-formatted' (which packs entries
-into lines so wrapping happens between entries, not mid-name)."
-  (let* ((names (if names-supplied-p names (+workspace-list-names)))
-         (current-name (+workspace-current-name)))
+into lines so wrapping happens between entries, not mid-name).
+
+When `claude-repl-hide-project-dirs-enabled' is non-nil, NAMES are
+first filtered through `claude-repl--filter-hide-project-dir-names'
+so workspaces whose project-dir lives under a configured prefix
+\(default `~/workspace/ChessCom') don't surface in the tab-bar.  The
+current workspace is retained even when it matches a prefix."
+  (let* ((raw-names (if names-supplied-p names (+workspace-list-names)))
+         (current-name (+workspace-current-name))
+         (names (if (fboundp 'claude-repl--filter-hide-project-dir-names)
+                    (claude-repl--filter-hide-project-dir-names
+                     raw-names current-name)
+                  raw-names)))
     (cl-loop for name in names
              for i from 1
              collect (claude-repl--render-tab-entry name current-name i))))
