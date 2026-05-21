@@ -54,8 +54,8 @@ without re-reading the file."
           "and you must follow them. "
           "Read them into context even if you have already done so previously "
           "and they have not changed since. Everything that follows this sentence "
-          "is a real user prompt. For answering, and ALL prompts that follow, follow the guidelines "
-          "you just read for answering precisely and without failure.")
+          "is a real user prompt, and for answering it, and for answering ALL subsequent user "
+          "prompts, obey precisely the guidelines that you just read for answering, and without failure.")
   "Template instructing Claude to read the metaprompt file before acting.
 Must contain a single %s placeholder, filled at load time with
 `claude-repl-metaprompt-file-symlink'.  Intentionally avoids any
