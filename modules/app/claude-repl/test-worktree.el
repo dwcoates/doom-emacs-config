@@ -1090,6 +1090,61 @@ includes both the literal name and the tail that was tried."
                                 (string-match-p "also tried tail baz" s)))
                          logged))))))
 
+(ert-deftest claude-repl-test-handle-merge-command-project-dir-resolves-via-registry ()
+  "A merge command carrying `project_dir' resolves to the workspace whose
+`:project-dir' matches that path, regardless of the `workspace' field.
+This is the bare-tree-branch case: the dispatcher's `workspace' value
+is the branch name (e.g. \"DC/foo\") but the registry is keyed by the
+repo name (e.g. \"explanation-engine\")."
+  (claude-repl-test--with-clean-state
+    (let ((dir (make-temp-file "claude-repl-handle-by-dir-" t))
+          (received :unset))
+      (unwind-protect
+          (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+                     (lambda (ws _root) (setq received ws))))
+            (claude-repl--ws-put "explanation-engine" :project-dir dir)
+            (claude-repl--handle-merge-command
+             `((type . "merge")
+               (workspace . "DC/some-branch")
+               (project_dir . ,dir)))
+            (should (equal received "explanation-engine")))
+        (delete-directory dir t)))))
+
+(ert-deftest claude-repl-test-handle-merge-command-project-dir-miss-falls-back-to-name ()
+  "When `project_dir' doesn't match any live workspace, the handler
+falls back to `workspace' name resolution so partial/typo'd paths
+don't block an otherwise-resolvable name."
+  (claude-repl-test--with-clean-state
+    (let ((received :unset))
+      (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+                 (lambda (ws _root) (setq received ws))))
+        (claude-repl--ws-put "feature-one" :project-dir "/tmp/feature-one")
+        (claude-repl--handle-merge-command
+         '((type . "merge")
+           (workspace . "feature-one")
+           (project_dir . "/nonexistent/path")))
+        (should (equal received "feature-one"))))))
+
+(ert-deftest claude-repl-test-handle-merge-command-unknown-logs-include-project-dir ()
+  "When the merge can't be resolved and a `project_dir' was supplied,
+the unknown-workspace log line includes the attempted path so the
+operator can see both the name and the path that missed."
+  (claude-repl-test--with-clean-state
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'claude-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logged)))
+                ((symbol-function 'claude-repl--workspace-merge-into-source)
+                 (lambda (&rest _) nil)))
+        (claude-repl--handle-merge-command
+         '((type . "merge")
+           (workspace . "bar/baz")
+           (project_dir . "/nonexistent/path")))
+        (should (cl-some (lambda (s)
+                           (and (string-match-p "unknown workspace: bar/baz" s)
+                                (string-match-p "also tried project_dir /nonexistent/path" s)))
+                         logged))))))
+
 (ert-deftest claude-repl-test-handle-merge-command-runs-silently ()
   "Skill-invoked merges (`/workspace-merge') must pass SILENT=t to
 workspace-merge-into-source so the merge does not steal user focus.
@@ -1216,6 +1271,72 @@ UI, run the merge on a worker thread, and reopen on failure."
   "Returns nil for an unregistered bare name (no `/' to fall back from)."
   (claude-repl-test--with-clean-state
     (should (null (claude-repl--resolve-merge-workspace-name "nope")))))
+
+(ert-deftest claude-repl-test-resolve-merge-workspace-name-project-dir-match ()
+  "When PROJECT-DIR resolves to a live workspace, it wins regardless of WS.
+This is the exact case that bites bare-tree branches: the registry uses
+the bare repo name (e.g. \"explanation-engine\") while the dispatcher's
+WS is the branch name (e.g. \"DC/foo\"). The project-dir lookup bridges
+the two without either side having to agree on a name."
+  (claude-repl-test--with-clean-state
+    (let ((dir (make-temp-file "claude-repl-merge-by-dir-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "explanation-engine" :project-dir dir)
+            (should (equal (claude-repl--resolve-merge-workspace-name
+                            "DC/some-feature-branch" dir)
+                           "explanation-engine")))
+        (delete-directory dir t)))))
+
+(ert-deftest claude-repl-test-resolve-merge-workspace-name-project-dir-wins-over-name ()
+  "PROJECT-DIR resolution beats name resolution even when both would hit.
+Defensive: if a caller happens to supply both and they point at
+different workspaces, the directory match is the authoritative one
+(directories are unique per live workspace, names are not always)."
+  (claude-repl-test--with-clean-state
+    (let ((dir (make-temp-file "claude-repl-merge-by-dir-wins-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "by-dir" :project-dir dir)
+            (claude-repl--ws-put "by-name" :project-dir "/tmp/by-name")
+            (should (equal (claude-repl--resolve-merge-workspace-name "by-name" dir)
+                           "by-dir")))
+        (delete-directory dir t)))))
+
+(ert-deftest claude-repl-test-resolve-merge-workspace-name-project-dir-miss-falls-back-to-name ()
+  "When PROJECT-DIR is non-nil but doesn't match a registered workspace,
+the resolver falls back to the WS literal/tail path so a stale or
+mistyped path doesn't shadow an otherwise-resolvable name."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "foo" :project-dir "/tmp/foo")
+    (should (equal (claude-repl--resolve-merge-workspace-name
+                    "foo" "/nonexistent/path")
+                   "foo"))))
+
+(ert-deftest claude-repl-test-resolve-merge-workspace-name-empty-project-dir-ignored ()
+  "Empty string PROJECT-DIR is treated as absent (resolver skips dir
+lookup and falls straight through to name resolution).
+The dispatcher emits empty strings rather than null when the cwd
+detection fails; the resolver must not pass those into the dir lookup
+or it would canonicalize \"\" and risk a spurious match."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "foo" :project-dir "/tmp/foo")
+    (should (equal (claude-repl--resolve-merge-workspace-name "foo" "")
+                   "foo"))))
+
+(ert-deftest claude-repl-test-resolve-merge-workspace-name-project-dir-canonicalizes ()
+  "PROJECT-DIR resolution canonicalizes paths so a trailing slash or
+relative `..' component in the dispatcher's value still matches a
+registered canonical `:project-dir'."
+  (claude-repl-test--with-clean-state
+    (let ((dir (make-temp-file "claude-repl-merge-canon-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws" :project-dir dir)
+            (should (equal (claude-repl--resolve-merge-workspace-name
+                            "ignored" (concat dir "/"))
+                           "ws")))
+        (delete-directory dir t)))))
 
 ;;;; ---- Tests: process-workspace-commands-file ----
 

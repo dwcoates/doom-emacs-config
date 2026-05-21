@@ -2268,22 +2268,39 @@ mode is a bug in the dispatch source and should surface, not paper over."
             (claude-repl--send (claude-repl--profile-format-prompt report-text) ws)
             (message "[claude-repl] profile: stopped, report sent to %s" ws))))))))))
 
-(defun claude-repl--resolve-merge-workspace-name (ws)
-  "Resolve WS to a registered workspace name for merge dispatch.
+(defun claude-repl--resolve-merge-workspace-name (ws &optional project-dir)
+  "Resolve a merge target to a registered workspace name.
 
-Tries WS literally first; if that has no `:project-dir' AND WS contains
-a `/', retries with the substring after the last `/' (the branch tail).
-Returns the matched name on success, or nil if neither lookup hits.
+Resolution order:
 
-Branch-style workspace names (e.g. \"DWC/foo\") arrive from
-/workspace-merge command-file dispatch when the spawning agent
-stringifies its branch back into branch form.  The registry is keyed by
-bare names, so the tail fallback bridges the two."
-  (cond
-   ((and (stringp ws) (claude-repl--ws-get ws :project-dir)) ws)
-   ((and (stringp ws) (string-match-p "/" ws))
-    (let ((tail (claude-repl--bare-workspace-name ws)))
-      (when (claude-repl--ws-get tail :project-dir) tail)))))
+  1. If PROJECT-DIR is a non-empty string and the registry has a live
+     workspace whose `:project-dir' canonicalizes to the same path,
+     return that workspace name.  Project-dir wins because it is the
+     unambiguous identifier any caller can produce from `$PWD' /
+     `git rev-parse --show-toplevel' without consulting the editor's
+     name registry — names can collide or drift (e.g. a branch is
+     checked out on the repo's main tree where the registry uses the
+     bare repo name, not the branch).
+  2. Otherwise, try WS as a literal name.
+  3. Otherwise, if WS contains a `/', try the substring after the last
+     `/' (the branch tail).
+
+Returns the matched workspace name on success, or nil if every lookup
+misses.  Used by `claude-repl--handle-merge-command' to convert the
+JSON `project_dir' and `workspace' fields into a registry key.
+
+Branch-style workspace names (e.g. \"DWC/foo\") still arrive via the
+WS argument when the dispatcher doesn't supply a project-dir; the
+literal-then-tail fallback preserves the historical name-only contract
+for those callers."
+  (or (when (and project-dir (stringp project-dir)
+                 (not (string-empty-p project-dir)))
+        (claude-repl--ws-name-for-dir project-dir))
+      (cond
+       ((and (stringp ws) (claude-repl--ws-get ws :project-dir)) ws)
+       ((and (stringp ws) (string-match-p "/" ws))
+        (let ((tail (claude-repl--bare-workspace-name ws)))
+          (when (claude-repl--ws-get tail :project-dir) tail))))))
 
 (defun claude-repl--ws-merge-routing-root (ws)
   "Return the repo root used to look up WS's merge-handler config.
@@ -2310,28 +2327,38 @@ auto-resolving cherry-pick into the source workspace) — other repos
 can opt into a different strategy by checking in
 `.claude-repl/workspace-merge.eld' (see merge-handlers.el).
 
-Resolves the JSON `workspace' field via
-`claude-repl--resolve-merge-workspace-name' so a branch-style value
-like \"DWC/foo\" matches a registry keyed by the bare name \"foo\".
-When neither the literal name nor the tail matches, logs an
-`unknown workspace' line (so the failure is debuggable) and returns —
-no error is raised, since a missing workspace is not actionable here."
+Reads two optional fields from CMD:
+  - `project_dir' — canonical filesystem path of the target workspace
+    (preferred, since paths are unambiguous across the name/branch
+    drift that bites the bare-name path; see
+    `claude-repl--resolve-merge-workspace-name' for the order).
+  - `workspace' — workspace name or branch (fallback when project_dir
+    is absent or doesn't match a live workspace).
+
+When neither resolves, logs an `unknown workspace' line (with both
+attempted inputs so the failure is debuggable) and returns — no error
+is raised, since a missing workspace is not actionable here."
   (let* ((ws (alist-get 'workspace cmd))
-         (resolved (claude-repl--resolve-merge-workspace-name ws)))
+         (project-dir (alist-get 'project_dir cmd))
+         (resolved (claude-repl--resolve-merge-workspace-name ws project-dir)))
     (cond
      (resolved
       (let ((repo-root (claude-repl--ws-merge-routing-root resolved)))
         (claude-repl--log ws
-                          "workspace-commands-file merge: ws=%s resolved=%s repo-root=%s"
-                          ws resolved (or repo-root "nil"))
+                          "workspace-commands-file merge: ws=%s project_dir=%s resolved=%s repo-root=%s"
+                          ws (or project-dir "nil") resolved (or repo-root "nil"))
         (claude-repl--workspace-merge-async resolved repo-root)))
      (t
       (let ((tail (and (stringp ws) (string-match-p "/" ws)
                        (claude-repl--bare-workspace-name ws))))
         (claude-repl--log ws
-                          "workspace-commands-file merge: unknown workspace: %s%s — skipping"
+                          "workspace-commands-file merge: unknown workspace: %s%s%s — skipping"
                           ws
-                          (if tail (format " (also tried tail %s)" tail) "")))))))
+                          (if tail (format " (also tried tail %s)" tail) "")
+                          (if (and project-dir (stringp project-dir)
+                                   (not (string-empty-p project-dir)))
+                              (format " (also tried project_dir %s)" project-dir)
+                            "")))))))
 
 (defcustom claude-repl-eval-output-max-chars 8000
   "Maximum number of characters of eval output to forward to a workspace.
