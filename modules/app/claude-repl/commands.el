@@ -2212,21 +2212,34 @@ can call finish without worrying whether a normal finish already ran."
     (claude-repl--snapshot-load-close-main)))
 
 (defun claude-repl--snapshot-load-close-main ()
-  "Kill the `main' workspace left over from Doom's startup, if it still exists.
+  "Nuke the `main' workspace left over from Doom's startup, if it still exists.
 Doom always creates `+workspaces-main' (typically \"main\") at startup;
 once the snapshot load has populated the real workspace set, this
-artifact is no longer useful and we kill it to keep the tabline clean.
-Absent main, the function is a no-op.  Errors from `+workspace/kill'
-are logged but never propagated — finish must remain robust."
+artifact is no longer useful and we tear it down to keep the tabline
+clean.  Absent main, the function is a no-op.
+
+NUKE semantics (vs. a plain `+workspace/kill'): we first sweep every
+buffer that belongs to the persp via
+`claude-repl--kill-workspace-buffers' (dashboard, scratch, file
+buffers, etc.) and only then drop the persp itself.  A bare
+`+workspace/kill' leaves those buffers orphaned in the global buffer
+list, which is exactly what the user asked us to avoid here.
+
+Each step is wrapped independently in `condition-case' so an error in
+the buffer sweep does not block the persp kill, and an error in either
+step is logged but never propagated — finish must remain robust."
   (let ((main (and (boundp '+workspaces-main) +workspaces-main)))
     (when (and main
                (fboundp '+workspace-exists-p)
                (+workspace-exists-p main)
                (fboundp '+workspace/kill))
-      (claude-repl--log nil "snapshot-load: closing 'main' workspace artifact main=%s" main)
+      (claude-repl--log nil "snapshot-load: nuking 'main' workspace artifact main=%s" main)
+      (condition-case err
+          (claude-repl--kill-workspace-buffers main)
+        (error (claude-repl--log nil "snapshot-load: nuke-main kill-buffers error: %S" err)))
       (condition-case err
           (+workspace/kill main)
-        (error (claude-repl--log nil "snapshot-load: close-main error: %S" err))))))
+        (error (claude-repl--log nil "snapshot-load: nuke-main persp-kill error: %S" err))))))
 
 (defun claude-repl--snapshot-load-on-loaded (ws &optional _marker)
   "Ws-fully-loaded hook handler: advance the snapshot load queue iff WS is awaited.
