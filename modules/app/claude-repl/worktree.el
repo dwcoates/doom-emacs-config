@@ -2307,7 +2307,7 @@ for those callers."
 Prefers `:source-ws-dir' (the parent worktree where a cherry-pick
 would land) when it's a live directory, falling back to WS's own
 `:project-dir'.  Both point at worktrees of the same repo, so the
-checked-in `.claude-repl/workspace-merge.eld' file resolves to the
+checked-in `.claude/emacs/workspace-merge.eld' file resolves to the
 same content either way — the preference is just for the canonical
 landing dir.  Returns nil if neither is known."
   (let ((source (claude-repl--ws-get ws :source-ws-dir))
@@ -2325,7 +2325,7 @@ workspace's repo root via the registered handler set.  The default
 `cherry-pick' handler preserves the historical behaviour (silent,
 auto-resolving cherry-pick into the source workspace) — other repos
 can opt into a different strategy by checking in
-`.claude-repl/workspace-merge.eld' (see merge-handlers.el).
+`.claude/emacs/workspace-merge.eld' (see merge-handlers.el).
 
 Reads two optional fields from CMD:
   - `project_dir' — canonical filesystem path of the target workspace
@@ -4361,7 +4361,7 @@ Why route through the handler instead of calling
 `claude-repl--workspace-merge-into-source' directly:
 
   - Honors any repo-declared override in
-    `.claude-repl/workspace-merge.eld' so a repo that opts out of
+    `.claude/emacs/workspace-merge.eld' so a repo that opts out of
     cherry-pick gets the same treatment interactively and headlessly.
   - Picks up `silent=t' so a conflict pops `magit-status' with the
     cherry-pick still in tree instead of aborting it — the user lands

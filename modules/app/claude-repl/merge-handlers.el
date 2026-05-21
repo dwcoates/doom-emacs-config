@@ -9,7 +9,7 @@
 ;; handlers.
 ;;
 ;; Lookup order at dispatch time:
-;;   1. `<repo-root>/.claude-repl/workspace-merge.eld' — repo-checked-in
+;;   1. `<repo-root>/.claude/emacs/workspace-merge.eld' — repo-checked-in
 ;;      data file naming a registered handler symbol plus optional args.
 ;;      Read with `read', NEVER evaluated, so repo content cannot inject
 ;;      arbitrary code into Emacs.
@@ -32,7 +32,7 @@
   "Alist mapping handler symbol → handler function.
 Each function is called with `(TARGET-WS &optional ARGS)' where
 TARGET-WS is the bare workspace name and ARGS is the optional plist
-read from the repo's `.claude-repl/workspace-merge.eld' file (or
+read from the repo's `.claude/emacs/workspace-merge.eld' file (or
 declared in `claude-repl-workspace-merge-handler-overrides').
 
 Entries are registered with
@@ -59,7 +59,7 @@ to the handler).  Path matching is canonical (`file-truename' +
 normalised.
 
 Consulted only when the repo itself does not provide
-`.claude-repl/workspace-merge.eld' — the repo-local file always wins.
+`.claude/emacs/workspace-merge.eld' — the repo-local file always wins.
 
 Default entry routes `~/workspace/ChessCom/explanation-engine' to
 `refresh-master-from-origin' because that repo's `/workspace-merge'
@@ -71,7 +71,7 @@ cherry-pick-into-source default."
   :group 'claude-repl)
 
 (defconst claude-repl--merge-handler-config-file
-  ".claude-repl/workspace-merge.eld"
+  ".claude/emacs/workspace-merge.eld"
   "Repo-relative path that declares a workspace-merge handler.
 Format: a single alist sexp like
   ((handler . create-pr)
@@ -129,7 +129,7 @@ entries by canonical path (`claude-repl--path-canonical')."
   "Resolve REPO-ROOT to a `(SYMBOL . ARGS)' handler descriptor.
 
 Lookup order:
-  1. REPO-ROOT's `.claude-repl/workspace-merge.eld' file.
+  1. REPO-ROOT's `.claude/emacs/workspace-merge.eld' file.
   2. `claude-repl-workspace-merge-handler-overrides' user alist.
   3. Fallback to `cherry-pick'.
 
