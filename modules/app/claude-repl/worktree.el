@@ -328,6 +328,60 @@ storm would be noise."
   (unless no-flash
     (claude-repl--flash-current-tab)))
 
+(defun claude-repl--restore-focus (orig-persp orig-window orig-buffer)
+  "Restore perspective to ORIG-PERSP and select ORIG-WINDOW / ORIG-BUFFER.
+Helper for `claude-repl--with-preserved-focus' — kept as a separate
+defun so the restoration logic is observable in tests via `cl-letf'
+and the macro body stays small.
+
+Each restore step is a no-op when the corresponding state has not
+drifted from its captured value, so a body that did not change focus
+does not pay for redundant `+workspace-switch' / `select-window' /
+`set-buffer' calls.  A failure in `+workspace-switch' is logged but
+not re-signaled — the macro's job is best-effort focus restoration,
+not error propagation."
+  (when (and orig-persp
+             (fboundp '+workspace-current-name)
+             (fboundp '+workspace-switch)
+             (not (equal orig-persp (+workspace-current-name))))
+    (condition-case err
+        (+workspace-switch orig-persp)
+      (error
+       (claude-repl--log nil
+                         "restore-focus: switch back to %s failed err=%S"
+                         orig-persp err))))
+  (when (and (window-live-p orig-window)
+             (not (eq orig-window (selected-window))))
+    (select-window orig-window 'norecord))
+  (when (and (buffer-live-p orig-buffer)
+             (not (eq orig-buffer (current-buffer))))
+    (set-buffer orig-buffer)))
+
+(defmacro claude-repl--with-preserved-focus (&rest body)
+  "Run BODY while preserving the caller's active workspace + window + buffer.
+Captures `(+workspace-current-name)', `(selected-window)', and
+`(current-buffer)' before BODY runs, then restores all three afterward
+via an `unwind-protect' even when BODY signals.
+
+Used to wrap workspace-creation side effects (e.g. `+workspace-new',
+`--initialize-claude', `magit-status') so any internal focus change
+those produce stays invisible to the user — the new workspace
+materializes in the background and the caller's perspective stays
+selected.  Restoration delegates to `claude-repl--restore-focus' so
+tests can observe the contract by stubbing that defun."
+  (declare (indent 0) (debug t))
+  (let ((orig-persp-sym (make-symbol "orig-persp"))
+        (orig-window-sym (make-symbol "orig-window"))
+        (orig-buffer-sym (make-symbol "orig-buffer")))
+    `(let ((,orig-persp-sym (and (fboundp '+workspace-current-name)
+                                 (+workspace-current-name)))
+           (,orig-window-sym (selected-window))
+           (,orig-buffer-sym (current-buffer)))
+       (unwind-protect
+           (progn ,@body)
+         (claude-repl--restore-focus
+          ,orig-persp-sym ,orig-window-sym ,orig-buffer-sym)))))
+
 (defun claude-repl--assert-clean-worktree (ws project-root)
   "Signal `user-error' if PROJECT-ROOT has uncommitted changes.
 WS is used only for the error message."
@@ -988,37 +1042,54 @@ Sets `:pending-magit' on the new workspace so `magit-status' opens in
 its own window layout the first time the user activates it, rather than
 splitting the caller's window.  Likewise sets `:pending-initial-buffers'
 so configured initial buffers are opened in the new workspace's
-perspective rather than the caller's."
+perspective rather than the caller's.
+
+The entire setup runs inside `claude-repl--with-preserved-focus' so
+any internal perspective / window / buffer change made while
+materializing the new workspace (e.g. by `+workspace-new',
+`--initialize-claude', or any persp-mode hook fired along the way)
+stays invisible to the user — the caller's workspace and window
+remain selected when finalize returns.  CALLBACK, when provided,
+runs OUTSIDE the focus-preservation wrapper so callers that
+deliberately want to switch (e.g. interactive worktree creation that
+should jump to the new ws) are not silently undone."
   (claude-repl--log dirname "finalize-worktree-workspace: path=%s dirname=%s priority=%s fork-session-id=%s force-sandbox=%s source-dir=%s"
                     path dirname priority fork-session-id force-sandbox (or source-dir "nil"))
-  (claude-repl--register-projectile-project path dirname)
-  (let* ((canonical (claude-repl--path-canonical path))
-         (ws-id (substring (md5 canonical) 0 claude-repl-workspace-id-length))
-         (ws dirname)
-         (effective-priority (or (claude-repl--inherit-priority-from-source priority source-dir)
-                                 (claude-repl--repo-default-priority-for-path path))))
-    (claude-repl--log ws "worktree creating workspace %s effective-priority=%s" ws (or effective-priority "nil"))
-    (+workspace-new ws)
-    (claude-repl--ws-put ws :pending-magit t)
-    (claude-repl--ws-put ws :pending-initial-buffers t)
-    (claude-repl--enqueue-preemptive-prompt ws preemptive-prompt)
-    ;; If this finalize matches an in-flight oneshot flavor, record the
-    ;; workspace name and append any amended prompts queued by `SPC j C-o'
-    ;; / `SPC j C-O' onto `:pending-prompts'.  Must run AFTER
-    ;; `--enqueue-preemptive-prompt' (which overwrites `:pending-prompts'
-    ;; with the lone preemptive prompt) so the amended prompts ride after
-    ;; it rather than getting clobbered.
-    (claude-repl--oneshot-track-workspace path dirname)
-    (claude-repl--apply-workspace-properties ws
-      :priority effective-priority
-      :fork-session-id fork-session-id
-      :source-ws-dir source-dir)
-    (claude-repl--reorder-workspace-by-priority ws)
-    (claude-repl--setup-worktree-session ws-id path ws force-sandbox)
-    (when (fboundp 'claude-repl--events-record)
-      (claude-repl--events-record ws :create))
-    (message "Worktree '%s' ready." dirname)
-    (when callback (funcall callback path dirname))))
+  (claude-repl--with-preserved-focus
+    (claude-repl--register-projectile-project path dirname)
+    (let* ((canonical (claude-repl--path-canonical path))
+           (ws-id (substring (md5 canonical) 0 claude-repl-workspace-id-length))
+           (ws dirname)
+           (effective-priority (or (claude-repl--inherit-priority-from-source priority source-dir)
+                                   (claude-repl--repo-default-priority-for-path path))))
+      (claude-repl--log ws "worktree creating workspace %s effective-priority=%s" ws (or effective-priority "nil"))
+      (+workspace-new ws)
+      (claude-repl--ws-put ws :pending-magit t)
+      (claude-repl--ws-put ws :pending-initial-buffers t)
+      (claude-repl--enqueue-preemptive-prompt ws preemptive-prompt)
+      ;; If this finalize matches an in-flight oneshot flavor, record the
+      ;; workspace name and append any amended prompts queued by `SPC j C-o'
+      ;; / `SPC j C-O' onto `:pending-prompts'.  Must run AFTER
+      ;; `--enqueue-preemptive-prompt' (which overwrites `:pending-prompts'
+      ;; with the lone preemptive prompt) so the amended prompts ride after
+      ;; it rather than getting clobbered.
+      (claude-repl--oneshot-track-workspace path dirname)
+      (claude-repl--apply-workspace-properties ws
+        :priority effective-priority
+        :fork-session-id fork-session-id
+        :source-ws-dir source-dir)
+      (claude-repl--reorder-workspace-by-priority ws)
+      (claude-repl--setup-worktree-session ws-id path ws force-sandbox)
+      (when (fboundp 'claude-repl--events-record)
+        (claude-repl--events-record ws :create))
+      (message "Worktree '%s' ready." dirname)))
+  ;; CALLBACK runs OUTSIDE the focus-preservation wrapper.  The only
+  ;; production caller (`claude-repl--worktree-creation-switch-callback')
+  ;; deliberately switches to the new workspace; wrapping it would
+  ;; silently undo that switch.  The sentinel-driven workspace-generation
+  ;; path passes CALLBACK=nil so the no-switch contract for that flow
+  ;; is already satisfied by the wrapped body above.
+  (when callback (funcall callback path dirname)))
 
 (defun claude-repl--worktree-add-callback (path dirname preemptive-prompt
                                                priority fork-session-id force-sandbox

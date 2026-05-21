@@ -7528,6 +7528,165 @@ leaking the opened buffers into the wrong workspace."
         (should (claude-repl--ws-get "test-ws" :pending-initial-buffers))
         (should-not open-called)))))
 
+;;;; ---- Tests: claude-repl--with-preserved-focus ----
+
+(ert-deftest claude-repl-test-with-preserved-focus-restores-after-persp-switch ()
+  "Macro restores the caller's workspace when BODY changes the current persp.
+Workspace-creation finalize must not leak focus changes to the user; the
+macro is the contract that guarantees it."
+  (let* ((current-persp "caller-ws")
+         (restored-with nil))
+    (cl-letf (((symbol-function '+workspace-current-name)
+               (lambda () current-persp))
+              ((symbol-function '+workspace-switch)
+               (lambda (name &optional _auto)
+                 (setq current-persp name)))
+              ((symbol-function 'claude-repl--restore-focus)
+               (lambda (orig-persp orig-window orig-buffer)
+                 (setq restored-with (list orig-persp orig-window orig-buffer)))))
+      (claude-repl--with-preserved-focus
+        (+workspace-switch "intruder-ws"))
+      (should (equal (nth 0 restored-with) "caller-ws")))))
+
+(ert-deftest claude-repl-test-with-preserved-focus-restores-on-error ()
+  "Macro restores focus even when BODY signals — `unwind-protect' contract."
+  (let ((restored-count 0))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "caller-ws"))
+              ((symbol-function 'claude-repl--restore-focus)
+               (lambda (&rest _) (cl-incf restored-count))))
+      (should-error
+       (claude-repl--with-preserved-focus
+         (error "body fail")))
+      (should (= restored-count 1)))))
+
+(ert-deftest claude-repl-test-restore-focus-switches-back-when-persp-drifted ()
+  "Restore helper calls `+workspace-switch' when current persp differs from ORIG-PERSP."
+  (let ((switched-to nil))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "drifted-ws"))
+              ((symbol-function '+workspace-switch)
+               (lambda (name &optional _auto) (setq switched-to name))))
+      (claude-repl--restore-focus "caller-ws" (selected-window) (current-buffer))
+      (should (equal switched-to "caller-ws")))))
+
+(ert-deftest claude-repl-test-restore-focus-no-switch-when-persp-stable ()
+  "Restore helper skips `+workspace-switch' when current persp matches ORIG-PERSP.
+Avoids re-firing the deactivate/activate hook chain when no drift actually happened."
+  (let ((switch-called nil))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "caller-ws"))
+              ((symbol-function '+workspace-switch)
+               (lambda (&rest _) (setq switch-called t))))
+      (claude-repl--restore-focus "caller-ws" (selected-window) (current-buffer))
+      (should-not switch-called))))
+
+(ert-deftest claude-repl-test-restore-focus-tolerates-switch-failure ()
+  "When `+workspace-switch' signals, restore logs and continues instead of re-signaling.
+The macro's job is best-effort focus restoration, not error propagation —
+a failing switch must not poison the `unwind-protect' chain or hide the
+underlying BODY error from the caller."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "drifted-ws"))
+            ((symbol-function '+workspace-switch)
+             (lambda (&rest _) (error "switch boom"))))
+    ;; Must not signal — and must return normally.
+    (claude-repl--restore-focus "caller-ws" (selected-window) (current-buffer))))
+
+(ert-deftest claude-repl-test-finalize-preserves-caller-persp ()
+  "finalize-worktree-workspace restores the caller's persp even when an internal
+side effect (here, a stubbed `+workspace-new') flips the current workspace.
+This is the user-visible contract: the sentinel-driven workspace generation
+must not steal focus away from whatever the user is currently doing."
+  (let* ((current-persp "caller-ws")
+         (switch-log nil))
+    (claude-repl-test--with-clean-state
+      (cl-letf (((symbol-function 'claude-repl--register-projectile-project) #'ignore)
+                ((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function 'claude-repl--repo-default-priority-for-path)
+                 (lambda (_path) nil))
+                ;; Simulate the bug: `+workspace-new' switches the current
+                ;; persp away from the caller's workspace.
+                ((symbol-function '+workspace-new)
+                 (lambda (name) (setq current-persp name)))
+                ((symbol-function '+workspace-current-name)
+                 (lambda () current-persp))
+                ((symbol-function '+workspace-switch)
+                 (lambda (name &optional _auto)
+                   (push name switch-log)
+                   (setq current-persp name)))
+                ((symbol-function 'magit-status) #'ignore)
+                ((symbol-function 'claude-repl--remove-doom-dashboard) #'ignore)
+                ((symbol-function 'claude-repl--open-initial-buffers) #'ignore)
+                ((symbol-function 'claude-repl--enqueue-preemptive-prompt) #'ignore)
+                ((symbol-function 'claude-repl--apply-workspace-properties) #'ignore)
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority) #'ignore)
+                ((symbol-function 'claude-repl--setup-worktree-session) #'ignore))
+        (claude-repl--finalize-worktree-workspace
+         "/tmp/fake" "test-ws" nil nil nil nil nil)
+        (should (equal current-persp "caller-ws"))
+        (should (member "caller-ws" switch-log))))))
+
+(ert-deftest claude-repl-test-finalize-runs-callback-outside-preserved-focus ()
+  "The optional CALLBACK runs OUTSIDE the focus-preservation wrapper, so
+callers that deliberately switch to the new workspace (e.g. interactive
+worktree creation that pulses the destination tab) are not silently undone
+by the restore step."
+  (let* ((current-persp "caller-ws")
+         (callback-final-persp nil))
+    (claude-repl-test--with-clean-state
+      (cl-letf (((symbol-function 'claude-repl--register-projectile-project) #'ignore)
+                ((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function 'claude-repl--repo-default-priority-for-path)
+                 (lambda (_path) nil))
+                ((symbol-function '+workspace-new) #'ignore)
+                ((symbol-function '+workspace-current-name)
+                 (lambda () current-persp))
+                ((symbol-function '+workspace-switch)
+                 (lambda (name &optional _auto) (setq current-persp name)))
+                ((symbol-function 'magit-status) #'ignore)
+                ((symbol-function 'claude-repl--remove-doom-dashboard) #'ignore)
+                ((symbol-function 'claude-repl--open-initial-buffers) #'ignore)
+                ((symbol-function 'claude-repl--enqueue-preemptive-prompt) #'ignore)
+                ((symbol-function 'claude-repl--apply-workspace-properties) #'ignore)
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority) #'ignore)
+                ((symbol-function 'claude-repl--setup-worktree-session) #'ignore))
+        (claude-repl--finalize-worktree-workspace
+         "/tmp/fake" "test-ws" nil nil nil nil
+         (lambda (_path dirname)
+           ;; Callback deliberately switches to the new ws.
+           (+workspace-switch dirname)
+           (setq callback-final-persp (+workspace-current-name))))
+        ;; The callback's switch must survive — i.e. NOT be undone by the
+        ;; wrapper's restore step.
+        (should (equal callback-final-persp "test-ws"))
+        (should (equal current-persp "test-ws"))))))
+
+(ert-deftest claude-repl-test-finalize-preserves-focus-on-signal ()
+  "When finalize body errors mid-setup, focus still restores via `unwind-protect'.
+A failing `--setup-worktree-session' (e.g. claude binary missing) must not
+leave the user stranded on a half-built workspace."
+  (let* ((current-persp "caller-ws"))
+    (claude-repl-test--with-clean-state
+      (cl-letf (((symbol-function 'claude-repl--register-projectile-project) #'ignore)
+                ((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function 'claude-repl--repo-default-priority-for-path)
+                 (lambda (_path) nil))
+                ((symbol-function '+workspace-new)
+                 (lambda (name) (setq current-persp name)))
+                ((symbol-function '+workspace-current-name)
+                 (lambda () current-persp))
+                ((symbol-function '+workspace-switch)
+                 (lambda (name &optional _auto) (setq current-persp name)))
+                ((symbol-function 'magit-status) #'ignore)
+                ((symbol-function 'claude-repl--remove-doom-dashboard) #'ignore)
+                ((symbol-function 'claude-repl--open-initial-buffers) #'ignore)
+                ((symbol-function 'claude-repl--enqueue-preemptive-prompt) #'ignore)
+                ((symbol-function 'claude-repl--apply-workspace-properties) #'ignore)
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority) #'ignore)
+                ((symbol-function 'claude-repl--setup-worktree-session)
+                 (lambda (&rest _) (error "setup boom"))))
+        (should-error
+         (claude-repl--finalize-worktree-workspace
+          "/tmp/fake" "test-ws" nil nil nil nil nil))
+        (should (equal current-persp "caller-ws"))))))
+
 ;;;; ---- Tests: claude-repl-create-doom-oneshot-workspace ----
 
 (ert-deftest claude-repl-test-create-doom-oneshot-pins-git-root-to-doom-config ()
