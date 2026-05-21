@@ -502,9 +502,15 @@ value is stored via `claude-repl--ws-put'."
   (projectile-add-known-project (file-name-as-directory path)))
 
 (defconst claude-repl--autonomous-prompt-prefix
-  "Do not wait for further instructions. Come up with a plan and then immediately execute on it. Commit freely and often, but do not commit before corresponding tests (if any) have run. Never rebase, pull, merge, push, or run any other mutating git commands. Here is the task:\n\n"
-  "Prefix prepended to preemptive prompts to instruct Claude to plan,
-execute, and commit autonomously without waiting for confirmation.")
+  "Do not wait for further instructions. Come up with a plan and then immediately execute on it. Here is the task:\n\n"
+  "Prefix prepended to preemptive prompts to instruct Claude to plan
+and execute autonomously without waiting for confirmation.  The commit
+policy (commit freely and often, tests pass before each commit, no
+other mutating git operations without explicit permission) used to
+live in this prefix but has been migrated to the metaprompt at
+`claude-repl-metaprompt-file', which the spawned agent reads on its
+first send via `claude-repl--command-prefix' — duplicating the policy
+here would only risk the two sources drifting out of sync.")
 
 (defconst claude-repl--doom-config-dir
   (file-name-as-directory (expand-file-name "~/.config/doom"))

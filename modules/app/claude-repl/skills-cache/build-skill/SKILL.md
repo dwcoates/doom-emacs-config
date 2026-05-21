@@ -87,6 +87,10 @@ These are the structural attributes every well-formed skill exhibits.
 
 ### 13. Implementation independence (black-box principle)
 - Skills name the *contract*, never the *mechanism*. This rule applies to every part of the SKILL.md — step bodies, exit-code descriptions, `Why this lives here` sub-bullets, Notes guardrails, everything.
+- **`run.sh` is a black box.** SKILL.md MUST NOT poke holes in it. CRITICAL: any description of what `run.sh` does internally — prefixing rules, suffix generation, file-write paths, atomic-mv patterns, env-var resolution order, fallback chains, the names of helpers it calls, the consumer that picks up its output — is FORBIDDEN. The skill says *which verb to call*, *what input to pipe in*, and *how to react to each exit code*. Nothing else about `run.sh`'s behavior may appear in SKILL.md.
+  - When auditing, treat any sentence that begins "`run.sh` automatically …", "`run.sh` resolves …", "`run.sh` writes …", "`run.sh` falls back to …", or similar as a finding and strip it. Replace with passive contract language ("X is handled downstream", "the disambiguator is added downstream") that names neither the mechanism nor the resolver.
+  - When auditing, treat references to `run.sh`'s output location, output naming, or its downstream consumer (file watcher, daemon, queue, etc.) as findings and strip them. The reader does not need to know where `run.sh` writes, what it names the artifact, or who reads it.
+  - Test (apply to every sentence that mentions `run.sh`): if the sentence describes *what `run.sh` is doing under the hood* rather than *how the caller interacts with `run.sh`*, it is a leak. Rewrite or delete.
 - **Forbidden** anywhere in the skill:
   - Process / daemon / plugin / module names.
   - Source-tree paths.
