@@ -120,6 +120,67 @@ sentence."
   (should-not (claude-repl--prompt-summary-skip-p "fix the auth bug"))
   (should-not (claude-repl--prompt-summary-skip-p "/init now please")))
 
+;;;; ---- Tests: format-summary-relative-time ----
+
+(ert-deftest claude-repl-test-format-summary-relative-time-nil ()
+  "Nil SENT-AT returns nil so callers can suppress the prefix."
+  (should-not (claude-repl--format-summary-relative-time nil)))
+
+(ert-deftest claude-repl-test-format-summary-relative-time-non-number ()
+  "Non-numeric SENT-AT returns nil (defensive guard)."
+  (should-not (claude-repl--format-summary-relative-time "not-a-number")))
+
+(ert-deftest claude-repl-test-format-summary-relative-time-under-a-minute ()
+  "Elapsed time under one minute renders as `<1m ago'."
+  (should (equal (claude-repl--format-summary-relative-time 1000.0 1030.0)
+                 "<1m ago"))
+  (should (equal (claude-repl--format-summary-relative-time 1000.0 1059.9)
+                 "<1m ago")))
+
+(ert-deftest claude-repl-test-format-summary-relative-time-exact-minute ()
+  "Exactly one minute renders as `1m ago'."
+  (should (equal (claude-repl--format-summary-relative-time 1000.0 1060.0)
+                 "1m ago")))
+
+(ert-deftest claude-repl-test-format-summary-relative-time-tens-of-minutes ()
+  "Whole-minute granularity rounds down (10m, 30m)."
+  (should (equal (claude-repl--format-summary-relative-time 1000.0
+                                                            (+ 1000.0 (* 10 60)))
+                 "10m ago"))
+  (should (equal (claude-repl--format-summary-relative-time 1000.0
+                                                            (+ 1000.0 (* 30 60) 30))
+                 "30m ago")))
+
+(ert-deftest claude-repl-test-format-summary-relative-time-just-under-an-hour ()
+  "59 minutes still renders as minutes, not hours."
+  (should (equal (claude-repl--format-summary-relative-time 1000.0
+                                                            (+ 1000.0 (* 59 60)))
+                 "59m ago")))
+
+(ert-deftest claude-repl-test-format-summary-relative-time-exact-hour ()
+  "Exactly one hour renders as `1hr 0m ago'."
+  (should (equal (claude-repl--format-summary-relative-time 1000.0
+                                                            (+ 1000.0 (* 60 60)))
+                 "1hr 0m ago")))
+
+(ert-deftest claude-repl-test-format-summary-relative-time-hour-and-minutes ()
+  "Over an hour renders as `Xhr Ym ago' (example from the user's brief)."
+  (should (equal (claude-repl--format-summary-relative-time 1000.0
+                                                            (+ 1000.0 (* 62 60)))
+                 "1hr 2m ago")))
+
+(ert-deftest claude-repl-test-format-summary-relative-time-many-hours ()
+  "Hours past 24 still render in raw hours (no day rollover)."
+  (should (equal (claude-repl--format-summary-relative-time 1000.0
+                                                            (+ 1000.0 (* 25 60 60) (* 30 60)))
+                 "25hr 30m ago")))
+
+(ert-deftest claude-repl-test-format-summary-relative-time-negative-clamps-to-zero ()
+  "A SENT-AT in the future (clock drift) clamps to `<1m ago' rather
+than rendering a nonsensical negative duration."
+  (should (equal (claude-repl--format-summary-relative-time 2000.0 1000.0)
+                 "<1m ago")))
+
 ;;;; ---- Tests: prompt-summary-segment ----
 
 (ert-deftest claude-repl-test-prompt-summary-segment-no-ws ()
@@ -177,6 +238,49 @@ sentence."
         (should (string-match-p "Bug Fix" seg))
         (should-not (string-match-p "summarizing" seg))))))
 
+(ert-deftest claude-repl-test-prompt-summary-segment-prefixes-timestamp ()
+  "Segment prepends a relative `X ago' prefix before the summary when
+:last-prompt-summary-at is populated."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :last-prompt-summary "Auth Bug Fix")
+    (claude-repl--ws-put "ws1" :last-prompt-summary-at 1000.0)
+    (cl-letf (((symbol-function 'float-time)
+               (lambda (&rest _) (+ 1000.0 (* 10 60)))))
+      (with-temp-buffer
+        (setq-local claude-repl--owning-workspace "ws1")
+        (let ((seg (claude-repl--prompt-summary-segment)))
+          (should (string-match-p "10m ago" seg))
+          (should (string-match-p "Auth Bug Fix" seg))
+          ;; Timestamp comes BEFORE the summary text.
+          (should (< (string-match "10m ago" seg)
+                     (string-match "Auth Bug Fix" seg))))))))
+
+(ert-deftest claude-repl-test-prompt-summary-segment-pending-prefixes-timestamp ()
+  "Pending segment also carries the `X ago' prefix so the user sees
+when the in-flight summary was kicked off."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-prompt-summary-pending-label "prompt summarizing"))
+      (claude-repl--ws-put "ws1" :last-prompt-summary-pending t)
+      (claude-repl--ws-put "ws1" :last-prompt-summary-at 1000.0)
+      (cl-letf (((symbol-function 'float-time)
+                 (lambda (&rest _) (+ 1000.0 (* 5 60)))))
+        (with-temp-buffer
+          (setq-local claude-repl--owning-workspace "ws1")
+          (let ((seg (claude-repl--prompt-summary-segment)))
+            (should (string-match-p "5m ago" seg))
+            (should (string-match-p "prompt summarizing" seg))))))))
+
+(ert-deftest claude-repl-test-prompt-summary-segment-omits-timestamp-when-missing ()
+  "Segment omits the `X ago' prefix when :last-prompt-summary-at has not
+been populated yet (e.g. summaries restored from an old state file)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :last-prompt-summary "Auth Bug Fix")
+    (with-temp-buffer
+      (setq-local claude-repl--owning-workspace "ws1")
+      (let ((seg (claude-repl--prompt-summary-segment)))
+        (should (string-match-p "Auth Bug Fix" seg))
+        (should-not (string-match-p "ago" seg))))))
+
 ;;;; ---- Tests: kickoff bookmarks ws + raw ----
 
 (ert-deftest claude-repl-test-kickoff-prompt-summary-writes-pending-state ()
@@ -227,6 +331,35 @@ overwriting the previous summary."
                  #'ignore))
         (claude-repl--kickoff-prompt-summary "ws-target" "the prompt")
         (should (equal captured '("ws-target" "the prompt")))))))
+
+(ert-deftest claude-repl-test-kickoff-prompt-summary-stamps-summary-at ()
+  "Kickoff stamps :last-prompt-summary-at with the current float-time so
+the mode-line `X ago' prefix anchors against this send."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-prompt-summary-enabled t))
+      (cl-letf (((symbol-function 'claude-repl--prompt-summary-spawn)
+                 (lambda (_ws _raw) 'fake-proc))
+                ((symbol-function 'claude-repl--prompt-summary-redisplay)
+                 #'ignore)
+                ((symbol-function 'float-time) (lambda (&rest _) 7654321.0)))
+        (claude-repl--kickoff-prompt-summary "ws1" "do the thing")
+        (should (equal (claude-repl--ws-get "ws1" :last-prompt-summary-at)
+                       7654321.0))))))
+
+(ert-deftest claude-repl-test-kickoff-prompt-summary-skipped-keeps-prior-summary-at ()
+  "Skipped (digit-only/yn/bare-slash) kickoffs do NOT overwrite the
+prior :last-prompt-summary-at, so the `X ago' prefix keeps tracking
+the original summarized prompt."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-prompt-summary-enabled t))
+      (claude-repl--ws-put "ws1" :last-prompt-summary "Previous Summary")
+      (claude-repl--ws-put "ws1" :last-prompt-summary-at 5000.0)
+      (cl-letf (((symbol-function 'claude-repl--prompt-summary-spawn)
+                 (lambda (&rest _) (error "spawn must not run for skipped input")))
+                ((symbol-function 'float-time) (lambda (&rest _) 9999.0)))
+        (claude-repl--kickoff-prompt-summary "ws1" "1")
+        (should (equal (claude-repl--ws-get "ws1" :last-prompt-summary-at)
+                       5000.0))))))
 
 ;;;; ---- Tests: prompt-format forbids tool use / external investigation ----
 

@@ -252,6 +252,7 @@ do not represent a kill."
                                 :saved-tab-index ,(claude-repl--ws-get ws :saved-tab-index)
                                 :fork-session-id ,(claude-repl--ws-get ws :fork-session-id)
                                 :last-prompt-summary ,(claude-repl--ws-get ws :last-prompt-summary)
+                                :last-prompt-summary-at ,(claude-repl--ws-get ws :last-prompt-summary-at)
                                 :last-prompt-time ,(claude-repl--ws-get ws :last-prompt-time)
                                 :worktree-p ,(claude-repl--ws-get ws :worktree-p)
                                 :merge-completed ,(claude-repl--ws-get ws :merge-completed)

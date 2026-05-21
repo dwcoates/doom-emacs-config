@@ -1456,6 +1456,27 @@ where fresh-ws-env wrote :active-env without :project-dir."
                            1700000000.5)))
         (delete-directory tmpdir t)))))
 
+(ert-deftest claude-repl-test-initialize-ws-env-restores-last-prompt-summary-at ()
+  "initialize-ws-env hydrates `:last-prompt-summary-at' so the mode-line
+`X ago' prefix anchors against the original send across Emacs restarts,
+rather than restarting its count from re-init time."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-lpsat-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :project-dir tmpdir)
+            (claude-repl--ws-put "ws1" :active-env :bare-metal)
+            (claude-repl--ws-put "ws1" :last-prompt-summary "Auth Bug Fix")
+            (claude-repl--ws-put "ws1" :last-prompt-summary-at 1700000123.5)
+            (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
+            (claude-repl--ws-put "ws1" :sandbox (make-claude-repl-instantiation))
+            (claude-repl--state-save "ws1")
+            (remhash "ws1" claude-repl--workspaces)
+            (claude-repl--initialize-ws-env "ws1" tmpdir)
+            (should (equal (claude-repl--ws-get "ws1" :last-prompt-summary-at)
+                           1700000123.5)))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest claude-repl-test-initialize-ws-env-active-env-hint-sets-sandbox ()
   "initialize-ws-env uses ACTIVE-ENV-HINT when provided and no state file exists."
   (claude-repl-test--with-clean-state
