@@ -4437,8 +4437,8 @@ sees nil state and short-circuits without printing bogus counters."
 ;;;; ---- claude-repl--snapshot-load-close-main ----
 
 (ert-deftest claude-repl-cmd-test-snapshot-load-finish/closes-main-when-exists ()
-  "After finish, the leftover `main' workspace artifact is killed via
-`+workspace/kill' when it still exists."
+  "After finish, the leftover `main' workspace artifact is nuked: the
+persp is killed via `+workspace/kill' when it still exists."
   (claude-repl-test--with-clean-state
     (let ((killed nil))
       (setq claude-repl--snapshot-load-state
@@ -4446,24 +4446,52 @@ sees nil state and short-circuits without printing bogus counters."
                   :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
       (cl-letf (((symbol-function '+workspace-exists-p)
                  (lambda (name) (equal name "main")))
+                ((symbol-function 'claude-repl--kill-workspace-buffers)
+                 (lambda (_ws) nil))
                 ((symbol-function '+workspace/kill)
                  (lambda (name) (setq killed name)))
                 (+workspaces-main "main"))
         (claude-repl--snapshot-load-finish)
         (should (equal killed "main"))))))
 
-(ert-deftest claude-repl-cmd-test-snapshot-load-finish/main-missing-is-noop ()
-  "Finish is a no-op for the main-close step when `main' doesn't exist."
+(ert-deftest claude-repl-cmd-test-snapshot-load-finish/nuke-main-sweeps-persp-buffers ()
+  "Nuking `main' invokes `claude-repl--kill-workspace-buffers' on the
+persp so dashboard/scratch/file buffers don't survive the kill, AND
+the sweep happens before the persp itself is killed (since
+`+workspace/kill' would otherwise drop the persp's buffer list)."
   (claude-repl-test--with-clean-state
-    (let ((kill-calls 0))
+    (let ((call-order nil))
+      (setq claude-repl--snapshot-load-state
+            (list :queue nil :origin nil :awaiting nil
+                  :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
+      (cl-letf (((symbol-function '+workspace-exists-p)
+                 (lambda (name) (equal name "main")))
+                ((symbol-function 'claude-repl--kill-workspace-buffers)
+                 (lambda (ws) (push (cons 'sweep ws) call-order)))
+                ((symbol-function '+workspace/kill)
+                 (lambda (ws) (push (cons 'persp-kill ws) call-order)))
+                (+workspaces-main "main"))
+        (claude-repl--snapshot-load-finish)
+        (should (equal (nreverse call-order)
+                       '((sweep . "main") (persp-kill . "main"))))))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load-finish/main-missing-is-noop ()
+  "Finish is a no-op for the nuke-main step when `main' doesn't exist:
+neither the buffer sweep nor the persp kill fires."
+  (claude-repl-test--with-clean-state
+    (let ((sweep-calls 0)
+          (kill-calls 0))
       (setq claude-repl--snapshot-load-state
             (list :queue nil :origin nil :awaiting nil
                   :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
       (cl-letf (((symbol-function '+workspace-exists-p) (lambda (_n) nil))
+                ((symbol-function 'claude-repl--kill-workspace-buffers)
+                 (lambda (_ws) (cl-incf sweep-calls)))
                 ((symbol-function '+workspace/kill)
                  (lambda (_n) (cl-incf kill-calls)))
                 (+workspaces-main "main"))
         (claude-repl--snapshot-load-finish)
+        (should (= 0 sweep-calls))
         (should (= 0 kill-calls))))))
 
 (ert-deftest claude-repl-cmd-test-snapshot-load-finish/close-main-error-swallowed ()
@@ -4474,6 +4502,8 @@ sees nil state and short-circuits without printing bogus counters."
                 :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
     (cl-letf (((symbol-function '+workspace-exists-p)
                (lambda (name) (equal name "main")))
+              ((symbol-function 'claude-repl--kill-workspace-buffers)
+               (lambda (_ws) nil))
               ((symbol-function '+workspace/kill)
                (lambda (_n) (error "boom")))
               (+workspaces-main "main"))
@@ -4481,9 +4511,29 @@ sees nil state and short-circuits without printing bogus counters."
       (claude-repl--snapshot-load-finish)
       (should-not claude-repl--snapshot-load-state))))
 
+(ert-deftest claude-repl-cmd-test-snapshot-load-finish/nuke-main-sweep-error-does-not-block-persp-kill ()
+  "An error from the buffer sweep on main is swallowed AND does not block
+the subsequent `+workspace/kill' — each step has its own condition-case
+so a failing sweep can't strand the persp in the tabline."
+  (claude-repl-test--with-clean-state
+    (let ((killed nil))
+      (setq claude-repl--snapshot-load-state
+            (list :queue nil :origin nil :awaiting nil
+                  :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
+      (cl-letf (((symbol-function '+workspace-exists-p)
+                 (lambda (name) (equal name "main")))
+                ((symbol-function 'claude-repl--kill-workspace-buffers)
+                 (lambda (_ws) (error "sweep boom")))
+                ((symbol-function '+workspace/kill)
+                 (lambda (ws) (setq killed ws)))
+                (+workspaces-main "main"))
+        ;; Must not signal.
+        (claude-repl--snapshot-load-finish)
+        (should (equal killed "main"))))))
+
 (ert-deftest claude-repl-cmd-test-snapshot-load-finish/idempotent-skips-second-close-main ()
   "A second `--snapshot-load-finish' call (state already nil) must not
-re-invoke the main-close step — close-main is part of the per-load
+re-invoke the nuke-main step — close-main is part of the per-load
 finalization, not a standalone teardown."
   (claude-repl-test--with-clean-state
     (let ((kill-calls 0))
@@ -4492,6 +4542,8 @@ finalization, not a standalone teardown."
                   :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
       (cl-letf (((symbol-function '+workspace-exists-p)
                  (lambda (name) (equal name "main")))
+                ((symbol-function 'claude-repl--kill-workspace-buffers)
+                 (lambda (_ws) nil))
                 ((symbol-function '+workspace/kill)
                  (lambda (_n) (cl-incf kill-calls)))
                 (+workspaces-main "main"))
