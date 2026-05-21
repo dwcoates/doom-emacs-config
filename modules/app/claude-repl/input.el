@@ -566,6 +566,30 @@ WARNING instead, making this common silent-failure mode visible."
     (claude-repl--log (+workspace-current-name) "%s: WARNING — vterm--term is %s, return NOT delivered"
                       label (if (boundp 'vterm--term) "nil" "unbound"))))
 
+(defun claude-repl--vterm-send-return-key-logged (label)
+  "Send the `<return>' key through libvterm, logging the attempt under LABEL.
+Routes through `vterm-send-key', which calls `vterm--update' so the
+keystroke takes libvterm's keyboard event path — the same path a
+user-typed Enter inside the vterm buffer would take.  Distinct from
+`claude-repl--vterm-send-return-logged', which bypasses libvterm and
+writes a raw `\\C-m'/`\\C-j' byte directly to the PTY via
+`process-send-string'.
+
+Used for the empty-input bare-RET branch of `claude-repl--send', where
+the keystroke needs to be framed as a real keyboard event for Claude's
+TUI to register it — the direct-PTY-write path lands the byte at the
+PTY but does not always produce a visible action in Ink-based TUIs.
+
+When `vterm--term' is nil — meaning `vterm-send-key' would silently
+no-op — logs a WARNING instead, making this common silent-failure mode
+visible."
+  (if (bound-and-true-p vterm--term)
+      (progn
+        (claude-repl--log (+workspace-current-name) "%s: return key delivered via libvterm" label)
+        (vterm-send-key "<return>"))
+    (claude-repl--log (+workspace-current-name) "%s: WARNING — vterm--term is %s, return-key NOT delivered"
+                      label (if (boundp 'vterm--term) "nil" "unbound"))))
+
 (defun claude-repl--send-input-direct (vterm-buf input &optional on-settle)
   "Send small INPUT string directly to VTERM-BUF and refresh.
 When ON-SETTLE is non-nil, call it after sending — the send is fully
@@ -753,9 +777,9 @@ Handles input preparation, sending, history, and persistence."
        ;; (metaprompt prefix, counter increment, posthooks, history)
        ;; — there's no input to record.
        ((and raw-empty vterm-buf (buffer-live-p vterm-buf))
-        (claude-repl--log ws "send: empty raw input -- forwarding bare RET to vterm")
+        (claude-repl--log ws "send: empty raw input -- forwarding bare RET to vterm via libvterm")
         (with-current-buffer vterm-buf
-          (claude-repl--vterm-send-return-logged "send-empty-bare-ret")))
+          (claude-repl--vterm-send-return-key-logged "send-empty-bare-ret")))
        ((and (not raw-empty) vterm-buf (buffer-live-p vterm-buf))
         (let ((input (claude-repl--prepare-input ws raw force-metaprompt)))
           (claude-repl--do-send ws input raw on-settle)
