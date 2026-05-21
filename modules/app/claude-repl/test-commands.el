@@ -3884,6 +3884,54 @@ depend on it).  After the hook returns it's restored."
               (should (equal opened tmp-file))))
         (delete-directory tmp-dir t)))))
 
+(ert-deftest claude-repl-cmd-test-establish-workspace/sets-workspace-project-param ()
+  "establish-workspace must set the `+workspace-project' persp-parameter
+to DIR on the newly added persp.  Without this, Doom's
+`+workspaces-switch-to-project-h' (invoked by `SPC p p') cannot match
+the existing workspace against the project root and falls through to
+its uniquify-by-parent-dir branch, producing names like
+`doom-worktrees/<ws>'.  Mirrors what Doom's own hook sets on line 588
+of ui/workspaces/autoload/workspaces.el."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-est-wp-" t)))
+           (fake-persp (vector 'fake-persp))
+           (set-with-key nil)
+           (set-with-val nil)
+           (set-with-persp nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'claude-repl--initialize-claude) #'ignore)
+                    ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil))
+                    ((symbol-function 'persp-add-new) (lambda (&rest _) fake-persp))
+                    ((symbol-function 'persp-frame-switch) #'ignore)
+                    ((symbol-function 'projectile-add-known-project) #'ignore)
+                    ((symbol-function 'set-persp-parameter)
+                     (lambda (k v p)
+                       (setq set-with-key k set-with-val v set-with-persp p))))
+            (claude-repl--establish-workspace "test-ws" tmp-dir)
+            (should (eq set-with-key '+workspace-project))
+            (should (equal set-with-val tmp-dir))
+            (should (eq set-with-persp fake-persp)))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-establish-workspace/skips-workspace-project-param-when-add-new-returns-nil ()
+  "establish-workspace must not call `set-persp-parameter' when
+`persp-add-new' returns nil (test stubs commonly stub it to `#'ignore').
+A nil persp would crash `set-persp-parameter'."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-est-wp-nil-" t)))
+           (set-called nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'claude-repl--initialize-claude) #'ignore)
+                    ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil))
+                    ((symbol-function 'persp-add-new) #'ignore)
+                    ((symbol-function 'persp-frame-switch) #'ignore)
+                    ((symbol-function 'projectile-add-known-project) #'ignore)
+                    ((symbol-function 'set-persp-parameter)
+                     (lambda (&rest _) (setq set-called t))))
+            (claude-repl--establish-workspace "test-ws" tmp-dir)
+            (should-not set-called))
+        (delete-directory tmp-dir t)))))
+
 (ert-deftest claude-repl-cmd-test-establish-workspace/skips-recent-when-gone ()
   "establish-workspace skips `find-file' when the recent file doesn't exist."
   (claude-repl-test--with-clean-state
