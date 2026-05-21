@@ -1657,7 +1657,7 @@ Regression guard: empty input must not dispatch a metaprompt-only send via
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'claude-repl--do-send)
                    (lambda (&rest _) (setq do-send-called t)))
-                  ((symbol-function 'claude-repl--vterm-send-return-logged) #'ignore))
+                  ((symbol-function 'claude-repl--vterm-send-return-key-logged) #'ignore))
           (claude-repl--send nil "ws1")
           (should-not do-send-called))))))
 
@@ -1675,7 +1675,7 @@ send whenever the prefix counter aligned with the period."
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'claude-repl--do-send)
                      (lambda (&rest _) (setq do-send-called t)))
-                    ((symbol-function 'claude-repl--vterm-send-return-logged) #'ignore))
+                    ((symbol-function 'claude-repl--vterm-send-return-key-logged) #'ignore))
             (claude-repl--send nil "ws1")
             (should-not do-send-called)))))))
 
@@ -1691,7 +1691,7 @@ send whenever the prefix counter aligned with the period."
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'claude-repl--do-send)
                      (lambda (&rest _) (setq do-send-called t)))
-                    ((symbol-function 'claude-repl--vterm-send-return-logged) #'ignore))
+                    ((symbol-function 'claude-repl--vterm-send-return-key-logged) #'ignore))
             (claude-repl--send nil "ws1")
             (should-not do-send-called)))))))
 
@@ -1704,7 +1704,7 @@ send whenever the prefix counter aligned with the period."
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'claude-repl--do-send)
                    (lambda (&rest _) (setq do-send-called t)))
-                  ((symbol-function 'claude-repl--vterm-send-return-logged) #'ignore))
+                  ((symbol-function 'claude-repl--vterm-send-return-key-logged) #'ignore))
           (claude-repl--send "" "ws1")
           (should-not do-send-called)
           (claude-repl--send "   \n  " "ws1")
@@ -1721,7 +1721,7 @@ permission prompts, menus, and confirmations."
         (claude-repl-test--with-temp-buffer "*claude-panel-bare-ret-empty-vterm*"
           (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                    ((symbol-function 'claude-repl--vterm-send-return-logged)
+                    ((symbol-function 'claude-repl--vterm-send-return-key-logged)
                      (lambda (&rest _) (setq ret-buf (current-buffer)))))
             (claude-repl--send nil "ws1")
             (should (eq ret-buf (claude-repl--ws-get "ws1" :vterm-buffer)))))))))
@@ -1736,7 +1736,7 @@ permission prompts, menus, and confirmations."
         (claude-repl-test--with-temp-buffer "*claude-panel-bare-ret-whitespace-vterm*"
           (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                    ((symbol-function 'claude-repl--vterm-send-return-logged)
+                    ((symbol-function 'claude-repl--vterm-send-return-key-logged)
                      (lambda (&rest _) (setq ret-buf (current-buffer)))))
             (claude-repl--send nil "ws1")
             (should (eq ret-buf (claude-repl--ws-get "ws1" :vterm-buffer)))))))))
@@ -1748,7 +1748,7 @@ permission prompts, menus, and confirmations."
       (claude-repl-test--with-temp-buffer "*claude-panel-bare-ret-empty-prompt-vterm*"
         (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                  ((symbol-function 'claude-repl--vterm-send-return-logged)
+                  ((symbol-function 'claude-repl--vterm-send-return-key-logged)
                    (lambda (&rest _) (cl-incf ret-call-count))))
           (claude-repl--send "" "ws1")
           (should (= ret-call-count 1))
@@ -1764,7 +1764,7 @@ should still forward RET so the keystroke reaches Claude."
       (claude-repl-test--with-temp-buffer "*claude-panel-bare-ret-nil-raw-vterm*"
         (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                  ((symbol-function 'claude-repl--vterm-send-return-logged)
+                  ((symbol-function 'claude-repl--vterm-send-return-key-logged)
                    (lambda (&rest _) (setq ret-buf (current-buffer)))))
           (claude-repl--send nil "ws1")
           (should (eq ret-buf (claude-repl--ws-get "ws1" :vterm-buffer))))))))
@@ -1778,7 +1778,7 @@ There's no terminal to receive the keystroke."
         (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
         ;; Note: no vterm-buffer registered.
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                  ((symbol-function 'claude-repl--vterm-send-return-logged)
+                  ((symbol-function 'claude-repl--vterm-send-return-key-logged)
                    (lambda (&rest _) (setq ret-called t))))
           (claude-repl--send nil "ws1")
           (should-not ret-called))))))
@@ -1791,7 +1791,7 @@ There's no terminal to receive the keystroke."
       (claude-repl--ws-put "ws1" :vterm-buffer dead-vterm)
       (kill-buffer dead-vterm)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                ((symbol-function 'claude-repl--vterm-send-return-logged)
+                ((symbol-function 'claude-repl--vterm-send-return-key-logged)
                  (lambda (&rest _) (setq ret-called t))))
         (claude-repl--send nil "ws1")
         (should-not ret-called)))))
@@ -1820,6 +1820,52 @@ There's no terminal to receive the keystroke."
         (cl-letf (((symbol-function 'vterm-send-return)
                    (lambda () (setq return-called t))))
           (claude-repl--vterm-send-return-logged "test-label")
+          (should-not return-called))))))
+
+;;;; ---- Tests: vterm-send-return-key-logged ----
+
+(ert-deftest claude-repl-test-vterm-send-return-key-logged-routes-via-libvterm ()
+  "`claude-repl--vterm-send-return-key-logged' sends \"<return>\" via `vterm-send-key' when vterm--term is alive.
+Regression guard: the empty-input bare-RET branch must go through
+libvterm's keyboard handler (vterm--update) rather than the raw
+process-send-string path used by `vterm-send-return', so Claude's Ink
+TUI registers the keystroke as a real Enter event."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*test-return-key-logged*"
+      (setq-local vterm--term 'fake-term)
+      (let ((key-arg nil))
+        (cl-letf (((symbol-function 'vterm-send-key)
+                   (lambda (key &rest _) (setq key-arg key))))
+          (claude-repl--vterm-send-return-key-logged "test-label")
+          (should (equal key-arg "<return>")))))))
+
+(ert-deftest claude-repl-test-vterm-send-return-key-logged-nil-term ()
+  "`claude-repl--vterm-send-return-key-logged' does NOT send when vterm--term is nil.
+Mirrors `claude-repl-test-vterm-send-return-logged-nil-term' for the
+libvterm-routed variant — a missing `vterm--term' must be a logged
+warning, not a silent vterm-send-key call."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*test-return-key-logged-nil*"
+      (setq-local vterm--term nil)
+      (let ((key-called nil))
+        (cl-letf (((symbol-function 'vterm-send-key)
+                   (lambda (&rest _) (setq key-called t))))
+          (claude-repl--vterm-send-return-key-logged "test-label")
+          (should-not key-called))))))
+
+(ert-deftest claude-repl-test-vterm-send-return-key-logged-does-not-call-vterm-send-return ()
+  "`claude-repl--vterm-send-return-key-logged' never falls back to `vterm-send-return'.
+The whole point of the libvterm-routed variant is to avoid the
+raw process-send-string path, so this guards against the helper
+accidentally being wired back to the byte-write path."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*test-return-key-logged-no-fallback*"
+      (setq-local vterm--term 'fake-term)
+      (let ((return-called nil))
+        (cl-letf (((symbol-function 'vterm-send-key) #'ignore)
+                  ((symbol-function 'vterm-send-return)
+                   (lambda () (setq return-called t))))
+          (claude-repl--vterm-send-return-key-logged "test-label")
           (should-not return-called))))))
 
 (ert-deftest claude-repl-test-send-input-direct-calls-send-return ()
