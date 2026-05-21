@@ -234,7 +234,16 @@
         (+dwc/toggle-window-fullscreen))
     (+vterm/toggle ARG))
   (map! :leader :desc "Toggle vterm popup" "o t" #'+dwc/vterm-toggle)
-  )
+
+  ;; `evil-collection-vterm' plants `C-k' -> `vterm--self-insert' on the
+  ;; insert-state aux map of `vterm-mode-map', so the key is sent to the
+  ;; terminal instead of moving to the window above.  Reclaim `C-k' for
+  ;; window-up navigation across normal and insert states (vterm spends
+  ;; most of its time in insert state).  The other `C-h/j/l' chords are
+  ;; intentionally left alone: `C-j' (newline) and `C-l' (clear) are
+  ;; useful terminal chords, and `C-h' already falls through to the
+  ;; global `evil-window-left' binding.
+  (map! :map vterm-mode-map :ni "C-k" #'evil-window-up))
 
 (after! evil
   ;; Highlight the current search match more brightly
