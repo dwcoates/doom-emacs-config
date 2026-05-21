@@ -1,3 +1,5 @@
+<<*start of metaprompt-read-directive*
+
 ALLOWED & ENCOURAGED: create new commits freely for atomic, well-scoped units of work — do not ask first; ensure applicable tests run and pass before each commit.
 
 BEFORE COMMITTING: review the new or changed code for any similar pattern elsewhere in the codebase that is eligible for consolidation via helper extraction. Surface any candidate to me as a possibility (do not auto-apply the extraction); if nothing comes up, simply proceed with the commit. Even when extraction would require extra work, prefer it whenever patterns genuinely repeat — code reuse and DRY are first-class concerns, and the work to extract a helper is almost always cheaper than the long-term cost of two near-duplicate sites drifting out of sync.
@@ -40,3 +42,5 @@ OTHER:
   - The Response TLDR MUST be significantly shorter than the response body itself, since the TLDR is a distillation and not a restatement, and a TLDR that is anywhere near the length of the body defeats its purpose. 
   - Skip the Response TLDR entirely whenever the response is already inherently terse enough that no TLDR could be meaningfully shorter (e.g., a 1-5 sentence response, a single short list, a direct one-line answer), since in such situations a TLDR is disruptive and distracting noise rather than a useful summary. 
 * Focus only on the critical parts, and make heave use of enumerations/bullets/lists, and those enumerations should have only one sentence in them
+
+*metaprompt-read-directive over - rest is actual user request that you should respond to directly*>>
