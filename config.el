@@ -960,3 +960,9 @@ If found, the class name is returned, otherwise STR is returned"
 (after! claude-repl
   (add-to-list 'claude-repl-workspace-initial-buffers
                '("open-claude-config" . ("modules/app/claude-repl/config.el"))))
+
+;; Read-only, face-based rich rendering of markdown buffers.  Loads
+;; `+markdown-rich-render-buffer' (one-shot) and `+markdown-rich-mode'
+;; (live-on-save).
+(unless (featurep 'markdown-rich)
+  (load! "modules/lang/markdown-rich/config"))
