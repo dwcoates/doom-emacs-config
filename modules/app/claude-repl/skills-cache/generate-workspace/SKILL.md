@@ -86,22 +86,21 @@ When analyzing Slack threads, **follow all links exhaustively**:
 2. **Generate branch names** for each workspace:
   - Branch Names should be short, lowercase, hyphen-separated slugs — not long descriptions.
     - E.g., Longer descriptions take up lots of space in the editor! Should not be longer than 3 words.
-  - **Do NOT include a user prefix yourself.** `run.sh` automatically prepends the current user's initials prefix (e.g. `JB/`) to every `"create"` entry's `name` when it writes the file. Emit the bare slug (e.g. `hello-world`); the on-disk result will be `<PREFIX>/hello-world-xyz`. The prefix is derived from `gns whoami` (email local part initials) or `CLAUDE_WORKSPACE_PREFIX` if set, so it is correct per-user without the agent guessing.
-  - If the user supplied a Jira ticket, include it as a sub-prefix using the format `<ticket-id>/<feature-name>`.
-    - E.g., `CV-100/fix-login` (run.sh emits the user prefix → `JB/CV-100/fix-login`).
-  - **Do NOT append a random hash suffix yourself.** `run.sh` automatically appends a random 3-letter lowercase suffix (e.g. `-abc`) to every `"create"` entry's `name`. Never call `openssl`, `uuidgen`, `tr`, etc. to mint your own suffix — that responsibility lives exclusively in `run.sh`.
+  - **Do NOT include a user prefix yourself.** Emit the bare slug (e.g. `hello-world`). Prefixing is handled downstream.
+  - If the user supplied a Jira ticket, include it as a sub-prefix using the format `<ticket-id>/<feature-name>` (e.g. `CV-100/fix-login`).
+  - **Do NOT append a random hash suffix yourself.** Disambiguator suffixes are handled downstream. Never call `openssl`, `uuidgen`, `tr`, etc. to mint your own.
 
 3. **Determine commands**: Build an array of typed command objects.
   - Always emit one `"create"` entry per workspace.
   - If the user **explicitly** asked to send a message to the generated workspaces, attach it as an inline `"prompt"` field on each `"create"` entry. Do **not** emit separate `"prompt"` entries for newly created workspaces — the inline form is preferred.
   - Separate `"prompt"` entries (without a `"create"`) are only for targeting **existing** workspaces by name.
   - If the user specifies a priority for a workspace, include a `"priority"` field on the `"create"` entry. Valid values are `"p05"`, `"p1"`, `"p2"`, `"p3"`. This displays a priority badge image in the tab-bar. The field is optional — omit it if no priority is specified.
-  - If the caller specifies a base ref to branch from, include a `"base_commit"` field on the `"create"` entry (e.g. `"HEAD"`, `"origin/master"`, a SHA, or any other git ref). When omitted on a non-fork create, `run.sh` resolves `base_commit` automatically by reading the `git_root`'s `origin` remote and calling `gh api repos/<owner>/<repo> --jq .default_branch`, falling back to `master` if `gh` is unavailable, the remote is not on github.com, or the lookup fails. Forks (`fork_from` set) skip this entirely and the downstream consumer uses `HEAD`.
-    - **Implicit base from source workspace**: when a `[source-ws:<name> path:<dir>]` tag is present AND the caller did NOT explicitly specify a base ref AND `fork_from` is NOT set, resolve the source workspace's current HEAD with `git -C <dir> rev-parse HEAD` and emit the resulting SHA as `"base_commit"` on every `create` entry whose `git_root` came from that tag. This makes the new workspace branch from the commit the invoking workspace is on, instead of silently falling through to `origin/master`.
-    - Pin to the SHA (not the literal `"HEAD"`) so the new worktree is deterministic even if the source workspace advances between dispatch and worktree creation.
+  - If the caller specifies a base ref to branch from, include a `"base_commit"` field on the `"create"` entry (e.g. `"HEAD"`, `"origin/master"`, a SHA, or any other git ref). When omitted on a non-fork create, the default base is resolved downstream. Forks (`fork_from` set) skip this entirely.
+    - **Implicit base from source workspace**: when a `[source-ws:<name> path:<dir>]` tag is present AND the caller did NOT explicitly specify a base ref AND `fork_from` is NOT set, resolve the source workspace's current HEAD with `git -C <dir> rev-parse HEAD` and emit the resulting SHA as `"base_commit"` on every `create` entry whose `git_root` came from that tag.
+    - Pin to the SHA so the new worktree is deterministic even if the source workspace advances between dispatch and worktree creation.
     - Do NOT override an explicit user-supplied `base_commit`.
-    - Do NOT emit `base_commit` when `fork_from` is set — downstream ignores it and the combination is misleading.
-    - If `git -C <dir> rev-parse HEAD` fails, stop and surface the error to the user — do not silently fall through to `origin/master`.
+    - Do NOT emit `base_commit` when `fork_from` is set.
+    - If `git -C <dir> rev-parse HEAD` fails, stop and surface the error to the user.
   - If the caller specifies a fork source, include a `"fork_from"` field naming the source workspace (the new worktree branches from HEAD and resumes that workspace's Claude session via `--fork-session`). When `fork_from` is set, the downstream consumer ignores any explicit `base_commit` and uses HEAD. If `fork_from` resolution fails (unknown workspace, no active session), the workspace is NOT created — there is no silent fallback.
   - **Always include a `"git_root"` field on every `"create"` entry** — it is required by the downstream consumer, which does not fall back to ambient context. Resolution order:
     1. If the user links a GitHub PR/issue or names a specific repo, use the local checkout path (e.g. `~/workspace/ChessCom/explanation-engine`).
@@ -156,14 +155,14 @@ When analyzing Slack threads, **follow all links exhaustively**:
    ]
    ```
 
-   Example — prompt existing workspaces only (pass the workspace name verbatim — `prompt` entries are not prefixed by `run.sh`):
+   Example — prompt existing workspaces only (pass the workspace name verbatim, with whatever prefix it already has):
    ```json
    [
      {"type": "prompt", "workspace": "DWC/feature-one", "prompt": "hello world"}
    ]
    ```
 
-4. **Write the commands** by piping the JSON array into the skill's `run.sh`. `run.sh` is the single source of truth for: (a) prepending the user initials prefix to each `create` entry's `name` (when the name has no `/`), (b) appending a random 3-letter suffix, and (c) writing atomically to `~/.claude/output/workspace_commands_<uuid>.json`. Do not write the file yourself with `mktemp`/`mv` — always go through `run.sh`.
+4. **Dispatch the commands** by piping the JSON array into the skill's `run.sh`. Do not write any file yourself — always go through `run.sh`.
    ```bash
    cat <<'EOF' | <skill_base_dir>/run.sh
    [
@@ -174,10 +173,10 @@ When analyzing Slack threads, **follow all links exhaustively**:
    ```
    `<skill_base_dir>` is the base directory of this skill as injected by the harness at invocation time (it appears in the system reminder above the skill's instructions).
 
-   **`run.sh` is FIRE-AND-FORGET.** After invoking it, you are DONE with the dispatch step — there is no verification phase, no post-write check, no inspection of `~/.claude/output/`, no second call. The exit code of `run.sh` is the sole and authoritative signal:
-   - Exit 0 → the write succeeded. Trust it unconditionally and move on. Do NOT `ls`, `cat`, `stat`, `find`, `test -f`, `[ -e ... ]`, or otherwise look at `~/.claude/output/` to "confirm." The downstream consumer (Emacs) watches that directory and deletes each file the instant it is dispatched, so any post-write inspection will almost always show your file missing — that is normal, not a failure. **Missing file ≠ failure.**
+   **`run.sh` is FIRE-AND-FORGET.** After invoking it, you are DONE with the dispatch step — there is no verification phase, no post-dispatch check, no second call. The exit code of `run.sh` is the sole and authoritative signal:
+   - Exit 0 → the dispatch succeeded. Trust it unconditionally and move on. Do NOT `ls`, `cat`, `stat`, `find`, `test -f`, `[ -e ... ]`, or otherwise inspect anything to "confirm." Any post-dispatch inspection will likely show no trace — that is normal, not a failure. **Missing artifact ≠ failure.**
    - Exit non-zero → stop immediately and surface the error to the user verbatim. Do not retry, do not adapt, do not work around, do not "re-run with stderr captured."
-   - Do NOT re-invoke `run.sh` for any reason — not to retry, not to verify, not to debug, not to "fix" anything. Each invocation produces a fresh random suffix, so a second call dispatches duplicate workspaces with different names; there is no idempotency safety net.
+   - Do NOT re-invoke `run.sh` for any reason — not to retry, not to verify, not to debug, not to "fix" anything. Re-invocation is unsafe; there is no idempotency safety net.
    - Do NOT attempt to fix, infer, or self-correct any aspect of the dispatch process. The pipeline is correct; assume your understanding of it is the unreliable part.
 
 6. **Tell the user** the workspace names that were written and that the workspaces will be created automatically. If prompt commands were included, mention that the prompts will be dispatched once each session is ready.

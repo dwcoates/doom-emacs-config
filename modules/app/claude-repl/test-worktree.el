@@ -5095,6 +5095,32 @@ triggers the master-worktree lookup."
         (should master-path-called)
         (should (equal captured-source-dir "/tmp/trunk/"))))))
 
+;;;; ---- Tests: autonomous-prompt-prefix content ----
+
+(ert-deftest claude-repl-test-autonomous-prompt-prefix-keeps-plan-framing ()
+  "The prefix retains the autonomous plan + task framing that is workspace-
+creation specific (the bit that the metaprompt does NOT cover)."
+  (should (string-match-p
+           (regexp-quote "Do not wait for further instructions.")
+           claude-repl--autonomous-prompt-prefix))
+  (should (string-match-p
+           (regexp-quote "Come up with a plan and then immediately execute on it.")
+           claude-repl--autonomous-prompt-prefix))
+  (should (string-suffix-p "Here is the task:\n\n"
+                           claude-repl--autonomous-prompt-prefix)))
+
+(ert-deftest claude-repl-test-autonomous-prompt-prefix-omits-commit-policy ()
+  "The commit policy (commit-often, tests-before-commit, no-other-mutating-git)
+has been migrated to the metaprompt and MUST NOT be duplicated in the
+prefix — otherwise the two sources can drift.  Each forbidden token
+guards a specific historical phrase from the old prefix."
+  (dolist (forbidden '("Commit freely"
+                       "do not commit before corresponding tests"
+                       "Never rebase"
+                       "mutating git commands"))
+    (should-not (string-match-p (regexp-quote forbidden)
+                                claude-repl--autonomous-prompt-prefix))))
+
 ;;;; ---- Tests: workspace-generation prompt construction ----
 
 (ert-deftest claude-repl-test-workspace-generation-prompt-includes-raw-and-prefixed ()

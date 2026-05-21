@@ -1,18 +1,11 @@
 #!/usr/bin/env bash
-# Reads a JSON workspace commands array from stdin, prepends a user
-# initials prefix (e.g. "JB/") and appends a random 3-letter lowercase
-# suffix (e.g. "-abc") to each create entry's "name" field, then writes
-# the result atomically to ~/.claude/output/workspace_commands_<uuid>.json.
+# Reads a JSON workspace commands array from stdin, decorates each create
+# entry's "name" field, then writes the result atomically to
+# ~/.claude/output/workspace_commands_<uuid>.json.
 #
-# Prefix and suffix are added here — not by the caller — so workspace
-# names always carry the right prefix for the current user and a
-# deterministic disambiguator. Prefix resolution order:
-#   1. CLAUDE_WORKSPACE_PREFIX env var (manual override)
-#   2. Initials derived from `gns whoami` email local part (split on
-#      '.', first char of each part, uppercased, concatenated)
-#
-# (Previously a wrapper that exec'd ../emit-workspace-commands.sh; inlined
-# here so the skill is self-contained and can be `gns skills publish`'d.)
+# Requires CLAUDE_WORKSPACE_PREFIX to be set in the environment; there is
+# no fallback. Callers must arrange for it to be exported before invoking
+# this script.
 set -e
 
 if ! command -v uuidgen &>/dev/null; then
@@ -25,30 +18,10 @@ if ! command -v python3 &>/dev/null; then
   exit 1
 fi
 
-# Resolve the workspace prefix for the current user.
 WS_PREFIX="${CLAUDE_WORKSPACE_PREFIX:-}"
 if [[ -z "$WS_PREFIX" ]]; then
-  if ! command -v gns &>/dev/null; then
-    echo "ERROR: gns is not available and CLAUDE_WORKSPACE_PREFIX is unset — cannot determine workspace prefix." >&2
-    exit 1
-  fi
-  whoami_json=$(gns whoami --json 2>/dev/null || true)
-  if [[ -z "$whoami_json" ]]; then
-    echo "ERROR: 'gns whoami --json' failed — run 'gns auth login' or set CLAUDE_WORKSPACE_PREFIX." >&2
-    exit 1
-  fi
-  WS_PREFIX=$(python3 -c '
-import json, sys
-data = json.loads(sys.argv[1] or "{}")
-email = (data.get("email") or "").strip()
-local = email.split("@", 1)[0] if "@" in email else email
-initials = "".join(p[0].upper() for p in local.split(".") if p)
-print(initials)
-' "$whoami_json")
-  if [[ -z "$WS_PREFIX" ]]; then
-    echo "ERROR: could not derive workspace prefix from 'gns whoami' — set CLAUDE_WORKSPACE_PREFIX." >&2
-    exit 1
-  fi
+  echo "ERROR: CLAUDE_WORKSPACE_PREFIX is unset — export it in the environment before running this skill." >&2
+  exit 1
 fi
 
 mkdir -p ~/.claude/output
