@@ -2333,6 +2333,15 @@ the error-routing `condition-case'."
          ;; Merged-completed entries: register data-only and advance.
          ;; The drawer's MERGED bucket renders these; `--finish-workspace'
          ;; (invoked via drawer `x') is the only way out.
+         ;;
+         ;; Exception: when register-merged-workspace flags `:merge-failed t'
+         ;; (either via on-disk state or the git-landing probe), promote the
+         ;; entry from drawer-only to a real tab-bar workspace via
+         ;; `--establish-workspace' and move it to the front of
+         ;; `persp-names-cache' via `--reorder-workspace-to-front'.  A failed
+         ;; cherry-pick must not hide in the MERGED bucket post-restart —
+         ;; surfacing it as the leftmost tab forces the user to notice and
+         ;; act (retry / investigate / dismiss).
          ((claude-repl--state-merge-completed-p dir)
           (claude-repl--log nil "snapshot-load iter=%d/%d ws=%s dir=%s register-merged"
                             iter total ws dir)
@@ -2340,6 +2349,15 @@ the error-routing `condition-case'."
               (claude-repl--register-merged-workspace ws dir)
             (error
              (claude-repl--log nil "snapshot-load: register-merged err ws=%s err=%S" ws err)))
+          (when (eq (claude-repl--ws-get ws :merge-failed) t)
+            (claude-repl--log nil "snapshot-load iter=%d/%d ws=%s dir=%s merge-failed -> establish + front-reorder"
+                              iter total ws dir)
+            (condition-case err
+                (progn
+                  (claude-repl--establish-workspace ws dir)
+                  (claude-repl--reorder-workspace-to-front ws))
+              (error
+               (claude-repl--log nil "snapshot-load: failed-restore establish err ws=%s err=%S" ws err))))
           (setq claude-repl--snapshot-load-state
                 (plist-put claude-repl--snapshot-load-state :loaded
                            (1+ (plist-get claude-repl--snapshot-load-state :loaded))))

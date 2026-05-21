@@ -2553,6 +2553,149 @@ recorded the failure."
               (should (eq (claude-repl--ws-get "merged-ws" :repl-state) :merge-failed))))
         (delete-file tmp)))))
 
+;;;; ---- snapshot-load: merge-failed restore -> establish + front-reorder ----
+
+(defun claude-repl-test--write-merge-state (dir &rest extra-plist)
+  "Write a state.el under DIR (under .claude/emacs/) with :merge-completed t.
+Extra plist entries are merged into the file's plist."
+  (let* ((emacs-dir (expand-file-name ".claude/emacs/" dir))
+         (state-file (expand-file-name "state.el" emacs-dir))
+         (plist (append (list :project-dir dir :merge-completed t)
+                        extra-plist)))
+    (make-directory emacs-dir t)
+    (with-temp-file state-file
+      (prin1 plist (current-buffer)))
+    state-file))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/merge-failed-establishes-and-fronts ()
+  "When a snapshot entry's state.el is `:merge-completed t' AND the
+register-merged probe flips `:merge-failed t', the loader promotes the
+entry from drawer-only to a real tab-bar workspace via
+`--establish-workspace' and moves it to the front of `persp-names-cache'
+via `--reorder-workspace-to-front'."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (failed-dir (make-temp-file "claude-proj-failed-" t))
+          (establish-calls nil)
+          (front-calls nil))
+      (claude-repl-test--write-merge-state failed-dir :merge-failed t)
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("failed-ws" . ,failed-dir)))
+            (cl-letf (((symbol-function 'claude-repl--detect-merge-actually-landed-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'claude-repl--establish-workspace)
+                       (lambda (ws _dir) (push ws establish-calls)))
+                      ((symbol-function 'claude-repl--reorder-workspace-to-front)
+                       (lambda (ws) (push ws front-calls)))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (claude-repl-load-workspace-snapshot)
+              (should (equal establish-calls '("failed-ws")))
+              (should (equal front-calls '("failed-ws")))))
+        (delete-file snapshot-file)
+        (delete-directory failed-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/clean-merge-stays-data-only ()
+  "When a snapshot entry's state.el is `:merge-completed t' AND the
+probe confirms the merge landed (no `:merge-failed'), the loader does
+NOT call establish-workspace or reorder-to-front — clean merges stay in
+the drawer-only MERGED bucket."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (clean-dir (make-temp-file "claude-proj-clean-" t))
+          (establish-calls nil)
+          (front-calls nil))
+      (claude-repl-test--write-merge-state clean-dir)
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("clean-ws" . ,clean-dir)))
+            (cl-letf (((symbol-function 'claude-repl--detect-merge-actually-landed-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'claude-repl--establish-workspace)
+                       (lambda (ws _dir) (push ws establish-calls)))
+                      ((symbol-function 'claude-repl--reorder-workspace-to-front)
+                       (lambda (ws) (push ws front-calls)))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (claude-repl-load-workspace-snapshot)
+              (should-not establish-calls)
+              (should-not front-calls)))
+        (delete-file snapshot-file)
+        (delete-directory clean-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/probe-detected-failure-fronts ()
+  "When state.el has `:merge-completed t' but NO `:merge-failed' flag
+and the git-landing probe reports NOT landed (legacy silent failure),
+the loader still promotes the entry to a real tab-bar workspace at the
+front — the probe is authoritative for unflagged legacy state."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (probe-dir (make-temp-file "claude-proj-probe-" t))
+          (establish-calls nil)
+          (front-calls nil))
+      (claude-repl-test--write-merge-state probe-dir)
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("probe-ws" . ,probe-dir)))
+            (cl-letf (((symbol-function 'claude-repl--detect-merge-actually-landed-p)
+                       (lambda (_ws) nil))
+                      ((symbol-function 'claude-repl--establish-workspace)
+                       (lambda (ws _dir) (push ws establish-calls)))
+                      ((symbol-function 'claude-repl--reorder-workspace-to-front)
+                       (lambda (ws) (push ws front-calls)))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (claude-repl-load-workspace-snapshot)
+              (should (equal establish-calls '("probe-ws")))
+              (should (equal front-calls '("probe-ws")))))
+        (delete-file snapshot-file)
+        (delete-directory probe-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-load/merge-failed-establish-error-isolated ()
+  "An error inside the failed-merge restore's establish-workspace must
+not abort the snapshot loader — the surrounding `condition-case'
+swallows the signal so subsequent queue entries still get processed."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (failed-dir (make-temp-file "claude-proj-failed-" t))
+          (later-dir (make-temp-file "claude-proj-later-" t))
+          (front-calls nil))
+      (claude-repl-test--write-merge-state failed-dir :merge-failed t)
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file snapshot-file
+                                          `(("failed-ws" . ,failed-dir)
+                                            ("later-ws" . ,later-dir)))
+            (cl-letf (((symbol-function 'claude-repl--detect-merge-actually-landed-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'claude-repl--establish-workspace)
+                       (lambda (ws _dir)
+                         (when (equal ws "failed-ws")
+                           (error "boom-during-establish"))))
+                      ((symbol-function 'claude-repl--reorder-workspace-to-front)
+                       (lambda (ws) (push ws front-calls)))
+                      ((symbol-function 'claude-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              ;; Must not signal — error is swallowed inside the loader.
+              (claude-repl-load-workspace-snapshot)
+              ;; reorder-to-front was never reached because establish threw.
+              (should-not front-calls)))
+        (delete-file snapshot-file)
+        (delete-directory failed-dir t)
+        (delete-directory later-dir t)))))
+
 (ert-deftest claude-repl-cmd-test-state-merge-completed-p/detects-flag ()
   "`--state-merge-completed-p' returns t when state.el carries
 `:merge-completed' t and nil otherwise.  Powers the snapshot loader's
