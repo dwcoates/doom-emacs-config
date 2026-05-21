@@ -101,8 +101,8 @@ Must match the `SKILLS_SRC' default in `.claude/install.sh' (or the
 
 (defconst claude-repl--managed-local-skills
   '("debug-logs"
+    "runtime-eval-code"
     "workspace-close"
-    "workspace-eval"
     "workspace-profile")
   "Bare names for repo-local managed skills.
 Sourced from `claude-repl-local-skills-src-dir' (this repo's

@@ -741,6 +741,47 @@ Regression guard so the file is not silently moved or deleted —
       (should (re-search-forward "^name: debug-logs$" nil t))
       (should (re-search-forward "^description: " nil t)))))
 
+(ert-deftest claude-repl-test-managed-local-skills-includes-runtime-eval-code ()
+  "Repo-local skills list must include `runtime-eval-code' (regression guard).
+`/runtime-eval-code' replaces the prior `/workspace-eval' skill and owns
+the JSON contract that the editor's `\"eval\"' handler dispatches against."
+  (should (member "runtime-eval-code" claude-repl--managed-local-skills)))
+
+(ert-deftest claude-repl-test-runtime-eval-code-skill-file-exists ()
+  "The checked-in runtime-eval-code SKILL.md must exist with required frontmatter.
+Regression guard so the file is not silently moved or deleted —
+`/runtime-eval-code' depends on it being discoverable at install time."
+  (let* ((src-dir (expand-file-name
+                   (or claude-repl-local-skills-src-dir
+                       (error "claude-repl-local-skills-src-dir is unset"))))
+         (skill-md (expand-file-name "runtime-eval-code/SKILL.md" src-dir)))
+    (should (file-exists-p skill-md))
+    (with-temp-buffer
+      (insert-file-contents skill-md)
+      (goto-char (point-min))
+      (should (looking-at "^---\n"))
+      (should (re-search-forward "^name: runtime-eval-code$" nil t))
+      (should (re-search-forward "^description: " nil t)))))
+
+(ert-deftest claude-repl-test-runtime-eval-code-run-sh-executable ()
+  "The checked-in runtime-eval-code run.sh must exist and be executable.
+Regression guard: SKILL.md Step 0 dispatches `run.sh resolve-ws' to obtain
+the workspace routing key, and the dispatch step pipes JSON into the same
+script. A non-executable or missing file breaks every dispatch."
+  (let* ((src-dir (expand-file-name
+                   (or claude-repl-local-skills-src-dir
+                       (error "claude-repl-local-skills-src-dir is unset"))))
+         (run-sh (expand-file-name "runtime-eval-code/run.sh" src-dir)))
+    (should (file-exists-p run-sh))
+    (should (file-executable-p run-sh))))
+
+(ert-deftest claude-repl-test-managed-local-skills-no-workspace-eval ()
+  "The legacy `workspace-eval' skill name must NOT be present.
+Regression guard: it was renamed/absorbed into `runtime-eval-code'.
+Leaving the old name in the managed list would create a broken symlink
+on install (no source directory matches it any more)."
+  (should-not (member "workspace-eval" claude-repl--managed-local-skills)))
+
 (ert-deftest claude-repl-test-managed-skills-includes-build-skill ()
   "External managed-skills list must include `build-skill' (regression guard).
 The skill lives at `claude-repl-skills-src-dir'/build-skill on the host;
