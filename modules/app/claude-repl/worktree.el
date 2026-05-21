@@ -191,6 +191,36 @@ worktree is on master or if git fails."
     (when (and output (not (string-empty-p output)))
       (claude-repl--parse-worktree-porcelain output target-ref))))
 
+(defun claude-repl--main-worktree-path (root)
+  "Return absolute path of the main worktree of ROOT's repo, or nil.
+ROOT is any directory inside the repo.  The main worktree is the
+original clone — the worktree whose `.git' is a directory rather
+than a pointer file.  Linked worktrees added via `git worktree add'
+all share that main worktree's `.git'.
+
+Distinct from `claude-repl--master-worktree-path': that function
+returns the worktree currently checked out to `master', which can
+be the main worktree, a sibling worktree, or nil.  This function
+returns the main clone regardless of what branch is checked out
+there — stable under `git checkout' inside the main worktree.
+
+Resolves via `git -C ROOT rev-parse --git-common-dir' and takes the
+parent of the returned `.git' directory.  Returns nil when git
+fails or the resolved path is not a live directory."
+  (let ((common (claude-repl--git-string-quiet
+                 "-C" root "rev-parse" "--git-common-dir")))
+    (when (and common
+               (not (string-empty-p common))
+               (not (string-prefix-p "fatal" common)))
+      (let* ((abs-common (if (file-name-absolute-p common)
+                             common
+                           (expand-file-name common root)))
+             (parent (directory-file-name
+                      (file-name-directory
+                       (directory-file-name abs-common)))))
+        (when (file-directory-p parent)
+          parent)))))
+
 (defun claude-repl--maybe-fast-forward-master (git-root)
   "Fast-forward local `master' to `origin/master' when safe.
 GIT-ROOT is any directory inside the repository.  Runs synchronously
@@ -242,6 +272,35 @@ no-ops and logged."
                 (claude-repl--log nil
                                   "ff-master: update-ref %s -> %s exit=%d"
                                   branch origin-ref ec)))))))))))
+
+(defun claude-repl--checkout-master-in-worktree (worktree-path)
+  "If WORKTREE-PATH is not on `claude-repl-master-branch-name', check out master.
+Returns t when the worktree is on master after the call, nil
+otherwise (e.g. checkout failed because another worktree already
+has the branch).  Caller is responsible for ensuring WORKTREE-PATH
+is clean — `git checkout' would otherwise refuse to switch over
+modified tracked files.  Logs the resulting state either way.
+
+Used by `claude-repl--merge-handler-refresh-master-from-origin' so
+that after `origin/master' has been fetched and the local ref
+advanced, the main worktree ends checked out to master even when
+it had been on a sibling branch before the merge."
+  (let* ((branch claude-repl-master-branch-name)
+         (current (claude-repl--git-string-quiet
+                   "-C" worktree-path "rev-parse" "--abbrev-ref" "HEAD")))
+    (cond
+     ((string= current branch)
+      (claude-repl--log nil
+                        "checkout-master-in-worktree: %s already on %s — no-op"
+                        worktree-path branch)
+      t)
+     (t
+      (let ((ec (claude-repl--git-exit-code
+                 worktree-path "checkout" branch)))
+        (claude-repl--log nil
+                          "checkout-master-in-worktree: %s checkout %s from=%s exit=%d"
+                          worktree-path branch (or current "?") ec)
+        (= ec 0))))))
 
 (defun claude-repl--bare-workspace-name (ws)
   "Extract bare workspace name from WS (e.g. \"DWC/foo\" -> \"foo\")."

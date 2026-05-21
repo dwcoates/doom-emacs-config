@@ -247,6 +247,121 @@
       (should (equal (claude-repl--master-worktree-path "/tmp/repo")
                      "/tmp/repo")))))
 
+;;;; ---- Tests: main-worktree-path ----
+;;
+;; `claude-repl--main-worktree-path' shells out via
+;; `claude-repl--git-string-quiet "-C" root "rev-parse" "--git-common-dir"'
+;; and takes the parent of the returned `.git' path.  Distinct from
+;; `--master-worktree-path' (which depends on which branch is checked
+;; out where) — this one identifies the original clone regardless of
+;; branch state.
+
+(ert-deftest claude-repl-test-main-worktree-path-from-main-relative-dot-git ()
+  "In the main worktree itself, `git-common-dir' returns `.git' (relative)
+which resolves to the worktree's parent dir."
+  (let ((repo (make-temp-file "claude-repl-test-main-" t)))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name ".git" repo) t)
+          (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+                     (lambda (&rest args)
+                       (should (equal args (list "-C" repo "rev-parse"
+                                                 "--git-common-dir")))
+                       ".git")))
+            (should (equal (claude-repl--main-worktree-path repo)
+                           (directory-file-name repo)))))
+      (delete-directory repo t))))
+
+(ert-deftest claude-repl-test-main-worktree-path-from-linked-worktree ()
+  "In a linked worktree, `git-common-dir' returns the absolute path
+to the main repo's `.git', and the helper returns its parent."
+  (let* ((main (make-temp-file "claude-repl-test-main-" t))
+         (wt (make-temp-file "claude-repl-test-wt-" t)))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name ".git" main) t)
+          (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+                     (lambda (&rest _args)
+                       (expand-file-name ".git" main))))
+            (should (equal (claude-repl--main-worktree-path wt)
+                           (directory-file-name main)))))
+      (delete-directory main t)
+      (delete-directory wt t))))
+
+(ert-deftest claude-repl-test-main-worktree-path-returns-nil-on-git-failure ()
+  "When git emits a fatal/empty response, the helper returns nil."
+  (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+             (lambda (&rest _args) "")))
+    (should (null (claude-repl--main-worktree-path "/tmp/not-a-repo")))))
+
+(ert-deftest claude-repl-test-main-worktree-path-returns-nil-on-fatal-output ()
+  "When git emits a `fatal:'-prefixed response, the helper returns nil."
+  (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+             (lambda (&rest _args) "fatal: not a git repository")))
+    (should (null (claude-repl--main-worktree-path "/tmp/not-a-repo")))))
+
+(ert-deftest claude-repl-test-main-worktree-path-returns-nil-when-parent-missing ()
+  "If the resolved parent dir does not exist on disk, return nil."
+  (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+             (lambda (&rest _args)
+               "/nonexistent/claude-repl-test/repo/.git")))
+    (should (null (claude-repl--main-worktree-path "/tmp/whatever")))))
+
+;;;; ---- Tests: checkout-master-in-worktree ----
+;;
+;; `claude-repl--checkout-master-in-worktree' shells out via
+;; `claude-repl--git-string-quiet' (current branch) and
+;; `claude-repl--git-exit-code' (`git checkout').  Tests mock both
+;; wrappers and assert the dispatch semantics.
+
+(ert-deftest claude-repl-test-checkout-master-already-on-master-no-op ()
+  "When the worktree is already on master, no `git checkout' is run,
+the function returns t, and only the rev-parse probe fires."
+  (let ((claude-repl-master-branch-name "master")
+        (exit-calls nil))
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest _args) "master"))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (&rest args) (push args exit-calls) 0)))
+      (should (eq t (claude-repl--checkout-master-in-worktree "/repo/main")))
+      (should (null exit-calls)))))
+
+(ert-deftest claude-repl-test-checkout-master-not-on-master-runs-checkout ()
+  "When the worktree is on a sibling branch, `git checkout master' runs
+and the function returns t on exit-code 0."
+  (let ((claude-repl-master-branch-name "master")
+        (checkout-args nil))
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest _args) "DWC/feature-x"))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (&rest args) (setq checkout-args args) 0)))
+      (should (eq t (claude-repl--checkout-master-in-worktree "/repo/main")))
+      (should (equal checkout-args
+                     '("/repo/main" "checkout" "master"))))))
+
+(ert-deftest claude-repl-test-checkout-master-checkout-failure-returns-nil ()
+  "When `git checkout' exits non-zero (e.g. another worktree holds master),
+the function returns nil — caller decides what to do with the failure."
+  (let ((claude-repl-master-branch-name "master"))
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest _args) "DWC/feature-x"))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (&rest _args) 128)))
+      (should (null (claude-repl--checkout-master-in-worktree "/repo/main"))))))
+
+(ert-deftest claude-repl-test-checkout-master-honors-defcustom ()
+  "Uses `claude-repl-master-branch-name' as the trunk branch name in both
+the rev-parse comparison and the checkout invocation."
+  (let ((claude-repl-master-branch-name "trunk")
+        (checkout-args nil))
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest _args) "feature"))
+              ((symbol-function 'claude-repl--git-exit-code)
+               (lambda (&rest args) (setq checkout-args args) 0)))
+      (should (eq t (claude-repl--checkout-master-in-worktree "/repo/main")))
+      (should (equal checkout-args
+                     '("/repo/main" "checkout" "trunk"))))))
+
 ;;;; ---- Tests: apply-workspace-properties ----
 
 (ert-deftest claude-repl-test-apply-workspace-properties-nil-values-skipped ()

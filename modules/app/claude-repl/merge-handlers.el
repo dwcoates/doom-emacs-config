@@ -195,31 +195,43 @@ merges.  Ignores ARGS (none defined for this handler)."
 
 (defun claude-repl--merge-handler-refresh-master-from-origin
     (target-ws &optional _args)
-  "Refresh local master from `origin/master' for TARGET-WS's repo, then close.
+  "Refresh master from origin and ensure the main worktree is on master.
 
 Handler for repos whose `/workspace-merge' contract is \"the PR has
 already landed via merge queue, just bring the local master worktree
-up to date with origin\" — opposite of the cherry-pick default.  The
-explanation-engine repo opts into this via
-`claude-repl-workspace-merge-handler-overrides'.
+up to date with origin and leave the main worktree checked out to
+master\" — opposite of the cherry-pick default.  The explanation-engine
+repo opts into this via the repo-local
+`.claude/emacs/workspace-merge.eld' (and the matching default in
+`claude-repl-workspace-merge-handler-overrides' as a safety net).
 
 Steps:
-  1. Resolve the master worktree path of TARGET-WS's repo via
-     `claude-repl--master-worktree-path', starting from the workspace's
-     own `:project-dir' (which lives inside the same repo as a sibling
-     worktree).  Skip the git work with a log line when neither the
-     repo nor a master worktree can be resolved.
-  2. Skip the fetch + fast-forward entirely when the master worktree
-     has uncommitted changes (`claude-repl--worktree-dirty-p').  The
-     contract is explicit: never touch a dirty trunk checkout.
-  3. Run `git fetch origin <master-branch-name>' in the master
-     worktree synchronously — this thread runs on the merge worker, so
-     blocking git here does not freeze the main UI thread.
-  4. Hand off to `claude-repl--maybe-fast-forward-master', which runs
-     `git merge --ff-only origin/<master>' in the master worktree and
-     no-ops on diverged history, equal HEADs, or missing refs.
+  1. Resolve the MAIN worktree path of TARGET-WS's repo via
+     `claude-repl--main-worktree-path' (the original clone — the
+     worktree whose `.git' is a directory, NOT a sibling worktree
+     added via `git worktree add'), starting from the workspace's
+     own `:project-dir' or `:source-ws-dir'.  Skip the git work
+     with a log line when neither can be resolved.
+  2. SIGNAL `user-error' if the main worktree has uncommitted
+     changes (`claude-repl--worktree-dirty-p').  Advancing master
+     while the user has dirty work in the trunk checkout would risk
+     ambiguity; the merge-async failure path re-enqueues the source
+     workspace with `:halt-until-human t' so the user can resolve
+     the dirty state before further merges proceed.
+  3. Run `git fetch origin <master-branch-name>' in the main
+     worktree synchronously — this thread runs on the merge worker,
+     so blocking git here does not freeze the main UI thread.
+  4. Hand off to `claude-repl--maybe-fast-forward-master', which
+     advances the local <master> ref (via `merge --ff-only' on
+     whatever worktree is on master, else `update-ref').  No-ops
+     on diverged history, equal HEADs, or missing refs.
+  5. Hand off to `claude-repl--checkout-master-in-worktree' against
+     the main worktree so it ends checked out to the freshly-advanced
+     <master>.  No-op when already on master, no-op-with-log when
+     another worktree currently holds master (and checkout therefore
+     refuses).
 
-After the optional git work, marks TARGET-WS `:merge-completed t' /
+After the git work, marks TARGET-WS `:merge-completed t' /
 `:repl-state :merged' so the drawer renders the 🔀 badge, then defers
 `claude-repl--gns-sockets-close-then' + `claude-repl--close-workspace'
 to the main thread so the workspace UI tears down cleanly — same
@@ -227,37 +239,45 @@ teardown chain the cherry-pick handler uses on success.
 
 ARGS is currently unused; reserved for future tuning.
 
-Deliberately does NOT signal on git failures (fetch hiccup, dirty
-trunk, diverged history): the PR has already landed upstream, so the
-workspace's job is done regardless of whether the local mirror could
-be advanced this run."
+SIGNALS `user-error' on a dirty main worktree (step 2).
+Deliberately does NOT signal on the other git failures (fetch
+hiccup, diverged history, missing local master, checkout refused
+because another worktree holds master): the PR has already landed
+upstream, so the workspace's job is done regardless of whether the
+local mirror could be advanced this run."
   (let* ((source-dir (or (claude-repl--ws-get target-ws :project-dir)
                          (claude-repl--ws-get target-ws :source-ws-dir)))
-         (master-dir (and source-dir
-                          (claude-repl--master-worktree-path source-dir))))
+         (main-dir (and source-dir
+                        (claude-repl--main-worktree-path source-dir))))
     (claude-repl--log target-ws
-                      "merge-handler-refresh-master-from-origin: ws=%s source-dir=%s master-dir=%s"
-                      target-ws (or source-dir "nil") (or master-dir "nil"))
+                      "merge-handler-refresh-master-from-origin: ws=%s source-dir=%s main-dir=%s"
+                      target-ws (or source-dir "nil") (or main-dir "nil"))
     (cond
-     ((not master-dir)
+     ((not main-dir)
       (claude-repl--log target-ws
-                        "merge-handler-refresh-master-from-origin: ws=%s no master worktree resolvable — skipping ff"
+                        "merge-handler-refresh-master-from-origin: ws=%s no main worktree resolvable — skipping"
                         target-ws))
-     ((claude-repl--worktree-dirty-p master-dir)
+     ((claude-repl--worktree-dirty-p main-dir)
       (claude-repl--log target-ws
-                        "merge-handler-refresh-master-from-origin: ws=%s master worktree %s is dirty — skipping ff"
-                        target-ws master-dir))
+                        "merge-handler-refresh-master-from-origin: ws=%s main worktree %s is dirty — signaling error"
+                        target-ws main-dir)
+      (user-error
+       "Cannot advance master from origin: main worktree '%s' has uncommitted changes — stash or commit first"
+       main-dir))
      (t
       (let ((ec (claude-repl--git-exit-code
-                 master-dir "fetch" "origin"
+                 main-dir "fetch" "origin"
                  claude-repl-master-branch-name)))
         (claude-repl--log target-ws
                           "merge-handler-refresh-master-from-origin: ws=%s fetch origin %s exit=%d"
                           target-ws claude-repl-master-branch-name ec))
-      (claude-repl--maybe-fast-forward-master master-dir)))
-    ;; Mark merged regardless of whether the local ff succeeded — the
-    ;; PR has already landed upstream, the workspace's contribution is
-    ;; on master either way.
+      (claude-repl--maybe-fast-forward-master main-dir)
+      (claude-repl--checkout-master-in-worktree main-dir)))
+    ;; Mark merged for the non-error branches (no main-dir / clean +
+    ;; fetched).  The dirty-main case never reaches here because the
+    ;; `user-error' above propagates out of the worker thread and into
+    ;; `--workspace-merge-async''s centralized failure path, which
+    ;; re-enqueues the source workspace with `:halt-until-human t'.
     (claude-repl--ws-put target-ws :merging nil)
     (claude-repl--ws-put target-ws :merge-completed t)
     (claude-repl--ws-put target-ws :merge-completed-at (float-time))
@@ -270,19 +290,19 @@ be advanced this run."
     ;; the merge worker thread spawned by
     ;; `claude-repl--workspace-merge-async', and persp/vterm kills must
     ;; happen on main.  Once the close is done, refresh any open
-    ;; magit-status buffer for MASTER-DIR so it reflects the post-ff
+    ;; magit-status buffer for MAIN-DIR so it reflects the post-ff
     ;; state — magit's own auto-revert may have last fired before the
-    ;; `git fetch' + `merge --ff-only' completed, leaving the buffer
-    ;; stuck on the pre-ff HEAD.
+    ;; `git fetch' + `merge --ff-only' + checkout completed, leaving
+    ;; the buffer stuck on the pre-ff HEAD.
     (claude-repl--defer-to-main-thread
      (lambda ()
        (claude-repl--gns-sockets-close-then
         target-ws
         (lambda ()
           (claude-repl--close-workspace target-ws 'preserve-entry)
-          (when master-dir
+          (when main-dir
             (claude-repl--refresh-magit-status-for-dir
-             master-dir target-ws))))))))
+             main-dir target-ws))))))))
 
 (claude-repl--register-merge-handler
  'refresh-master-from-origin

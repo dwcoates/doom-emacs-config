@@ -233,10 +233,11 @@ Restores the prior registry on exit so tests don't bleed."
 ;;;; ---- Tests: refresh-master-from-origin handler ----
 ;;
 ;; Each test mocks every external boundary the handler reaches:
-;;   - `--master-worktree-path' (master worktree resolution)
+;;   - `--main-worktree-path' (main worktree resolution)
 ;;   - `--worktree-dirty-p' (clean check)
 ;;   - `--git-exit-code' (the fetch call)
 ;;   - `--maybe-fast-forward-master' (the ff call)
+;;   - `--checkout-master-in-worktree' (the post-ff checkout)
 ;;   - `--gns-sockets-close-then' and `--close-workspace' (teardown)
 ;; so the test surface stays inside elisp.
 
@@ -248,8 +249,8 @@ exactly which side effects fired (and which were skipped).  Always
 mocks `claude-repl--events-record' to a no-op since the events file
 write is incidental to handler semantics."
   (declare (indent 0))
-  `(let ((captured (list :fetch nil :ff nil :close-then nil :close nil
-                         :magit-refresh nil)))
+  `(let ((captured (list :fetch nil :ff nil :checkout nil :close-then nil
+                         :close nil :magit-refresh nil)))
      (cl-letf
          (((symbol-function 'claude-repl--events-record) (lambda (&rest _) nil))
           ((symbol-function 'claude-repl--git-exit-code)
@@ -258,6 +259,8 @@ write is incidental to handler semantics."
              0))
           ((symbol-function 'claude-repl--maybe-fast-forward-master)
            (lambda (dir) (plist-put captured :ff dir)))
+          ((symbol-function 'claude-repl--checkout-master-in-worktree)
+           (lambda (dir) (plist-put captured :checkout dir) t))
           ((symbol-function 'claude-repl--gns-sockets-close-then)
            (lambda (ws thunk)
              (plist-put captured :close-then ws)
@@ -275,7 +278,7 @@ write is incidental to handler semantics."
   (claude-repl-test--with-clean-state
     (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
       (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
-      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
                  (lambda (_dir) "/repo/main"))
                 ((symbol-function 'claude-repl--worktree-dirty-p)
                  (lambda (_dir) nil)))
@@ -286,11 +289,11 @@ write is incidental to handler semantics."
           (should-not (claude-repl--ws-get "foo" :merging)))))))
 
 (ert-deftest claude-repl-test-refresh-master-fetches-origin-when-clean ()
-  "When the master worktree is clean, the handler runs `git fetch origin master'."
+  "When the main worktree is clean, the handler runs `git fetch origin master'."
   (claude-repl-test--with-clean-state
     (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
       (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
-      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
                  (lambda (_dir) "/repo/main"))
                 ((symbol-function 'claude-repl--worktree-dirty-p)
                  (lambda (_dir) nil)))
@@ -307,7 +310,7 @@ write is incidental to handler semantics."
   (claude-repl-test--with-clean-state
     (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
       (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
-      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
                  (lambda (_dir) "/repo/main"))
                 ((symbol-function 'claude-repl--worktree-dirty-p)
                  (lambda (_dir) nil)))
@@ -315,54 +318,76 @@ write is incidental to handler semantics."
           (claude-repl--merge-handler-refresh-master-from-origin "foo")
           (should (equal (plist-get captured :ff) "/repo/main")))))))
 
-(ert-deftest claude-repl-test-refresh-master-skips-ff-when-dirty ()
-  "A dirty master worktree skips both the fetch and the fast-forward."
+(ert-deftest claude-repl-test-refresh-master-checks-out-master-in-main-when-clean ()
+  "After the ff, the handler invokes `--checkout-master-in-worktree' on the main worktree
+so the trunk checkout ends on master even when it started on a sibling branch."
   (claude-repl-test--with-clean-state
     (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
       (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
-      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) nil)))
+        (claude-repl-test--with-refresh-mocks
+          (claude-repl--merge-handler-refresh-master-from-origin "foo")
+          (should (equal (plist-get captured :checkout) "/repo/main")))))))
+
+(ert-deftest claude-repl-test-refresh-master-errors-on-dirty-main ()
+  "A dirty main worktree signals `user-error' so the merge-async failure
+path can re-enqueue with :halt-until-human t."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
                  (lambda (_dir) "/repo/main"))
                 ((symbol-function 'claude-repl--worktree-dirty-p)
                  (lambda (_dir) t)))
         (claude-repl-test--with-refresh-mocks
-          (claude-repl--merge-handler-refresh-master-from-origin "foo")
+          (should-error
+           (claude-repl--merge-handler-refresh-master-from-origin "foo")
+           :type 'user-error)
           (should-not (plist-get captured :fetch))
-          (should-not (plist-get captured :ff)))))))
+          (should-not (plist-get captured :ff))
+          (should-not (plist-get captured :checkout)))))))
 
-(ert-deftest claude-repl-test-refresh-master-marks-merged-even-when-dirty ()
-  "Dirty trunk still flips the workspace to :merged — the PR already landed."
+(ert-deftest claude-repl-test-refresh-master-does-not-mark-merged-when-dirty ()
+  "Dirty main worktree signals out before the :merged flip — the failure path
+in --workspace-merge-async owns post-error state, not this handler."
   (claude-repl-test--with-clean-state
     (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
       (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
-      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
                  (lambda (_dir) "/repo/main"))
                 ((symbol-function 'claude-repl--worktree-dirty-p)
                  (lambda (_dir) t)))
         (claude-repl-test--with-refresh-mocks
-          (claude-repl--merge-handler-refresh-master-from-origin "foo")
-          (should (eq (claude-repl--ws-get "foo" :merge-completed) t))
-          (should (eq (claude-repl--ws-get "foo" :repl-state) :merged)))))))
+          (should-error
+           (claude-repl--merge-handler-refresh-master-from-origin "foo")
+           :type 'user-error)
+          (should-not (claude-repl--ws-get "foo" :merge-completed))
+          (should-not (eq (claude-repl--ws-get "foo" :repl-state) :merged)))))))
 
-(ert-deftest claude-repl-test-refresh-master-skips-ff-when-no-master-dir ()
-  "When no master worktree can be resolved, fetch and ff are skipped."
+(ert-deftest claude-repl-test-refresh-master-skips-when-no-main-dir ()
+  "When no main worktree can be resolved, fetch / ff / checkout are skipped."
   (claude-repl-test--with-clean-state
     (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
       (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
-      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
                  (lambda (_dir) nil))
                 ((symbol-function 'claude-repl--worktree-dirty-p)
                  (lambda (_dir) (error "should not be called"))))
         (claude-repl-test--with-refresh-mocks
           (claude-repl--merge-handler-refresh-master-from-origin "foo")
           (should-not (plist-get captured :fetch))
-          (should-not (plist-get captured :ff)))))))
+          (should-not (plist-get captured :ff))
+          (should-not (plist-get captured :checkout)))))))
 
-(ert-deftest claude-repl-test-refresh-master-still-marks-merged-when-no-master-dir ()
-  "Even with no resolvable master worktree the workspace gets :merged + close."
+(ert-deftest claude-repl-test-refresh-master-still-marks-merged-when-no-main-dir ()
+  "Even with no resolvable main worktree the workspace gets :merged + close."
   (claude-repl-test--with-clean-state
     (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
       (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
-      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
                  (lambda (_dir) nil)))
         (claude-repl-test--with-refresh-mocks
           (claude-repl--merge-handler-refresh-master-from-origin "foo")
@@ -376,7 +401,7 @@ write is incidental to handler semantics."
   (claude-repl-test--with-clean-state
     (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
       (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
-      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
                  (lambda (_dir) "/repo/main"))
                 ((symbol-function 'claude-repl--worktree-dirty-p)
                  (lambda (_dir) nil)))
@@ -386,16 +411,17 @@ write is incidental to handler semantics."
           (should (equal (plist-get captured :close)
                          '("foo" preserve-entry))))))))
 
-(ert-deftest claude-repl-test-refresh-master-refreshes-master-magit-after-close ()
-  "Once `master-dir' is resolved and the close has happened, the handler
-forces a `--refresh-magit-status-for-dir' for the master worktree.
+(ert-deftest claude-repl-test-refresh-master-refreshes-main-magit-after-close ()
+  "Once `main-dir' is resolved and the close has happened, the handler
+forces a `--refresh-magit-status-for-dir' for the main worktree.
 Mirrors the cherry-pick handler's trailing refresh — magit's own
-auto-revert may have last fired before the fetch + ff-only completed,
-leaving the buffer stuck on the pre-ff HEAD until the user pressed `g'."
+auto-revert may have last fired before the fetch + ff-only + checkout
+completed, leaving the buffer stuck on the pre-ff HEAD until the user
+pressed `g'."
   (claude-repl-test--with-clean-state
     (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
       (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
-      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
                  (lambda (_dir) "/repo/main"))
                 ((symbol-function 'claude-repl--worktree-dirty-p)
                  (lambda (_dir) nil)))
@@ -404,14 +430,14 @@ leaving the buffer stuck on the pre-ff HEAD until the user pressed `g'."
           (should (equal (plist-get captured :magit-refresh)
                          '("/repo/main" "foo"))))))))
 
-(ert-deftest claude-repl-test-refresh-master-skips-magit-refresh-when-no-master-dir ()
-  "When no master worktree resolves, there is no directory to refresh —
+(ert-deftest claude-repl-test-refresh-master-skips-magit-refresh-when-no-main-dir ()
+  "When no main worktree resolves, there is no directory to refresh —
 the handler must not call `--refresh-magit-status-for-dir' with nil
 \(which would still iterate `buffer-list' for no reason)."
   (claude-repl-test--with-clean-state
     (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
       (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
-      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
                  (lambda (_dir) nil)))
         (claude-repl-test--with-refresh-mocks
           (claude-repl--merge-handler-refresh-master-from-origin "foo")
