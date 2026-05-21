@@ -340,6 +340,32 @@
 
 ;;;; ---- Tests: command-prefix content ----
 
+(ert-deftest claude-repl-test-command-prefix-houses-commit-frequency-directive ()
+  "The metaprompt is the new home of the 'commit freely and often' directive
+that used to live in `claude-repl--autonomous-prompt-prefix'."
+  (should (string-match-p "freely and often" claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-houses-tests-before-commit-directive ()
+  "The metaprompt is the new home of the tests-pass-before-commit directive
+that used to live in `claude-repl--autonomous-prompt-prefix'."
+  (should (string-match-p
+           "applicable tests run and pass before each commit"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-houses-mutating-git-restriction ()
+  "The metaprompt is the new home of the 'no other mutating git commands'
+directive that used to live in `claude-repl--autonomous-prompt-prefix'.
+Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
+  ;; Commit-context recap names commit as the authorized mutating op.
+  (should (string-match-p
+           "only mutating git operations authorized by default"
+           claude-repl-command-prefix))
+  ;; NOT ALLOWED list enumerates the restricted operations.
+  (dolist (op '("rebase" "pull" "merge"))
+    (should (string-match-p
+             (concat "other mutating git commands.*" op)
+             claude-repl-command-prefix))))
+
 (ert-deftest claude-repl-test-command-prefix-contains-response-tldr ()
   "`claude-repl-command-prefix' must instruct including a 'Response TLDR' section."
   (should (stringp claude-repl-command-prefix))
