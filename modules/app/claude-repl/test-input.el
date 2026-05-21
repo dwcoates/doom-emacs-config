@@ -412,6 +412,15 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
   (should (string-match-p "└──" claude-repl-command-prefix))
   (should (string-match-p "│" claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-tldr-connectors-emanate-from-first-number ()
+  "TLDR spec must require child connectors to emanate from the first number in the parent's identifier, not from the emoji."
+  (should (string-match-p
+           "MUST emanate from the column of the first number in the parent's identifier"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "rather than from the emoji"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-tldr-dotted-hierarchical-numbering ()
   "TLDR spec must call out dotted hierarchical numbering for the tree's node labels, with examples up through the depth-4 cap."
   (should (string-match-p
