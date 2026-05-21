@@ -258,28 +258,64 @@ ending with a single period — interrogative mood is forbidden."
 
 ;;;; State helpers
 
+(defun claude-repl--format-summary-relative-time (sent-at &optional now)
+  "Return a human-readable \"X ago\" string for SENT-AT (a float-time stamp).
+NOW defaults to `(float-time)'.  Granularity is whole minutes:
+
+  < 1 minute   → \"<1m ago\"
+  1-59 minutes → \"Nm ago\"
+  60+ minutes  → \"Nhr Mm ago\"
+
+Returns nil when SENT-AT is nil or not a number, so callers can use
+`(when …)' to suppress the prefix for workspaces that have never sent
+a prompt."
+  (when (and sent-at (numberp sent-at))
+    (let* ((now (or now (float-time)))
+           (elapsed (max 0 (- now sent-at)))
+           (total-minutes (floor (/ elapsed 60.0))))
+      (cond
+       ((< total-minutes 1) "<1m ago")
+       ((< total-minutes 60) (format "%dm ago" total-minutes))
+       (t (format "%dhr %dm ago"
+                  (/ total-minutes 60)
+                  (% total-minutes 60)))))))
+
 (defun claude-repl--prompt-summary-segment ()
   "Return a propertized string for the mode-line's summary segment.
 Reads `claude-repl--owning-workspace' from the current buffer (set on
 every claude-owned vterm buffer by `claude-repl--create-buffer') and
 pulls the workspace's :last-prompt-summary / :last-prompt-summary-pending
-state.  Returns the empty string when no prompt has been sent yet."
+state.  Returns the empty string when no prompt has been sent yet.
+
+When `:last-prompt-summary-at' is set, prefixes the segment with a
+relative \"X ago\" timestamp (see
+`claude-repl--format-summary-relative-time') in the same blue color as
+the summary text, so the user sees how stale the current summary is at
+a glance.  The 1Hz tab-bar redraw drives `force-mode-line-update' so
+the timestamp ticks without explicit polling."
   (let ((ws (and (boundp 'claude-repl--owning-workspace)
                  claude-repl--owning-workspace)))
     (if (not ws)
         ""
-      (let ((summary (claude-repl--ws-get ws :last-prompt-summary))
-            (pending (claude-repl--ws-get ws :last-prompt-summary-pending)))
+      (let* ((summary (claude-repl--ws-get ws :last-prompt-summary))
+             (pending (claude-repl--ws-get ws :last-prompt-summary-pending))
+             (sent-at (claude-repl--ws-get ws :last-prompt-summary-at))
+             (rel (claude-repl--format-summary-relative-time sent-at))
+             (face '(:foreground "deep sky blue" :weight normal))
+             (face-italic '(:foreground "deep sky blue"
+                            :weight normal :slant italic))
+             (time-prefix (when rel (propertize (concat rel " ") 'face face))))
         (cond
          ((and (stringp summary) (not (string-empty-p summary)))
           (concat "  "
+                  (or time-prefix "")
                   (propertize (claude-repl--prompt-summary-truncate summary)
-                              'face '(:foreground "deep sky blue" :weight normal))))
+                              'face face)))
          (pending
           (concat "  "
+                  (or time-prefix "")
                   (propertize claude-repl-prompt-summary-pending-label
-                              'face '(:foreground "deep sky blue"
-                                      :weight normal :slant italic))))
+                              'face face-italic)))
          (t ""))))))
 
 (defun claude-repl--prompt-summary-truncate (s &optional allow-empty)
@@ -492,6 +528,11 @@ even if the user has switched perspectives by the time it resolves."
     (claude-repl--ws-put ws :last-prompt-text raw)
     (claude-repl--ws-put ws :last-prompt-summary nil)
     (claude-repl--ws-put ws :last-prompt-summary-pending t)
+    ;; Stamp the wall-clock time of THIS prompt send so the mode-line's
+    ;; "X ago" prefix tracks the prompt that drives the displayed summary,
+    ;; not the latest send (e.g. a permission "1" response that skips
+    ;; summarization but still updates `:last-prompt-time' inside do-send).
+    (claude-repl--ws-put ws :last-prompt-summary-at (float-time))
     (claude-repl--prompt-summary-redisplay ws)
     (claude-repl--prompt-summary-spawn ws raw)))
 

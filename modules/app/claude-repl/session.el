@@ -285,6 +285,12 @@ state-save.  Callers already guard on `claude-repl--claude-running-p'."
     ;; the apply-summary path on the next prompt.
     (when-let ((summary (and saved (plist-get saved :last-prompt-summary))))
       (claude-repl--ws-put ws :last-prompt-summary summary))
+    ;; Restore the send-time of the prompt that produced the persisted
+    ;; summary so the mode-line's "X ago" prefix survives Emacs restart
+    ;; and continues counting against the actual prompt's wall-clock,
+    ;; not the post-restart re-init moment.
+    (when-let ((at (and saved (plist-get saved :last-prompt-summary-at))))
+      (claude-repl--ws-put ws :last-prompt-summary-at at))
     ;; Worktree-flag + merge-completed: survive restart so the drawer's
     ;; MERGED bucket reappears and `--finish-workspace' can still remove
     ;; the worktree when the user presses `x' on a post-restart MERGED
