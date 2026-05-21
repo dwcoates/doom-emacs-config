@@ -1755,14 +1755,20 @@ latest one."
         (claude-repl--maybe-autoselect-input "test-ws")
         (should (eq (selected-window) orig-win))))))
 
-(ert-deftest claude-repl-test-panels-maybe-autoselect-input-vterm-center-hack ()
-  "maybe-autoselect-input briefly selects the vterm window before input."
+(ert-deftest claude-repl-test-panels-maybe-autoselect-input-snaps-vterm-then-selects-input ()
+  "maybe-autoselect-input snaps the vterm window to its cursor (via
+`--snap-vterm-window-to-cursor') and then selects only the input
+window.  Replaces the old brief-select hack — the previous transient
+`select-window vterm-win' was the source of the visible scroll-down
+animation, so the new flow snaps `window-start' directly and selects
+only the input window."
   (claude-repl-test--with-clean-state
-    (let ((input-buf (get-buffer-create "*autoselect-input-hack*"))
-          (vterm-buf (get-buffer-create "*autoselect-vterm-hack*"))
+    (let ((input-buf (get-buffer-create "*autoselect-input-snap*"))
+          (vterm-buf (get-buffer-create "*autoselect-vterm-snap*"))
           (vterm-win nil)
           (input-win nil)
-          (selections nil))
+          (selections nil)
+          (snap-arg nil))
       (unwind-protect
           (progn
             (claude-repl--ws-put "test-ws" :input-buffer input-buf)
@@ -1771,18 +1777,21 @@ latest one."
             (set-window-buffer input-win input-buf)
             (setq vterm-win (split-window))
             (set-window-buffer vterm-win vterm-buf)
+            (with-current-buffer vterm-buf (setq major-mode 'vterm-mode))
             (select-window (car (window-list)))
             (let ((claude-repl-autoselect-input-on-workspace-switch t)
                   (orig-select-window (symbol-function 'select-window)))
               (cl-letf (((symbol-function 'select-window)
                          (lambda (win &optional norecord)
                            (push win selections)
-                           (funcall orig-select-window win norecord))))
+                           (funcall orig-select-window win norecord)))
+                        ((symbol-function 'claude-repl--snap-vterm-window-to-cursor)
+                         (lambda (win) (setq snap-arg win))))
                 (claude-repl--maybe-autoselect-input "test-ws"))
               (setq selections (nreverse selections))
-              ;; vterm must be selected first, then input — the hack's whole
-              ;; point is the transient vterm selection before the final input.
-              (should (equal selections (list vterm-win input-win)))
+              ;; Snap runs on vterm-win; only input-win is selected.
+              (should (eq snap-arg vterm-win))
+              (should (equal selections (list input-win)))
               (should (eq (selected-window) input-win))))
         (when (and vterm-win (window-live-p vterm-win))
           (ignore-errors (delete-window vterm-win)))
@@ -2623,20 +2632,194 @@ initialize-ws-env.  Models the worktree-creation / new-workspace paths."
 
 ;;;; ---- Tests: fix-vterm-scroll with different window ----
 
-(ert-deftest claude-repl-test-panels-fix-vterm-scroll-different-window ()
-  "fix-vterm-scroll briefly selects the vterm window and restores original."
-  (let ((buf (get-buffer-create "*scroll-diff-win*"))
+(ert-deftest claude-repl-test-panels-fix-vterm-scroll-different-window-preserves-selection ()
+  "fix-vterm-scroll never changes the selected window when the vterm window
+is a different (non-selected) window — the previous brief-select hack
+was the source of the visible scroll-down animation, so the new
+implementation must NOT select the vterm window at any point."
+  (let ((buf (get-buffer-create "*scroll-diff-win-preserve*"))
+        (new-win nil)
+        (selections nil))
+    (unwind-protect
+        (progn
+          (setq new-win (split-window))
+          (set-window-buffer new-win buf)
+          (let ((orig-win (selected-window))
+                (orig-select-window (symbol-function 'select-window)))
+            ;; Ensure we are NOT in the vterm window
+            (should-not (eq new-win orig-win))
+            (cl-letf (((symbol-function 'select-window)
+                       (lambda (win &optional norecord)
+                         (push win selections)
+                         (funcall orig-select-window win norecord))))
+              (claude-repl--fix-vterm-scroll buf))
+            ;; New impl: no `select-window' calls at all — the snap is
+            ;; driven via `set-window-start' / `set-window-point' alone.
+            (should-not selections)
+            (should (eq (selected-window) orig-win))))
+      (when (and new-win (window-live-p new-win))
+        (ignore-errors (delete-window new-win)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-panels-fix-vterm-scroll-different-window-calls-snap ()
+  "fix-vterm-scroll calls `--snap-vterm-window-to-cursor' on the vterm
+window when the vterm window is a different (non-selected) window."
+  (let ((buf (get-buffer-create "*scroll-diff-win-snap*"))
+        (new-win nil)
+        (snap-arg nil))
+    (unwind-protect
+        (progn
+          (setq new-win (split-window))
+          (set-window-buffer new-win buf)
+          (with-current-buffer buf (setq major-mode 'vterm-mode))
+          (cl-letf (((symbol-function 'claude-repl--snap-vterm-window-to-cursor)
+                     (lambda (win) (setq snap-arg win))))
+            (claude-repl--fix-vterm-scroll buf))
+          (should (eq snap-arg new-win)))
+      (when (and new-win (window-live-p new-win))
+        (ignore-errors (delete-window new-win)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+;;;; ---- Tests: snap-vterm-window-to-cursor ----
+
+(ert-deftest claude-repl-test-panels-snap-vterm-window-to-cursor-positions-cursor-at-bottom ()
+  "snap-vterm-window-to-cursor sets `window-start' so the cursor lands on
+the last visible line — that is, `window-start' is exactly
+`(body-height - 1)' lines above the cursor."
+  (let ((buf (get-buffer-create "*snap-bottom*"))
         (new-win nil))
     (unwind-protect
         (progn
           (setq new-win (split-window))
           (set-window-buffer new-win buf)
-          (let ((orig-win (selected-window)))
-            ;; Ensure we are NOT in the vterm window
-            (should-not (eq new-win orig-win))
-            (claude-repl--fix-vterm-scroll buf)
-            ;; Should return to original window
-            (should (eq (selected-window) orig-win))))
+          (with-current-buffer buf
+            (erase-buffer)
+            ;; Insert enough lines that the body-height fits inside the buffer.
+            (dotimes (i 200) (insert (format "line-%d\n" i)))
+            (goto-char (point-max))
+            (let* ((body-height (window-body-height new-win))
+                   (expected-start
+                    (save-excursion
+                      (goto-char (point-max))
+                      (forward-line (- 1 body-height))
+                      (line-beginning-position))))
+              (claude-repl--snap-vterm-window-to-cursor new-win)
+              (should (= (window-start new-win) expected-start))
+              (should (= (window-point new-win) (point-max))))))
+      (when (and new-win (window-live-p new-win))
+        (ignore-errors (delete-window new-win)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-panels-snap-vterm-window-to-cursor-short-buffer-uses-point-min ()
+  "When the buffer is shorter than `window-body-height',
+snap-vterm-window-to-cursor falls back to `point-min' as `window-start'
+\(via the natural `forward-line' cap when walking past the buffer head)."
+  (let ((buf (get-buffer-create "*snap-short*"))
+        (new-win nil))
+    (unwind-protect
+        (progn
+          (setq new-win (split-window))
+          (set-window-buffer new-win buf)
+          (with-current-buffer buf
+            (erase-buffer)
+            (insert "only line\n")
+            (goto-char (point-max))
+            (claude-repl--snap-vterm-window-to-cursor new-win)
+            (should (= (window-start new-win) (point-min)))
+            (should (= (window-point new-win) (point-max)))))
+      (when (and new-win (window-live-p new-win))
+        (ignore-errors (delete-window new-win)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-panels-snap-vterm-window-to-cursor-does-not-select-window ()
+  "snap-vterm-window-to-cursor never selects the target window — it
+operates purely through `set-window-start' + `set-window-point' to
+avoid `window-selection-change-functions' / `bounce-from-vterm'
+re-entry."
+  (let ((buf (get-buffer-create "*snap-no-select*"))
+        (new-win nil)
+        (selections nil)
+        (orig-win nil))
+    (unwind-protect
+        (progn
+          (setq orig-win (selected-window))
+          (setq new-win (split-window))
+          (set-window-buffer new-win buf)
+          (with-current-buffer buf
+            (insert "some content\n")
+            (goto-char (point-max))
+            (let ((orig-select-window (symbol-function 'select-window)))
+              (cl-letf (((symbol-function 'select-window)
+                         (lambda (win &optional norecord)
+                           (push win selections)
+                           (funcall orig-select-window win norecord))))
+                (claude-repl--snap-vterm-window-to-cursor new-win))
+              (should-not selections)
+              (should (eq (selected-window) orig-win)))))
+      (when (and new-win (window-live-p new-win))
+        (ignore-errors (delete-window new-win)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+;;;; ---- Tests: refresh-vterm-window ----
+
+(ert-deftest claude-repl-test-panels-refresh-vterm-window-snaps-on-vterm-mode-buffer ()
+  "refresh-vterm-window calls `--snap-vterm-window-to-cursor' on the
+vterm window after the cursor reset + redraw, replacing the old bare
+`set-window-point' tail."
+  (let ((buf (get-buffer-create "*claude-panel-snap-test*"))
+        (new-win nil)
+        (snap-arg nil))
+    (unwind-protect
+        (progn
+          (setq new-win (split-window))
+          (set-window-buffer new-win buf)
+          (with-current-buffer buf (setq major-mode 'vterm-mode))
+          (cl-letf (((symbol-function 'claude-repl--claude-buffer-p) (lambda (_b) t))
+                    ((symbol-function 'claude-repl--vterm-redraw) #'ignore)
+                    ((symbol-function 'vterm-reset-cursor-point) #'ignore)
+                    ((symbol-function 'claude-repl--snap-vterm-window-to-cursor)
+                     (lambda (win) (setq snap-arg win))))
+            (claude-repl--refresh-vterm-window new-win))
+          (should (eq snap-arg new-win)))
+      (when (and new-win (window-live-p new-win))
+        (ignore-errors (delete-window new-win)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-panels-refresh-vterm-window-skips-non-claude-buffer ()
+  "refresh-vterm-window is a no-op when the window's buffer is not a
+Claude vterm buffer — the snap helper must not run."
+  (let ((buf (get-buffer-create "*not-claude-refresh*"))
+        (new-win nil)
+        (snap-called nil))
+    (unwind-protect
+        (progn
+          (setq new-win (split-window))
+          (set-window-buffer new-win buf)
+          (cl-letf (((symbol-function 'claude-repl--claude-buffer-p) (lambda (_b) nil))
+                    ((symbol-function 'claude-repl--snap-vterm-window-to-cursor)
+                     (lambda (_win) (setq snap-called t))))
+            (claude-repl--refresh-vterm-window new-win))
+          (should-not snap-called))
+      (when (and new-win (window-live-p new-win))
+        (ignore-errors (delete-window new-win)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-panels-fix-vterm-scroll-non-vterm-mode-skips-reset ()
+  "fix-vterm-scroll does not call `vterm-reset-cursor-point' when the
+buffer is not in `vterm-mode' — the cursor-reset is vterm-specific."
+  (let ((buf (get-buffer-create "*scroll-non-vterm*"))
+        (new-win nil)
+        (reset-called nil))
+    (unwind-protect
+        (progn
+          (setq new-win (split-window))
+          (set-window-buffer new-win buf)
+          (cl-letf (((symbol-function 'vterm-reset-cursor-point)
+                     (lambda () (setq reset-called t)))
+                    ((symbol-function 'claude-repl--snap-vterm-window-to-cursor)
+                     #'ignore))
+            (claude-repl--fix-vterm-scroll buf))
+          (should-not reset-called))
       (when (and new-win (window-live-p new-win))
         (ignore-errors (delete-window new-win)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
