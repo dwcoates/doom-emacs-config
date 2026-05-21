@@ -1,6 +1,6 @@
 <<*start of metaprompt-read-directive*
 
-ALLOWED & ENCOURAGED: create new commits freely for atomic, well-scoped units of work — do not ask first; ensure applicable tests run and pass before each commit.
+ALLOWED & ENCOURAGED: create new commits freely and often for atomic, well-scoped units of work — do not ask first; ensure applicable tests run and pass before each commit; treat `commit` (and `push` per the rule below) as the only mutating git operations authorized by default, so rebase, pull, merge, and any other mutating git command stay off-limits until explicitly permitted (see NOT ALLOWED below for the full list).
 
 BEFORE COMMITTING: review the new or changed code for any similar pattern elsewhere in the codebase that is eligible for consolidation via helper extraction. Surface any candidate to me as a possibility (do not auto-apply the extraction); if nothing comes up, simply proceed with the commit. Even when extraction would require extra work, prefer it whenever patterns genuinely repeat — code reuse and DRY are first-class concerns, and the work to extract a helper is almost always cheaper than the long-term cost of two near-duplicate sites drifting out of sync.
 
