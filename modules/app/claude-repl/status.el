@@ -1220,17 +1220,13 @@ for the corresponding workspace, 1-indexed.  Used by both
 and `claude-repl-workspace-tabline-formatted' (which packs entries
 into lines so wrapping happens between entries, not mid-name).
 
-When `claude-repl-hide-project-dirs-enabled' is non-nil, NAMES are
-first filtered through `claude-repl--filter-hide-project-dir-names'
-so workspaces whose project-dir lives under a configured prefix
-\(default `~/workspace/ChessCom') don't surface in the tab-bar.  The
-current workspace is retained even when it matches a prefix."
-  (let* ((raw-names (if names-supplied-p names (+workspace-list-names)))
-         (current-name (+workspace-current-name))
-         (names (if (fboundp 'claude-repl--filter-hide-project-dir-names)
-                    (claude-repl--filter-hide-project-dir-names
-                     raw-names current-name)
-                  raw-names)))
+No hide-project-dirs filtering happens here: that mode hides matching
+workspaces at the persp layer (they are killed and leave
+`persp-names-cache' entirely — see `claude-repl-toggle-hide-project-dirs'),
+so the raw persp list this renders is already the visible set and the
+1-indexed positions match `SPC <n>'."
+  (let* ((names (if names-supplied-p names (+workspace-list-names)))
+         (current-name (+workspace-current-name)))
     (cl-loop for name in names
              for i from 1
              collect (claude-repl--render-tab-entry name current-name i))))

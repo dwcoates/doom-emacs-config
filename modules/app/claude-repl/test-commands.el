@@ -3078,6 +3078,114 @@ the workspaces in tab-bar order."
               (should (equal (mapcar #'car data) '("third" "first" "second")))))
         (delete-file snapshot-file)))))
 
+;;;; ---- Tests: snapshot hide-project-dirs persistence ----
+
+(ert-deftest claude-repl-cmd-test-collect-snapshot-entries/hidden-tombstone-carries-marker ()
+  "`--collect-snapshot-entries' tags a tombstone killed by the
+hide-project-dirs toggle with `:hidden-project-dir' so the next session
+can tell it apart from a hand-nuked workspace."
+  (claude-repl-test--with-clean-state
+    (puthash "ws-cc"
+             (list :project-dir "/tmp/cc"
+                   :nuked-at (current-time)
+                   :hidden-project-dir t)
+             claude-repl--workspaces)
+    (let* ((entries (claude-repl--collect-snapshot-entries))
+           (plist (cdr (assoc "ws-cc" entries))))
+      (should (plist-get plist :nuked-at))
+      (should (eq (plist-get plist :hidden-project-dir) t)))))
+
+(ert-deftest claude-repl-cmd-test-collect-snapshot-entries/plain-tombstone-omits-marker ()
+  "`--collect-snapshot-entries' does NOT add `:hidden-project-dir' to a
+tombstone the user nuked by hand (no hide marker on the live plist)."
+  (claude-repl-test--with-clean-state
+    (puthash "ws-tomb"
+             (list :project-dir "/tmp/t" :nuked-at (current-time))
+             claude-repl--workspaces)
+    (let* ((entries (claude-repl--collect-snapshot-entries))
+           (plist (cdr (assoc "ws-tomb" entries))))
+      (should (plist-get plist :nuked-at))
+      (should-not (plist-member plist :hidden-project-dir)))))
+
+(ert-deftest claude-repl-cmd-test-write-workspace-snapshot/round-trips-hide-enabled ()
+  "A snapshot written while `claude-repl-hide-project-dirs-enabled' is t
+reads back with `:hide-project-dirs-enabled' t."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (claude-repl-hide-project-dirs-enabled t))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+            (claude-repl-save-workspace-snapshot)
+            (should (eq (plist-get (claude-repl--read-workspace-snapshot snapshot-file)
+                                   :hide-project-dirs-enabled)
+                        t)))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-write-workspace-snapshot/round-trips-hide-disabled ()
+  "A snapshot written while `claude-repl-hide-project-dirs-enabled' is nil
+reads back with `:hide-project-dirs-enabled' nil."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (claude-repl-hide-project-dirs-enabled nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+            (claude-repl-save-workspace-snapshot)
+            (should-not (plist-get (claude-repl--read-workspace-snapshot snapshot-file)
+                                   :hide-project-dirs-enabled)))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-read-workspace-snapshot/legacy-format-has-no-hide-flag ()
+  "Reading a legacy list-of-entries snapshot reports `:hide-project-dirs-enabled'
+as nil — the key predates that format."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-")))
+      (unwind-protect
+          (progn
+            (claude-repl--write-sexp-file snapshot-file
+                                          '(("ws1" :project-dir "/tmp/ws1")))
+            (should-not (plist-get (claude-repl--read-workspace-snapshot snapshot-file)
+                                   :hide-project-dirs-enabled)))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/restores-hide-flag ()
+  "load-workspace-snapshot restores `claude-repl-hide-project-dirs-enabled'
+from the snapshot's `:hide-project-dirs-enabled' key."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (claude-repl-hide-project-dirs-enabled nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file
+             snapshot-file
+             `(:workspaces (("ws-cc" :project-dir "/tmp/cc"
+                             :nuked-at ,(current-time)
+                             :hidden-project-dir t))
+               :hide-project-dirs-enabled t))
+            (claude-repl-load-workspace-snapshot)
+            (should (eq claude-repl-hide-project-dirs-enabled t)))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-load-workspace-snapshot/restores-hidden-tombstone-marker ()
+  "load-workspace-snapshot carries `:hidden-project-dir' onto the restored
+tombstone so a later unhide can re-establish it."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-"))
+          (claude-repl-hide-project-dirs-enabled nil))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file))
+            (claude-repl--write-sexp-file
+             snapshot-file
+             `(:workspaces (("ws-cc" :project-dir "/tmp/cc"
+                             :nuked-at ,(current-time)
+                             :hidden-project-dir t))
+               :hide-project-dirs-enabled t))
+            (claude-repl-load-workspace-snapshot)
+            (should (claude-repl--ws-get "ws-cc" :hidden-project-dir))
+            (should (claude-repl--ws-get "ws-cc" :nuked-at)))
+        (delete-file snapshot-file)))))
+
 (ert-deftest claude-repl-cmd-test-establish-workspace/skips-priority-reorder-during-snapshot-load ()
   "`--establish-workspace' must NOT call `--reorder-workspace-by-priority'
 while a snapshot load is in flight (`claude-repl--snapshot-load-state'
