@@ -11,6 +11,11 @@
 (declare-function claude-repl--drain-merge-queue "worktree")
 (declare-function claude-repl--any-cherry-pick-in-progress-p "worktree")
 
+;; Forward declaration: defined in hide-project-dirs.el (loaded after
+;; commands.el).  The snapshot writer/loader persists and restores this
+;; toggle so the hidden set survives an Emacs restart.
+(defvar claude-repl-hide-project-dirs-enabled)
+
 ;;;; Customization — prompts & diff specs
 
 (defcustom claude-repl-branch-diff-spec
@@ -1697,7 +1702,7 @@ current `(NAME :project-dir DIR)' plist shape."
            (t (error "claude-repl: malformed snapshot entry: %S" entry))))))
 
 (defun claude-repl--collect-snapshot-entries ()
-  "Return a list of (NAME :project-dir DIR [:nuked-at TIME]) entries.
+  "Return a list of (NAME :project-dir DIR [:nuked-at TIME] [:hidden-project-dir t]) entries.
 Sourced from `claude-repl--workspaces'.  Includes every workspace
 whose plist has a non-nil `:project-dir'.  `:priority' is deliberately
 NOT included — it lives in each project's `<root>/.claude/emacs/state.el'
@@ -1709,6 +1714,10 @@ record would resurrect as live on next load.  Live entries omit
 `:nuked-at' entirely so the on-disk format stays minimal for the common
 case.
 
+A tombstone killed by `claude-repl-toggle-hide-project-dirs' also
+carries `:hidden-project-dir' so the next session can tell it apart
+from a workspace the user nuked by hand and restore it on unhide.
+
 Order: tab-bar order.  Entries that appear in `persp-names-cache'
 \(the source of truth for the tab bar) come first in cache order; any
 remaining entries (tombstones or workspaces not realized as persps)
@@ -1719,10 +1728,13 @@ across Emacs restarts."
   (let ((entries (make-hash-table :test 'equal)))
     (maphash (lambda (ws plist)
                (when-let ((dir (plist-get plist :project-dir)))
-                 (let ((tomb (plist-get plist :nuked-at)))
+                 (let ((tomb (plist-get plist :nuked-at))
+                       (hidden (plist-get plist :hidden-project-dir)))
                    (puthash ws
                             (if tomb
-                                (list :project-dir dir :nuked-at tomb)
+                                (append (list :project-dir dir :nuked-at tomb)
+                                        (when hidden
+                                          (list :hidden-project-dir t)))
                               (list :project-dir dir))
                             entries))))
              claude-repl--workspaces)
@@ -1781,10 +1793,19 @@ list-of-entries or a plist without `:in-flight-merges')."
     (:plist (plist-get raw :in-flight-merges))
     (_ nil)))
 
+(defun claude-repl--snapshot-hide-project-dirs-from-raw (raw)
+  "Return the persisted hide-project-dirs toggle state from RAW.
+RAW is a parsed snapshot sexp.  Returns nil when RAW predates the
+hide-project-dirs persistence (legacy list-of-entries, or a plist
+without the `:hide-project-dirs-enabled' key)."
+  (pcase (claude-repl--snapshot-raw-format raw)
+    (:plist (plist-get raw :hide-project-dirs-enabled))
+    (_ nil)))
+
 (defun claude-repl--read-workspace-snapshot (file)
   "Read FILE and return a plist with the parsed snapshot contents.
 Returned shape: `(:workspaces ENTRIES :merge-queue QUEUE
-:in-flight-merges IN-FLIGHT)'.
+:in-flight-merges IN-FLIGHT :hide-project-dirs-enabled BOOL)'.
 
 Normalizes both legacy (`((ws :project-dir dir) ...)') and current
 plist-shaped files into the plist return shape so callers don't need
@@ -1795,7 +1816,9 @@ the sexp is unreadable."
         (let ((raw (claude-repl--read-sexp-file file)))
           (list :workspaces (claude-repl--snapshot-entries-from-raw raw)
                 :merge-queue (claude-repl--snapshot-merge-queue-from-raw raw)
-                :in-flight-merges (claude-repl--snapshot-in-flight-merges-from-raw raw)))
+                :in-flight-merges (claude-repl--snapshot-in-flight-merges-from-raw raw)
+                :hide-project-dirs-enabled
+                (claude-repl--snapshot-hide-project-dirs-from-raw raw)))
       (error
        (claude-repl--log nil "read-workspace-snapshot: read err file=%s err=%S"
                          file err)
@@ -1838,11 +1861,16 @@ insulated from future plist-key additions on the live entries."
   "Write SNAPSHOT (a list of workspace entries) and queue state to
 `claude-repl-workspace-snapshot-file' in the plist format
 `(:workspaces SNAPSHOT :merge-queue MERGE-QUEUE
-:in-flight-merges IN-FLIGHT-MERGES)'.
+:in-flight-merges IN-FLIGHT-MERGES
+:hide-project-dirs-enabled BOOL)'.
 
 When MERGE-QUEUE / IN-FLIGHT-MERGES are omitted, defaults to the live
 `claude-repl--merge-queue' / `claude-repl--in-flight-merges' so every
 snapshot write captures the live state alongside the roster.
+
+`:hide-project-dirs-enabled' records the live
+`claude-repl-hide-project-dirs-enabled' toggle so a session restore
+reconstructs the hidden set.
 
 Creates the parent directory if missing and archives the previous file
 before overwriting.  Caller is responsible for any pre-write checks
@@ -1879,7 +1907,12 @@ before overwriting.  Caller is responsible for any pre-write checks
           (unless first (insert "\n                     "))
           (setq first nil)
           (prin1 entry (current-buffer))))
-      (insert "))"))))
+      (insert ")\n :hide-project-dirs-enabled ")
+      (prin1 (and (boundp 'claude-repl-hide-project-dirs-enabled)
+                  claude-repl-hide-project-dirs-enabled
+                  t)
+             (current-buffer))
+      (insert ")"))))
 
 (defun claude-repl-save-workspace-snapshot ()
   "Save the current set of claude-repl workspaces to a hidden file.
@@ -2481,9 +2514,16 @@ Returns to the workspace that was active when the load began."
          (parsed (claude-repl--read-workspace-snapshot file))
          (snapshot (plist-get parsed :workspaces))
          (saved-mq (plist-get parsed :merge-queue))
-         (saved-ifm (plist-get parsed :in-flight-merges)))
+         (saved-ifm (plist-get parsed :in-flight-merges))
+         (saved-hide (plist-get parsed :hide-project-dirs-enabled)))
     (unless snapshot
       (user-error "No workspace snapshot at %s" file))
+    ;; Restore the hide-project-dirs toggle BEFORE establishing entries —
+    ;; the tombstone-vs-live partition below already encodes the hidden
+    ;; set (hidden workspaces were saved as `:hidden-project-dir'
+    ;; tombstones), so the runtime flag just needs to agree with it.
+    (when (boundp 'claude-repl-hide-project-dirs-enabled)
+      (setq claude-repl-hide-project-dirs-enabled (and saved-hide t)))
     (let* ((normalized (mapcar #'claude-repl--snapshot-entry-normalize snapshot))
            ;; Partition: tombstoned entries (`:nuked-at' present) are
            ;; identity-only records — restore them directly to the hash
@@ -2503,8 +2543,14 @@ Returns to the workspace that was active when the load began."
               (plist (cdr entry)))
           (claude-repl--ws-put ws :project-dir (plist-get plist :project-dir))
           (claude-repl--ws-put ws :nuked-at (plist-get plist :nuked-at))
-          (claude-repl--log ws "snapshot-load: restored tombstone ws=%s dir=%s"
-                            ws (plist-get plist :project-dir))))
+          ;; Carry the hide marker so `claude-repl-toggle-hide-project-dirs'
+          ;; can tell a hide-killed tombstone from a hand-nuked one and
+          ;; restore only the former on unhide.
+          (claude-repl--ws-put ws :hidden-project-dir
+                               (plist-get plist :hidden-project-dir))
+          (claude-repl--log ws "snapshot-load: restored tombstone ws=%s dir=%s hidden=%s"
+                            ws (plist-get plist :project-dir)
+                            (if (plist-get plist :hidden-project-dir) "t" "nil"))))
       (setq claude-repl--snapshot-load-state
             (list :queue queue
                   :origin origin-ws
