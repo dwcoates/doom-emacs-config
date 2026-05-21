@@ -366,10 +366,11 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
              (concat "other mutating git commands.*" op)
              claude-repl-command-prefix))))
 
-(ert-deftest claude-repl-test-command-prefix-contains-response-tldr ()
-  "`claude-repl-command-prefix' must instruct including a 'Response TLDR' section."
+(ert-deftest claude-repl-test-command-prefix-mandates-entire-response-is-tree ()
+  "`claude-repl-command-prefix' must mandate that the entire response itself BE a single TLDR tree."
   (should (stringp claude-repl-command-prefix))
-  (should (string-match-p "Response TLDR" claude-repl-command-prefix)))
+  (should (string-match-p "ENTIRE response MUST itself BE a single TLDR tree"
+                          claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-omits-convo-tldr ()
   "`claude-repl-command-prefix' must NOT reference a 'Convo TLDR' section."
@@ -380,10 +381,18 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
   (should-not (string-match-p "Response TLDR's TLDR" claude-repl-command-prefix))
   (should-not (string-match-p "TLDR's TLDR" claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-response-tldr-is-last ()
-  "The 'Response TLDR' instruction must mandate it be the very last section of the response."
-  (should (string-match-p "Response TLDR.*VERY LAST\\|VERY LAST.*Response TLDR"
-                           claude-repl-command-prefix)))
+(ert-deftest claude-repl-test-command-prefix-no-separate-tldr-section ()
+  "The metaprompt must state there is no separate 'Response TLDR' section, since the tree IS the whole response."
+  (should (string-match-p "there is no separate 'Response TLDR' section"
+                          claude-repl-command-prefix))
+  (should (string-match-p "the tree IS the whole response"
+                          claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-nothing-outside-tree-except-header ()
+  "The metaprompt must forbid any response content outside the tree except the single header line."
+  (should (string-match-p
+           "Nothing may appear in the response outside the tree except the single response header line"
+           claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-structure-mece-numbered-ascii-tree ()
   "TLDR spec must mandate rendering as a MECE numbered ASCII tree with a dynamically determined depth in range 1-4."
@@ -446,7 +455,7 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-depth-range-and-hard-cap ()
-  "TLDR spec must mandate the 1-4 depth range with depth 4 as a hard cap, and direct the assistant to skip the TLDR rather than degenerate to a shallow tree for terse responses."
+  "TLDR spec must mandate the 1-4 depth range with depth 4 as a hard cap, and render a terse answer as a shallow depth-1 tree rather than padding it with manufactured depth."
   (should (string-match-p
            "MUST stay within the range 1 to 4 inclusive"
            claude-repl-command-prefix))
@@ -454,7 +463,7 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
            "depth 4 as the hard cap"
            claude-repl-command-prefix))
   (should (string-match-p
-           "skipped entirely rather than coerced into a degenerate shallow tree"
+           "rendered as a shallow depth-1 tree of just its root branches rather than padded out with manufactured depth"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-depth-may-vary-across-branches ()
@@ -497,7 +506,7 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-per-level-concision ()
-  "TLDR spec must require entries at the same level of the tree to be a bit more concise than the equivalent sentence would be in the response body, without sacrificing meaning."
+  "TLDR spec must require entries at the same level of the tree to be a bit more concise than the fuller resolution carried by their child subtrees, without sacrificing meaning."
   (should (string-match-p
            "Entries at the same level of the tree SHOULD be a bit more concise"
            claude-repl-command-prefix))
@@ -577,13 +586,17 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
            "non-root nodes are NOT emoji-prefixed"
            claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-no-emoji-in-main-body ()
-  "The metaprompt must explicitly disallow emoji-prefixed top-level bullets in the main response body."
-  (should (string-match-p "Do NOT prefix top-level bullets with emojis in the main response body"
-                          claude-repl-command-prefix)))
+(ert-deftest claude-repl-test-command-prefix-omits-main-response-body-concept ()
+  "Now that the entire response IS the tree, the metaprompt must NOT reference a separate 'main response body'."
+  (should-not (string-match-p "main response body" claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-main-body-comma-paren-subbullet-rule ()
-  "Main body must extend the subbullet-instead-of-semicolons/emdashes rule to also cover commas and parenthetical asides that bolt on additional/qualifying content."
+(ert-deftest claude-repl-test-command-prefix-omits-skip-when-terse ()
+  "Now that the entire response IS the tree, the metaprompt must NOT carry skip-when-terse language."
+  (should-not (string-match-p "Skip the Response TLDR entirely" claude-repl-command-prefix))
+  (should-not (string-match-p "omit the TLDR entirely" claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-response-comma-paren-subbullet-rule ()
+  "The response style rules must extend the subbullet-instead-of-semicolons/emdashes rule to also cover commas and parenthetical asides that bolt on additional/qualifying content."
   (should (string-match-p
            "same standard applies to commas and parenthetical asides that bolt on additional or qualifying content"
            claude-repl-command-prefix))
@@ -591,28 +604,31 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
            "any comma, semicolon, emdash, or paren that attaches extra detail to a bullet"
            claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-main-body-comma-strong-reason-exception ()
-  "Main body comma/paren rule must carry an explicit 'strong reason' inline-exception clause so the rule is emphatic but not absolute."
+(ert-deftest claude-repl-test-command-prefix-response-comma-strong-reason-exception ()
+  "The comma/paren rule must carry an explicit 'strong reason' inline-exception clause so the rule is emphatic but not absolute."
   (should (string-match-p
            "unless there's a strong reason to keep them inline"
            claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-main-body-grammatical-structure-principle ()
-  "Main body must state the guiding principle: keep bullets short not by simplifying content but by recursively subbulleting along english grammatical structure."
+(ert-deftest claude-repl-test-command-prefix-response-grammatical-structure-principle ()
+  "The metaprompt must state the guiding principle: keep bullets short not by simplifying content but by recursively subbulleting along english grammatical structure."
   (should (string-match-p
            "keep each bullet short not by simplifying content but by subbulleting along english grammatical structure, recursively"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-header-changes-annotation ()
-  "TLDR spec must require the Response TLDR section header to indicate whether changes were made."
+  "TLDR spec must require the response to open with a header line indicating whether changes were made."
   (should (string-match-p
-           "Response TLDR section's header MUST indicate whether changes were made"
+           "The response MUST open with a single header line"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "whether changes were made in this response"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-header-changes-example ()
-  "TLDR spec must give concrete parenthesized examples of the annotation with both status emojis."
-  (should (string-match-p "'Response TLDR (✏️ changes made)'" claude-repl-command-prefix))
-  (should (string-match-p "'Response TLDR (👀 no changes made)'" claude-repl-command-prefix)))
+  "TLDR spec must give concrete parenthesized examples of the header annotation with both status emojis."
+  (should (string-match-p "'Response (✏️ changes made)'" claude-repl-command-prefix))
+  (should (string-match-p "'Response (👀 no changes made)'" claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-header-changes-defines-changes ()
   "TLDR spec must define what 'changes' means (edits/writes/commits, not reads/analysis)."
@@ -698,43 +714,19 @@ work after a proposed change, or how they work now after a change just made."
            "and so on recursively to finer scopes"
            claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-significantly-shorter ()
-  "TLDR spec must mandate the Response TLDR be significantly shorter than the response body."
+(ert-deftest claude-repl-test-command-prefix-brevity-via-tree-depth ()
+  "The metaprompt must express brevity through tree depth, since the entire response IS the tree."
   (should (string-match-p
-           "Response TLDR MUST be significantly shorter than the response body"
+           "The ENTIRE response IS itself the TLDR tree"
            claude-repl-command-prefix))
   (should (string-match-p
-           "distillation and not a restatement"
+           "brevity is instead expressed through the tree's depth"
            claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-skip-when-inherently-terse ()
-  "TLDR spec must instruct skipping the TLDR entirely when the response is already inherently terse."
+(ert-deftest claude-repl-test-command-prefix-header-plus-tree-is-entire-response ()
+  "TLDR spec must state the header line plus the tree beneath it constitute the entire response."
   (should (string-match-p
-           "Skip the Response TLDR entirely whenever the response is already inherently terse"
-           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-tldr-disruptive-distracting ()
-  "TLDR spec must justify the skip-when-terse rule with the disruptive/distracting framing."
-  (should (string-match-p
-           "disruptive and distracting"
-           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-tldr-terse-examples ()
-  "TLDR spec must give concrete examples of what counts as inherently terse (1-5 sentences, short list, one-line answer)."
-  (should (string-match-p
-           "1-5 sentence response"
-           claude-repl-command-prefix))
-  (should (string-match-p
-           "single short list"
-           claude-repl-command-prefix))
-  (should (string-match-p
-           "direct one-line answer"
-           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-tldr-skip-leading-clause ()
-  "The leading 'ALWAYS provide a Response TLDR' clause must carry the inherently-terse skip exception."
-  (should (string-match-p
-           "Unless the response is inherently terse enough that a meaningful TLDR cannot be significantly shorter"
+           "this header line together with the tree beneath it constitutes the entire response"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-forbids-emdashes-and-semicolons ()
@@ -788,20 +780,11 @@ work after a proposed change, or how they work now after a change just made."
            "second sentences inside a single bullet are never allowed"
            claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-emoji-only-in-tldr ()
-  "Emoji prefixing must be prescribed for TLDR top-level bullets only.
-The first occurrence of 'emoji' in the prefix should be in a TLDR-only context
-(i.e. appear after the introduction of the main-body restriction)."
-  (let ((restriction-pos (string-match "Do NOT prefix top-level bullets with emojis"
-                                        claude-repl-command-prefix))
-        (tldr-spec-pos (string-match "TLDR spec" claude-repl-command-prefix))
-        (tldr-emoji-pos (string-match "relevant prefixing emoji for top-level bullets"
-                                       claude-repl-command-prefix)))
-    (should restriction-pos)
-    (should tldr-spec-pos)
-    (should tldr-emoji-pos)
-    (should (< restriction-pos tldr-spec-pos))
-    (should (< tldr-spec-pos tldr-emoji-pos))))
+(ert-deftest claude-repl-test-command-prefix-omits-main-body-emoji-restriction ()
+  "Now that every root branch of the response tree is emoji-prefixed, the
+metaprompt must NOT carry the old main-body emoji restriction."
+  (should-not (string-match-p "Do NOT prefix top-level bullets with emojis"
+                              claude-repl-command-prefix)))
 
 ;;;; ---- Tests: metaprompt auto-reload ----
 
