@@ -30,8 +30,8 @@ The directory is created with `make-temp-file' (deleted on exit)."
          (delete-directory ,var t)))))
 
 (defun claude-repl-test--seed-merge-config (repo-root content)
-  "Write CONTENT (string) to REPO-ROOT's `.claude-repl/workspace-merge.eld'."
-  (let* ((dir (expand-file-name ".claude-repl" repo-root))
+  "Write CONTENT (string) to REPO-ROOT's `.claude/emacs/workspace-merge.eld'."
+  (let* ((dir (expand-file-name ".claude/emacs" repo-root))
          (path (expand-file-name "workspace-merge.eld" dir)))
     (make-directory dir t)
     (with-temp-file path (insert content))
@@ -60,7 +60,7 @@ Restores the prior registry on exit so tests don't bleed."
                      '(:add-to-merge-queue t))))))
 
 (ert-deftest claude-repl-test-merge-config-returns-nil-when-missing ()
-  "A repo with no .claude-repl/workspace-merge.eld file returns nil."
+  "A repo with no .claude/emacs/workspace-merge.eld file returns nil."
   (claude-repl-test--with-temp-repo root
     (should-not (claude-repl--read-merge-handler-config-file root))))
 

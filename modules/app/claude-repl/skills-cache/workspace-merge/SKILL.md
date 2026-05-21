@@ -16,7 +16,7 @@ Do NOT attempt to merge the workspaces yourself in any way. Under NO circumstanc
 2. **Close any gns-sockets subscriptions bound to this Claude session** before writing the dispatch file. The downstream editor will tear the workspace down; any subscription whose `session_id` equals the current Claude session would otherwise outlive the session that owned it. Pass every named workspace from step 1 — the script itself decides whether the current branch is among them and no-ops when it is not. Subscriptions for workspaces not currently checked out are bound to different Claude sessions and are not reachable from here.
 
    ```bash
-   bash /home/claude/.claude/skills/workspace-merge/run.sh \
+   bash ~/.claude/skills/workspace-merge/run.sh \
      --close-current-session-sockets DWC/feature-one DWC/feature-two
    ```
 
@@ -25,7 +25,7 @@ Do NOT attempt to merge the workspaces yourself in any way. Under NO circumstanc
 
 3. **Write the commands** by piping JSON to `run.sh --emit-commands` using the Bash tool:
    ```bash
-   bash /home/claude/.claude/skills/workspace-merge/run.sh --emit-commands << 'EOF'
+   bash ~/.claude/skills/workspace-merge/run.sh --emit-commands << 'EOF'
    [
      {"type": "merge", "workspace": "DWC/feature-one"},
      {"type": "merge", "workspace": "DWC/feature-two"}
