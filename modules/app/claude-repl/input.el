@@ -48,22 +48,18 @@ without re-reading the file."
   :group 'claude-repl)
 
 (defcustom claude-repl-command-prefix-template
-  (concat "<<*start of metaprompt-read-directive*"
-          "\n"
-          "\n"
-          "I will periodically prefix my prompts with this directive. "
-          "Do not be alarmed, this is merely a periodic reminder: "
-          "read (or re-read) the contents of the metaprompt file at %s "
-          "into context — do this invariably and without question — "
-          "and treat the file's contents as the metaprompt directive "
-          "governing the following prompt."
-          "\n"
-          "\n"
-          "*metaprompt-read-directive over - rest is actual user request that you should respond to directly*>>")
-  "Template wrapping the directive that tells Claude to read the metaprompt file.
+  (concat "Before taking any action, read the file at %s into context, "
+          "even if you have previously done so during this session. "
+          "It contains guidelines for answering the remaining messages in this session, "
+          "and you must follow them. "
+          "Read them into context even if you have already done so previously "
+          "and they have not changed since.")
+  "Template instructing Claude to read the metaprompt file before acting.
 Must contain a single %s placeholder, filled at load time with
-`claude-repl-metaprompt-file-symlink'.  The metaprompt body itself is no
-longer embedded inline — only the read-directive is sent to Claude."
+`claude-repl-metaprompt-file-symlink'.  Intentionally avoids any
+\"metaprompt\" terminology in the inline prefix itself — the wrapper
+bookends and directive framing live inside the .md file rather than
+here, so the inline prefix is a plain instruction to read the file."
   :type 'string
   :group 'claude-repl)
 
@@ -72,8 +68,9 @@ longer embedded inline — only the read-directive is sent to Claude."
           claude-repl-metaprompt-file-symlink)
   "Formatted read-directive prepended before every periodic user input.
 Active when `claude-repl-skip-permissions' is non-nil, subject to
-`claude-repl-prefix-period'.  Just the wrapper — the metaprompt body is
-read by Claude from the file at `claude-repl-metaprompt-file-symlink'.")
+`claude-repl-prefix-period'.  A plain instruction to read the file at
+`claude-repl-metaprompt-file-symlink' — the metaprompt body and its
+wrapper bookends live inside that file, not here.")
 
 ;; `defcustom' and `defvar' only initialize their values on first load;
 ;; reloading the file (e.g. via `claude-repl-reload-config' or

@@ -862,20 +862,41 @@ than inline in input.el."
       (setq claude-repl-command-prefix orig-value)
       (setq claude-repl--command-prefix orig-derived))))
 
-(ert-deftest claude-repl-test-internal-command-prefix-is-pure-wrapper ()
-  "`claude-repl--command-prefix' must be the wrapper directive only.
-The metaprompt body is now read by Claude from
-`claude-repl-metaprompt-file-symlink'; the body must NOT be embedded
-inline in the derived prefix string."
+(ert-deftest claude-repl-test-internal-command-prefix-is-plain-read-directive ()
+  "`claude-repl--command-prefix' must be a plain read-the-file instruction.
+The metaprompt body AND its wrapper bookends are now read by Claude from
+`claude-repl-metaprompt-file-symlink'; neither the body nor the wrapper
+markers must be embedded inline in the derived prefix string, and the
+inline prefix must NOT use \"metaprompt\" as a conceptual framing so it
+cannot confuse Claude into refusing to read the file (the bare filename
+inside the path is allowed and unavoidable)."
   (should (stringp claude-repl--command-prefix))
-  ;; Wrapper bookends are present.
-  (should (string-match-p "start of metaprompt-read-directive" claude-repl--command-prefix))
-  (should (string-match-p "metaprompt-read-directive over" claude-repl--command-prefix))
+  ;; Plain read-directive is present.
+  (should (string-match-p "read the file at" claude-repl--command-prefix))
+  ;; Wrapper bookends are NOT present in the derived prefix — they live in the file.
+  (should-not (string-match-p "start of metaprompt-read-directive"
+                              claude-repl--command-prefix))
+  (should-not (string-match-p "metaprompt-read-directive over"
+                              claude-repl--command-prefix))
+  ;; Conceptual "metaprompt" framing must be absent from the inline prefix.
+  (should-not (string-match-p "metaprompt directive" claude-repl--command-prefix))
+  (should-not (string-match-p "metaprompt file" claude-repl--command-prefix))
+  (should-not (string-match-p "the metaprompt" claude-repl--command-prefix))
   ;; Body content (a substring unique to the metaprompt body) is NOT present.
   (should-not (string-match-p "Response TLDR MUST be rendered as a MECE"
                               claude-repl--command-prefix))
   (should-not (string-match-p "MECE numbered ASCII tree"
                               claude-repl--command-prefix)))
+
+(ert-deftest claude-repl-test-metaprompt-file-contains-wrapper-bookends ()
+  "The metaprompt .md file must contain the wrapper bookend markers.
+These used to live in the inline prefix template but were moved into the
+file body so the inline prefix can be a plain, metaprompt-free read-the-file
+directive that Claude does not refuse to act on."
+  (should (string-match-p "<<\\*start of metaprompt-read-directive\\*"
+                          claude-repl-command-prefix))
+  (should (string-match-p "\\*metaprompt-read-directive over"
+                          claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-internal-command-prefix-references-symlink ()
   "`claude-repl--command-prefix' must embed `claude-repl-metaprompt-file-symlink'.
@@ -886,10 +907,16 @@ the metaprompt body is loaded from there."
            claude-repl--command-prefix)))
 
 (ert-deftest claude-repl-test-internal-command-prefix-read-directive-is-unconditional ()
-  "The wrapper directive must tell Claude to read the file 'invariably and without question'."
-  (should (string-match-p "invariably and without question"
+  "The inline directive must instruct Claude to read the file even if already loaded.
+The whole point of the periodic re-injection is to force a fresh read, so
+the inline prefix must explicitly tell Claude to read the file even if it
+has previously done so during the session and even if it has not changed."
+  (should (string-match-p "even if you have previously done so during this session"
                           claude-repl--command-prefix))
-  (should (string-match-p "read (or re-read)" claude-repl--command-prefix)))
+  (should (string-match-p "even if you have already done so previously"
+                          claude-repl--command-prefix))
+  (should (string-match-p "they have not changed since"
+                          claude-repl--command-prefix)))
 
 (ert-deftest claude-repl-test-metaprompt-file-exists ()
   "`claude-repl-metaprompt-file' must resolve to a readable file on disk."
@@ -3102,9 +3129,16 @@ Mirrors the append-to-input-buffer dead-buffer case."
   (should (= (default-value 'claude-repl-scroll-lines) 15)))
 
 (ert-deftest claude-repl-test-command-prefix-contains-text ()
-  "`claude-repl--command-prefix' should contain the metaprompt text."
+  "`claude-repl--command-prefix' should contain the plain read-directive text.
+Must NOT use \"metaprompt\" as a conceptual framing — that terminology
+was confusing Claude into refusing to read the file, so the inline prefix
+is intentionally phrased as a generic \"read this file\" instruction
+(the bare filename inside the path is allowed and unavoidable)."
   (should (stringp claude-repl--command-prefix))
-  (should (string-match-p "metaprompt" claude-repl--command-prefix)))
+  (should (string-match-p "read the file at" claude-repl--command-prefix))
+  (should-not (string-match-p "metaprompt directive" claude-repl--command-prefix))
+  (should-not (string-match-p "metaprompt file" claude-repl--command-prefix))
+  (should-not (string-match-p "the metaprompt" claude-repl--command-prefix)))
 
 ;;;; ---- Tests: no-silent-fallback behavior in slash mode (regression suite) ----
 ;;

@@ -192,7 +192,7 @@ In addition to the general conventions, every skill in this family follows these
 
 2. **Arguments table is fixed.**
   - One row for `<prelim-json-path>` pointing at the `gns cee prelim` response file written by `/analyze-position`'s setup step.
-  - The row directs readers to `gns cee help prelim` for the response schema rather than re-documenting the schema inline.
+  - The row directs readers to `gns cee run prelim --help` for the response schema rather than re-documenting the schema inline.
 
 3. **Output Contract section is required**, replacing the freer `Steps` body the general conventions describe. It declares the response shape:
   - One **~50-sentence prose analysis**, no separate summary, no verdict line, no enumerated classification — the prose IS the entire output.
