@@ -5911,15 +5911,20 @@ Covers the full call the interactive `SPC TAB n' path builds up."
       (should (equal loaded-file claude-repl--config-file)))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-never-pops-magit-status ()
-  "`--workspace-merge-do' must NEVER open or refresh a magit-status
-buffer — post-merge buffer presentation is purely the caller's
-(`--workspace-merge-into-source') workspace-switch responsibility.  The
-function exercises both the SILENT and non-SILENT call shapes to assert
-this is unconditional, not gated on SILENT."
+  "`--workspace-merge-do' must NEVER call `magit-status' to POP a new
+magit-status buffer — post-merge buffer presentation (window selection,
+buffer creation) is purely the caller's (`--workspace-merge-into-source')
+workspace-switch responsibility.  Exercises both the SILENT and
+non-SILENT call shapes to assert this is unconditional, not gated on
+SILENT.
+
+Note: a magit-refresh of any already-open status buffer for the merge
+target IS called at the end of the merge (see
+`claude-repl-test-workspace-merge-do-refreshes-target-magit-after-close')
+— this test only asserts that no NEW buffer is created/popped."
   (claude-repl-test--with-clean-state
     (puthash "other-ws" '() claude-repl--workspaces)
-    (let ((magit-status-called nil)
-          (magit-refresh-called nil))
+    (let ((magit-status-called nil))
       (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
                  ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
                  ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
@@ -5929,17 +5934,15 @@ this is unconditional, not gated on SILENT."
                  ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'claude-repl--close-workspace) #'ignore)
                  ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
+                 ((symbol-function 'claude-repl--refresh-magit-status-for-dir) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
-                 ((symbol-function 'magit-status) (lambda (&rest _) (setq magit-status-called t)))
-                 ((symbol-function 'magit-refresh) (lambda (&rest _) (setq magit-refresh-called t))))
+                 ((symbol-function 'magit-status) (lambda (&rest _) (setq magit-status-called t))))
         ;; Non-silent path.
         (claude-repl--workspace-merge-do "other-ws")
         (should-not magit-status-called)
-        (should-not magit-refresh-called)
         ;; Silent path.
         (claude-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
-        (should-not magit-status-called)
-        (should-not magit-refresh-called)))))
+        (should-not magit-status-called)))))
 
 ;;;; ---- Tests: tag-merge-completion ----
 
@@ -6176,6 +6179,93 @@ NOT called — that runs only when the user explicitly presses `x'."
         (should tagged)
         (should (equal nuked-ws "other-ws"))
         (should nuked-preserve)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-refreshes-target-magit-after-close ()
+  "Successful merge refreshes any open magit-status buffer for the
+cherry-pick target directory AFTER `--close-workspace' completes.
+This is the deferred magit update: the cherry-pick can run for many
+seconds (auto-resolve loop, multi-commit replay) during which magit's
+own auto-revert may have last fired mid-flight, leaving the buffer
+stuck on an intermediate state.  The trailing refresh guarantees the
+final post-merge state is visible without the user pressing `g'.
+
+Asserts:
+  1. `--refresh-magit-status-for-dir' is called with PROJECT-ROOT.
+  2. It is called AFTER `--close-workspace' — the order matters so
+     any close-time buffer churn is settled before the refresh fires."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (let ((events nil))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/master"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+                 ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+                 ((symbol-function 'load-file) #'ignore)
+                 ((symbol-function 'claude-repl--close-workspace)
+                  (lambda (&rest _) (push 'close events)))
+                 ((symbol-function 'claude-repl--refresh-magit-status-for-dir)
+                  (lambda (dir &optional _ws)
+                    (push (list 'refresh dir) events))))
+        (claude-repl--workspace-merge-do "other-ws" "/tmp/master" t)
+        (setq events (nreverse events))
+        (should (equal events
+                       '(close (refresh "/tmp/master"))))))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-skips-target-magit-refresh-on-silent-failure ()
+  "Silent cherry-pick failure (sentinel `failed') must NOT refresh the
+target's magit-status — the merge didn't land, the worktree is in its
+pre-merge state, and the user keeps the source workspace alive to
+investigate.  Forcing a refresh of the (unchanged) target dir would
+be a misleading nudge that something landed."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (let ((refresh-called nil))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/master"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits)
+                  (lambda (_dir _ws _base _br &optional _auto _silent) 'failed))
+                 ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+                 ((symbol-function 'claude-repl--close-workspace) #'ignore)
+                 ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
+                 ((symbol-function 'load-file) #'ignore)
+                 ((symbol-function 'claude-repl--refresh-magit-status-for-dir)
+                  (lambda (&rest _) (setq refresh-called t))))
+        (claude-repl--workspace-merge-do "other-ws" "/tmp/master" t)
+        (should-not refresh-called)))))
+
+(ert-deftest claude-repl-test-workspace-merge-do-skips-target-magit-refresh-on-conflict ()
+  "Cherry-pick conflict (`claude-repl-merge-conflict-error') must NOT
+refresh the target's magit.  The conflict resolution path opens magit
+on the target itself via `--surface-silent-merge-conflict' (when
+silent) or aborts the cherry-pick — running our trailing refresh on
+top would either fight the conflict UI or refresh state that was
+just aborted."
+  (claude-repl-test--with-clean-state
+    (puthash "other-ws" '() claude-repl--workspaces)
+    (let ((refresh-called nil))
+      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
+                 ((symbol-function 'claude-repl--workspace-branch) (lambda (_ws) "branch-x"))
+                 ((symbol-function 'claude-repl--ws-dir) (lambda (_ws) "/tmp/master"))
+                 ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
+                 ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
+                 ((symbol-function 'claude-repl--cherry-pick-commits)
+                  (lambda (_dir _ws _base _br &optional _auto _silent)
+                    (signal 'claude-repl-merge-conflict-error '("conflict"))))
+                 ((symbol-function 'claude-repl--mark-merge-conflict) #'ignore)
+                 ((symbol-function 'claude-repl--clear-in-flight-merge) #'ignore)
+                 ((symbol-function 'claude-repl--drain-merge-queue) #'ignore)
+                 ((symbol-function 'load-file) #'ignore)
+                 ((symbol-function 'claude-repl--refresh-magit-status-for-dir)
+                  (lambda (&rest _) (setq refresh-called t))))
+        (ignore-errors
+          (claude-repl--workspace-merge-do "other-ws" "/tmp/master" t))
+        (should-not refresh-called)))))
 
 (ert-deftest claude-repl-test-workspace-merge-do-routes-close-through-gns-gating ()
   "Successful merge must dispatch the editor-side close via

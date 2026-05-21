@@ -589,19 +589,40 @@ timestamp (orthogonal to `:repl-state'):
           (claude-repl--fix-vterm-scroll vterm-buf))
       (claude-repl--log ws "refresh-vterm-after-finish: buffer is dead buf=%s" (buffer-name vterm-buf)))))
 
-(defun claude-repl--refresh-magit-status (ws)
-  "Refresh any magit-status buffer whose repo root matches WS's :project-dir.
-No-op when WS has no :project-dir or no matching buffer exists."
-  (when-let* ((root (claude-repl--ws-get ws :project-dir))
-              (canonical (claude-repl--path-canonical root)))
+(defun claude-repl--refresh-magit-status-for-dir (dir &optional ws)
+  "Refresh any magit-status buffer whose `default-directory' canonicalizes to DIR.
+Iterates `buffer-list', filters to `magit-status-mode' buffers whose
+`default-directory' matches the canonical form of DIR, and runs
+`magit-refresh' in each.  No-op when DIR is nil or has no matching
+buffer.
+
+WS is optional and used only for the log line so a caller with a
+workspace context (e.g. `claude-repl--refresh-magit-status') can keep
+the existing log prefix; directory-keyed callers (e.g. the post-merge
+refresh in `claude-repl--workspace-merge-do') pass nil and the log
+falls back to the bare directory."
+  (when-let* ((canonical (and dir (claude-repl--path-canonical dir))))
     (dolist (buf (buffer-list))
       (when (and (buffer-live-p buf)
                  (with-current-buffer buf
                    (and (eq major-mode 'magit-status-mode)
                         (equal (claude-repl--path-canonical default-directory)
                                canonical))))
-        (claude-repl--log ws "refresh-magit-status: refreshing buf=%s" (buffer-name buf))
+        (claude-repl--log ws "refresh-magit-status-for-dir: dir=%s refreshing buf=%s"
+                          canonical (buffer-name buf))
         (with-current-buffer buf (magit-refresh))))))
+
+(defun claude-repl--refresh-magit-status (ws)
+  "Refresh any magit-status buffer whose repo root matches WS's :project-dir.
+No-op when WS has no :project-dir or no matching buffer exists.
+
+Thin wrapper over `claude-repl--refresh-magit-status-for-dir' so the
+WS-keyed call sites (e.g. `--handle-claude-finished') and
+directory-keyed call sites (e.g. the post-merge refresh in
+`--workspace-merge-do', which has the target directory but not a
+target workspace) share the same buffer-matching logic."
+  (claude-repl--refresh-magit-status-for-dir
+   (claude-repl--ws-get ws :project-dir) ws))
 
 (defun claude-repl--handle-claude-finished (ws)
   "Handle Claude finishing in WS.

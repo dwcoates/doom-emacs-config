@@ -269,13 +269,20 @@ be advanced this run."
     ;; Defer the UI teardown to the main thread — this handler runs on
     ;; the merge worker thread spawned by
     ;; `claude-repl--workspace-merge-async', and persp/vterm kills must
-    ;; happen on main.
+    ;; happen on main.  Once the close is done, refresh any open
+    ;; magit-status buffer for MASTER-DIR so it reflects the post-ff
+    ;; state — magit's own auto-revert may have last fired before the
+    ;; `git fetch' + `merge --ff-only' completed, leaving the buffer
+    ;; stuck on the pre-ff HEAD.
     (claude-repl--defer-to-main-thread
      (lambda ()
        (claude-repl--gns-sockets-close-then
         target-ws
         (lambda ()
-          (claude-repl--close-workspace target-ws 'preserve-entry)))))))
+          (claude-repl--close-workspace target-ws 'preserve-entry)
+          (when master-dir
+            (claude-repl--refresh-magit-status-for-dir
+             master-dir target-ws))))))))
 
 (claude-repl--register-merge-handler
  'refresh-master-from-origin

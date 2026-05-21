@@ -248,7 +248,8 @@ exactly which side effects fired (and which were skipped).  Always
 mocks `claude-repl--events-record' to a no-op since the events file
 write is incidental to handler semantics."
   (declare (indent 0))
-  `(let ((captured (list :fetch nil :ff nil :close-then nil :close nil)))
+  `(let ((captured (list :fetch nil :ff nil :close-then nil :close nil
+                         :magit-refresh nil)))
      (cl-letf
          (((symbol-function 'claude-repl--events-record) (lambda (&rest _) nil))
           ((symbol-function 'claude-repl--git-exit-code)
@@ -263,7 +264,10 @@ write is incidental to handler semantics."
              (funcall thunk)))
           ((symbol-function 'claude-repl--close-workspace)
            (lambda (ws &optional preserve)
-             (plist-put captured :close (list ws preserve)))))
+             (plist-put captured :close (list ws preserve))))
+          ((symbol-function 'claude-repl--refresh-magit-status-for-dir)
+           (lambda (dir &optional ws)
+             (plist-put captured :magit-refresh (list dir ws)))))
        ,@body)))
 
 (ert-deftest claude-repl-test-refresh-master-marks-ws-merged-on-success ()
@@ -381,6 +385,37 @@ write is incidental to handler semantics."
           (should (equal (plist-get captured :close-then) "foo"))
           (should (equal (plist-get captured :close)
                          '("foo" preserve-entry))))))))
+
+(ert-deftest claude-repl-test-refresh-master-refreshes-master-magit-after-close ()
+  "Once `master-dir' is resolved and the close has happened, the handler
+forces a `--refresh-magit-status-for-dir' for the master worktree.
+Mirrors the cherry-pick handler's trailing refresh — magit's own
+auto-revert may have last fired before the fetch + ff-only completed,
+leaving the buffer stuck on the pre-ff HEAD until the user pressed `g'."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) nil)))
+        (claude-repl-test--with-refresh-mocks
+          (claude-repl--merge-handler-refresh-master-from-origin "foo")
+          (should (equal (plist-get captured :magit-refresh)
+                         '("/repo/main" "foo"))))))))
+
+(ert-deftest claude-repl-test-refresh-master-skips-magit-refresh-when-no-master-dir ()
+  "When no master worktree resolves, there is no directory to refresh —
+the handler must not call `--refresh-magit-status-for-dir' with nil
+\(which would still iterate `buffer-list' for no reason)."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) nil)))
+        (claude-repl-test--with-refresh-mocks
+          (claude-repl--merge-handler-refresh-master-from-origin "foo")
+          (should-not (plist-get captured :magit-refresh)))))))
 
 (ert-deftest claude-repl-test-refresh-master-handler-registered ()
   "The handler symbol is wired into the registry."
