@@ -3003,6 +3003,142 @@ roster is at least as large as the on-disk one."
               (should (= 2 (length data)))))
         (delete-file snapshot-file)))))
 
+;;;; ---- Tests: snapshot save/load preserves tab-bar order ----
+
+(ert-deftest claude-repl-cmd-test-collect-snapshot-entries/orders-by-persp-cache ()
+  "`--collect-snapshot-entries' returns entries in `persp-names-cache' order
+so the saved snapshot mirrors the tab-bar order at save time — the third
+tab when saving is the third entry on disk, and on subsequent load the
+loader processes entries in file order, preserving the visual order
+across Emacs restarts."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "alpha"   :project-dir "/tmp/alpha")
+    (claude-repl--ws-put "bravo"   :project-dir "/tmp/bravo")
+    (claude-repl--ws-put "charlie" :project-dir "/tmp/charlie")
+    (let ((persp-names-cache '("bravo" "alpha" "charlie")))
+      (let ((entries (claude-repl--collect-snapshot-entries)))
+        (should (equal (mapcar #'car entries) '("bravo" "alpha" "charlie")))))))
+
+(ert-deftest claude-repl-cmd-test-collect-snapshot-entries/skips-persp-nil-name ()
+  "Entries are taken from `persp-names-cache' in order, but `persp-nil-name'
+\(the sentinel persp-mode keeps at the cache head) is skipped so it never
+shows up in the snapshot."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "alpha" :project-dir "/tmp/alpha")
+    (claude-repl--ws-put "bravo" :project-dir "/tmp/bravo")
+    (let ((persp-nil-name "none")
+          (persp-names-cache '("none" "bravo" "alpha")))
+      (let ((entries (claude-repl--collect-snapshot-entries)))
+        (should (equal (mapcar #'car entries) '("bravo" "alpha")))))))
+
+(ert-deftest claude-repl-cmd-test-collect-snapshot-entries/appends-entries-missing-from-cache ()
+  "Workspaces with `:project-dir' but no slot in `persp-names-cache'
+\(typically tombstones or pre-persp-realized records) follow after the
+cache-ordered prefix.  They're still included so the snapshot doesn't
+lose identity records; they just don't have a positional anchor to slot
+into."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "alpha"   :project-dir "/tmp/alpha")
+    (claude-repl--ws-put "orphan"  :project-dir "/tmp/orphan")
+    (let ((persp-names-cache '("alpha")))
+      (let* ((entries (claude-repl--collect-snapshot-entries))
+             (names (mapcar #'car entries)))
+        (should (= 2 (length entries)))
+        (should (equal (car names) "alpha"))
+        (should (member "orphan" names))))))
+
+(ert-deftest claude-repl-cmd-test-collect-snapshot-entries/no-persp-cache-falls-back ()
+  "When `persp-names-cache' is unbound (test envs without persp-mode), the
+collector still emits every live entry — order is hash-traversal under
+that fallback, but the entries themselves must not be dropped."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "alpha" :project-dir "/tmp/alpha")
+    (claude-repl--ws-put "bravo" :project-dir "/tmp/bravo")
+    (cl-progv '(persp-names-cache) nil
+      (let ((entries (claude-repl--collect-snapshot-entries)))
+        (should (= 2 (length entries)))
+        (should (assoc "alpha" entries))
+        (should (assoc "bravo" entries))))))
+
+(ert-deftest claude-repl-cmd-test-save-workspace-snapshot/persists-tab-bar-order ()
+  "End-to-end: `save-workspace-snapshot' writes entries in the on-disk file
+in the same order as `persp-names-cache', so a subsequent `read' returns
+the workspaces in tab-bar order."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-")))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file)
+                (persp-names-cache '("third" "first" "second")))
+            (claude-repl--ws-put "first"  :project-dir "/tmp/first")
+            (claude-repl--ws-put "second" :project-dir "/tmp/second")
+            (claude-repl--ws-put "third"  :project-dir "/tmp/third")
+            (claude-repl-save-workspace-snapshot)
+            (let ((data (plist-get (claude-repl--read-workspace-snapshot snapshot-file)
+                                   :workspaces)))
+              (should (equal (mapcar #'car data) '("third" "first" "second")))))
+        (delete-file snapshot-file)))))
+
+(ert-deftest claude-repl-cmd-test-establish-workspace/skips-priority-reorder-during-snapshot-load ()
+  "`--establish-workspace' must NOT call `--reorder-workspace-by-priority'
+while a snapshot load is in flight (`claude-repl--snapshot-load-state'
+non-nil) — the loader visits entries in saved tab-bar order, and a
+per-entry priority reseating would shuffle them back into priority
+order, defeating the order preservation `--collect-snapshot-entries'
+encodes on save."
+  (claude-repl-test--with-clean-state
+    (let ((reorder-calls nil))
+      (cl-letf (((symbol-function 'persp-add-new)
+                 (lambda (_ws) nil))
+                ((symbol-function 'persp-frame-switch)
+                 (lambda (_ws) nil))
+                ((symbol-function 'claude-repl--clean-frame-foreign-windows)
+                 (lambda (_ws) nil))
+                ((symbol-function 'projectile-add-known-project)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--most-recent-project-file)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--hydrate-priority-from-state)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+                 (lambda (ws) (push ws reorder-calls)))
+                ((symbol-function 'claude-repl--initialize-claude)
+                 (lambda (_ws) nil))
+                ((symbol-function 'claude-repl--claude-running-p)
+                 (lambda (_ws) t)))
+        ;; Simulate an in-flight snapshot load.
+        (let ((claude-repl--snapshot-load-state '(:queue nil)))
+          (claude-repl--establish-workspace "ws-a" "/tmp/ws-a"))
+        (should-not reorder-calls)))))
+
+(ert-deftest claude-repl-cmd-test-establish-workspace/applies-priority-reorder-outside-snapshot-load ()
+  "Outside a snapshot load (`claude-repl--snapshot-load-state' nil),
+`--establish-workspace' still applies the priority reorder — drawer-driven
+restores and worktree hydration paths depend on the priority-slot
+behavior for ad-hoc creations."
+  (claude-repl-test--with-clean-state
+    (let ((reorder-calls nil))
+      (cl-letf (((symbol-function 'persp-add-new)
+                 (lambda (_ws) nil))
+                ((symbol-function 'persp-frame-switch)
+                 (lambda (_ws) nil))
+                ((symbol-function 'claude-repl--clean-frame-foreign-windows)
+                 (lambda (_ws) nil))
+                ((symbol-function 'projectile-add-known-project)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--most-recent-project-file)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--hydrate-priority-from-state)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+                 (lambda (ws) (push ws reorder-calls)))
+                ((symbol-function 'claude-repl--initialize-claude)
+                 (lambda (_ws) nil))
+                ((symbol-function 'claude-repl--claude-running-p)
+                 (lambda (_ws) t)))
+        (let ((claude-repl--snapshot-load-state nil))
+          (claude-repl--establish-workspace "ws-a" "/tmp/ws-a"))
+        (should (equal reorder-calls '("ws-a")))))))
+
 ;;;; ---- Tests: clean-frame-foreign-windows ----
 
 (defun claude-repl-test--make-owned-buffer (name ws)
