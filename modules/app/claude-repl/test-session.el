@@ -847,6 +847,122 @@ default-directory matches the workspace."
         (claude-repl--handle-claude-finished "ws1")
         (should (equal refresh-ws "ws1"))))))
 
+;;;; ---- Tests: refresh-magit-status-for-dir ----
+
+(ert-deftest claude-repl-test-refresh-magit-status-for-dir-refreshes-matching-buffer ()
+  "refresh-magit-status-for-dir refreshes a magit-status buffer whose
+default-directory matches DIR — directory-keyed, no workspace needed."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "claude-magit-dir-" t))
+          (buf (generate-new-buffer " *test-magit-dir-match*"))
+          (refreshed 0))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (setq-local major-mode 'magit-status-mode)
+              (setq-local default-directory (file-name-as-directory tmpdir)))
+            (cl-letf (((symbol-function 'magit-refresh)
+                       (lambda (&rest _) (cl-incf refreshed))))
+              (claude-repl--refresh-magit-status-for-dir tmpdir)
+              (should (= refreshed 1))))
+        (kill-buffer buf)
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-refresh-magit-status-for-dir-skips-non-matching-dir ()
+  "refresh-magit-status-for-dir does not refresh buffers whose default-directory
+points at a different repo than the supplied DIR."
+  (claude-repl-test--with-clean-state
+    (let ((target-dir (make-temp-file "claude-magit-dir-target-" t))
+          (other-dir (make-temp-file "claude-magit-dir-other-" t))
+          (buf (generate-new-buffer " *test-magit-dir-other*"))
+          (refreshed 0))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (setq-local major-mode 'magit-status-mode)
+              (setq-local default-directory (file-name-as-directory other-dir)))
+            (cl-letf (((symbol-function 'magit-refresh)
+                       (lambda (&rest _) (cl-incf refreshed))))
+              (claude-repl--refresh-magit-status-for-dir target-dir)
+              (should (= refreshed 0))))
+        (kill-buffer buf)
+        (delete-directory target-dir t)
+        (delete-directory other-dir t)))))
+
+(ert-deftest claude-repl-test-refresh-magit-status-for-dir-skips-non-magit-buffer ()
+  "refresh-magit-status-for-dir does not refresh a non-magit buffer even when
+its default-directory matches the supplied DIR."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "claude-magit-dir-nonmagit-" t))
+          (buf (generate-new-buffer " *test-non-magit-dir*"))
+          (refreshed 0))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (setq-local major-mode 'fundamental-mode)
+              (setq-local default-directory (file-name-as-directory tmpdir)))
+            (cl-letf (((symbol-function 'magit-refresh)
+                       (lambda (&rest _) (cl-incf refreshed))))
+              (claude-repl--refresh-magit-status-for-dir tmpdir)
+              (should (= refreshed 0))))
+        (kill-buffer buf)
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-refresh-magit-status-for-dir-nil-dir-is-noop ()
+  "refresh-magit-status-for-dir is a no-op when DIR is nil — guards against
+callers that pass a missing target directory (e.g. unresolved master worktree)."
+  (claude-repl-test--with-clean-state
+    (let ((refreshed 0))
+      (cl-letf (((symbol-function 'magit-refresh)
+                 (lambda (&rest _) (cl-incf refreshed))))
+        (claude-repl--refresh-magit-status-for-dir nil)
+        (should (= refreshed 0))))))
+
+(ert-deftest claude-repl-test-refresh-magit-status-for-dir-refreshes-multiple-matching-buffers ()
+  "refresh-magit-status-for-dir refreshes every magit-status buffer whose
+default-directory matches DIR — covers the post-merge case where a worktree
+may have more than one stale magit-status buffer open."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "claude-magit-dir-multi-" t))
+          (buf1 (generate-new-buffer " *test-magit-dir-multi-1*"))
+          (buf2 (generate-new-buffer " *test-magit-dir-multi-2*"))
+          (refreshed 0))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf1
+              (setq-local major-mode 'magit-status-mode)
+              (setq-local default-directory (file-name-as-directory tmpdir)))
+            (with-current-buffer buf2
+              (setq-local major-mode 'magit-status-mode)
+              (setq-local default-directory (file-name-as-directory tmpdir)))
+            (cl-letf (((symbol-function 'magit-refresh)
+                       (lambda (&rest _) (cl-incf refreshed))))
+              (claude-repl--refresh-magit-status-for-dir tmpdir)
+              (should (= refreshed 2))))
+        (kill-buffer buf1)
+        (kill-buffer buf2)
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-refresh-magit-status-delegates-to-for-dir ()
+  "refresh-magit-status forwards to refresh-magit-status-for-dir with
+WS's :project-dir — guards against the wrapper drifting from the
+directory-keyed primitive."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "claude-magit-delegate-" t))
+          (forwarded-dir nil)
+          (forwarded-ws nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :project-dir tmpdir)
+            (cl-letf (((symbol-function 'claude-repl--refresh-magit-status-for-dir)
+                       (lambda (dir &optional ws)
+                         (setq forwarded-dir dir
+                               forwarded-ws ws))))
+              (claude-repl--refresh-magit-status "ws1")
+              (should (equal forwarded-dir tmpdir))
+              (should (equal forwarded-ws "ws1"))))
+        (delete-directory tmpdir t)))))
+
 ;;;; ---- Tests: maybe-notify-finished edge cases ----
 
 (ert-deftest claude-repl-test-maybe-notify-first-call-no-last-time ()

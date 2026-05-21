@@ -3643,13 +3643,23 @@ off so the user resolves in magit directly."
               ;; run on the worker thread spawned by
               ;; `claude-repl--workspace-merge-async' — the teardown
               ;; chain ultimately kills the perspective + vterm, which
-              ;; must happen on main.
+              ;; must happen on main.  The trailing
+              ;; `--refresh-magit-status-for-dir' call forces a final
+              ;; magit-refresh of the merge target (PROJECT-ROOT, e.g.
+              ;; the master worktree) AFTER the cherry-pick has fully
+              ;; landed, so any open magit-status buffer for that dir
+              ;; reflects the post-merge state.  Without this trailing
+              ;; refresh, magit's own auto-revert may have last fired
+              ;; mid-cherry-pick — leaving the buffer stuck on the
+              ;; intermediate state until the user manually presses `g'.
               (claude-repl--defer-to-main-thread
                (lambda ()
                  (claude-repl--gns-sockets-close-then
                   target-ws
                   (lambda ()
-                    (claude-repl--close-workspace target-ws 'preserve-entry)))))))
+                    (claude-repl--close-workspace target-ws 'preserve-entry)
+                    (claude-repl--refresh-magit-status-for-dir
+                     project-root target-ws)))))))
             ;; Refresh the drawer's `:detail-*' cache so its rendering
             ;; reflects post-cherry-pick git state.  The worktree dir
             ;; survives on either branch, so the synchronous git calls
