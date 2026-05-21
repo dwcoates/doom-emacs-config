@@ -71,7 +71,34 @@ case "${1:-}" in
 
 --emit-commands)
   shift
-  exec bash "$(dirname "$0")/../emit-workspace-commands.sh"
+  # Enrich any "merge" entry whose `workspace' field matches the current
+  # git branch with a `project_dir' field carrying the canonical repo
+  # root. The downstream handler prefers `project_dir' over `workspace'
+  # because paths are unambiguous identifiers even when the dispatcher's
+  # branch name doesn't match the editor's workspace name (the failure
+  # mode that bit branches checked out on a repo's main tree, where the
+  # registry uses the bare repo name rather than the branch name).
+  #
+  # When jq or git toplevel is unavailable we pass stdin through verbatim
+  # so the handler still gets a chance via the name-based fallback.
+  current_branch=$(git -C "$PWD" branch --show-current 2>/dev/null || true)
+  current_toplevel=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)
+  if command -v jq >/dev/null 2>&1 \
+     && [ -n "$current_branch" ] && [ -n "$current_toplevel" ]; then
+    jq --arg br "$current_branch" --arg dir "$current_toplevel" '
+      if type == "array" then
+        map(
+          if (.type == "merge") and (.workspace == $br) and (has("project_dir") | not)
+          then . + {project_dir: $dir}
+          else .
+          end
+        )
+      else .
+      end
+    ' | exec bash "$(dirname "$0")/../emit-workspace-commands.sh"
+  else
+    exec bash "$(dirname "$0")/../emit-workspace-commands.sh"
+  fi
   ;;
 
 *)
