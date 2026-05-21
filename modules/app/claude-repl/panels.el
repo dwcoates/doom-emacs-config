@@ -170,6 +170,37 @@ Convenience wrapper combining `claude-repl--show-panels' and
 
 ;;;; Vterm refresh
 
+(defun claude-repl--snap-vterm-window-to-cursor (win)
+  "Set WIN's `window-start' so the buffer cursor lands on the last visible line.
+
+Avoids the visible scroll-down animation that redisplay would otherwise
+produce when point and the saved `window-start' are far apart — instead
+of letting Emacs scroll line-by-line until the cursor is on screen, this
+jumps `window-start' directly to a position that places the cursor at
+the bottom of WIN's body, so the new view appears in a single redisplay
+without intermediate scroll frames.
+
+Uses the calling buffer's current `point' as the cursor — production
+callers run this after `vterm-reset-cursor-point' so point already
+matches vterm's prompt cursor.  Passes NOFORCE=t to `set-window-start'
+so the chosen start sticks across the next redisplay cycle.  When the
+buffer is shorter than WIN's body height, the backward-line walk caps
+naturally at `point-min' (the `line-beginning-position' fallback), so
+the entire buffer remains visible without forcing a scroll.
+
+Selecting WIN to drive this via `recenter -1' would re-trigger
+`window-selection-change-functions' (and the `bounce-from-vterm'
+redirect), so the implementation deliberately works through
+`set-window-start' + `set-window-point' alone."
+  (let* ((cursor (point))
+         (body-height (window-body-height win))
+         (new-start (save-excursion
+                      (goto-char cursor)
+                      (forward-line (- 1 body-height))
+                      (line-beginning-position))))
+    (set-window-start win new-start t)
+    (set-window-point win cursor)))
+
 (defun claude-repl--vterm-redraw ()
   "Redraw the current vterm buffer with read-only suppressed.
 Assumes the current buffer is in vterm-mode."
@@ -186,14 +217,27 @@ Must be called with a vterm-mode buffer current."
   (redisplay t))
 
 (defun claude-repl--fix-vterm-scroll (buf)
-  "Briefly select the vterm window for BUF to fix Emacs scroll position."
+  "Snap the vterm window for BUF to its cursor without a visible scroll.
+
+Replaces the previous brief-select hack: instead of momentarily
+selecting BUF's window so vterm's selection-change side effect scrolls
+the display to the cursor, this resets the buffer cursor explicitly
+and jumps `window-start' so the cursor lands on the last visible line
+in a single redisplay step (see `claude-repl--snap-vterm-window-to-cursor').
+
+No-op when BUF is dead, has no displayed window, or its window is the
+currently selected one — reading/copying flows preserve the user's
+manual scroll position in the selected window."
   (let ((vterm-win (get-buffer-window buf))
         (orig-win (selected-window)))
     (if (and vterm-win (not (eq vterm-win orig-win)))
         (progn
-          (claude-repl--log-verbose (+workspace-current-name) "fix-vterm-scroll: fixing scroll for buf=%s" (buffer-name buf))
-          (select-window vterm-win 'norecord)
-          (select-window orig-win 'norecord))
+          (claude-repl--log-verbose (+workspace-current-name) "fix-vterm-scroll: snapping buf=%s" (buffer-name buf))
+          (with-current-buffer buf
+            (when (and (eq major-mode 'vterm-mode)
+                       (fboundp 'vterm-reset-cursor-point))
+              (condition-case nil (vterm-reset-cursor-point) (end-of-buffer nil)))
+            (claude-repl--snap-vterm-window-to-cursor vterm-win)))
       (claude-repl--log-verbose (+workspace-current-name) "fix-vterm-scroll: skipped buf=%s vterm-win=%s same-win=%s"
                                 (buffer-name buf) (if vterm-win "yes" "no")
                                 (if (eq vterm-win orig-win) "yes" "no")))))
@@ -278,19 +322,25 @@ the caller's workspace."
 Respects `claude-repl-autoselect-input-on-workspace-switch'.
 Window lookup delegates to `claude-repl-window--panel-window'.
 
-HACK: when the vterm output window is also visible, point is moved
-into it transiently before being moved to the input window.  vterm
-only recenters its display on the cursor as a side effect of being
-the selected window, so without this momentary stop the output panel
-can render stale scroll position after a workspace switch.  The two
-`select-window' calls are synchronous (no redisplay runs between
-them), so the user never observes point sitting in vterm — the
-intermediate selection exists purely to trigger vterm's recenter."
+When the vterm output window is also visible, its display is snapped to
+the cursor before the input window is selected, via
+`claude-repl--snap-vterm-window-to-cursor'.  This replaces the old
+brief-select hack (transiently selecting the vterm window so vterm's
+selection-change side effect would recenter on the cursor), which
+produced a visible scroll-down animation on workspace switch.  Jumping
+`window-start' directly puts the cursor on the last visible line in a
+single redisplay step — a snap, not a scroll."
   (when claude-repl-autoselect-input-on-workspace-switch
     (when-let ((win (claude-repl-window--panel-window :input ws)))
       (when-let ((vterm-win (claude-repl-window--panel-window :vterm ws)))
-        (claude-repl--log ws "maybe-autoselect-input: vterm-center hack via vterm-win=%s" vterm-win)
-        (select-window vterm-win))
+        (claude-repl--log ws "maybe-autoselect-input: snap-vterm via vterm-win=%s" vterm-win)
+        (when-let ((vterm-buf (window-buffer vterm-win)))
+          (when (buffer-live-p vterm-buf)
+            (with-current-buffer vterm-buf
+              (when (and (eq major-mode 'vterm-mode)
+                         (fboundp 'vterm-reset-cursor-point))
+                (condition-case nil (vterm-reset-cursor-point) (end-of-buffer nil)))
+              (claude-repl--snap-vterm-window-to-cursor vterm-win)))))
       (claude-repl--log ws "maybe-autoselect-input: selecting input-win=%s" win)
       (select-window win))))
 
@@ -617,7 +667,11 @@ deletion that follows."
 ;; Skips the selected window so clicking into vterm to read/copy isn't disrupted.
 (defun claude-repl--refresh-vterm-window (win)
   "Refresh the Claude vterm buffer shown in WIN.
-Resets cursor, redraws, and syncs window point."
+Resets cursor, redraws, and snaps `window-start' so the cursor lands on
+the last visible line — replaces the bare `set-window-point' tail with
+`claude-repl--snap-vterm-window-to-cursor' so the new view appears in a
+single redisplay rather than animating a scroll from the saved
+`window-start' down to the cursor."
   (let ((buf (window-buffer win)))
     (when (and buf (buffer-live-p buf) (claude-repl--claude-buffer-p buf))
       (claude-repl--log-verbose (+workspace-current-name) "refresh-vterm-window: win=%s buf=%s" win (buffer-name buf))
@@ -629,7 +683,7 @@ Resets cursor, redraws, and syncs window point."
                 (vterm-reset-cursor-point)
                 (claude-repl--vterm-redraw)
                 (vterm-reset-cursor-point)
-                (set-window-point win (point)))
+                (claude-repl--snap-vterm-window-to-cursor win))
             (end-of-buffer nil)))))))
 
 (defun claude-repl--reset-vterm-cursors ()
