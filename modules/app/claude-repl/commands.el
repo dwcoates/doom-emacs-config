@@ -1707,7 +1707,15 @@ Tombstoned entries (`:nuked-at' set) ARE included so the tombstone
 survives across Emacs restart — otherwise a nuked workspace's identity
 record would resurrect as live on next load.  Live entries omit
 `:nuked-at' entirely so the on-disk format stays minimal for the common
-case."
+case.
+
+Order: tab-bar order.  Entries that appear in `persp-names-cache'
+\(the source of truth for the tab bar) come first in cache order; any
+remaining entries (tombstones or workspaces not realized as persps)
+follow in hash-traversal order.  Pairing this with the snapshot
+loader's skip-priority-reorder during load means the third tab at
+save time is the third tab at load time — visual order is preserved
+across Emacs restarts."
   (let ((entries (make-hash-table :test 'equal)))
     (maphash (lambda (ws plist)
                (when-let ((dir (plist-get plist :project-dir)))
@@ -1718,10 +1726,24 @@ case."
                               (list :project-dir dir))
                             entries))))
              claude-repl--workspaces)
-    (let (snapshot)
-      (maphash (lambda (ws plist) (push (cons ws plist) snapshot))
-               entries)
-      snapshot)))
+    (let* ((cache (and (boundp 'persp-names-cache) persp-names-cache))
+           (nil-name (and (boundp 'persp-nil-name) persp-nil-name))
+           (ordered-names (if nil-name
+                              (cl-remove nil-name cache :test #'equal)
+                            cache))
+           (in-order nil))
+      ;; Pull entries that appear in `persp-names-cache' first, in cache
+      ;; order — the cache is the tab-bar's order of record.
+      (dolist (name ordered-names)
+        (when-let ((plist (gethash name entries)))
+          (push (cons name plist) in-order)
+          (remhash name entries)))
+      ;; Append any leftovers (tombstones, or live entries that for some
+      ;; reason are not in the cache) in hash-traversal order.
+      (let (remainder)
+        (maphash (lambda (ws plist) (push (cons ws plist) remainder))
+                 entries)
+        (append (nreverse in-order) remainder)))))
 
 (defun claude-repl--snapshot-raw-format (raw)
   "Classify the RAW sexp read from a workspace-snapshot file.
@@ -1994,9 +2016,14 @@ Each call:
   rehydrates `:priority' from the per-project state file via
   `claude-repl--hydrate-priority-from-state',
 - reorders the ws in `persp-names-cache' by its hydrated `:priority'
-  via `claude-repl--reorder-workspace-by-priority' so restored
-  workspaces appear in priority order, matching what
+  via `claude-repl--reorder-workspace-by-priority' (drawer-driven
+  restores, worktree hydration), matching what
   `claude-repl-set-priority' does for user-driven changes,
+  - SKIPPED while a snapshot load is in flight
+    (`claude-repl--snapshot-load-state' non-nil): the loader visits
+    entries in saved tab-bar order and per-entry priority reseating
+    would shuffle them back into priority order, defeating
+    `claude-repl--collect-snapshot-entries' order preservation,
 - starts claude (`claude-repl--initialize-claude') unless already
   running."
   (claude-repl--with-error-logging (format "establish-workspace[%s]" ws)
@@ -2063,15 +2090,17 @@ Each call:
     (claude-repl--ws-put ws :project-dir dir)
     (when (fboundp 'claude-repl--hydrate-priority-from-state)
       (claude-repl--hydrate-priority-from-state dir))
-    ;; WHY: snapshot entries are establish'd in file order, so
-    ;; `persp-add-new' above appends each new ws at the cache tail in
-    ;; that order — priority badges hydrate after the persp is already
-    ;; placed.  Mirror what `claude-repl-set-priority' does after a
-    ;; user-driven priority change: re-splice this ws into its rank-
-    ;; correct slot.  Without this, restored workspaces sit in
-    ;; snapshot-file order instead of priority order.  Guarded on
-    ;; fboundp so a partial-load test environment doesn't crash here.
-    (when (fboundp 'claude-repl--reorder-workspace-by-priority)
+    ;; Priority-based reorder: pulls this ws to its priority slot so a
+    ;; user-driven creation (drawer-driven restore, worktree hydration)
+    ;; lands in priority order regardless of when the badge hydrates.
+    ;; Skipped during snapshot load (`claude-repl--snapshot-load-state'
+    ;; non-nil) — the loader processes entries in saved tab-bar order
+    ;; and per-entry priority reseating would shuffle that visual order
+    ;; back to priority order, defeating the order-preservation that
+    ;; `claude-repl--collect-snapshot-entries' encodes on save.  Guarded
+    ;; on fboundp so a partial-load test environment doesn't crash here.
+    (when (and (fboundp 'claude-repl--reorder-workspace-by-priority)
+               (not claude-repl--snapshot-load-state))
       (claude-repl--reorder-workspace-by-priority ws))
     (when (and (fboundp 'claude-repl--initialize-claude)
                (fboundp 'claude-repl--claude-running-p)
