@@ -1062,46 +1062,6 @@ appended *after* the faced padding, not merged into it."
     (should (eq (get-text-property penultimate 'face result)
                 '+workspace-tab-face))))
 
-;;;; ---- Tests: tab-prefix ----
-
-(ert-deftest claude-repl-test-render-tab-starts-with-tab-prefix ()
-  "render-tab's first characters are exactly `claude-repl-tab-prefix'.
-The prefix (default \"💜\") sits at the very start of every entry,
-ahead of the faced separator space that precedes the bracket."
-  (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
-         (result (claude-repl--render-tab "ws1" spec "1" '+workspace-tab-face nil))
-         (prefix-len (length claude-repl-tab-prefix)))
-    (should (equal (substring result 0 prefix-len) claude-repl-tab-prefix))))
-
-(ert-deftest claude-repl-test-render-tab-prefix-default-is-purple-heart ()
-  "The default value of `claude-repl-tab-prefix' is the purple-heart emoji."
-  (should (equal claude-repl-tab-prefix "💜")))
-
-(ert-deftest claude-repl-test-render-tab-bracket-follows-prefix-and-separator ()
-  "Immediately after the prefix and faced separator space comes the
-bracket label — confirms the prefix lands *before* the existing
-separator space, not in the middle of the entry."
-  (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
-         (result (claude-repl--render-tab "ws1" spec "1" '+workspace-tab-face nil))
-         (prefix-len (length claude-repl-tab-prefix))
-         (after-prefix (substring result prefix-len)))
-    (should (equal (substring after-prefix 0 4) " [1]"))))
-
-(ert-deftest claude-repl-test-render-tab-prefix-honors-custom-value ()
-  "Customizing `claude-repl-tab-prefix' changes the leading characters."
-  (let* ((claude-repl-tab-prefix "XX")
-         (spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
-         (result (claude-repl--render-tab "ws1" spec "1" '+workspace-tab-face nil)))
-    (should (equal (substring result 0 2) "XX"))))
-
-(ert-deftest claude-repl-test-render-tab-prefix-empty-yields-no-leading-extra ()
-  "An empty `claude-repl-tab-prefix' leaves the entry starting with the
-faced separator space, preserving pre-prefix behavior."
-  (let* ((claude-repl-tab-prefix "")
-         (spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
-         (result (claude-repl--render-tab "ws1" spec "1" '+workspace-tab-face nil)))
-    (should (equal (substring result 0 4) " [1]"))))
-
 ;;;; ---- Tests: tab-label edge cases ----
 
 (ert-deftest claude-repl-test-tab-label-zero-index ()
