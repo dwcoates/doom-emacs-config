@@ -64,14 +64,6 @@ recognized repo or the repo has no configured default."
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-tab-prefix "💜"
-  "String prepended to every rendered tab entry.
-Sits at the very start of the entry, before the faced separator space
-that precedes the bracket label.  Default is a purple heart for visual
-flair."
-  :type 'string
-  :group 'claude-repl)
-
 (defcustom claude-repl-state-poll-interval 1
   "Seconds between workspace state update polls."
   :type 'integer
@@ -1044,8 +1036,7 @@ whenever an entry landed at a wrap (or the final row's) end."
          (weight     (or (plist-get spec :weight)     'normal))
          (separator-face `(:background unspecified :foreground ,fg :weight ,weight))
          (bracket-face   `(:background ,bracket-bg  :foreground ,bracket-fg :weight ,weight)))
-    (concat claude-repl-tab-prefix
-            (propertize " " 'face separator-face)
+    (concat (propertize " " 'face separator-face)
             (propertize (format claude-repl-tab-bracket-format label) 'face bracket-face)
             (when img-str (concat " " img-str " "))
             (propertize (format claude-repl-tab-name-padding name) 'face name-face)
