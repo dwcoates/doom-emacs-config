@@ -7725,7 +7725,7 @@ edit the doom config."
                  (lambda () "unrelated-ws"))
                 ((symbol-function 'claude-repl--ws-dir)
                  (lambda (_ws) "/tmp/unrelated-repo/"))
-                ((symbol-function 'read-string)
+                ((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw _prefixed git-root _base _fork-from)
@@ -7740,7 +7740,7 @@ edit the doom config."
   "doom-oneshot branches off local `master', mirroring `SPC TAB N'."
   (claude-repl-test--with-clean-state
     (let ((captured-base :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw _prefixed _git-root base _fork-from)
@@ -7754,7 +7754,7 @@ spawned agent's first message) so the inner agent knows to invoke
 `/workspace-merge' after a successful, tested implementation."
   (claude-repl-test--with-clean-state
     (let ((captured-prefixed :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw prefixed _git-root _base _fork-from)
@@ -7771,7 +7771,7 @@ for slug generation and should not get polluted with skill names like
 `/workspace-merge', which would derail the workspace-name slug."
   (claude-repl-test--with-clean-state
     (let ((captured-raw :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (raw _prefixed _git-root _base _fork-from)
@@ -7785,7 +7785,7 @@ for slug generation and should not get polluted with skill names like
 prefix so the spawned agent runs autonomously without waiting."
   (claude-repl-test--with-clean-state
     (let ((captured-prefixed :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw prefixed _git-root _base _fork-from)
@@ -7799,7 +7799,7 @@ prefix so the spawned agent runs autonomously without waiting."
 implement, and we do not want to spawn a useless workspace."
   (claude-repl-test--with-clean-state
     (let ((spawned nil))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "   "))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (&rest _) (setq spawned t))))
@@ -7812,7 +7812,7 @@ implement, and we do not want to spawn a useless workspace."
 starts a fresh Claude session rather than resuming someone else's."
   (claude-repl-test--with-clean-state
     (let ((captured-fork-from :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw _prefixed _git-root _base fork-from)
@@ -7841,7 +7841,7 @@ the doom-config repo) rather than `master', so the one-shot builds on
 top of in-flight doom-config work."
   (claude-repl-test--with-clean-state
     (let ((captured-base :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw _prefixed _git-root base _fork-from)
@@ -7859,7 +7859,7 @@ changes from `master' to HEAD."
                  (lambda () "unrelated-ws"))
                 ((symbol-function 'claude-repl--ws-dir)
                  (lambda (_ws) "/tmp/unrelated-repo/"))
-                ((symbol-function 'read-string)
+                ((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw _prefixed git-root _base _fork-from)
@@ -7873,7 +7873,7 @@ to the prefixed prompt — the spawned agent still needs to know to invoke
 `/workspace-merge' after a successful implementation."
   (claude-repl-test--with-clean-state
     (let ((captured-prefixed :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw prefixed _git-root _base _fork-from)
@@ -7889,7 +7889,7 @@ to the prefixed prompt — the spawned agent still needs to know to invoke
 generation — same constraint as the master variant."
   (claude-repl-test--with-clean-state
     (let ((captured-raw :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (raw _prefixed _git-root _base _fork-from)
@@ -7903,7 +7903,7 @@ generation — same constraint as the master variant."
 too — there is nothing to slug or implement."
   (claude-repl-test--with-clean-state
     (let ((spawned nil))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "   "))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (&rest _) (setq spawned t))))
@@ -7918,7 +7918,7 @@ too — there is nothing to slug or implement."
 and existing call sites that pass no arguments."
   (claude-repl-test--with-clean-state
     (let ((captured-base :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw _prefixed _git-root base _fork-from)
@@ -8465,7 +8465,7 @@ workspace's project, so SPC j O always dispatches into that repo."
                  (lambda () "unrelated-ws"))
                 ((symbol-function 'claude-repl--ws-dir)
                  (lambda (_ws) "/tmp/unrelated-repo/"))
-                ((symbol-function 'read-string)
+                ((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw _prefixed git-root _base _fork-from)
@@ -8483,7 +8483,7 @@ workspace's project, so SPC j O always dispatches into that repo."
 (equivalent to `SPC TAB N' in that repo)."
   (claude-repl-test--with-clean-state
     (let ((captured-base :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw _prefixed _git-root base _fork-from)
@@ -8498,7 +8498,7 @@ the spawned agent knows to invoke
 `/workspace-merge' instruction used by the doom one-shot."
   (claude-repl-test--with-clean-state
     (let ((captured-prefixed :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw prefixed _git-root _base _fork-from)
@@ -8519,7 +8519,7 @@ must mention `/workspace-merge', and it must appear textually AFTER the
 (implement → PR → CICD → workspace-merge)."
   (claude-repl-test--with-clean-state
     (let ((captured-prefixed :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw prefixed _git-root _base _fork-from)
@@ -8539,7 +8539,7 @@ purely for slug generation and should not get polluted with slash
 commands like `/create-or-update-pr', which would derail the slug."
   (claude-repl-test--with-clean-state
     (let ((captured-raw :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (raw _prefixed _git-root _base _fork-from)
@@ -8554,7 +8554,7 @@ commands like `/create-or-update-pr', which would derail the slug."
 prefix so the spawned agent runs autonomously without waiting."
   (claude-repl-test--with-clean-state
     (let ((captured-prefixed :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw prefixed _git-root _base _fork-from)
@@ -8568,7 +8568,7 @@ prefix so the spawned agent runs autonomously without waiting."
 implement, and we do not want to spawn a useless workspace."
   (claude-repl-test--with-clean-state
     (let ((spawned nil))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "   "))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (&rest _) (setq spawned t))))
@@ -8583,7 +8583,7 @@ so the new workspace starts a fresh Claude session rather than resuming
 someone else's."
   (claude-repl-test--with-clean-state
     (let ((captured-fork-from :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw _prefixed _git-root _base fork-from)
@@ -8732,7 +8732,7 @@ variants are visually distinguishable when the user is typing the
 preemptive prompt."
   (claude-repl-test--with-clean-state
     (let ((captured-mb-prompt :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (prompt &rest _)
                    (setq captured-mb-prompt prompt)
                    "do a thing"))
@@ -8747,7 +8747,7 @@ preemptive prompt."
 variant inherits the validation — no caller can accidentally skip it."
   (claude-repl-test--with-clean-state
     (let ((spawned nil))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "   "))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (&rest _) (setq spawned t))))
@@ -8762,7 +8762,7 @@ variant inherits the validation — no caller can accidentally skip it."
 — a caller pinning a non-default repo must see exactly that path."
   (claude-repl-test--with-clean-state
     (let ((captured-git-root :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "do a thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (_raw _prefixed git-root _base _fork-from)
@@ -8778,7 +8778,7 @@ workspace-name slug clean across every one-shot variant."
   (claude-repl-test--with-clean-state
     (let ((captured-raw :unset)
           (captured-prefixed :unset))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "do a thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (raw prefixed _git-root _base _fork-from)
@@ -8789,6 +8789,108 @@ workspace-name slug clean across every one-shot variant."
         (should-not (string-match-p "::SENTINEL-SUFFIX::" captured-raw))
         (should (string-match-p "::SENTINEL-SUFFIX::"
                                 captured-prefixed))))))
+
+;;;; ---- Tests: one-shot prompt C-RET no-action suffix ----
+
+(ert-deftest claude-repl-test-oneshot-no-action-suffix-value ()
+  "The C-RET no-action suffix is exactly \". dont take action\" — the
+leading period+space close off the user's typed prompt before the
+instruction."
+  (should (equal claude-repl--oneshot-no-action-suffix ". dont take action")))
+
+(ert-deftest claude-repl-test-oneshot-prompt-insert-no-action-suffix-appends ()
+  "The insert helper appends the no-action suffix to the current buffer's
+contents."
+  (with-temp-buffer
+    (insert "do the thing")
+    (claude-repl--oneshot-prompt-insert-no-action-suffix)
+    (should (equal (buffer-string) "do the thing. dont take action"))))
+
+(ert-deftest claude-repl-test-oneshot-prompt-insert-no-action-suffix-at-end ()
+  "The insert helper appends at point-max even when point is not at the
+end of the buffer — the suffix must land after the whole prompt."
+  (with-temp-buffer
+    (insert "do the thing")
+    (goto-char (point-min))
+    (claude-repl--oneshot-prompt-insert-no-action-suffix)
+    (should (equal (buffer-string) "do the thing. dont take action"))))
+
+(ert-deftest claude-repl-test-oneshot-prompt-submit-no-action-is-command ()
+  "`claude-repl--oneshot-prompt-submit-no-action' is an interactive
+command so it can be bound directly in the minibuffer keymap."
+  (should (commandp 'claude-repl--oneshot-prompt-submit-no-action)))
+
+(ert-deftest claude-repl-test-oneshot-prompt-submit-no-action-appends-suffix ()
+  "The submit command appends the no-action suffix before exiting the
+minibuffer."
+  (with-temp-buffer
+    (cl-letf (((symbol-function 'exit-minibuffer) #'ignore))
+      (insert "fix the bug")
+      (claude-repl--oneshot-prompt-submit-no-action)
+      (should (equal (buffer-string) "fix the bug. dont take action")))))
+
+(ert-deftest claude-repl-test-oneshot-prompt-submit-no-action-exits-minibuffer ()
+  "The submit command calls `exit-minibuffer' so the suffixed prompt is
+dispatched immediately."
+  (with-temp-buffer
+    (let ((exited nil))
+      (cl-letf (((symbol-function 'exit-minibuffer)
+                 (lambda () (setq exited t))))
+        (insert "fix the bug")
+        (claude-repl--oneshot-prompt-submit-no-action)
+        (should exited)))))
+
+(ert-deftest claude-repl-test-oneshot-prompt-map-binds-c-ret ()
+  "`C-RET' in the one-shot prompt keymap dispatches the no-action submit
+command."
+  (should (eq (lookup-key claude-repl--oneshot-prompt-map (kbd "C-RET"))
+              #'claude-repl--oneshot-prompt-submit-no-action)))
+
+(ert-deftest claude-repl-test-oneshot-prompt-map-ret-inherits-normal-submit ()
+  "`RET' in the one-shot prompt keymap resolves to the inherited
+`minibuffer-local-map' binding — plain RET still submits normally."
+  (should (eq (lookup-key claude-repl--oneshot-prompt-map (kbd "RET"))
+              (lookup-key minibuffer-local-map (kbd "RET")))))
+
+(ert-deftest claude-repl-test-oneshot-prompt-map-parent-is-minibuffer-local-map ()
+  "The one-shot prompt keymap inherits `minibuffer-local-map' so all the
+standard minibuffer editing/submit bindings remain available."
+  (should (eq (keymap-parent claude-repl--oneshot-prompt-map)
+              minibuffer-local-map)))
+
+(ert-deftest claude-repl-test-create-pinned-oneshot-reads-with-oneshot-prompt-map ()
+  "The preemptive prompt is read with `claude-repl--oneshot-prompt-map'
+so `C-RET' is reachable while typing the one-shot prompt."
+  (claude-repl-test--with-clean-state
+    (let ((captured-keymap :unset))
+      (cl-letf (((symbol-function 'read-from-minibuffer)
+                 (lambda (_prompt _initial keymap &rest _)
+                   (setq captured-keymap keymap)
+                   "do a thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (&rest _) nil)))
+        (claude-repl--create-pinned-oneshot-workspace
+         "/tmp/repo/" 'master "SUFFIX" "test-tag")
+        (should (eq captured-keymap claude-repl--oneshot-prompt-map))))))
+
+(ert-deftest claude-repl-test-create-pinned-oneshot-c-ret-suffix-reaches-prefixed ()
+  "When the minibuffer is dispatched with `C-RET', the resulting prompt
+carries the no-action suffix all the way into the prefixed prompt sent
+to the spawned agent."
+  (claude-repl-test--with-clean-state
+    (let ((captured-prefixed :unset))
+      (cl-letf (((symbol-function 'read-from-minibuffer)
+                 (lambda (&rest _)
+                   (concat "do a thing"
+                           claude-repl--oneshot-no-action-suffix)))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw prefixed _git-root _base _fork-from)
+                   (setq captured-prefixed prefixed))))
+        (claude-repl--create-pinned-oneshot-workspace
+         "/tmp/repo/" 'master "SUFFIX" "test-tag")
+        (should (string-match-p
+                 (regexp-quote claude-repl--oneshot-no-action-suffix)
+                 captured-prefixed))))))
 
 ;;;; ---- Tests: eval-code-string ----
 
@@ -9256,7 +9358,7 @@ the new oneshot."
             (plist-put claude-repl--oneshot-amended-prompts :doom '("stale"))
             claude-repl--oneshot-last-ws
             (plist-put claude-repl--oneshot-last-ws :doom "old-ws"))
-      (cl-letf (((symbol-function 'read-string)
+      (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (&rest _) nil)))
