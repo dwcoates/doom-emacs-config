@@ -159,23 +159,43 @@ cannot wedge merge dispatch."
   "Resolve and invoke the merge handler for TARGET-WS.
 REPO-ROOT is the directory used to locate the repo-local handler
 config; it is the workspace's `:source-ws-dir' when recorded, else
-its `:project-dir'.  Both point at the same repo (different
-worktrees), so the .eld content is consistent either way.
+its `:project-dir'.  Either is typically a sibling worktree path
+\(e.g. `~/workspace/<repo>-worktrees/<branch>'), so before resolution
+REPO-ROOT is normalised to the repo's MAIN worktree via
+`claude-repl--main-worktree-path'.  Without that step:
+  - The `.eld' lookup reads from inside the sibling worktree, where
+    the file is present only when the branch's tree happens to carry
+    it.  A branch cut from master before the file landed would have
+    no `.eld', silently falling through to the default cherry-pick.
+  - The defcustom override is keyed by canonical main-repo path
+    \(e.g. `~/workspace/ChessCom/explanation-engine'), so a sibling
+    worktree path never matches, also falling through to cherry-pick.
 
-Logs the resolved handler + args before invoking so failure modes
-are easy to trace.  Signals `user-error' if the resolved symbol has
-no entry in the registry — defensive: the resolver guarantees a
-valid symbol, but an unloaded handler file could leave the registry
-short an entry."
-  (let* ((descriptor (claude-repl--resolve-merge-handler repo-root))
+Normalising to the main worktree at dispatch makes both lookups
+keyed on the stable repo root regardless of which worktree the
+workspace was created from.  When `--main-worktree-path' returns
+nil (git unavailable, REPO-ROOT not inside a repo), falls back to
+the caller-supplied REPO-ROOT as-is so the legacy behaviour
+remains the safety net.
+
+Logs both the caller-supplied REPO-ROOT and the resolved root so
+failure modes are easy to trace.  Signals `user-error' if the
+resolved symbol has no entry in the registry — defensive: the
+resolver guarantees a valid symbol, but an unloaded handler file
+could leave the registry short an entry."
+  (let* ((resolved-root (or (and repo-root
+                                 (claude-repl--main-worktree-path repo-root))
+                            repo-root))
+         (descriptor (claude-repl--resolve-merge-handler resolved-root))
          (symbol (car descriptor))
          (args (cdr descriptor))
          (entry (assq symbol claude-repl--merge-handler-registry))
          (fn (and entry (cdr entry))))
     (when (fboundp 'claude-repl--log)
       (claude-repl--log target-ws
-                        "dispatch-merge-handler: ws=%s repo-root=%s handler=%S args=%S"
-                        target-ws (or repo-root "nil") symbol args))
+                        "dispatch-merge-handler: ws=%s repo-root=%s resolved-root=%s handler=%S args=%S"
+                        target-ws (or repo-root "nil")
+                        (or resolved-root "nil") symbol args))
     (unless fn
       (user-error "No merge handler registered for symbol '%s'" symbol))
     (funcall fn target-ws args)))
