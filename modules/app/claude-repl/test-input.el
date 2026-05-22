@@ -613,6 +613,18 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
            "non-root nodes are NOT emoji-prefixed"
            claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-tldr-fix-section-dedicated-root-branch ()
+  "TLDR spec must require a dedicated fix section, rendered as its own root branch, whenever a fix is available."
+  (should (string-match-p
+           "the TLDR tree MUST contain a dedicated fix section rendered as its own root branch"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-fix-section-wrench-icon ()
+  "TLDR spec must require the fix section's root branch to be prefixed with the wrench icon."
+  (should (string-match-p
+           "prefixed with the wrench icon 🔧 immediately after its numeric label"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-omits-main-response-body-concept ()
   "Now that the entire response IS the tree, the metaprompt must NOT reference a separate 'main response body'."
   (should-not (string-match-p "main response body" claude-repl-command-prefix)))
