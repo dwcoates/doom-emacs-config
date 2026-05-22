@@ -5585,6 +5585,66 @@ unprefixed — the prefix is reserved for the new ws session, not for naming."
       (should-error (claude-repl-create-worktree-workspace 'head)
                     :type 'user-error))))
 
+(ert-deftest claude-repl-test-create-worktree-workspace-logs-entry-before-prompt-read ()
+  "An ENTRY log line is emitted BEFORE `read-string' so a cancelled minibuffer
+or empty prompt still leaves a trace that the keybinding fired."
+  (claude-repl-test--with-clean-state
+    (let ((logs nil)
+          (read-string-called nil))
+      (cl-letf (((symbol-function 'claude-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logs)))
+                ((symbol-function 'claude-repl--resolve-current-git-root)
+                 (lambda () "/tmp/repo/"))
+                ((symbol-function 'read-string)
+                 (lambda (&rest _)
+                   (setq read-string-called t)
+                   (signal 'quit nil)))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (&rest _) (error "should not be called"))))
+        (condition-case _err
+            (claude-repl-create-worktree-workspace 'head)
+          (quit nil))
+        (should read-string-called)
+        (should (cl-some (lambda (s)
+                           (string-match-p "create-worktree-workspace: ENTRY" s))
+                         logs))))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-logs-abort-on-empty-prompt ()
+  "Empty preemptive prompt logs an ABORT line before signalling user-error,
+so the cancellation path is visible in the log."
+  (claude-repl-test--with-clean-state
+    (let ((logs nil))
+      (cl-letf (((symbol-function 'claude-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logs)))
+                ((symbol-function 'claude-repl--resolve-current-git-root)
+                 (lambda () "/tmp/repo/"))
+                ((symbol-function 'read-string)
+                 (lambda (&rest _) "   "))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (&rest _) (error "should not be called"))))
+        (should-error (claude-repl-create-worktree-workspace 'head)
+                      :type 'user-error)
+        (should (cl-some (lambda (s)
+                           (string-match-p "ABORT empty preemptive prompt" s))
+                         logs))))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-from-origin-master-logs-entry ()
+  "`SPC TAB N' wrapper logs an ENTRY line before delegating, so the keybinding
+firing is visible in the log even if the inner command bails."
+  (let ((logs nil))
+    (cl-letf (((symbol-function 'claude-repl--log)
+               (lambda (_ws fmt &rest args)
+                 (push (apply #'format fmt args) logs)))
+              ((symbol-function 'claude-repl-create-worktree-workspace)
+               (lambda (&rest _) nil)))
+      (claude-repl-create-worktree-workspace-from-origin-master)
+      (should (cl-some (lambda (s)
+                         (string-match-p
+                          "create-worktree-workspace-from-origin-master: ENTRY" s))
+                       logs)))))
+
 (ert-deftest claude-repl-test-fork-worktree-workspace-prefixes-preemptive-prompt ()
   "Fork's preemptive prompt is prefixed with the autonomous instruction."
   (claude-repl-test--with-clean-state

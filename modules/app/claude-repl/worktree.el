@@ -1337,12 +1337,15 @@ Because name generation and worktree setup both run asynchronously,
 this command returns immediately; the new workspace materializes once
 the JSON file lands and the file-watcher dispatches it."
   (interactive (list 'head (claude-repl--read-source-workspace-maybe)))
+  (claude-repl--log nil "create-worktree-workspace: ENTRY base=%s source-ws=%s (before minibuffer read)"
+                    base (or source-ws "nil"))
   (let* ((base-commit (claude-repl--resolve-worktree-base base))
          (effective-source-ws (or source-ws (+workspace-current-name)))
          (source-dir (ignore-errors (claude-repl--ws-dir effective-source-ws)))
          (git-root (or source-dir (claude-repl--resolve-current-git-root)))
          (raw-prompt (read-string "Preemptive prompt: ")))
     (when (string-empty-p (string-trim (or raw-prompt "")))
+      (claude-repl--log nil "create-worktree-workspace: ABORT empty preemptive prompt, signalling user-error")
       (user-error "Preemptive prompt is required"))
     (let ((prefixed-prompt (concat claude-repl--autonomous-prompt-prefix raw-prompt)))
       (claude-repl--log nil "create-worktree-workspace: base=%s base-commit=%s source-ws=%s git-root=%s"
@@ -1514,6 +1517,8 @@ SOURCE-WS, when non-nil, names the workspace whose repository the new
 worktree is rooted in.  Interactively, `\\[universal-argument]' prompts
 for it from the persp workspace list."
   (interactive (list (claude-repl--read-source-workspace-maybe)))
+  (claude-repl--log nil "create-worktree-workspace-from-origin-master: ENTRY source-ws=%s"
+                    (or source-ws "nil"))
   (claude-repl-create-worktree-workspace 'master source-ws))
 
 (defun claude-repl-fork-worktree-workspace (&optional source-ws)
