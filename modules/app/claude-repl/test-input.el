@@ -467,43 +467,19 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
   ;; The numeral-drop counter-example must also be trailing-dot-free.
   (should-not (string-match-p "'2\\.1\\.'" claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-separator-line-between-parent-and-children ()
-  "TLDR spec must require exactly one separator line separating a parent node from its block of child nodes."
+(ert-deftest claude-repl-test-command-prefix-tldr-blank-line-between-parent-and-children ()
+  "TLDR spec must require exactly one blank line separating a parent node from its block of child nodes."
   (should (string-match-p
-           "MUST be separated from its block of child nodes by exactly one separator line"
+           "MUST be separated from its block of child nodes by exactly one blank line"
            claude-repl-command-prefix))
   (should (string-match-p
-           "every branch carries a single separator line between it and its parent"
+           "every branch carries a single blank line between it and its parent"
            claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-no-separator-line-between-siblings ()
-  "TLDR spec must forbid any separator line between sibling nodes at the same depth."
+(ert-deftest claude-repl-test-command-prefix-tldr-no-blank-line-between-siblings ()
+  "TLDR spec must forbid any blank line between sibling nodes at the same depth."
   (should (string-match-p
-           "sibling nodes at the same depth MUST NOT be separated from one another by any separator line"
-           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-tldr-separator-line-not-pure-blank ()
-  "TLDR spec must forbid rendering the separator line as a pure blank line."
-  (should (string-match-p
-           "this separator line MUST NOT be rendered as a pure blank line"
-           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-tldr-separator-line-extends-connectors ()
-  "TLDR spec must require the separator line to extend the tree's vertical branch connectors through it."
-  (should (string-match-p
-           "MUST extend the tree's vertical branch connectors down through it"
-           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-tldr-separator-line-carries-parent-connector-column ()
-  "TLDR spec must require the separator line to carry a connector glyph in the parent's own connector column."
-  (should (string-match-p
-           "namely the parent's own connector column since its child block follows immediately below"
-           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-tldr-separator-line-carries-ancestor-connector-columns ()
-  "TLDR spec must require the separator line to carry connectors for ancestor columns with remaining siblings."
-  (should (string-match-p
-           "every ancestor connector column whose subtree still has further siblings left to render"
+           "sibling nodes at the same depth MUST NOT be separated from one another by any blank line"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-entries-wrap-at-column-110 ()
