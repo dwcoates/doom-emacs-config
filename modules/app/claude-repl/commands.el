@@ -2046,8 +2046,9 @@ Each call:
 - opens the most-recent project file via `find-file' when one exists
   in `recentf-list',
 - hydrates `:project-dir' into `claude-repl--workspaces' and
-  rehydrates `:priority' from the per-project state file via
-  `claude-repl--hydrate-priority-from-state',
+  rehydrates persisted display state (`:priority' and the drawer
+  badges) from the per-project state file via
+  `claude-repl--load-display-state',
 - reorders the ws in `persp-names-cache' by its hydrated `:priority'
   via `claude-repl--reorder-workspace-by-priority' (drawer-driven
   restores, worktree hydration), matching what
@@ -2121,8 +2122,8 @@ Each call:
     ;; with the post-establish state.
     (claude-repl--ws-put ws :nuked-at nil)
     (claude-repl--ws-put ws :project-dir dir)
-    (when (fboundp 'claude-repl--hydrate-priority-from-state)
-      (claude-repl--hydrate-priority-from-state dir))
+    (when (fboundp 'claude-repl--load-display-state)
+      (claude-repl--load-display-state ws dir))
     ;; Priority-based reorder: pulls this ws to its priority slot so a
     ;; user-driven creation (drawer-driven restore, worktree hydration)
     ;; lands in priority order regardless of when the badge hydrates.
@@ -2771,27 +2772,6 @@ through `--initialize-ws-env' for merged entries)."
 
 ;;;; Project-switch wrapper
 
-(defun claude-repl--hydrate-priority-from-state (project-root)
-  "Hydrate :priority for the current workspace from PROJECT-ROOT's state file.
-Reads the per-project state file (preferring `<PROJECT-ROOT>/.claude/emacs/state.el',
-falling back to the legacy `<PROJECT-ROOT>/.claude-repl-state') and, if it
-carries a `:priority', records it on the current workspace's plist so the
-tabline badge renders without waiting for `claude-repl--initialize-ws-env'
-\(which only runs when Claude actually starts).  No-op when the state
-file is missing, malformed, or carries no `:priority'."
-  (when-let* ((ws (ignore-errors (+workspace-current-name)))
-              (state-file (claude-repl--state-file-for-read project-root))
-              (saved (condition-case err
-                         (claude-repl--read-sexp-file-if-exists state-file)
-                       (error
-                        (claude-repl--log ws "hydrate-priority: read error file=%s err=%S"
-                                          state-file err)
-                        nil)))
-              (priority (plist-get saved :priority)))
-    (claude-repl--log ws "hydrate-priority: ws=%s priority=%s" ws priority)
-    (claude-repl--ws-put ws :priority priority)
-    (force-mode-line-update t)))
-
 (defvar recentf-list)
 
 (defun claude-repl--most-recent-project-file (project-root)
@@ -3060,7 +3040,8 @@ Switches via `projectile-switch-project-by-name' (which fires Doom's
 `+workspaces-switch-to-project-h' to create/activate the persp keyed
 on the project basename), then opens the most-recently-accessed file
 under PROJECT via `claude-repl--most-recent-project-file', hydrates
-the saved `:priority' from the per-project state file (so the
+the saved display state (`:priority' and the drawer badges) from the
+per-project state file via `claude-repl--load-display-state' (so the
 tabline badge appears immediately on `SPC p p' instead of only once
 Claude starts), and flashes the activated tab.
 
@@ -3077,7 +3058,8 @@ name."
       (when-let ((recent-file (claude-repl--most-recent-project-file project)))
         (when (file-exists-p recent-file)
           (find-file recent-file)))
-      (claude-repl--hydrate-priority-from-state project)
+      (claude-repl--load-display-state (ignore-errors (+workspace-current-name))
+                                       project)
       (claude-repl--flash-current-tab))))
 
 ;;;; Workspace cycling (hide-mode aware)

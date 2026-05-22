@@ -3205,8 +3205,8 @@ encodes on save."
                  (lambda (_dir) nil))
                 ((symbol-function 'claude-repl--most-recent-project-file)
                  (lambda (_dir) nil))
-                ((symbol-function 'claude-repl--hydrate-priority-from-state)
-                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--load-display-state)
+                 (lambda (&rest _) nil))
                 ((symbol-function 'claude-repl--reorder-workspace-by-priority)
                  (lambda (ws) (push ws reorder-calls)))
                 ((symbol-function 'claude-repl--initialize-claude)
@@ -3235,8 +3235,8 @@ behavior for ad-hoc creations."
                  (lambda (_dir) nil))
                 ((symbol-function 'claude-repl--most-recent-project-file)
                  (lambda (_dir) nil))
-                ((symbol-function 'claude-repl--hydrate-priority-from-state)
-                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--load-display-state)
+                 (lambda (&rest _) nil))
                 ((symbol-function 'claude-repl--reorder-workspace-by-priority)
                  (lambda (ws) (push ws reorder-calls)))
                 ((symbol-function 'claude-repl--initialize-claude)
@@ -4338,26 +4338,28 @@ A nil persp would crash `set-persp-parameter'."
             (should-not find-file-called))
         (delete-directory tmp-dir t)))))
 
-(ert-deftest claude-repl-cmd-test-establish-workspace/rehydrates-priority-from-state ()
-  "establish-workspace calls `--hydrate-priority-from-state' so the badge
-restores from the per-project state file rather than the roster."
+(ert-deftest claude-repl-cmd-test-establish-workspace/loads-display-state-from-state ()
+  "establish-workspace calls `--load-display-state' with its ws name and dir
+so the badge restores from the per-project state file rather than the roster."
   (claude-repl-test--with-clean-state
     (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-est-pri-" t)))
-           (hydrated-with nil))
+           (loaded-ws nil)
+           (loaded-with nil))
       (unwind-protect
           (cl-letf (((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore)
                     ((symbol-function 'claude-repl--initialize-claude) #'ignore)
                     ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil))
-                    ((symbol-function 'claude-repl--hydrate-priority-from-state)
-                     (lambda (d) (setq hydrated-with d))))
+                    ((symbol-function 'claude-repl--load-display-state)
+                     (lambda (ws d) (setq loaded-ws ws loaded-with d))))
             (claude-repl--establish-workspace "test-ws" tmp-dir)
-            (should (equal (file-name-as-directory hydrated-with) tmp-dir)))
+            (should (equal loaded-ws "test-ws"))
+            (should (equal (file-name-as-directory loaded-with) tmp-dir)))
         (delete-directory tmp-dir t)))))
 
 (ert-deftest claude-repl-cmd-test-establish-workspace/reorders-by-priority ()
-  "establish-workspace calls `--reorder-workspace-by-priority' AFTER priority
+  "establish-workspace calls `--reorder-workspace-by-priority' AFTER display-state
 hydration so restored workspaces appear in priority order, matching the
 behavior of `claude-repl-set-priority'.  Without this, snapshot entries
 sit in file order even when state.el carries priorities."
@@ -4370,16 +4372,16 @@ sit in file order even when state.el carries priorities."
                     ((symbol-function 'projectile-add-known-project) #'ignore)
                     ((symbol-function 'claude-repl--initialize-claude) #'ignore)
                     ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) nil))
-                    ((symbol-function 'claude-repl--hydrate-priority-from-state)
-                     (lambda (_d) (push 'hydrate events)))
+                    ((symbol-function 'claude-repl--load-display-state)
+                     (lambda (&rest _) (push 'load events)))
                     ((symbol-function 'claude-repl--reorder-workspace-by-priority)
                      (lambda (_ws) (push 'reorder events))))
             (claude-repl--establish-workspace "test-ws" tmp-dir)
             (let ((ordered (reverse events)))
-              (should (memq 'hydrate ordered))
+              (should (memq 'load ordered))
               (should (memq 'reorder ordered))
-              ;; Reorder must come after hydrate so it reads a real priority.
-              (should (< (cl-position 'hydrate ordered)
+              ;; Reorder must come after the load so it reads a real priority.
+              (should (< (cl-position 'load ordered)
                          (cl-position 'reorder ordered)))))
         (delete-directory tmp-dir t)))))
 
@@ -4940,51 +4942,6 @@ finalization, not a standalone teardown."
         ;; the close-main call, so no extra kill fires.
         (claude-repl--snapshot-load-finish)
         (should (= 1 kill-calls))))))
-
-;;;; ---- claude-repl--hydrate-priority-from-state ----
-
-(ert-deftest claude-repl-cmd-test-hydrate-priority/sets-priority-from-state-file ()
-  "hydrate-priority reads :priority from .claude-repl-state and applies it."
-  (claude-repl-test--with-clean-state
-    (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-hydrate-" t))))
-      (unwind-protect
-          (progn
-            (claude-repl-test--seed-file
-             (claude-repl--state-file tmp-dir)
-             (prin1-to-string '(:project-dir "/some/dir" :active-env :bare-metal :priority "p1")))
-            (cl-letf (((symbol-function '+workspace-current-name)
-                       (lambda () "test-ws"))
-                      ((symbol-function 'force-mode-line-update)
-                       (lambda (&optional _all) nil)))
-              (claude-repl--hydrate-priority-from-state tmp-dir)
-              (should (equal (claude-repl--ws-get "test-ws" :priority) "p1"))))
-        (delete-directory tmp-dir t)))))
-
-(ert-deftest claude-repl-cmd-test-hydrate-priority/no-state-file-noop ()
-  "hydrate-priority is a no-op when the state file is missing."
-  (claude-repl-test--with-clean-state
-    (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-hydrate-" t))))
-      (unwind-protect
-          (cl-letf (((symbol-function '+workspace-current-name)
-                     (lambda () "test-ws")))
-            (claude-repl--hydrate-priority-from-state tmp-dir)
-            (should-not (claude-repl--ws-get "test-ws" :priority)))
-        (delete-directory tmp-dir t)))))
-
-(ert-deftest claude-repl-cmd-test-hydrate-priority/state-without-priority-noop ()
-  "hydrate-priority is a no-op when state file has no :priority entry."
-  (claude-repl-test--with-clean-state
-    (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-hydrate-" t))))
-      (unwind-protect
-          (progn
-            (claude-repl-test--seed-file
-             (claude-repl--state-file tmp-dir)
-             (prin1-to-string '(:project-dir "/some/dir" :active-env :bare-metal)))
-            (cl-letf (((symbol-function '+workspace-current-name)
-                       (lambda () "test-ws")))
-              (claude-repl--hydrate-priority-from-state tmp-dir)
-              (should-not (claude-repl--ws-get "test-ws" :priority))))
-        (delete-directory tmp-dir t)))))
 
 ;;;; ---- claude-repl-switch-to-project ----
 
