@@ -179,9 +179,11 @@ Restores the prior registry on exit so tests don't bleed."
       (claude-repl-test--with-temp-repo root
         (claude-repl-test--seed-merge-config
          root "((handler . noop) (args . (:hello world)))")
-        (claude-repl--dispatch-merge-handler "DWC/foo" root)
-        (should (equal (plist-get captured :ws) "DWC/foo"))
-        (should (equal (plist-get captured :args) '(:hello world)))))))
+        (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                   (lambda (dir) dir)))
+          (claude-repl--dispatch-merge-handler "DWC/foo" root)
+          (should (equal (plist-get captured :ws) "DWC/foo"))
+          (should (equal (plist-get captured :args) '(:hello world))))))))
 
 (ert-deftest claude-repl-test-dispatch-falls-back-to-cherry-pick ()
   "With no config, dispatcher invokes the registered cherry-pick handler."
@@ -190,21 +192,87 @@ Restores the prior registry on exit so tests don't bleed."
       (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
                  (lambda (ws silent auto-resolve)
                    (setq captured (list :ws ws :silent silent
-                                        :auto-resolve auto-resolve)))))
+                                        :auto-resolve auto-resolve))))
+                ((symbol-function 'claude-repl--main-worktree-path)
+                 (lambda (dir) dir)))
         (claude-repl-test--with-temp-repo root
           (claude-repl--dispatch-merge-handler "DWC/foo" root)
           (should (equal (plist-get captured :ws) "DWC/foo"))
           (should (eq (plist-get captured :silent) t))
           (should (eq (plist-get captured :auto-resolve) t)))))))
 
+(ert-deftest claude-repl-test-dispatch-normalises-repo-root-to-main-worktree-for-eld ()
+  "Dispatcher canonicalises REPO-ROOT through `--main-worktree-path' before
+reading the `.eld' file, so a sibling-worktree caller still hits the main
+worktree's checked-in config.  Without normalisation a worktree path whose
+tree happens not to carry the file would silently fall through to
+cherry-pick."
+  (claude-repl-test--with-clean-registry
+    (let ((captured nil))
+      (claude-repl--register-merge-handler
+       'noop (lambda (ws args)
+               (setq captured (list :ws ws :args args))))
+      (claude-repl-test--with-temp-repo main
+        (claude-repl-test--with-temp-repo worktree
+          (claude-repl-test--seed-merge-config
+           main "((handler . noop) (args . (:from main)))")
+          (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                     (lambda (dir)
+                       (when (equal dir worktree) main))))
+            (claude-repl--dispatch-merge-handler "DWC/foo" worktree)
+            (should (equal (plist-get captured :ws) "DWC/foo"))
+            (should (equal (plist-get captured :args) '(:from main)))))))))
+
+(ert-deftest claude-repl-test-dispatch-normalises-repo-root-to-main-worktree-for-override ()
+  "Dispatcher canonicalises REPO-ROOT through `--main-worktree-path' before
+consulting the defcustom override, so a sibling-worktree caller still
+matches an override entry keyed by the main repo path."
+  (claude-repl-test--with-clean-registry
+    (let ((captured nil))
+      (claude-repl--register-merge-handler
+       'noop (lambda (ws args)
+               (setq captured (list :ws ws :args args))))
+      (claude-repl-test--with-temp-repo main
+        (claude-repl-test--with-temp-repo worktree
+          (let ((claude-repl-workspace-merge-handler-overrides
+                 (list (cons main '((handler . noop)
+                                    (args . (:via override)))))))
+            (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                       (lambda (dir)
+                         (when (equal dir worktree) main))))
+              (claude-repl--dispatch-merge-handler "DWC/foo" worktree)
+              (should (equal (plist-get captured :ws) "DWC/foo"))
+              (should (equal (plist-get captured :args)
+                             '(:via override))))))))))
+
+(ert-deftest claude-repl-test-dispatch-falls-back-to-repo-root-when-main-worktree-nil ()
+  "When `--main-worktree-path' returns nil (git unavailable / not a repo),
+dispatcher falls back to the caller-supplied REPO-ROOT for resolution.
+Preserves legacy behaviour for tests and any non-git invocation."
+  (claude-repl-test--with-clean-registry
+    (let ((captured nil))
+      (claude-repl--register-merge-handler
+       'noop (lambda (ws args)
+               (setq captured (list :ws ws :args args))))
+      (claude-repl-test--with-temp-repo root
+        (claude-repl-test--seed-merge-config
+         root "((handler . noop) (args . (:from root)))")
+        (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                   (lambda (_dir) nil)))
+          (claude-repl--dispatch-merge-handler "DWC/foo" root)
+          (should (equal (plist-get captured :ws) "DWC/foo"))
+          (should (equal (plist-get captured :args) '(:from root))))))))
+
 (ert-deftest claude-repl-test-dispatch-errors-on-missing-registry-entry ()
   "Dispatcher signals user-error if resolved symbol has no fn (registry empty)."
   (let ((claude-repl--merge-handler-registry nil)
         (claude-repl-workspace-merge-handler-overrides nil))
-    (claude-repl-test--with-temp-repo root
-      (should-error
-       (claude-repl--dispatch-merge-handler "DWC/foo" root)
-       :type 'user-error))))
+    (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+               (lambda (dir) dir)))
+      (claude-repl-test--with-temp-repo root
+        (should-error
+         (claude-repl--dispatch-merge-handler "DWC/foo" root)
+         :type 'user-error)))))
 
 ;;;; ---- Tests: register-merge-handler ----
 
