@@ -467,6 +467,21 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
   ;; The numeral-drop counter-example must also be trailing-dot-free.
   (should-not (string-match-p "'2\\.1\\.'" claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-tldr-blank-line-between-parent-and-children ()
+  "TLDR spec must require exactly one blank line separating a parent node from its block of child nodes."
+  (should (string-match-p
+           "MUST be separated from its block of child nodes by exactly one blank line"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "every branch carries a single blank line between it and its parent"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-no-blank-line-between-siblings ()
+  "TLDR spec must forbid any blank line between sibling nodes at the same depth."
+  (should (string-match-p
+           "sibling nodes at the same depth MUST NOT be separated from one another by any blank line"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-tldr-entries-wrap-at-column-110 ()
   "TLDR spec must require each entry in the tree to be hard-wrapped at a maximum column width of 110 characters."
   (should (string-match-p
