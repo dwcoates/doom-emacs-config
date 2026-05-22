@@ -1352,6 +1352,47 @@ the JSON file lands and the file-watcher dispatches it."
       (claude-repl--spawn-workspace-generation
        raw-prompt prefixed-prompt git-root base-commit nil))))
 
+(defconst claude-repl--oneshot-no-action-suffix ". dont take action"
+  "Suffix appended to a one-shot preemptive prompt when the user dispatches
+the minibuffer with `C-RET' instead of `RET'.
+
+`SPC j o' / `SPC j O' read the preemptive prompt through
+`claude-repl--create-pinned-oneshot-workspace', whose minibuffer uses
+`claude-repl--oneshot-prompt-map'.  `RET' submits the typed text as-is;
+`C-RET' submits it with this suffix appended, telling the spawned agent
+to investigate and report without making any changes.")
+
+(defun claude-repl--oneshot-prompt-insert-no-action-suffix ()
+  "Append `claude-repl--oneshot-no-action-suffix' at the end of the
+current buffer.
+
+Factored out of `claude-repl--oneshot-prompt-submit-no-action' so the
+pure buffer mutation is testable without an active minibuffer."
+  (goto-char (point-max))
+  (insert claude-repl--oneshot-no-action-suffix))
+
+(defun claude-repl--oneshot-prompt-submit-no-action ()
+  "Append `claude-repl--oneshot-no-action-suffix' to the one-shot prompt
+minibuffer and submit it, exactly as if the user had typed the suffix
+and pressed `RET'.
+
+Bound to `C-RET' in `claude-repl--oneshot-prompt-map'."
+  (interactive)
+  (claude-repl--oneshot-prompt-insert-no-action-suffix)
+  (exit-minibuffer))
+
+(defvar claude-repl--oneshot-prompt-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map minibuffer-local-map)
+    (define-key map (kbd "C-RET") #'claude-repl--oneshot-prompt-submit-no-action)
+    map)
+  "Minibuffer keymap for the `SPC j o' / `SPC j O' one-shot preemptive
+prompt read by `claude-repl--create-pinned-oneshot-workspace'.
+
+Inherits `minibuffer-local-map' so `RET' submits the typed text
+unchanged; `C-RET' submits it with `claude-repl--oneshot-no-action-suffix'
+appended via `claude-repl--oneshot-prompt-submit-no-action'.")
+
 (defun claude-repl--create-pinned-oneshot-workspace (git-root base suffix tag)
   "Internal helper for one-shot workspace creators pinned to GIT-ROOT.
 Shared by every `claude-repl-create-<repo>-oneshot-workspace' command —
@@ -1375,9 +1416,16 @@ The suffix is appended to the PREFIXED prompt but NOT to the raw
 description used for slug generation, so the workspace name stays clean.
 The headless `claude' that runs `/workspace-generation' itself MUST NOT
 invoke the suffix's wrap-up command — the prompt builder makes that
-explicit."
+explicit.
+
+The preemptive prompt is read with `claude-repl--oneshot-prompt-map':
+`RET' submits the typed text as-is, while `C-RET' submits it with
+`claude-repl--oneshot-no-action-suffix' appended so the spawned agent
+investigates and reports without making changes."
   (let* ((base-commit (claude-repl--resolve-worktree-base base))
-         (raw-prompt (read-string (format "One-shot %s prompt: " tag))))
+         (raw-prompt (read-from-minibuffer
+                      (format "One-shot %s prompt: " tag)
+                      nil claude-repl--oneshot-prompt-map)))
     (when (string-empty-p (string-trim (or raw-prompt "")))
       (user-error "Preemptive prompt is required"))
     (let* ((suffixed-raw (concat raw-prompt suffix))
