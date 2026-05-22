@@ -476,31 +476,10 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
            "every branch carries a single separator line between it and its parent"
            claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-no-separator-line-between-non-root-siblings ()
-  "TLDR spec must forbid any separator line between non-root sibling nodes at the same depth."
+(ert-deftest claude-repl-test-command-prefix-tldr-no-separator-line-between-siblings ()
+  "TLDR spec must forbid any separator line between sibling nodes at the same depth."
   (should (string-match-p
-           "non-root sibling nodes at the same depth MUST NOT be separated from one another by any separator line"
-           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-tldr-pure-blank-line-between-toplevel-entries ()
-  "TLDR spec must require exactly one pure blank line separating the tree's depth-1 top-level entries."
-  (should (string-match-p
-           "depth-1 top-level entries"
-           claude-repl-command-prefix))
-  (should (string-match-p
-           "MUST additionally be separated from one another by exactly one pure blank line"
-           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-tldr-toplevel-separator-carries-no-connectors ()
-  "TLDR spec must require the top-level separator to be a genuinely pure blank line with no connector glyphs."
-  (should (string-match-p
-           "MUST be a genuinely pure blank line carrying no connector glyphs whatsoever"
-           claude-repl-command-prefix)))
-
-(ert-deftest claude-repl-test-command-prefix-tldr-toplevel-entries-are-disjoint-roots ()
-  "TLDR spec must justify the pure blank line by noting top-level entries are disjoint roots with no branching edges to connect."
-  (should (string-match-p
-           "disjoint roots with no shared parent and therefore no branching edges to connect across the gap"
+           "sibling nodes at the same depth MUST NOT be separated from one another by any separator line"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-separator-line-not-pure-blank ()
