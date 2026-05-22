@@ -445,14 +445,27 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
            "dotted hierarchical numbering"
            claude-repl-command-prefix))
   (should (string-match-p
-           "1\\.1\\. \\.\\.\\."
+           "1\\.1 \\.\\.\\."
            claude-repl-command-prefix))
   (should (string-match-p
-           "1\\.1\\.1\\. \\.\\.\\."
+           "1\\.1\\.1 \\.\\.\\."
            claude-repl-command-prefix))
   (should (string-match-p
-           "1\\.1\\.1\\.1\\. \\.\\.\\."
+           "1\\.1\\.1\\.1 \\.\\.\\."
            claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-label-has-no-trailing-dot ()
+  "TLDR spec must explicitly state a label ends on its final numeral and carries NO trailing dot."
+  (should (string-match-p
+           "carries NO trailing dot"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-label-examples-omit-trailing-dot ()
+  "Regression guard: the dotted-numbering label examples must NOT carry a trailing dot after the final numeral."
+  ;; Depth-4 example label must appear without a trailing dot.
+  (should-not (string-match-p "1\\.1\\.1\\.1\\. " claude-repl-command-prefix))
+  ;; The numeral-drop counter-example must also be trailing-dot-free.
+  (should-not (string-match-p "'2\\.1\\.'" claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-entries-wrap-at-column-110 ()
   "TLDR spec must require each entry in the tree to be hard-wrapped at a maximum column width of 110 characters."
