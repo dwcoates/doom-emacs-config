@@ -412,13 +412,31 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
   (should (string-match-p "└──" claude-repl-command-prefix))
   (should (string-match-p "│" claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-connectors-emanate-from-first-number ()
-  "TLDR spec must require child connectors to emanate from the first number in the parent's identifier, not from the emoji."
+(ert-deftest claude-repl-test-command-prefix-tldr-connectors-emanate-from-label-start ()
+  "TLDR spec must require child connectors to emanate from the column where the parent's label begins, not from the emoji."
   (should (string-match-p
-           "MUST emanate from the column of the first number in the parent's identifier"
+           "MUST emanate from the column where the parent's dotted hierarchical label begins"
            claude-repl-command-prefix))
   (should (string-match-p
            "rather than from the emoji"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-connector-rule-does-not-affect-numbering ()
+  "Regression guard: the connector-alignment clause must explicitly state it does not influence node numbering."
+  (should (string-match-p
+           "MUST NOT influence how any node is numbered"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-child-label-is-parent-full-label-plus-index ()
+  "Regression guard: the TLDR spec must state a child's dotted label is always the parent's COMPLETE dotted label plus the child's next index."
+  (should (string-match-p
+           "the parent's complete dotted label followed by the child's own next index"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-numeral-drop-is-forbidden ()
+  "Regression guard: the TLDR spec must explicitly forbid the numeral-dropped child numbering that the prior 'first number' phrasing could induce."
+  (should (string-match-p
+           "NEVER the numeral-dropped"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-dotted-hierarchical-numbering ()
