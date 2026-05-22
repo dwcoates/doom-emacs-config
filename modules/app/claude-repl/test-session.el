@@ -2024,4 +2024,105 @@ through an Emacs crash — without it, the SID would only reach
                     (claude-repl--ws-get "ws" :bare-metal))
                    "captured-sid"))))
 
+;;;; ---- claude-repl--apply-display-state ----
+
+(ert-deftest claude-repl-test-apply-display-state-sets-priority-from-saved ()
+  "apply-display-state copies :priority out of the saved plist onto the ws."
+  (claude-repl-test--with-clean-state
+    (claude-repl--apply-display-state "ws1" '(:priority "p1"))
+    (should (equal (claude-repl--ws-get "ws1" :priority) "p1"))))
+
+(ert-deftest claude-repl-test-apply-display-state-priority-falls-back-to-plist ()
+  "apply-display-state keeps the in-memory :priority when saved carries none."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :priority "mem")
+    (claude-repl--apply-display-state "ws1" '(:project-dir "/x"))
+    (should (equal (claude-repl--ws-get "ws1" :priority) "mem"))))
+
+(ert-deftest claude-repl-test-apply-display-state-restores-repl-state-inactive ()
+  "apply-display-state restores a persistable :repl-state (:inactive)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--apply-display-state "ws1" '(:repl-state :inactive))
+    (should (eq (claude-repl--ws-get "ws1" :repl-state) :inactive))))
+
+(ert-deftest claude-repl-test-apply-display-state-skips-non-persistable-repl-state ()
+  "apply-display-state ignores a non-persistable :repl-state (:dead)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--apply-display-state "ws1" '(:repl-state :dead))
+    (should-not (claude-repl--ws-get "ws1" :repl-state))))
+
+(ert-deftest claude-repl-test-apply-display-state-merge-completed-sets-merged ()
+  "apply-display-state maps a saved :merge-completed t to :repl-state :merged."
+  (claude-repl-test--with-clean-state
+    (claude-repl--apply-display-state "ws1" '(:merge-completed t))
+    (should (claude-repl--ws-get "ws1" :merge-completed))
+    (should (eq (claude-repl--ws-get "ws1" :repl-state) :merged))))
+
+(ert-deftest claude-repl-test-apply-display-state-merge-failed-sets-merge-failed ()
+  "apply-display-state maps a saved :merge-failed t to :repl-state :merge-failed."
+  (claude-repl-test--with-clean-state
+    (claude-repl--apply-display-state "ws1" '(:merge-completed t :merge-failed t))
+    (should (eq (claude-repl--ws-get "ws1" :repl-state) :merge-failed))))
+
+(ert-deftest claude-repl-test-apply-display-state-nil-saved-keeps-plist-priority ()
+  "apply-display-state with a nil saved plist preserves the in-memory :priority."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :priority "mem")
+    (claude-repl--apply-display-state "ws1" nil)
+    (should (equal (claude-repl--ws-get "ws1" :priority) "mem"))))
+
+;;;; ---- claude-repl--load-display-state ----
+
+(ert-deftest claude-repl-test-load-display-state-applies-priority-from-file ()
+  "load-display-state reads the state file and applies :priority to the ws."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (file-name-as-directory (make-temp-file "claude-repl-lds-" t))))
+      (unwind-protect
+          (progn
+            (claude-repl-test--seed-file
+             (claude-repl--state-file tmpdir)
+             (prin1-to-string '(:priority "p9")))
+            (cl-letf (((symbol-function 'force-mode-line-update)
+                       (lambda (&optional _all) nil)))
+              (claude-repl--load-display-state "ws1" tmpdir)
+              (should (equal (claude-repl--ws-get "ws1" :priority) "p9"))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-load-display-state-skips-when-active-env-set ()
+  "load-display-state is a no-op once the ws is env-initialized (:active-env set).
+An env-initialized workspace already carries display state in memory, so the
+disk read must be skipped rather than re-read."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (file-name-as-directory (make-temp-file "claude-repl-lds-" t))))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :active-env :bare-metal)
+            (claude-repl-test--seed-file
+             (claude-repl--state-file tmpdir)
+             (prin1-to-string '(:priority "disk")))
+            (claude-repl--load-display-state "ws1" tmpdir)
+            (should-not (claude-repl--ws-get "ws1" :priority)))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-load-display-state-nil-ws-noop ()
+  "load-display-state does not error when WS is nil."
+  (claude-repl-test--with-clean-state
+    (should-not (claude-repl--load-display-state nil "/tmp"))))
+
+(ert-deftest claude-repl-test-load-display-state-nil-root-noop ()
+  "load-display-state sets nothing and does not error when PROJECT-ROOT is nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl--load-display-state "ws1" nil)
+    (should-not (claude-repl--ws-get "ws1" :priority))))
+
+(ert-deftest claude-repl-test-load-display-state-missing-state-file-noop ()
+  "load-display-state is a no-op when the project has no state file on disk."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (file-name-as-directory (make-temp-file "claude-repl-lds-" t))))
+      (unwind-protect
+          (progn
+            (claude-repl--load-display-state "ws1" tmpdir)
+            (should-not (claude-repl--ws-get "ws1" :priority)))
+        (delete-directory tmpdir t)))))
+
 ;;; test-session.el ends here

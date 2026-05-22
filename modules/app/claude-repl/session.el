@@ -174,6 +174,133 @@ Returns (:needs-build t :install-script PATH) if the image is not built yet."
 
 ;;;; Workspace environment initialization
 
+(defun claude-repl--apply-display-state (ws saved)
+  "Apply persisted display/metadata state from SAVED plist onto workspace WS.
+SAVED is a parsed state-file plist (or nil).  Hydrates the
+non-env-struct keys that drive the tabline badge and drawer glyphs:
+`:priority', `:source-ws-dir', `:last-prompt-time', `:repl-state',
+`:saved-tab-index', `:fork-session-id', `:last-prompt-summary',
+`:last-prompt-summary-at', `:worktree-p', and the `:merge-completed' /
+`:merge-failed' / `:merge-completed-at' bookkeeping.
+
+Shared by `claude-repl--initialize-ws-env' (the Claude-start path) and
+`claude-repl--load-display-state' (the `SPC p p' / workspace-creation
+path) so the set of persisted display keys is defined in exactly one
+place.  Performs no disk I/O — callers supply the already-parsed SAVED
+plist.  Idempotent.
+
+`:priority', `:source-ws-dir', and `:last-prompt-time' prefer the
+SAVED value but fall back to whatever is already on WS's plist (e.g.
+`claude-repl-set-priority' run before any state-save happened); the
+remaining keys are written only when SAVED carries them."
+  ;; Priority: prefer the saved value, fall back to whatever is already in
+  ;; the plist (e.g., `claude-repl-set-priority' called before any
+  ;; state-save happened for this workspace).
+  (claude-repl--ws-put ws :priority
+                       (or (and saved (plist-get saved :priority))
+                           (claude-repl--ws-get ws :priority)))
+  ;; Source workspace dir: prefer the saved value, fall back to whatever is
+  ;; already in the plist (e.g., set by `--finalize-worktree-workspace'
+  ;; before any state-save happened for this workspace).
+  (claude-repl--ws-put ws :source-ws-dir
+                       (or (and saved (plist-get saved :source-ws-dir))
+                           (claude-repl--ws-get ws :source-ws-dir)))
+  ;; Last-prompt-time: prefer saved value, fall back to whatever is
+  ;; already in the plist.  Used by the drawer's detail view to show
+  ;; "duration since last user message"; survives Emacs restarts so
+  ;; the duration reflects real elapsed wall-clock, not session age.
+  (claude-repl--ws-put ws :last-prompt-time
+                       (or (and saved (plist-get saved :last-prompt-time))
+                           (claude-repl--ws-get ws :last-prompt-time)))
+  ;; Repl-state: hydrate the *desired* panel-visibility lifecycle from the
+  ;; saved file so `:inactive' (panels closed via plain `SPC o c') and
+  ;; `:hidden' (deprio-close via `SPC o C') survive Emacs restart.  Only
+  ;; persistable values matter at restart — `:dead'/nil reduce to "no
+  ;; opinion, default to opening panels", so we only restore `:active' /
+  ;; `:inactive' / `:hidden'.  `--open-panels-after-ready' reads this on
+  ;; first ready and skips the panel-open call for `:inactive'/`:hidden';
+  ;; `--maybe-sweep-hidden-on-switch' demotes `:hidden' to `:inactive'
+  ;; when the user actually arrives back on the workspace.
+  (let ((saved-repl-state (and saved (plist-get saved :repl-state))))
+    (when (memq saved-repl-state '(:active :inactive :hidden))
+      (claude-repl--ws-put ws :repl-state saved-repl-state)))
+  ;; Tab-bar slot: if the ws was deprioritized at the prior quit (i.e.
+  ;; pushed to second-to-last via `SPC o C'), `:saved-tab-index' was
+  ;; left non-nil pending the next reopen.  Restore it so the next
+  ;; `--show-existing-panels' returns the ws to its prior slot.
+  (when-let ((idx (and saved (plist-get saved :saved-tab-index))))
+    (claude-repl--ws-put ws :saved-tab-index idx))
+  ;; Fork session ID: a worktree-fork ws whose claude session was never
+  ;; actually started before quit needs the fork pointer to survive so
+  ;; the next `--initialize-claude' can launch with `--resume FORK
+  ;; --fork-session'.  Cleared by `--initialize-claude' once consumed.
+  (when-let ((fork (and saved (plist-get saved :fork-session-id))))
+    (claude-repl--ws-put ws :fork-session-id fork))
+  ;; Last prompt summary: the tabline / mode-line uses this to render a
+  ;; short "what is this ws working on" hint.  Restore just the summary
+  ;; — `:last-prompt-text' and `:last-prompt-summary-pending' are
+  ;; coordination fields for the in-flight async summary task, which
+  ;; can't survive Emacs quit, so persisting them would only confuse
+  ;; the apply-summary path on the next prompt.
+  (when-let ((summary (and saved (plist-get saved :last-prompt-summary))))
+    (claude-repl--ws-put ws :last-prompt-summary summary))
+  ;; Restore the send-time of the prompt that produced the persisted
+  ;; summary so the mode-line's "X ago" prefix survives Emacs restart
+  ;; and continues counting against the actual prompt's wall-clock,
+  ;; not the post-restart re-init moment.
+  (when-let ((at (and saved (plist-get saved :last-prompt-summary-at))))
+    (claude-repl--ws-put ws :last-prompt-summary-at at))
+  ;; Worktree-flag + merge-completed: survive restart so the drawer's
+  ;; MERGED bucket reappears and `--finish-workspace' can still remove
+  ;; the worktree when the user presses `x' on a post-restart MERGED
+  ;; entry.  `:merge-completed-at' rides alongside for display only.
+  (when (and saved (eq (plist-get saved :worktree-p) t))
+    (claude-repl--ws-put ws :worktree-p t))
+  (when (and saved (eq (plist-get saved :merge-completed) t))
+    (claude-repl--ws-put ws :merge-completed t)
+    ;; Restore the merged repl-state alongside `:merge-completed'
+    ;; so the badge re-appears post-restart instead of falling
+    ;; through to `:dead' (or whatever the poll resolves).  A
+    ;; persisted `:merge-failed t' wins over the success path: the
+    ;; workspace stays in MERGED but surfaces the ❌ badge via
+    ;; `:repl-state :merge-failed' so the prior silent-failure
+    ;; signal isn't lost across restart.
+    (let ((mf (eq (plist-get saved :merge-failed) t)))
+      (claude-repl--ws-put ws :merge-failed mf)
+      (claude-repl--ws-put ws :repl-state (if mf :merge-failed :merged)))
+    (when-let ((mca (plist-get saved :merge-completed-at)))
+      (claude-repl--ws-put ws :merge-completed-at mca))))
+
+(defun claude-repl--load-display-state (ws project-root)
+  "Hydrate WS's persisted display state from PROJECT-ROOT's state file.
+Reads PROJECT-ROOT's state file once and applies the persisted
+display/metadata keys (`:priority' and the drawer-badge / merge /
+last-prompt fields) to WS via `claude-repl--apply-display-state', so
+the tabline badge and drawer glyphs render the moment a workspace is
+switched to (`SPC p p') or created — without waiting for
+`claude-repl--initialize-ws-env', which only runs when Claude starts.
+
+No-op when WS or PROJECT-ROOT is nil, or when WS has already been
+env-initialized (`:active-env' set): an env-initialized workspace
+already carries its display state in memory, so re-reading the state
+file would be a redundant disk read and could clobber live in-memory
+values with staler on-disk ones.  Also a no-op when the state file is
+missing or malformed."
+  (when (and ws project-root
+             (null (claude-repl--ws-get ws :active-env)))
+    (let* ((state-file (claude-repl--state-file-for-read project-root))
+           (saved (and state-file
+                       (condition-case err
+                           (claude-repl--read-sexp-file-if-exists state-file)
+                         (error
+                          (claude-repl--log ws "load-display-state: read error file=%s err=%S"
+                                            state-file err)
+                          nil)))))
+      (when saved
+        (claude-repl--log ws "load-display-state: ws=%s root=%s" ws project-root)
+        (claude-repl--apply-display-state ws saved)
+        (force-mode-line-update t)))))
+
 (defun claude-repl--initialize-ws-env (ws &optional project-dir-hint active-env-hint)
   "Initialize environment state for workspace WS (idempotent).
 Writes `:project-dir', `:active-env', and per-env instantiation
@@ -234,83 +361,12 @@ state-save.  Callers already guard on `claude-repl--claude-running-p'."
                          (or (and saved (plist-get saved :active-env))
                              active-env-hint
                              :bare-metal))
-    ;; Priority: prefer the saved value, fall back to whatever is already in
-    ;; the plist (e.g., `claude-repl-set-priority' called before any
-    ;; state-save happened for this workspace).
-    (claude-repl--ws-put ws :priority
-                         (or (and saved (plist-get saved :priority))
-                             (claude-repl--ws-get ws :priority)))
-    ;; Source workspace dir: prefer the saved value, fall back to whatever is
-    ;; already in the plist (e.g., set by `--finalize-worktree-workspace'
-    ;; before any state-save happened for this workspace).
-    (claude-repl--ws-put ws :source-ws-dir
-                         (or (and saved (plist-get saved :source-ws-dir))
-                             (claude-repl--ws-get ws :source-ws-dir)))
-    ;; Last-prompt-time: prefer saved value, fall back to whatever is
-    ;; already in the plist.  Used by the drawer's detail view to show
-    ;; "duration since last user message"; survives Emacs restarts so
-    ;; the duration reflects real elapsed wall-clock, not session age.
-    (claude-repl--ws-put ws :last-prompt-time
-                         (or (and saved (plist-get saved :last-prompt-time))
-                             (claude-repl--ws-get ws :last-prompt-time)))
-    ;; Repl-state: hydrate the *desired* panel-visibility lifecycle from the
-    ;; saved file so `:inactive' (panels closed via plain `SPC o c') and
-    ;; `:hidden' (deprio-close via `SPC o C') survive Emacs restart.  Only
-    ;; persistable values matter at restart — `:dead'/nil reduce to "no
-    ;; opinion, default to opening panels", so we only restore `:active' /
-    ;; `:inactive' / `:hidden'.  `--open-panels-after-ready' reads this on
-    ;; first ready and skips the panel-open call for `:inactive'/`:hidden';
-    ;; `--maybe-sweep-hidden-on-switch' demotes `:hidden' to `:inactive'
-    ;; when the user actually arrives back on the workspace.
-    (let ((saved-repl-state (and saved (plist-get saved :repl-state))))
-      (when (memq saved-repl-state '(:active :inactive :hidden))
-        (claude-repl--ws-put ws :repl-state saved-repl-state)))
-    ;; Tab-bar slot: if the ws was deprioritized at the prior quit (i.e.
-    ;; pushed to second-to-last via `SPC o C'), `:saved-tab-index' was
-    ;; left non-nil pending the next reopen.  Restore it so the next
-    ;; `--show-existing-panels' returns the ws to its prior slot.
-    (when-let ((idx (and saved (plist-get saved :saved-tab-index))))
-      (claude-repl--ws-put ws :saved-tab-index idx))
-    ;; Fork session ID: a worktree-fork ws whose claude session was never
-    ;; actually started before quit needs the fork pointer to survive so
-    ;; the next `--initialize-claude' can launch with `--resume FORK
-    ;; --fork-session'.  Cleared by `--initialize-claude' once consumed.
-    (when-let ((fork (and saved (plist-get saved :fork-session-id))))
-      (claude-repl--ws-put ws :fork-session-id fork))
-    ;; Last prompt summary: the tabline / mode-line uses this to render a
-    ;; short "what is this ws working on" hint.  Restore just the summary
-    ;; — `:last-prompt-text' and `:last-prompt-summary-pending' are
-    ;; coordination fields for the in-flight async summary task, which
-    ;; can't survive Emacs quit, so persisting them would only confuse
-    ;; the apply-summary path on the next prompt.
-    (when-let ((summary (and saved (plist-get saved :last-prompt-summary))))
-      (claude-repl--ws-put ws :last-prompt-summary summary))
-    ;; Restore the send-time of the prompt that produced the persisted
-    ;; summary so the mode-line's "X ago" prefix survives Emacs restart
-    ;; and continues counting against the actual prompt's wall-clock,
-    ;; not the post-restart re-init moment.
-    (when-let ((at (and saved (plist-get saved :last-prompt-summary-at))))
-      (claude-repl--ws-put ws :last-prompt-summary-at at))
-    ;; Worktree-flag + merge-completed: survive restart so the drawer's
-    ;; MERGED bucket reappears and `--finish-workspace' can still remove
-    ;; the worktree when the user presses `x' on a post-restart MERGED
-    ;; entry.  `:merge-completed-at' rides alongside for display only.
-    (when (and saved (eq (plist-get saved :worktree-p) t))
-      (claude-repl--ws-put ws :worktree-p t))
-    (when (and saved (eq (plist-get saved :merge-completed) t))
-      (claude-repl--ws-put ws :merge-completed t)
-      ;; Restore the merged repl-state alongside `:merge-completed'
-      ;; so the badge re-appears post-restart instead of falling
-      ;; through to `:dead' (or whatever the poll resolves).  A
-      ;; persisted `:merge-failed t' wins over the success path: the
-      ;; workspace stays in MERGED but surfaces the ❌ badge via
-      ;; `:repl-state :merge-failed' so the prior silent-failure
-      ;; signal isn't lost across restart.
-      (let ((mf (eq (plist-get saved :merge-failed) t)))
-        (claude-repl--ws-put ws :merge-failed mf)
-        (claude-repl--ws-put ws :repl-state (if mf :merge-failed :merged)))
-      (when-let ((mca (plist-get saved :merge-completed-at)))
-        (claude-repl--ws-put ws :merge-completed-at mca)))
+    ;; Display/metadata state — priority badge, repl-state lifecycle,
+    ;; merge bookkeeping, last-prompt summary/time, tab slot, fork
+    ;; pointer — is hydrated from the saved plist by the shared applier
+    ;; that `claude-repl--load-display-state' also drives, so a `SPC p p'
+    ;; switch shows the same badges before Claude ever starts.
+    (claude-repl--apply-display-state ws saved)
     (dolist (key claude-repl--environment-keys)
       (claude-repl--ws-put ws key
                            (claude-repl--make-instantiation-from-plist
