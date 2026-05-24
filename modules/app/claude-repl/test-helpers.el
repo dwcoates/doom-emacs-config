@@ -484,6 +484,35 @@ user's real snapshot during ERT runs."
          (when (file-directory-p archive-dir)
            (delete-directory archive-dir t))))))
 
+(defmacro claude-repl-test--with-mocked-git-probes (&rest body)
+  "Execute BODY with the cherry-pick probe's git wrappers stubbed.
+
+`claude-repl--any-cherry-pick-in-progress-p' walks every registered
+workspace dir and probes for `CHERRY_PICK_HEAD' via two external-
+boundary wrappers (`claude-repl--git-string' for `rev-parse
+--absolute-git-dir', `claude-repl--git-string-quiet' for other
+rev-parse variants).  Any test whose subject reaches that probe —
+including every `--drain-merge-queue' test, every
+`--workspace-merge-into-source' / `--workspace-merge-current-into-
+source' test, and any future call site that walks the registered ws
+set — must mock both wrappers or trip the runtime boundary guard.
+
+This macro stubs both wrappers to return the empty string, which
+causes the probe's downstream `expand-file-name CHERRY_PICK_HEAD' +
+`file-exists-p' to resolve nil, so the probe reports `no cherry-pick
+in flight' deterministically without shelling out.  Nest an inner
+`cl-letf' inside BODY for any test-specific stubs.
+
+Extracted to consolidate the (formerly duplicated) 4-line `cl-letf'
+block that previously appeared verbatim at every site needing this
+mock pair."
+  (declare (indent 0) (debug t))
+  `(cl-letf (((symbol-function 'claude-repl--git-string)
+              (lambda (&rest _args) ""))
+             ((symbol-function 'claude-repl--git-string-quiet)
+              (lambda (&rest _args) "")))
+     ,@body))
+
 (defun claude-repl-test--seed-file (path content)
   "Write CONTENT (string) to PATH, creating any needed parent dirs.
 Used by tests that need to seed a fixture file at a path whose parent
