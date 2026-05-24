@@ -7036,25 +7036,14 @@ background-triggered /workspace-merge does not yank the user's focus."
           (progn
             (claude-repl--ws-put "self-ws" :project-dir tmpdir)
             (claude-repl--ws-put "self-ws" :source-ws-dir tmpdir)
-            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "self-ws"))
-                      ((symbol-function 'claude-repl--master-worktree-path)
-                       (lambda (_root) nil))
-                      ;; `--any-cherry-pick-in-progress-p' (called
-                      ;; before the same-source guard fires) probes
-                      ;; every registered workspace dir via two git
-                      ;; wrappers: `--git-string' for "rev-parse
-                      ;; --absolute-git-dir" and `--git-string-quiet'
-                      ;; elsewhere.  Stub both to return empty so the
-                      ;; probe reports "no cherry-pick in flight"
-                      ;; without shelling out.
-                      ((symbol-function 'claude-repl--git-string)
-                       (lambda (&rest _args) ""))
-                      ((symbol-function 'claude-repl--git-string-quiet)
-                       (lambda (&rest _args) ""))
-                      ((symbol-function 'claude-repl--assert-clean-worktree)
-                       (lambda (&rest _) nil)))
-              (should-error (claude-repl-workspace-merge-current-into-source)
-                            :type 'user-error)))
+            (claude-repl-test--with-mocked-git-probes
+              (cl-letf (((symbol-function '+workspace-current-name) (lambda () "self-ws"))
+                        ((symbol-function 'claude-repl--master-worktree-path)
+                         (lambda (_root) nil))
+                        ((symbol-function 'claude-repl--assert-clean-worktree)
+                         (lambda (&rest _) nil)))
+                (should-error (claude-repl-workspace-merge-current-into-source)
+                              :type 'user-error))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest claude-repl-test-workspace-merge-into-source-accepts-explicit-ws ()
@@ -8145,14 +8134,15 @@ finishes."
       (claude-repl--enqueue-merge "ws1" t t)
       (claude-repl--enqueue-merge "ws2" nil nil)
       (let ((dispatched nil))
-        (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
-                   (lambda (ws &optional silent auto)
-                     (push (list ws silent auto) dispatched))))
-          (claude-repl--drain-merge-queue)
-          (should (equal dispatched '(("ws1" t t))))
-          (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
-                                 claude-repl--merge-queue)
-                         '("ws2"))))))))
+        (claude-repl-test--with-mocked-git-probes
+          (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+                     (lambda (ws &optional silent auto)
+                       (push (list ws silent auto) dispatched))))
+            (claude-repl--drain-merge-queue)
+            (should (equal dispatched '(("ws1" t t))))
+            (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
+                                   claude-repl--merge-queue)
+                           '("ws2")))))))))
 
 (ert-deftest claude-repl-test-drain-merge-queue-clears-queued-marker ()
   "Drain clears the dispatched workspace's `:merge-queued' marker so the
@@ -8162,11 +8152,12 @@ without precedence collisions."
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (claude-repl--enqueue-merge "ws1" t t)
-      (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
-                 (lambda (&rest _) nil)))
-        (claude-repl--drain-merge-queue)
-        (should-not (eq (claude-repl--ws-get "ws1" :repl-state)
-                        :merge-queued))))))
+      (claude-repl-test--with-mocked-git-probes
+        (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (&rest _) nil)))
+          (claude-repl--drain-merge-queue)
+          (should-not (eq (claude-repl--ws-get "ws1" :repl-state)
+                          :merge-queued)))))))
 
 (ert-deftest claude-repl-test-drain-merge-queue-catches-deferred-error ()
   "Errors from a deferred merge are caught so a single bad entry does
@@ -8202,16 +8193,17 @@ mid-merge does not resurrect an already-dispatched entry."
       (claude-repl--enqueue-merge "ws1" t t)
       (let ((save-calls 0)
             (queue-len-at-save nil))
-        (cl-letf (((symbol-function 'claude-repl-save-workspace-snapshot)
-                   (lambda ()
-                     (cl-incf save-calls)
-                     (setq queue-len-at-save (length claude-repl--merge-queue))))
-                  ((symbol-function 'claude-repl--workspace-merge-into-source)
-                   (lambda (&rest _) nil)))
-          (claude-repl--drain-merge-queue)
-          (should (= 1 save-calls))
-          ;; Drain pops before saving, so the persisted queue has 0 entries.
-          (should (= 0 queue-len-at-save)))))))
+        (claude-repl-test--with-mocked-git-probes
+          (cl-letf (((symbol-function 'claude-repl-save-workspace-snapshot)
+                     (lambda ()
+                       (cl-incf save-calls)
+                       (setq queue-len-at-save (length claude-repl--merge-queue))))
+                    ((symbol-function 'claude-repl--workspace-merge-into-source)
+                     (lambda (&rest _) nil)))
+            (claude-repl--drain-merge-queue)
+            (should (= 1 save-calls))
+            ;; Drain pops before saving, so the persisted queue has 0 entries.
+            (should (= 0 queue-len-at-save))))))))
 
 (ert-deftest claude-repl-test-persist-merge-queue-tolerates-missing-saver ()
   "`--persist-merge-queue' is a no-op when the saver isn't fboundp, so
