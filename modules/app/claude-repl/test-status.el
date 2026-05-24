@@ -1462,8 +1462,9 @@ native-comp."
     (should-not (claude-repl--claude-in-saved-wconf-p "ws1"))))
 
 (ert-deftest claude-repl-test-claude-in-saved-wconf-persp-is-symbol ()
-  "claude-in-saved-wconf-p should return nil when persp is a symbol (nil persp)."
-  (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_name) 'none)))
+  "claude-in-saved-wconf-p should return nil when persp-get-by-name returns the sentinel keyword."
+  ;; persp-not-persp is :nil — a keyword; --ws-resolve-persp normalizes it to nil.
+  (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_name) :nil)))
     (should-not (claude-repl--claude-in-saved-wconf-p "ws1"))))
 
 (ert-deftest claude-repl-test-claude-in-saved-wconf-with-claude ()

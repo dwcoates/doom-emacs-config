@@ -2223,14 +2223,15 @@ registered."
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest claude-repl-test-panels-kill-workspace-buffers/symbol-persp-skipped ()
-  "kill-workspace-buffers skips when persp-get-by-name returns a symbol sentinel.
-persp-mode uses symbol sentinels (e.g. t) for the \"no perspective\"
-container — those don't have a `persp-buffers' slot and must be skipped."
+  "kill-workspace-buffers skips when persp-get-by-name returns the persp-not-persp keyword.
+persp-mode returns the :nil keyword (persp-not-persp) when the perspective
+does not exist — --ws-resolve-persp normalizes it to nil so the buffers
+loop is skipped entirely."
   (let ((persp-mode t)
         (buf (get-buffer-create "*kwb-symbol-persp*"))
         (persp-buffers-called nil))
     (unwind-protect
-        (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_ws) 'none))
+        (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_ws) :nil))
                   ((symbol-function 'persp-buffers)
                    (lambda (_p) (setq persp-buffers-called t) nil)))
           (claude-repl--kill-workspace-buffers "sym-ws")

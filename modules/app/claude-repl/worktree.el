@@ -75,7 +75,7 @@ Checks `claude-repl-workspace-initial-buffers' for entries whose PATTERN
 matches PATH, then opens each listed file with `find-file-noselect' and adds
 it to the WS perspective without displaying it."
   (claude-repl--log ws "open-initial-buffers: path=%s" path)
-  (when-let ((persp (persp-get-by-name ws)))
+  (when-let ((persp (claude-repl--ws-resolve-persp ws)))
     (dolist (entry claude-repl-workspace-initial-buffers)
       (when (string-match-p (car entry) path)
         (dolist (relpath (cdr entry))

@@ -951,6 +951,37 @@ identity-distinct string injected by `claude-repl-set-priority' from
         (claude-repl--reorder-workspace-by-priority "new-p1")
         (should (equal (car captured) "main"))))))
 
+;;;; ---- Tests: --ws-resolve-persp ----
+
+(ert-deftest claude-repl-test-ws-resolve-persp-returns-persp-when-found ()
+  "ws-resolve-persp returns the persp object when one exists for the name."
+  (claude-repl-test--with-clean-state
+    (let ((fake-persp (list :a-persp-object)))
+      (cl-letf (((symbol-function 'persp-get-by-name)
+                 (lambda (_ws) fake-persp)))
+        (should (eq (claude-repl--ws-resolve-persp "my-ws") fake-persp))))))
+
+(ert-deftest claude-repl-test-ws-resolve-persp-returns-nil-for-not-persp-sentinel ()
+  "ws-resolve-persp returns nil when persp-get-by-name returns the persp-not-persp keyword."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-get-by-name)
+               ;; persp-not-persp is :nil — a keyword — which keywordp catches
+               (lambda (_ws) :nil)))
+      (should-not (claude-repl--ws-resolve-persp "missing-ws")))))
+
+(ert-deftest claude-repl-test-ws-resolve-persp-returns-nil-when-unbound ()
+  "ws-resolve-persp returns nil when persp-get-by-name is not fboundp."
+  (claude-repl-test--with-clean-state
+    (fmakunbound 'persp-get-by-name)
+    (should-not (claude-repl--ws-resolve-persp "my-ws"))))
+
+(ert-deftest claude-repl-test-ws-resolve-persp-returns-nil-for-nil-result ()
+  "ws-resolve-persp returns nil when persp-get-by-name returns nil."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-get-by-name)
+               (lambda (_ws) nil)))
+      (should-not (claude-repl--ws-resolve-persp "my-ws")))))
+
 ;;;; ---- Tests: --ws-system-available-p ----
 
 (ert-deftest claude-repl-test-ws-system-available-p-returns-t-when-persp-mode-on ()
