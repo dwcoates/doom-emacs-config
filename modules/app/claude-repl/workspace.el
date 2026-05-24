@@ -677,5 +677,21 @@ Callers must use this function instead of calling
   (and (fboundp '+workspace-current-name)
        (+workspace-current-name)))
 
+(defun claude-repl--ws-switch (ws &rest args)
+  "Switch the active workspace to WS, passing ARGS to `+workspace-switch'.
+No-op when `+workspace-switch' is not bound (e.g. during tests that do
+not load persp-mode).  Any error from the underlying call propagates to
+the caller unchanged — silence errors at the call site when needed.
+
+ARGS are forwarded verbatim to `+workspace-switch', which lets callers
+pass optional flags (e.g., a non-nil second argument to suppress the
+tab-bar flash that `+workspace-switch' normally triggers).
+
+This is the persp-mode navigation boundary owned by `workspace.el'.
+Callers must use this function instead of calling `+workspace-switch'
+directly or wrapping it themselves with `fboundp'."
+  (when (fboundp '+workspace-switch)
+    (apply '+workspace-switch ws args)))
+
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here

@@ -1263,7 +1263,7 @@ session and un-marks the workspace as merge-completed."
       (claude-repl-drawer--reactivate-merged ws))
      (t
       (claude-repl-drawer--leave-side-window-before-switch)
-      (+workspace-switch ws)))))
+      (claude-repl--ws-switch ws)))))
 
 (defun claude-repl-drawer-refresh ()
   "Manually refresh the drawer contents.
@@ -1431,12 +1431,12 @@ restore doesn't clobber the destination workspace's panel state."
     (claude-repl-drawer--leave-side-window-before-switch)
     (if (eq (claude-repl-drawer--workspace-section ws) :merged)
         (claude-repl-drawer--reactivate-merged ws)
-      (+workspace-switch ws))
+      (claude-repl--ws-switch ws))
     (unwind-protect
         (funcall fn)
       (when (and prev (not (equal prev (claude-repl--ws-current-name))))
         (claude-repl-drawer--leave-side-window-before-switch)
-        (+workspace-switch prev)))))
+        (claude-repl--ws-switch prev)))))
 
 (defun claude-repl-drawer-merge-into-master ()
   "Merge the target workspaces into their source/master.
