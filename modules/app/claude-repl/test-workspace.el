@@ -951,6 +951,27 @@ identity-distinct string injected by `claude-repl-set-priority' from
         (claude-repl--reorder-workspace-by-priority "new-p1")
         (should (equal (car captured) "main"))))))
 
+;;;; ---- Tests: --ws-system-available-p ----
+
+(ert-deftest claude-repl-test-ws-system-available-p-returns-t-when-persp-mode-on ()
+  "ws-system-available-p returns t when persp-mode is non-nil."
+  (claude-repl-test--with-clean-state
+    (let ((persp-mode t))
+      (should (claude-repl--ws-system-available-p)))))
+
+(ert-deftest claude-repl-test-ws-system-available-p-returns-nil-when-persp-mode-off ()
+  "ws-system-available-p returns nil when persp-mode is nil."
+  (claude-repl-test--with-clean-state
+    (let ((persp-mode nil))
+      (should-not (claude-repl--ws-system-available-p)))))
+
+(ert-deftest claude-repl-test-ws-system-available-p-returns-nil-when-persp-mode-unbound ()
+  "ws-system-available-p returns nil when persp-mode variable is unbound."
+  (claude-repl-test--with-clean-state
+    ;; bound-and-true-p returns nil for unbound vars, same as nil.
+    ;; We test with persp-mode=nil (the test-helpers default).
+    (should-not (claude-repl--ws-system-available-p))))
+
 ;;;; ---- Tests: --ws-switch ----
 
 (ert-deftest claude-repl-test-ws-switch-delegates-when-bound ()

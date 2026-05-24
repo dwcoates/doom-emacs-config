@@ -1070,7 +1070,7 @@ perspective.  Each buffer is killed inside its own `condition-case' so
 one bad buffer cannot block the rest.  File-visiting buffers are
 marked unmodified before killing so `kill-buffer' does not prompt —
 the user has already confirmed the destructive nuke."
-  (when (and (bound-and-true-p persp-mode)
+  (when (and (claude-repl--ws-system-available-p)
              (fboundp 'persp-get-by-name)
              (fboundp 'persp-buffers))
     (when-let ((persp (persp-get-by-name ws)))
