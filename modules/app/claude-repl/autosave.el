@@ -18,7 +18,7 @@ for diagnostic logging context."
 (defun claude-repl--autosave-workspace-buffers ()
   "Save all modified file-visiting buffers across all workspaces.
 Runs silently every 5 minutes to prevent data loss."
-  (when (bound-and-true-p persp-mode)
+  (when (claude-repl--ws-system-available-p)
     (claude-repl--log-verbose nil "autosave-workspace-buffers: scanning all workspace buffers")
     (let ((saved 0))
       (dolist (persp (persp-persps))

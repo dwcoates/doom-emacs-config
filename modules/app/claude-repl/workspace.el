@@ -576,7 +576,7 @@ finish-workspace path."
     ;; emitted the user-visible warning `'<ws>' workspace doesn't
     ;; exist' in the echo area after every successful merge.
     (condition-case err
-        (when (and (bound-and-true-p persp-mode)
+        (when (and (claude-repl--ws-system-available-p)
                    (fboundp '+workspace-exists-p)
                    (+workspace-exists-p ws))
           (claude-repl--log ws "nuke-one-workspace: pre-persp-kill ws=%s cache=%S"
@@ -662,6 +662,17 @@ route through it; they may not mutate `persp-names-cache' directly."
 ;; (a) the fboundp guards are written once, in one place; (b) tests stub a
 ;; single symbol instead of juggling `fboundp' and the real function; and
 ;; (c) future persp-mode API changes require only a local edit here.
+
+(defun claude-repl--ws-system-available-p ()
+  "Return non-nil when the persp-mode workspace system is active.
+Specifically, returns non-nil when the variable `persp-mode' is both
+bound and non-nil — i.e. the same test as `(bound-and-true-p persp-mode)'.
+
+Use this predicate instead of calling `bound-and-true-p' on `persp-mode'
+directly.  The single definition here is the workspace.el integration
+boundary for system-availability checks (see AGENTS.md), so a future
+change in how availability is detected requires only a local edit."
+  (bound-and-true-p persp-mode))
 
 (defun claude-repl--ws-current-name ()
   "Return the name of the currently-active workspace, or nil.

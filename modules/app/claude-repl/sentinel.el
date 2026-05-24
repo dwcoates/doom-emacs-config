@@ -87,10 +87,10 @@ won't match any host path.  Extract the first path component after /
 as the container root name and match against workspace project dirs.
 Return the workspace name or nil."
   (claude-repl--log-verbose nil "ws-for-dir-container: ENTER dir=%S persp-mode=%s"
-                    dir (if (bound-and-true-p persp-mode) "yes" "no"))
-  (unless (bound-and-true-p persp-mode)
+                    dir (if (claude-repl--ws-system-available-p) "yes" "no"))
+  (unless (claude-repl--ws-system-available-p)
     (claude-repl--log nil "ws-for-dir-container: persp-mode not bound, aborting"))
-  (when (bound-and-true-p persp-mode)
+  (when (claude-repl--ws-system-available-p)
     (let* ((container-root (car (split-string (substring dir 1) "/")))
            (all-ws (+workspace-list-names))
            (ws-dirs (mapcar (lambda (ws)

@@ -1269,7 +1269,7 @@ single routing point."
     'nuke)
    (t
     (claude-repl--log ws "nuke-or-kill: ws not live, routing to +workspace/kill")
-    (when (and (bound-and-true-p persp-mode)
+    (when (and (claude-repl--ws-system-available-p)
                (fboundp '+workspace-exists-p)
                (+workspace-exists-p ws))
       (condition-case err

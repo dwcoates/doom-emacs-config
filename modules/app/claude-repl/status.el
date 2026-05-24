@@ -570,7 +570,7 @@ A no-op if a check is already in progress for WS."
 
 (defun claude-repl--workspace-for-buffer (buf)
   "Return the workspace name that contains BUF, or nil."
-  (when (bound-and-true-p persp-mode)
+  (when (claude-repl--ws-system-available-p)
     (cl-loop for persp in (persp-persps)
              when (persp-contain-buffer-p buf persp)
              return (safe-persp-name persp))))
