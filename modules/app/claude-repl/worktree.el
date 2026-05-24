@@ -307,15 +307,17 @@ it had been on a sibling branch before the merge."
   (file-name-nondirectory (directory-file-name ws)))
 
 (defun claude-repl--switch-to-workspace (ws)
-  "Switch to workspace WS via `+workspace-switch'.
+  "Switch to workspace WS via the workspace.el navigation boundary.
 Signals an error if the switch fails — downstream code assumes the
 switch succeeded, so silent failure would operate on the wrong
 workspace.
 
 This is the raw primitive — prefer `claude-repl-jump-to-workspace' for
-user-facing identity-based jumps so the destination tab flashes."
+user-facing identity-based jumps so the destination tab flashes.
+Routes through `claude-repl--ws-switch' (workspace.el integration
+boundary); callers must not call `+workspace-switch' directly."
   (claude-repl--log ws "switch-to-workspace: ws=%s" ws)
-  (+workspace-switch ws)
+  (claude-repl--ws-switch ws)
   (claude-repl--log ws "switch-to-workspace: switched ws=%s" ws))
 
 (defun claude-repl-jump-to-workspace (ws &optional no-flash)
@@ -341,10 +343,9 @@ does not pay for redundant `+workspace-switch' / `select-window' /
 not re-signaled — the macro's job is best-effort focus restoration,
 not error propagation."
   (when (and orig-persp
-             (fboundp '+workspace-switch)
              (not (equal orig-persp (claude-repl--ws-current-name))))
     (condition-case err
-        (+workspace-switch orig-persp)
+        (claude-repl--ws-switch orig-persp)
       (error
        (claude-repl--log nil
                          "restore-focus: switch back to %s failed err=%S"

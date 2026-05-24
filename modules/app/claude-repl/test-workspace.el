@@ -951,6 +951,32 @@ identity-distinct string injected by `claude-repl-set-priority' from
         (claude-repl--reorder-workspace-by-priority "new-p1")
         (should (equal (car captured) "main"))))))
 
+;;;; ---- Tests: --ws-switch ----
+
+(ert-deftest claude-repl-test-ws-switch-delegates-when-bound ()
+  "ws-switch calls +workspace-switch with the given ws name."
+  (claude-repl-test--with-clean-state
+    (let (called-with)
+      (cl-letf (((symbol-function '+workspace-switch)
+                 (lambda (ws &rest _args) (setq called-with ws))))
+        (claude-repl--ws-switch "my-ws")
+        (should (equal called-with "my-ws"))))))
+
+(ert-deftest claude-repl-test-ws-switch-passes-extra-args ()
+  "ws-switch forwards additional args to +workspace-switch."
+  (claude-repl-test--with-clean-state
+    (let (captured-args)
+      (cl-letf (((symbol-function '+workspace-switch)
+                 (lambda (&rest args) (setq captured-args args))))
+        (claude-repl--ws-switch "my-ws" t)
+        (should (equal captured-args '("my-ws" t)))))))
+
+(ert-deftest claude-repl-test-ws-switch-noop-when-unbound ()
+  "ws-switch is a no-op when +workspace-switch is not fboundp."
+  (claude-repl-test--with-clean-state
+    (fmakunbound '+workspace-switch)
+    (should-not (claude-repl--ws-switch "my-ws"))))
+
 ;;;; ---- Tests: --ws-current-name ----
 
 (ert-deftest claude-repl-test-ws-current-name-delegates-to-wrapper ()

@@ -2977,7 +2977,7 @@ becomes noise; identity-based jumps (`SPC p p', priority change,
 worktree jump) keep the flash since they're discrete attention cues."
   (let ((current-name (claude-repl--ws-current-name)))
     (if (+workspace--protected-p current-name)
-        (+workspace-switch +workspaces-main t)
+        (claude-repl--ws-switch +workspaces-main t)
       (condition-case-unless-debug ex
           (let* ((visible (claude-repl--filter-hidden-names
                            (+workspace-list-names) current-name))
@@ -2985,7 +2985,7 @@ worktree jump) keep the flash since they're discrete attention cues."
                  (index (cl-position current-name visible :test #'equal)))
             (when (= perspc 1)
               (user-error "No other workspaces"))
-            (+workspace-switch (nth (mod (+ index n) perspc) visible)))
+            (claude-repl--ws-switch (nth (mod (+ index n) perspc) visible)))
         ('user-error (+workspace-error (cadr ex) t))
         ('error (+workspace-error ex t))))))
 
@@ -3028,7 +3028,7 @@ does not consult `current-prefix-arg' and does not flash the tab."
          (dest (nth index names)))
     (unless dest
       (user-error "No workspace at #%s" (1+ index)))
-    (+workspace-switch dest)))
+    (claude-repl--ws-switch dest)))
 
 (defun claude-repl-workspace-switch-to-0 ()
   "Switch to the 1st workspace.  Thin wrapper, ignores prefix arg."
@@ -3082,7 +3082,7 @@ does not consult `current-prefix-arg' and does not flash the tab."
          (dest (car (last names))))
     (unless dest
       (user-error "No workspaces"))
-    (+workspace-switch dest)))
+    (claude-repl--ws-switch dest)))
 
 ;;;; Workspace tab-order shuffles
 ;;

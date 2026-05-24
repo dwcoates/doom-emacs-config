@@ -170,8 +170,8 @@ Returns the list of restored workspace names."
         (claude-repl--reorder-workspace-to-front ws)))
     ;; Return focus to wherever the user was before the restore cascade
     ;; switched the frame through each re-established workspace.
-    (when (and origin (fboundp '+workspace-switch))
-      (ignore-errors (+workspace-switch origin)))
+    (when origin
+      (ignore-errors (claude-repl--ws-switch origin)))
     targets))
 
 ;;;; Persistence ------------------------------------------------------------
