@@ -656,5 +656,26 @@ route through it; they may not mutate `persp-names-cache' directly."
           (claude-repl--log ws "reorder-workspace-by-priority: SKIP-APPLY ws=%s reason=persp-update-names-cache-unbound"
                             ws)))))))
 
+;;;; ---- persp-mode identity / navigation boundary -----------------------
+;;
+;; These thin wrappers insulate callers from the +workspace-* API names so
+;; (a) the fboundp guards are written once, in one place; (b) tests stub a
+;; single symbol instead of juggling `fboundp' and the real function; and
+;; (c) future persp-mode API changes require only a local edit here.
+
+(defun claude-repl--ws-current-name ()
+  "Return the name of the currently-active workspace, or nil.
+Delegates to `+workspace-current-name' when persp-mode is loaded;
+returns nil when that function is unbound (e.g. during tests that
+do not load persp-mode, or early during startup before the workspace
+system is ready).
+
+This is the persp-mode identity boundary owned by `workspace.el'.
+Callers must use this function instead of calling
+`+workspace-current-name' directly or wrapping it themselves with
+`fboundp'."
+  (and (fboundp '+workspace-current-name)
+       (+workspace-current-name)))
+
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here

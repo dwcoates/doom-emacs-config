@@ -581,7 +581,7 @@ the resolved directory is not inside a git repository.
 Intended to be called exactly once per workspace, at creation time, so
 new worktrees are always rooted at the repository the user is currently
 working in (rather than wherever Emacs happened to be launched)."
-  (let* ((ws-dir (ignore-errors (claude-repl--ws-dir (+workspace-current-name))))
+  (let* ((ws-dir (ignore-errors (claude-repl--ws-dir (claude-repl--ws-current-name))))
          (dir (or ws-dir default-directory))
          (default-directory dir)
          (raw (claude-repl--git-string-quiet "rev-parse" "--show-toplevel")))
@@ -609,7 +609,7 @@ via `directory-file-name' so that the same directory always produces the same ha
 Uses an MD5 hash of the canonical project root path from the workspace hashmap.
 Returns nil when no workspace has a registered `:project-dir' — callers are
 expected to only invoke this from contexts where a workspace is active."
-  (let* ((root (ignore-errors (claude-repl--ws-dir (+workspace-current-name))))
+  (let* ((root (ignore-errors (claude-repl--ws-dir (claude-repl--ws-current-name))))
          (id (when root
                (substring (md5 (claude-repl--path-canonical root)) 0 claude-repl-workspace-id-length))))
     (claude-repl--log-verbose nil "workspace-id: root=%s id=%s" root id)
@@ -681,12 +681,11 @@ empty id produces buffer names like *claude-panel-*, which the
 `claude-repl--vterm-buffer-re' / `claude-repl--input-buffer-re' regexes
 mis-classify (input names match the vterm regex with id=\"input-\"),
 causing `claude-repl--sync-panels' to delete the input panel as orphaned."
-  (let* ((ws-name (or ws (and (fboundp '+workspace-current-name)
-                              (+workspace-current-name))))
+  (let* ((ws-name (or ws (claude-repl--ws-current-name)))
          (safe (claude-repl--sanitize-ws-name ws-name)))
     (when (or (null safe) (string-empty-p safe))
       (error "claude-repl--buffer-name: empty workspace name (ws=%S, +workspace-current-name=%S, sanitized=%S)"
-             ws (and (fboundp '+workspace-current-name) (+workspace-current-name)) safe))
+             ws (claude-repl--ws-current-name) safe))
     (let ((name (format claude-repl-panel-buffer-name-format (or suffix "") safe)))
       (claude-repl--log-verbose nil "buffer-name: suffix=%s ws=%s name=%s" suffix ws-name name)
       name)))
@@ -750,13 +749,13 @@ BUFFERS may be buffer objects or name strings."
 
 (defun claude-repl--current-ws-p (ws)
   "Return non-nil when WS is the currently active workspace name."
-  (string= ws (+workspace-current-name)))
+  (string= ws (claude-repl--ws-current-name)))
 
 (defun claude-repl--current-ws-live-vterm ()
   "Return the live vterm buffer for the current workspace, or nil.
 Looks up :vterm-buffer in the current workspace state and returns it only if
 the buffer object is still live."
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (buf (claude-repl--ws-get ws :vterm-buffer))
          (live (and buf (buffer-live-p buf))))
     (claude-repl--log-verbose ws "current-ws-live-vterm: buf=%s live=%s" buf live)

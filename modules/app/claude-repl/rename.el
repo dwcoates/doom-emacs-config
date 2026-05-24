@@ -322,12 +322,12 @@ can lightly edit the existing name rather than retype it.
 NEW-NAME may include a directory prefix (e.g. \"DWC/foo\") to set the
 branch ref explicitly; a bare name preserves the current branch's prefix."
   (interactive
-   (let* ((ws (+workspace-current-name))
+   (let* ((ws (claude-repl--ws-current-name))
           (path (claude-repl--ws-dir ws))
           (default (or (claude-repl--rename-resolve-current-branch path)
                        ws)))
      (list (read-string (format "Rename '%s' to: " ws) default))))
-  (claude-repl--do-rename-workspace (+workspace-current-name) new-name))
+  (claude-repl--do-rename-workspace (claude-repl--ws-current-name) new-name))
 
 (defalias '+dwc/workspace-rename #'claude-repl-rename-workspace)
 
