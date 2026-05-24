@@ -365,6 +365,79 @@ to avoid surfacing nuked workspaces."
     (should-not (claude-repl--ws-live-p "ws1"))
     (should (claude-repl--ws-tombstoned-p "ws1"))))
 
+;;;; ---- Tests: --ws-hide-tombstoned-p ----
+
+(ert-deftest claude-repl-test-ws-hide-tombstoned-p-returns-t-when-both-set ()
+  "A workspace tombstoned by the hide flow returns t."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "hidden-ws" :project-dir "/tmp/x")
+    (claude-repl--ws-put "hidden-ws" :hidden-project-dir t)
+    (claude-repl--ws-del "hidden-ws")
+    (should (claude-repl--ws-hide-tombstoned-p "hidden-ws"))))
+
+(ert-deftest claude-repl-test-ws-hide-tombstoned-p-returns-nil-for-nuke-tombstoned ()
+  "A workspace tombstoned without the hide marker returns nil even though it is tombstoned."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "nuked-ws" :project-dir "/tmp/x")
+    (claude-repl--ws-del "nuked-ws")
+    (should (claude-repl--ws-tombstoned-p "nuked-ws"))
+    (should-not (claude-repl--ws-hide-tombstoned-p "nuked-ws"))))
+
+(ert-deftest claude-repl-test-ws-hide-tombstoned-p-returns-nil-for-live-marker ()
+  "A live workspace carrying the marker but no :nuked-at returns nil.
+Predicate is a conjunction of tombstone state AND reason marker."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "live-ws" :project-dir "/tmp/x")
+    (claude-repl--ws-put "live-ws" :hidden-project-dir t)
+    (should-not (claude-repl--ws-hide-tombstoned-p "live-ws"))))
+
+(ert-deftest claude-repl-test-ws-hide-tombstoned-p-returns-nil-for-unknown ()
+  "An unregistered workspace returns nil."
+  (claude-repl-test--with-clean-state
+    (should-not (claude-repl--ws-hide-tombstoned-p "never-seen"))))
+
+;;;; ---- Tests: --ws-hide-tombstoned-names ----
+
+(ert-deftest claude-repl-test-ws-hide-tombstoned-names-returns-hide-tombstones-only ()
+  "Enumerator returns hide-tombstoned ws but excludes nuke-tombstoned and live ws."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "hidden1" :project-dir "/tmp/a")
+    (claude-repl--ws-put "hidden1" :hidden-project-dir t)
+    (claude-repl--ws-del "hidden1")
+    (claude-repl--ws-put "nuked"   :project-dir "/tmp/b")
+    (claude-repl--ws-del "nuked")
+    (claude-repl--ws-put "live"    :project-dir "/tmp/c")
+    (let ((names (claude-repl--ws-hide-tombstoned-names)))
+      (should (equal names '("hidden1")))
+      (should-not (member "nuked" names))
+      (should-not (member "live" names)))))
+
+(ert-deftest claude-repl-test-ws-hide-tombstoned-names-sorted-by-name ()
+  "Returned names are sorted lexicographically for deterministic restore order."
+  (claude-repl-test--with-clean-state
+    (dolist (n '("c" "a" "b"))
+      (claude-repl--ws-put n :project-dir (concat "/tmp/" n))
+      (claude-repl--ws-put n :hidden-project-dir t)
+      (claude-repl--ws-del n))
+    (should (equal (claude-repl--ws-hide-tombstoned-names) '("a" "b" "c")))))
+
+(ert-deftest claude-repl-test-ws-hide-tombstoned-names-empty-when-no-matches ()
+  "Returns nil when no workspace carries the marker."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "live" :project-dir "/tmp/x")
+    (should-not (claude-repl--ws-hide-tombstoned-names))))
+
+;;;; ---- Tests: --ws-render-status nil for hide-tombstoned ----
+
+(ert-deftest claude-repl-test-ws-render-status-nil-for-hide-tombstoned ()
+  "Render-status returns nil for hide-tombstoned ws, collapsed with nuke-tombstoned."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "hidden" :project-dir "/tmp/x")
+    (claude-repl--ws-put "hidden" :claude-state :thinking)
+    (claude-repl--ws-put "hidden" :hidden-project-dir t)
+    (claude-repl--ws-del "hidden")
+    (should-not (claude-repl--ws-render-status "hidden"))))
+
 ;;;; ---- Tests: --ws-open-p ----
 
 (ert-deftest claude-repl-test-ws-open-p-returns-t-when-in-persp-cache ()
