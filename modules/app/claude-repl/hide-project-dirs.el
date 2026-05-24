@@ -120,11 +120,13 @@ returned, since tombstones have no persp left to kill."
   "Return names of workspaces carrying the `:hidden-project-dir' marker.
 These are the tombstones killed by a prior hide toggle — the set that
 `claude-repl--hide-project-dirs--restore' brings back.  Returned in
-name order so restore is deterministic."
-  (sort (cl-remove-if-not
-         (lambda (ws) (claude-repl--ws-get ws :hidden-project-dir))
-         (hash-table-keys claude-repl--workspaces))
-        #'string<))
+name order so restore is deterministic.
+
+Thin wrapper over `claude-repl--ws-hide-tombstoned-names' (the
+workspace.el integration boundary for hide-reason tombstones); this
+file no longer pokes `claude-repl--workspaces' directly per the
+\"Workspace state encapsulation\" rule in AGENTS.md."
+  (claude-repl--ws-hide-tombstoned-names))
 
 ;;;; Hide / restore ---------------------------------------------------------
 

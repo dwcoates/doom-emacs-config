@@ -242,9 +242,50 @@ no-silent-fallback rule).  Returns nil on success."
 (defun claude-repl--ws-tombstoned-p (ws)
   "Return non-nil iff WS is known AND has `:nuked-at' set.
 Complementary to `--ws-live-p' over `--ws-known-p': a known ws is
-either live or tombstoned, never both.  Unknown ws returns nil."
+either live or tombstoned, never both.  Unknown ws returns nil.
+
+A tombstone may additionally carry a REASON marker explaining why
+the entry was nuked, layered on top of the `:nuked-at' stamp:
+
+  - `:hidden-project-dir t' — the entry was killed by
+    `claude-repl-hide-project-dirs-mode' and is eligible for restore
+    when the mode toggles off.  Use `--ws-hide-tombstoned-p' to test
+    for this reason specifically.
+
+The base `--ws-tombstoned-p' predicate intentionally collapses all
+reasons because every renderer treats them identically (drawer
+filters them out, `--ws-render-status' returns nil); callers that
+need to distinguish reasons use the reason-specific helper."
   (and (claude-repl--ws-known-p ws)
        (not (null (claude-repl--ws-get ws :nuked-at)))))
+
+(defun claude-repl--ws-hide-tombstoned-p (ws)
+  "Return non-nil iff WS is tombstoned for the hide-project-dirs reason.
+True when WS is `--ws-tombstoned-p' AND carries `:hidden-project-dir t'
+on its plist (the marker stamped by
+`claude-repl--hide-project-dirs--hide' before the nuke).  Used by the
+restore path to enumerate the tombstones it owns without sweeping in
+nuke-by-hand tombstones it does not.
+
+Unknown ws returns nil.  Live ws (no `:nuked-at') returns nil even
+if `:hidden-project-dir' happens to be t — the predicate is a
+conjunction of tombstone state and reason marker."
+  (and (claude-repl--ws-tombstoned-p ws)
+       (not (null (claude-repl--ws-get ws :hidden-project-dir)))))
+
+(defun claude-repl--ws-hide-tombstoned-names ()
+  "Return the names of every workspace tombstoned for the hide reason.
+Wrapper around the `(hash-table-keys claude-repl--workspaces)' walk
+filtered by `--ws-hide-tombstoned-p'.  Used by
+`claude-repl-hide-project-dirs-mode's restore path so it does not
+poke `claude-repl--workspaces' directly (per the
+\"Workspace state encapsulation\" rule in AGENTS.md).
+
+Sorted by name so restore order is deterministic and matches what
+the previous direct-hash-walk produced."
+  (sort (cl-remove-if-not #'claude-repl--ws-hide-tombstoned-p
+                          (hash-table-keys claude-repl--workspaces))
+        #'string<))
 
 (defun claude-repl--ws-open-p (ws)
   "Return non-nil iff WS is currently visible in the tab-bar.
@@ -368,12 +409,17 @@ Returns one of (in precedence order; first match wins):
     — read from `:claude-state' in order of precedence.  Each is set
     by `claude-repl--ws-set-claude-state' through the typed setter.
 
-  nil             — tombstoned workspace (`--ws-tombstoned-p' t), or
-                    no session / unborn (every signal above absent).
-                    The two cases are intentionally collapsed: a
-                    renderer should skip both equally (the drawer's
-                    `--live-ws-names' filter already excludes
-                    tombstones before this function is called).
+  nil             — tombstoned workspace (`--ws-tombstoned-p' t,
+                    regardless of REASON marker such as
+                    `:hidden-project-dir'), or no session / unborn
+                    (every signal above absent).  The cases are
+                    intentionally collapsed: every renderer skips them
+                    equally (the drawer's `--live-ws-names' filter
+                    already excludes tombstones before this function
+                    is called, and callers that need to distinguish
+                    nuke-tombstoned from hide-tombstoned use the
+                    reason-specific predicate
+                    `--ws-hide-tombstoned-p').
 
 Precedence rationale: a workspace that crashed its vterm *while a
 merge was in flight* still needs to surface the merge signal — the
