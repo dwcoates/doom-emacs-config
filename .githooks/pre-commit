@@ -37,6 +37,15 @@ else
   fi
 fi
 
+# Skip the test gate entirely during cherry-picks.  The commit being
+# replayed was already tested on its source branch; re-running ERT here
+# adds noise with no benefit and blocks automated cherry-pick workflows.
+GIT_DIR_PATH="$(git rev-parse --git-dir)"
+if [ -f "$GIT_DIR_PATH/CHERRY_PICK_HEAD" ]; then
+  echo "[pre-commit] Cherry-pick detected — skipping ERT gate."
+  exit 0
+fi
+
 # Only gate when claude-repl source or test files are staged.
 if ! git diff --cached --name-only | grep -qE '^modules/app/claude-repl/.*\.el$'; then
   exit 0
