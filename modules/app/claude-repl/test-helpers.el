@@ -376,10 +376,23 @@ so the install can be verified after the fact by
                    (concat
                     "EXTERNAL BOUNDARY UNMOCKED: `%s' called with %S during a test run.\n"
                     "Per AGENTS.md \"No External Processes or External State in Tests\",\n"
-                    "every external-boundary wrapper must be stubbed via `cl-letf' before\n"
-                    "the production code under test reaches it.\n"
-                    "Fix: add `((symbol-function '%s) (lambda (&rest _args) <fixture>))`\n"
-                    "to your test's `cl-letf' bindings.")
+                    "every external-boundary wrapper MUST be stubbed via `cl-letf'\n"
+                    "before the production code under test reaches it.\n"
+                    "\n"
+                    "REQUIRED REMEDIATION (one of these two; no other option exists):\n"
+                    "  (a) Add the stub: `((symbol-function '%s)\n"
+                    "                      (lambda (&rest _args) <fixture>))`\n"
+                    "      to the failing test's `cl-letf' bindings.\n"
+                    "  (b) Delete the test if its only purpose is to exercise the\n"
+                    "      external boundary itself (per AGENTS.md \"We test lisp,\n"
+                    "      not external code\" — such tests do not belong in ERT).\n"
+                    "\n"
+                    "BYPASSING IS FORBIDDEN.  Do NOT route around this guard via\n"
+                    "`--no-verify', `ignore-errors', `condition-case' that swallows\n"
+                    "the signal, restoring the original `symbol-function' inside the\n"
+                    "test, advice that no-ops the guard, or any other technique.\n"
+                    "If you find yourself reasoning \"just this once\", stop and\n"
+                    "apply remediation (a) or (b) instead.")
                    fn-name args fn-name))))))
     (setq claude-repl-test--external-guards-installed t)))
 
