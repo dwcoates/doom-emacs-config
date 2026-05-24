@@ -39,7 +39,9 @@
                                   (command . "~/.claude/hooks/session-start-notify.sh")))))))
      (Notification . (((matcher . "permission_prompt")
                        (hooks . (((type . "command")
-                                  (command . "~/.claude/hooks/permission-notify.sh"))))))))))
+                                  (command . "~/.claude/hooks/permission-notify.sh")))))))
+     (PermissionRequest . (((hooks . (((type . "command")
+                                       (command . "~/.claude/hooks/permission-request-notify.sh"))))))))))
 
 (defun test-install--json-missing-one (event-to-drop)
   "Like the all-hooks fixture but with EVENT-TO-DROP removed."
@@ -139,6 +141,24 @@
   (cl-letf (((symbol-function 'claude-repl--settings-json)
              (lambda () (test-install--json-missing-one 'Notification))))
     (should-not (claude-repl--hooks-installed-p))))
+
+(ert-deftest claude-repl-test-hooks-installed-missing-permission-request ()
+  "Returns nil when the PermissionRequest hook is absent.
+PermissionRequest is the real-time permission-dialog signal that drives
+the tab to `:permission' WHILE Claude is waiting on the user.  Its
+absence falls back to the lagging Notification permission_prompt path,
+so doctor must surface the missing registration."
+  (cl-letf (((symbol-function 'claude-repl--settings-json)
+             (lambda () (test-install--json-missing-one 'PermissionRequest))))
+    (should-not (claude-repl--hooks-installed-p))))
+
+(ert-deftest claude-repl-test-managed-hooks-includes-permission-request ()
+  "The managed-hooks alist must include PermissionRequest pointing at our script.
+This is the real-time signal that flips the tab to `:permission' the
+moment the permission dialog appears, so a regression that drops the
+entry would silently revert to the lagging Notification path."
+  (should (equal (cdr (assq 'PermissionRequest claude-repl--managed-hooks))
+                 "~/.claude/hooks/permission-request-notify.sh")))
 
 (ert-deftest claude-repl-test-hooks-installed-settings-absent ()
   "Returns nil when settings.json cannot be read."
@@ -399,7 +419,8 @@ SCRIPT-NAME with `:missing' means leave that script absent."
      ("subagent-stop-notify.sh" . (#o755 . "x"))
      ("prompt-submit-notify.sh" . (#o755 . "x"))
      ("session-start-notify.sh" . (#o755 . "x"))
-     ("permission-notify.sh" . (#o755 . "x")))
+     ("permission-notify.sh" . (#o755 . "x"))
+     ("permission-request-notify.sh" . (#o755 . "x")))
    (lambda (_tmp)
      (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
                ((symbol-function 'claude-repl--settings-json)
@@ -421,7 +442,8 @@ SCRIPT-NAME with `:missing' means leave that script absent."
      ("subagent-stop-notify.sh" . (#o755 . "x"))
      ("prompt-submit-notify.sh" . (#o755 . "x"))
      ("session-start-notify.sh" . (#o755 . "x"))
-     ("permission-notify.sh" . (#o755 . "x")))
+     ("permission-notify.sh" . (#o755 . "x"))
+     ("permission-request-notify.sh" . (#o755 . "x")))
    (lambda (_tmp)
      (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
                ((symbol-function 'claude-repl--settings-json)
@@ -442,7 +464,8 @@ SCRIPT-NAME with `:missing' means leave that script absent."
      ("subagent-stop-notify.sh" . (#o755 . "x"))
      ("prompt-submit-notify.sh" . (#o755 . "x"))
      ("session-start-notify.sh" . (#o755 . "x"))
-     ("permission-notify.sh" . (#o755 . "x")))
+     ("permission-notify.sh" . (#o755 . "x"))
+     ("permission-request-notify.sh" . (#o755 . "x")))
    (lambda (_tmp)
      (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
                ((symbol-function 'claude-repl--settings-json)

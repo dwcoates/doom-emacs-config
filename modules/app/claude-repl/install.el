@@ -41,17 +41,27 @@
 ;;;; ---- Constants --------------------------------------------------------
 
 (defconst claude-repl--managed-hooks
-  '((Stop             . "~/.claude/hooks/stop-notify.sh")
-    (StopFailure      . "~/.claude/hooks/stop-failure-notify.sh")
-    (SubagentStart    . "~/.claude/hooks/subagent-start-notify.sh")
-    (SubagentStop     . "~/.claude/hooks/subagent-stop-notify.sh")
-    (UserPromptSubmit . "~/.claude/hooks/prompt-submit-notify.sh")
-    (SessionStart     . "~/.claude/hooks/session-start-notify.sh")
-    (Notification     . "~/.claude/hooks/permission-notify.sh"))
+  '((Stop              . "~/.claude/hooks/stop-notify.sh")
+    (StopFailure       . "~/.claude/hooks/stop-failure-notify.sh")
+    (SubagentStart     . "~/.claude/hooks/subagent-start-notify.sh")
+    (SubagentStop      . "~/.claude/hooks/subagent-stop-notify.sh")
+    (UserPromptSubmit  . "~/.claude/hooks/prompt-submit-notify.sh")
+    (SessionStart      . "~/.claude/hooks/session-start-notify.sh")
+    (Notification      . "~/.claude/hooks/permission-notify.sh")
+    (PermissionRequest . "~/.claude/hooks/permission-request-notify.sh"))
   "Alist (EVENT-SYMBOL . COMMAND-PATH) for hooks this module manages.
 The COMMAND-PATH matches what `install.sh' writes into
 `~/.claude/settings.json' — the literal `~/' is preserved
-because Claude Code expands it at dispatch time.")
+because Claude Code expands it at dispatch time.
+
+`PermissionRequest' is the real-time permission-dialog signal: Claude
+Code fires it the moment the permission UI appears, so the tab flips
+to `:permission' WHILE Claude is waiting on the user rather than after.
+The older `Notification' permission_prompt entry can lag the dialog
+(it fires when Claude Code dispatches a NOTIFICATION about the prompt,
+which is the 60s-idle nudge on \"needs your attention\"), so it's kept
+as a fallback — the elisp callback's `:thinking' gate makes redundant
+arrivals a no-op.")
 
 (defconst claude-repl--install-script
   (let ((module-dir (file-name-directory (or load-file-name
@@ -263,19 +273,27 @@ load so hooks are registered before later claude-repl sub-modules
 ;;;; ---- Doctor support ---------------------------------------------------
 
 (defconst claude-repl--hook-severity
-  '((Stop             . error)
-    (SessionStart     . error)
-    (UserPromptSubmit . warn)
-    (Notification     . warn)
+  '((Stop              . error)
+    (SessionStart      . error)
+    (UserPromptSubmit  . warn)
+    (Notification      . warn)
+    ;; PermissionRequest: when missing, the `:permission' tab transition
+    ;; falls back to the `Notification' permission_prompt signal, which
+    ;; can lag the dialog appearance by up to the 60s-idle nudge window.
+    ;; Tabs still eventually flip yellow — just not at the moment Claude
+    ;; starts waiting.  Warn rather than error so users on older
+    ;; Claude Code versions (where PermissionRequest may not exist) are
+    ;; not blocked.
+    (PermissionRequest . warn)
     ;; New (2026-05) Stop-coordination hooks.  Treated as warn rather than
     ;; error: their absence does not break the core REPL loop, only the
     ;; correctness of the `:done' transition gating (Stop will resolve
     ;; immediately) and the `:stop-failed' state (turns ending on API
     ;; errors will appear stuck in `:thinking').  Promote to `error' if
     ;; we ever rely on them as load-bearing.
-    (StopFailure      . warn)
-    (SubagentStart    . warn)
-    (SubagentStop     . warn))
+    (StopFailure       . warn)
+    (SubagentStart     . warn)
+    (SubagentStop      . warn))
   "Severity of a missing managed hook.
 `error' means the module is non-functional without it; `warn' means a
 degraded UX but still usable.  Script-file problems for any hook are

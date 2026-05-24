@@ -233,7 +233,24 @@ name and the directory."
 
 (defun claude-repl--on-permission-event (ws _dir)
   "Set :permission status on workspace WS.
-Callback for the permission_prompt sentinel handler.
+Callback for both sentinel sources that signal a permission prompt:
+
+  * `permission_request' — written by the PermissionRequest hook, which
+    Claude Code fires the moment the permission dialog appears (before
+    the user answers).  This is the real-time signal; it's what flips
+    the tab to `:permission' WHILE Claude is waiting on the user.
+
+  * `permission_prompt' — written by the Notification hook for
+    `notification_type=permission_prompt'.  That notification can lag
+    the dialog (Claude Code dispatches it when sending a notification
+    ABOUT the prompt — historically including the 60s-idle \"Claude
+    Code needs your attention\" nudge under the same type), so by the
+    time it arrives the user may already have answered.  Kept as a
+    fallback for older Claude Code versions that don't emit
+    PermissionRequest.
+
+Whichever arrives first wins; the second is a no-op thanks to the
+`:thinking' gate below.
 
 The Notification hook fires for both real permission prompts and the
 60s-idle \"Claude Code needs your attention\" nudge under the same
@@ -451,7 +468,17 @@ running but its load cycle has logically ended)."
   ;; otherwise stop-failure files would dispatch to the regular Stop
   ;; handler.  (`subagent_start_' / `subagent_stop_' do not collide with
   ;; `stop_' since their filenames start with `subagent_'.)
-  '(("permission_prompt"  . (:callback claude-repl--on-permission-event
+  '(;; ORDER MATTERS for this pair too: `permission_request' is itself
+    ;; prefixed by `permission_' just like `permission_prompt' is, but
+    ;; since neither prefix is a prefix of the other (they diverge at
+    ;; the underscore after "permission_"), order between THEM doesn't
+    ;; matter.  `permission_request' is listed first because it's the
+    ;; canonical/primary signal (real-time PermissionRequest hook) and
+    ;; `permission_prompt' is the lagging fallback (Notification hook).
+    ("permission_request" . (:callback claude-repl--on-permission-event
+                             :warning  "[claude-repl] WARNING: permission-request dir=%s matched no workspace"
+                             :name     "handle-permission-request"))
+    ("permission_prompt"  . (:callback claude-repl--on-permission-event
                              :warning  "[claude-repl] WARNING: permission dir=%s matched no workspace"
                              :name     "handle-permission"))
     ("subagent_start_"    . (:callback claude-repl--on-subagent-start-event

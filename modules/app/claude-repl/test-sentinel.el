@@ -77,6 +77,21 @@ Symmetric to the filter in `claude-repl--poll-workspace-notifications'."
         (should (eq (plist-get dispatched-handler :callback)
                     'claude-repl--on-permission-event))))))
 
+(ert-deftest claude-repl-test-sentinel-dispatches-permission-request ()
+  "A file named permission_request should dispatch to the permission handler.
+This is the real-time PermissionRequest signal Claude Code emits at the
+moment the permission dialog appears; the dispatch entry must share its
+callback with the older `permission_prompt' Notification fallback so
+both paths flip the tab to `:permission' through the same gate."
+  (claude-repl-test--with-clean-state
+    (let ((dispatched-handler nil))
+      (cl-letf (((symbol-function 'claude-repl--process-sentinel-file)
+                 (lambda (_file handler) (setq dispatched-handler handler))))
+        (claude-repl--dispatch-sentinel-file "/dir/permission_request")
+        (should dispatched-handler)
+        (should (eq (plist-get dispatched-handler :callback)
+                    'claude-repl--on-permission-event))))))
+
 (ert-deftest claude-repl-test-sentinel-dispatches-stop ()
   "A file named stop_12345 should dispatch to the stop handler."
   (claude-repl-test--with-clean-state
