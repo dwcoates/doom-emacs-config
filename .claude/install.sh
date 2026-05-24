@@ -49,6 +49,13 @@ HOOKS=(
   "UserPromptSubmit|prompt-submit-notify.sh|"
   "SessionStart|session-start-notify.sh|"
   "Notification|permission-notify.sh|permission_prompt"
+  # PermissionRequest fires at the moment the permission dialog appears,
+  # BEFORE the user answers — that's the real-time signal the tab-bar
+  # needs to show `:permission' WHILE Claude is waiting on the user.
+  # The older Notification hook above is kept as a fallback (and for the
+  # 60s-idle nudge that arrives under the same `permission_prompt'
+  # notification type).
+  "PermissionRequest|permission-request-notify.sh|"
 )
 
 # Resolve a $SCRIPT_DIR-relative path to an absolute canonical form
