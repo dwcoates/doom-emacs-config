@@ -227,11 +227,11 @@ to the new identity."
 
 (defun claude-repl--rename-persp (old-ws new-ws)
   "Rename the persp-mode perspective from OLD-WS to NEW-WS.
-No-op when `persp-rename' or `persp-get-by-name' is unbound (tests).
+No-op when `persp-rename' is unbound or when OLD-WS has no live persp.
 Signals `error' when the persp exists but the rename fails — a
 persistent old-name persp would diverge from the renamed state."
-  (when (and (fboundp 'persp-rename) (fboundp 'persp-get-by-name))
-    (when-let ((persp (persp-get-by-name old-ws)))
+  (when (fboundp 'persp-rename)
+    (when-let ((persp (claude-repl--ws-resolve-persp old-ws)))
       (unless (persp-rename new-ws persp)
         (error "persp-rename %s -> %s failed" old-ws new-ws)))))
 

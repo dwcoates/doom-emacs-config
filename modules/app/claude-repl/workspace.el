@@ -663,6 +663,27 @@ route through it; they may not mutate `persp-names-cache' directly."
 ;; single symbol instead of juggling `fboundp' and the real function; and
 ;; (c) future persp-mode API changes require only a local edit here.
 
+(defun claude-repl--ws-resolve-persp (ws)
+  "Return the live persp object for workspace name WS, or nil.
+Delegates to `persp-get-by-name'.  Returns nil when:
+  - `persp-get-by-name' is not bound (persp-mode not loaded), or
+  - WS is not found — persp-mode returns the keyword `persp-not-persp'
+    (i.e. `:nil') in that case, which is truthy but not a persp object;
+    this wrapper normalizes that sentinel to nil.
+
+Callers must use this function instead of calling `persp-get-by-name'
+directly, so the persp-not-persp normalization and the fboundp guard are
+applied consistently.  This is part of the persp-mode integration
+boundary owned by `workspace.el' (see AGENTS.md)."
+  (when (fboundp 'persp-get-by-name)
+    (let ((p (persp-get-by-name ws)))
+      ;; persp-get-by-name returns the :nil keyword (the value of the
+      ;; `persp-not-persp' variable) when the persp is absent.  That
+      ;; sentinel is a keyword (not a plain symbol), so `keywordp'
+      ;; distinguishes it from a real persp struct.  Filter it out so
+      ;; callers receive either a real persp struct or nil.
+      (and p (not (keywordp p)) p))))
+
 (defun claude-repl--ws-system-available-p ()
   "Return non-nil when the persp-mode workspace system is active.
 Specifically, returns non-nil when the variable `persp-mode' is both

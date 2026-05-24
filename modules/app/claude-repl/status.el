@@ -1362,8 +1362,8 @@ config (e.g. from a placeholder layout) should not count as claude open."
 
 (defun claude-repl--claude-in-saved-wconf-p (ws-name)
   "Return non-nil if background workspace WS-NAME has a claude buffer in its saved config."
-  (let* ((persp (persp-get-by-name ws-name))
-         (wconf (and persp (not (symbolp persp)) (persp-window-conf persp))))
+  (let* ((persp (claude-repl--ws-resolve-persp ws-name))
+         (wconf (and persp (persp-window-conf persp))))
     (claude-repl--wconf-has-claude-p wconf)))
 
 (defun claude-repl--ws-claude-open-p (ws-name)

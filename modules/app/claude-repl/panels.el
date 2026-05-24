@@ -1071,26 +1071,24 @@ one bad buffer cannot block the rest.  File-visiting buffers are
 marked unmodified before killing so `kill-buffer' does not prompt —
 the user has already confirmed the destructive nuke."
   (when (and (claude-repl--ws-system-available-p)
-             (fboundp 'persp-get-by-name)
              (fboundp 'persp-buffers))
-    (when-let ((persp (persp-get-by-name ws)))
-      (unless (symbolp persp)
-        (let ((bufs (persp-buffers persp))
-              (kill-buffer-query-functions nil))
-          (claude-repl--log ws "kill-workspace-buffers: count=%d" (length bufs))
-          (dolist (buf bufs)
-            (condition-case err
-                (when (buffer-live-p buf)
-                  (when-let ((proc (get-buffer-process buf)))
-                    (set-process-query-on-exit-flag proc nil)
-                    (ignore-errors (delete-process proc))
-                    (claude-repl--schedule-sigkill proc))
-                  (with-current-buffer buf
-                    (set-buffer-modified-p nil))
-                  (kill-buffer buf))
-              (error
-               (claude-repl--log ws "kill-workspace-buffers: error on %s: %S"
-                                 (claude-repl--safe-buffer-name buf) err)))))))))
+    (when-let ((persp (claude-repl--ws-resolve-persp ws)))
+      (let ((bufs (persp-buffers persp))
+            (kill-buffer-query-functions nil))
+        (claude-repl--log ws "kill-workspace-buffers: count=%d" (length bufs))
+        (dolist (buf bufs)
+          (condition-case err
+              (when (buffer-live-p buf)
+                (when-let ((proc (get-buffer-process buf)))
+                  (set-process-query-on-exit-flag proc nil)
+                  (ignore-errors (delete-process proc))
+                  (claude-repl--schedule-sigkill proc))
+                (with-current-buffer buf
+                  (set-buffer-modified-p nil))
+                (kill-buffer buf))
+            (error
+             (claude-repl--log ws "kill-workspace-buffers: error on %s: %S"
+                               (claude-repl--safe-buffer-name buf) err))))))))
 
 ;;;; User commands
 
