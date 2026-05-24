@@ -38,9 +38,9 @@ window is selected so the user can start typing immediately."
 
 (defun claude-repl--ws-buffer-visible-p (key)
   "Return non-nil if the buffer stored at KEY in current workspace is visible."
-  (let* ((buf (claude-repl--ws-get (+workspace-current-name) key))
+  (let* ((buf (claude-repl--ws-get (claude-repl--ws-current-name) key))
          (result (and buf (buffer-live-p buf) (get-buffer-window buf))))
-    (claude-repl--log-verbose (+workspace-current-name) "ws-buffer-visible-p: key=%s result=%s" key (if result "visible" "hidden"))
+    (claude-repl--log-verbose (claude-repl--ws-current-name) "ws-buffer-visible-p: key=%s result=%s" key (if result "visible" "hidden"))
     result))
 
 (defun claude-repl--input-visible-p ()
@@ -55,7 +55,7 @@ window is selected so the user can start typing immediately."
   "Return t if both panels are visible."
   (let ((result (and (claude-repl--input-visible-p)
                      (claude-repl--vterm-visible-p))))
-    (claude-repl--log-verbose (+workspace-current-name) "panels-visible-p: result=%s" (if result "visible" "hidden"))
+    (claude-repl--log-verbose (claude-repl--ws-current-name) "panels-visible-p: result=%s" (if result "visible" "hidden"))
     result))
 
 ;;;; Panel display and hide
@@ -75,7 +75,7 @@ caller is doing a per-frame teardown."
 
 (defun claude-repl--close-buffer-windows (&rest bufs)
   "Close windows displaying any of BUFS."
-  (claude-repl--log (+workspace-current-name) "close-buffer-windows %s" (mapcar #'claude-repl--safe-buffer-name bufs))
+  (claude-repl--log (claude-repl--ws-current-name) "close-buffer-windows %s" (mapcar #'claude-repl--safe-buffer-name bufs))
   (dolist (buf bufs)
     (when (and buf (buffer-live-p buf))
       (claude-repl--close-buffer-window buf))))
@@ -93,7 +93,7 @@ Keyboard-navigation isolation is handled dynamically by
 `no-other-window' parameter — that way windmove/`other-window' can see
 vterm, but any non-mouse selection gets auto-corrected back to the
 input panel (or a warning if the input isn't displayed)."
-  (claude-repl--log (+workspace-current-name) "configure-vterm-window: win=%s" win)
+  (claude-repl--log (claude-repl--ws-current-name) "configure-vterm-window: win=%s" win)
   (claude-repl-window--harden win
                               :dedicate       t
                               :size-fix       'width
@@ -113,7 +113,7 @@ split, and we must never touch the drawer."
       (select-window main)))
   (when-let ((above (window-in-direction 'above)))
     (select-window above))
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (vterm-buf (claude-repl--ws-get ws :vterm-buffer))
          (input-buf (claude-repl--ws-get ws :input-buffer)))
     (claude-repl--log ws "show-panels vterm=%s input=%s"
@@ -149,8 +149,8 @@ Signals an error if the input buffer or its window cannot be found —
 callers should ensure panels are displayed before calling this.
 Buffer/window resolution delegates to
 `claude-repl-window--panel-buffer' and `--panel-window'."
-  (claude-repl--log (+workspace-current-name) "focus-input-panel")
-  (let* ((ws (+workspace-current-name))
+  (claude-repl--log (claude-repl--ws-current-name) "focus-input-panel")
+  (let* ((ws (claude-repl--ws-current-name))
          (buf (claude-repl-window--panel-buffer :input ws)))
     (unless buf
       (error "claude-repl--focus-input-panel: no :input-buffer for workspace %s" ws))
@@ -204,7 +204,7 @@ redirect), so the implementation deliberately works through
 (defun claude-repl--vterm-redraw ()
   "Redraw the current vterm buffer with read-only suppressed.
 Assumes the current buffer is in vterm-mode."
-  (claude-repl--log-verbose (+workspace-current-name) "vterm-redraw: buf=%s" (buffer-name))
+  (claude-repl--log-verbose (claude-repl--ws-current-name) "vterm-redraw: buf=%s" (buffer-name))
   (let ((inhibit-read-only t))
     (when vterm--term
       (vterm--redraw vterm--term))))
@@ -212,7 +212,7 @@ Assumes the current buffer is in vterm-mode."
 (defun claude-repl--do-refresh ()
   "Low-level refresh of the current vterm buffer.
 Must be called with a vterm-mode buffer current."
-  (claude-repl--log-verbose (+workspace-current-name) "do-refresh: buf=%s" (buffer-name))
+  (claude-repl--log-verbose (claude-repl--ws-current-name) "do-refresh: buf=%s" (buffer-name))
   (claude-repl--vterm-redraw)
   (redisplay t))
 
@@ -232,13 +232,13 @@ manual scroll position in the selected window."
         (orig-win (selected-window)))
     (if (and vterm-win (not (eq vterm-win orig-win)))
         (progn
-          (claude-repl--log-verbose (+workspace-current-name) "fix-vterm-scroll: snapping buf=%s" (buffer-name buf))
+          (claude-repl--log-verbose (claude-repl--ws-current-name) "fix-vterm-scroll: snapping buf=%s" (buffer-name buf))
           (with-current-buffer buf
             (when (and (eq major-mode 'vterm-mode)
                        (fboundp 'vterm-reset-cursor-point))
               (condition-case nil (vterm-reset-cursor-point) (end-of-buffer nil)))
             (claude-repl--snap-vterm-window-to-cursor vterm-win)))
-      (claude-repl--log-verbose (+workspace-current-name) "fix-vterm-scroll: skipped buf=%s vterm-win=%s same-win=%s"
+      (claude-repl--log-verbose (claude-repl--ws-current-name) "fix-vterm-scroll: skipped buf=%s vterm-win=%s same-win=%s"
                                 (buffer-name buf) (if vterm-win "yes" "no")
                                 (if (eq vterm-win orig-win) "yes" "no")))))
 
@@ -248,11 +248,11 @@ Uses the current buffer if it is in vterm-mode, otherwise looks up the
 workspace's vterm buffer."
   (if (eq major-mode 'vterm-mode)
       (progn
-        (claude-repl--log-verbose (+workspace-current-name) "resolve-vterm-buffer: path=vterm-mode buf=%s" (buffer-name))
+        (claude-repl--log-verbose (claude-repl--ws-current-name) "resolve-vterm-buffer: path=vterm-mode buf=%s" (buffer-name))
         (current-buffer))
-    (when-let ((ws (+workspace-current-name)))
+    (when-let ((ws (claude-repl--ws-current-name)))
       (let ((buf (claude-repl--ws-get ws :vterm-buffer)))
-        (claude-repl--log-verbose (+workspace-current-name) "resolve-vterm-buffer: path=workspace-lookup ws=%s buf=%s"
+        (claude-repl--log-verbose (claude-repl--ws-current-name) "resolve-vterm-buffer: path=workspace-lookup ws=%s buf=%s"
                                   ws (claude-repl--safe-buffer-name buf))
         buf))))
 
@@ -262,14 +262,14 @@ Works from any buffer or from within the vterm buffer itself."
   (let ((buf (claude-repl--resolve-vterm-buffer)))
     (cond
      ((not buf)
-      (claude-repl--log-verbose (+workspace-current-name) "refresh-vterm: no buffer found"))
+      (claude-repl--log-verbose (claude-repl--ws-current-name) "refresh-vterm: no buffer found"))
      ((not (buffer-live-p buf))
-      (claude-repl--log-verbose (+workspace-current-name) "refresh-vterm: buffer not live buf=%s" (buffer-name buf)))
+      (claude-repl--log-verbose (claude-repl--ws-current-name) "refresh-vterm: buffer not live buf=%s" (buffer-name buf)))
      (t
       (with-current-buffer buf
         (if (eq major-mode 'vterm-mode)
             (claude-repl--do-refresh)
-          (claude-repl--log-verbose (+workspace-current-name) "refresh-vterm: buf=%s not vterm-mode (mode=%s)"
+          (claude-repl--log-verbose (claude-repl--ws-current-name) "refresh-vterm: buf=%s not vterm-mode (mode=%s)"
                                     (buffer-name buf) major-mode)))
       (claude-repl--fix-vterm-scroll buf)))))
 
@@ -347,7 +347,7 @@ single redisplay step — a snap, not a scroll."
 (defun claude-repl--on-workspace-switch (&optional ws)
   "Handle workspace switch: update all workspace states, refresh vterm, reset cursors.
 WS is the workspace name to operate on; when nil, falls back to
-`(+workspace-current-name)' at call time.  Callers from
+`(claude-repl--ws-current-name)' at call time.  Callers from
 `--after-persp-activated' pass the ws captured at hook-fire time so
 the deferred call operates on the workspace that was just switched
 to, even if another switch raced ahead before the timer fired.
@@ -366,7 +366,7 @@ never causes a silent decay.
 Also runs `claude-repl--maybe-sweep-hidden-on-switch' so workspaces
 marked `:hidden' (via `SPC o C') are persp-killed when hide-mode is on
 — the persp-level enforcement of hide-mode."
-  (let ((ws (or ws (+workspace-current-name))))
+  (let ((ws (or ws (claude-repl--ws-current-name))))
     (claude-repl--log-verbose ws "workspace-switch ws=%s" ws)
     (when (eq (claude-repl--ws-claude-state ws) :done)
       (claude-repl--ws-put ws :done-acked t)
@@ -451,18 +451,18 @@ clears the `:done' focus-dwell tracking on the outgoing workspace so
 a sub-`claude-repl-done-idle-delay' transit never decays it.
 Logs `persp-names-cache' so cache mutations across persp lifecycle
 events (kill, switch, add) are traceable."
-  (claude-repl--log (+workspace-current-name) "before-persp-deactivate: entry cache=%S"
+  (claude-repl--log (claude-repl--ws-current-name) "before-persp-deactivate: entry cache=%S"
                     (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
-  (claude-repl--clear-done-ack-on-switch-away (+workspace-current-name))
+  (claude-repl--clear-done-ack-on-switch-away (claude-repl--ws-current-name))
   (claude-repl--redirect-from-claude-before-save)
   (condition-case err
       (persp-frame-save-state)
     (error (message "[claude-repl] WARNING: persp-frame-save-state failed: %S" err)
-           (claude-repl--log (+workspace-current-name) "before-persp-deactivate: persp-frame-save-state error: %S" err))))
+           (claude-repl--log (claude-repl--ws-current-name) "before-persp-deactivate: persp-frame-save-state error: %S" err))))
 
 (defun claude-repl--after-persp-activated (&rest _)
   "Handle perspective activation by scheduling a workspace switch.
-Captures `(+workspace-current-name)' at hook-fire time and passes it
+Captures `(claude-repl--ws-current-name)' at hook-fire time and passes it
 to the deferred `--on-workspace-switch' so the call operates on the
 workspace that just activated, not whatever happens to be current
 when the run-at-time-0 timer eventually fires (rapid back-to-back
@@ -471,9 +471,9 @@ latest ws, dropping bookkeeping on the intermediate ones).
 
 Logs `persp-names-cache' so cache mutations across persp lifecycle
 events (kill, switch, add) are traceable."
-  (claude-repl--log (+workspace-current-name) "after-persp-activated: entry cache=%S"
+  (claude-repl--log (claude-repl--ws-current-name) "after-persp-activated: entry cache=%S"
                     (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
-  (let ((ws (+workspace-current-name)))
+  (let ((ws (claude-repl--ws-current-name)))
     (run-at-time 0 nil #'claude-repl--on-workspace-switch ws)))
 
 (when (modulep! :ui workspaces)
@@ -484,7 +484,7 @@ events (kill, switch, add) are traceable."
 
 (defun claude-repl--hide-panels ()
   "Hide both Claude panels without killing buffers."
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (input-buf (claude-repl--ws-get ws :input-buffer))
          (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (claude-repl--log ws "hide-panels")
@@ -545,7 +545,7 @@ Sets `:repl-state :inactive' on WS (`:claude-state' untouched so an
 in-flight :thinking / :permission survives the close), then hides
 the panel windows.  No save-tab-index, no push-to-back, no flash —
 this is the simple-close audit point that `SPC o c' is bound to."
-  (let ((ws (or ws (+workspace-current-name))))
+  (let ((ws (or ws (claude-repl--ws-current-name))))
     (claude-repl--log ws "on-simple-close: CALLED this-command=%s last-command=%s"
                       this-command last-command)
     (when ws
@@ -571,7 +571,7 @@ Bound to `SPC o C' (the deprio toggle); also fires from
 
 WS defaults to the current workspace; when WS is nil the function still
 hides panels but skips the bookkeeping write and the tab shuffle."
-  (let ((ws (or ws (+workspace-current-name))))
+  (let ((ws (or ws (claude-repl--ws-current-name))))
     (claude-repl--log ws "on-close: CALLED this-command=%s last-command=%s"
                       this-command last-command)
     (when ws
@@ -579,7 +579,7 @@ hides panels but skips the bookkeeping write and the tab shuffle."
                         ws (claude-repl--ws-claude-state ws))
       (claude-repl--ws-set-repl-state ws :hidden))
     (claude-repl--hide-panels)
-    (when (and ws (equal ws (+workspace-current-name)))
+    (when (and ws (equal ws (claude-repl--ws-current-name)))
       (claude-repl--save-tab-index ws)
       (claude-repl--log ws "on-close: pushing ws=%s to second-to-last" ws)
       (claude-repl-workspace-push-to-back))))
@@ -633,7 +633,7 @@ loading placeholder exists (the vterm has not been swapped in yet)."
                         (or (not is-input)
                             (not (get-buffer claude-repl-loading-placeholder-name))))))
       (when result
-        (claude-repl--log-verbose (+workspace-current-name) "orphaned-panel-p: name=%s partner=%s is-orphaned" name partner))
+        (claude-repl--log-verbose (claude-repl--ws-current-name) "orphaned-panel-p: name=%s partner=%s is-orphaned" name partner))
       result)))
 
 (defun claude-repl--sync-panels ()
@@ -645,7 +645,7 @@ costs nothing and remains defense-in-depth.
 Logs each orphan's buffer name BEFORE the sweep (capturing names
 while windows are still live) so the per-orphan log survives the
 deletion that follows."
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (orphan-names
           (cl-loop for win in (window-list)
                    for name = (buffer-name (window-buffer win))
@@ -674,7 +674,7 @@ single redisplay rather than animating a scroll from the saved
 `window-start' down to the cursor."
   (let ((buf (window-buffer win)))
     (when (and buf (buffer-live-p buf) (claude-repl--claude-buffer-p buf))
-      (claude-repl--log-verbose (+workspace-current-name) "refresh-vterm-window: win=%s buf=%s" win (buffer-name buf))
+      (claude-repl--log-verbose (claude-repl--ws-current-name) "refresh-vterm-window: win=%s buf=%s" win (buffer-name buf))
       (with-current-buffer buf
         (when (and (eq major-mode 'vterm-mode)
                    (fboundp 'vterm-reset-cursor-point))
@@ -688,7 +688,7 @@ single redisplay rather than animating a scroll from the saved
 
 (defun claude-repl--reset-vterm-cursors ()
   "Refresh every visible Claude vterm window except the selected one."
-  (claude-repl--log-verbose (+workspace-current-name) "reset-vterm-cursors: entry")
+  (claude-repl--log-verbose (claude-repl--ws-current-name) "reset-vterm-cursors: entry")
   (let ((sel (selected-window)))
     (dolist (win (window-list))
       (unless (eq win sel)
@@ -709,7 +709,7 @@ The reset is only useful right after a workspace switch (to recenter
 the new vterm on its prompt), so it lives in
 `claude-repl--on-workspace-switch' alone — not on every window-config
 change, selection change, or buffer-list update."
-  (claude-repl--log-verbose (+workspace-current-name) "on-window-change")
+  (claude-repl--log-verbose (claude-repl--ws-current-name) "on-window-change")
   (claude-repl--sync-panels)
   (claude-repl--update-hide-overlay))
 
@@ -745,16 +745,16 @@ this bounce alone is sufficient to keep keyboard nav out of vterm."
   (let ((win (selected-window)))
     (if (and (claude-repl--claude-buffer-p (window-buffer win))
              (not (mouse-event-p last-input-event)))
-        (let* ((ws (+workspace-current-name))
+        (let* ((ws (claude-repl--ws-current-name))
                (input-buf (and ws (claude-repl--ws-get ws :input-buffer)))
                (input-win (and input-buf (get-buffer-window input-buf))))
           (if input-win
               (progn
-                (claude-repl--log-verbose (+workspace-current-name) "bounce-from-vterm: bouncing to input-win=%s" input-win)
+                (claude-repl--log-verbose (claude-repl--ws-current-name) "bounce-from-vterm: bouncing to input-win=%s" input-win)
                 (select-window input-win))
             (message "[claude-repl] keyboard navigation landed in Claude vterm but input panel isn't visible — stuck here until you click out or reopen panels")
-            (claude-repl--log (+workspace-current-name) "bounce-from-vterm: no input-win to bounce to (warned)")))
-      (claude-repl--log-verbose (+workspace-current-name) "bounce-from-vterm: skipped vterm-buffer=%s mouse=%s"
+            (claude-repl--log (claude-repl--ws-current-name) "bounce-from-vterm: no input-win to bounce to (warned)")))
+      (claude-repl--log-verbose (claude-repl--ws-current-name) "bounce-from-vterm: skipped vterm-buffer=%s mouse=%s"
                                 (if (claude-repl--claude-buffer-p (window-buffer win)) "yes" "no")
                                 (if (mouse-event-p last-input-event) "yes" "no")))))
 
@@ -779,10 +779,10 @@ Errors if the buffer is already initialized (already in `claude-input-mode')."
 WS defaults to the current workspace."
   (let ((existing (get-buffer (claude-repl--buffer-name nil ws))))
     (if (not existing)
-        (claude-repl--log (+workspace-current-name) "kill-stale-vterm: no existing buffer")
+        (claude-repl--log (claude-repl--ws-current-name) "kill-stale-vterm: no existing buffer")
       (if (get-buffer-process existing)
-          (claude-repl--log (+workspace-current-name) "kill-stale-vterm: buf=%s has live process no-op" (buffer-name existing))
-        (claude-repl--log (+workspace-current-name) "kill-stale-vterm: killing stale buf=%s" (buffer-name existing))
+          (claude-repl--log (claude-repl--ws-current-name) "kill-stale-vterm: buf=%s has live process no-op" (buffer-name existing))
+        (claude-repl--log (claude-repl--ws-current-name) "kill-stale-vterm: killing stale buf=%s" (buffer-name existing))
         (kill-buffer existing)))))
 
 ;;;; Panel show/hide strategies
@@ -790,7 +790,7 @@ WS defaults to the current workspace."
 (defun claude-repl--show-loading-panels ()
   "Show panels using a loading placeholder in the vterm slot.
 The placeholder is swapped for the real vterm buffer once Claude is ready."
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (real-vterm (claude-repl--ws-get ws :vterm-buffer))
          (placeholder (get-buffer-create claude-repl-loading-placeholder-name)))
     (claude-repl--log ws "show-loading-panels")
@@ -820,7 +820,7 @@ Panels are deliberately NOT opened here — `on-session-start-event'
 opens them once `:claude-state' transitions from `:init' to `:idle'.
 During that window the user sees the blue `:init' tab and the
 echo-area message below."
-  (let ((ws (or ws (+workspace-current-name))))
+  (let ((ws (or ws (claude-repl--ws-current-name))))
     (unless ws (error "claude-repl--initialize-claude: no active workspace"))
     (when (claude-repl--claude-running-p ws)
       (error "claude-repl--initialize-claude: already running ws=%s" ws))
@@ -893,7 +893,7 @@ Main-area clear routes through `--clear-main-area-for-panels' rather
 than `delete-other-windows' so the drawer side window is preserved
 unconditionally, not just when its `no-delete-other-windows' parameter
 survived upstream."
-  (let ((ws (+workspace-current-name)))
+  (let ((ws (claude-repl--ws-current-name)))
     (claude-repl--log ws "show-existing-panels")
     (unless ws (error "claude-repl--show-existing-panels: no active workspace"))
     (claude-repl--ws-set-repl-state ws :active)
@@ -908,7 +908,7 @@ survived upstream."
   "Restore hidden panels.  `show-existing-panels' writes :repl-state :active.
 `:claude-state' is untouched; rendering follows the same rule whether
 panels are visible or hidden."
-  (let ((ws (+workspace-current-name)))
+  (let ((ws (claude-repl--ws-current-name)))
     (claude-repl--log ws "showing panels ws=%s claude-state=%s"
                       ws (claude-repl--ws-claude-state ws)))
   (claude-repl--show-existing-panels))
@@ -918,7 +918,7 @@ panels are visible or hidden."
 Thin wrapper around `claude-repl--on-close' that enforces the invariant
 that a workspace is active.  See `claude-repl--simple-hide-and-preserve-status'
 for the no-tab-bar-update variant bound to `SPC o c'."
-  (let ((ws (+workspace-current-name)))
+  (let ((ws (claude-repl--ws-current-name)))
     (unless ws (error "claude-repl--hide-and-preserve-status: no active workspace"))
     (claude-repl--on-close ws)))
 
@@ -928,7 +928,7 @@ Thin wrapper around `claude-repl--on-simple-close' that enforces the
 invariant that a workspace is active.  See
 `claude-repl--hide-and-preserve-status' for the deprio + flash variant
 bound to `SPC o C'."
-  (let ((ws (+workspace-current-name)))
+  (let ((ws (claude-repl--ws-current-name)))
     (unless ws (error "claude-repl--simple-hide-and-preserve-status: no active workspace"))
     (claude-repl--on-simple-close ws)))
 
@@ -945,7 +945,7 @@ the workspace is hidden even if Claude isn't visible (or isn't running
 at all).  This is the `SPC o C' contract: pressing it again on a
 workspace that is already hidden / never-started should still mark it
 `:hidden' and push it to the back, not re-show or launch Claude."
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (vterm-running (claude-repl--claude-running-p))
          (session-starting (claude-repl--session-starting-p))
          (panels-visible (claude-repl--panels-visible-p))
@@ -993,7 +993,7 @@ push-to-back, no flash.  Bound to `SPC o c'."
 
 (defun claude-repl--kill-placeholder ()
   "Close and kill the loading placeholder buffer if it exists."
-  (claude-repl--log (+workspace-current-name) "kill-placeholder exists=%s" (if (get-buffer claude-repl-loading-placeholder-name) "yes" "no"))
+  (claude-repl--log (claude-repl--ws-current-name) "kill-placeholder exists=%s" (if (get-buffer claude-repl-loading-placeholder-name) "yes" "no"))
   (when-let ((placeholder (get-buffer claude-repl-loading-placeholder-name)))
     (claude-repl--close-buffer-window placeholder)
     (kill-buffer placeholder)))
@@ -1001,12 +1001,12 @@ push-to-back, no flash.  Bound to `SPC o c'."
 (defun claude-repl--sigkill-if-alive (proc)
   "Send SIGKILL to PROC if it is still alive."
   (when (process-live-p proc)
-    (claude-repl--log (+workspace-current-name) "sigkill fallback for lingering process")
+    (claude-repl--log (claude-repl--ws-current-name) "sigkill fallback for lingering process")
     (signal-process proc 'SIGKILL)))
 
 (defun claude-repl--schedule-sigkill (proc)
   "Schedule a SIGKILL for PROC after 0.5s if it's still alive."
-  (claude-repl--log (+workspace-current-name) "schedule-sigkill: scheduling for proc=%s" proc)
+  (claude-repl--log (claude-repl--ws-current-name) "schedule-sigkill: scheduling for proc=%s" proc)
   (run-at-time claude-repl-sigkill-delay nil #'claude-repl--sigkill-if-alive proc))
 
 (defun claude-repl--kill-vterm-process (buf)
@@ -1015,7 +1015,7 @@ Suppresses both the standard process-exit query (via
 `set-process-query-on-exit-flag') and any other
 `kill-buffer-query-functions' (e.g., vterm's own kill query) so the
 nuke path never prompts about the claude process."
-  (claude-repl--log (+workspace-current-name) "kill-vterm-process buf=%s" (claude-repl--safe-buffer-name buf))
+  (claude-repl--log (claude-repl--ws-current-name) "kill-vterm-process buf=%s" (claude-repl--safe-buffer-name buf))
   (when (and buf (buffer-live-p buf))
     (let ((proc (get-buffer-process buf))
           (kill-buffer-query-functions nil))
@@ -1045,7 +1045,7 @@ nuke path never prompts about the claude process."
 
 (defun claude-repl--destroy-session-buffers (vterm-buf input-buf)
   "Close windows and kill VTERM-BUF, INPUT-BUF, and any placeholder."
-  (claude-repl--log (+workspace-current-name) "destroy-session-buffers")
+  (claude-repl--log (claude-repl--ws-current-name) "destroy-session-buffers")
   (claude-repl--close-buffer-windows vterm-buf input-buf)
   (claude-repl--kill-placeholder)
   (claude-repl--kill-vterm-process vterm-buf)
@@ -1097,7 +1097,7 @@ the user has already confirmed the destructive nuke."
 (defun claude-repl-kill ()
   "Kill Claude REPL buffers and windows for the current workspace."
   (interactive)
-  (let ((ws (+workspace-current-name)))
+  (let ((ws (claude-repl--ws-current-name)))
     (claude-repl--log ws "kill")
     (unless ws (error "claude-repl-kill: no active workspace"))
     ;; Lifecycle-reset: kill destroys the session, so both state axes are
@@ -1117,7 +1117,7 @@ re-initializes. The Claude state file on disk is preserved so the new
 process resumes via `--continue'. Panels reopen once the new session
 signals ready."
   (interactive)
-  (let ((ws (+workspace-current-name)))
+  (let ((ws (claude-repl--ws-current-name)))
     (claude-repl--log ws "restart")
     (claude-repl-kill)
     (claude-repl--initialize-claude ws)))
@@ -1126,7 +1126,7 @@ signals ready."
   "Focus the Claude input buffer, or return to previous window if already there.
 If Claude isn't running, start it (same as `claude-repl')."
   (interactive)
-  (let ((ws (+workspace-current-name)))
+  (let ((ws (claude-repl--ws-current-name)))
     (cond
      ;; Already in the input buffer — jump back
      ((eq (current-buffer) (claude-repl--ws-get ws :input-buffer))
@@ -1164,7 +1164,7 @@ structural-delete errors via the built-in's own `condition-case', but
 that re-introduced the parameter dependency and could kill the drawer
 on `SPC w f' when the param had been lost.  The benign-error filtering
 now lives inside `--delete-where' itself, so we get both properties."
-  (claude-repl--log (+workspace-current-name)
+  (claude-repl--log (claude-repl--ws-current-name)
                     "delete-non-panel-windows: window-count=%d"
                     (length (window-list)))
   (claude-repl-window--delete-where
@@ -1176,7 +1176,7 @@ now lives inside `--delete-where' itself, so we get both properties."
 Saves the current window configuration per-workspace and expands the
 Claude panels to fill the frame.  Calling again restores the layout."
   (interactive)
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (saved (claude-repl--ws-get ws :fullscreen-config)))
     (claude-repl--log ws "toggle-fullscreen ws=%s currently=%s" ws (if saved "fullscreen" "normal"))
     (cond
@@ -1253,7 +1253,7 @@ real main-area window — see
   (if (claude-repl--claude-panel-buffer-p)
       (progn
         (claude-repl-toggle-fullscreen)
-        (let* ((ws (+workspace-current-name))
+        (let* ((ws (claude-repl--ws-current-name))
                (input-buf (claude-repl--ws-get ws :input-buffer))
                (input-win (and input-buf (get-buffer-window input-buf))))
           (when input-win
@@ -1272,9 +1272,9 @@ real main-area window — see
 (defun claude-repl-cycle ()
   "Send backtab to Claude vterm to cycle through options."
   (interactive)
-  (claude-repl--log (+workspace-current-name) "cycle")
+  (claude-repl--log (claude-repl--ws-current-name) "cycle")
   (when (claude-repl--vterm-live-p)
-    (with-current-buffer (claude-repl--ws-get (+workspace-current-name) :vterm-buffer)
+    (with-current-buffer (claude-repl--ws-get (claude-repl--ws-current-name) :vterm-buffer)
       (vterm-send-key "<backtab>"))))
 
 (defun claude-repl--validate-env-switch (ws new-env worktree-p session-id)
@@ -1316,7 +1316,7 @@ current one so `--continue' in the other env picks up the conversation.
 On subsequent switches each environment resumes its own prior session
 independently.  Requires a worktree workspace with a captured session ID."
   (interactive)
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (active-env (claude-repl--ws-get ws :active-env))
          (_ (claude-repl--log ws "switch-environment: ws=%s active-env=%s" ws active-env))
          (worktree-p (claude-repl--ws-get ws :worktree-p))

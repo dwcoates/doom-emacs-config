@@ -948,11 +948,11 @@ variables."
   "Pulse the current workspace's tab via `claude-repl-flash-tab'.
 Centralizes the post-jump flash so every identity-based workspace jump
 draws the eye to the destination tab uniformly.  No-op when
-`claude-repl-flash-tab' or `+workspace-current-name' is unbound — those
-come from optional layers that may not be loaded yet at startup."
-  (when (and (fboundp 'claude-repl-flash-tab)
-             (fboundp '+workspace-current-name))
-    (claude-repl-flash-tab (+workspace-current-name))))
+`claude-repl-flash-tab' is unbound or when `claude-repl--ws-current-name'
+returns nil — those come from optional layers that may not be loaded yet
+at startup."
+  (when (fboundp 'claude-repl-flash-tab)
+    (claude-repl-flash-tab (claude-repl--ws-current-name))))
 
 (defun claude-repl--render-tab (name spec label name-face img-str)
   "Render a tab string for workspace NAME from SPEC.
@@ -1126,7 +1126,7 @@ When NAMES is not supplied, defaults to `claude-repl--ws-list-names'
 `+workspace-list-names' directly — the tab-bar reflects claude-repl's
 own notion of which workspaces it owns, not persp-mode's raw cache."
   (let* ((names (if names-supplied-p names (claude-repl--ws-list-names)))
-         (current-name (+workspace-current-name)))
+         (current-name (claude-repl--ws-current-name)))
     (cl-loop for name in names
              for i from 1
              collect (claude-repl--render-tab-entry name current-name i))))
@@ -1203,7 +1203,7 @@ next workspace switch and disappear from `persp-names-cache' (and
 therefore the tab-bar) naturally."
   (let* ((resolved-names (if names-supplied-p names (claude-repl--ws-list-names)))
          (entries (claude-repl--tabline-rendered-entries resolved-names))
-         (current-name (+workspace-current-name))
+         (current-name (claude-repl--ws-current-name))
          (states (mapcar (lambda (n)
                            (cons n (claude-repl--ws-display-state n)))
                          resolved-names)))
@@ -1370,7 +1370,7 @@ config (e.g. from a placeholder layout) should not count as claude open."
   "Return non-nil if workspace WS-NAME has a claude buffer in its window layout.
 For the current workspace, checks live windows.
 For background workspaces, inspects the saved persp window configuration."
-  (if (equal ws-name (+workspace-current-name))
+  (if (equal ws-name (claude-repl--ws-current-name))
       (claude-repl--claude-visible-in-current-ws-p)
     (claude-repl--claude-in-saved-wconf-p ws-name)))
 
@@ -1660,10 +1660,10 @@ an event-driven signal that the user is back and wants fresh data, so
 it should kick a refresh regardless of the in-flight reentry guard."
   (if (frame-focus-state)
       (progn
-        (claude-repl--log (+workspace-current-name) "on-frame-focus: focused")
+        (claude-repl--log (claude-repl--ws-current-name) "on-frame-focus: focused")
         (claude-repl--refresh-vterm)
         (claude-repl--update-all-workspace-states-now))
-    (claude-repl--log-verbose (+workspace-current-name) "on-frame-focus: not focused")))
+    (claude-repl--log-verbose (claude-repl--ws-current-name) "on-frame-focus: not focused")))
 
 (add-function :after after-focus-change-function #'claude-repl--on-frame-focus)
 

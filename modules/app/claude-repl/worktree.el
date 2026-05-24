@@ -341,9 +341,8 @@ does not pay for redundant `+workspace-switch' / `select-window' /
 not re-signaled — the macro's job is best-effort focus restoration,
 not error propagation."
   (when (and orig-persp
-             (fboundp '+workspace-current-name)
              (fboundp '+workspace-switch)
-             (not (equal orig-persp (+workspace-current-name))))
+             (not (equal orig-persp (claude-repl--ws-current-name))))
     (condition-case err
         (+workspace-switch orig-persp)
       (error
@@ -359,7 +358,7 @@ not error propagation."
 
 (defmacro claude-repl--with-preserved-focus (&rest body)
   "Run BODY while preserving the caller's active workspace + window + buffer.
-Captures `(+workspace-current-name)', `(selected-window)', and
+Captures `(claude-repl--ws-current-name)', `(selected-window)', and
 `(current-buffer)' before BODY runs, then restores all three afterward
 via an `unwind-protect' even when BODY signals.
 
@@ -373,8 +372,7 @@ tests can observe the contract by stubbing that defun."
   (let ((orig-persp-sym (make-symbol "orig-persp"))
         (orig-window-sym (make-symbol "orig-window"))
         (orig-buffer-sym (make-symbol "orig-buffer")))
-    `(let ((,orig-persp-sym (and (fboundp '+workspace-current-name)
-                                 (+workspace-current-name)))
+    `(let ((,orig-persp-sym (claude-repl--ws-current-name))
            (,orig-window-sym (selected-window))
            (,orig-buffer-sym (current-buffer)))
        (unwind-protect
@@ -411,7 +409,7 @@ WS-ID is the hash identifier (used for logging/buffer naming); the state
 is stored under WS, defaulting to `+workspace-current-name'.
 Signals an error if no workspace name can be determined.  The project
 root is recorded by `claude-repl--initialize-ws-env', not here."
-  (let ((ws (or ws (+workspace-current-name))))
+  (let ((ws (or ws (claude-repl--ws-current-name))))
     (unless ws
       (error "claude-repl--register-worktree-ws: no workspace name provided and no current workspace"))
     (claude-repl--log ws "register-worktree-ws ws-id=%s ws=%s" ws-id ws)
@@ -1221,7 +1219,7 @@ from; persisted as `:source-ws-dir' on the new workspace so
     (claude-repl--validate-worktree-creation name git-root dirname branch-name path)
     (claude-repl--log name "worktree git-root=%s name=%s dirname=%s branch=%s base=%s in-worktree=%s path=%s old-ws=%s old-ws-id=%s source-dir=%s"
              git-root name dirname (or branch-name "none") base-commit in-worktree path
-             (+workspace-current-name) (claude-repl--workspace-id) (or source-dir "nil"))
+             (claude-repl--ws-current-name) (claude-repl--workspace-id) (or source-dir "nil"))
     ;; --- kick off: fetch (if base is a remote ref) then add ---------------
     (let ((add-fn (apply-partially #'claude-repl--async-worktree-add
                                    git-root branch-name path base-commit
@@ -1254,7 +1252,7 @@ buffer list."
   (when (and (boundp '+doom-dashboard-buffer-name)
              (fboundp 'persp-remove-buffer))
     (when-let ((dash (get-buffer +doom-dashboard-buffer-name)))
-      (claude-repl--log (+workspace-current-name)
+      (claude-repl--log (claude-repl--ws-current-name)
                         "remove-doom-dashboard: removing buffer=%s" (buffer-name dash))
       (ignore-errors (persp-remove-buffer dash)))))
 
@@ -1267,7 +1265,7 @@ Routes through `claude-repl-jump-to-workspace' so the destination tab
 flashes — symmetric with the project-picker (`SPC p p') and reopen
 paths, so every identity-based jump pulses uniformly."
   (claude-repl--log dirname "worktree-creation-switch-callback: path=%s dirname=%s fboundp(+workspace-switch-to)=%s current-ws=%s target=%s"
-                    path dirname (fboundp '+workspace-switch-to) (+workspace-current-name) dirname)
+                    path dirname (fboundp '+workspace-switch-to) (claude-repl--ws-current-name) dirname)
   (claude-repl-jump-to-workspace dirname))
 
 (defconst claude-repl--worktree-base-commits
@@ -1340,7 +1338,7 @@ the JSON file lands and the file-watcher dispatches it."
   (claude-repl--log nil "create-worktree-workspace: ENTRY base=%s source-ws=%s (before minibuffer read)"
                     base (or source-ws "nil"))
   (let* ((base-commit (claude-repl--resolve-worktree-base base))
-         (effective-source-ws (or source-ws (+workspace-current-name)))
+         (effective-source-ws (or source-ws (claude-repl--ws-current-name)))
          (source-dir (ignore-errors (claude-repl--ws-dir effective-source-ws)))
          (git-root (or source-dir (claude-repl--resolve-current-git-root)))
          (raw-prompt (read-string "Preemptive prompt: ")))
@@ -1536,7 +1534,7 @@ forked AND whose repository roots the new worktree (instead of the
 ambient workspace).  Interactively, `\\[universal-argument]' prompts for
 SOURCE-WS from the persp workspace list."
   (interactive (list (claude-repl--read-source-workspace-maybe)))
-  (let* ((fork-ws (or source-ws (+workspace-current-name)))
+  (let* ((fork-ws (or source-ws (claude-repl--ws-current-name)))
          (source-dir (ignore-errors (claude-repl--ws-dir fork-ws)))
          (git-root (or source-dir (claude-repl--resolve-current-git-root))))
     ;; Verify the fork source has a session before doing anything else.
@@ -1569,9 +1567,9 @@ overridden by any saved priority for the same project)."
   (let ((root (claude-repl--git-root)))
     (unless root
       (error "claude-repl--new-workspace: not in a git repository"))
-    (claude-repl--log (+workspace-current-name) "new-workspace: root=%s" root)
+    (claude-repl--log (claude-repl--ws-current-name) "new-workspace: root=%s" root)
     (+workspace/new)
-    (let ((ws (+workspace-current-name))
+    (let ((ws (claude-repl--ws-current-name))
           (default-priority (claude-repl--repo-default-priority-for-path root)))
       (when default-priority
         (claude-repl--log ws "new-workspace: applying repo-default priority=%s root=%s"
@@ -3746,7 +3744,7 @@ When AUTO-RESOLVE is non-nil, cherry-pick conflicts are first sent to
 `claude-repl--auto-resolve-cherry-pick-conflict').  Only the
 skill-invoked path passes t — interactive merges leave the resolver
 off so the user resolves in magit directly."
-  (let* ((current-ws (+workspace-current-name))
+  (let* ((current-ws (claude-repl--ws-current-name))
          (target-branch (claude-repl--workspace-branch target-ws)))
     (claude-repl--log current-ws "workspace-merge-do current-ws=%s target-ws=%s target-branch=%s project-root-override=%s silent=%s auto-resolve=%s"
                       current-ws target-ws target-branch (or project-root-override "nil") silent (if auto-resolve "t" "nil"))
@@ -3903,7 +3901,7 @@ off so the user resolves in magit directly."
   "Cherry-pick another workspace's branch commits onto the current branch.
 Prompts for which workspace to merge in."
   (interactive)
-  (let* ((current-ws (+workspace-current-name))
+  (let* ((current-ws (claude-repl--ws-current-name))
          (other-ws (remove current-ws (+workspace-list-names))))
     (claude-repl--log current-ws "workspace-merge: current-ws=%s" current-ws)
     (unless other-ws
@@ -4574,7 +4572,7 @@ The interactive caller accepts the freeze in exchange for the
 \"declined-resolver pops magit\" UX over the previous \"aborted-and-
 errored\" UX."
   (interactive)
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (repo-root (claude-repl--ws-merge-routing-root ws)))
     (claude-repl--log ws
                       "workspace-merge-current-into-source: ws=%s repo-root=%s"

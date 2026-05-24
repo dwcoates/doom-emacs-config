@@ -46,8 +46,7 @@ scrolled) keep their normal redraw cadence."
   (if claude-repl--vterm-frozen
       (progn
         (when (fboundp 'claude-repl--log-verbose)
-          (claude-repl--log-verbose (and (fboundp '+workspace-current-name)
-                                          (+workspace-current-name))
+          (claude-repl--log-verbose (claude-repl--ws-current-name)
                                      "vterm-invalidate-advice: SKIP buf=%s"
                                      (buffer-name)))
         nil)
@@ -74,8 +73,7 @@ the freeze gets flushed into the visible buffer."
       (setq claude-repl--vterm-frozen nil)
       (setq claude-repl--vterm-freeze-timer nil)
       (when (fboundp 'claude-repl--log)
-        (claude-repl--log (and (fboundp '+workspace-current-name)
-                               (+workspace-current-name))
+        (claude-repl--log (claude-repl--ws-current-name)
                           "vterm-unfreeze: buf=%s flushing" (buffer-name)))
       ;; Force a redraw to flush any output that arrived while frozen.
       ;; Guard `vterm--term' so tests / buffers without an active libvterm
@@ -99,8 +97,7 @@ dead."
             (run-with-timer claude-repl-vterm-freeze-duration nil
                             #'claude-repl--vterm-unfreeze buf))
       (when (fboundp 'claude-repl--log)
-        (claude-repl--log (and (fboundp '+workspace-current-name)
-                               (+workspace-current-name))
+        (claude-repl--log (claude-repl--ws-current-name)
                           "vterm-freeze-bump: buf=%s duration=%.2f"
                           (buffer-name) claude-repl-vterm-freeze-duration)))))
 

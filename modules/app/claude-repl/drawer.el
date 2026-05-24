@@ -783,7 +783,7 @@ reason."
 
 (defun claude-repl-drawer--current-ws ()
   "Return the currently active workspace name, or nil."
-  (and (fboundp '+workspace-current-name) (+workspace-current-name)))
+  (claude-repl--ws-current-name))
 
 (defun claude-repl-drawer--render-workspace (ws _current hidden &optional depth)
   "Insert the rendered representation for workspace WS into the current buffer.
@@ -1413,7 +1413,7 @@ Refuses to act on MERGED entries (no live Claude to receive the prompt)."
 (defun claude-repl-drawer--with-temp-current-ws (ws fn)
   "Switch to WS, call FN, then return to the previous workspace.
 Used to dispatch merge commands for the entry at point — the merge
-public functions read `(+workspace-current-name)' internally and
+public functions read `(claude-repl--ws-current-name)' internally and
 switch perspectives themselves, so we must temporarily inhabit the
 target workspace before invoking them.
 
@@ -1427,15 +1427,14 @@ silently failed and the workspace was marked merged anyway).
 Leaves the drawer side window before each switch (see
 `claude-repl-drawer--leave-side-window-before-switch') so persp's
 restore doesn't clobber the destination workspace's panel state."
-  (let ((prev (and (fboundp '+workspace-current-name)
-                   (+workspace-current-name))))
+  (let ((prev (claude-repl--ws-current-name)))
     (claude-repl-drawer--leave-side-window-before-switch)
     (if (eq (claude-repl-drawer--workspace-section ws) :merged)
         (claude-repl-drawer--reactivate-merged ws)
       (+workspace-switch ws))
     (unwind-protect
         (funcall fn)
-      (when (and prev (not (equal prev (+workspace-current-name))))
+      (when (and prev (not (equal prev (claude-repl--ws-current-name))))
         (claude-repl-drawer--leave-side-window-before-switch)
         (+workspace-switch prev)))))
 
@@ -2087,8 +2086,7 @@ doesn't fire here because the actual command is running in a
 different buffer (or via a persp-mode hook), so we mirror its
 overlay-refresh action explicitly."
   (when-let* ((buf (get-buffer claude-repl-drawer-buffer-name))
-              (current-ws (and (fboundp '+workspace-current-name)
-                               (+workspace-current-name))))
+              (current-ws (claude-repl--ws-current-name)))
     (let ((win (get-buffer-window buf t)))
       (with-current-buffer buf
         (when (claude-repl-drawer--goto-workspace-line current-ws)

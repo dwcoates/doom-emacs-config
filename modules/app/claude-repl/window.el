@@ -72,12 +72,10 @@ created).  Signals an error for an unknown KIND so typos surface at
 call time."
   (pcase kind
     (:vterm
-     (claude-repl--ws-get (or ws (and (fboundp '+workspace-current-name)
-                                      (+workspace-current-name)))
+     (claude-repl--ws-get (or ws (claude-repl--ws-current-name))
                           :vterm-buffer))
     (:input
-     (claude-repl--ws-get (or ws (and (fboundp '+workspace-current-name)
-                                      (+workspace-current-name)))
+     (claude-repl--ws-get (or ws (claude-repl--ws-current-name))
                           :input-buffer))
     (:drawer
      (and (boundp 'claude-repl-drawer-buffer-name)

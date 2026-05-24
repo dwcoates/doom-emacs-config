@@ -108,8 +108,7 @@ filter and remain visible."
 The current workspace is excluded — hiding never kills the workspace
 the user is sitting in.  Only live (non-tombstoned) workspaces are
 returned, since tombstones have no persp left to kill."
-  (let ((current (and (fboundp '+workspace-current-name)
-                      (+workspace-current-name))))
+  (let ((current (claude-repl--ws-current-name)))
     (cl-remove-if-not
      (lambda (ws)
        (and (not (equal ws current))
@@ -157,8 +156,7 @@ returns to the workspace that was active when the restore began.
 
 Returns the list of restored workspace names."
   (let ((targets (claude-repl--hide-project-dirs--hidden-workspace-names))
-        (origin (and (fboundp '+workspace-current-name)
-                     (+workspace-current-name))))
+        (origin (claude-repl--ws-current-name)))
     (dolist (ws targets)
       (let ((dir (claude-repl--ws-get ws :project-dir)))
         (claude-repl--log ws "hide-project-dirs: restoring ws=%s dir=%s" ws dir)

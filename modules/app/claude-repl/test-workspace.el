@@ -951,5 +951,27 @@ identity-distinct string injected by `claude-repl-set-priority' from
         (claude-repl--reorder-workspace-by-priority "new-p1")
         (should (equal (car captured) "main"))))))
 
+;;;; ---- Tests: --ws-current-name ----
+
+(ert-deftest claude-repl-test-ws-current-name-delegates-to-wrapper ()
+  "ws-current-name returns value from +workspace-current-name when bound."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws")))
+      (should (equal (claude-repl--ws-current-name) "my-ws")))))
+
+(ert-deftest claude-repl-test-ws-current-name-returns-nil-when-unbound ()
+  "ws-current-name returns nil when +workspace-current-name is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) nil))
+      ;; Unbind by fmakunbound so fboundp returns nil.
+      (fmakunbound '+workspace-current-name)
+      (should-not (claude-repl--ws-current-name)))))
+
+(ert-deftest claude-repl-test-ws-current-name-returns-nil-when-no-persp ()
+  "ws-current-name returns nil when the workspace system returns nil."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
+      (should-not (claude-repl--ws-current-name)))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here

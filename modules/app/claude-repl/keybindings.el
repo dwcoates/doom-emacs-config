@@ -189,8 +189,8 @@ and the current workspace's session must be left alone).  Callers that
 need to kill a specific named workspace's session (the nuke / kill /
 sweep paths) handle teardown explicitly via `claude-repl--kill-session'
 before invoking `+workspace/kill'."
-  (let ((target (or name (+workspace-current-name)))
-        (current (+workspace-current-name)))
+  (let ((target (or name (claude-repl--ws-current-name)))
+        (current (claude-repl--ws-current-name)))
     (claude-repl--log current
                       "kill-before-workspace-delete: target=%s current=%s"
                       target current)
@@ -211,7 +211,7 @@ before invoking `+workspace/kill'."
 (defun claude-repl--read-workspace-with-default (prompt)
   "Prompt for a workspace name with PROMPT, defaulting to the current workspace."
   (completing-read prompt (+workspace-list-names) nil t
-                   nil nil (+workspace-current-name)))
+                   nil nil (claude-repl--ws-current-name)))
 
 (defun claude-repl--read-known-workspace (prompt)
   "Prompt for a workspace registered in `claude-repl--workspaces'.
@@ -222,8 +222,7 @@ Filters out tombstoned entries via `claude-repl--live-ws-names' — a
 nuked workspace's identity record survives in the hash for
 `--ws-dir' callers, but it must not surface in interactive pickers."
   (let* ((known (claude-repl--live-ws-names))
-         (current (and (fboundp '+workspace-current-name)
-                       (+workspace-current-name)))
+         (current (claude-repl--ws-current-name))
          (default (and current (member current known) current)))
     (unless known (user-error "No claude-repl workspaces registered"))
     (completing-read prompt known nil t nil nil default)))
@@ -251,8 +250,7 @@ already been killed.  Defaults to the current workspace when it
 appears in the candidate list.  Signals `user-error' when no
 candidates exist."
   (let* ((known (claude-repl--nukeable-workspace-names))
-         (current (and (fboundp '+workspace-current-name)
-                       (+workspace-current-name)))
+         (current (claude-repl--ws-current-name))
          (default (and current (member current known) current)))
     (unless known (user-error "No workspaces available to nuke/kill"))
     (completing-read prompt known nil t nil nil default)))
@@ -262,7 +260,7 @@ candidates exist."
 Ensures the output directory exists.  Returns the full path of the written file."
   (make-directory claude-repl--output-dir t)
   (let ((file (expand-file-name filename claude-repl--output-dir)))
-    (claude-repl--log (+workspace-current-name) "write-output-json: filename=%s dir=%s" filename claude-repl--output-dir)
+    (claude-repl--log (claude-repl--ws-current-name) "write-output-json: filename=%s dir=%s" filename claude-repl--output-dir)
     (with-temp-file file
       (insert (json-encode content)))
     file))
@@ -280,7 +278,7 @@ Extracts the trailing digit from the key sequence (e.g. SPC o 3 -> \"3\")."
   (interactive)
   (let* ((keys (this-command-keys-vector))
          (last-key (aref keys (1- (length keys)))))
-    (claude-repl--log (+workspace-current-name) "send-digit-char: digit=%s" (string last-key))
+    (claude-repl--log (claude-repl--ws-current-name) "send-digit-char: digit=%s" (string last-key))
     (claude-repl-send-char (string last-key))))
 
 ;; C-v paste forwarding to vterm
@@ -288,11 +286,11 @@ Extracts the trailing digit from the key sequence (e.g. SPC o 3 -> \"3\")."
   "Forward a Ctrl-V keystroke to the Claude vterm buffer.
 This lets Claude CLI handle paste natively, including images."
   (interactive)
-  (claude-repl--log (+workspace-current-name) "paste-to-vterm: entry")
+  (claude-repl--log (claude-repl--ws-current-name) "paste-to-vterm: entry")
   (if (claude-repl--vterm-live-p)
       (progn
-        (claude-repl--log (+workspace-current-name) "paste-to-vterm: vterm live, forwarding C-v")
-        (with-current-buffer (claude-repl--ws-get (+workspace-current-name) :vterm-buffer)
+        (claude-repl--log (claude-repl--ws-current-name) "paste-to-vterm: vterm live, forwarding C-v")
+        (with-current-buffer (claude-repl--ws-get (claude-repl--ws-current-name) :vterm-buffer)
           (vterm-send-key "v" nil nil t)))
     (user-error "No live Claude session — paste not forwarded")))
 
@@ -362,14 +360,14 @@ for the priority (defaulting to the workspace's current priority, if
 any).  Each candidate in the prompt is annotated with its badge
 image so the visual mapping between key and glyph is obvious."
   (interactive
-   (let* ((target (+workspace-current-name))
+   (let* ((target (claude-repl--ws-current-name))
           (current (claude-repl--ws-get target :priority))
           (prompt (format "Priority%s: "
                           (if current (format " (current: %s)" current) "")))
           (priority (claude-repl--read-priority prompt (or current ""))))
      (list priority target)))
   (let* ((ws-explicit-p (not (null ws)))
-         (ws (or ws (+workspace-current-name)))
+         (ws (or ws (claude-repl--ws-current-name)))
          (old-priority (claude-repl--ws-get ws :priority))
          (new-priority (if (string-empty-p priority) nil priority))
          (had-entry (not (null (gethash ws claude-repl--workspaces))))
@@ -390,7 +388,7 @@ image so the visual mapping between key and glyph is obvious."
 (defun claude-repl-revert-and-eval-buffer ()
   "Revert the current buffer from disk, then evaluate it as Elisp."
   (interactive)
-  (claude-repl--log (+workspace-current-name) "revert-and-eval-buffer: entry buffer=%s" (buffer-name))
+  (claude-repl--log (claude-repl--ws-current-name) "revert-and-eval-buffer: entry buffer=%s" (buffer-name))
   (revert-buffer :ignore-auto :noconfirm)
   (eval-buffer))
 
@@ -406,7 +404,7 @@ rather than the root `~/.config/doom' copy the module was originally
 loaded from.  Falls back to `claude-repl--config-file' (the original
 load path) for non-doom-config workspaces, unregistered workspaces, or
 workspaces with no `:project-dir'."
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (proj (and ws (claude-repl--ws-get ws :project-dir)))
          (candidate (and proj (expand-file-name "modules/app/claude-repl/config.el" proj))))
     (if (and candidate (file-exists-p candidate))
@@ -419,7 +417,7 @@ Resolves the config path via `claude-repl--reload-config-file' so a
 doom-config worktree reloads its own checkout."
   (interactive)
   (let ((file (claude-repl--reload-config-file)))
-    (claude-repl--log (+workspace-current-name) "reload-config: file=%s" file)
+    (claude-repl--log (claude-repl--ws-current-name) "reload-config: file=%s" file)
     (load-file file)
     (message "[claude-repl] Reloaded %s" file)))
 
@@ -438,7 +436,7 @@ NAMES is an optional list of branch name strings; defaults to a single test entr
   (interactive)
   (let* ((names (or names (list claude-repl-debug-mock-workspace-default-name)))
          (file (claude-repl--write-output-json "workspace_generation.json" names)))
-    (claude-repl--log (+workspace-current-name) "mock workspace-generation file written: %s names=%s" file names)
+    (claude-repl--log (claude-repl--ws-current-name) "mock workspace-generation file written: %s names=%s" file names)
     (message "Wrote mock workspace_generation.json: %s" names)))
 
 (defun claude-repl-debug/mock-workspace-commands-with-priority ()
@@ -465,7 +463,7 @@ Use this to verify the processor works independently of the file watcher."
                  claude-repl--output-dir)
       (message "Found %d file(s), processing..." (length files))
       (dolist (file files)
-        (claude-repl--log (+workspace-current-name) "process-pending-commands: processing file=%s" file)
+        (claude-repl--log (claude-repl--ws-current-name) "process-pending-commands: processing file=%s" file)
         (claude-repl--process-workspace-commands-file file)))))
 
 (defun claude-repl-debug/workspace-states ()
@@ -544,7 +542,7 @@ window changes, git-diff sentinels, resolve-root, etc.)."
     (message "[claude-repl] debug logging: %s" label)
     ;; Also emit via the log system so it appears in the log stream.
     (when claude-repl-debug
-      (claude-repl--log (+workspace-current-name) "debug logging toggled: %s" label))))
+      (claude-repl--log (claude-repl--ws-current-name) "debug logging toggled: %s" label))))
 
 (defun claude-repl-debug/toggle-log-to-file ()
   "Toggle writing debug log output to `~/.claude/emacs/doom-claude-repl.log'.
@@ -567,7 +565,7 @@ appended to the file regardless of the `claude-repl-debug' level."
 (defun claude-repl-debug/prefix-counter ()
   "Show the current metaprompt prefix counter, period, and workspace."
   (interactive)
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (counter (or (claude-repl--ws-get ws :prefix-counter) 0)))
     (message "[%s] Prefix counter: %d  period: %d  next metaprompt in: %d sends"
              ws counter claude-repl-prefix-period

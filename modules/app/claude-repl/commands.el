@@ -112,7 +112,7 @@ First %s is the change-spec, second %s is the prompt."
 
 (defun claude-repl--send-to-claude (text)
   "Send TEXT to Claude, starting it if needed."
-  (let ((ws (+workspace-current-name)))
+  (let ((ws (claude-repl--ws-current-name)))
     (claude-repl--log ws "send-to-claude len=%d" (length text))
     (unless (claude-repl--claude-running-p ws)
       (claude-repl--initialize-claude ws))
@@ -126,8 +126,8 @@ First %s is the change-spec, second %s is the prompt."
   (let ((file (buffer-file-name)))
     (unless file
       (user-error "Buffer %s is not visiting a file" (buffer-name)))
-    (let ((rel (file-relative-name (claude-repl--path-canonical file) (claude-repl--ws-dir (+workspace-current-name)))))
-      (claude-repl--log (+workspace-current-name) "buffer-relative-path: path=%s" rel)
+    (let ((rel (file-relative-name (claude-repl--path-canonical file) (claude-repl--ws-dir (claude-repl--ws-current-name)))))
+      (claude-repl--log (claude-repl--ws-current-name) "buffer-relative-path: path=%s" rel)
       rel)))
 
 (defun claude-repl--format-file-ref ()
@@ -139,9 +139,9 @@ Without region: returns file:line."
         (let ((start-line (line-number-at-pos (region-beginning)))
               (end-line (line-number-at-pos (region-end))))
           (deactivate-mark)
-          (claude-repl--log (+workspace-current-name) "format-file-ref: region branch start=%d end=%d" start-line end-line)
+          (claude-repl--log (claude-repl--ws-current-name) "format-file-ref: region branch start=%d end=%d" start-line end-line)
           (format "%s:%d-%d" rel start-line end-line))
-      (claude-repl--log (+workspace-current-name) "format-file-ref: single-line branch line=%d" (line-number-at-pos (point)))
+      (claude-repl--log (claude-repl--ws-current-name) "format-file-ref: single-line branch line=%d" (line-number-at-pos (point)))
       (format "%s:%d" rel (line-number-at-pos (point))))))
 
 (defun claude-repl--format-magit-hunk-ref ()
@@ -155,9 +155,9 @@ Returns a \"file:startline-endline\" string based on the hunk's to-range."
          (end (+ start len -1))
          (rel (file-relative-name
                (claude-repl--path-canonical (expand-file-name file (magit-toplevel)))
-               (claude-repl--ws-dir (+workspace-current-name))))
+               (claude-repl--ws-dir (claude-repl--ws-current-name))))
          (ref (format "%s:%d-%d" rel start end)))
-    (claude-repl--log (+workspace-current-name) "format-magit-hunk-ref: ref=%s" ref)
+    (claude-repl--log (claude-repl--ws-current-name) "format-magit-hunk-ref: ref=%s" ref)
     ref))
 
 (defun claude-repl--context-reference ()
@@ -169,9 +169,9 @@ both active region and point-at-line cases)."
                            'magit-revision-mode)
            (magit-section-match 'hunk))
       (progn
-        (claude-repl--log (+workspace-current-name) "context-reference: magit-hunk branch")
+        (claude-repl--log (claude-repl--ws-current-name) "context-reference: magit-hunk branch")
         (claude-repl--format-magit-hunk-ref))
-    (claude-repl--log (+workspace-current-name) "context-reference: standard branch")
+    (claude-repl--log (claude-repl--ws-current-name) "context-reference: standard branch")
     (claude-repl--format-file-ref)))
 
 ;;;; Diff analysis infrastructure
@@ -181,7 +181,7 @@ both active region and point-at-line cases)."
 CHANGE-SPEC describes which changes (e.g. \"unstaged changes (git diff)\").
 PROMPT is the analysis instruction."
   (let ((msg (format claude-repl-diff-analysis-message-template change-spec prompt)))
-    (claude-repl--log (+workspace-current-name) "diff-analysis: %s" change-spec)
+    (claude-repl--log (claude-repl--ws-current-name) "diff-analysis: %s" change-spec)
     (claude-repl--send-to-claude msg)))
 
 (defconst claude-repl--diff-scopes
@@ -296,7 +296,7 @@ Without region: sends file path and current line."
   (interactive)
   (let* ((ref (claude-repl--context-reference))
          (msg (format claude-repl-explain-prompt-template ref)))
-    (claude-repl--log (+workspace-current-name) "explain %s" msg)
+    (claude-repl--log (claude-repl--ws-current-name) "explain %s" msg)
     (claude-repl--send-to-claude msg)))
 
 (defun claude-repl-explain-prompt ()
@@ -309,7 +309,7 @@ Without region: pre-fills with file path and current line."
   (let* ((ref (claude-repl--context-reference))
          (msg (read-string "Send to Claude: " ref)))
     (when (and msg (not (string-empty-p msg)))
-      (claude-repl--log (+workspace-current-name) "explain-prompt %s" msg)
+      (claude-repl--log (claude-repl--ws-current-name) "explain-prompt %s" msg)
       (claude-repl--send-to-claude msg))))
 
 ;;;; Explain config -- read-only Q&A about this doom config via headless claude
@@ -1085,7 +1085,7 @@ point is for clarification and explanation only.  Output streams to
   (let ((trimmed (string-trim (or prompt ""))))
     (when (string-empty-p trimmed)
       (user-error "Empty prompt"))
-    (claude-repl--log (+workspace-current-name)
+    (claude-repl--log (claude-repl--ws-current-name)
                       "explain-config: dir=%s len=%d"
                       claude-repl-explain-config-dir (length trimmed))
     (claude-repl--explain-config-spawn trimmed)))
@@ -1102,10 +1102,10 @@ WS is the current workspace name for logging."
   "Send \"i\" to VTERM-BUF to re-enter insert mode."
   (if (buffer-live-p vterm-buf)
       (progn
-        (claude-repl--log (+workspace-current-name) "enter-insert-mode: sending \"i\" to vterm=%s" (buffer-name vterm-buf))
+        (claude-repl--log (claude-repl--ws-current-name) "enter-insert-mode: sending \"i\" to vterm=%s" (buffer-name vterm-buf))
         (with-current-buffer vterm-buf
           (vterm-send-string "i")))
-    (claude-repl--log (+workspace-current-name) "enter-insert-mode: vterm is dead, skipping")))
+    (claude-repl--log (claude-repl--ws-current-name) "enter-insert-mode: vterm is dead, skipping")))
 
 (defun claude-repl-interrupt (&optional ws)
   "Interrupt Claude in workspace WS and re-enter insert mode after a delay.
@@ -1122,7 +1122,7 @@ terminates the in-flight turn, so the tab should immediately reflect
 arrives.  No Stop hook will fire for the interrupted turn, so Emacs
 is the sole observer here."
   (interactive)
-  (let* ((ws (or ws (+workspace-current-name)))
+  (let* ((ws (or ws (claude-repl--ws-current-name)))
          (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (claude-repl--log ws "interrupt")
     (if (and vterm-buf (buffer-live-p vterm-buf))
@@ -1137,7 +1137,7 @@ is the sole observer here."
 (defun claude-repl-update-pr ()
   "Ask Claude to update the PR description for the current branch."
   (interactive)
-  (claude-repl--log (+workspace-current-name) "update-pr: sending update-pr prompt")
+  (claude-repl--log (claude-repl--ws-current-name) "update-pr: sending update-pr prompt")
   (claude-repl--send-to-claude claude-repl-update-pr-prompt))
 
 (defun claude-repl--rebase-onto-origin-master-callback (ws ok output)
@@ -1162,7 +1162,7 @@ to Claude so the agent performs the rebase itself (and resolves any
 conflicts).  On fetch failure, skips the dispatch and surfaces the git
 error via `message'."
   (interactive)
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (project-dir (claude-repl--ws-dir ws)))
     (claude-repl--log ws "rebase-onto-origin-master: fetching origin in %s" project-dir)
     (message "[%s] git fetch origin..." ws)
@@ -1205,7 +1205,7 @@ EXCLUDED is a list of `no-FLAG' symbols (e.g. \\='(no-self-certified)) — each
 named flag is removed from `claude-repl-create-or-update-pr-base-flags'
 before the prompt is sent."
   (interactive)
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (base (claude-repl--build-create-or-update-pr-prompt excluded))
          (input-buf (claude-repl--ws-get ws :input-buffer))
          (raw-prefix (claude-repl--read-input-buffer ws))
@@ -1231,7 +1231,7 @@ rendering in markdown contexts.  No workspace state is touched — the
 input buffer is left intact and Claude is not contacted."
   (interactive)
   (let ((prompt (claude-repl--build-create-or-update-pr-prompt excluded)))
-    (claude-repl--log (+workspace-current-name)
+    (claude-repl--log (claude-repl--ws-current-name)
                       "create-or-update-pr-paste: prompt=%s" prompt)
     (insert "`" prompt "`")))
 
@@ -1318,7 +1318,7 @@ Prompts once with the count before proceeding."
     (unless (y-or-n-p (format "Nuke ALL %d claude-repl workspace(s)? This kills processes and buffers but preserves on-disk state. "
                               count))
       (user-error "Aborted"))
-    (claude-repl--log (+workspace-current-name) "nuke-all-workspaces: count=%d" count)
+    (claude-repl--log (claude-repl--ws-current-name) "nuke-all-workspaces: count=%d" count)
     ;; Snapshot keys before iterating; each call mutates the hash.
     (dolist (ws known)
       (claude-repl--nuke-one-workspace ws))
@@ -1345,7 +1345,7 @@ proceeding.  Same per-workspace teardown as
     (unless (y-or-n-p (format "Nuke %d restored claude-repl workspace(s)? This kills processes and buffers but preserves on-disk state. "
                               count))
       (user-error "Aborted"))
-    (claude-repl--log (+workspace-current-name)
+    (claude-repl--log (claude-repl--ws-current-name)
                       "nuke-restored-workspaces: count=%d" count)
     (dolist (ws restored)
       (claude-repl--nuke-one-workspace ws))
@@ -1391,7 +1391,7 @@ state file so the workspace can be re-opened via project switch.
 
 No-op when there are no matching workspaces.  Returns the list of names
 that were actually killed (useful for tests)."
-  (let* ((current (or except (+workspace-current-name)))
+  (let* ((current (or except (claude-repl--ws-current-name)))
          (candidates (cl-remove-if
                       (lambda (ws)
                         (or (equal ws current)
@@ -1411,7 +1411,7 @@ that were actually killed (useful for tests)."
 (defun claude-repl--maybe-sweep-hidden-on-switch (&optional ws)
   "Run `claude-repl--sweep-hidden-workspaces' when hide-mode is enabled.
 WS is the just-arrived-on workspace; when nil, falls back to
-`(+workspace-current-name)'.  Callers from `--on-workspace-switch'
+`(claude-repl--ws-current-name)'.  Callers from `--on-workspace-switch'
 pass the ws captured at hook-fire time so the reset and sweep operate
 on the workspace that was just switched to — not on whatever is
 current when this deferred call eventually runs (rapid back-to-back
@@ -1422,7 +1422,7 @@ Hooked into `claude-repl--on-workspace-switch' (panels.el).  Also resets
 WS's `:repl-state' from `:hidden' back to `:inactive' if applicable, so
 navigating to a hidden workspace removes its hidden flag (the user is
 actively viewing it; it should not be killed)."
-  (let ((current (or ws (+workspace-current-name))))
+  (let ((current (or ws (claude-repl--ws-current-name))))
     (when (eq (claude-repl--ws-repl-state current) :hidden)
       (claude-repl--log current
                         "maybe-sweep: arriving on :hidden ws, resetting to :inactive")
@@ -1435,7 +1435,7 @@ actively viewing it; it should not be killed)."
 With active region: copies file:startline-endline.
 Without region: copies file:line."
   (interactive)
-  (claude-repl--log (+workspace-current-name) "copy-reference: copying file reference")
+  (claude-repl--log (claude-repl--ws-current-name) "copy-reference: copying file reference")
   (let ((ref (claude-repl--format-file-ref)))
     (kill-new ref)
     (message "Copied: %s" ref)))
@@ -1449,7 +1449,7 @@ clipboard, deliberately distinct from the OS clipboard.
 Signals `user-error' when no text has been set for the current
 workspace."
   (interactive)
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (text (claude-repl--ws-get ws :clipboard)))
     (unless text
       (user-error "No clipboard text set for workspace '%s'" ws))
@@ -2432,8 +2432,7 @@ Returns to the workspace that was active when the load began."
            (queue (cl-remove-if
                    (lambda (e) (plist-get (cdr e) :nuked-at))
                    normalized))
-           (origin-ws (and (fboundp '+workspace-current-name)
-                           (ignore-errors (+workspace-current-name)))))
+           (origin-ws (claude-repl--ws-current-name)))
       (dolist (entry tombstones)
         (let ((ws (car entry))
               (plist (cdr entry)))
@@ -2959,7 +2958,7 @@ name."
       (when-let ((recent-file (claude-repl--most-recent-project-file project)))
         (when (file-exists-p recent-file)
           (find-file recent-file)))
-      (claude-repl--load-display-state (ignore-errors (+workspace-current-name))
+      (claude-repl--load-display-state (ignore-errors (claude-repl--ws-current-name))
                                        project)
       (claude-repl--flash-current-tab))))
 
@@ -2976,7 +2975,7 @@ protected-workspace handling: when current is the nil-persp, switch to
 tab — left/right cycling is high-frequency navigation and the flash
 becomes noise; identity-based jumps (`SPC p p', priority change,
 worktree jump) keep the flash since they're discrete attention cues."
-  (let ((current-name (+workspace-current-name)))
+  (let ((current-name (claude-repl--ws-current-name)))
     (if (+workspace--protected-p current-name)
         (+workspace-switch +workspaces-main t)
       (condition-case-unless-debug ex
@@ -3104,7 +3103,7 @@ since the user just closed claude in this workspace and shouldn't get
 yanked away from it.  Pulses the moved tab via `claude-repl-flash-tab'
 so the user can visually track it to its new home."
   (interactive)
-  (let* ((current (+workspace-current-name))
+  (let* ((current (claude-repl--ws-current-name))
          (names (persp-names-current-frame-fast-ordered))
          (old-index (cl-position current names :test #'string=))
          (without-current (remove current names))
@@ -3129,7 +3128,7 @@ so the user can visually track it to its new home."
   "Pull the current workspace to the second position in the tab-bar.
 Focus remains on the current workspace."
   (interactive)
-  (let* ((current (+workspace-current-name))
+  (let* ((current (claude-repl--ws-current-name))
          (names (persp-names-current-frame-fast-ordered))
          (without-current (remove current names))
          (reordered (append (list (car without-current))

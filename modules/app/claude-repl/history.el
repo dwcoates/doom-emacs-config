@@ -154,7 +154,7 @@ Same fallback semantics as `claude-repl--history-file-for-read'."
 (defun claude-repl--ws-live-input-buffer (ws)
   "Return the live input buffer for workspace WS, or nil.
 WS defaults to the current workspace name."
-  (let* ((ws (or ws (+workspace-current-name)))
+  (let* ((ws (or ws (claude-repl--ws-current-name)))
          (buf (and ws (claude-repl--ws-get ws :input-buffer))))
     (if (and buf (buffer-live-p buf))
         buf
@@ -166,7 +166,7 @@ WS defaults to the current workspace name."
 Resolves the project root via `claude-repl--ws-dir' so the location
 follows the workspace record rather than whatever buffer is current.
 WS defaults to the current workspace name."
-  (let ((ws (or ws (+workspace-current-name))))
+  (let ((ws (or ws (claude-repl--ws-current-name))))
     (claude-repl--log ws "history-save ws=%s" ws)
     (if-let ((buf (claude-repl--ws-live-input-buffer ws)))
         (let* ((root (claude-repl--ws-dir ws))
@@ -302,7 +302,7 @@ Signals an error with a descriptive message when validation fails."
   "Save TEXT (or current buffer text) to history.
 Skips empty strings and duplicates of the most recent entry."
   (let ((text (string-trim (or text (buffer-string))))
-        (ws (+workspace-current-name)))
+        (ws (claude-repl--ws-current-name)))
     (cond
      ((string-empty-p text)
       (claude-repl--log ws "history-push: skipped empty text"))
@@ -326,7 +326,7 @@ Binds `claude-repl--history-navigating' to suppress `history-on-change'."
 (defun claude-repl--history-show-entry (index)
   "Display the history entry at INDEX, or the stash when INDEX is negative.
 Updates `claude-repl--history-index' and replaces the buffer contents."
-  (claude-repl--log (+workspace-current-name) "history-show-entry: index=%d" index)
+  (claude-repl--log (claude-repl--ws-current-name) "history-show-entry: index=%d" index)
   (setq claude-repl--history-index index)
   (claude-repl--history-replace-buffer-text
    (if (< index 0)
@@ -336,7 +336,7 @@ Updates `claude-repl--history-index' and replaces the buffer contents."
 (defun claude-repl--history-prev ()
   "Navigate to the previous (older) history entry."
   (interactive)
-  (claude-repl--log (+workspace-current-name) "history-prev index=%d" claude-repl--history-index)
+  (claude-repl--log (claude-repl--ws-current-name) "history-prev index=%d" claude-repl--history-index)
   (when claude-repl--input-history
     (let ((next-index (1+ claude-repl--history-index)))
       (when (< next-index (length claude-repl--input-history))
@@ -347,7 +347,7 @@ Updates `claude-repl--history-index' and replaces the buffer contents."
 (defun claude-repl--history-next ()
   "Navigate to the next (newer) history entry, or restore stashed text."
   (interactive)
-  (claude-repl--log (+workspace-current-name) "history-next index=%d" claude-repl--history-index)
+  (claude-repl--log (claude-repl--ws-current-name) "history-next index=%d" claude-repl--history-index)
   (when (>= claude-repl--history-index 0)
     (claude-repl--history-show-entry (1- claude-repl--history-index))))
 
@@ -355,7 +355,7 @@ Updates `claude-repl--history-index' and replaces the buffer contents."
   "Reset history browsing when the user edits the buffer directly."
   (when (and (not claude-repl--history-navigating)
              (>= claude-repl--history-index 0))
-    (claude-repl--log (+workspace-current-name) "history-on-change resetting from index=%d" claude-repl--history-index)
+    (claude-repl--log (claude-repl--ws-current-name) "history-on-change resetting from index=%d" claude-repl--history-index)
     (claude-repl--history-reset)))
 
 ;;;; History search (completing-read)
@@ -383,7 +383,7 @@ the selection.  Stashes the in-progress text on first navigation so
 arrow-key navigation flow.  No-op (with a message) when history is
 empty."
   (interactive)
-  (claude-repl--log (+workspace-current-name) "history-search: entries=%d"
+  (claude-repl--log (claude-repl--ws-current-name) "history-search: entries=%d"
                     (length claude-repl--input-history))
   (if (null claude-repl--input-history)
       (message "[claude-repl] input history is empty")

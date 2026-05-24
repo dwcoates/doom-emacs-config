@@ -941,7 +941,7 @@ honor it here by skipping the panel-open call)."
   "Return t if Claude vterm buffer for WS exists with a live process.
 WS defaults to the current workspace name.  Signals an error if no
 workspace can be determined."
-  (let ((ws (or ws (+workspace-current-name))))
+  (let ((ws (or ws (claude-repl--ws-current-name))))
     (unless ws (error "claude-repl--claude-running-p: no workspace specified and no current workspace"))
     (claude-repl--vterm-process-alive-p ws)))
 
@@ -949,7 +949,7 @@ workspace can be determined."
   "Return t if vterm exists with a live process but Claude is not yet ready.
 WS defaults to the current workspace name.  Signals an error if no
 workspace can be determined."
-  (let ((ws (or ws (+workspace-current-name))))
+  (let ((ws (or ws (claude-repl--ws-current-name))))
     (unless ws (error "claude-repl--session-starting-p: no workspace specified and no current workspace"))
     (let ((result (and (claude-repl--vterm-process-alive-p ws)
                        (not (buffer-local-value 'claude-repl--ready

@@ -117,7 +117,7 @@ buffer so the change becomes visible immediately."
 Routes git reads through `claude-repl--git-string' so the function
 is mockable per AGENTS.md."
   (interactive)
-  (let* ((default-directory (claude-repl--ws-dir (+workspace-current-name)))
+  (let* ((default-directory (claude-repl--ws-dir (claude-repl--ws-current-name)))
          (commit-sha (claude-repl--git-string "rev-parse" "HEAD"))
          (remote-url (claude-repl--git-string "config" "--get" "remote.origin.url"))
          (cleaned-url (replace-regexp-in-string claude-repl-magit-github-ssh-prefix-regexp claude-repl-magit-github-base-url
@@ -135,7 +135,7 @@ Routes git reads through `claude-repl--git-string' so the function
 is mockable per AGENTS.md."
   (interactive)
   (let* ((commit-sha (magit-commit-at-point))
-         (default-directory (claude-repl--ws-dir (+workspace-current-name)))
+         (default-directory (claude-repl--ws-dir (claude-repl--ws-current-name)))
          (remote-url (claude-repl--git-string "config" "--get" "remote.origin.url"))
          (cleaned-url (replace-regexp-in-string claude-repl-magit-github-ssh-prefix-regexp claude-repl-magit-github-base-url
                                                 (replace-regexp-in-string "\\.git$" "" remote-url)))
@@ -169,7 +169,7 @@ works correctly from any buffer in the workspace.  Errors when no PR is
 associated with the current branch.  Routes git reads through
 `claude-repl--git-string' so the function is mockable per AGENTS.md."
   (interactive)
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (project-dir (claude-repl--ws-dir ws))
          (default-directory (file-name-as-directory project-dir))
          (branch (claude-repl--git-string "rev-parse" "--abbrev-ref" "HEAD"))
@@ -206,7 +206,7 @@ fullscreen once magit replaces the current window."
   (interactive)
   (when (window-parameter (selected-window) 'window-side)
     (select-window (window-main-window)))
-  (let* ((ws (+workspace-current-name))
+  (let* ((ws (claude-repl--ws-current-name))
          (dir (claude-repl--ws-dir ws))
          (magit-display-buffer-function
           #'claude-repl--magit-display-buffer-same-window))
