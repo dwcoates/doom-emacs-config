@@ -7038,7 +7038,21 @@ background-triggered /workspace-merge does not yank the user's focus."
             (claude-repl--ws-put "self-ws" :source-ws-dir tmpdir)
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "self-ws"))
                       ((symbol-function 'claude-repl--master-worktree-path)
-                       (lambda (_root) nil)))
+                       (lambda (_root) nil))
+                      ;; `--any-cherry-pick-in-progress-p' (called
+                      ;; before the same-source guard fires) probes
+                      ;; every registered workspace dir via two git
+                      ;; wrappers: `--git-string' for "rev-parse
+                      ;; --absolute-git-dir" and `--git-string-quiet'
+                      ;; elsewhere.  Stub both to return empty so the
+                      ;; probe reports "no cherry-pick in flight"
+                      ;; without shelling out.
+                      ((symbol-function 'claude-repl--git-string)
+                       (lambda (&rest _args) ""))
+                      ((symbol-function 'claude-repl--git-string-quiet)
+                       (lambda (&rest _args) ""))
+                      ((symbol-function 'claude-repl--assert-clean-worktree)
+                       (lambda (&rest _) nil)))
               (should-error (claude-repl-workspace-merge-current-into-source)
                             :type 'user-error)))
         (delete-directory tmpdir t)))))
