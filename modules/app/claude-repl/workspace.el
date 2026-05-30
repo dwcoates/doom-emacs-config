@@ -900,5 +900,21 @@ directly or wrapping it themselves with `fboundp'."
   (and persp (fboundp 'persp-buffers)
        (persp-buffers persp)))
 
+(defun claude-repl--ws-rename-persp (old-ws new-ws)
+  "Rename the live perspective for OLD-WS to NEW-WS.
+Resolves OLD-WS's persp via `--ws-resolve-persp' and renames it with
+`persp-rename'.  Returns non-nil on success or when there is nothing to
+rename (persp-mode unloaded, or OLD-WS has no live persp).  Returns nil
+ONLY when a live persp existed but `persp-rename' reported failure.
+
+This is the persp-mode rename boundary owned by `workspace.el'.
+Callers must use this function instead of calling `persp-rename'
+directly or wrapping it themselves with `fboundp'."
+  (if (not (fboundp 'persp-rename))
+      t
+    (if-let ((persp (claude-repl--ws-resolve-persp old-ws)))
+        (and (persp-rename new-ws persp) t)
+      t)))
+
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here
