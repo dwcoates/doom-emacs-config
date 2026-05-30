@@ -6179,7 +6179,7 @@ With ws-list (a b c d) and current=b, the result should be (a c b d)."
                 ((symbol-function 'persp-update-names-cache)
                  (lambda (names) (setq updated-names names)))
                 ((symbol-function 'claude-repl--force-tab-bar-redraw) #'ignore)
-                ((symbol-function '+workspace/switch-to) #'ignore)
+                ((symbol-function '+workspace-switch) #'ignore)
                 ((symbol-function 'claude-repl-flash-tab)
                  (lambda (_ws) (cl-incf flash-called))))
         (claude-repl-workspace-push-to-back)
@@ -6187,7 +6187,7 @@ With ws-list (a b c d) and current=b, the result should be (a c b d)."
         (should (= flash-called 1))))))
 
 (ert-deftest claude-repl-test-workspace-push-to-back-keeps-focus-when-asked ()
-  "With KEEP-FOCUS non-nil, the function does NOT call +workspace/switch-to."
+  "With KEEP-FOCUS non-nil, the function does NOT switch away from current."
   (claude-repl-test--with-clean-state
     (let ((switched-to nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "b"))
@@ -6195,8 +6195,8 @@ With ws-list (a b c d) and current=b, the result should be (a c b d)."
                  (lambda () '("a" "b" "c" "d")))
                 ((symbol-function 'persp-update-names-cache) #'ignore)
                 ((symbol-function 'claude-repl--force-tab-bar-redraw) #'ignore)
-                ((symbol-function '+workspace/switch-to)
-                 (lambda (ws) (setq switched-to ws)))
+                ((symbol-function '+workspace-switch)
+                 (lambda (ws &rest _) (setq switched-to ws)))
                 ((symbol-function 'claude-repl-flash-tab) #'ignore))
         (claude-repl-workspace-push-to-back t)
         (should-not switched-to)))))
@@ -6212,7 +6212,7 @@ With ws-list (a b c d) and current=c, the result should be (a c b d)."
                 ((symbol-function 'persp-update-names-cache)
                  (lambda (names) (setq updated-names names)))
                 ((symbol-function 'claude-repl--force-tab-bar-redraw) #'ignore)
-                ((symbol-function '+workspace/switch-to) #'ignore))
+                ((symbol-function '+workspace-switch) #'ignore))
         (claude-repl-workspace-pull-to-front)
         (should (equal updated-names '("a" "c" "b" "d")))))))
 
