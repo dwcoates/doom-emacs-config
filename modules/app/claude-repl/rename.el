@@ -234,11 +234,10 @@ persistent old-name persp would diverge from the renamed state."
     (error "persp-rename %s -> %s failed" old-ws new-ws)))
 
 (defun claude-repl--rename-update-history (old-ws new-ws)
-  "Replace OLD-WS with NEW-WS in `+dwc/workspace-history'."
-  (when (boundp '+dwc/workspace-history)
-    (setq +dwc/workspace-history
-          (mapcar (lambda (n) (if (string= n old-ws) new-ws n))
-                  +dwc/workspace-history))))
+  "Replace OLD-WS with NEW-WS in `claude-repl--workspace-history'."
+  (setq claude-repl--workspace-history
+        (mapcar (lambda (n) (if (string= n old-ws) new-ws n))
+                claude-repl--workspace-history)))
 
 (defun claude-repl--rename-update-projectile (old-path new-path)
   "Move projectile's known-project entry from OLD-PATH to NEW-PATH."

@@ -1508,6 +1508,32 @@ identity-distinct string injected by `claude-repl-set-priority' from
       (fmakunbound 'safe-persp-name)
       (should-not (claude-repl--ws-persp-name 'a-persp)))))
 
+;;;; ---- Tests: --record-workspace-history ----
+
+(ert-deftest claude-repl-test-record-workspace-history-pushes-current ()
+  "record-workspace-history pushes the current workspace to the front."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspace-history nil))
+      (cl-letf (((symbol-function 'claude-repl--ws-current-name) (lambda () "a")))
+        (claude-repl--record-workspace-history)
+        (should (equal claude-repl--workspace-history '("a")))))))
+
+(ert-deftest claude-repl-test-record-workspace-history-dedups-and-fronts ()
+  "record-workspace-history moves an already-present name to the front."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspace-history '("b" "a")))
+      (cl-letf (((symbol-function 'claude-repl--ws-current-name) (lambda () "a")))
+        (claude-repl--record-workspace-history)
+        (should (equal claude-repl--workspace-history '("a" "b")))))))
+
+(ert-deftest claude-repl-test-record-workspace-history-noop-when-no-current ()
+  "record-workspace-history leaves history unchanged when there is no current ws."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspace-history '("a")))
+      (cl-letf (((symbol-function 'claude-repl--ws-current-name) (lambda () nil)))
+        (claude-repl--record-workspace-history)
+        (should (equal claude-repl--workspace-history '("a")))))))
+
 ;;;; ---- Tests: --ws-new ----
 
 (ert-deftest claude-repl-test-ws-new-with-name-delegates-to-workspace-new ()

@@ -91,6 +91,17 @@ Keys: :vterm-buffer :input-buffer
 :active-env is :sandbox or :bare-metal; :sandbox and :bare-metal are
 `claude-repl-instantiation' structs holding per-environment session state.")
 
+(defvar claude-repl--workspace-history nil
+  "Workspace names ordered by most-recently-visited first.
+Maintained by `claude-repl--record-workspace-history' on every workspace
+activation.  Read by the rename and workspace-merge paths and by
+`claude-repl-open-most-recent-workspace'.")
+
+(defvar claude-repl--opened-recent-workspaces nil
+  "Workspaces already returned by `claude-repl-open-most-recent-workspace'
+this session, so repeated invocations cycle through history instead of
+returning the same workspace twice.")
+
 (defun claude-repl--ws-get (ws key)
   "Get KEY from workspace WS's plist."
   (plist-get (gethash ws claude-repl--workspaces) key))
@@ -1186,6 +1197,19 @@ callers do not name the feature directly.
 Boundary owned by `workspace.el'."
   (with-eval-after-load 'persp-mode
     (funcall thunk)))
+
+(defun claude-repl--record-workspace-history (&rest _)
+  "Record the current workspace at the front of `claude-repl--workspace-history'.
+Removes any prior occurrence of the name so the list stays
+most-recently-visited-first with no duplicates.  No-op when there is no
+current workspace.  Registered on the persp activation hook below."
+  (let ((name (claude-repl--ws-current-name)))
+    (when name
+      (setq claude-repl--workspace-history
+            (cons name (cl-remove name claude-repl--workspace-history
+                                  :test #'string=))))))
+
+(claude-repl--ws-add-activated-hook #'claude-repl--record-workspace-history)
 
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here
