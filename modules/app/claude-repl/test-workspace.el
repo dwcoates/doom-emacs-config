@@ -1478,5 +1478,39 @@ identity-distinct string injected by `claude-repl-set-priority' from
       (fmakunbound 'projectile-relevant-known-projects)
       (should-not (claude-repl--ws-known-projects)))))
 
+;;;; ---- Tests: --workspace-for-buffer (moved from test-status.el) ----
+
+(ert-deftest claude-repl-test-workspace-for-buffer-persp-mode-nil ()
+  "workspace-for-buffer should return nil when persp-mode is nil."
+  (claude-repl-test--with-clean-state
+    (let ((persp-mode nil))
+      (should-not (claude-repl--workspace-for-buffer (current-buffer))))))
+
+(ert-deftest claude-repl-test-workspace-for-buffer-found ()
+  "workspace-for-buffer should return workspace name when buffer is found."
+  (claude-repl-test--with-clean-state
+    (let ((persp-mode t)
+          (test-buf (current-buffer))
+          (fake-persp "my-workspace"))
+      (cl-letf (((symbol-function 'persp-persps)
+                 (lambda () (list fake-persp)))
+                ((symbol-function 'persp-contain-buffer-p)
+                 (lambda (buf persp)
+                   (and (eq buf test-buf) (equal persp fake-persp))))
+                ((symbol-function 'safe-persp-name)
+                 (lambda (persp) persp)))
+        (should (equal (claude-repl--workspace-for-buffer test-buf)
+                       "my-workspace"))))))
+
+(ert-deftest claude-repl-test-workspace-for-buffer-not-found ()
+  "workspace-for-buffer should return nil when buffer not in any persp."
+  (claude-repl-test--with-clean-state
+    (let ((persp-mode t))
+      (cl-letf (((symbol-function 'persp-persps)
+                 (lambda () '("ws-a" "ws-b")))
+                ((symbol-function 'persp-contain-buffer-p)
+                 (lambda (_buf _persp) nil)))
+        (should-not (claude-repl--workspace-for-buffer (current-buffer)))))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here

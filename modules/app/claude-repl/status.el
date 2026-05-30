@@ -563,15 +563,6 @@ A no-op if a check is already in progress for WS."
                     (apply-partially #'claude-repl--git-diff-sentinel ws))))
         (claude-repl--ws-put ws :git-proc proc)))))
 
-;;; Buffer/workspace resolution -----------------------------------------------
-
-(defun claude-repl--workspace-for-buffer (buf)
-  "Return the workspace name that contains BUF, or nil."
-  (when (claude-repl--ws-system-available-p)
-    (cl-loop for persp in (persp-persps)
-             when (persp-contain-buffer-p buf persp)
-             return (safe-persp-name persp))))
-
 ;;; Tab-bar rendering ---------------------------------------------------------
 ;;
 ;; Appearance is described by a small pyramid:

@@ -775,40 +775,6 @@ even when the full-tab background is suppressed."
       (claude-repl--async-refresh-git-status "ws1")
       (should-not (claude-repl--ws-get "ws1" :git-proc)))))
 
-;;;; ---- Tests: workspace-for-buffer ----
-
-(ert-deftest claude-repl-test-workspace-for-buffer-persp-mode-nil ()
-  "workspace-for-buffer should return nil when persp-mode is nil."
-  (claude-repl-test--with-clean-state
-    (let ((persp-mode nil))
-      (should-not (claude-repl--workspace-for-buffer (current-buffer))))))
-
-(ert-deftest claude-repl-test-workspace-for-buffer-found ()
-  "workspace-for-buffer should return workspace name when buffer is found."
-  (claude-repl-test--with-clean-state
-    (let ((persp-mode t)
-          (test-buf (current-buffer))
-          (fake-persp "my-workspace"))
-      (cl-letf (((symbol-function 'persp-persps)
-                 (lambda () (list fake-persp)))
-                ((symbol-function 'persp-contain-buffer-p)
-                 (lambda (buf persp)
-                   (and (eq buf test-buf) (equal persp fake-persp))))
-                ((symbol-function 'safe-persp-name)
-                 (lambda (persp) persp)))
-        (should (equal (claude-repl--workspace-for-buffer test-buf)
-                       "my-workspace"))))))
-
-(ert-deftest claude-repl-test-workspace-for-buffer-not-found ()
-  "workspace-for-buffer should return nil when buffer not in any persp."
-  (claude-repl-test--with-clean-state
-    (let ((persp-mode t))
-      (cl-letf (((symbol-function 'persp-persps)
-                 (lambda () '("ws-a" "ws-b")))
-                ((symbol-function 'persp-contain-buffer-p)
-                 (lambda (_buf _persp) nil)))
-        (should-not (claude-repl--workspace-for-buffer (current-buffer)))))))
-
 ;;;; ---- Tests: tab-spec ----
 
 (ert-deftest claude-repl-test-tab-spec-unselected-known-state ()
