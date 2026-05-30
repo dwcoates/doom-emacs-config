@@ -1265,17 +1265,14 @@ right-aligned segment to repaint too.
 
 The segment's actual text is invisible (`'invisible t' text property)
 so its only purpose is the cache-busting role."
-  (let ((name (if (fboundp 'safe-persp-name)
-                  (safe-persp-name (and (fboundp 'get-current-persp)
-                                        (get-current-persp)))
-                "")))
+  (let ((name (or (claude-repl--ws-current-name) "")))
     (propertize (if claude-repl--tabline-space-toggle
                     (concat name " ")
                   name)
                 'invisible t)))
 
-;; Install the tab-bar after persp-mode loads so `safe-persp-name' /
-;; `get-current-persp' resolve cleanly at render time; persp-mode is the
+;; Install the tab-bar after persp-mode loads so `claude-repl--ws-current-name'
+;; resolves cleanly at render time; persp-mode is the
 ;; dep that the workspace-list entries read in
 ;; `claude-repl--tabline-rendered-entries' and below.
 (after! persp-mode
