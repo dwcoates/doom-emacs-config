@@ -2844,8 +2844,6 @@ replayed. Falls back to `merge-base HEAD TARGET-BRANCH' when no annotations matc
         (claude-repl--git-string
          "-C" project-root "merge-base" "HEAD" target-branch))))
 
-(defalias '+dwc/workspace-merge--fork #'claude-repl--cherry-pick-base)
-
 (defun claude-repl--workspace-branch (ws)
   "Return the git branch checked out in workspace WS's worktree, or nil.
 Workspace name != branch name: e.g. persp \"fix-login\" was created from
@@ -2862,8 +2860,6 @@ Resolves via :project-dir stored in `claude-repl--workspaces'."
           (claude-repl--log ws "workspace-branch ws=%s detached HEAD, sha=%s" ws sha)
           sha)
       branch)))
-
-(defalias '+dwc/workspace->branch #'claude-repl--workspace-branch)
 
 (defun claude-repl--cherry-pick-commits (root target-ws base-branch target-branch
                                               &optional auto-resolve silent)
@@ -3890,8 +3886,6 @@ off so the user resolves in magit directly."
          (claude-repl--drain-merge-queue)
          (signal (car err) (cdr err)))))))
 
-(defalias '+dwc/workspace-merge--do #'claude-repl--workspace-merge-do)
-
 (defun claude-repl-workspace-merge ()
   "Cherry-pick another workspace's branch commits onto the current branch.
 Prompts for which workspace to merge in."
@@ -3916,8 +3910,6 @@ Prompts for which workspace to merge in."
                          "Merge workspace into current: ")
                        other-ws nil t nil nil default-ws)))
       (claude-repl--workspace-merge-do target-ws))))
-
-(defalias '+dwc/workspace-merge #'claude-repl-workspace-merge)
 
 (defun claude-repl--ws-merge-parent-dir (ws)
   "Return the directory whose branch is WS's merge-target.
@@ -4573,8 +4565,6 @@ errored\" UX."
                       "workspace-merge-current-into-source: ws=%s repo-root=%s"
                       ws (or repo-root "nil"))
     (claude-repl--workspace-merge-async ws repo-root)))
-
-(defalias '+dwc/workspace-merge-current-into-source #'claude-repl-workspace-merge-current-into-source)
 
 ;;; Main-thread heartbeat (diagnostic instrumentation)
 ;;

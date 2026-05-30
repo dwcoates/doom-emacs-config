@@ -2064,7 +2064,7 @@ existing worktree."
 
 ;;;; ---- Tests: merge-fork (cherry-pick-base) ----
 ;;
-;; `claude-repl--cherry-pick-base' (aliased as `+dwc/workspace-merge--fork')
+;; `claude-repl--cherry-pick-base'
 ;; runs three git invocations through `claude-repl--git-string':
 ;;   (1) `log --right-only --pretty=%H --no-merges HEAD...TARGET' — target's
 ;;       unique commits, newest first, newline-separated.
@@ -2093,7 +2093,7 @@ existing worktree."
                    (`("-C" "/tmp/repo" "merge-base" "HEAD" "branch-b")
                     sha-m)
                    (_ (error "unmocked git-string args: %S" args))))))
-      (should (equal (+dwc/workspace-merge--fork "/tmp/repo" "branch-b") sha-m)))))
+      (should (equal (claude-repl--cherry-pick-base "/tmp/repo" "branch-b") sha-m)))))
 
 (ert-deftest claude-repl-test-merge-fork-clean-chain ()
   "After merging B (with -x), fork for C (descends from B) is B's tip SHA."
@@ -2114,7 +2114,7 @@ existing worktree."
                     (format "A1\n\nB1\n\n(cherry picked from commit %s)\n\nB2\n\n(cherry picked from commit %s)"
                             sha-b1 sha-b2))
                    (_ (error "unmocked git-string args: %S" args))))))
-      (should (equal (+dwc/workspace-merge--fork "/tmp/repo" "branch-c") sha-b2)))))
+      (should (equal (claude-repl--cherry-pick-base "/tmp/repo" "branch-c") sha-b2)))))
 
 (ert-deftest claude-repl-test-merge-fork-already-fully-merged ()
   "When all TARGET commits are incorporated, fork equals TARGET tip -> empty range."
@@ -2131,7 +2131,7 @@ existing worktree."
                     (format "A1\n\nB1\n\n(cherry picked from commit %s)\n\nB2\n\n(cherry picked from commit %s)"
                             sha-b1 sha-b2))
                    (_ (error "unmocked git-string args: %S" args))))))
-      (should (equal (+dwc/workspace-merge--fork "/tmp/repo" "branch-b") sha-b2)))))
+      (should (equal (claude-repl--cherry-pick-base "/tmp/repo" "branch-b") sha-b2)))))
 
 (ert-deftest claude-repl-test-merge-fork-growing-workspace ()
   "After B is merged, adding B3 to branch-b; fork stays at B2 -> only B3 is new."
@@ -2150,7 +2150,7 @@ existing worktree."
                     (format "A1\n\nB1\n\n(cherry picked from commit %s)\n\nB2\n\n(cherry picked from commit %s)"
                             sha-b1 sha-b2))
                    (_ (error "unmocked git-string args: %S" args))))))
-      (should (equal (+dwc/workspace-merge--fork "/tmp/repo" "branch-b") sha-b2)))))
+      (should (equal (claude-repl--cherry-pick-base "/tmp/repo" "branch-b") sha-b2)))))
 
 (ert-deftest claude-repl-test-merge-fork-deep-chain ()
   "After merging B then C, fork for D (descends from C) is C's tip SHA."
@@ -2169,7 +2169,7 @@ existing worktree."
                     (format "A1\n\nB1\n\n(cherry picked from commit %s)\n\nB2\n\n(cherry picked from commit %s)\n\nC1\n\n(cherry picked from commit %s)"
                             sha-b1 sha-b2 sha-c1))
                    (_ (error "unmocked git-string args: %S" args))))))
-      (should (equal (+dwc/workspace-merge--fork "/tmp/repo" "branch-d") sha-c1)))))
+      (should (equal (claude-repl--cherry-pick-base "/tmp/repo" "branch-d") sha-c1)))))
 
 (ert-deftest claude-repl-test-merge-fork-annotation-survives-conflict-resolution ()
   "Annotation is written even when cherry-pick required conflict resolution via --continue."
@@ -2187,7 +2187,7 @@ existing worktree."
                    (`("-C" "/tmp/repo" "log" "--left-only" "--pretty=%B" "HEAD...branch-c")
                     (format "A1\n\nB1 (resolved)\n\n(cherry picked from commit %s)" sha-b1))
                    (_ (error "unmocked git-string args: %S" args))))))
-      (should (equal (+dwc/workspace-merge--fork "/tmp/repo" "branch-c") sha-b1)))))
+      (should (equal (claude-repl--cherry-pick-base "/tmp/repo" "branch-c") sha-b1)))))
 
 ;;;; ---- Tests: detect-merge-actually-landed-p ----
 

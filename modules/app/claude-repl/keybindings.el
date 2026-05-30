@@ -819,9 +819,9 @@ global drawer-mirror bindings win in vterm buffers."
        :desc "New worktree ws (from current)" "n" #'claude-repl-create-worktree-workspace
        :desc "New worktree ws (from local master)" "N" #'claude-repl-create-worktree-workspace-from-origin-master
        :desc "Fork worktree ws + fork Claude session" "f" #'claude-repl-fork-worktree-workspace
-       :desc "Merge workspace into current" "m" #'+dwc/workspace-merge
-       :desc "Merge current workspace into source" "M" #'+dwc/workspace-merge-current-into-source
-       :desc "Rename current workspace" "r" #'+dwc/workspace-rename
+       :desc "Merge workspace into current" "m" #'claude-repl-workspace-merge
+       :desc "Merge current workspace into source" "M" #'claude-repl-workspace-merge-current-into-source
+       :desc "Rename current workspace" "r" #'claude-repl-rename-workspace
        :desc "Push workspace to second-to-last" "p" #'claude-repl-workspace-push-to-back
        :desc "Pull workspace to second" "P" #'claude-repl-workspace-pull-to-front
        :desc "Open most recent workspace" "R" #'claude-repl-open-most-recent-workspace))
