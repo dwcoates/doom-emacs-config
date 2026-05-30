@@ -1508,6 +1508,65 @@ identity-distinct string injected by `claude-repl-set-priority' from
       (fmakunbound 'safe-persp-name)
       (should-not (claude-repl--ws-persp-name 'a-persp)))))
 
+;;;; ---- Tests: --ws-new ----
+
+(ert-deftest claude-repl-test-ws-new-with-name-delegates-to-workspace-new ()
+  "ws-new with a NAME calls +workspace-new with that name."
+  (claude-repl-test--with-clean-state
+    (let (created)
+      (cl-letf (((symbol-function '+workspace-new) (lambda (name) (setq created name))))
+        (claude-repl--ws-new "ws1")
+        (should (equal created "ws1"))))))
+
+(ert-deftest claude-repl-test-ws-new-without-name-delegates-to-workspace/new ()
+  "ws-new without a NAME calls the interactive +workspace/new."
+  (claude-repl-test--with-clean-state
+    (let (called)
+      (cl-letf (((symbol-function '+workspace/new) (lambda (&rest _) (setq called t))))
+        (claude-repl--ws-new)
+        (should called)))))
+
+(ert-deftest claude-repl-test-ws-new-noop-when-unbound ()
+  "ws-new with a NAME is a no-op when +workspace-new is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-new) nil))
+      (fmakunbound '+workspace-new)
+      (should-not (claude-repl--ws-new "ws1")))))
+
+;;;; ---- Tests: --ws-persp-kill ----
+
+(ert-deftest claude-repl-test-ws-persp-kill-delegates-when-bound ()
+  "ws-persp-kill calls persp-kill with the given ws name."
+  (claude-repl-test--with-clean-state
+    (let (killed)
+      (cl-letf (((symbol-function 'persp-kill) (lambda (ws) (setq killed ws))))
+        (claude-repl--ws-persp-kill "doomed")
+        (should (equal killed "doomed"))))))
+
+(ert-deftest claude-repl-test-ws-persp-kill-noop-when-unbound ()
+  "ws-persp-kill is a no-op when persp-kill is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-kill) nil))
+      (fmakunbound 'persp-kill)
+      (should-not (claude-repl--ws-persp-kill "doomed")))))
+
+;;;; ---- Tests: --ws-remove-buffer ----
+
+(ert-deftest claude-repl-test-ws-remove-buffer-delegates-when-bound ()
+  "ws-remove-buffer calls persp-remove-buffer with the given buffer."
+  (claude-repl-test--with-clean-state
+    (let (removed)
+      (cl-letf (((symbol-function 'persp-remove-buffer) (lambda (buf) (setq removed buf))))
+        (claude-repl--ws-remove-buffer 'buf)
+        (should (eq removed 'buf))))))
+
+(ert-deftest claude-repl-test-ws-remove-buffer-noop-when-unbound ()
+  "ws-remove-buffer is a no-op when persp-remove-buffer is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-remove-buffer) nil))
+      (fmakunbound 'persp-remove-buffer)
+      (should-not (claude-repl--ws-remove-buffer 'buf)))))
+
 ;;;; ---- Tests: --ws-nil-name ----
 
 (ert-deftest claude-repl-test-ws-nil-name-returns-value-when-bound ()
