@@ -232,56 +232,10 @@ every recognized priority."
   (or (and priority (cl-position priority claude-repl-priority-levels :test #'equal))
       most-positive-fixnum))
 
-;; `claude-repl--reorder-workspace-by-priority' moved into `workspace.el'
-;; during the persp-mode integration extraction (see AGENTS.md, "NEVER
-;; manipulate third-party internals from a high-level layer").  The
-;; function is the persp-mode boundary for cache reordering; status.el
-;; should not own it.
-
-(defun claude-repl--reorder-workspace-to-front (ws)
-  "Move workspace WS to the front of `persp-names-cache' (visible portion).
-The visible portion is everything after `persp-nil-name' when that
-variable is bound (persp-mode keeps its sentinel persp at the head);
-WS is inserted as the first element of the visible portion so it
-shows up as the leftmost tab.
-
-Mirrors `claude-repl--reorder-workspace-by-priority' in structure:
-preserves cache string identity via the `(car (member ws cache))'
-canonicalization (`persp-remove-from-menu' relies on `eql' identity
-for string removal), and the nil-name slot at the cache head.
-
-No-op when the cache does not contain WS, when persp-mode is not
-loaded, or when `persp-update-names-cache' is unavailable.  Each entry,
-every bail-out, and the post-mutation cache state are logged so the
-silent no-op paths are observable when reproducing ordering bugs.
-
-Used by the snapshot loader's merge-failed restore path so a workspace
-whose cherry-pick silently failed pre-restart surfaces as the leftmost
-tab on the next session, demanding the user's attention instead of
-hiding in the drawer's MERGED bucket."
-  (let ((cache-snapshot (if (boundp 'persp-names-cache) persp-names-cache "(unbound)")))
-    (claude-repl--log ws "reorder-workspace-to-front: ENTRY ws=%s cache=%S"
-                      ws cache-snapshot)
-    (cond
-     ((not (boundp 'persp-names-cache))
-      (claude-repl--log ws "reorder-workspace-to-front: BAIL ws=%s reason=cache-unbound" ws))
-     ((not (member ws persp-names-cache))
-      (claude-repl--log ws "reorder-workspace-to-front: BAIL ws=%s reason=not-in-cache cache=%S"
-                        ws persp-names-cache))
-     (t
-      (let* ((nil-name (and (boundp 'persp-nil-name) persp-nil-name))
-             (canonical-ws (car (member ws persp-names-cache)))
-             (without-ws (cl-remove canonical-ws persp-names-cache :test #'eq :count 1))
-             (visible (if nil-name
-                          (cl-remove nil-name without-ws :test #'equal :count 1)
-                        without-ws))
-             (new-visible (cons canonical-ws visible))
-             (new-cache (if (and nil-name (member nil-name persp-names-cache))
-                            (cons nil-name new-visible)
-                          new-visible)))
-        (claude-repl--log ws "reorder-workspace-to-front: APPLY ws=%s canonical-eq-input=%s new-cache=%S"
-                          ws (if (eq canonical-ws ws) "t" "nil") new-cache)
-        (claude-repl--ws-update-names-cache new-cache))))))
+;; `claude-repl--reorder-workspace-by-priority' and
+;; `claude-repl--reorder-workspace-to-front' both live in `workspace.el'
+;; (the persp-mode boundary for `persp-names-cache' reordering); status.el
+;; does not own persp-cache mutation.
 
 ;;; Workspace state accessors ------------------------------------------------
 
