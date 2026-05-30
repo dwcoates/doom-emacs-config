@@ -2016,9 +2016,7 @@ Each call:
           (when (fboundp 'hack-dir-local-variables-non-file-buffer)
             (hack-dir-local-variables-non-file-buffer))))
       (unwind-protect
-          (when (and (boundp '+workspaces-switch-project-function)
-                     +workspaces-switch-project-function)
-            (funcall +workspaces-switch-project-function dir))
+          (claude-repl--ws-run-switch-project-function dir)
         (when (and fb (buffer-live-p fb) orig-dir)
           (with-current-buffer fb
             (setq default-directory orig-dir)))))

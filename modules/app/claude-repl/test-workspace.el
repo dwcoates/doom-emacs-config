@@ -1508,6 +1508,24 @@ identity-distinct string injected by `claude-repl-set-priority' from
       (fmakunbound 'safe-persp-name)
       (should-not (claude-repl--ws-persp-name 'a-persp)))))
 
+;;;; ---- Tests: --ws-run-switch-project-function ----
+
+(ert-deftest claude-repl-test-ws-run-switch-project-function-invokes-when-set ()
+  "ws-run-switch-project-function funcalls the configured function with DIR."
+  (claude-repl-test--with-clean-state
+    (let ((+workspaces-switch-project-function nil)
+          (called-with nil))
+      (setq +workspaces-switch-project-function
+            (lambda (dir) (setq called-with dir)))
+      (claude-repl--ws-run-switch-project-function "/tmp/proj")
+      (should (equal called-with "/tmp/proj")))))
+
+(ert-deftest claude-repl-test-ws-run-switch-project-function-noop-when-nil ()
+  "ws-run-switch-project-function is a no-op when the function var is nil."
+  (claude-repl-test--with-clean-state
+    (let ((+workspaces-switch-project-function nil))
+      (should-not (claude-repl--ws-run-switch-project-function "/tmp/proj")))))
+
 ;;;; ---- Tests: --record-workspace-history ----
 
 (ert-deftest claude-repl-test-record-workspace-history-pushes-current ()
