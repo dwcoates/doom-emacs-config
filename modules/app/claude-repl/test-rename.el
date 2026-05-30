@@ -282,16 +282,16 @@ is stale and must be re-resolved on next read."
 ;;;; ---- Tests: update-history ----
 
 (ert-deftest claude-repl-test-rename-update-history-replaces-old-name ()
-  "Old name in `+dwc/workspace-history' is replaced with the new name."
-  (let ((+dwc/workspace-history '("a" "old" "b")))
+  "Old name in `claude-repl--workspace-history' is replaced with the new name."
+  (let ((claude-repl--workspace-history '("a" "old" "b")))
     (claude-repl--rename-update-history "old" "new")
-    (should (equal +dwc/workspace-history '("a" "new" "b")))))
+    (should (equal claude-repl--workspace-history '("a" "new" "b")))))
 
 (ert-deftest claude-repl-test-rename-update-history-no-old-entry-noop ()
   "History without the old name passes through unchanged."
-  (let ((+dwc/workspace-history '("a" "b")))
+  (let ((claude-repl--workspace-history '("a" "b")))
     (claude-repl--rename-update-history "old" "new")
-    (should (equal +dwc/workspace-history '("a" "b")))))
+    (should (equal claude-repl--workspace-history '("a" "b")))))
 
 ;;;; ---- Tests: end-to-end through claude-repl--do-rename-workspace ----
 ;;

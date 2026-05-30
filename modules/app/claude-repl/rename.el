@@ -324,8 +324,6 @@ branch ref explicitly; a bare name preserves the current branch's prefix."
      (list (read-string (format "Rename '%s' to: " ws) default))))
   (claude-repl--do-rename-workspace (claude-repl--ws-current-name) new-name))
 
-(defalias '+dwc/workspace-rename #'claude-repl-rename-workspace)
-
 (provide 'claude-repl-rename)
 
 ;;; rename.el ends here
