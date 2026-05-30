@@ -9,9 +9,21 @@ The user will describe work they want to do across one or more workspaces in pla
 
 Do NOT attempt to generate git branches or worktrees yourself in git. Under NO circumstances. The handling of branch/worktree generation is EXCLUSIVELY the responsibility and right of downstream consumers. Your EXCLUSIVE job is to generate the aforementioned JSON file, and NOTHING else. To that end, no code or any other files or mutating effects should be done, either.
 
+## Scope: no investigation, only synthesis
+
+This skill is strictly about turning the user's request into the dispatch JSON. The dispatch JSON is merely a concise description of the workspace to be created, and the near entirey of the work is to be done by the downstream workspaces created from the dispatch JSON itself. Thus, any actual investigation — running tests, walking source files, reading whole Slack threads or PR diffs, spidering through linked resources, reproducing bugs, exploring the codebase — is OUT OF SCOPE here and belongs to the *generated* workspace's session, not this one. For example, running this skill on a given slack thread should simply create dispatch JSON with a prompt for "investigate Slack thread xyz \<perhaps also with some additional context specified by the user that is important to include in the prompt\>"
+
+Concretely:
+
+- **Allowed**, because it directly informs branch naming or the initial prompt: parsing the user's plain-English request, fetching the *root* Slack message or GH ticket title (one shallow call, not a recursive crawl), reading at most a few lines of an obviously-cited file when the branch slug would otherwise be a guess.
+- **Not allowed**, even when it might be useful: running tests, executing scripts, reading large file ranges, fetching every reply in a thread, following every link in a thread, expanding linked PRs, walking blame, building dependency graphs, or any other multi-step exploration. Each of these can take minutes and is exactly what the downstream workspace is designed to do.
+- **The escape hatch**: when work would require investigation to *do correctly*, encode the investigation as instructions in the `"prompt"` field of the generated `"create"` entry so the spawned workspace performs it after launch. The spawned session has the time and tools to do this properly; this session does not.
+
+The skill MUST finish quickly. If you find yourself reaching for a second or third `gns slack convo`, a `gh pr view --json files`, a `WebFetch`, or a code read past a few lines, stop and route that work into the workspace prompt instead.
+
 ## Gathering Context via GNS
 
-When the user's request references external resources (Slack messages, GitHub PRs, etc.), use the `gns` CLI to fetch context before generating workspaces. Use `gns --help` and `gns <subcommand> --help` for full details beyond what's listed here.
+When the user's request references external resources (Slack messages, GitHub PRs, etc.), use the `gns` CLI to fetch the *minimum* context needed to draft branch names and an initial prompt. Use `gns --help` and `gns <subcommand> --help` for full details beyond what's listed here. Per the **Scope** section above, fetches should be shallow — typically a single root-message lookup, not a full conversation crawl.
 
 ### Slack
 
@@ -67,21 +79,19 @@ gns search "<query>" --limit 10 --json
 
 ### Following Links
 
-When analyzing Slack threads, **follow all links exhaustively**:
-- **Slack links** (`chesscom.slack.com/archives/...`): use `gns slack convo <link>`
-- **GitHub PR/issue links** (`github.com/org/repo/pull/N`): use `gh pr view` or `gh issue view`
-- **Jira links**: extract the ticket ID for branch naming
-- **Other URLs**: use `WebFetch` if available, or note them for the workspace prompt
+When a link appears in the user's request, do the *minimum* lookup needed to draft branch names and an initial prompt — never an exhaustive crawl. Per the **Scope** section, deeper investigation belongs to the generated workspace, not to this one. Recommended posture per link type:
+
+- **Slack links** (`chesscom.slack.com/archives/...`): one `gns slack convo <link>` is fine for the root message, but do not chase every link inside that conversation. Reference the link in the workspace prompt and let the spawned session pull what it needs.
+- **GitHub PR/issue links** (`github.com/org/repo/pull/N`): one `gh pr view` for title and body is fine. Do NOT fetch `--json files`, walk the diff, or pull blame.
+- **Jira links**: extract the ticket ID for branch naming and stop.
+- **Other URLs**: include them verbatim in the workspace prompt rather than fetching them here.
 
 ## Steps
 
-1. **Interpret** the user's description as a description of the branches or a description of the process to generate the branch names. 
-  - **EXAMPLE**: "one for each of the skipped tests listed in the test suite output" should be interpreted as the following process by you
-    - first -> identify how to run the corresponding tests
-    - second -> run the tests
-    - third -> enumerate the items found in the output
-    - fourth -> spin up one agent item, and determine the corresponding branch names
-  - **NOTE**: attempt to spin up agents dedicated to each soon-to-be branch name when possible
+1. **Interpret** the user's description as a description of the branches or a description of the process to generate the branch names.
+  - When the user enumerates the branches explicitly (e.g. by name or by a small fixed list), use that enumeration directly.
+  - When the user describes a *process* for enumerating branches (e.g. "one per skipped test", "one per failing CI job"), do NOT execute that process here. Per the **Scope** section, this skill does not run tests, scripts, or other multi-step exploration. Instead, generate a SINGLE workspace whose `"prompt"` field instructs the spawned session to perform the enumeration and re-invoke `/workspace-generation` from inside that session with the concrete list.
+  - **NOTE**: attempt to spin up agents dedicated to each soon-to-be branch name when possible.
 
 2. **Generate branch names** for each workspace:
   - Branch Names should be short, lowercase, hyphen-separated slugs — not long descriptions.
