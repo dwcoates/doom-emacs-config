@@ -779,8 +779,7 @@ or creating ghost state."
       (message "Amended-oneshot prompt queued for in-flight %s workspace." flavor))
      ((stringp state)
       (unless (claude-repl--ws-get state :vterm-buffer)
-        (unless (member state (and (fboundp '+workspace-list-names)
-                                   (+workspace-list-names)))
+        (unless (member state (claude-repl--ws-all-names))
           (user-error "Tracked oneshot workspace '%s' no longer exists — press `SPC j %s' to create a new one"
                       state (if (eq flavor :doom) "o" "O"))))
       (claude-repl--log state
@@ -1068,7 +1067,7 @@ should jump to the new ws) are not silently undone."
            (effective-priority (or (claude-repl--inherit-priority-from-source priority source-dir)
                                    (claude-repl--repo-default-priority-for-path path))))
       (claude-repl--log ws "worktree creating workspace %s effective-priority=%s" ws (or effective-priority "nil"))
-      (+workspace-new ws)
+      (claude-repl--ws-new ws)
       (claude-repl--ws-put ws :pending-magit t)
       (claude-repl--ws-put ws :pending-initial-buffers t)
       (claude-repl--enqueue-preemptive-prompt ws preemptive-prompt)
@@ -1250,12 +1249,11 @@ from; persisted as `:source-ws-dir' on the new workspace so
 Called after `magit-status' opens so that magit is the sole main buffer
 in a new workspace, rather than the Doom splash screen lingering in the
 buffer list."
-  (when (and (boundp '+doom-dashboard-buffer-name)
-             (fboundp 'persp-remove-buffer))
+  (when (boundp '+doom-dashboard-buffer-name)
     (when-let ((dash (get-buffer +doom-dashboard-buffer-name)))
       (claude-repl--log (claude-repl--ws-current-name)
                         "remove-doom-dashboard: removing buffer=%s" (buffer-name dash))
-      (ignore-errors (persp-remove-buffer dash)))))
+      (ignore-errors (claude-repl--ws-remove-buffer dash)))))
 
 (defun claude-repl--worktree-creation-switch-callback (path dirname)
   "Switch to the newly created worktree workspace.
@@ -1265,8 +1263,8 @@ Magit-status is already opened by `finalize-worktree-workspace'.
 Routes through `claude-repl-jump-to-workspace' so the destination tab
 flashes — symmetric with the project-picker (`SPC p p') and reopen
 paths, so every identity-based jump pulses uniformly."
-  (claude-repl--log dirname "worktree-creation-switch-callback: path=%s dirname=%s fboundp(+workspace-switch-to)=%s current-ws=%s target=%s"
-                    path dirname (fboundp '+workspace-switch-to) (claude-repl--ws-current-name) dirname)
+  (claude-repl--log dirname "worktree-creation-switch-callback: path=%s dirname=%s current-ws=%s target=%s"
+                    path dirname (claude-repl--ws-current-name) dirname)
   (claude-repl-jump-to-workspace dirname))
 
 (defconst claude-repl--worktree-base-commits
@@ -1569,7 +1567,7 @@ overridden by any saved priority for the same project)."
     (unless root
       (error "claude-repl--new-workspace: not in a git repository"))
     (claude-repl--log (claude-repl--ws-current-name) "new-workspace: root=%s" root)
-    (+workspace/new)
+    (claude-repl--ws-new)
     (let ((ws (claude-repl--ws-current-name))
           (default-priority (claude-repl--repo-default-priority-for-path root)))
       (when default-priority
@@ -1677,8 +1675,8 @@ it is normalized to the dirname before lookup."
     (claude-repl--ws-del ws)
     ;; Kill the Doom perspective.
     (claude-repl--log ws "finish-workspace: killing persp ws=%s" ws)
-    (when (member ws (+workspace-list-names))
-      (persp-kill ws))
+    (when (member ws (claude-repl--ws-all-names))
+      (claude-repl--ws-persp-kill ws))
     ;; Remove the git worktree and projectile entry.
     (claude-repl--log ws "finish-workspace: removing worktree worktree-p=%s project-dir=%s" worktree-p project-dir)
     (when (and worktree-p project-dir (file-directory-p project-dir))
@@ -3903,7 +3901,7 @@ off so the user resolves in magit directly."
 Prompts for which workspace to merge in."
   (interactive)
   (let* ((current-ws (claude-repl--ws-current-name))
-         (other-ws (remove current-ws (+workspace-list-names))))
+         (other-ws (remove current-ws (claude-repl--ws-all-names))))
     (claude-repl--log current-ws "workspace-merge: current-ws=%s" current-ws)
     (unless other-ws
       (user-error "No other workspaces to merge"))

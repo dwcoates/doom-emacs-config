@@ -1067,6 +1067,44 @@ Callers must use this function instead of reading `persp-names-cache'
 directly or guarding it themselves with `boundp'."
   (and (boundp 'persp-names-cache) persp-names-cache))
 
+(defun claude-repl--ws-new (&optional name)
+  "Create a new workspace, named NAME when given.
+With NAME, delegates to `+workspace-new'.  Without NAME, delegates to
+the interactive `+workspace/new', which auto-generates a name (the
+caller then reads it back via `--ws-current-name').  No-op when the
+corresponding function is unbound (persp-mode not loaded).
+
+This is the persp-mode creation boundary owned by `workspace.el'.
+Callers must use this function instead of calling `+workspace-new' or
+`+workspace/new' directly or wrapping them with `fboundp'."
+  (if name
+      (when (fboundp '+workspace-new)
+        (+workspace-new name))
+    (when (fboundp '+workspace/new)
+      (+workspace/new))))
+
+(defun claude-repl--ws-persp-kill (ws)
+  "Kill the perspective named WS via the low-level `persp-kill'.
+No-op when `persp-kill' is unbound.  Distinct from `--ws-kill'
+(`+workspace/kill'): this is the lower-level persp-mode kill used when
+the caller has already decided the persp should be dropped.
+
+This is the persp-mode low-level kill boundary owned by `workspace.el'.
+Callers must use this function instead of calling `persp-kill' directly
+or wrapping it themselves with `fboundp'."
+  (when (fboundp 'persp-kill)
+    (persp-kill ws)))
+
+(defun claude-repl--ws-remove-buffer (buffer)
+  "Detach BUFFER from its perspective via `persp-remove-buffer'.
+No-op when `persp-remove-buffer' is unbound (persp-mode not loaded).
+
+This is the persp-mode buffer-detach boundary owned by `workspace.el'.
+Callers must use this function instead of calling `persp-remove-buffer'
+directly or wrapping it themselves with `fboundp'."
+  (when (fboundp 'persp-remove-buffer)
+    (persp-remove-buffer buffer)))
+
 ;;;; ---- Projectile integration boundary ---------------------------------
 ;;
 ;; A claude-repl workspace IS a project (a dir-keyed persp), so projectile
