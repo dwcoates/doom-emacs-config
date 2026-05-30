@@ -967,6 +967,18 @@ Callers must use this function instead of referring to
 `+workspace-tab-selected-face' directly."
   '+workspace-tab-selected-face)
 
+(defun claude-repl--workspace-for-buffer (buf)
+  "Return the workspace name whose perspective contains BUF, or nil.
+Scans `persp-persps' for the perspective that owns BUF.  Returns nil
+when the workspace system is unavailable.
+
+This is persp-mode buffer-ownership resolution; it lives in
+`workspace.el' because it touches the raw persp set directly."
+  (when (claude-repl--ws-system-available-p)
+    (cl-loop for persp in (persp-persps)
+             when (persp-contain-buffer-p buf persp)
+             return (safe-persp-name persp))))
+
 ;;;; ---- Projectile integration boundary ---------------------------------
 ;;
 ;; A claude-repl workspace IS a project (a dir-keyed persp), so projectile
