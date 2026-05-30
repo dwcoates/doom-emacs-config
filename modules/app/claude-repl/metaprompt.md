@@ -176,6 +176,10 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
   - 👀 when no changes were made.
 - Plain english after the emoji is permitted (e.g. 'changes made' / 'no changes made') but the emoji is mandatory.
 
+### Formatting
+
+- Always use standard markdown inline code spawns -- don't get confused in emacs context and use backtick+apostraphe or any other representation strategy 
+
 ### Expansion of prior bullets
 
 - When the user requests expansion of one or more specific bullets from a prior response tree, the new response tree's root branches MUST correspond to (and be labelled to mirror) the bullets the user asked to expand.
