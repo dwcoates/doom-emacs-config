@@ -612,7 +612,7 @@ Returns a plist with keys :vterm-buf :proc-alive :owning-ws :has-window
   (let* ((open (claude-repl--ws-claude-open-p ws-name))
          (dirty (not (claude-repl--workspace-clean-p ws-name)))
          (persp (claude-repl--ws-resolve-persp ws-name))
-         (persp-bufs (and persp (persp-buffers persp)))
+         (persp-bufs (claude-repl--ws-buffers persp))
          (vterm-buf (cl-loop for buf in persp-bufs
                              when (and (buffer-live-p buf)
                                        (claude-repl--claude-buffer-p buf))

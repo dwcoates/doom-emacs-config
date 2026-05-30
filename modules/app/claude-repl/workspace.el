@@ -876,5 +876,29 @@ directly or wrapping it themselves with `fboundp'."
   (when (fboundp '+workspace-error)
     (+workspace-error message noerror)))
 
+(defun claude-repl--ws-add-buffer (buffer persp &optional switch)
+  "Attach BUFFER to perspective PERSP via `persp-add-buffer'.
+SWITCH is forwarded as persp-add-buffer's switch argument (nil means do
+not switch to the buffer).  No-op when `persp-add-buffer' is unbound
+(persp-mode not loaded).  Idempotent — persp-add-buffer no-ops when the
+buffer is already in the perspective.
+
+This is the persp-mode buffer-attachment boundary owned by `workspace.el'.
+Callers must use this function instead of calling `persp-add-buffer'
+directly or wrapping it themselves with `fboundp'."
+  (when (fboundp 'persp-add-buffer)
+    (persp-add-buffer buffer persp switch)))
+
+(defun claude-repl--ws-buffers (persp)
+  "Return the list of buffers belonging to perspective PERSP.
+Delegates to `persp-buffers'.  Returns nil when PERSP is nil or
+`persp-buffers' is unbound (persp-mode not loaded).
+
+This is the persp-mode buffer-listing boundary owned by `workspace.el'.
+Callers must use this function instead of calling `persp-buffers'
+directly or wrapping it themselves with `fboundp'."
+  (and persp (fboundp 'persp-buffers)
+       (persp-buffers persp)))
+
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here

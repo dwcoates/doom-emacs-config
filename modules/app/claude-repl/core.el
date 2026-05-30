@@ -709,9 +709,9 @@ no perspective named WS exists (e.g. early in session startup)."
   (let ((buf (get-buffer-create (claude-repl--buffer-name suffix ws))))
     (with-current-buffer buf
       (setq-local claude-repl--owning-workspace ws))
-    (when (and ws (fboundp 'persp-add-buffer))
+    (when ws
       (when-let ((persp (claude-repl--ws-resolve-persp ws)))
-        (persp-add-buffer buf persp nil)))
+        (claude-repl--ws-add-buffer buf persp nil)))
     buf))
 
 (defun claude-repl--claude-buffer-p (&optional buf)
