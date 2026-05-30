@@ -1217,14 +1217,15 @@ so its only purpose is the cache-busting role."
 ;; resolves cleanly at render time; persp-mode is the
 ;; dep that the workspace-list entries read in
 ;; `claude-repl--tabline-rendered-entries' and below.
-(after! persp-mode
-  (setq tab-bar-format '(claude-repl-workspace-tabline-formatted
-                         tab-bar-format-align-right
-                         claude-repl-current-workspace-name-segment)
-        tab-bar-show t
-        tab-bar-new-button-show nil
-        tab-bar-close-button-show nil)
-  (tab-bar-mode 1))
+(claude-repl--ws-after-system-load
+ (lambda ()
+   (setq tab-bar-format '(claude-repl-workspace-tabline-formatted
+                          tab-bar-format-align-right
+                          claude-repl-current-workspace-name-segment)
+         tab-bar-show t
+         tab-bar-new-button-show nil
+         tab-bar-close-button-show nil)
+   (tab-bar-mode 1)))
 
 (defun claude-repl-toggle-hide-mode ()
   "Toggle `claude-repl-hide-mode-enabled'.

@@ -477,10 +477,8 @@ events (kill, switch, add) are traceable."
     (run-at-time 0 nil #'claude-repl--on-workspace-switch ws)))
 
 (when (modulep! :ui workspaces)
-  (add-hook 'persp-before-deactivate-functions
-            #'claude-repl--before-persp-deactivate)
-  (add-hook 'persp-activated-functions
-            #'claude-repl--after-persp-activated))
+  (claude-repl--ws-add-before-deactivate-hook #'claude-repl--before-persp-deactivate)
+  (claude-repl--ws-add-activated-hook #'claude-repl--after-persp-activated))
 
 (defun claude-repl--hide-panels ()
   "Hide both Claude panels without killing buffers."
