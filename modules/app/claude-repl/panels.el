@@ -456,7 +456,7 @@ events (kill, switch, add) are traceable."
   (claude-repl--clear-done-ack-on-switch-away (claude-repl--ws-current-name))
   (claude-repl--redirect-from-claude-before-save)
   (condition-case err
-      (persp-frame-save-state)
+      (claude-repl--ws-frame-save-state)
     (error (message "[claude-repl] WARNING: persp-frame-save-state failed: %S" err)
            (claude-repl--log (claude-repl--ws-current-name) "before-persp-deactivate: persp-frame-save-state error: %S" err))))
 

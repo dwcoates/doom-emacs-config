@@ -2007,8 +2007,7 @@ Each call:
     ;; land in whatever windows the last-loaded ws ended with.  If this
     ;; is ever reordered or replaced with a setup-without-switch, the
     ;; snapshot loader's return-to-origin layout silently regresses.
-    (when (fboundp 'persp-frame-switch)
-      (persp-frame-switch ws))
+    (claude-repl--ws-frame-switch ws)
     ;; Strip any window-configuration bleed-over from the prior persp before
     ;; populating WS — panels left over from the previous workspace are marked
     ;; `no-delete-other-windows', so the later `delete-other-windows' in
@@ -2178,9 +2177,8 @@ can call finish without worrying whether a normal finish already ran."
       ;; replays that layout — and persp-mode's restore filters foreign
       ;; buffers, so panels owned by some other ws can't bleed in.
       (when (and origin
-                 (claude-repl--ws-exists-p origin)
-                 (fboundp 'persp-frame-switch))
-        (persp-frame-switch origin))
+                 (claude-repl--ws-exists-p origin))
+        (claude-repl--ws-frame-switch origin))
       (force-mode-line-update t)
       (setq claude-repl--snapshot-loaded-p t)
       (let ((mq-restored (and (boundp 'claude-repl--merge-queue)
