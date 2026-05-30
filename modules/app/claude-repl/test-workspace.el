@@ -1508,6 +1508,34 @@ identity-distinct string injected by `claude-repl-set-priority' from
       (fmakunbound 'safe-persp-name)
       (should-not (claude-repl--ws-persp-name 'a-persp)))))
 
+;;;; ---- Tests: --ws-nil-name ----
+
+(ert-deftest claude-repl-test-ws-nil-name-returns-value-when-bound ()
+  "ws-nil-name returns the persp-nil-name value when bound and non-nil."
+  (claude-repl-test--with-clean-state
+    (let ((persp-nil-name "none"))
+      (should (equal (claude-repl--ws-nil-name) "none")))))
+
+(ert-deftest claude-repl-test-ws-nil-name-returns-nil-when-nil ()
+  "ws-nil-name returns nil when persp-nil-name is nil."
+  (claude-repl-test--with-clean-state
+    (let ((persp-nil-name nil))
+      (should-not (claude-repl--ws-nil-name)))))
+
+;;;; ---- Tests: --ws-names-cache ----
+
+(ert-deftest claude-repl-test-ws-names-cache-returns-cache-when-bound ()
+  "ws-names-cache returns the persp-names-cache list when bound and non-empty."
+  (claude-repl-test--with-clean-state
+    (let ((persp-names-cache '("main" "ws-a")))
+      (should (equal (claude-repl--ws-names-cache) '("main" "ws-a"))))))
+
+(ert-deftest claude-repl-test-ws-names-cache-returns-nil-when-empty ()
+  "ws-names-cache returns nil when persp-names-cache is empty."
+  (claude-repl-test--with-clean-state
+    (let ((persp-names-cache nil))
+      (should-not (claude-repl--ws-names-cache)))))
+
 ;;;; ---- Tests: --workspace-for-buffer (moved from test-status.el) ----
 
 (ert-deftest claude-repl-test-workspace-for-buffer-persp-mode-nil ()

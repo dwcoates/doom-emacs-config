@@ -370,7 +370,7 @@ image so the visual mapping between key and glyph is obvious."
          (old-priority (claude-repl--ws-get ws :priority))
          (new-priority (if (string-empty-p priority) nil priority))
          (had-entry (not (null (gethash ws claude-repl--workspaces))))
-         (cache-before (if (boundp 'persp-names-cache) persp-names-cache "(unbound)")))
+         (cache-before (or (claude-repl--ws-names-cache) "(unbound)")))
     (claude-repl--log ws "set-priority: ws=%s ws-explicit=%s had-entry=%s priority %s -> %s cache=%S"
                       ws (if ws-explicit-p "t" "nil") (if had-entry "t" "nil")
                       (or old-priority "nil") (or new-priority "(cleared)")
