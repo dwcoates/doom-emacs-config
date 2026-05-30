@@ -916,5 +916,38 @@ directly or wrapping it themselves with `fboundp'."
         (and (persp-rename new-ws persp) t)
       t)))
 
+(defun claude-repl--ws-frame-ordered-names ()
+  "Return workspace names in current-frame tab-bar order.
+Delegates to `persp-names-current-frame-fast-ordered'.  Returns nil when
+that function is unbound (persp-mode not loaded).
+
+This is the persp-mode frame-order boundary owned by `workspace.el'.
+Callers must use this function instead of calling
+`persp-names-current-frame-fast-ordered' directly or wrapping it with
+`fboundp'."
+  (when (fboundp 'persp-names-current-frame-fast-ordered)
+    (persp-names-current-frame-fast-ordered)))
+
+(defun claude-repl--ws-update-names-cache (names)
+  "Replace the persp names cache with NAMES via `persp-update-names-cache'.
+No-op when that function is unbound (persp-mode not loaded).
+
+This is the persp-mode names-cache boundary owned by `workspace.el'.
+Callers must use this function instead of calling
+`persp-update-names-cache' directly or wrapping it with `fboundp'."
+  (when (fboundp 'persp-update-names-cache)
+    (persp-update-names-cache names)))
+
+(defun claude-repl--ws-window-conf (persp)
+  "Return the saved window-configuration for perspective PERSP.
+Delegates to `persp-window-conf'.  Returns nil when PERSP is nil or
+`persp-window-conf' is unbound (persp-mode not loaded).
+
+This is the persp-mode window-config boundary owned by `workspace.el'.
+Callers must use this function instead of calling `persp-window-conf'
+directly or wrapping it with `fboundp'."
+  (and persp (fboundp 'persp-window-conf)
+       (persp-window-conf persp)))
+
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here
