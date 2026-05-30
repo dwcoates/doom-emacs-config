@@ -1613,44 +1613,73 @@ A tombstone killed by `claude-repl-toggle-hide-project-dirs' also
 carries `:hidden-project-dir' so the next session can tell it apart
 from a workspace the user nuked by hand and restore it on unhide.
 
-Order: tab-bar order.  Entries that appear in `persp-names-cache'
-\(the source of truth for the tab bar) come first in cache order; any
-remaining entries (tombstones or workspaces not realized as persps)
-follow in hash-traversal order.  Pairing this with the snapshot
-loader's skip-priority-reorder during load means the third tab at
-save time is the third tab at load time — visual order is preserved
-across Emacs restarts."
-  (let ((entries (make-hash-table :test 'equal)))
-    (maphash (lambda (ws plist)
-               (when-let ((dir (plist-get plist :project-dir)))
-                 (let ((tomb (plist-get plist :nuked-at))
-                       (hidden (plist-get plist :hidden-project-dir)))
-                   (puthash ws
-                            (if tomb
-                                (append (list :project-dir dir :nuked-at tomb)
-                                        (when hidden
-                                          (list :hidden-project-dir t)))
-                              (list :project-dir dir))
-                            entries))))
-             claude-repl--workspaces)
-    (let* ((cache (and (boundp 'persp-names-cache) persp-names-cache))
-           (nil-name (and (boundp 'persp-nil-name) persp-nil-name))
-           (ordered-names (if nil-name
-                              (cl-remove nil-name cache :test #'equal)
-                            cache))
-           (in-order nil))
-      ;; Pull entries that appear in `persp-names-cache' first, in cache
-      ;; order — the cache is the tab-bar's order of record.
-      (dolist (name ordered-names)
-        (when-let ((plist (gethash name entries)))
-          (push (cons name plist) in-order)
-          (remhash name entries)))
-      ;; Append any leftovers (tombstones, or live entries that for some
-      ;; reason are not in the cache) in hash-traversal order.
-      (let (remainder)
-        (maphash (lambda (ws plist) (push (cons ws plist) remainder))
-                 entries)
-        (append (nreverse in-order) remainder)))))
+Order: cache-ordered live prefix followed by tombstones.
+
+Live entries are sourced via `--ws-list-names' (intersection of
+`persp-names-cache' and `claude-repl--workspaces', nil-name stripped,
+in cache order).  Live entries NOT in `persp-names-cache' are excluded
+when the cache is bound — they have no current tab-bar presence and
+saving them as live would cause the snapshot loader to re-establish
+them as new tabs on the next load (the source of unexpected workspace
+resurrection after kills that bypassed claude-repl's nuke path).
+
+Tombstones are sourced via `--ws-tombstoned-names' and appended after
+the live prefix, preserving their identity records across restarts.
+
+Both helpers are workspace.el integration-boundary wrappers; this
+function does not access `persp-names-cache' or `persp-nil-name'
+directly.
+
+Fallback: when `--ws-names-cache-bound-p' returns nil
+\(pre-persp-mode init, test envs without persp-mode), all live entries
+are included in hash-traversal order since the cache is not a
+reliable tab-bar signal in that state.
+
+Pairing the cache-ordered prefix with the snapshot loader's
+skip-priority-reorder during load means the third tab at save time is
+the third tab at load time — visual order is preserved across Emacs
+restarts."
+  (if (not (claude-repl--ws-names-cache-usable-p))
+      ;; Fallback: persp-names-cache is not bound (pre-persp-mode init,
+      ;; test envs without persp-mode).  Include all live entries in
+      ;; hash-traversal order so nothing is silently dropped.
+      (let (result)
+        (maphash (lambda (ws plist)
+                   (when-let ((dir (plist-get plist :project-dir)))
+                     (let ((tomb (plist-get plist :nuked-at))
+                           (hidden (plist-get plist :hidden-project-dir)))
+                       (push (cons ws (if tomb
+                                          (append (list :project-dir dir :nuked-at tomb)
+                                                  (when hidden (list :hidden-project-dir t)))
+                                        (list :project-dir dir)))
+                             result))))
+                 claude-repl--workspaces)
+        result)
+    ;; Normal path: cache is bound.  Route all persp-mode access through
+    ;; workspace.el's integration boundary.
+    (let* (;; Live tab-bar entries in cache order via --ws-list-names.
+           ;; Entries not in the cache are naturally excluded.
+           (live-entries
+            (cl-remove-if-not
+             #'identity
+             (mapcar (lambda (ws)
+                       (when-let ((dir (claude-repl--ws-get ws :project-dir)))
+                         (cons ws (list :project-dir dir))))
+                     (claude-repl--ws-list-names))))
+           ;; Tombstones via --ws-tombstoned-names.  Tombstones have no
+           ;; persp/cache presence so they never appear in --ws-list-names
+           ;; and must be collected separately.
+           (tomb-entries
+            (cl-remove-if-not
+             #'identity
+             (mapcar (lambda (ws)
+                       (when-let ((dir (claude-repl--ws-get ws :project-dir)))
+                         (let ((tomb (claude-repl--ws-get ws :nuked-at))
+                               (hidden (claude-repl--ws-get ws :hidden-project-dir)))
+                           (cons ws (append (list :project-dir dir :nuked-at tomb)
+                                            (when hidden (list :hidden-project-dir t)))))))
+                     (claude-repl--ws-tombstoned-names)))))
+      (append live-entries tomb-entries))))
 
 (defun claude-repl--snapshot-raw-format (raw)
   "Classify the RAW sexp read from a workspace-snapshot file.

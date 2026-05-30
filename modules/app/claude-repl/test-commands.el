@@ -3031,34 +3031,48 @@ shows up in the snapshot."
       (let ((entries (claude-repl--collect-snapshot-entries)))
         (should (equal (mapcar #'car entries) '("bravo" "alpha")))))))
 
-(ert-deftest claude-repl-cmd-test-collect-snapshot-entries/appends-entries-missing-from-cache ()
-  "Workspaces with `:project-dir' but no slot in `persp-names-cache'
-\(typically tombstones or pre-persp-realized records) follow after the
-cache-ordered prefix.  They're still included so the snapshot doesn't
-lose identity records; they just don't have a positional anchor to slot
-into."
+(ert-deftest claude-repl-cmd-test-collect-snapshot-entries/tombstoned-orphan-included-from-remainder ()
+  "A tombstoned workspace NOT in `persp-names-cache' IS included after the
+live prefix so its identity record survives restart."
   (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "alpha"   :project-dir "/tmp/alpha")
-    (claude-repl--ws-put "orphan"  :project-dir "/tmp/orphan")
+    (claude-repl--ws-put "alpha" :project-dir "/tmp/alpha")
+    (puthash "orphan-tomb"
+             (list :project-dir "/tmp/orphan" :nuked-at (current-time))
+             claude-repl--workspaces)
     (let ((persp-names-cache '("alpha")))
       (let* ((entries (claude-repl--collect-snapshot-entries))
              (names (mapcar #'car entries)))
         (should (= 2 (length entries)))
         (should (equal (car names) "alpha"))
-        (should (member "orphan" names))))))
+        (should (member "orphan-tomb" names))))))
+
+(ert-deftest claude-repl-cmd-test-collect-snapshot-entries/live-orphan-excluded-when-cache-bound ()
+  "A live workspace in the hash but NOT in `persp-names-cache' is dropped
+when the cache is bound — saving it live would re-establish it as a new
+tab on the next load even though it had no tab-bar presence at save time."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "alpha"  :project-dir "/tmp/alpha")
+    (claude-repl--ws-put "orphan" :project-dir "/tmp/orphan")
+    (let ((persp-names-cache '("alpha")))
+      (let* ((entries (claude-repl--collect-snapshot-entries))
+             (names (mapcar #'car entries)))
+        (should (= 1 (length entries)))
+        (should (equal names '("alpha")))
+        (should-not (assoc "orphan" entries))))))
 
 (ert-deftest claude-repl-cmd-test-collect-snapshot-entries/no-persp-cache-falls-back ()
-  "When `persp-names-cache' is unbound (test envs without persp-mode), the
+  "When `persp-names-cache' is nil (persp-mode not active or stubs), the
 collector still emits every live entry — order is hash-traversal under
 that fallback, but the entries themselves must not be dropped."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "alpha" :project-dir "/tmp/alpha")
     (claude-repl--ws-put "bravo" :project-dir "/tmp/bravo")
-    (cl-progv '(persp-names-cache) nil
-      (let ((entries (claude-repl--collect-snapshot-entries)))
-        (should (= 2 (length entries)))
-        (should (assoc "alpha" entries))
-        (should (assoc "bravo" entries))))))
+    ;; persp-names-cache is nil in the test-helpers stub — no explicit
+    ;; binding needed; the default nil value triggers the fallback path.
+    (let ((entries (claude-repl--collect-snapshot-entries)))
+      (should (= 2 (length entries)))
+      (should (assoc "alpha" entries))
+      (should (assoc "bravo" entries)))))
 
 (ert-deftest claude-repl-cmd-test-save-workspace-snapshot/persists-tab-bar-order ()
   "End-to-end: `save-workspace-snapshot' writes entries in the on-disk file

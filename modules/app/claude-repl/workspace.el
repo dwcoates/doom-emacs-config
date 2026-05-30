@@ -287,6 +287,34 @@ the previous direct-hash-walk produced."
                           (hash-table-keys claude-repl--workspaces))
         #'string<))
 
+(defun claude-repl--ws-tombstoned-names ()
+  "Return the names of every tombstoned workspace, regardless of reason.
+All entries in `claude-repl--workspaces' for which `--ws-tombstoned-p'
+returns non-nil.  Sorted by name for determinism, paralleling
+`--ws-hide-tombstoned-names' (which applies the additional
+hide-reason filter).  Used by the snapshot collector to gather the
+identity records that must survive Emacs restart without pulling
+all-tombstones through a direct `hash-table-keys' walk at the call
+site."
+  (sort (cl-remove-if-not #'claude-repl--ws-tombstoned-p
+                          (hash-table-keys claude-repl--workspaces))
+        #'string<))
+
+(defun claude-repl--ws-names-cache-usable-p ()
+  "Return non-nil when `persp-names-cache' is bound and non-nil.
+'Usable' means the cache is available as a reliable tab-bar membership
+signal — the persp-mode cache has been populated with at least one
+entry.  Returns nil when:
+  - `persp-names-cache' is unbound (persp-mode not loaded), or
+  - `persp-names-cache' is bound but nil (startup init phase or test
+    stubs where persp-mode is not active and no persps exist yet).
+Callers (principally `--collect-snapshot-entries') use this to decide
+whether to consult the cache as the authoritative tab-bar source or fall
+back to a plain hash-traversal that includes all live entries.  Part of
+the persp-mode integration boundary owned by `workspace.el' (see file
+Commentary and AGENTS.md)."
+  (and (boundp 'persp-names-cache) persp-names-cache))
+
 (defun claude-repl--ws-open-p (ws)
   "Return non-nil iff WS is currently visible in the tab-bar.
 \"Open\" means `persp-names-cache' membership — the persp-mode hash
