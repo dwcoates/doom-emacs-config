@@ -255,6 +255,21 @@ than rendering a nonsensical negative duration."
           (should (< (string-match "10m ago" seg)
                      (string-match "Auth Bug Fix" seg))))))))
 
+(ert-deftest claude-repl-test-prompt-summary-segment-timestamp-is-light-grey ()
+  "The `X ago' prefix is rendered in light grey, distinct from the blue
+summary text."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :last-prompt-summary "Auth Bug Fix")
+    (claude-repl--ws-put "ws1" :last-prompt-summary-at 1000.0)
+    (cl-letf (((symbol-function 'float-time)
+               (lambda (&rest _) (+ 1000.0 (* 10 60)))))
+      (with-temp-buffer
+        (setq-local claude-repl--owning-workspace "ws1")
+        (let* ((seg (claude-repl--prompt-summary-segment))
+               (pos (string-match "10m ago" seg))
+               (face (get-text-property pos 'face seg)))
+          (should (equal (plist-get face :foreground) "light grey")))))))
+
 (ert-deftest claude-repl-test-prompt-summary-segment-pending-prefixes-timestamp ()
   "Pending segment also carries the `X ago' prefix so the user sees
 when the in-flight summary was kicked off."
