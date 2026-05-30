@@ -281,10 +281,7 @@ hiding in the drawer's MERGED bucket."
                           new-visible)))
         (claude-repl--log ws "reorder-workspace-to-front: APPLY ws=%s canonical-eq-input=%s new-cache=%S"
                           ws (if (eq canonical-ws ws) "t" "nil") new-cache)
-        (if (fboundp 'persp-update-names-cache)
-            (persp-update-names-cache new-cache)
-          (claude-repl--log ws "reorder-workspace-to-front: SKIP-APPLY ws=%s reason=persp-update-names-cache-unbound"
-                            ws)))))))
+        (claude-repl--ws-update-names-cache new-cache))))))
 
 ;;; Workspace state accessors ------------------------------------------------
 
@@ -1360,7 +1357,7 @@ config (e.g. from a placeholder layout) should not count as claude open."
 (defun claude-repl--claude-in-saved-wconf-p (ws-name)
   "Return non-nil if background workspace WS-NAME has a claude buffer in its saved config."
   (let* ((persp (claude-repl--ws-resolve-persp ws-name))
-         (wconf (and persp (persp-window-conf persp))))
+         (wconf (claude-repl--ws-window-conf persp)))
     (claude-repl--wconf-has-claude-p wconf)))
 
 (defun claude-repl--ws-claude-open-p (ws-name)

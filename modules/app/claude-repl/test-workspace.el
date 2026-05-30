@@ -1342,5 +1342,61 @@ identity-distinct string injected by `claude-repl-set-priority' from
       (fmakunbound 'persp-rename)
       (should (claude-repl--ws-rename-persp "old" "new")))))
 
+;;;; ---- Tests: --ws-frame-ordered-names ----
+
+(ert-deftest claude-repl-test-ws-frame-ordered-names-delegates-when-bound ()
+  "ws-frame-ordered-names returns the persp fast-ordered list when bound."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-names-current-frame-fast-ordered)
+               (lambda () '("a" "b" "c"))))
+      (should (equal (claude-repl--ws-frame-ordered-names) '("a" "b" "c"))))))
+
+(ert-deftest claude-repl-test-ws-frame-ordered-names-returns-nil-when-unbound ()
+  "ws-frame-ordered-names returns nil when the persp helper is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-names-current-frame-fast-ordered) nil))
+      (fmakunbound 'persp-names-current-frame-fast-ordered)
+      (should-not (claude-repl--ws-frame-ordered-names)))))
+
+;;;; ---- Tests: --ws-update-names-cache ----
+
+(ert-deftest claude-repl-test-ws-update-names-cache-delegates-when-bound ()
+  "ws-update-names-cache forwards NAMES to persp-update-names-cache."
+  (claude-repl-test--with-clean-state
+    (let (captured)
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (names) (setq captured names))))
+        (claude-repl--ws-update-names-cache '("a" "b"))
+        (should (equal captured '("a" "b")))))))
+
+(ert-deftest claude-repl-test-ws-update-names-cache-noop-when-unbound ()
+  "ws-update-names-cache is a no-op when persp-update-names-cache is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-update-names-cache) nil))
+      (fmakunbound 'persp-update-names-cache)
+      (should-not (claude-repl--ws-update-names-cache '("a"))))))
+
+;;;; ---- Tests: --ws-window-conf ----
+
+(ert-deftest claude-repl-test-ws-window-conf-delegates-when-bound ()
+  "ws-window-conf returns the persp-window-conf result for a non-nil persp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-window-conf) (lambda (_persp) 'a-wconf)))
+      (should (eq (claude-repl--ws-window-conf 'persp) 'a-wconf)))))
+
+(ert-deftest claude-repl-test-ws-window-conf-returns-nil-for-nil-persp ()
+  "ws-window-conf returns nil for a nil persp without calling persp-window-conf."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-window-conf)
+               (lambda (_persp) (error "should not be called"))))
+      (should-not (claude-repl--ws-window-conf nil)))))
+
+(ert-deftest claude-repl-test-ws-window-conf-returns-nil-when-unbound ()
+  "ws-window-conf returns nil when persp-window-conf is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-window-conf) nil))
+      (fmakunbound 'persp-window-conf)
+      (should-not (claude-repl--ws-window-conf 'persp)))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here

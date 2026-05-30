@@ -3117,7 +3117,7 @@ yanked away from it.  Pulses the moved tab via `claude-repl-flash-tab'
 so the user can visually track it to its new home."
   (interactive)
   (let* ((current (claude-repl--ws-current-name))
-         (names (persp-names-current-frame-fast-ordered))
+         (names (claude-repl--ws-frame-ordered-names))
          (old-index (cl-position current names :test #'string=))
          (without-current (remove current names))
          (reordered (append (butlast without-current)
@@ -3127,7 +3127,7 @@ so the user can visually track it to its new home."
                          without-current)))
     (claude-repl--log current "workspace-push-to-back: ws=%s old-index=%s next=%s keep-focus=%s"
                       current old-index next-name keep-focus)
-    (persp-update-names-cache reordered)
+    (claude-repl--ws-update-names-cache reordered)
     (claude-repl--force-tab-bar-redraw)
     (when (and next-name (not keep-focus))
       (claude-repl--ws-switch next-name))
@@ -3142,13 +3142,13 @@ so the user can visually track it to its new home."
 Focus remains on the current workspace."
   (interactive)
   (let* ((current (claude-repl--ws-current-name))
-         (names (persp-names-current-frame-fast-ordered))
+         (names (claude-repl--ws-frame-ordered-names))
          (without-current (remove current names))
          (reordered (append (list (car without-current))
                             (list current)
                             (cdr without-current))))
     (claude-repl--log current "workspace-pull-to-front: ws=%s" current)
-    (persp-update-names-cache reordered)
+    (claude-repl--ws-update-names-cache reordered)
     (claude-repl--force-tab-bar-redraw)
     (claude-repl--ws-switch current)
     (message "Pulled '%s' to second position." current)))

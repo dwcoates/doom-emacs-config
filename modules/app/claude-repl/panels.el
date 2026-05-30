@@ -501,12 +501,11 @@ Also writes the index to disk via `--state-save' so a deprioritized ws
 that the user closes Emacs on still returns to its saved slot on
 restart (without this, `:saved-tab-index' is in-memory only and the ws
 loses its prior position across an Emacs lifecycle)."
-  (when (fboundp 'persp-names-current-frame-fast-ordered)
-    (when-let ((idx (cl-position ws (persp-names-current-frame-fast-ordered)
-                                 :test #'string=)))
-      (claude-repl--log ws "save-tab-index ws=%s index=%d" ws idx)
-      (claude-repl--ws-put ws :saved-tab-index idx)
-      (claude-repl--state-save ws))))
+  (when-let ((idx (cl-position ws (claude-repl--ws-frame-ordered-names)
+                               :test #'string=)))
+    (claude-repl--log ws "save-tab-index ws=%s index=%d" ws idx)
+    (claude-repl--ws-put ws :saved-tab-index idx)
+    (claude-repl--state-save ws)))
 
 (defun claude-repl--restore-tab-index (ws)
   "Move WS back to its persisted `:saved-tab-index' slot, if any.
@@ -520,17 +519,15 @@ toggle is flipped — the tab-bar's string-equality cache otherwise
 risks holding the pre-restore order if the new tabline string happens
 to compare equal under propertized-string semantics."
   (when-let ((idx (claude-repl--ws-get ws :saved-tab-index)))
-    (when (and (fboundp 'persp-names-current-frame-fast-ordered)
-               (fboundp 'persp-update-names-cache))
-      (let* ((names (persp-names-current-frame-fast-ordered))
-             (without-ws (remove ws names))
+    (when-let ((names (claude-repl--ws-frame-ordered-names)))
+      (let* ((without-ws (remove ws names))
              (clamped (min idx (length without-ws)))
              (head (cl-subseq without-ws 0 clamped))
              (tail (cl-subseq without-ws clamped))
              (reordered (append head (list ws) tail)))
         (claude-repl--log ws "restore-tab-index ws=%s saved-idx=%d clamped=%d"
                           ws idx clamped)
-        (persp-update-names-cache reordered)
+        (claude-repl--ws-update-names-cache reordered)
         (claude-repl--ws-put ws :saved-tab-index nil)
         ;; Persist the cleared index so a future restart doesn't see a
         ;; stale value and re-restore (the ws is no longer deprioritized
