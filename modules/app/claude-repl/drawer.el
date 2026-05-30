@@ -2111,9 +2111,8 @@ identity compare) so safe as a global `post-command-hook'."
 
 (add-hook 'post-command-hook #'claude-repl-drawer--global-post-command)
 
-(with-eval-after-load 'persp-mode
-  (add-hook 'persp-activated-functions
-            #'claude-repl-drawer--sync-cursor-to-current-ws))
+(claude-repl--ws-add-activated-hook
+ #'claude-repl-drawer--sync-cursor-to-current-ws)
 
 (defun claude-repl-drawer--ensure-visible-on-persp-switch (&rest _)
   "Reconcile drawer visibility AND width with the global state on workspace switch.
@@ -2165,9 +2164,8 @@ switches with no cursor disruption."
           (set-window-dedicated-p w nil)))
       (claude-repl-window--delete-buffer-windows buf)))))
 
-(with-eval-after-load 'persp-mode
-  (add-hook 'persp-activated-functions
-            #'claude-repl-drawer--ensure-visible-on-persp-switch))
+(claude-repl--ws-add-activated-hook
+ #'claude-repl-drawer--ensure-visible-on-persp-switch)
 
 ;;;; Keyboard-inaccessibility bounce ----------------------------------------
 ;;

@@ -1150,5 +1150,42 @@ Projectile boundary owned by `workspace.el'."
   (when (fboundp 'projectile-relevant-known-projects)
     (projectile-relevant-known-projects)))
 
+;;;; ---- persp-mode load-ordering / hook-registration boundary -----------
+;;
+;; These installers let callers register persp-mode lifecycle hooks (and
+;; run load-deferred setup) without naming the `persp-mode' feature or its
+;; hook variables directly.  They are load-time wiring, mirroring the bare
+;; `with-eval-after-load' / `add-hook' forms they replace.
+
+(defun claude-repl--ws-add-activated-hook (fn)
+  "Register FN to run when a perspective is activated.
+Adds FN to `persp-activated-functions' once persp-mode loads.
+
+This is the persp-mode activation-hook boundary owned by `workspace.el'.
+Callers must use this function instead of touching `persp-activated-functions'
+or `with-eval-after-load' on persp-mode directly."
+  (with-eval-after-load 'persp-mode
+    (add-hook 'persp-activated-functions fn)))
+
+(defun claude-repl--ws-add-before-deactivate-hook (fn)
+  "Register FN to run before a perspective is deactivated.
+Adds FN to `persp-before-deactivate-functions' once persp-mode loads.
+
+This is the persp-mode deactivation-hook boundary owned by `workspace.el'.
+Callers must use this function instead of touching
+`persp-before-deactivate-functions' or `with-eval-after-load' on
+persp-mode directly."
+  (with-eval-after-load 'persp-mode
+    (add-hook 'persp-before-deactivate-functions fn)))
+
+(defun claude-repl--ws-after-system-load (thunk)
+  "Call THUNK once the persp-mode workspace system has loaded.
+Thin wrapper over `with-eval-after-load' for the persp-mode feature so
+callers do not name the feature directly.
+
+Boundary owned by `workspace.el'."
+  (with-eval-after-load 'persp-mode
+    (funcall thunk)))
+
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here

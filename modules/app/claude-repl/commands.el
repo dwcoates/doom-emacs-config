@@ -585,9 +585,8 @@ the one we just activated."
      ((and (not claude-repl--explain-config-global-visible-p) win)
       (claude-repl-window--delete-buffer-windows buf)))))
 
-(with-eval-after-load 'persp-mode
-  (add-hook 'persp-activated-functions
-            #'claude-repl--explain-config-ensure-visible-on-persp-switch))
+(claude-repl--ws-add-activated-hook
+ #'claude-repl--explain-config-ensure-visible-on-persp-switch)
 
 (defcustom claude-repl-explain-config-preamble
   (concat
