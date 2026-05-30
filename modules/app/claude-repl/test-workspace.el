@@ -1308,5 +1308,39 @@ identity-distinct string injected by `claude-repl-set-priority' from
       (fmakunbound 'persp-buffers)
       (should-not (claude-repl--ws-buffers 'persp)))))
 
+;;;; ---- Tests: --ws-rename-persp ----
+
+(ert-deftest claude-repl-test-ws-rename-persp-renames-live-persp ()
+  "ws-rename-persp renames the resolved persp and returns non-nil on success."
+  (claude-repl-test--with-clean-state
+    (let (captured)
+      (cl-letf (((symbol-function 'claude-repl--ws-resolve-persp) (lambda (_ws) 'a-persp))
+                ((symbol-function 'persp-rename)
+                 (lambda (new persp) (setq captured (list new persp)) t)))
+        (should (claude-repl--ws-rename-persp "old" "new"))
+        (should (equal captured '("new" a-persp)))))))
+
+(ert-deftest claude-repl-test-ws-rename-persp-returns-nil-on-failure ()
+  "ws-rename-persp returns nil when a live persp exists but persp-rename fails."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--ws-resolve-persp) (lambda (_ws) 'a-persp))
+              ((symbol-function 'persp-rename) (lambda (_new _persp) nil)))
+      (should-not (claude-repl--ws-rename-persp "old" "new")))))
+
+(ert-deftest claude-repl-test-ws-rename-persp-noop-when-no-persp ()
+  "ws-rename-persp returns non-nil and skips rename when OLD-WS has no live persp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--ws-resolve-persp) (lambda (_ws) nil))
+              ((symbol-function 'persp-rename)
+               (lambda (&rest _) (error "should not be called"))))
+      (should (claude-repl--ws-rename-persp "old" "new")))))
+
+(ert-deftest claude-repl-test-ws-rename-persp-noop-when-unbound ()
+  "ws-rename-persp returns non-nil when persp-rename is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-rename) nil))
+      (fmakunbound 'persp-rename)
+      (should (claude-repl--ws-rename-persp "old" "new")))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here
