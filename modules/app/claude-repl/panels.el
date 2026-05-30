@@ -1070,10 +1070,9 @@ perspective.  Each buffer is killed inside its own `condition-case' so
 one bad buffer cannot block the rest.  File-visiting buffers are
 marked unmodified before killing so `kill-buffer' does not prompt —
 the user has already confirmed the destructive nuke."
-  (when (and (claude-repl--ws-system-available-p)
-             (fboundp 'persp-buffers))
+  (when (claude-repl--ws-system-available-p)
     (when-let ((persp (claude-repl--ws-resolve-persp ws)))
-      (let ((bufs (persp-buffers persp))
+      (let ((bufs (claude-repl--ws-buffers persp))
             (kill-buffer-query-functions nil))
         (claude-repl--log ws "kill-workspace-buffers: count=%d" (length bufs))
         (dolist (buf bufs)

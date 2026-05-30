@@ -1268,5 +1268,45 @@ identity-distinct string injected by `claude-repl-set-priority' from
       (fmakunbound '+workspace-error)
       (should-not (claude-repl--ws-error "boom" t)))))
 
+;;;; ---- Tests: --ws-add-buffer ----
+
+(ert-deftest claude-repl-test-ws-add-buffer-delegates-when-bound ()
+  "ws-add-buffer forwards buffer, persp, and switch to persp-add-buffer."
+  (claude-repl-test--with-clean-state
+    (let (captured)
+      (cl-letf (((symbol-function 'persp-add-buffer)
+                 (lambda (buf persp switch) (setq captured (list buf persp switch)))))
+        (claude-repl--ws-add-buffer 'buf 'persp t)
+        (should (equal captured '(buf persp t)))))))
+
+(ert-deftest claude-repl-test-ws-add-buffer-noop-when-unbound ()
+  "ws-add-buffer is a no-op when persp-add-buffer is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-add-buffer) nil))
+      (fmakunbound 'persp-add-buffer)
+      (should-not (claude-repl--ws-add-buffer 'buf 'persp nil)))))
+
+;;;; ---- Tests: --ws-buffers ----
+
+(ert-deftest claude-repl-test-ws-buffers-delegates-when-bound ()
+  "ws-buffers returns the persp-buffers result for a non-nil persp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-buffers) (lambda (_persp) '(b1 b2))))
+      (should (equal (claude-repl--ws-buffers 'persp) '(b1 b2))))))
+
+(ert-deftest claude-repl-test-ws-buffers-returns-nil-for-nil-persp ()
+  "ws-buffers returns nil when persp is nil, without calling persp-buffers."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-buffers)
+               (lambda (_persp) (error "should not be called"))))
+      (should-not (claude-repl--ws-buffers nil)))))
+
+(ert-deftest claude-repl-test-ws-buffers-returns-nil-when-unbound ()
+  "ws-buffers returns nil when persp-buffers is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-buffers) nil))
+      (fmakunbound 'persp-buffers)
+      (should-not (claude-repl--ws-buffers 'persp)))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here

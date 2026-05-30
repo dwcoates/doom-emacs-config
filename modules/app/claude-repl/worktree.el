@@ -83,7 +83,7 @@ it to the WS perspective without displaying it."
             (if (file-exists-p fullpath)
                 (progn
                   (claude-repl--log ws "open-initial-buffers: opening file=%s" fullpath)
-                  (persp-add-buffer (find-file-noselect fullpath) persp t))
+                  (claude-repl--ws-add-buffer (find-file-noselect fullpath) persp t))
               (claude-repl--log ws "open-initial-buffers: file not found in worktree: %s" fullpath))))))))
 
 
