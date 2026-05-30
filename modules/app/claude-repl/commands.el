@@ -2989,7 +2989,7 @@ tab — left/right cycling is high-frequency navigation and the flash
 becomes noise; identity-based jumps (`SPC p p', priority change,
 worktree jump) keep the flash since they're discrete attention cues."
   (let ((current-name (claude-repl--ws-current-name)))
-    (if (+workspace--protected-p current-name)
+    (if (claude-repl--ws-protected-p current-name)
         (claude-repl--ws-switch (claude-repl--ws-main-name) t)
       (condition-case-unless-debug ex
           (let* ((visible (claude-repl--filter-hidden-names
@@ -2999,8 +2999,8 @@ worktree jump) keep the flash since they're discrete attention cues."
             (when (= perspc 1)
               (user-error "No other workspaces"))
             (claude-repl--ws-switch (nth (mod (+ index n) perspc) visible)))
-        ('user-error (+workspace-error (cadr ex) t))
-        ('error (+workspace-error ex t))))))
+        ('user-error (claude-repl--ws-error (cadr ex) t))
+        ('error (claude-repl--ws-error ex t))))))
 
 (defun claude-repl-switch-left ()
   "Cycle one workspace left, skipping hide-mode-filtered workspaces.

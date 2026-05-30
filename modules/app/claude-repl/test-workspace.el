@@ -1235,5 +1235,38 @@ identity-distinct string injected by `claude-repl-set-priority' from
       (fmakunbound 'persp-add-new)
       (should-not (claude-repl--ws-create "ws1" "/tmp/p")))))
 
+;;;; ---- Tests: --ws-protected-p ----
+
+(ert-deftest claude-repl-test-ws-protected-p-delegates-when-bound ()
+  "ws-protected-p returns the +workspace--protected-p result when bound."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace--protected-p) (lambda (ws) (equal ws "main"))))
+      (should (claude-repl--ws-protected-p "main"))
+      (should-not (claude-repl--ws-protected-p "feature")))))
+
+(ert-deftest claude-repl-test-ws-protected-p-returns-nil-when-unbound ()
+  "ws-protected-p returns nil when +workspace--protected-p is not fboundp."
+  (claude-repl-test--with-clean-state
+    (fmakunbound '+workspace--protected-p)
+    (should-not (claude-repl--ws-protected-p "main"))))
+
+;;;; ---- Tests: --ws-error ----
+
+(ert-deftest claude-repl-test-ws-error-delegates-when-bound ()
+  "ws-error forwards message and noerror flag to +workspace-error."
+  (claude-repl-test--with-clean-state
+    (let (captured)
+      (cl-letf (((symbol-function '+workspace-error)
+                 (lambda (msg &optional noerror) (setq captured (list msg noerror)))))
+        (claude-repl--ws-error "boom" t)
+        (should (equal captured '("boom" t)))))))
+
+(ert-deftest claude-repl-test-ws-error-noop-when-unbound ()
+  "ws-error is a no-op when +workspace-error is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-error) nil))
+      (fmakunbound '+workspace-error)
+      (should-not (claude-repl--ws-error "boom" t)))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here

@@ -853,5 +853,28 @@ Callers must use this function instead of calling `persp-add-new' or
         (set-persp-parameter '+workspace-project project-dir persp))
       persp)))
 
+(defun claude-repl--ws-protected-p (ws)
+  "Return non-nil when workspace WS is protected from deletion/cycling.
+Delegates to `+workspace--protected-p'.  Returns nil when that function
+is unbound (persp-mode not loaded).
+
+This is the persp-mode protection boundary owned by `workspace.el'.
+Callers must use this function instead of calling `+workspace--protected-p'
+directly or wrapping it themselves with `fboundp'."
+  (and (fboundp '+workspace--protected-p)
+       (+workspace--protected-p ws)))
+
+(defun claude-repl--ws-error (message &optional noerror)
+  "Report a workspace error via `+workspace-error' with MESSAGE.
+With NOERROR non-nil, `+workspace-error' displays the message instead of
+signaling.  No-op when `+workspace-error' is unbound (persp-mode not
+loaded).  When it does signal, the error propagates to the caller.
+
+This is the persp-mode error boundary owned by `workspace.el'.
+Callers must use this function instead of calling `+workspace-error'
+directly or wrapping it themselves with `fboundp'."
+  (when (fboundp '+workspace-error)
+    (+workspace-error message noerror)))
+
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here
