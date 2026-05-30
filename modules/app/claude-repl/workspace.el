@@ -1024,6 +1024,28 @@ This is persp-mode buffer-ownership resolution; it lives in
              when (persp-contain-buffer-p buf persp)
              return (safe-persp-name persp))))
 
+(defun claude-repl--ws-all-persps ()
+  "Return the raw list of all perspective objects via `persp-persps'.
+Returns nil when `persp-persps' is unbound (persp-mode not loaded).  The
+list may include persp-mode's nil container and non-perspective symbol
+entries; callers filter as needed.
+
+This is the persp-mode enumeration boundary owned by `workspace.el'.
+Callers must use this function instead of calling `persp-persps'
+directly or wrapping it themselves with `fboundp'."
+  (when (fboundp 'persp-persps)
+    (persp-persps)))
+
+(defun claude-repl--ws-persp-name (persp)
+  "Return the name of perspective PERSP via `safe-persp-name'.
+Returns nil when `safe-persp-name' is unbound (persp-mode not loaded).
+
+This is the persp-mode name-resolution boundary owned by `workspace.el'.
+Callers must use this function instead of calling `safe-persp-name'
+directly or wrapping it themselves with `fboundp'."
+  (when (fboundp 'safe-persp-name)
+    (safe-persp-name persp)))
+
 ;;;; ---- Projectile integration boundary ---------------------------------
 ;;
 ;; A claude-repl workspace IS a project (a dir-keyed persp), so projectile

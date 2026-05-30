@@ -1478,6 +1478,36 @@ identity-distinct string injected by `claude-repl-set-priority' from
       (fmakunbound 'projectile-relevant-known-projects)
       (should-not (claude-repl--ws-known-projects)))))
 
+;;;; ---- Tests: --ws-all-persps ----
+
+(ert-deftest claude-repl-test-ws-all-persps-delegates-when-bound ()
+  "ws-all-persps returns the raw persp-persps list when bound."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-persps) (lambda () '(p1 p2 nil))))
+      (should (equal (claude-repl--ws-all-persps) '(p1 p2 nil))))))
+
+(ert-deftest claude-repl-test-ws-all-persps-returns-nil-when-unbound ()
+  "ws-all-persps returns nil when persp-persps is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-persps) nil))
+      (fmakunbound 'persp-persps)
+      (should-not (claude-repl--ws-all-persps)))))
+
+;;;; ---- Tests: --ws-persp-name ----
+
+(ert-deftest claude-repl-test-ws-persp-name-delegates-when-bound ()
+  "ws-persp-name returns the safe-persp-name result when bound."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'safe-persp-name) (lambda (persp) (format "%s" persp))))
+      (should (equal (claude-repl--ws-persp-name 'a-persp) "a-persp")))))
+
+(ert-deftest claude-repl-test-ws-persp-name-returns-nil-when-unbound ()
+  "ws-persp-name returns nil when safe-persp-name is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'safe-persp-name) nil))
+      (fmakunbound 'safe-persp-name)
+      (should-not (claude-repl--ws-persp-name 'a-persp)))))
+
 ;;;; ---- Tests: --workspace-for-buffer (moved from test-status.el) ----
 
 (ert-deftest claude-repl-test-workspace-for-buffer-persp-mode-nil ()
