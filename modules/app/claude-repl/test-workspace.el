@@ -1408,5 +1408,75 @@ identity-distinct string injected by `claude-repl-set-priority' from
   "ws-tab-selected-face returns the +workspace-tab-selected-face symbol."
   (should (eq (claude-repl--ws-tab-selected-face) '+workspace-tab-selected-face)))
 
+;;;; ---- Tests: --ws-register-project ----
+
+(ert-deftest claude-repl-test-ws-register-project-delegates-when-bound ()
+  "ws-register-project forwards DIR to projectile-add-known-project."
+  (claude-repl-test--with-clean-state
+    (let (captured)
+      (cl-letf (((symbol-function 'projectile-add-known-project)
+                 (lambda (dir) (setq captured dir))))
+        (claude-repl--ws-register-project "/tmp/p/")
+        (should (equal captured "/tmp/p/"))))))
+
+(ert-deftest claude-repl-test-ws-register-project-noop-when-unbound ()
+  "ws-register-project is a no-op when projectile-add-known-project is unbound."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'projectile-add-known-project) nil))
+      (fmakunbound 'projectile-add-known-project)
+      (should-not (claude-repl--ws-register-project "/tmp/p/")))))
+
+;;;; ---- Tests: --ws-unregister-project ----
+
+(ert-deftest claude-repl-test-ws-unregister-project-delegates-when-bound ()
+  "ws-unregister-project forwards DIR to projectile-remove-known-project."
+  (claude-repl-test--with-clean-state
+    (let (captured)
+      (cl-letf (((symbol-function 'projectile-remove-known-project)
+                 (lambda (dir) (setq captured dir))))
+        (claude-repl--ws-unregister-project "/tmp/p/")
+        (should (equal captured "/tmp/p/"))))))
+
+(ert-deftest claude-repl-test-ws-unregister-project-noop-when-unbound ()
+  "ws-unregister-project is a no-op when projectile-remove-known-project is unbound."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'projectile-remove-known-project) nil))
+      (fmakunbound 'projectile-remove-known-project)
+      (should-not (claude-repl--ws-unregister-project "/tmp/p/")))))
+
+;;;; ---- Tests: --ws-switch-project ----
+
+(ert-deftest claude-repl-test-ws-switch-project-delegates-when-bound ()
+  "ws-switch-project forwards PROJECT to projectile-switch-project-by-name."
+  (claude-repl-test--with-clean-state
+    (let (captured)
+      (cl-letf (((symbol-function 'projectile-switch-project-by-name)
+                 (lambda (project) (setq captured project))))
+        (claude-repl--ws-switch-project "/tmp/p/")
+        (should (equal captured "/tmp/p/"))))))
+
+(ert-deftest claude-repl-test-ws-switch-project-noop-when-unbound ()
+  "ws-switch-project is a no-op when projectile-switch-project-by-name is unbound."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'projectile-switch-project-by-name) nil))
+      (fmakunbound 'projectile-switch-project-by-name)
+      (should-not (claude-repl--ws-switch-project "/tmp/p/")))))
+
+;;;; ---- Tests: --ws-known-projects ----
+
+(ert-deftest claude-repl-test-ws-known-projects-delegates-when-bound ()
+  "ws-known-projects returns the projectile-relevant-known-projects list."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'projectile-relevant-known-projects)
+               (lambda () '("/a/" "/b/"))))
+      (should (equal (claude-repl--ws-known-projects) '("/a/" "/b/"))))))
+
+(ert-deftest claude-repl-test-ws-known-projects-returns-nil-when-unbound ()
+  "ws-known-projects returns nil when projectile-relevant-known-projects is unbound."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'projectile-relevant-known-projects) nil))
+      (fmakunbound 'projectile-relevant-known-projects)
+      (should-not (claude-repl--ws-known-projects)))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here
