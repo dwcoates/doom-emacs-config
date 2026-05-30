@@ -230,15 +230,14 @@ nuked workspace's identity record survives in the hash for
 (defun claude-repl--nukeable-workspace-names ()
   "Return candidate names for the nuke/kill picker.
 Union of live claude-repl workspaces (`claude-repl--live-ws-names')
-and tab-bar workspaces (`+workspace-list-names'), preserving the live
+and tab-bar workspaces (`claude-repl--ws-all-names'), preserving the live
 entries first.  Tab-bar entries whose claude-repl session has been
 torn down (or never existed) are included so the user can dispatch a
 plain persp/doom kill on stray tabs through the same picker — the
 dispatcher (`claude-repl--nuke-or-kill-workspace') decides per-entry
 whether to run the claude-repl teardown or a bare `+workspace/kill'."
   (let* ((live (claude-repl--live-ws-names))
-         (tabbar (and (fboundp '+workspace-list-names)
-                      (+workspace-list-names)))
+         (tabbar (claude-repl--ws-all-names))
          (extras (cl-remove-if (lambda (n) (member n live)) tabbar)))
     (append live extras)))
 

@@ -50,7 +50,7 @@ Signals `user-error' on any conflict."
   (when (and new-start-tag
              (claude-repl--git-tag-exists-p old-path new-start-tag))
     (user-error "Start tag '%s' already exists" new-start-tag))
-  (when (member new-bare (+workspace-list-names))
+  (when (member new-bare (claude-repl--ws-all-names))
     (user-error "Workspace '%s' already exists" new-bare)))
 
 (defun claude-repl--rename-assert-no-pending-merge (path)

@@ -92,7 +92,7 @@ Return the workspace name or nil."
     (claude-repl--log nil "ws-for-dir-container: persp-mode not bound, aborting"))
   (when (claude-repl--ws-system-available-p)
     (let* ((container-root (car (split-string (substring dir 1) "/")))
-           (all-ws (+workspace-list-names))
+           (all-ws (claude-repl--ws-all-names))
            (ws-dirs (mapcar (lambda (ws)
                               (cons ws (claude-repl--ws-get ws :project-dir)))
                             all-ws)))

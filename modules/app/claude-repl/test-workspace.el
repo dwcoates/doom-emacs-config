@@ -542,6 +542,28 @@ contract explicitly so a renderer relying on it stays predictable."
     (let ((persp-names-cache '("ws1")))
       (should (member "ws1" (claude-repl--ws-list-names))))))
 
+;;;; ---- Tests: --ws-all-names -------------------------------------------
+
+(ert-deftest claude-repl-test-ws-all-names-delegates-when-bound ()
+  "--ws-all-names returns the raw +workspace-list-names value when bound."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-list-names)
+               (lambda () '("a" "b" "c"))))
+      (should (equal (claude-repl--ws-all-names) '("a" "b" "c"))))))
+
+(ert-deftest claude-repl-test-ws-all-names-unfiltered-by-known ()
+  "--ws-all-names returns names even when claude-repl never registered them."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-list-names)
+               (lambda () '("stray-persp"))))
+      (should (equal (claude-repl--ws-all-names) '("stray-persp"))))))
+
+(ert-deftest claude-repl-test-ws-all-names-returns-nil-when-unbound ()
+  "--ws-all-names returns nil when +workspace-list-names is not fboundp."
+  (claude-repl-test--with-clean-state
+    (fmakunbound '+workspace-list-names)
+    (should-not (claude-repl--ws-all-names))))
+
 ;;;; ---- Tests: --ws-tombstoned-names ------------------------------------
 
 (ert-deftest claude-repl-test-ws-tombstoned-names-returns-tombstones ()
