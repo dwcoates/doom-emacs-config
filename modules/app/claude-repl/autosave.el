@@ -21,13 +21,13 @@ Runs silently every 5 minutes to prevent data loss."
   (when (claude-repl--ws-system-available-p)
     (claude-repl--log-verbose nil "autosave-workspace-buffers: scanning all workspace buffers")
     (let ((saved 0))
-      (dolist (persp (persp-persps))
+      (dolist (persp (claude-repl--ws-all-persps))
         (cond
          ;; nil is persp-mode's "no perspective" container — expected, skip silently.
          ((null persp) nil)
          ((not (symbolp persp))
-          (let ((ws (safe-persp-name persp)))
-            (dolist (buf (persp-buffers persp))
+          (let ((ws (claude-repl--ws-persp-name persp)))
+            (dolist (buf (claude-repl--ws-buffers persp))
               (when (claude-repl--save-buffer-if-modified buf ws)
                 (cl-incf saved)))))
          (t
