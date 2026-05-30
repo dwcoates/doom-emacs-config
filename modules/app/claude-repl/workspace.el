@@ -367,6 +367,24 @@ Returns nil when `persp-names-cache' is unbound."
                          (claude-repl--ws-known-p name))
                collect name))))
 
+(defun claude-repl--ws-all-names ()
+  "Return the raw list of ALL workspace names known to persp-mode.
+Delegates to `+workspace-list-names', returning every persp in the
+tab-bar regardless of whether claude-repl registered it.  Returns nil
+when `+workspace-list-names' is unbound (persp-mode not loaded).
+
+Differs from `claude-repl--ws-list-names', which intersects the cache
+with `claude-repl--workspaces' to yield only claude-repl-owned names.
+Use THIS wrapper for uniqueness checks and any path that must observe
+persps claude-repl did not create.  Use `--ws-list-names' for
+renderers that should reflect only claude-repl's own workspaces.
+
+This is the persp-mode namespace boundary owned by `workspace.el'.
+Callers must use this function instead of calling `+workspace-list-names'
+directly or wrapping it themselves with `fboundp'."
+  (when (fboundp '+workspace-list-names)
+    (+workspace-list-names)))
+
 ;;;; ---- Render-state unification ----------------------------------------
 ;;
 ;; `claude-repl--ws-render-status' is the single source of truth for
