@@ -53,6 +53,7 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
     - So instead of making one long bullet with a comma joining similar ideas or enumerating subconsceptions, use subbullets to represent that similar idea or enumeration
       - Thus, consider grammatical organization to be achieved by recursive tree production, rather than typical grammatical punctuation
     - The guiding principle is to keep each bullet short not by simplifying content but by subbulleting along english grammatical structure, recursively.
+    - This extends to conjunctions and other grammatical mechanisms ('and', 'but', 'however', etc are all strong clues for subbulleting)
 - Nothing may appear in the response outside the tree except the single response header line specified in the TLDR spec below.
 
 ## TLDR spec
@@ -77,7 +78,7 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 
 - Top-level entries in the tree should be separated by a newline
   - Non-top-level entries should not have any line spacing between entries
-- Each entry in the TLDR tree MUST be hard-wrapped at a maximum column width of 100 characters.
+- Each entry in the TLDR tree MUST be hard-wrapped at a maximum column width of 110 characters.
   - Any entry whose text would otherwise extend past column 110 is broken onto continuation lines that align under the entry's text (not under the ASCII connectors).
   - This ensures the tree remains readable at standard editor widths.
 
