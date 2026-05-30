@@ -1984,20 +1984,10 @@ Each call:
 - starts claude (`claude-repl--initialize-claude') unless already
   running."
   (claude-repl--with-error-logging (format "establish-workspace[%s]" ws)
-    (when (fboundp 'persp-add-new)
-      (let ((persp (persp-add-new ws)))
-        ;; Set `+workspace-project' on the persp so a later `SPC p p' to
-        ;; DIR matches this workspace via Doom's
-        ;; `+workspaces-switch-to-project-h' instead of triggering its
-        ;; uniquify-by-parent-dir branch.  Without this, the file-equal-p
-        ;; check on `+workspace-project' inside that hook errors against
-        ;; nil, the loop walks up the path, and the workspace gets
-        ;; recreated under names like `doom-worktrees/<ws>'.  Doom's own
-        ;; hook sets this parameter (line 588 of
-        ;; ui/workspaces/autoload/workspaces.el); we mirror it here so the
-        ;; snapshot-restore + `SPC j o' paths produce equivalent state.
-        (when (and persp (not (keywordp persp)) (fboundp 'set-persp-parameter))
-          (set-persp-parameter '+workspace-project dir persp))))
+    ;; Create the persp and tag it with `+workspace-project' so a later
+    ;; `SPC p p' to DIR matches this workspace; see --ws-create for the
+    ;; full rationale.
+    (claude-repl--ws-create ws dir)
     ;; WHY: this switch is load-bearing for `--snapshot-load-finish' in
     ;; addition to its primary purpose.  persp-mode auto-saves the
     ;; previous persp's window-configuration on switch-away, and finish

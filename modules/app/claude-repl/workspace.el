@@ -827,5 +827,31 @@ directly or wrapping it themselves with `fboundp'."
   (when (fboundp 'persp-frame-save-state)
     (persp-frame-save-state)))
 
+(defun claude-repl--ws-create (ws &optional project-dir)
+  "Create persp WS via `persp-add-new' and tag it with PROJECT-DIR.
+Returns the new persp object, or nil when `persp-add-new' is unbound.
+
+When PROJECT-DIR is non-nil and the new persp is a real persp object
+\(not the `persp-not-persp' keyword sentinel), sets the persp's
+`+workspace-project' parameter to PROJECT-DIR.  This makes a later
+`SPC p p' to PROJECT-DIR match this workspace via Doom's
+`+workspaces-switch-to-project-h' instead of hitting its
+uniquify-by-parent-dir branch.  Without it, the `file-equal-p' check on
+`+workspace-project' inside that hook errors against nil, the loop walks
+up the path, and the workspace gets recreated under names like
+`doom-worktrees/<ws>'.  Doom's own project hook sets this parameter; we
+mirror it so the snapshot-restore and `SPC j o' paths produce
+equivalent state.
+
+This is the persp-mode creation boundary owned by `workspace.el'.
+Callers must use this function instead of calling `persp-add-new' or
+`set-persp-parameter' directly or wrapping them with `fboundp'."
+  (when (fboundp 'persp-add-new)
+    (let ((persp (persp-add-new ws)))
+      (when (and persp (not (keywordp persp)) project-dir
+                 (fboundp 'set-persp-parameter))
+        (set-persp-parameter '+workspace-project project-dir persp))
+      persp)))
+
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here
