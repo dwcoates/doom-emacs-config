@@ -3130,7 +3130,7 @@ so the user can visually track it to its new home."
     (persp-update-names-cache reordered)
     (claude-repl--force-tab-bar-redraw)
     (when (and next-name (not keep-focus))
-      (+workspace/switch-to next-name))
+      (claude-repl--ws-switch next-name))
     (claude-repl-flash-tab current)
     (if keep-focus
         (message "Pushed '%s' to second-to-last." current)
@@ -3150,5 +3150,5 @@ Focus remains on the current workspace."
     (claude-repl--log current "workspace-pull-to-front: ws=%s" current)
     (persp-update-names-cache reordered)
     (claude-repl--force-tab-bar-redraw)
-    (+workspace/switch-to current)
+    (claude-repl--ws-switch current)
     (message "Pulled '%s' to second position." current)))
