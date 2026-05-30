@@ -59,9 +59,16 @@
 (declare-function +workspace-exists-p "ext:persp-mode" (name))
 (declare-function +workspace/kill "ext:persp-mode" (name))
 (declare-function persp-update-names-cache "ext:persp-mode" (cache))
+(declare-function magit-status "ext:magit" (&optional directory cache))
+(declare-function doom-real-buffer-list "ext:doom" (&optional buffer-list))
 (defvar persp-nil-name)
 (defvar persp-names-cache)
 (defvar persp-mode)
+(defvar persp-auto-resume-time)
+(defvar persp-auto-save-opt)
+(defvar persp-kill-foreign-buffer-behaviour)
+(defvar persp-set-frame-buffer-predicate)
+(defvar +workspaces-switch-project-function)
 (defvar claude-repl--restored-workspaces)
 
 (cl-defstruct claude-repl-instantiation
@@ -1197,6 +1204,29 @@ callers do not name the feature directly.
 Boundary owned by `workspace.el'."
   (with-eval-after-load 'persp-mode
     (funcall thunk)))
+
+;;;; ---- persp-mode policy configuration ---------------------------------
+;;
+;; claude-repl owns workspace/persp policy.  These settings used to live
+;; in the top-level config.el and were moved here so the persp boundary
+;; owns persp-mode's own configuration.  Deferred until persp-mode loads.
+
+(with-eval-after-load 'persp-mode
+  ;; Skip the find-file prompt when switching to a project that already
+  ;; has an open workspace; show magit instead when there are no buffers.
+  (setq +workspaces-switch-project-function
+        (lambda (dir)
+          (unless (doom-real-buffer-list)
+            (magit-status dir))))
+  ;; persp-mode's own session persistence is disabled — claude-repl is the
+  ;; single source of truth for workspace save/restore via its snapshot
+  ;; mechanism.  -1 disables auto-resume; 0 disables auto-save on kill.
+  (setq persp-auto-resume-time -1
+        persp-auto-save-opt 0)
+  ;; Never prompt when killing a buffer not in the current workspace.
+  (setq persp-kill-foreign-buffer-behaviour 'kill)
+  ;; Only show current-workspace buffers in buffer lists (SPC ,).
+  (setq persp-set-frame-buffer-predicate t))
 
 (defun claude-repl--record-workspace-history (&rest _)
   "Record the current workspace at the front of `claude-repl--workspace-history'.
