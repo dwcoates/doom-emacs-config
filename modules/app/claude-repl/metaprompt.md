@@ -70,6 +70,8 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
     - A child's dotted label is ALWAYS the parent's complete dotted label followed by the child's own next index.
       - A child of '2.1' is numbered '2.1.1', '2.1.2', '2.1.3' and NEVER the numeral-dropped '2.1', '2.2', '2.3'.
       - No numeral of the parent's prefix is ever omitted from a child.
+  - Don't put a trailing branch on a bullet if it's the last of its siblings
+    - Of course, such a branch will never connect to a subsequent bullet, because its eminating from a bullet with no next sibling
 
 ### Spacing and wrapping
 
