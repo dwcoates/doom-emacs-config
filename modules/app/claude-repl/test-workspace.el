@@ -1195,5 +1195,45 @@ identity-distinct string injected by `claude-repl-set-priority' from
       (fmakunbound 'persp-frame-save-state)
       (should-not (claude-repl--ws-frame-save-state)))))
 
+;;;; ---- Tests: --ws-create ----
+
+(ert-deftest claude-repl-test-ws-create-returns-persp-and-tags-project ()
+  "ws-create calls persp-add-new and sets +workspace-project on a real persp."
+  (claude-repl-test--with-clean-state
+    (let (added param-call)
+      (cl-letf (((symbol-function 'persp-add-new) (lambda (ws) (setq added ws) 'a-persp))
+                ((symbol-function 'set-persp-parameter)
+                 (lambda (key val persp) (setq param-call (list key val persp)))))
+        (should (eq (claude-repl--ws-create "ws1" "/tmp/p") 'a-persp))
+        (should (equal added "ws1"))
+        (should (equal param-call '(+workspace-project "/tmp/p" a-persp)))))))
+
+(ert-deftest claude-repl-test-ws-create-skips-param-when-keyword-sentinel ()
+  "ws-create does not set the project param when persp-add-new returns a keyword."
+  (claude-repl-test--with-clean-state
+    (let (param-called)
+      (cl-letf (((symbol-function 'persp-add-new) (lambda (_ws) :nil))
+                ((symbol-function 'set-persp-parameter)
+                 (lambda (&rest _) (setq param-called t))))
+        (claude-repl--ws-create "ws1" "/tmp/p")
+        (should-not param-called)))))
+
+(ert-deftest claude-repl-test-ws-create-skips-param-when-no-dir ()
+  "ws-create does not set the project param when PROJECT-DIR is nil."
+  (claude-repl-test--with-clean-state
+    (let (param-called)
+      (cl-letf (((symbol-function 'persp-add-new) (lambda (_ws) 'a-persp))
+                ((symbol-function 'set-persp-parameter)
+                 (lambda (&rest _) (setq param-called t))))
+        (claude-repl--ws-create "ws1")
+        (should-not param-called)))))
+
+(ert-deftest claude-repl-test-ws-create-noop-when-unbound ()
+  "ws-create returns nil when persp-add-new is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-add-new) nil))
+      (fmakunbound 'persp-add-new)
+      (should-not (claude-repl--ws-create "ws1" "/tmp/p")))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here
