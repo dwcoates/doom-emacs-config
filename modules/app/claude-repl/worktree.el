@@ -498,7 +498,7 @@ value is stored via `claude-repl--ws-put'."
   "Write a .projectile marker and register PATH (named DIRNAME) with projectile."
   (write-region dirname nil (expand-file-name ".projectile" path))
   (claude-repl--log dirname "worktree wrote .projectile, adding to projectile known projects")
-  (projectile-add-known-project (file-name-as-directory path)))
+  (claude-repl--ws-register-project (file-name-as-directory path)))
 
 (defconst claude-repl--autonomous-prompt-prefix
   "Do not wait for further instructions. Come up with a plan and then immediately execute on it. Here is the task:\n\n"
@@ -1617,7 +1617,7 @@ do not need to track the owning repository separately."
                   "-C" expanded
                   "worktree" "remove" expanded)))
     (claude-repl--log nil "finish-workspace worktree-remove: %s" result))
-  (projectile-remove-known-project (file-name-as-directory project-dir)))
+  (claude-repl--ws-unregister-project (file-name-as-directory project-dir)))
 
 (defun claude-repl--defer-to-main-thread (thunk)
   "Schedule zero-arg THUNK to run on the main thread on the next event-loop tick.

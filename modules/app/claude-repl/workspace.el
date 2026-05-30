@@ -967,5 +967,50 @@ Callers must use this function instead of referring to
 `+workspace-tab-selected-face' directly."
   '+workspace-tab-selected-face)
 
+;;;; ---- Projectile integration boundary ---------------------------------
+;;
+;; A claude-repl workspace IS a project (a dir-keyed persp), so projectile
+;; is part of the same workspace domain.  These wrappers are the single
+;; place claude-repl touches the projectile known-projects API, mirroring
+;; the persp-mode boundary above.  Callers outside this file must use
+;; these wrappers rather than naming `projectile-*' directly.
+
+(defun claude-repl--ws-register-project (dir)
+  "Register DIR with projectile via `projectile-add-known-project'.
+No-op when `projectile-add-known-project' is unbound (projectile not
+loaded).  DIR should already be normalized by the caller (e.g. via
+`file-name-as-directory') when canonical form matters.
+
+Projectile boundary owned by `workspace.el'."
+  (when (fboundp 'projectile-add-known-project)
+    (projectile-add-known-project dir)))
+
+(defun claude-repl--ws-unregister-project (dir)
+  "Drop DIR from projectile's known projects via `projectile-remove-known-project'.
+No-op when `projectile-remove-known-project' is unbound (projectile not
+loaded).
+
+Projectile boundary owned by `workspace.el'."
+  (when (fboundp 'projectile-remove-known-project)
+    (projectile-remove-known-project dir)))
+
+(defun claude-repl--ws-switch-project (project)
+  "Switch to PROJECT via `projectile-switch-project-by-name'.
+No-op when `projectile-switch-project-by-name' is unbound (projectile
+not loaded).
+
+Projectile boundary owned by `workspace.el'."
+  (when (fboundp 'projectile-switch-project-by-name)
+    (projectile-switch-project-by-name project)))
+
+(defun claude-repl--ws-known-projects ()
+  "Return the list of projectile-relevant known project roots.
+Delegates to `projectile-relevant-known-projects'.  Returns nil when
+that function is unbound (projectile not loaded).
+
+Projectile boundary owned by `workspace.el'."
+  (when (fboundp 'projectile-relevant-known-projects)
+    (projectile-relevant-known-projects)))
+
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here

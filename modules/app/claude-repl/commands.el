@@ -2003,8 +2003,7 @@ Each call:
     ;; `no-delete-other-windows', so the later `delete-other-windows' in
     ;; `--show-existing-panels' won't tear them down on its own.
     (claude-repl--clean-frame-foreign-windows ws)
-    (when (fboundp 'projectile-add-known-project)
-      (projectile-add-known-project dir))
+    (claude-repl--ws-register-project dir)
     ;; The fallback buffer is SHARED across persps — permanently rewriting
     ;; its `default-directory' makes scratch report the last-loaded ws's
     ;; project root from every persp.  Save/restore the original so the
@@ -2924,7 +2923,7 @@ Captures the choice via the action closure rather than `ivy-read''s
 return value because ivy's return shape for cons-cell candidates varies
 across versions (sometimes the cons, sometimes the car); the action
 sees `c' in a consistent shape so we can normalize once."
-  (let* ((roots (projectile-relevant-known-projects))
+  (let* ((roots (claude-repl--ws-known-projects))
          (candidates (claude-repl--build-project-picker-candidates roots))
          (selected nil))
     (if (fboundp 'ivy-read)
@@ -2967,7 +2966,7 @@ name."
   (interactive)
   (let ((project (or project (claude-repl--read-project-via-picker))))
     (when project
-      (projectile-switch-project-by-name project)
+      (claude-repl--ws-switch-project project)
       (when-let ((recent-file (claude-repl--most-recent-project-file project)))
         (when (file-exists-p recent-file)
           (find-file recent-file)))

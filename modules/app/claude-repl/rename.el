@@ -242,12 +242,10 @@ persistent old-name persp would diverge from the renamed state."
 
 (defun claude-repl--rename-update-projectile (old-path new-path)
   "Move projectile's known-project entry from OLD-PATH to NEW-PATH."
-  (when (fboundp 'projectile-remove-known-project)
-    (ignore-errors
-      (projectile-remove-known-project (file-name-as-directory old-path))))
-  (when (fboundp 'projectile-add-known-project)
-    (ignore-errors
-      (projectile-add-known-project (file-name-as-directory new-path)))))
+  (ignore-errors
+    (claude-repl--ws-unregister-project (file-name-as-directory old-path)))
+  (ignore-errors
+    (claude-repl--ws-register-project (file-name-as-directory new-path))))
 
 (defun claude-repl--rename-git-common-cwd (old-path)
   "Return a stable directory to pass as `git -C' across the worktree move.
