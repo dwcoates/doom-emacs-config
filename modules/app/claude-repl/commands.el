@@ -2213,7 +2213,7 @@ list, which is exactly what the user asked us to avoid here.
 Each step is wrapped independently in `condition-case' so an error in
 the buffer sweep does not block the persp kill, and an error in either
 step is logged but never propagated — finish must remain robust."
-  (let ((main (and (boundp '+workspaces-main) +workspaces-main)))
+  (let ((main (claude-repl--ws-main-name)))
     (when (and main
                (claude-repl--ws-exists-p main))
       (claude-repl--log nil "snapshot-load: nuking 'main' workspace artifact main=%s" main)
@@ -3002,7 +3002,7 @@ becomes noise; identity-based jumps (`SPC p p', priority change,
 worktree jump) keep the flash since they're discrete attention cues."
   (let ((current-name (claude-repl--ws-current-name)))
     (if (+workspace--protected-p current-name)
-        (claude-repl--ws-switch +workspaces-main t)
+        (claude-repl--ws-switch (claude-repl--ws-main-name) t)
       (condition-case-unless-debug ex
           (let* ((visible (claude-repl--filter-hidden-names
                            (claude-repl--ws-list-names) current-name))

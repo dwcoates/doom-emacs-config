@@ -794,5 +794,16 @@ directly or wrapping it themselves with `fboundp'."
   (when (fboundp '+workspace/kill)
     (+workspace/kill ws)))
 
+(defun claude-repl--ws-main-name ()
+  "Return the name of Doom's main workspace, or nil.
+Reads `+workspaces-main', the variable holding the name Doom assigns to
+the startup workspace.  Returns nil when that variable is unbound or nil
+(e.g. persp-mode not loaded).
+
+This is the persp-mode main-workspace boundary owned by `workspace.el'.
+Callers must use this function instead of reading `+workspaces-main'
+directly or guarding it themselves with `boundp'."
+  (and (boundp '+workspaces-main) +workspaces-main))
+
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here

@@ -1147,5 +1147,19 @@ identity-distinct string injected by `claude-repl-set-priority' from
     (fmakunbound '+workspace/kill)
     (should-not (claude-repl--ws-kill "doomed"))))
 
+;;;; ---- Tests: --ws-main-name ----
+
+(ert-deftest claude-repl-test-ws-main-name-returns-value ()
+  "ws-main-name returns the +workspaces-main value when bound and non-nil."
+  (claude-repl-test--with-clean-state
+    (let ((+workspaces-main "custom-main"))
+      (should (equal (claude-repl--ws-main-name) "custom-main")))))
+
+(ert-deftest claude-repl-test-ws-main-name-returns-nil-when-nil ()
+  "ws-main-name returns nil when +workspaces-main is nil."
+  (claude-repl-test--with-clean-state
+    (let ((+workspaces-main nil))
+      (should-not (claude-repl--ws-main-name)))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here
