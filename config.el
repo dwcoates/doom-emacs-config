@@ -391,58 +391,9 @@
 
   (advice-add '+ivy/project-compile :after #'DWC--add-command-to-projectile-history))
 
-;; Skip find-file prompt when switching to a project that already has an open workspace
-(setq +workspaces-switch-project-function
-      (lambda (dir)
-        (unless (doom-real-buffer-list)
-          (magit-status dir))))
-
-;; All magit integration and user magit commands live in the claude-repl
-;; module's magit.el (see AGENTS.md — no claude-repl code in this file).
-
-;; Workspace configuration
-(after! persp-mode
-  ;; persp-mode's own session persistence is disabled — claude-repl is the
-  ;; single source of truth for workspace save/restore via its snapshot
-  ;; mechanism (see modules/app/claude-repl/config.el).  These are explicit
-  ;; belt-and-suspenders in case Doom's defaults or a future package
-  ;; re-enables them: -1 disables auto-resume (`<= 0 → no autoresume' per
-  ;; persp-mode's own docs), 0 disables auto-save on kill, and nilling the
-  ;; save dir ensures stray `persp-load-state-from-file' calls without an
-  ;; explicit arg have nowhere to read from.
-  (setq persp-auto-resume-time -1
-        persp-auto-save-opt 0)
-  ;; Never ask for confirmation when killing a buffer not in the current workspace
-  (setq persp-kill-foreign-buffer-behaviour 'kill)
-  ;; Only show buffers belonging to the current workspace in buffer lists (SPC ,)
-  (setq persp-set-frame-buffer-predicate t)
-
-  ;; NOTE: the claude-repl tab-bar (alternating-space hack, status
-  ;; colors, per-workspace face transitions) and the `SPC TAB p' /
-  ;; `SPC TAB P' tab-shuffle commands live entirely in
-  ;; `modules/app/claude-repl/' now:
-  ;;
-  ;;   - `claude-repl-workspace-tabline-formatted' /
-  ;;     `claude-repl-current-workspace-name-segment' (status.el) —
-  ;;     installed into `tab-bar-format' from the module's own
-  ;;     `(after! persp-mode …)' block.
-  ;;
-  ;;   - `claude-repl-workspace-push-to-back' /
-  ;;     `claude-repl-workspace-pull-to-front' (commands.el) — bound in
-  ;;     `keybindings.el'.
-  ;;
-  ;;   - `claude-repl--force-tab-bar-redraw' (status.el) — flips the
-  ;;     alternating-space toggle and drives the tab-bar / mode-line
-  ;;     redraw primitives, called by the 1Hz
-  ;;     `claude-repl--update-all-workspace-states' timer.
-  ;;
-  ;; Do NOT re-introduce `+dwc/' tab-bar code here.  Top-level
-  ;; `config.el' is NOT reloaded by `M-x doom/reload' / the
-  ;; workspace-merge sentinel reload the same way the module is, so
-  ;; edits here silently fail to take effect in the running Emacs
-  ;; until a full restart.  See AGENTS.md "HARD GATE: never edit the
-  ;; top-level doomdir `config.el' without explicit permission".
-  )
+;; Workspace/persp policy configuration (+workspaces-switch-project-function
+;; and the persp-mode session/buffer settings) moved into the claude-repl
+;; module's workspace.el, which owns the persp boundary.
 
 ;; Cmd+<numeral> AND Meta+<numeral> workspace switching live in
 ;; `modules/app/claude-repl/keybindings.el' via
