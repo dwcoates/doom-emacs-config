@@ -1046,6 +1046,27 @@ directly or wrapping it themselves with `fboundp'."
   (when (fboundp 'safe-persp-name)
     (safe-persp-name persp)))
 
+(defun claude-repl--ws-nil-name ()
+  "Return persp-mode's sentinel \"no perspective\" name, or nil.
+Reads `persp-nil-name'.  Returns nil when that variable is unbound
+(persp-mode not loaded).
+
+This is the persp-mode sentinel-name boundary owned by `workspace.el'.
+Callers must use this function instead of reading `persp-nil-name'
+directly or guarding it themselves with `boundp'."
+  (and (boundp 'persp-nil-name) persp-nil-name))
+
+(defun claude-repl--ws-names-cache ()
+  "Return the raw `persp-names-cache' list, or nil when unbound.
+Used mainly for diagnostic logging of cache state.  Returns nil both
+when the cache is empty and when `persp-names-cache' is unbound
+(persp-mode not loaded).
+
+This is the persp-mode names-cache read boundary owned by `workspace.el'.
+Callers must use this function instead of reading `persp-names-cache'
+directly or guarding it themselves with `boundp'."
+  (and (boundp 'persp-names-cache) persp-names-cache))
+
 ;;;; ---- Projectile integration boundary ---------------------------------
 ;;
 ;; A claude-repl workspace IS a project (a dir-keyed persp), so projectile

@@ -479,7 +479,7 @@ hide-project-dirs needs no special handling here: that mode kills
 matching workspaces (`claude-repl-toggle-hide-project-dirs'), so they
 become tombstones and the `:nuked-at' filter above already drops them
 from the drawer."
-  (let ((nil-name (and (boundp 'persp-nil-name) persp-nil-name)))
+  (let ((nil-name (claude-repl--ws-nil-name)))
     (cl-remove-if
      (lambda (ws)
        (and nil-name

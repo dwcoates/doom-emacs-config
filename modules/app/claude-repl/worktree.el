@@ -2102,7 +2102,7 @@ empty, the default applies (HEAD for forks,
          (base-commit (and (stringp cmd-base-commit)
                            (not (string-empty-p cmd-base-commit))
                            cmd-base-commit))
-         (nil-name (and (boundp 'persp-nil-name) persp-nil-name))
+         (nil-name (claude-repl--ws-nil-name))
          (bare-name (and (stringp name)
                          (not (string-empty-p name))
                          (claude-repl--bare-workspace-name name)))

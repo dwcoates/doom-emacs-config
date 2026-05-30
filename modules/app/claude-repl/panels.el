@@ -452,7 +452,7 @@ a sub-`claude-repl-done-idle-delay' transit never decays it.
 Logs `persp-names-cache' so cache mutations across persp lifecycle
 events (kill, switch, add) are traceable."
   (claude-repl--log (claude-repl--ws-current-name) "before-persp-deactivate: entry cache=%S"
-                    (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
+                    (or (claude-repl--ws-names-cache) "(unbound)"))
   (claude-repl--clear-done-ack-on-switch-away (claude-repl--ws-current-name))
   (claude-repl--redirect-from-claude-before-save)
   (condition-case err
@@ -472,7 +472,7 @@ latest ws, dropping bookkeeping on the intermediate ones).
 Logs `persp-names-cache' so cache mutations across persp lifecycle
 events (kill, switch, add) are traceable."
   (claude-repl--log (claude-repl--ws-current-name) "after-persp-activated: entry cache=%S"
-                    (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
+                    (or (claude-repl--ws-names-cache) "(unbound)"))
   (let ((ws (claude-repl--ws-current-name)))
     (run-at-time 0 nil #'claude-repl--on-workspace-switch ws)))
 
