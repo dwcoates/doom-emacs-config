@@ -1161,5 +1161,39 @@ identity-distinct string injected by `claude-repl-set-priority' from
     (let ((+workspaces-main nil))
       (should-not (claude-repl--ws-main-name)))))
 
+;;;; ---- Tests: --ws-frame-switch ----
+
+(ert-deftest claude-repl-test-ws-frame-switch-delegates-when-bound ()
+  "ws-frame-switch calls persp-frame-switch with the given ws name."
+  (claude-repl-test--with-clean-state
+    (let (switched)
+      (cl-letf (((symbol-function 'persp-frame-switch) (lambda (ws) (setq switched ws))))
+        (claude-repl--ws-frame-switch "target")
+        (should (equal switched "target"))))))
+
+(ert-deftest claude-repl-test-ws-frame-switch-noop-when-unbound ()
+  "ws-frame-switch is a no-op when persp-frame-switch is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-frame-switch) nil))
+      (fmakunbound 'persp-frame-switch)
+      (should-not (claude-repl--ws-frame-switch "target")))))
+
+;;;; ---- Tests: --ws-frame-save-state ----
+
+(ert-deftest claude-repl-test-ws-frame-save-state-delegates-when-bound ()
+  "ws-frame-save-state calls persp-frame-save-state when bound."
+  (claude-repl-test--with-clean-state
+    (let (saved)
+      (cl-letf (((symbol-function 'persp-frame-save-state) (lambda () (setq saved t))))
+        (claude-repl--ws-frame-save-state)
+        (should saved)))))
+
+(ert-deftest claude-repl-test-ws-frame-save-state-noop-when-unbound ()
+  "ws-frame-save-state is a no-op when persp-frame-save-state is not fboundp."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-frame-save-state) nil))
+      (fmakunbound 'persp-frame-save-state)
+      (should-not (claude-repl--ws-frame-save-state)))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here

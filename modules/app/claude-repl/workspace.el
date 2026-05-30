@@ -805,5 +805,27 @@ Callers must use this function instead of reading `+workspaces-main'
 directly or guarding it themselves with `boundp'."
   (and (boundp '+workspaces-main) +workspaces-main))
 
+(defun claude-repl--ws-frame-switch (ws)
+  "Activate workspace WS on the current frame via `persp-frame-switch'.
+No-op when `persp-frame-switch' is unbound (persp-mode not loaded).
+
+This is the persp-mode frame-activation boundary owned by `workspace.el'.
+Callers must use this function instead of calling `persp-frame-switch'
+directly or wrapping it themselves with `fboundp'."
+  (when (fboundp 'persp-frame-switch)
+    (persp-frame-switch ws)))
+
+(defun claude-repl--ws-frame-save-state ()
+  "Save the current frame's persp window-configuration state.
+Delegates to `persp-frame-save-state'.  No-op when that function is
+unbound (persp-mode not loaded).  Errors propagate to the caller — wrap
+at the call site when the save must stay robust.
+
+This is the persp-mode frame-save boundary owned by `workspace.el'.
+Callers must use this function instead of calling `persp-frame-save-state'
+directly or wrapping it themselves with `fboundp'."
+  (when (fboundp 'persp-frame-save-state)
+    (persp-frame-save-state)))
+
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here
