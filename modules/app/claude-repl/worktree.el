@@ -1288,7 +1288,7 @@ bad values."
 
 (defun claude-repl--read-source-workspace-maybe ()
   "Return a source workspace name when prefix-arg is active, else nil.
-Prompts from `(+workspace-list-names)' with the current workspace as default.
+Prompts from `claude-repl--ws-list-names' with the current workspace as default.
 Intended for `(interactive (list ...))' forms so `C-u' routes the new
 worktree to a different repository than the ambient workspace's."
   (when current-prefix-arg
