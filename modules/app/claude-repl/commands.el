@@ -1270,10 +1270,9 @@ single routing point."
    (t
     (claude-repl--log ws "nuke-or-kill: ws not live, routing to +workspace/kill")
     (when (and (claude-repl--ws-system-available-p)
-               (fboundp '+workspace-exists-p)
-               (+workspace-exists-p ws))
+               (claude-repl--ws-exists-p ws))
       (condition-case err
-          (+workspace/kill ws)
+          (claude-repl--ws-kill ws)
         (error (claude-repl--log ws "nuke-or-kill: +workspace/kill error: %S" err))))
     'kill)))
 
@@ -2179,8 +2178,7 @@ can call finish without worrying whether a normal finish already ran."
       ;; replays that layout — and persp-mode's restore filters foreign
       ;; buffers, so panels owned by some other ws can't bleed in.
       (when (and origin
-                 (fboundp '+workspace-exists-p)
-                 (+workspace-exists-p origin)
+                 (claude-repl--ws-exists-p origin)
                  (fboundp 'persp-frame-switch))
         (persp-frame-switch origin))
       (force-mode-line-update t)
@@ -2217,15 +2215,13 @@ the buffer sweep does not block the persp kill, and an error in either
 step is logged but never propagated — finish must remain robust."
   (let ((main (and (boundp '+workspaces-main) +workspaces-main)))
     (when (and main
-               (fboundp '+workspace-exists-p)
-               (+workspace-exists-p main)
-               (fboundp '+workspace/kill))
+               (claude-repl--ws-exists-p main))
       (claude-repl--log nil "snapshot-load: nuking 'main' workspace artifact main=%s" main)
       (condition-case err
           (claude-repl--kill-workspace-buffers main)
         (error (claude-repl--log nil "snapshot-load: nuke-main kill-buffers error: %S" err)))
       (condition-case err
-          (+workspace/kill main)
+          (claude-repl--ws-kill main)
         (error (claude-repl--log nil "snapshot-load: nuke-main persp-kill error: %S" err))))))
 
 (defun claude-repl--snapshot-load-on-loaded (ws &optional _marker)

@@ -771,5 +771,28 @@ directly or wrapping it themselves with `fboundp'."
   (when (fboundp '+workspace-switch)
     (apply '+workspace-switch ws args)))
 
+(defun claude-repl--ws-exists-p (ws)
+  "Return non-nil when workspace WS exists in the tab-bar.
+Delegates to `+workspace-exists-p'.  Returns nil when that function is
+unbound (persp-mode not loaded).
+
+This is the persp-mode existence boundary owned by `workspace.el'.
+Callers must use this function instead of calling `+workspace-exists-p'
+directly or wrapping it themselves with `fboundp'."
+  (and (fboundp '+workspace-exists-p)
+       (+workspace-exists-p ws)))
+
+(defun claude-repl--ws-kill (ws)
+  "Kill workspace WS via `+workspace/kill'.
+No-op when `+workspace/kill' is unbound (e.g. persp-mode not loaded).
+Any error from the underlying call propagates to the caller — wrap at
+the call site with `condition-case' when teardown must stay robust.
+
+This is the persp-mode kill boundary owned by `workspace.el'.
+Callers must use this function instead of calling `+workspace/kill'
+directly or wrapping it themselves with `fboundp'."
+  (when (fboundp '+workspace/kill)
+    (+workspace/kill ws)))
+
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here

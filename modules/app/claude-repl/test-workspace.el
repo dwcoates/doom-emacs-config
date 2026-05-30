@@ -1116,5 +1116,36 @@ identity-distinct string injected by `claude-repl-set-priority' from
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
       (should-not (claude-repl--ws-current-name)))))
 
+;;;; ---- Tests: --ws-exists-p ----
+
+(ert-deftest claude-repl-test-ws-exists-p-delegates-when-bound ()
+  "ws-exists-p returns the +workspace-exists-p result when bound."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-exists-p) (lambda (ws) (equal ws "live"))))
+      (should (claude-repl--ws-exists-p "live"))
+      (should-not (claude-repl--ws-exists-p "gone")))))
+
+(ert-deftest claude-repl-test-ws-exists-p-returns-nil-when-unbound ()
+  "ws-exists-p returns nil when +workspace-exists-p is not fboundp."
+  (claude-repl-test--with-clean-state
+    (fmakunbound '+workspace-exists-p)
+    (should-not (claude-repl--ws-exists-p "any"))))
+
+;;;; ---- Tests: --ws-kill ----
+
+(ert-deftest claude-repl-test-ws-kill-delegates-when-bound ()
+  "ws-kill calls +workspace/kill with the given ws name."
+  (claude-repl-test--with-clean-state
+    (let (killed)
+      (cl-letf (((symbol-function '+workspace/kill) (lambda (ws) (setq killed ws))))
+        (claude-repl--ws-kill "doomed")
+        (should (equal killed "doomed"))))))
+
+(ert-deftest claude-repl-test-ws-kill-noop-when-unbound ()
+  "ws-kill is a no-op when +workspace/kill is not fboundp."
+  (claude-repl-test--with-clean-state
+    (fmakunbound '+workspace/kill)
+    (should-not (claude-repl--ws-kill "doomed"))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here
