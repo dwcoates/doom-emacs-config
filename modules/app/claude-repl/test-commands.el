@@ -5330,7 +5330,7 @@ SWITCHED-TO and FLASHED are place-symbols (boxed into single-cell lists)
 the stubs push to.  PROTECTED-P is a boolean controlling
 `+workspace--protected-p'."
   (declare (indent 7))
-  `(cl-letf (((symbol-function '+workspace-list-names) (lambda () ,names))
+  `(cl-letf (((symbol-function 'claude-repl--ws-list-names) (lambda () ,names))
              ((symbol-function '+workspace-current-name) (lambda () ,current))
              ((symbol-function '+workspace--protected-p)
               (lambda (_name) ,protected-p))
@@ -6007,7 +6007,7 @@ the candidate list."
 into SWITCHED-TO so the test can assert the destination passed by the
 indexed switchers."
   (declare (indent 2))
-  `(cl-letf (((symbol-function '+workspace-list-names) (lambda () ,names))
+  `(cl-letf (((symbol-function 'claude-repl--ws-list-names) (lambda () ,names))
              ((symbol-function '+workspace-switch)
               (lambda (name &optional _auto-create) (push name ,switched-to))))
      ,@body))

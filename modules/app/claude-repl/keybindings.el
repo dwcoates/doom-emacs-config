@@ -206,11 +206,11 @@ before invoking `+workspace/kill'."
 
 (defun claude-repl--read-workspace (prompt)
   "Prompt for a workspace name with PROMPT.  Requires an exact match."
-  (completing-read prompt (+workspace-list-names) nil t))
+  (completing-read prompt (claude-repl--ws-list-names) nil t))
 
 (defun claude-repl--read-workspace-with-default (prompt)
   "Prompt for a workspace name with PROMPT, defaulting to the current workspace."
-  (completing-read prompt (+workspace-list-names) nil t
+  (completing-read prompt (claude-repl--ws-list-names) nil t
                    nil nil (claude-repl--ws-current-name)))
 
 (defun claude-repl--read-known-workspace (prompt)
@@ -469,7 +469,7 @@ Use this to verify the processor works independently of the file watcher."
 (defun claude-repl-debug/workspace-states ()
   "Display all workspace states."
   (interactive)
-  (let ((states (mapcar #'claude-repl--cons-name-state (+workspace-list-names))))
+  (let ((states (mapcar #'claude-repl--cons-name-state (claude-repl--ws-list-names))))
     (message "Workspace states:\n%s"
              (mapconcat #'claude-repl--format-workspace-state states "\n"))))
 

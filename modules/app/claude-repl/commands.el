@@ -3009,7 +3009,7 @@ worktree jump) keep the flash since they're discrete attention cues."
         (claude-repl--ws-switch +workspaces-main t)
       (condition-case-unless-debug ex
           (let* ((visible (claude-repl--filter-hidden-names
-                           (+workspace-list-names) current-name))
+                           (claude-repl--ws-list-names) current-name))
                  (perspc (length visible))
                  (index (cl-position current-name visible :test #'equal)))
             (when (= perspc 1)
@@ -3050,10 +3050,10 @@ Drop-in replacement for `+workspace/switch-right' that honors
 ;; named commands below are the only entry points bound to keys.
 
 (defun claude-repl--workspace-switch-by-index (index)
-  "Switch to workspace at zero-based INDEX in `+workspace-list-names'.
+  "Switch to workspace at zero-based INDEX in `claude-repl--ws-list-names'.
 Signals `user-error' if INDEX is out of range.  Pure persp wrapper —
 does not consult `current-prefix-arg' and does not flash the tab."
-  (let* ((names (+workspace-list-names))
+  (let* ((names (claude-repl--ws-list-names))
          (dest (nth index names)))
     (unless dest
       (user-error "No workspace at #%s" (1+ index)))
@@ -3107,7 +3107,7 @@ does not consult `current-prefix-arg' and does not flash the tab."
 (defun claude-repl-workspace-switch-to-final ()
   "Switch to the final (last) workspace.  Thin wrapper, ignores prefix arg."
   (interactive)
-  (let* ((names (+workspace-list-names))
+  (let* ((names (claude-repl--ws-list-names))
          (dest (car (last names))))
     (unless dest
       (user-error "No workspaces"))
