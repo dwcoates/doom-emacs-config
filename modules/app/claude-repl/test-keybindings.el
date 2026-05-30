@@ -122,7 +122,8 @@ current workspace, not NAME)."
 
 (ert-deftest claude-repl-test-read-workspace-returns-match ()
   "read-workspace should return the value from completing-read."
-  (cl-letf (((symbol-function 'completing-read)
+  (cl-letf (((symbol-function 'claude-repl--ws-list-names) (lambda () '("test-ws")))
+            ((symbol-function 'completing-read)
              (lambda (_prompt coll &rest _) (car coll))))
     (should (equal (claude-repl--read-workspace "Pick: ") "test-ws"))))
 
@@ -864,7 +865,8 @@ value and writes :repl-state :dead."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-set "test-ws" :thinking)
     (let ((msg nil))
-      (cl-letf (((symbol-function 'message) (lambda (fmt &rest args)
+      (cl-letf (((symbol-function 'claude-repl--ws-list-names) (lambda () '("test-ws")))
+                ((symbol-function 'message) (lambda (fmt &rest args)
                                               (setq msg (apply #'format fmt args)))))
         (claude-repl-debug/workspace-states)
         (should (string-match-p "test-ws" msg))
