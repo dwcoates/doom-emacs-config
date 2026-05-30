@@ -289,9 +289,9 @@ state.  Returns the empty string when no prompt has been sent yet.
 
 When `:last-prompt-summary-at' is set, prefixes the segment with a
 relative \"X ago\" timestamp (see
-`claude-repl--format-summary-relative-time') in the same blue color as
-the summary text, so the user sees how stale the current summary is at
-a glance.  The 1Hz tab-bar redraw drives `force-mode-line-update' so
+`claude-repl--format-summary-relative-time') in a light grey color
+(distinct from the blue summary text), so the user sees how stale the
+current summary is at a glance.  The 1Hz tab-bar redraw drives `force-mode-line-update' so
 the timestamp ticks without explicit polling."
   (let ((ws (and (boundp 'claude-repl--owning-workspace)
                  claude-repl--owning-workspace)))
@@ -304,7 +304,8 @@ the timestamp ticks without explicit polling."
              (face '(:foreground "deep sky blue" :weight normal))
              (face-italic '(:foreground "deep sky blue"
                             :weight normal :slant italic))
-             (time-prefix (when rel (propertize (concat rel " ") 'face face))))
+             (time-face '(:foreground "light grey" :weight normal))
+             (time-prefix (when rel (propertize (concat rel " ") 'face time-face))))
         (cond
          ((and (stringp summary) (not (string-empty-p summary)))
           (concat "  "
