@@ -3150,3 +3150,30 @@ Focus remains on the current workspace."
     (claude-repl--force-tab-bar-redraw)
     (claude-repl--ws-switch current)
     (message "Pulled '%s' to second position." current)))
+
+(defun claude-repl-open-most-recent-workspace ()
+  "Switch to the most recently visited workspace not yet opened by this command.
+Each call returns a different workspace, cycling through
+`claude-repl--workspace-history'.  When all workspaces have been visited,
+resets the cycle.  Falls back to the full workspace list when history is
+empty (e.g. a fresh session)."
+  (interactive)
+  (let* ((current (claude-repl--ws-current-name))
+         (candidates (cl-remove-if
+                      (lambda (name)
+                        (or (string= name current)
+                            (member name claude-repl--opened-recent-workspaces)))
+                      claude-repl--workspace-history))
+         (candidates (or candidates
+                         (cl-remove-if
+                          (lambda (name)
+                            (or (string= name current)
+                                (member name claude-repl--opened-recent-workspaces)))
+                          (claude-repl--ws-all-names))))
+         (target (car candidates)))
+    (if target
+        (progn
+          (push target claude-repl--opened-recent-workspaces)
+          (claude-repl--ws-switch target))
+      (setq claude-repl--opened-recent-workspaces nil)
+      (message "All workspaces visited — cycle reset"))))

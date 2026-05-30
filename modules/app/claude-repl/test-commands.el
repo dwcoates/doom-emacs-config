@@ -6216,6 +6216,61 @@ With ws-list (a b c d) and current=c, the result should be (a c b d)."
         (claude-repl-workspace-pull-to-front)
         (should (equal updated-names '("a" "c" "b" "d")))))))
 
+;;;; ---- Tests: claude-repl-open-most-recent-workspace (moved from config.el) ----
+
+(ert-deftest claude-repl-test-open-most-recent-switches-to-history-head ()
+  "open-most-recent-workspace switches to the most recent unopened ws and records it."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspace-history '("a" "b"))
+          (claude-repl--opened-recent-workspaces nil)
+          (switched nil))
+      (cl-letf (((symbol-function 'claude-repl--ws-current-name) (lambda () "cur"))
+                ((symbol-function 'claude-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws))))
+        (claude-repl-open-most-recent-workspace)
+        (should (equal switched "a"))
+        (should (member "a" claude-repl--opened-recent-workspaces))))))
+
+(ert-deftest claude-repl-test-open-most-recent-skips-already-opened ()
+  "open-most-recent-workspace skips workspaces already opened this cycle."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspace-history '("a" "b"))
+          (claude-repl--opened-recent-workspaces '("a"))
+          (switched nil))
+      (cl-letf (((symbol-function 'claude-repl--ws-current-name) (lambda () "cur"))
+                ((symbol-function 'claude-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws))))
+        (claude-repl-open-most-recent-workspace)
+        (should (equal switched "b"))))))
+
+(ert-deftest claude-repl-test-open-most-recent-falls-back-to-all-names ()
+  "open-most-recent-workspace falls back to the full ws list when history is empty."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspace-history nil)
+          (claude-repl--opened-recent-workspaces nil)
+          (switched nil))
+      (cl-letf (((symbol-function 'claude-repl--ws-current-name) (lambda () "cur"))
+                ((symbol-function 'claude-repl--ws-all-names) (lambda () '("cur" "x")))
+                ((symbol-function 'claude-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws))))
+        (claude-repl-open-most-recent-workspace)
+        (should (equal switched "x"))))))
+
+(ert-deftest claude-repl-test-open-most-recent-resets-when-all-visited ()
+  "open-most-recent-workspace resets the opened set and does not switch when none remain."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspace-history '("a"))
+          (claude-repl--opened-recent-workspaces '("a"))
+          (switched nil))
+      (cl-letf (((symbol-function 'claude-repl--ws-current-name) (lambda () "cur"))
+                ((symbol-function 'claude-repl--ws-all-names) (lambda () '("cur" "a")))
+                ((symbol-function 'claude-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws)))
+                ((symbol-function 'message) (lambda (&rest _) nil)))
+        (claude-repl-open-most-recent-workspace)
+        (should-not switched)
+        (should-not claude-repl--opened-recent-workspaces)))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here

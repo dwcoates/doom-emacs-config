@@ -10,10 +10,6 @@
   "Cherry-pick conflict left in tree (resolver declined or interactive abort)"
   'user-error)
 
-(defvar +dwc/workspace-history nil
-  "Workspace names ordered by most-recently-visited first.
-Defined in config.el; declared here to suppress byte-compiler warnings.")
-
 ;;; Worktree initial buffers
 
 (defcustom claude-repl-workspace-initial-buffers nil
@@ -3912,7 +3908,7 @@ Prompts for which workspace to merge in."
                         (lambda (ws)
                           (and (member ws other-ws)
                                (gethash ws claude-repl--workspaces)))
-                        +dwc/workspace-history))
+                        claude-repl--workspace-history))
            (target-ws (completing-read
                        (if default-ws
                            (format "Merge workspace into current (default %s): "

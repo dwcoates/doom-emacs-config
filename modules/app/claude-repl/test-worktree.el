@@ -6022,7 +6022,7 @@ Covers the full call the interactive `SPC TAB n' path builds up."
     (claude-repl--ws-put "current" :project-dir "/tmp/cur")
     (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
     (claude-repl--ws-put "ws-b" :project-dir "/tmp/b")
-    (let ((+dwc/workspace-history '("ws-b" "ws-a" "current"))
+    (let ((claude-repl--workspace-history '("ws-b" "ws-a" "current"))
           (captured-default nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current"))
                 ((symbol-function '+workspace-list-names)
@@ -6042,7 +6042,7 @@ Covers the full call the interactive `SPC TAB n' path builds up."
     (claude-repl--ws-put "current" :project-dir "/tmp/cur")
     ;; Only ws-b is a claude workspace; ws-a is a plain workspace.
     (claude-repl--ws-put "ws-b" :project-dir "/tmp/b")
-    (let ((+dwc/workspace-history '("ws-a" "ws-b" "current"))
+    (let ((claude-repl--workspace-history '("ws-a" "ws-b" "current"))
           (captured-default nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current"))
                 ((symbol-function '+workspace-list-names)
@@ -6061,7 +6061,7 @@ Covers the full call the interactive `SPC TAB n' path builds up."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "current" :project-dir "/tmp/cur")
     (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
-    (let ((+dwc/workspace-history nil)
+    (let ((claude-repl--workspace-history nil)
           (captured-default nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current"))
                 ((symbol-function '+workspace-list-names)
@@ -6080,7 +6080,7 @@ Covers the full call the interactive `SPC TAB n' path builds up."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "current" :project-dir "/tmp/cur")
     (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
-    (let ((+dwc/workspace-history '("current" "ws-a"))
+    (let ((claude-repl--workspace-history '("current" "ws-a"))
           (captured-default nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current"))
                 ((symbol-function '+workspace-list-names)
