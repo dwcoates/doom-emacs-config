@@ -542,6 +542,49 @@ contract explicitly so a renderer relying on it stays predictable."
     (let ((persp-names-cache '("ws1")))
       (should (member "ws1" (claude-repl--ws-list-names))))))
 
+;;;; ---- Tests: --ws-tombstoned-names ------------------------------------
+
+(ert-deftest claude-repl-test-ws-tombstoned-names-returns-tombstones ()
+  "--ws-tombstoned-names returns all tombstoned workspace names."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "live-ws"  :project-dir "/tmp/live")
+    (claude-repl--ws-put "dead-ws"  :project-dir "/tmp/dead")
+    (claude-repl--ws-del "dead-ws")
+    (let ((result (claude-repl--ws-tombstoned-names)))
+      (should (equal result '("dead-ws")))
+      (should-not (member "live-ws" result)))))
+
+(ert-deftest claude-repl-test-ws-tombstoned-names-empty-when-none ()
+  "--ws-tombstoned-names returns nil when no workspace is tombstoned."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (should-not (claude-repl--ws-tombstoned-names))))
+
+(ert-deftest claude-repl-test-ws-tombstoned-names-sorted ()
+  "--ws-tombstoned-names returns names in alphabetical order."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "charlie" :project-dir "/tmp/c")
+    (claude-repl--ws-put "alpha"   :project-dir "/tmp/a")
+    (claude-repl--ws-put "bravo"   :project-dir "/tmp/b")
+    (claude-repl--ws-del "charlie")
+    (claude-repl--ws-del "alpha")
+    (claude-repl--ws-del "bravo")
+    (should (equal (claude-repl--ws-tombstoned-names) '("alpha" "bravo" "charlie")))))
+
+;;;; ---- Tests: --ws-names-cache-usable-p --------------------------------
+
+(ert-deftest claude-repl-test-ws-names-cache-usable-p-returns-t-when-non-nil ()
+  "--ws-names-cache-usable-p returns non-nil when persp-names-cache is a
+non-nil list."
+  (let ((persp-names-cache '("ws1")))
+    (should (claude-repl--ws-names-cache-usable-p))))
+
+(ert-deftest claude-repl-test-ws-names-cache-usable-p-returns-nil-when-nil ()
+  "--ws-names-cache-usable-p returns nil when persp-names-cache is nil
+even if bound — a nil cache is not a usable tab-bar signal."
+  (let ((persp-names-cache nil))
+    (should-not (claude-repl--ws-names-cache-usable-p))))
+
 ;;;; ---- Tests: --ws-render-status (closed-set return) -------------------
 
 (ert-deftest claude-repl-test-ws-render-status-errors-for-unknown ()

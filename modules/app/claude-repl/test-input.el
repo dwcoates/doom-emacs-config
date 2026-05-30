@@ -367,9 +367,9 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
              claude-repl-command-prefix))))
 
 (ert-deftest claude-repl-test-command-prefix-mandates-entire-response-is-tree ()
-  "`claude-repl-command-prefix' must mandate that the entire response itself BE a single TLDR tree."
+  "`claude-repl-command-prefix' must mandate that the entire response itself be a single TLDR tree."
   (should (stringp claude-repl-command-prefix))
-  (should (string-match-p "ENTIRE response MUST itself BE a single TLDR tree"
+  (should (string-match-p "ENTIRE response should itself be a TLDR tree"
                           claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-omits-convo-tldr ()
@@ -468,18 +468,18 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
   (should-not (string-match-p "'2\\.1\\.'" claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-blank-line-between-parent-and-children ()
-  "TLDR spec must require exactly one blank line separating a parent node from its block of child nodes."
+  "TLDR spec must require a blank line separating top-level entries and no line spacing between non-top-level entries."
   (should (string-match-p
-           "MUST be separated from its block of child nodes by exactly one blank line"
+           "Top-level entries in the tree should be separated by a newline"
            claude-repl-command-prefix))
   (should (string-match-p
-           "every branch carries a single blank line between it and its parent"
+           "Non-top-level entries should not have any line spacing between entries"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-no-blank-line-between-siblings ()
-  "TLDR spec must forbid any blank line between sibling nodes at the same depth."
+  "TLDR spec must forbid line spacing between non-top-level sibling entries."
   (should (string-match-p
-           "sibling nodes at the same depth MUST NOT be separated from one another by any blank line"
+           "Non-top-level entries should not have any line spacing between entries"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-entries-wrap-at-column-110 ()
@@ -495,27 +495,24 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-depth-scales-with-response-length ()
-  "TLDR spec must mandate that tree depth scales with the length of the response itself."
+  "TLDR spec must mandate that tree depth scales with the conceptual length of the response itself."
   (should (string-match-p
-           "TLDR tree depth MUST scale with the length of the response"
+           "TLDR tree depth MUST scale with the conceptual length of the response itself"
            claude-repl-command-prefix))
   (should (string-match-p
-           "very short responses use a shallow tree (depth 1 or 2)"
+           "Very simple responses use a shallow tree (depth 1 or 2)"
            claude-repl-command-prefix))
   (should (string-match-p
-           "medium-length responses use depth 3"
+           "Medium-length responses use depth 3"
            claude-repl-command-prefix))
   (should (string-match-p
-           "long, multi-section, or analysis-heavy responses use depth 4"
+           "Long, multi-section, or analysis-heavy responses use depth 4"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-depth-range-and-hard-cap ()
-  "TLDR spec must mandate the 1-4 depth range with depth 4 as a hard cap, and render a terse answer as a shallow depth-1 tree rather than padding it with manufactured depth."
+  "TLDR spec must mandate the permitted 1-4 depth range and render a terse answer as a shallow depth-1 tree rather than padding it with manufactured depth."
   (should (string-match-p
-           "MUST stay within the range 1 to 4 inclusive"
-           claude-repl-command-prefix))
-  (should (string-match-p
-           "depth 4 as the hard cap"
+           "within the permitted range of 1 to 4 inclusive"
            claude-repl-command-prefix))
   (should (string-match-p
            "rendered as a shallow depth-1 tree of just its root branches rather than padded out with manufactured depth"
@@ -621,24 +618,24 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-leaves-are-resolution-detail ()
-  "TLDR spec must state the tree's leaves are where the resolution lands, replacing any recursive 'even shorter' section."
+  "TLDR spec must anchor leaves with grounded pragmatic references to code or knowledge."
   (should (string-match-p
-           "tree replaces any 'even shorter' or 'recursive' TLDR section"
-           claude-repl-command-prefix))
-  (should (string-match-p
-           "leaves are where the resolution finally lands"
+           "Anchor leaves with fully grounded pragmatic references to code"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-root-branches-emoji-after-number ()
   "TLDR spec must require an emoji prefix on each root branch, immediately after its numeric label, and forbid emoji on non-root nodes (independent of the tree's chosen depth)."
   (should (string-match-p
-           "Each root branch (depth-1 node) MUST be prefixed with a relevant prefixing emoji"
+           "Each root branch (AKA depth-1 node"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "MUST be prefixed with a relevant prefixing emoji"
            claude-repl-command-prefix))
   (should (string-match-p
            "immediately after its numeric label"
            claude-repl-command-prefix))
   (should (string-match-p
-           "non-root nodes are NOT emoji-prefixed"
+           "Non-root nodes are NOT emoji-prefixed"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-fix-section-dedicated-root-branch ()
@@ -663,18 +660,21 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
   (should-not (string-match-p "omit the TLDR entirely" claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-response-comma-paren-subbullet-rule ()
-  "The response style rules must extend the subbullet-instead-of-semicolons/emdashes rule to also cover commas and parenthetical asides that bolt on additional/qualifying content."
+  "The response style rules must extend the subbullet rule to also cover commas and parenthetical asides that bolt on additional/qualifying content."
   (should (string-match-p
-           "same standard applies to commas and parenthetical asides that bolt on additional or qualifying content"
+           "cognizant of avoiding commas wherever a comma is serving to bolt on an additional or qualifying clause"
            claude-repl-command-prefix))
   (should (string-match-p
-           "any comma, semicolon, emdash, or paren that attaches extra detail to a bullet"
+           "same cognizance applies to parenthetical asides"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-response-comma-strong-reason-exception ()
-  "The comma/paren rule must carry an explicit 'strong reason' inline-exception clause so the rule is emphatic but not absolute."
+  "The paren rule must carry an explicit exception for short labels that are part of the bullet's own name or identifier."
   (should (string-match-p
-           "unless there's a strong reason to keep them inline"
+           "Exception: short labels that are part of the bullet's own name or identifier"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "may stay inline"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-response-grammatical-structure-principle ()
@@ -782,12 +782,12 @@ work after a proposed change, or how they work now after a change just made."
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-brevity-via-tree-depth ()
-  "The metaprompt must express brevity through tree depth, since the entire response IS the tree."
+  "The metaprompt must express that the entire response is the tree and that there is no separate prose body."
   (should (string-match-p
-           "The ENTIRE response IS itself the TLDR tree"
+           "ENTIRE response should itself be a TLDR tree"
            claude-repl-command-prefix))
   (should (string-match-p
-           "brevity is instead expressed through the tree's depth"
+           "There is no separate prose body"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-header-plus-tree-is-entire-response ()
