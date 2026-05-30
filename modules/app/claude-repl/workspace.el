@@ -1205,6 +1205,27 @@ Boundary owned by `workspace.el'."
   (with-eval-after-load 'persp-mode
     (funcall thunk)))
 
+(defun claude-repl--ws-run-switch-project-function (dir)
+  "Invoke `+workspaces-switch-project-function' on DIR when it is set.
+No-op when that variable is unbound or nil.
+
+This is the Doom switch-project-function boundary owned by `workspace.el'.
+Callers must use this function instead of reading or funcalling
+`+workspaces-switch-project-function' directly."
+  (when (and (boundp '+workspaces-switch-project-function)
+             +workspaces-switch-project-function)
+    (funcall +workspaces-switch-project-function dir)))
+
+(defun claude-repl--ws-advise-kill-before (fn)
+  "Install FN as `:before' advice on `+workspace/kill'.
+Lets a caller run teardown while the workspace is still current.  This
+is load-time wiring registered once at module load.
+
+This is the persp-mode kill-advice boundary owned by `workspace.el'.
+Callers must use this function instead of calling `advice-add' on
+`+workspace/kill' directly."
+  (advice-add '+workspace/kill :before fn))
+
 ;;;; ---- persp-mode policy configuration ---------------------------------
 ;;
 ;; claude-repl owns workspace/persp policy.  These settings used to live

@@ -995,5 +995,5 @@ aux maps for every state in `claude-repl--scroll-output-intercept-states'
 
 ;; Kill Claude session before workspace deletion so buffers/windows are cleaned
 ;; up while the workspace is still current.
-(advice-add #'+workspace/kill :before #'claude-repl--kill-before-workspace-delete)
+(claude-repl--ws-advise-kill-before #'claude-repl--kill-before-workspace-delete)
 
