@@ -949,5 +949,23 @@ directly or wrapping it with `fboundp'."
   (and persp (fboundp 'persp-window-conf)
        (persp-window-conf persp)))
 
+(defun claude-repl--ws-tab-face ()
+  "Return the Doom face symbol for an unselected workspace tab name.
+Names the `+workspace-tab-face' face that Doom's tab-bar defines.
+
+This is the Doom tab-face boundary owned by `workspace.el'.
+Callers must use this function instead of referring to
+`+workspace-tab-face' directly."
+  '+workspace-tab-face)
+
+(defun claude-repl--ws-tab-selected-face ()
+  "Return the Doom face symbol for a selected workspace tab name.
+Names the `+workspace-tab-selected-face' face that Doom's tab-bar defines.
+
+This is the Doom tab-face boundary owned by `workspace.el'.
+Callers must use this function instead of referring to
+`+workspace-tab-selected-face' directly."
+  '+workspace-tab-selected-face)
+
 (provide 'claude-repl-workspace)
 ;;; workspace.el ends here

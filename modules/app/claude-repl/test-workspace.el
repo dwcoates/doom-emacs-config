@@ -1398,5 +1398,15 @@ identity-distinct string injected by `claude-repl-set-priority' from
       (fmakunbound 'persp-window-conf)
       (should-not (claude-repl--ws-window-conf 'persp)))))
 
+;;;; ---- Tests: --ws-tab-face / --ws-tab-selected-face ----
+
+(ert-deftest claude-repl-test-ws-tab-face-returns-doom-face-symbol ()
+  "ws-tab-face returns the +workspace-tab-face symbol."
+  (should (eq (claude-repl--ws-tab-face) '+workspace-tab-face)))
+
+(ert-deftest claude-repl-test-ws-tab-selected-face-returns-doom-face-symbol ()
+  "ws-tab-selected-face returns the +workspace-tab-selected-face symbol."
+  (should (eq (claude-repl--ws-tab-selected-face) '+workspace-tab-selected-face)))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here

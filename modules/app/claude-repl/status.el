@@ -992,12 +992,12 @@ When the palette defines a `:label' for STATE (e.g. \"❓\" for permission,
 (defun claude-repl--tab-face (state selected)
   "Return the face symbol for the NAME portion of a tab.
 For unselected tabs, uses the palette row's `:face' or falls back to
-`+workspace-tab-face'.  For selected tabs, always uses
-`+workspace-tab-selected-face' so selection dims the state color."
+the Doom tab face.  For selected tabs, always uses the Doom selected-tab
+face so selection dims the state color."
   (if selected
-      '+workspace-tab-selected-face
+      (claude-repl--ws-tab-selected-face)
     (or (plist-get (alist-get state claude-repl--tab-palette) :face)
-        '+workspace-tab-face)))
+        (claude-repl--ws-tab-face))))
 
 (defun claude-repl--tab-priority-image-str (name)
   "Return a propertized image string for workspace NAME's priority, or nil."
