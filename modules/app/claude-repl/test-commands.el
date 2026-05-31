@@ -3962,6 +3962,23 @@ so a later read restores the FIFO."
               (should (eq    (plist-get (nth 1 mq) :auto-resolve) t))))
         (delete-file snapshot-file)))))
 
+(ert-deftest claude-repl-cmd-test-write-workspace-snapshot/persists-merge-queue-target-dir ()
+  "Writer round-trips each entry's `:target-dir' so the per-target bucket
+partitioning survives a restart."
+  (claude-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "claude-snap-")))
+      (unwind-protect
+          (let ((claude-repl-workspace-snapshot-file snapshot-file)
+                (claude-repl--merge-queue
+                 '((:source-ws "ws-a" :silent t :auto-resolve t
+                    :target-dir "/tmp/target-a"))))
+            (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
+            (claude-repl-save-workspace-snapshot)
+            (let* ((parsed (claude-repl--read-workspace-snapshot snapshot-file))
+                   (mq (plist-get parsed :merge-queue)))
+              (should (equal (plist-get (nth 0 mq) :target-dir) "/tmp/target-a"))))
+        (delete-file snapshot-file)))))
+
 (ert-deftest claude-repl-cmd-test-write-workspace-snapshot/empty-merge-queue ()
   "An empty live queue writes an empty :merge-queue list — not omitted."
   (claude-repl-test--with-clean-state
@@ -3991,6 +4008,17 @@ so a later read restores the FIFO."
       (should (= 2 (length claude-repl--merge-queue)))
       (should (equal (plist-get (nth 0 claude-repl--merge-queue) :source-ws) "ws-a"))
       (should (equal (plist-get (nth 1 claude-repl--merge-queue) :source-ws) "ws-b")))))
+
+(ert-deftest claude-repl-cmd-test-snapshot-restore-merge-queue/preserves-target-dir ()
+  "Restore carries each entry's `:target-dir' so the per-target sub-queue
+partitioning survives the restart."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--merge-queue nil))
+      (claude-repl--ws-put "ws-a" :project-dir "/tmp/a")
+      (claude-repl--snapshot-restore-merge-queue
+       '((:source-ws "ws-a" :silent t :auto-resolve t :target-dir "/tmp/target-a")))
+      (should (equal (plist-get (car claude-repl--merge-queue) :target-dir)
+                     "/tmp/target-a")))))
 
 (ert-deftest claude-repl-cmd-test-snapshot-restore-merge-queue/remarks-queued-state ()
   "Restore re-applies `:repl-state :merge-queued' on each surviving ws so
@@ -4143,36 +4171,35 @@ the internal drain."
     (let ((claude-repl--merge-queue nil)
           (drain-called nil))
       (cl-letf (((symbol-function 'claude-repl--drain-merge-queue)
-                 (lambda () (setq drain-called t)))
-                ((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
-                 (lambda () nil)))
+                 (lambda () (setq drain-called t))))
         (claude-repl-drain-merge-queue)
         (should-not drain-called)))))
 
-(ert-deftest claude-repl-cmd-test-drain-merge-queue/cherry-pick-active-errors ()
-  "With a cherry-pick in progress the command refuses to drain (user-error)."
+(ert-deftest claude-repl-cmd-test-drain-merge-queue/cherry-pick-active-does-not-block ()
+  "The drain is per-target now, so a live cherry-pick in one target no
+longer makes the command refuse — it still calls the internal drain,
+which skips busy buckets and dispatches the free ones."
   (claude-repl-test--with-clean-state
     (let ((claude-repl--merge-queue
-           '((:source-ws "ws-a" :silent t :auto-resolve t)))
+           '((:source-ws "ws-a" :silent t :auto-resolve t :target-dir "/tmp/target")))
           (drain-called nil))
-      (cl-letf (((symbol-function 'claude-repl--drain-merge-queue)
-                 (lambda () (setq drain-called t)))
-                ((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
-                 (lambda () t)))
-        (should-error (claude-repl-drain-merge-queue) :type 'user-error)
-        (should-not drain-called)))))
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function 'claude-repl--drain-merge-queue)
+                 (lambda () (setq drain-called t))))
+        ;; Must NOT signal, and must still reach the drain.
+        (claude-repl-drain-merge-queue)
+        (should drain-called)))))
 
 (ert-deftest claude-repl-cmd-test-drain-merge-queue/dispatches-when-safe ()
-  "With a non-empty queue and no live cherry-pick the command calls
-`claude-repl--drain-merge-queue' to dispatch the next entry."
+  "With a non-empty queue the command calls `claude-repl--drain-merge-queue'
+to dispatch the next eligible entry."
   (claude-repl-test--with-clean-state
     (let ((claude-repl--merge-queue
-           '((:source-ws "ws-a" :silent t :auto-resolve t)))
+           '((:source-ws "ws-a" :silent t :auto-resolve t :target-dir "/tmp/target")))
           (drain-called nil))
-      (cl-letf (((symbol-function 'claude-repl--drain-merge-queue)
-                 (lambda () (setq drain-called t)))
-                ((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
-                 (lambda () nil)))
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function 'claude-repl--drain-merge-queue)
+                 (lambda () (setq drain-called t))))
         (claude-repl-drain-merge-queue)
         (should drain-called)))))
 

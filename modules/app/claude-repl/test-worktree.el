@@ -6943,6 +6943,8 @@ called on the happy path — the assertion is on merge-do's TARGET-DIR arg."
                        (lambda (_root) nil))
                       ((symbol-function 'claude-repl--main-worktree-path)
                        (lambda (dir) dir))
+                      ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                       (lambda (_) nil))
                       ((symbol-function 'claude-repl--assert-clean-worktree)
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project)
@@ -6965,6 +6967,8 @@ the `switch-to-project' call)."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
                 ((symbol-function 'claude-repl--master-worktree-path)
                  (lambda (_root) "/tmp/master-fallback/"))
+                ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                 (lambda (_) nil))
                 ((symbol-function 'claude-repl--assert-clean-worktree)
                  (lambda (&rest _) nil))
                 ((symbol-function 'claude-repl-switch-to-project) #'ignore)
@@ -6983,6 +6987,8 @@ the `switch-to-project' call)."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
                 ((symbol-function 'claude-repl--master-worktree-path)
                  (lambda (_root) "/tmp/master-fallback/"))
+                ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                 (lambda (_) nil))
                 ((symbol-function 'claude-repl--assert-clean-worktree)
                  (lambda (&rest _) nil))
                 ((symbol-function 'claude-repl-switch-to-project) #'ignore)
@@ -7007,6 +7013,8 @@ background-triggered /workspace-merge does not yank the user's focus."
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
                       ((symbol-function 'claude-repl--master-worktree-path)
                        (lambda (_root) nil))
+                      ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                       (lambda (_) nil))
                       ((symbol-function 'claude-repl--assert-clean-worktree)
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project)
@@ -7059,6 +7067,8 @@ background-triggered /workspace-merge does not yank the user's focus."
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
                       ((symbol-function 'claude-repl--master-worktree-path)
                        (lambda (_root) nil))
+                      ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                       (lambda (_) nil))
                       ((symbol-function 'claude-repl--assert-clean-worktree)
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project)
@@ -7082,6 +7092,8 @@ background-triggered /workspace-merge does not yank the user's focus."
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
                       ((symbol-function 'claude-repl--master-worktree-path)
                        (lambda (_root) nil))
+                      ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                       (lambda (_) nil))
                       ((symbol-function 'claude-repl--assert-clean-worktree)
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project) #'ignore)
@@ -7388,6 +7400,8 @@ visible in merge-do's TARGET-DIR arg rather than in `switch-to-project'."
                        (lambda (dir) dir))
                       ((symbol-function 'claude-repl--branch-merged-into-p)
                        (lambda (_s _t) t))
+                      ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                       (lambda (_) nil))
                       ((symbol-function 'claude-repl--assert-clean-worktree)
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project) #'ignore)
@@ -7417,6 +7431,8 @@ target-dir decision shows up in merge-do's args."
                        (lambda (dir) dir))
                       ((symbol-function 'claude-repl--branch-merged-into-p)
                        (lambda (_s _t) nil))
+                      ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                       (lambda (_) nil))
                       ((symbol-function 'claude-repl--assert-clean-worktree)
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project) #'ignore)
@@ -8026,41 +8042,29 @@ afterwards or later tests inherit stale state."
     (claude-repl--ws-put "ws" :repl-state :merged)
     (should-not (claude-repl--ws-merge-queued-p "ws"))))
 
-(ert-deftest claude-repl-test-any-cherry-pick-in-progress-false-on-clean-tree ()
-  "No CHERRY_PICK_HEAD in any registered ws dir → returns nil."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :project-dir "/tmp/repo")
-    (cl-letf (((symbol-function 'file-directory-p)
-               (lambda (p) (equal p "/tmp/repo")))
-              ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
-               (lambda (_root) nil)))
-      (should-not (claude-repl--any-cherry-pick-in-progress-p)))))
-
-(ert-deftest claude-repl-test-any-cherry-pick-in-progress-true-during-conflict ()
-  "Any registered ws dir with CHERRY_PICK_HEAD → returns t."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :project-dir "/tmp/repo")
-    (cl-letf (((symbol-function 'file-directory-p)
-               (lambda (p) (equal p "/tmp/repo")))
-              ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
-               (lambda (root) (equal root "/tmp/repo"))))
-      (should (claude-repl--any-cherry-pick-in-progress-p)))))
-
-(ert-deftest claude-repl-test-any-cherry-pick-in-progress-skips-missing-dir ()
-  "Stale :project-dir entries (dir no longer exists) are skipped, not
-errored on.  Tests the defensive `file-directory-p' guard."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "ws" :project-dir "/nonexistent/path/missing")
-    (should-not (claude-repl--any-cherry-pick-in-progress-p))))
-
 (ert-deftest claude-repl-test-enqueue-merge-appends-to-queue ()
-  "`--enqueue-merge' appends a plist describing the request to the FIFO."
+  "`--enqueue-merge' appends a plist describing the request to the FIFO,
+tagged with the canonical `:target-dir' bucket key."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--enqueue-merge "ws1" t t)
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+        (claude-repl--enqueue-merge "ws1" t t "/tmp/target"))
       (should (equal claude-repl--merge-queue
-                     '((:source-ws "ws1" :silent t :auto-resolve t)))))))
+                     '((:source-ws "ws1" :silent t :auto-resolve t
+                        :target-dir "/tmp/target")))))))
+
+(ert-deftest claude-repl-test-enqueue-merge-canonicalizes-target-dir ()
+  "`--enqueue-merge' stores the CANONICAL target dir so two spellings of
+the same destination land in the same bucket."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (cl-letf (((symbol-function 'claude-repl--path-canonical)
+                 (lambda (_) "/canon/target")))
+        (claude-repl--enqueue-merge "ws1" t t "/tmp/target/"))
+      (should (equal (plist-get (car claude-repl--merge-queue) :target-dir)
+                     "/canon/target")))))
 
 (ert-deftest claude-repl-test-enqueue-merge-marks-repl-state ()
   "`--enqueue-merge' flips the workspace's `:repl-state' to `:merge-queued'
@@ -8068,7 +8072,7 @@ so the drawer can route it under MERGING."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--enqueue-merge "ws1" nil nil)
+      (claude-repl--enqueue-merge "ws1" nil nil "/tmp/target")
       (should (eq (claude-repl--ws-get "ws1" :repl-state) :merge-queued)))))
 
 (ert-deftest claude-repl-test-enqueue-merge-clears-claude-state ()
@@ -8077,7 +8081,7 @@ so the drawer can route it under MERGING."
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (claude-repl--ws-put "ws1" :claude-state :thinking)
-      (claude-repl--enqueue-merge "ws1" nil nil)
+      (claude-repl--enqueue-merge "ws1" nil nil "/tmp/target")
       (should (null (claude-repl--ws-get "ws1" :claude-state))))))
 
 (ert-deftest claude-repl-test-enqueue-merge-preserves-fifo-order ()
@@ -8087,9 +8091,9 @@ so the drawer can route it under MERGING."
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
       (claude-repl--ws-put "ws3" :project-dir "/tmp/ws3")
-      (claude-repl--enqueue-merge "ws1" t t)
-      (claude-repl--enqueue-merge "ws2" nil t)
-      (claude-repl--enqueue-merge "ws3" t nil)
+      (claude-repl--enqueue-merge "ws1" t t "/tmp/target")
+      (claude-repl--enqueue-merge "ws2" nil t "/tmp/target")
+      (claude-repl--enqueue-merge "ws3" t nil "/tmp/target")
       (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
                              claude-repl--merge-queue)
                      '("ws1" "ws2" "ws3"))))))
@@ -8118,10 +8122,12 @@ so the drawer can route it under MERGING."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--enqueue-merge "ws1" t t)
-      (claude-repl--enqueue-merge "ws1" t t)
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+        (claude-repl--enqueue-merge "ws1" t t "/tmp/target")
+        (claude-repl--enqueue-merge "ws1" t t "/tmp/target"))
       (should (equal claude-repl--merge-queue
-                     '((:source-ws "ws1" :silent t :auto-resolve t)))))))
+                     '((:source-ws "ws1" :silent t :auto-resolve t
+                        :target-dir "/tmp/target")))))))
 
 (ert-deftest claude-repl-test-enqueue-merge-dedupe-keeps-distinct-ws ()
   "Dedup is keyed on `:source-ws' only — a distinct ws still appends."
@@ -8129,9 +8135,9 @@ so the drawer can route it under MERGING."
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
-      (claude-repl--enqueue-merge "ws1" t t)
-      (claude-repl--enqueue-merge "ws1" t t)
-      (claude-repl--enqueue-merge "ws2" t t)
+      (claude-repl--enqueue-merge "ws1" t t "/tmp/target")
+      (claude-repl--enqueue-merge "ws1" t t "/tmp/target")
+      (claude-repl--enqueue-merge "ws2" t t "/tmp/target")
       (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
                              claude-repl--merge-queue)
                      '("ws1" "ws2"))))))
@@ -8141,7 +8147,7 @@ so the drawer can route it under MERGING."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--enqueue-merge "ws1" t t)
+      (claude-repl--enqueue-merge "ws1" t t "/tmp/target")
       (claude-repl--dequeue-merge "ws1")
       (should (null claude-repl--merge-queue)))))
 
@@ -8150,7 +8156,7 @@ so the drawer can route it under MERGING."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--enqueue-merge "ws1" t t)
+      (claude-repl--enqueue-merge "ws1" t t "/tmp/target")
       (claude-repl--dequeue-merge "ws1")
       (should (null (claude-repl--ws-get "ws1" :repl-state))))))
 
@@ -8159,7 +8165,7 @@ so the drawer can route it under MERGING."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--enqueue-merge "ws1" t t)
+      (claude-repl--enqueue-merge "ws1" t t "/tmp/target")
       (should (claude-repl--dequeue-merge "ws1")))))
 
 (ert-deftest claude-repl-test-dequeue-merge-noop-when-ws-not-queued ()
@@ -8168,20 +8174,24 @@ has no parked entry."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--enqueue-merge "ws1" t t)
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+        (claude-repl--enqueue-merge "ws1" t t "/tmp/target"))
       (should-not (claude-repl--dequeue-merge "ws2"))
       (should (equal claude-repl--merge-queue
-                     '((:source-ws "ws1" :silent t :auto-resolve t)))))))
+                     '((:source-ws "ws1" :silent t :auto-resolve t
+                        :target-dir "/tmp/target")))))))
 
 (ert-deftest claude-repl-test-dequeue-merge-noop-when-ws-nil ()
   "`--dequeue-merge' returns nil for a nil ws without touching the queue."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--enqueue-merge "ws1" t t)
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+        (claude-repl--enqueue-merge "ws1" t t "/tmp/target"))
       (should-not (claude-repl--dequeue-merge nil))
       (should (equal claude-repl--merge-queue
-                     '((:source-ws "ws1" :silent t :auto-resolve t)))))))
+                     '((:source-ws "ws1" :silent t :auto-resolve t
+                        :target-dir "/tmp/target")))))))
 
 (ert-deftest claude-repl-test-dequeue-merge-preserves-other-entries ()
   "`--dequeue-merge' removes only the matching ws, leaving siblings in
@@ -8191,9 +8201,9 @@ FIFO order."
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
       (claude-repl--ws-put "ws3" :project-dir "/tmp/ws3")
-      (claude-repl--enqueue-merge "ws1" t t)
-      (claude-repl--enqueue-merge "ws2" nil t)
-      (claude-repl--enqueue-merge "ws3" t nil)
+      (claude-repl--enqueue-merge "ws1" t t "/tmp/target")
+      (claude-repl--enqueue-merge "ws2" nil t "/tmp/target")
+      (claude-repl--enqueue-merge "ws3" t nil "/tmp/target")
       (claude-repl--dequeue-merge "ws2")
       (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
                              claude-repl--merge-queue)
@@ -8206,11 +8216,80 @@ FIFO order."
       ;; Hand-place an entry without the marker so the repl-state under
       ;; test is a foreign value the dequeue must leave alone.
       (setq claude-repl--merge-queue
-            '((:source-ws "ws1" :silent t :auto-resolve t)))
+            '((:source-ws "ws1" :silent t :auto-resolve t :target-dir "/tmp/target")))
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (claude-repl--ws-put "ws1" :repl-state :merged)
       (claude-repl--dequeue-merge "ws1")
       (should (eq (claude-repl--ws-get "ws1" :repl-state) :merged)))))
+
+;;;; ---- Tests: merge-queue bucket helpers ----
+
+(ert-deftest claude-repl-test-merge-target-dir-for-ws-uses-recorded-source ()
+  "`--merge-target-dir-for-ws' resolves through the recorded source dir."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (claude-repl--ws-put "ws1" :source-ws-dir "/tmp/parent")
+    (cl-letf (((symbol-function 'file-directory-p) (lambda (_) t))
+              ((symbol-function 'claude-repl--master-worktree-path)
+               (lambda (_) "/tmp/master"))
+              ((symbol-function 'claude-repl--resolve-merge-into-source-target)
+               (lambda (parent _master) parent)))
+      (should (equal (claude-repl--merge-target-dir-for-ws "ws1") "/tmp/parent")))))
+
+(ert-deftest claude-repl-test-merge-target-dir-for-ws-nil-when-no-project-dir ()
+  "`--merge-target-dir-for-ws' returns nil for a ws with no `:project-dir'
+\(it cannot resolve a destination)."
+  (claude-repl-test--with-clean-state
+    (should (null (claude-repl--merge-target-dir-for-ws "ghost-ws")))))
+
+(ert-deftest claude-repl-test-merge-queue-entry-target-dir-prefers-stored ()
+  "`--merge-queue-entry-target-dir' returns the canonical stored
+`:target-dir' without resolving from the source ws."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--merge-target-dir-for-ws)
+               (lambda (_) (error "must not resolve when :target-dir present"))))
+      (should (equal (claude-repl--merge-queue-entry-target-dir
+                      '(:source-ws "ws1" :target-dir "/tmp/target"))
+                     "/tmp/target")))))
+
+(ert-deftest claude-repl-test-merge-queue-entry-target-dir-falls-back-to-resolution ()
+  "`--merge-queue-entry-target-dir' resolves from the source ws when the
+entry carries no `:target-dir' (legacy/recovery entry)."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--merge-target-dir-for-ws)
+               (lambda (ws) (and (equal ws "ws1") "/tmp/resolved"))))
+      (should (equal (claude-repl--merge-queue-entry-target-dir
+                      '(:source-ws "ws1"))
+                     "/tmp/resolved")))))
+
+(ert-deftest claude-repl-test-merge-queue-target-dirs-distinct-first-appearance ()
+  "`--merge-queue-target-dirs' returns distinct bucket keys in first-seen
+order."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+        (setq claude-repl--merge-queue
+              '((:source-ws "w1" :target-dir "/tmp/a")
+                (:source-ws "w2" :target-dir "/tmp/b")
+                (:source-ws "w3" :target-dir "/tmp/a")))
+        (should (equal (claude-repl--merge-queue-target-dirs)
+                       '("/tmp/a" "/tmp/b")))))))
+
+(ert-deftest claude-repl-test-merge-queue-front-for-target-returns-oldest ()
+  "`--merge-queue-front-for-target' returns the FIFO front of a bucket."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+        (setq claude-repl--merge-queue
+              '((:source-ws "w1" :target-dir "/tmp/a")
+                (:source-ws "w2" :target-dir "/tmp/b")
+                (:source-ws "w3" :target-dir "/tmp/a")))
+        (should (equal (plist-get
+                        (claude-repl--merge-queue-front-for-target "/tmp/a")
+                        :source-ws)
+                       "w1"))))))
 
 (ert-deftest claude-repl-test-drain-merge-queue-noop-when-empty ()
   "Empty queue → drain does nothing, no error."
@@ -8222,20 +8301,18 @@ FIFO order."
           (claude-repl--drain-merge-queue)
           (should-not called))))))
 
-(ert-deftest claude-repl-test-drain-merge-queue-noop-when-cherry-pick-active ()
-  "If any registered ws dir still has CHERRY_PICK_HEAD, drain leaves the
-queue untouched — another caller will drain after the live cherry-pick
-finishes."
+(ert-deftest claude-repl-test-drain-merge-queue-noop-when-target-bucket-busy ()
+  "A bucket whose TARGET worktree still has CHERRY_PICK_HEAD is left
+untouched — a later drain re-enters once that target's cherry-pick clears."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
-      (claude-repl--ws-put "ws-blocker" :project-dir "/tmp/repo")
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--enqueue-merge "ws1" t t)
-      (cl-letf (((symbol-function 'file-directory-p)
-                 (lambda (p) (member p '("/tmp/repo" "/tmp/ws1"))))
-                ;; Block: at least one ws dir has CHERRY_PICK_HEAD.
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+        (claude-repl--enqueue-merge "ws1" t t "/tmp/target"))
+      (cl-letf (;; Block: this target's worktree has a cherry-pick in flight.
                 ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
-                 (lambda (root) (equal root "/tmp/repo"))))
+                 (lambda (root) (equal root "/tmp/target")))
+                ((symbol-function 'claude-repl--path-canonical) #'identity))
         (let ((called nil))
           (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
                      (lambda (&rest _) (setq called t))))
@@ -8243,24 +8320,117 @@ finishes."
             (should-not called)
             (should (= 1 (length claude-repl--merge-queue)))))))))
 
-(ert-deftest claude-repl-test-drain-merge-queue-pops-oldest-first ()
-  "Drain pops the oldest enqueued entry (FIFO)."
+(ert-deftest claude-repl-test-drain-merge-queue-pops-oldest-first-within-bucket ()
+  "Within a single target bucket, drain dispatches the oldest entry (FIFO)
+and leaves the rest of that bucket parked."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
-      (claude-repl--enqueue-merge "ws1" t t)
-      (claude-repl--enqueue-merge "ws2" nil nil)
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+        (claude-repl--enqueue-merge "ws1" t t "/tmp/target")
+        (claude-repl--enqueue-merge "ws2" nil nil "/tmp/target"))
       (let ((dispatched nil))
-        (claude-repl-test--with-mocked-git-probes
-          (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
-                     (lambda (ws &optional silent auto)
-                       (push (list ws silent auto) dispatched))))
-            (claude-repl--drain-merge-queue)
-            (should (equal dispatched '(("ws1" t t))))
-            (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
-                                   claude-repl--merge-queue)
-                           '("ws2")))))))))
+        (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (ws &optional silent auto)
+                     (push (list ws silent auto) dispatched))))
+          (claude-repl--drain-merge-queue)
+          (should (equal dispatched '(("ws1" t t))))
+          (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
+                                 claude-repl--merge-queue)
+                         '("ws2"))))))))
+
+(ert-deftest claude-repl-test-drain-merge-queue-drains-distinct-targets-concurrently ()
+  "Two merges whose destinations are DIFFERENT target worktrees both
+dispatch in a single drain — neither bucket blocks the other."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+        (claude-repl--enqueue-merge "ws1" t t "/tmp/target-a")
+        (claude-repl--enqueue-merge "ws2" t t "/tmp/target-b"))
+      (let ((dispatched nil))
+        (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (ws &rest _) (push ws dispatched))))
+          (claude-repl--drain-merge-queue)
+          (should (equal (sort (copy-sequence dispatched) #'string<)
+                         '("ws1" "ws2")))
+          (should (null claude-repl--merge-queue)))))))
+
+(ert-deftest claude-repl-test-drain-merge-queue-busy-bucket-does-not-block-free-bucket ()
+  "When one target's worktree has a live cherry-pick, its bucket is skipped
+but a different target's bucket still drains — the core independence
+guarantee."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws-busy" :project-dir "/tmp/ws-busy")
+      (claude-repl--ws-put "ws-free" :project-dir "/tmp/ws-free")
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+        (claude-repl--enqueue-merge "ws-busy" t t "/tmp/target-busy")
+        (claude-repl--enqueue-merge "ws-free" t t "/tmp/target-free"))
+      (let ((dispatched nil))
+        (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (root) (equal root "/tmp/target-busy")))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (ws &rest _) (push ws dispatched))))
+          (claude-repl--drain-merge-queue)
+          (should (equal dispatched '("ws-free")))
+          (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
+                                 claude-repl--merge-queue)
+                         '("ws-busy"))))))))
+
+(ert-deftest claude-repl-test-drain-merge-queue-resolves-target-for-legacy-entry ()
+  "An entry carrying no `:target-dir' (legacy/recovery) is bucketed by
+lazily resolving its destination via `--merge-target-dir-for-ws'."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (setq claude-repl--merge-queue
+            (list (list :source-ws "ws1" :silent t :auto-resolve t)))
+      (let ((dispatched nil))
+        (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                  ((symbol-function 'claude-repl--merge-target-dir-for-ws)
+                   (lambda (_) "/tmp/resolved-target"))
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (ws &rest _) (push ws dispatched))))
+          (claude-repl--drain-merge-queue)
+          (should (equal dispatched '("ws1")))
+          (should (null claude-repl--merge-queue)))))))
+
+(ert-deftest claude-repl-test-drain-merge-queue-skips-unresolvable-target-entry ()
+  "An entry whose destination cannot be resolved (nil bucket) stays parked
+rather than being dispatched blind."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (setq claude-repl--merge-queue
+            (list (list :source-ws "ws1" :silent t :auto-resolve t)))
+      (let ((called nil))
+        (cl-letf (((symbol-function 'claude-repl--merge-target-dir-for-ws)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (&rest _) (setq called t))))
+          (claude-repl--drain-merge-queue)
+          (should-not called)
+          (should (= 1 (length claude-repl--merge-queue))))))))
 
 (ert-deftest claude-repl-test-drain-merge-queue-clears-queued-marker ()
   "Drain clears the dispatched workspace's `:merge-queued' marker so the
@@ -8269,13 +8439,18 @@ without precedence collisions."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--enqueue-merge "ws1" t t)
-      (claude-repl-test--with-mocked-git-probes
-        (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
-                   (lambda (&rest _) nil)))
-          (claude-repl--drain-merge-queue)
-          (should-not (eq (claude-repl--ws-get "ws1" :repl-state)
-                          :merge-queued)))))))
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+        (claude-repl--enqueue-merge "ws1" t t "/tmp/target"))
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                 (lambda (_) nil))
+                ((symbol-function 'claude-repl--current-head-sha)
+                 (lambda (_) nil))
+                ((symbol-function 'claude-repl--workspace-merge-into-source)
+                 (lambda (&rest _) nil)))
+        (claude-repl--drain-merge-queue)
+        (should-not (eq (claude-repl--ws-get "ws1" :repl-state)
+                        :merge-queued))))))
 
 (ert-deftest claude-repl-test-drain-merge-queue-catches-deferred-error ()
   "Errors from a deferred merge are caught so a single bad entry does
@@ -8283,8 +8458,14 @@ not leave the queue stuck — drain returns normally, no signal."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--enqueue-merge "ws1" t t)
-      (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+        (claude-repl--enqueue-merge "ws1" t t "/tmp/target"))
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                 (lambda (_) nil))
+                ((symbol-function 'claude-repl--current-head-sha)
+                 (lambda (_) nil))
+                ((symbol-function 'claude-repl--workspace-merge-into-source)
                  (lambda (&rest _) (error "boom"))))
         ;; Must not raise.
         (claude-repl--drain-merge-queue)))))
@@ -8298,7 +8479,7 @@ restart restores the queue.  Stubs out the saver to confirm the call."
       (let ((save-calls 0))
         (cl-letf (((symbol-function 'claude-repl-save-workspace-snapshot)
                    (lambda () (cl-incf save-calls))))
-          (claude-repl--enqueue-merge "ws1" t t)
+          (claude-repl--enqueue-merge "ws1" t t "/tmp/target")
           (should (= 1 save-calls)))))))
 
 (ert-deftest claude-repl-test-drain-merge-queue-persists-snapshot ()
@@ -8308,20 +8489,25 @@ mid-merge does not resurrect an already-dispatched entry."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--enqueue-merge "ws1" t t)
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+        (claude-repl--enqueue-merge "ws1" t t "/tmp/target"))
       (let ((save-calls 0)
             (queue-len-at-save nil))
-        (claude-repl-test--with-mocked-git-probes
-          (cl-letf (((symbol-function 'claude-repl-save-workspace-snapshot)
-                     (lambda ()
-                       (cl-incf save-calls)
-                       (setq queue-len-at-save (length claude-repl--merge-queue))))
-                    ((symbol-function 'claude-repl--workspace-merge-into-source)
-                     (lambda (&rest _) nil)))
-            (claude-repl--drain-merge-queue)
-            (should (= 1 save-calls))
-            ;; Drain pops before saving, so the persisted queue has 0 entries.
-            (should (= 0 queue-len-at-save))))))))
+        (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl-save-workspace-snapshot)
+                   (lambda ()
+                     (cl-incf save-calls)
+                     (setq queue-len-at-save (length claude-repl--merge-queue))))
+                  ((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (&rest _) nil)))
+          (claude-repl--drain-merge-queue)
+          (should (= 1 save-calls))
+          ;; Drain pops before saving, so the persisted queue has 0 entries.
+          (should (= 0 queue-len-at-save)))))))
 
 (ert-deftest claude-repl-test-persist-merge-queue-tolerates-missing-saver ()
   "`--persist-merge-queue' is a no-op when the saver isn't fboundp, so
@@ -8346,63 +8532,98 @@ not propagate into the queue mutator and stall the merge flow."
         ;; Must not raise.
         (claude-repl--persist-merge-queue)))))
 
-(ert-deftest claude-repl-test-workspace-merge-into-source-enqueues-when-cherry-pick-in-flight ()
-  "When a cherry-pick is in progress in any registered ws dir, the new
-merge request is parked on the queue rather than running."
+(ert-deftest claude-repl-test-workspace-merge-into-source-enqueues-when-target-cherry-pick-in-flight ()
+  "When a cherry-pick is in progress in the resolved TARGET worktree, the
+new merge request is parked on the queue (tagged with that target) rather
+than running."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
-      (claude-repl--ws-put "ws-blocker" :project-dir "/tmp/repo")
-      ;; ws-pending has a registered project-dir so the "unknown ws"
-      ;; guard doesn't fire before the queue check.
       (claude-repl--ws-put "ws-pending" :project-dir "/tmp/ws-pending")
-      (cl-letf (((symbol-function 'file-directory-p)
-                 (lambda (p) (member p '("/tmp/repo" "/tmp/ws-pending"))))
+      (claude-repl--ws-put "ws-pending" :source-ws-dir "/tmp/parent")
+      (cl-letf (((symbol-function 'file-directory-p) (lambda (_) t))
+                ((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_) "/tmp/master"))
+                ((symbol-function 'claude-repl--resolve-merge-into-source-target)
+                 (lambda (parent _master) parent))
+                ;; The resolved target ("/tmp/parent") has a cherry-pick in flight.
                 ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
-                 (lambda (root) (equal root "/tmp/repo"))))
+                 (lambda (root) (equal root "/tmp/parent"))))
         (let ((merge-do-called nil))
           (cl-letf (((symbol-function 'claude-repl--workspace-merge-do)
                      (lambda (&rest _) (setq merge-do-called t))))
             (claude-repl--workspace-merge-into-source "ws-pending" t t)
             (should-not merge-do-called)
             (should (= 1 (length claude-repl--merge-queue)))
+            (should (equal (plist-get (car claude-repl--merge-queue) :target-dir)
+                           "/tmp/parent"))
             (should (eq (claude-repl--ws-get "ws-pending" :repl-state)
                         :merge-queued))))))))
+
+(ert-deftest claude-repl-test-workspace-merge-into-source-proceeds-when-different-target-busy ()
+  "A cherry-pick in flight in an UNRELATED worktree does not defer a merge
+whose resolved target is a different worktree — the per-target gate only
+inspects this merge's own destination."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws-pending" :project-dir "/tmp/ws-pending")
+      (claude-repl--ws-put "ws-pending" :source-ws-dir "/tmp/parent")
+      (cl-letf (((symbol-function 'file-directory-p) (lambda (_) t))
+                ((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_) "/tmp/master"))
+                ((symbol-function 'claude-repl--resolve-merge-into-source-target)
+                 (lambda (parent _master) parent))
+                ((symbol-function 'claude-repl--assert-clean-worktree) #'ignore)
+                ;; An unrelated worktree is busy, but NOT this merge's target.
+                ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                 (lambda (root) (equal root "/tmp/unrelated"))))
+        (let ((merge-do-args nil))
+          (cl-letf (((symbol-function 'claude-repl--workspace-merge-do)
+                     (lambda (ws target &rest _) (setq merge-do-args (list ws target)))))
+            (claude-repl--workspace-merge-into-source "ws-pending" t t)
+            (should (equal merge-do-args '("ws-pending" "/tmp/parent")))
+            (should (null claude-repl--merge-queue))))))))
 
 ;;;; ---- Tests: drain-merge-queue loop guards ----
 
 (ert-deftest claude-repl-test-drain-merge-queue-halts-on-halt-until-human ()
-  "Front entry with `:halt-until-human t' must NOT be popped during an
-auto-drain — the queue stays untouched until a human kicks it via
-`claude-repl-drain-merge-queue'."
+  "A bucket whose front entry carries `:halt-until-human t' must NOT be
+popped during an auto-drain — that bucket stays untouched until a human
+kicks it via `claude-repl-drain-merge-queue'."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (setq claude-repl--merge-queue
             (list (list :source-ws "ws1" :silent t :auto-resolve t
-                        :halt-until-human t)))
+                        :target-dir "/tmp/target" :halt-until-human t)))
       (let ((called nil))
-        (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
-                   (lambda (&rest _) (setq called t)))
-                  ((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
-                   (lambda () nil)))
+        (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (&rest _) (setq called t))))
           (claude-repl--drain-merge-queue)
           (should-not called)
           (should (= 1 (length claude-repl--merge-queue))))))))
 
 (ert-deftest claude-repl-test-drain-merge-queue-halts-on-matching-target-head ()
-  "Loop guard: front entry whose recorded `:last-attempt-target-head'
-equals the current HEAD of its `:resolved-target-dir' is skipped —
-nothing on that branch has advanced, so retrying would just re-fail."
+  "Loop guard: a bucket front whose recorded `:last-attempt-target-head'
+equals the current HEAD of its target dir is skipped — nothing on that
+branch has advanced, so retrying would just re-fail."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
       (setq claude-repl--merge-queue
             (list (list :source-ws "ws1" :silent t :auto-resolve t
+                        :target-dir "/tmp/target"
                         :last-attempt-target-head "abc123")))
       (let ((called nil))
-        (cl-letf (((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
-                   (lambda () nil))
+        (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
                   ((symbol-function 'claude-repl--current-head-sha)
                    (lambda (_) "abc123"))
                   ((symbol-function 'claude-repl--workspace-merge-into-source)
@@ -8418,13 +8639,14 @@ workspace's retry is no longer redundant."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
       (setq claude-repl--merge-queue
             (list (list :source-ws "ws1" :silent t :auto-resolve t
+                        :target-dir "/tmp/target"
                         :last-attempt-target-head "abc123")))
       (let ((called nil))
-        (cl-letf (((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
-                   (lambda () nil))
+        (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
                   ((symbol-function 'claude-repl--current-head-sha)
                    (lambda (_) "def456"))
                   ((symbol-function 'claude-repl--workspace-merge-into-source)
@@ -8441,10 +8663,12 @@ enqueues."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--enqueue-merge "ws1" t t)
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+        (claude-repl--enqueue-merge "ws1" t t "/tmp/target"))
       (let ((called nil))
-        (cl-letf (((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
-                   (lambda () nil))
+        (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
                   ((symbol-function 'claude-repl--current-head-sha)
                    (lambda (_) "abc123"))
                   ((symbol-function 'claude-repl--workspace-merge-into-source)
@@ -8456,23 +8680,51 @@ enqueues."
 
 (ert-deftest claude-repl-test-interactive-drain-clears-halt-flag-then-drains ()
   "The interactive `claude-repl-drain-merge-queue' is the human signal
-that re-dispatch should proceed.  It clears `:halt-until-human' on the
-front entry and then runs the drain — the same drain that would
+that re-dispatch should proceed.  It clears `:halt-until-human' on each
+bucket's front entry and then runs the drain — the same drain that would
 otherwise have halted on the flag."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (setq claude-repl--merge-queue
             (list (list :source-ws "ws1" :silent t :auto-resolve t
-                        :halt-until-human t)))
+                        :target-dir "/tmp/target" :halt-until-human t)))
       (let ((called nil))
-        (cl-letf (((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
-                   (lambda () nil))
+        (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) nil))
                   ((symbol-function 'claude-repl--workspace-merge-into-source)
                    (lambda (ws &rest _) (setq called ws))))
           (claude-repl-drain-merge-queue)
           (should (equal called "ws1"))
           (should (= 0 (length claude-repl--merge-queue))))))))
+
+(ert-deftest claude-repl-test-interactive-drain-clears-halt-on-every-bucket ()
+  "The human kick clears `:halt-until-human' on the front of EVERY target
+bucket so all halted buckets become drainable in one kick."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws-a" :project-dir "/tmp/ws-a")
+      (claude-repl--ws-put "ws-b" :project-dir "/tmp/ws-b")
+      (setq claude-repl--merge-queue
+            (list (list :source-ws "ws-a" :silent t :auto-resolve t
+                        :target-dir "/tmp/target-a" :halt-until-human t)
+                  (list :source-ws "ws-b" :silent t :auto-resolve t
+                        :target-dir "/tmp/target-b" :halt-until-human t)))
+      (let ((dispatched nil))
+        (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (ws &rest _) (push ws dispatched))))
+          (claude-repl-drain-merge-queue)
+          (should (equal (sort (copy-sequence dispatched) #'string<)
+                         '("ws-a" "ws-b")))
+          (should (null claude-repl--merge-queue)))))))
 
 (ert-deftest claude-repl-test-interactive-drain-leaves-non-halted-front-untouched ()
   "When the front entry has no `:halt-until-human' flag, the interactive
@@ -8480,11 +8732,15 @@ drain runs as-is — it must not spuriously rewrite the entry."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-empty-merge-queue
       (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (claude-repl--enqueue-merge "ws1" t t)
+      (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity))
+        (claude-repl--enqueue-merge "ws1" t t "/tmp/target"))
       (let ((entry-before (car claude-repl--merge-queue))
             (dispatched nil))
-        (cl-letf (((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
-                   (lambda () nil))
+        (cl-letf (((symbol-function 'claude-repl--path-canonical) #'identity)
+                  ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--current-head-sha)
+                   (lambda (_) nil))
                   ((symbol-function 'claude-repl--workspace-merge-into-source)
                    (lambda (&rest _) (setq dispatched t))))
           (claude-repl-drain-merge-queue)
@@ -8632,8 +8888,8 @@ worker thread."
                  (lambda (parent _master) parent))
                 ((symbol-function 'claude-repl--path-canonical) #'identity)
                 ((symbol-function 'file-directory-p) (lambda (_) t))
-                ((symbol-function 'claude-repl--any-cherry-pick-in-progress-p)
-                 (lambda () nil))
+                ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                 (lambda (_) nil))
                 ((symbol-function 'claude-repl--assert-clean-worktree) #'ignore)
                 ((symbol-function 'claude-repl--workspace-merge-do)
                  (lambda (ws target &rest _)

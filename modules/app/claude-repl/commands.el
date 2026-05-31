@@ -9,7 +9,8 @@
 (defvar claude-repl--merge-queue)
 (defvar claude-repl--in-flight-merges)
 (declare-function claude-repl--drain-merge-queue "worktree")
-(declare-function claude-repl--any-cherry-pick-in-progress-p "worktree")
+(declare-function claude-repl--merge-queue-target-dirs "worktree")
+(declare-function claude-repl--merge-queue-front-for-target "worktree")
 
 ;; Forward declaration: defined in hide-project-dirs.el (loaded after
 ;; commands.el).  The snapshot writer/loader persists and restores this
@@ -1799,14 +1800,17 @@ indirection keeps the on-disk format insulated from future plist-key
 additions.
 
 Carries the loop-guard metadata `:last-attempt-target-head' (HEAD SHA
-recorded at re-enqueue time after a failed merge) and the
+recorded at re-enqueue time after a failed merge), the
 `:halt-until-human' flag (set on generic-failure re-enqueues to block
-auto-drain) so a restart preserves the same drain semantics as the
+auto-drain), and the `:target-dir' bucket key (canonical cherry-pick
+destination, used to partition the queue into independent per-target
+sub-queues) so a restart preserves the same drain semantics as the
 live queue."
   (mapcar (lambda (entry)
             (list :source-ws (plist-get entry :source-ws)
                   :silent (and (plist-get entry :silent) t)
                   :auto-resolve (and (plist-get entry :auto-resolve) t)
+                  :target-dir (plist-get entry :target-dir)
                   :last-attempt-target-head
                   (plist-get entry :last-attempt-target-head)
                   :halt-until-human
@@ -2137,7 +2141,10 @@ Filters out entries whose `:source-ws' no longer exists in
 `claude-repl--workspaces' (the workspace was removed between sessions,
 or its snapshot entry was skipped because its `:project-dir' was gone).
 Re-applies the `:repl-state :merge-queued' marker on each surviving
-source-ws so the drawer's MERGING bucket re-surfaces them.
+source-ws so the drawer's MERGING bucket re-surfaces them.  Preserves
+each entry's `:target-dir' so the per-target sub-queue partitioning
+survives the restart (a missing key falls back to lazy resolution in
+the drain).
 
 Does NOT auto-drain — `claude-repl--workspace-merge-do' is the normal
 drain trigger and the user kicks it off via `claude-repl-drain-merge-queue'
@@ -2152,7 +2159,8 @@ the user has manually resolved before re-entering the loop)."
            ((and ws (gethash ws claude-repl--workspaces))
             (push (list :source-ws ws
                         :silent (and (plist-get entry :silent) t)
-                        :auto-resolve (and (plist-get entry :auto-resolve) t))
+                        :auto-resolve (and (plist-get entry :auto-resolve) t)
+                        :target-dir (plist-get entry :target-dir))
                   restored)
             (claude-repl--ws-put ws :repl-state :merge-queued)
             (claude-repl--ws-put ws :claude-state nil))
@@ -2602,38 +2610,37 @@ on-disk snapshot, or when a cherry-pick fails in a way that requires
 the user to repair the worktree by hand before the next queued merge
 can proceed.
 
-Clears `:halt-until-human' on the front queue entry before draining —
-`claude-repl--reenqueue-merge-on-failure' sets that flag on generic
-failures specifically so auto-drain does NOT retry them.  The
-interactive kick IS the human signal that re-dispatch should proceed,
-so the flag is dropped here and the entry becomes drainable.
+Clears `:halt-until-human' on the FRONT entry of every per-target+repo
+bucket before draining — `claude-repl--reenqueue-merge-on-failure' sets
+that flag on generic failures specifically so auto-drain does NOT retry
+them.  The interactive kick IS the human signal that re-dispatch should
+proceed, so the flag is dropped on each bucket's front and those entries
+become drainable.
 
-No-op (with a `message') when the queue is empty.  No-op (with a
-`message') when a cherry-pick is still in progress in any registered
-workspace — the user must clear `CHERRY_PICK_HEAD' first (commit,
-abort, or resolve) so the queue isn't dispatched into the middle of a
-live merge.
+No-op (with a `message') when the queue is empty.  Does NOT block when a
+cherry-pick is in progress: the drain is now per-target, so buckets whose
+target worktree has a live cherry-pick are simply skipped while free
+buckets drain — the user no longer has to clear every `CHERRY_PICK_HEAD'
+in the session before any queued merge can proceed.
 
 The drain itself is the same `claude-repl--drain-merge-queue' that the
-automatic path uses: one entry pops, the corresponding
-`claude-repl--workspace-merge-into-source' runs, and its completion
-cascades into the next drain."
+automatic path uses: each free bucket's front entry pops, the
+corresponding `claude-repl--workspace-merge-into-source' runs, and its
+completion cascades into the next drain."
   (interactive)
   (cond
    ((not (boundp 'claude-repl--merge-queue))
     (user-error "claude-repl: merge queue module not loaded"))
    ((null claude-repl--merge-queue)
     (message "[claude-repl] merge queue is empty — nothing to drain"))
-   ((claude-repl--any-cherry-pick-in-progress-p)
-    (user-error "claude-repl: a cherry-pick is still in progress — resolve it before draining"))
    (t
-    (let ((front (car claude-repl--merge-queue)))
-      (when (plist-get front :halt-until-human)
-        (claude-repl--log nil
-                          "drain-merge-queue: manual kick clearing :halt-until-human on front ws=%s"
-                          (plist-get front :source-ws))
-        (setcar claude-repl--merge-queue
-                (plist-put (copy-sequence front) :halt-until-human nil))))
+    (dolist (target-dir (claude-repl--merge-queue-target-dirs))
+      (let ((front (claude-repl--merge-queue-front-for-target target-dir)))
+        (when (and front (plist-get front :halt-until-human))
+          (claude-repl--log nil
+                            "drain-merge-queue: manual kick clearing :halt-until-human on ws=%s target=%s"
+                            (plist-get front :source-ws) (or target-dir "nil"))
+          (plist-put front :halt-until-human nil))))
     (claude-repl--log nil
                       "drain-merge-queue: manual kick queue-len=%d"
                       (length claude-repl--merge-queue))
