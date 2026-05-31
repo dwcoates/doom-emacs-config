@@ -3745,6 +3745,117 @@ call is cheaper and makes the asymmetry explicit at the call site."
           (claude-repl--workspace-merge-async "ws1" "/tmp/ws1"))
         (should-not drained)))))
 
+;;;; ---- Tests: reenqueue-and-redrive-on-failure (shared failure core) ----
+
+(ert-deftest claude-repl-test-reenqueue-and-redrive-on-conflict-reenqueues-to-back ()
+  "A `claude-repl-merge-conflict-error' re-enqueues WS to the BACK with no
+halt flag, so siblings get a turn before this one retries."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws-front" :project-dir "/tmp/wsf")
+      (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
+      (setq claude-repl--merge-queue
+            (list (list :source-ws "ws-front" :silent t :auto-resolve t)))
+      (cl-letf (((symbol-function 'claude-repl--abort-cherry-pick-if-in-flight) #'ignore)
+                ((symbol-function 'claude-repl--current-head-sha) (lambda (_) "deadbeef"))
+                ((symbol-function 'claude-repl--drain-merge-queue) #'ignore)
+                ((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+        (claude-repl--reenqueue-and-redrive-on-failure
+         "ws1" '(claude-repl-merge-conflict-error "rejected")))
+      (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
+                             claude-repl--merge-queue)
+                     '("ws-front" "ws1")))
+      (should-not (plist-get (nth 1 claude-repl--merge-queue) :halt-until-human)))))
+
+(ert-deftest claude-repl-test-reenqueue-and-redrive-on-conflict-drains ()
+  "Conflict-rejection re-drives `--drain-merge-queue' so a sibling can try."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (let ((drained nil))
+        (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
+        (cl-letf (((symbol-function 'claude-repl--abort-cherry-pick-if-in-flight) #'ignore)
+                  ((symbol-function 'claude-repl--current-head-sha) (lambda (_) "deadbeef"))
+                  ((symbol-function 'claude-repl--drain-merge-queue) (lambda () (setq drained t)))
+                  ((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+          (claude-repl--reenqueue-and-redrive-on-failure
+           "ws1" '(claude-repl-merge-conflict-error "rejected")))
+        (should drained)))))
+
+(ert-deftest claude-repl-test-reenqueue-and-redrive-on-generic-reenqueues-front-with-halt ()
+  "A generic (non-conflict) failure re-enqueues WS to the FRONT with
+`:halt-until-human' set."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws-existing" :project-dir "/tmp/wse")
+      (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
+      (setq claude-repl--merge-queue
+            (list (list :source-ws "ws-existing" :silent t :auto-resolve t)))
+      (cl-letf (((symbol-function 'claude-repl--abort-cherry-pick-if-in-flight) #'ignore)
+                ((symbol-function 'claude-repl--current-head-sha) (lambda (_) "cafef00d"))
+                ((symbol-function 'claude-repl--drain-merge-queue) #'ignore)
+                ((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+        (claude-repl--reenqueue-and-redrive-on-failure "ws1" '(error "boom")))
+      (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
+                             claude-repl--merge-queue)
+                     '("ws1" "ws-existing")))
+      (should (plist-get (car claude-repl--merge-queue) :halt-until-human)))))
+
+(ert-deftest claude-repl-test-reenqueue-and-redrive-on-generic-does-not-drain ()
+  "A generic failure must NOT auto-drain — the halted front entry blocks
+the queue until a human kick."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (let ((drained nil))
+        (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
+        (cl-letf (((symbol-function 'claude-repl--abort-cherry-pick-if-in-flight) #'ignore)
+                  ((symbol-function 'claude-repl--current-head-sha) (lambda (_) "cafef00d"))
+                  ((symbol-function 'claude-repl--drain-merge-queue) (lambda () (setq drained t)))
+                  ((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+          (claude-repl--reenqueue-and-redrive-on-failure "ws1" '(error "boom")))
+        (should-not drained)))))
+
+(ert-deftest claude-repl-test-reenqueue-and-redrive-aborts-in-flight-cherry-pick ()
+  "The helper aborts any in-flight cherry-pick at WS's resolved target dir
+so a conflict cannot leave CHERRY_PICK_HEAD wedged and freeze the queue."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (let ((aborted-dir 'unset))
+        (claude-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
+        (cl-letf (((symbol-function 'claude-repl--abort-cherry-pick-if-in-flight)
+                   (lambda (_ws dir) (setq aborted-dir dir)))
+                  ((symbol-function 'claude-repl--current-head-sha) (lambda (_) "deadbeef"))
+                  ((symbol-function 'claude-repl--drain-merge-queue) #'ignore)
+                  ((symbol-function 'claude-repl--persist-merge-queue) #'ignore))
+          (claude-repl--reenqueue-and-redrive-on-failure
+           "ws1" '(claude-repl-merge-conflict-error "rejected")))
+        (should (equal aborted-dir "/tmp/target"))))))
+
+;;;; ---- Tests: drain-merge-queue routes failures through shared recovery ----
+
+(ert-deftest claude-repl-test-drain-merge-queue-on-failure-runs-shared-recovery ()
+  "When a drained merge fails, `--drain-merge-queue' routes the error
+through `--reenqueue-and-redrive-on-failure' — the same recovery the
+async-dispatch path uses — so a drained conflict cannot leave the queue
+wedged (the historical drain-path bug)."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (let ((recovered nil))
+        (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+        (setq claude-repl--merge-queue
+              (list (list :source-ws "ws1" :target-dir "/tmp/ws1"
+                          :silent t :auto-resolve t)))
+        (cl-letf (((symbol-function 'claude-repl--cherry-pick-in-progress-p)
+                   (lambda (_) nil))
+                  ((symbol-function 'claude-repl--current-head-sha) (lambda (_) nil))
+                  ((symbol-function 'claude-repl--persist-merge-queue) #'ignore)
+                  ((symbol-function 'claude-repl--workspace-merge-into-source)
+                   (lambda (&rest _)
+                     (signal 'claude-repl-merge-conflict-error '("rejected"))))
+                  ((symbol-function 'claude-repl--reenqueue-and-redrive-on-failure)
+                   (lambda (ws _err) (setq recovered ws))))
+          (claude-repl--drain-merge-queue))
+        (should (equal recovered "ws1"))))))
+
 ;;;; ---- Tests: reopen-workspace-from-state ----
 
 (ert-deftest claude-repl-test-reopen-workspace-from-state-establishes-from-project-dir ()

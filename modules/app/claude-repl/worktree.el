@@ -1772,6 +1772,41 @@ would still color the name)."
                       (length claude-repl--merge-queue))
     (claude-repl--persist-merge-queue)))
 
+(defun claude-repl--reenqueue-and-redrive-on-failure (ws err)
+  "Shared non-UI recovery for a merge attempt for WS that raised ERR.
+Every merge path must run this on failure, regardless of whether the
+attempt was dispatched via `claude-repl--workspace-merge-async' or
+drained from `claude-repl--merge-queue' by
+`claude-repl--drain-merge-queue'.  Centralizing it here keeps the two
+call sites from drifting (the drain site historically lacked the abort
+and re-enqueue, which left a conflicted cherry-pick wedged and froze the
+queue).
+
+Steps:
+
+  1. Abort any in-flight cherry-pick at WS's `:resolved-target-dir' via
+     `claude-repl--abort-cherry-pick-if-in-flight' so a conflict cannot
+     leave CHERRY_PICK_HEAD in the target worktree (which would keep
+     `claude-repl--any-cherry-pick-in-progress-p' true and block every
+     later merge).
+  2. Re-enqueue WS via `claude-repl--reenqueue-merge-on-failure',
+     classifying by signal: `claude-repl-merge-conflict-error' goes to
+     the BACK (recoverable, siblings get a turn) and anything else goes
+     to the FRONT with `:halt-until-human'.
+  3. On a conflict rejection only, re-drive `claude-repl--drain-merge-queue'
+     so a sibling can attempt its merge while WS waits at the back.
+     Generic failures intentionally do NOT drain — the halted front entry
+     blocks the queue until a human kicks it.
+
+UI recovery (reopen + claude-send) is intentionally NOT done here: it is
+async-dispatch-specific and stays in `claude-repl--workspace-merge-async'."
+  (let ((conflict-rejection (eq (car err) 'claude-repl-merge-conflict-error))
+        (target-dir (claude-repl--ws-get ws :resolved-target-dir)))
+    (claude-repl--abort-cherry-pick-if-in-flight ws target-dir)
+    (claude-repl--reenqueue-merge-on-failure ws conflict-rejection target-dir)
+    (when conflict-rejection
+      (claude-repl--drain-merge-queue))))
+
 (defun claude-repl--workspace-merge-async (ws repo-root)
   "Run a workspace merge asynchronously.  Single unified entry for both
 the interactive `SPC TAB M' path and the `/workspace-merge' skill
@@ -1838,26 +1873,19 @@ do this."
         (claude-repl--log ws
                           "workspace-merge-async: ws=%s thread caught err=%S — handling failure"
                           ws err)
-        (let* ((conflict-rejection (eq (car err) 'claude-repl-merge-conflict-error))
-               (target-dir (claude-repl--ws-get ws :resolved-target-dir)))
-          ;; (a) Abort any in-flight cherry-pick at the target dir.
-          (claude-repl--abort-cherry-pick-if-in-flight ws target-dir)
-          ;; (b) Re-enqueue with classification + loop-guard metadata.
-          (claude-repl--reenqueue-merge-on-failure ws conflict-rejection target-dir)
-          ;; (c) Restore the workspace UI and send the error to its
-          ;; claude with the analyze-only directive — both are UI ops,
-          ;; so defer to the main thread.
-          (run-at-time
-           0 nil
-           (lambda ()
-             (claude-repl--reopen-workspace-from-state ws)
-             (claude-repl--dispatch-prompt-command
-              ws (claude-repl--format-merge-failure-prompt err))))
-          ;; (d) Only continue the drain on a recoverable conflict
-          ;; rejection — generic failures park at the front of the queue
-          ;; with `:halt-until-human' set.
-          (when conflict-rejection
-            (claude-repl--drain-merge-queue))))))
+        ;; Non-UI recovery (abort + classify-reenqueue + conditional
+        ;; drain) is shared with the queue-drain path via the helper, so
+        ;; the two cannot drift.
+        (claude-repl--reenqueue-and-redrive-on-failure ws err)
+        ;; UI recovery is async-dispatch-specific: restore the workspace
+        ;; and send the error to its claude with the analyze-only
+        ;; directive.  Both are UI ops, so defer to the main thread.
+        (run-at-time
+         0 nil
+         (lambda ()
+           (claude-repl--reopen-workspace-from-state ws)
+           (claude-repl--dispatch-prompt-command
+            ws (claude-repl--format-merge-failure-prompt err)))))))
    (format "claude-repl-merge-%s" ws)))
 
 (defun claude-repl--reopen-workspace-from-state (ws)
@@ -3877,22 +3905,23 @@ off so the user resolves in magit directly."
          ;; resolution) instead of ❌ (process died).  Branch matched
          ;; before the generic `error' handler so the more specific
          ;; signal takes precedence (per Emacs's condition-case rules).
+         ;;
+         ;; Mark the badge and drop the in-flight bookkeeping, then
+         ;; re-signal.  The abort, re-enqueue, and drain are owned by the
+         ;; single outer failure handler — `claude-repl--workspace-merge-async'
+         ;; for an initial dispatch or the catch in
+         ;; `claude-repl--drain-merge-queue' for a drained one — both routed
+         ;; through `claude-repl--reenqueue-and-redrive-on-failure'.  Doing
+         ;; them here as well would double-enqueue and double-drain.
          (claude-repl--mark-merge-conflict target-ws err)
-         ;; Conflict resolution is now the user's responsibility (the
-         ;; abort + magit pop already ran), so the in-flight gate is
-         ;; conceptually clear from the recovery's perspective — drop
-         ;; the bookkeeping.
          (claude-repl--clear-in-flight-merge target-ws)
-         (claude-repl--drain-merge-queue)
          (signal (car err) (cdr err)))
         (error
+         ;; Generic failure — mark ❌ and drop bookkeeping, then re-signal.
+         ;; Abort / re-enqueue-with-halt are owned by the outer handler,
+         ;; exactly as in the conflict branch above.
          (claude-repl--mark-merge-failed target-ws err)
          (claude-repl--clear-in-flight-merge target-ws)
-         ;; Drain before re-signaling: the in-flight gate is clear and a
-         ;; queued merge should not be blocked by this one's failure.
-         ;; `--drain-merge-queue' catches errors from the deferred call,
-         ;; so it cannot mask the original failure being re-signaled.
-         (claude-repl--drain-merge-queue)
          (signal (car err) (cdr err)))))))
 
 (defun claude-repl-workspace-merge ()
@@ -4365,7 +4394,14 @@ merge are caught and logged so one bad entry does not stall the bucket."
                 (error
                  (claude-repl--log ws
                                    "merge-queue: deferred merge failed ws=%s err=%S"
-                                   ws err))))))))))))
+                                   ws err)
+                 ;; Run the same non-UI recovery the async-dispatch path runs:
+                 ;; abort the (possibly conflicted) cherry-pick so the gate
+                 ;; reopens, re-enqueue this ws by class, and on a conflict
+                 ;; re-drive the drain so a sibling can try.  Without this a
+                 ;; drained conflict left CHERRY_PICK_HEAD wedged and froze the
+                 ;; whole queue.
+                 (claude-repl--reenqueue-and-redrive-on-failure ws err))))))))))))
 
 (defun claude-repl--drain-merge-queue ()
   "Drain the front merge of EVERY target+repo bucket that is currently free.
