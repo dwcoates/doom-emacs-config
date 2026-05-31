@@ -136,7 +136,8 @@ recovered source workspaces appended to `:merge-queue' for retry."
               (let ((recovered nil))
                 (dolist (entry in-flight)
                   (let* ((source-ws (plist-get entry :source-ws))
-                         (target-dir (plist-get entry :target-dir)))
+                         (target-dir (plist-get entry :target-dir))
+                         (recovered-entry (list source-ws target-dir)))
                     ;; Short-circuit malformed entries BEFORE probing
                     ;; the target dir — a botched prior write must not
                     ;; spawn `git' subprocesses against the partial
@@ -152,7 +153,7 @@ recovered source workspaces appended to `:merge-queue' for retry."
                           (let ((exit-code (claude-repl--early-abort-cherry-pick target-dir)))
                             (message "[claude-repl] early-recovery: ws=%s aborted cherry-pick in %s (exit=%d) — re-enqueueing"
                                      source-ws target-dir exit-code)
-                            (push source-ws recovered)))
+                            (push recovered-entry recovered)))
                          (t
                           (message "[claude-repl] early-recovery: ws=%s no orphan CHERRY_PICK_HEAD at %s — clearing bookkeeping"
                                    source-ws target-dir))))))))
@@ -160,11 +161,17 @@ recovered source workspaces appended to `:merge-queue' for retry."
                 ;; append recovered entries to :merge-queue.
                 (let* ((workspaces (plist-get raw :workspaces))
                        (merge-queue (plist-get raw :merge-queue))
+                       ;; RECOVERED holds (SOURCE-WS TARGET-DIR) pairs.
+                       ;; Carry TARGET-DIR onto the re-enqueued entry as
+                       ;; `:target-dir' so the recovered merge rejoins its
+                       ;; own per-target+repo sub-queue (the orphan's
+                       ;; destination is exactly the in-flight target dir).
                        (new-entries
-                        (mapcar (lambda (ws)
-                                  (list :source-ws ws
+                        (mapcar (lambda (pair)
+                                  (list :source-ws (nth 0 pair)
                                         :silent t
                                         :auto-resolve t
+                                        :target-dir (nth 1 pair)
                                         :last-attempt-target-head nil
                                         :halt-until-human nil))
                                 (reverse recovered)))

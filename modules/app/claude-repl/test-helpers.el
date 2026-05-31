@@ -487,15 +487,17 @@ user's real snapshot during ERT runs."
 (defmacro claude-repl-test--with-mocked-git-probes (&rest body)
   "Execute BODY with the cherry-pick probe's git wrappers stubbed.
 
-`claude-repl--any-cherry-pick-in-progress-p' walks every registered
-workspace dir and probes for `CHERRY_PICK_HEAD' via two external-
-boundary wrappers (`claude-repl--git-string' for `rev-parse
---absolute-git-dir', `claude-repl--git-string-quiet' for other
-rev-parse variants).  Any test whose subject reaches that probe —
-including every `--drain-merge-queue' test, every
-`--workspace-merge-into-source' / `--workspace-merge-current-into-
-source' test, and any future call site that walks the registered ws
-set — must mock both wrappers or trip the runtime boundary guard.
+`claude-repl--cherry-pick-in-progress-p' probes a target worktree for
+`CHERRY_PICK_HEAD' via two external-boundary wrappers
+\(`claude-repl--git-string' for `rev-parse --absolute-git-dir',
+`claude-repl--git-string-quiet' for other rev-parse variants), and the
+merge-queue drain additionally reads HEAD SHAs via
+`claude-repl--current-head-sha' (also `claude-repl--git-string').  Any
+test whose subject reaches one of these — including every
+`--drain-merge-queue' test, every `--workspace-merge-into-source' /
+`--workspace-merge-current-into-source' test, and any future call site
+that probes a worktree's git dir — must mock both wrappers or trip the
+runtime boundary guard.
 
 This macro stubs both wrappers to return the empty string, which
 causes the probe's downstream `expand-file-name CHERRY_PICK_HEAD' +

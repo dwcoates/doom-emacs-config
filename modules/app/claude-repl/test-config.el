@@ -144,6 +144,26 @@ back with :halt-until-human nil."
           (should (equal (plist-get (car mq) :source-ws) "ws-a"))
           (should-not (plist-get (car mq) :halt-until-human)))))))
 
+(ert-deftest claude-repl-config-test-early-recovery/carries-target-dir-onto-reenqueued-entry ()
+  "A recovered orphan re-enqueues with `:target-dir' set to the in-flight
+target dir so the merge rejoins its own per-target+repo bucket."
+  (let ((snap (make-temp-file "claude-snap-")))
+    (claude-repl-test--with-snapshot-fixture snap
+        '(:workspaces (("ws-a" :project-dir "/tmp/a"))
+          :merge-queue nil
+          :in-flight-merges ((:source-ws "ws-a" :target-dir "/tmp/a" :started-at 1.0)))
+      (claude-repl-test--with-redirected-snapshot snap
+        (cl-letf (((symbol-function 'claude-repl--early-cherry-pick-head-at)
+                   (lambda (dir) (concat dir "/.git/CHERRY_PICK_HEAD")))
+                  ((symbol-function 'claude-repl--early-abort-cherry-pick)
+                   (lambda (_) 0))
+                  ((symbol-function 'message) #'ignore))
+          (claude-repl--early-recover-orphan-cherry-picks))
+        (let* ((raw (claude-repl-test--read-snapshot snap))
+               (mq (plist-get raw :merge-queue)))
+          (should (= 1 (length mq)))
+          (should (equal (plist-get (car mq) :target-dir) "/tmp/a")))))))
+
 (ert-deftest claude-repl-config-test-early-recovery/no-cherry-pick-head-just-clears-bookkeeping ()
   "Entry whose target-dir has NO CHERRY_PICK_HEAD must NOT trigger an
 abort (would error on bare `cherry-pick --abort') — only clears the
