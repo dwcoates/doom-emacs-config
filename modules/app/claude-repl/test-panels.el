@@ -1582,6 +1582,25 @@ the ws-plist hash with a nil key in test/init environments."
       (claude-repl--on-workspace-switch nil)
       (should-not (gethash nil claude-repl--workspaces)))))
 
+(ert-deftest claude-repl-test-panels-on-workspace-switch-dequeues-merge ()
+  "Switching to a workspace calls `--dequeue-merge' on it so a parked
+merge request is pulled from the queue on activation."
+  (claude-repl-test--with-clean-state
+    (let (dequeued)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'claude-repl--maybe-sweep-hidden-on-switch) #'ignore)
+                ((symbol-function 'claude-repl--dequeue-merge)
+                 (lambda (ws) (setq dequeued ws)))
+                ((symbol-function 'claude-repl--update-all-workspace-states-now) #'ignore)
+                ((symbol-function 'claude-repl--refresh-vterm) #'ignore)
+                ((symbol-function 'claude-repl--reset-vterm-cursors) #'ignore)
+                ((symbol-function 'claude-repl--drain-pending-magit) #'ignore)
+                ((symbol-function 'claude-repl--drain-pending-initial-buffers) #'ignore)
+                ((symbol-function 'claude-repl--drain-pending-show-panels) #'ignore)
+                ((symbol-function 'claude-repl--maybe-autoselect-input) #'ignore))
+        (claude-repl--on-workspace-switch "ws1")
+        (should (equal dequeued "ws1"))))))
+
 (ert-deftest claude-repl-test-panels-on-workspace-switch-done-stamps-acked-at ()
   "Switching to a workspace in :done sets :done-acked t and stamps
 :done-acked-at with the current time so the focus-dwell countdown

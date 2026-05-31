@@ -365,13 +365,19 @@ never causes a silent decay.
 
 Also runs `claude-repl--maybe-sweep-hidden-on-switch' so workspaces
 marked `:hidden' (via `SPC o C') are persp-killed when hide-mode is on
-— the persp-level enforcement of hide-mode."
+— the persp-level enforcement of hide-mode.
+
+Runs `claude-repl--dequeue-merge' so a workspace parked in the merge
+queue is pulled from it on switch — activating a queued workspace is
+read as the user wanting to work on it directly rather than have its
+pending merge auto-fire."
   (let ((ws (or ws (claude-repl--ws-current-name))))
     (claude-repl--log-verbose ws "workspace-switch ws=%s" ws)
     (when (eq (claude-repl--ws-claude-state ws) :done)
       (claude-repl--ws-put ws :done-acked t)
       (claude-repl--ws-put ws :done-acked-at (float-time)))
     (claude-repl--maybe-sweep-hidden-on-switch ws)
+    (claude-repl--dequeue-merge ws)
     ;; Event-driven (workspace just activated) → kick a fresh pass via
     ;; the unguarded entrypoint so the in-flight reentry guard from the
     ;; 1Hz timer doesn't swallow the switch's refresh.
