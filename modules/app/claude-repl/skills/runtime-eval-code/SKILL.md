@@ -199,6 +199,24 @@ Common operational inspections. Each entry: when to reach for it, the snippet to
   - Values are large nested plists (`:vterm-buffer`, `:active-env` structs, etc.) — dumping the whole hash with `pp` is verbose and can hit the 8000-char truncation, so project the one or two keys you care about.
   - A key bound to `nil` is distinct from an absent key; internals use the `claude-repl--ws-absent` sentinel to tell them apart, so don't read a `nil` `plist-get` as "key missing."
 
+### Reopen a workspace
+
+- **When**: the user asks to reopen, switch back to, or re-activate a workspace (including closed/tombstoned ones), or to open a whole set of them at once.
+- **Send** (derive the workspace name, resolve it to its project root with `claude-repl--ws-dir`, then hand that root to `claude-repl-switch-to-project`):
+  ```elisp
+  (claude-repl-switch-to-project (claude-repl--ws-dir "<ws-name>"))
+  ```
+  - To reopen several (e.g. every workspace parked in the merge queue), loop over the names:
+    ```elisp
+    (dolist (ws (mapcar (lambda (e) (plist-get e :source-ws)) claude-repl--merge-queue))
+      (claude-repl-switch-to-project (claude-repl--ws-dir ws)))
+    ```
+- **Watch out for**:
+  - `claude-repl-switch-to-project` takes a project **root path**, not a workspace name, so always resolve through `claude-repl--ws-dir` first.
+  - It is **side-effecting**: it creates/activates the persp and visits a file, so a loop ends focused on the last workspace opened.
+  - Tombstoned (closed) workspaces still resolve because `:project-dir` is preserved on close, so reopening them works.
+  - `claude-repl--ws-dir` errors when a name has no `:project-dir`, so feed it real workspace names (not arbitrary strings).
+
 ## Notes
 
 - **CRITICAL NOTE: Do NOT evaluate the elisp yourself.** No `emacs --batch`, no subshell `emacsclient`. The editor is the only legitimate evaluator.
