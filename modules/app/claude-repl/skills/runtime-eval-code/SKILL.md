@@ -165,6 +165,22 @@ Common operational inspections. Each entry: when to reach for it, the snippet to
   - Each element is a plist `(:source-ws WS :silent BOOL :auto-resolve BOOL)`; the queue is FIFO (head is next to run).
   - The queue only holds *deferred* merges (parked behind an active cherry-pick) — an empty queue does not mean no merge is in flight, just that none are waiting.
 
+### Link the user to code
+
+- **When**: any time the user asks about an implementation detail, or whenever there is relevant code worth pointing them at — reach for this **proactively**.
+  - Applies when the user is *explicitly* asking about specific code.
+  - Applies equally when the user is asking about implementation *logic* (not code per se) but there is code that answers it — find it and link it anyway.
+  - In these situations, proactively grep/search the repo for the most relevant definition first, then link it rather than only describing it in prose.
+- **Send** (`claude-repl-link-code` opens the file in a left window, jumps to the code, and selects the full line range):
+  ```elisp
+  (claude-repl-link-code "<absolute-path-to-file>" <start-line> <end-line>)
+  ```
+  - `end-line` is optional — omit it to select a single line: `(claude-repl-link-code "<path>" <line>)`.
+- **Watch out for**:
+  - Pass an **absolute** path (resolve relative paths against the workspace root yourself before sending).
+  - Line numbers are **1-indexed and inclusive**; the selected region runs from the start line's beginning to the end line's end.
+  - It opens in a left-docked window and selects the region — it does not edit, so it is always safe to dispatch.
+
 ### Check the workspaces hashmap
 
 - **When**: the user reports a workspace in the wrong state (stale priority, wrong env, missing buffer, a tombstone that should be gone) or you need to confirm a UI element's backing per-workspace state.
