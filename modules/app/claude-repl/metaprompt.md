@@ -139,6 +139,9 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - Subbullets are the ONLY permissible way to attach additional or qualifying information to a TLDR bullet.
   - May be used recursively, at any depth up to the chosen depth cap of max 4.
   - Second sentences inside a single bullet are never allowed.
+- TLDR bullets MUST never use an anaphor referring across siblings or to descendants.
+  - An anaphor is a word like 'it', 'this', 'that', 'these', 'the former', or 'the latter' standing in for another bullet.
+  - Each bullet must name its referent explicitly so it reads self-contained without scanning its siblings or children.
 
 ### State disambiguation
 
