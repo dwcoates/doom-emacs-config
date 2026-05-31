@@ -174,6 +174,51 @@ both active region and point-at-line cases)."
     (claude-repl--log (claude-repl--ws-current-name) "context-reference: standard branch")
     (claude-repl--format-file-ref)))
 
+;;;; Code linking (open file + select line range in a left window)
+
+(defun claude-repl--select-line-range (start-line &optional end-line)
+  "Select the inclusive line range START-LINE..END-LINE in the current buffer.
+Widens, then activates a region from the beginning of START-LINE to the
+end of END-LINE (defaults to START-LINE).  Line numbers are 1-indexed;
+START-LINE is floored at 1 and END-LINE is floored at START-LINE, and
+both clamp to the buffer's last line.  Leaves point at the beginning of
+START-LINE so the region's top is what a follow-up `recenter' brings
+into view."
+  (let ((start-line (max 1 start-line))
+        (end-line (max (max 1 start-line) (or end-line start-line))))
+    (widen)
+    (goto-char (point-min))
+    (forward-line (1- start-line))
+    (let ((beg (line-beginning-position)))
+      (forward-line (- end-line start-line))
+      (set-mark (line-end-position))
+      (goto-char beg)
+      (activate-mark))))
+
+(defun claude-repl-link-code (file start-line &optional end-line)
+  "Open FILE in a left-side window and select lines START-LINE..END-LINE.
+Code-linking entry point for the runtime-eval-code skill: visits FILE,
+displays its buffer in a window docked to the leftmost edge of the
+frame, selects the inclusive line range START-LINE..END-LINE (END-LINE
+defaults to START-LINE) via `claude-repl--select-line-range', recenters
+on it, and selects the window so the user lands on the code.
+
+FILE is run through `expand-file-name', so pass an absolute path.
+START-LINE and END-LINE are 1-indexed inclusive line numbers.  Returns
+the window the file was shown in, or nil when display failed."
+  (let* ((buf (find-file-noselect (expand-file-name file)))
+         (win (display-buffer
+               buf
+               '((display-buffer-in-direction)
+                 (direction . leftmost)
+                 (window-width . 0.5)))))
+    (when win
+      (with-selected-window win
+        (claude-repl--select-line-range start-line end-line)
+        (recenter))
+      (select-window win))
+    win))
+
 ;;;; Diff analysis infrastructure
 
 (defun claude-repl--send-diff-analysis (change-spec prompt)
