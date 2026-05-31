@@ -4098,6 +4098,15 @@ than racing the live cherry-pick."
      claude-repl--workspaces)
     nil))
 
+(defun claude-repl--ws-in-merge-queue-p (ws)
+  "Return non-nil when WS already has an entry parked in `claude-repl--merge-queue'.
+Distinct from `claude-repl--ws-merge-queued-p', which reads the
+`:repl-state' workflow marker: this scans the live queue list by
+`:source-ws' so the enqueue path can dedupe by actual queue membership
+rather than by a marker that may drift from the list."
+  (seq-some (lambda (entry) (equal (plist-get entry :source-ws) ws))
+            claude-repl--merge-queue))
+
 (defun claude-repl--enqueue-merge (source-ws silent auto-resolve)
   "Park a merge request for SOURCE-WS onto `claude-repl--merge-queue'.
 Marks SOURCE-WS with `:repl-state :merge-queued' so the drawer
@@ -4106,22 +4115,31 @@ surfaces it under MERGING with the queued-state badge.  Clears
 state-glyph precedence reads `:repl-state' first, but a stale
 claude-state would still color the name.
 
+Deduped on SOURCE-WS: if the workspace already has an entry in the
+queue, the request is dropped (logged, but the queue and markers are
+left untouched) so a second merge request for an already-parked
+workspace can't produce a duplicate entry.
+
 After the enqueue, persists the live queue to the workspace snapshot
 file (`claude-repl-workspace-snapshot-file') via
 `claude-repl-save-workspace-snapshot' so an Emacs restart preserves
 the pending merges (a restart used to lose them silently)."
-  (setq claude-repl--merge-queue
-        (append claude-repl--merge-queue
-                (list (list :source-ws source-ws
-                            :silent silent
-                            :auto-resolve auto-resolve))))
-  (claude-repl--ws-put source-ws :repl-state :merge-queued)
-  (claude-repl--ws-put source-ws :claude-state nil)
-  (claude-repl--log source-ws
-                    "merge-queue: enqueued ws=%s silent=%s auto-resolve=%s queue-len=%d"
-                    source-ws (if silent "t" "nil") (if auto-resolve "t" "nil")
-                    (length claude-repl--merge-queue))
-  (claude-repl--persist-merge-queue))
+  (if (claude-repl--ws-in-merge-queue-p source-ws)
+      (claude-repl--log source-ws
+                        "merge-queue: skip duplicate enqueue ws=%s queue-len=%d"
+                        source-ws (length claude-repl--merge-queue))
+    (setq claude-repl--merge-queue
+          (append claude-repl--merge-queue
+                  (list (list :source-ws source-ws
+                              :silent silent
+                              :auto-resolve auto-resolve))))
+    (claude-repl--ws-put source-ws :repl-state :merge-queued)
+    (claude-repl--ws-put source-ws :claude-state nil)
+    (claude-repl--log source-ws
+                      "merge-queue: enqueued ws=%s silent=%s auto-resolve=%s queue-len=%d"
+                      source-ws (if silent "t" "nil") (if auto-resolve "t" "nil")
+                      (length claude-repl--merge-queue))
+    (claude-repl--persist-merge-queue)))
 
 (defun claude-repl--persist-merge-queue ()
   "Persist the live `claude-repl--merge-queue' to the workspace snapshot file.

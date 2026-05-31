@@ -8094,6 +8094,48 @@ so the drawer can route it under MERGING."
                              claude-repl--merge-queue)
                      '("ws1" "ws2" "ws3"))))))
 
+(ert-deftest claude-repl-test-ws-in-merge-queue-p-nil-when-empty ()
+  "`--ws-in-merge-queue-p' returns nil against an empty queue."
+  (claude-repl-test--with-empty-merge-queue
+    (should-not (claude-repl--ws-in-merge-queue-p "ws1"))))
+
+(ert-deftest claude-repl-test-ws-in-merge-queue-p-true-when-parked ()
+  "`--ws-in-merge-queue-p' detects a ws that has an entry in the queue."
+  (claude-repl-test--with-empty-merge-queue
+    (setq claude-repl--merge-queue
+          '((:source-ws "ws1" :silent t :auto-resolve t)))
+    (should (claude-repl--ws-in-merge-queue-p "ws1"))))
+
+(ert-deftest claude-repl-test-ws-in-merge-queue-p-nil-for-absent-ws ()
+  "`--ws-in-merge-queue-p' returns nil for a ws not present among queued entries."
+  (claude-repl-test--with-empty-merge-queue
+    (setq claude-repl--merge-queue
+          '((:source-ws "ws1" :silent t :auto-resolve t)))
+    (should-not (claude-repl--ws-in-merge-queue-p "ws2"))))
+
+(ert-deftest claude-repl-test-enqueue-merge-dedupes-duplicate-ws ()
+  "Re-enqueuing a ws already in the queue does not append a second entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (claude-repl--enqueue-merge "ws1" t t)
+      (should (equal claude-repl--merge-queue
+                     '((:source-ws "ws1" :silent t :auto-resolve t)))))))
+
+(ert-deftest claude-repl-test-enqueue-merge-dedupe-keeps-distinct-ws ()
+  "Dedup is keyed on `:source-ws' only — a distinct ws still appends."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (claude-repl--enqueue-merge "ws1" t t)
+      (claude-repl--enqueue-merge "ws2" t t)
+      (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
+                             claude-repl--merge-queue)
+                     '("ws1" "ws2"))))))
+
 (ert-deftest claude-repl-test-drain-merge-queue-noop-when-empty ()
   "Empty queue → drain does nothing, no error."
   (claude-repl-test--with-clean-state
