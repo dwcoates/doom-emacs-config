@@ -20,6 +20,13 @@ Reach for this skill **proactively** — do not wait to be told to "eval some el
 - **Always prefer this skill over asking the user to run elisp themselves.**
   - If you would otherwise type "can you run `(...)` and paste the result?", dispatch it through this skill instead and read the roundtripped result.
   - The sole exception is genuinely dangerous code (destructive mutations, anything irreversible) — surface that to the user and let them decide rather than dispatching it silently.
+- **After performing any mutating change, proactively verify it landed** rather than assuming success from a clean dispatch.
+  - This applies to every mutation, whether it ran through this skill or through any other path (a command, a hook, an edit-then-reload).
+  - Verify by checking the logs and/or by reading the relevant runtime state that the change was supposed to affect.
+    - Read the claude-repl log (or dump `*Messages*` per the cheatsheet) to confirm the expected log line appeared and no error followed.
+    - Re-read the specific state the mutation targets and confirm it now holds the intended value.
+    - Where the change should surface in the UI, inspect the backing state for the affected element (e.g. the tabline / tab-bar) to confirm it reflects the new state.
+  - Treat the verification read as part of the mutation, not an optional follow-up — a dispatch returning exit 0 only means the command was queued, not that the intended effect occurred.
 
 ## Arguments
 
