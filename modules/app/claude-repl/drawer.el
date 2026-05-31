@@ -528,13 +528,29 @@ map 1:1 onto `claude-repl--ws-render-status' values — the same
 keyword that drives the icon also drives the section — so the merge
 branches delegate to render-status for the source of truth.
 
+The MERGING section is defined to hold EXACTLY the members of the
+live merge queue and nothing else: a workspace is bucketed under
+MERGING if and only if it is a member of the merge queue.  Membership
+means one of two render-states, which map 1:1 onto the two pieces of
+queue bookkeeping:
+  - `:merging'      ↔ an in-flight cherry-pick (`claude-repl--in-flight-merges').
+  - `:merge-queued' ↔ a parked request (`claude-repl--merge-queue').
+Every other merge render-state is NOT a queue member and therefore
+must NOT land in MERGING.
+
 Mapping:
   render-status :merged                → :merged section
-  render-status :merging               → :merging section (in flight)
-  render-status :merge-queued          → :merging section (parked)
-  render-status :merge-conflict        → :merging section (needs
-                                          attention but bucket-wise
-                                          belongs with the others)
+  render-status :merging               → :merging section (in flight, in queue)
+  render-status :merge-queued          → :merging section (parked, in queue)
+  render-status :merge-conflict        → :merged section (a real cherry-pick
+                                          conflict awaiting human resolution;
+                                          it was removed from the queue and not
+                                          re-enqueued by
+                                          `claude-repl--mark-merge-conflict', so
+                                          it is NOT a queue member and must not
+                                          sit in MERGING — it groups with the
+                                          other terminal merge outcomes under
+                                          MERGED, distinguished by its 💥 glyph)
   render-status :merge-failed          → :merged section (the historical
                                           MERGED-with-⛔ bucket; the
                                           workspace did `complete' the
@@ -549,8 +565,8 @@ Precedence is encoded in `--ws-render-status' itself."
     (cond
      ((eq status :merged)                              :merged)
      ((eq status :merge-failed)                        :merged)
-     ((memq status '(:merging :merge-queued :merge-conflict))
-                                                       :merging)
+     ((eq status :merge-conflict)                      :merged)
+     ((memq status '(:merging :merge-queued))          :merging)
      ((eq (claude-repl--ws-get ws :repl-state) :hidden) :hidden)
      (t                                                 :main))))
 
