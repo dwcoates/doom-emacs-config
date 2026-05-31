@@ -8136,6 +8136,82 @@ so the drawer can route it under MERGING."
                              claude-repl--merge-queue)
                      '("ws1" "ws2"))))))
 
+(ert-deftest claude-repl-test-dequeue-merge-removes-entry ()
+  "`--dequeue-merge' pulls the matching ws's entry out of the FIFO."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (claude-repl--dequeue-merge "ws1")
+      (should (null claude-repl--merge-queue)))))
+
+(ert-deftest claude-repl-test-dequeue-merge-clears-repl-state-marker ()
+  "`--dequeue-merge' clears the `:repl-state :merge-queued' marker on the ws."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (claude-repl--dequeue-merge "ws1")
+      (should (null (claude-repl--ws-get "ws1" :repl-state))))))
+
+(ert-deftest claude-repl-test-dequeue-merge-returns-t-when-removed ()
+  "`--dequeue-merge' returns non-nil when it removed an entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (should (claude-repl--dequeue-merge "ws1")))))
+
+(ert-deftest claude-repl-test-dequeue-merge-noop-when-ws-not-queued ()
+  "`--dequeue-merge' returns nil and leaves the queue intact when the ws
+has no parked entry."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (should-not (claude-repl--dequeue-merge "ws2"))
+      (should (equal claude-repl--merge-queue
+                     '((:source-ws "ws1" :silent t :auto-resolve t)))))))
+
+(ert-deftest claude-repl-test-dequeue-merge-noop-when-ws-nil ()
+  "`--dequeue-merge' returns nil for a nil ws without touching the queue."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (should-not (claude-repl--dequeue-merge nil))
+      (should (equal claude-repl--merge-queue
+                     '((:source-ws "ws1" :silent t :auto-resolve t)))))))
+
+(ert-deftest claude-repl-test-dequeue-merge-preserves-other-entries ()
+  "`--dequeue-merge' removes only the matching ws, leaving siblings in
+FIFO order."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+      (claude-repl--ws-put "ws3" :project-dir "/tmp/ws3")
+      (claude-repl--enqueue-merge "ws1" t t)
+      (claude-repl--enqueue-merge "ws2" nil t)
+      (claude-repl--enqueue-merge "ws3" t nil)
+      (claude-repl--dequeue-merge "ws2")
+      (should (equal (mapcar (lambda (e) (plist-get e :source-ws))
+                             claude-repl--merge-queue)
+                     '("ws1" "ws3"))))))
+
+(ert-deftest claude-repl-test-dequeue-merge-leaves-other-repl-state-untouched ()
+  "`--dequeue-merge' does not clear a non-`:merge-queued' `:repl-state'."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-empty-merge-queue
+      ;; Hand-place an entry without the marker so the repl-state under
+      ;; test is a foreign value the dequeue must leave alone.
+      (setq claude-repl--merge-queue
+            '((:source-ws "ws1" :silent t :auto-resolve t)))
+      (claude-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (claude-repl--ws-put "ws1" :repl-state :merged)
+      (claude-repl--dequeue-merge "ws1")
+      (should (eq (claude-repl--ws-get "ws1" :repl-state) :merged)))))
+
 (ert-deftest claude-repl-test-drain-merge-queue-noop-when-empty ()
   "Empty queue → drain does nothing, no error."
   (claude-repl-test--with-clean-state

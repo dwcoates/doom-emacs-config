@@ -4141,6 +4141,37 @@ the pending merges (a restart used to lose them silently)."
                       (length claude-repl--merge-queue))
     (claude-repl--persist-merge-queue)))
 
+(defun claude-repl--dequeue-merge (source-ws)
+  "Remove SOURCE-WS's parked merge request from `claude-repl--merge-queue'.
+Called when the user switches to a workspace: activating a workspace
+that is parked in the merge queue is read as a signal that the user
+wants to work on it directly rather than have its queued merge
+auto-fire, so the entry is pulled from the FIFO and its
+`:repl-state :merge-queued' marker cleared.
+
+No-op (returns nil) when SOURCE-WS is nil or has no entry in the
+queue.  Returns non-nil when an entry was removed.
+
+Only touches the parked FIFO — an in-flight cherry-pick (tracked in
+`claude-repl--in-flight-merges') is left untouched, since dequeueing is
+about cancelling a *pending* merge, not aborting one already underway.
+
+Re-persists the now-shorter queue to the workspace snapshot file via
+`claude-repl--persist-merge-queue' so an Emacs restart does not
+resurrect the dequeued entry."
+  (when (and source-ws (claude-repl--ws-in-merge-queue-p source-ws))
+    (setq claude-repl--merge-queue
+          (cl-remove-if (lambda (entry)
+                          (equal (plist-get entry :source-ws) source-ws))
+                        claude-repl--merge-queue))
+    (when (eq (claude-repl--ws-get source-ws :repl-state) :merge-queued)
+      (claude-repl--ws-put source-ws :repl-state nil))
+    (claude-repl--log source-ws
+                      "merge-queue: dequeued ws=%s on switch queue-len=%d"
+                      source-ws (length claude-repl--merge-queue))
+    (claude-repl--persist-merge-queue)
+    t))
+
 (defun claude-repl--persist-merge-queue ()
   "Persist the live `claude-repl--merge-queue' to the workspace snapshot file.
 Thin wrapper around `claude-repl-save-workspace-snapshot' — guarded on
