@@ -63,6 +63,88 @@
              (lambda () "test-ws")))
     (should (equal (claude-repl--buffer-relative-path) "src/bar.el"))))
 
+;;;; ---- claude-repl--select-line-range ----
+
+(ert-deftest claude-repl-cmd-test-select-line-range/single-line ()
+  "With END-LINE omitted, the region spans exactly START-LINE."
+  (with-temp-buffer
+    (insert "l1\nl2\nl3\nl4\nl5\n")
+    (claude-repl--select-line-range 3)
+    (should (= (line-number-at-pos (region-beginning)) 3))
+    (should (= (line-number-at-pos (region-end)) 3))))
+
+(ert-deftest claude-repl-cmd-test-select-line-range/multi-line ()
+  "A START..END range marks every line in the inclusive span."
+  (with-temp-buffer
+    (insert "l1\nl2\nl3\nl4\nl5\n")
+    (claude-repl--select-line-range 2 4)
+    (should (= (line-number-at-pos (region-beginning)) 2))
+    (should (= (line-number-at-pos (region-end)) 4))))
+
+(ert-deftest claude-repl-cmd-test-select-line-range/region-covers-full-lines ()
+  "The region runs from START-LINE's bol to END-LINE's eol."
+  (with-temp-buffer
+    (insert "aaa\nbbb\nccc\nddd\n")
+    (claude-repl--select-line-range 2 3)
+    (should (equal (buffer-substring-no-properties (region-beginning) (region-end))
+                   "bbb\nccc"))))
+
+(ert-deftest claude-repl-cmd-test-select-line-range/end-before-start-clamps ()
+  "An END-LINE below START-LINE is clamped up to START-LINE (single line)."
+  (with-temp-buffer
+    (insert "l1\nl2\nl3\nl4\n")
+    (claude-repl--select-line-range 3 1)
+    (should (= (line-number-at-pos (region-beginning)) 3))
+    (should (= (line-number-at-pos (region-end)) 3))))
+
+(ert-deftest claude-repl-cmd-test-select-line-range/start-below-one-floors ()
+  "A START-LINE below 1 is floored to the first line."
+  (with-temp-buffer
+    (insert "l1\nl2\nl3\n")
+    (claude-repl--select-line-range 0)
+    (should (= (line-number-at-pos (region-beginning)) 1))))
+
+(ert-deftest claude-repl-cmd-test-select-line-range/point-at-start ()
+  "Point is left at the beginning of START-LINE after selection."
+  (with-temp-buffer
+    (insert "l1\nl2\nl3\nl4\n")
+    (claude-repl--select-line-range 2 4)
+    (should (= (line-number-at-pos (point)) 2))
+    (should (= (point) (line-beginning-position)))))
+
+(ert-deftest claude-repl-cmd-test-select-line-range/widens-narrowed-buffer ()
+  "A narrowed buffer is widened so out-of-restriction lines are reachable."
+  (with-temp-buffer
+    (insert "l1\nl2\nl3\nl4\nl5\n")
+    (narrow-to-region (point-min) (progn (goto-char (point-min)) (line-end-position)))
+    (claude-repl--select-line-range 4)
+    (should (= (line-number-at-pos (region-beginning)) 4))))
+
+;;;; ---- claude-repl-link-code ----
+
+(ert-deftest claude-repl-cmd-test-link-code/opens-file-and-selects-range ()
+  "link-code visits FILE and activates the requested line range in it."
+  (let ((tmp (make-temp-file "claude-repl-link-" nil ".txt"
+                             "one\ntwo\nthree\nfour\nfive\n")))
+    (unwind-protect
+        (progn
+          (claude-repl-link-code tmp 2 4)
+          (let ((buf (get-file-buffer tmp)))
+            (should buf)
+            (with-current-buffer buf
+              (should (= (line-number-at-pos (region-beginning)) 2))
+              (should (= (line-number-at-pos (region-end)) 4)))))
+      (when (get-file-buffer tmp) (kill-buffer (get-file-buffer tmp)))
+      (delete-file tmp))))
+
+(ert-deftest claude-repl-cmd-test-link-code/returns-a-window ()
+  "link-code returns the window the file was displayed in."
+  (let ((tmp (make-temp-file "claude-repl-link-" nil ".txt" "a\nb\nc\n")))
+    (unwind-protect
+        (should (window-live-p (claude-repl-link-code tmp 1)))
+      (when (get-file-buffer tmp) (kill-buffer (get-file-buffer tmp)))
+      (delete-file tmp))))
+
 ;;;; ---- claude-repl--format-file-ref ----
 
 (ert-deftest claude-repl-cmd-test-format-file-ref/no-region ()
