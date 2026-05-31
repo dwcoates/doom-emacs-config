@@ -514,9 +514,14 @@ FUNCTION is called with (WS RAW) where WS is the workspace name and RAW is the i
 
 (defun claude-repl--posthook-reset-prefix-counter (ws _raw)
   "Reset the metaprompt prefix counter for workspace WS.
-Resets to 1 (just past the firing point) so the next send does not
-immediately re-trigger the metaprompt."
-  (claude-repl--ws-put ws :prefix-counter 1))
+Resets to 0 — the same value a freshly-initialized workspace starts at
+\(see `claude-repl--initialize-claude') — so the first send after a
+`/clear' re-injects the metaprompt.  A `/clear' wipes Claude's context,
+including the previously-prepended guidelines, so the next prompt must
+re-establish them exactly as the first prompt of a new session does.
+Resetting to 1 instead would skip a full period before re-injecting,
+leaving Claude without guidelines in the interim."
+  (claude-repl--ws-put ws :prefix-counter 0))
 
 (defun claude-repl--posthook-mark-done (ws _raw)
   "Mark workspace WS's claude-state as :done.

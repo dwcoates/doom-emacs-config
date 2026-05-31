@@ -1365,18 +1365,31 @@ the file means a stale variable that won't reflect file edits."
 ;;;; ---- Tests: posthooks ----
 
 (ert-deftest claude-repl-test-posthook-reset-prefix-counter ()
-  "`/clear' posthook resets the prefix counter to 1."
+  "`/clear' posthook resets the prefix counter to 0."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :prefix-counter 42)
     (claude-repl--posthook-reset-prefix-counter "ws1" "/clear")
-    (should (= (claude-repl--ws-get "ws1" :prefix-counter) 1))))
+    (should (= (claude-repl--ws-get "ws1" :prefix-counter) 0))))
+
+(ert-deftest claude-repl-test-posthook-reset-prefix-counter-fires-next-send ()
+  "After `/clear' reset, the next send re-injects the metaprompt.
+Counter 0 satisfies the firing condition `(zerop (mod counter period))',
+mirroring the first send of a freshly-initialized workspace."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-skip-permissions t)
+          (claude-repl-command-prefix "PREFIX")
+          (claude-repl-prefix-period 3))
+      (claude-repl--ws-put "ws1" :prefix-counter 42)
+      (claude-repl--posthook-reset-prefix-counter "ws1" "/clear")
+      (let ((counter (claude-repl--ws-get "ws1" :prefix-counter)))
+        (should (claude-repl--should-prepend-metaprompt-p "hello" counter))))))
 
 (ert-deftest claude-repl-test-run-send-posthooks-matches-clear ()
   "`claude-repl--run-send-posthooks' fires the /clear hook."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :prefix-counter 42)
     (claude-repl--run-send-posthooks "ws1" "/clear")
-    (should (= (claude-repl--ws-get "ws1" :prefix-counter) 1))))
+    (should (= (claude-repl--ws-get "ws1" :prefix-counter) 0))))
 
 (ert-deftest claude-repl-test-run-send-posthooks-no-match ()
   "Posthooks should not fire for non-matching input."
@@ -1390,7 +1403,7 @@ the file means a stale variable that won't reflect file edits."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :prefix-counter 42)
     (claude-repl--run-send-posthooks "ws1" "/clear  ")
-    (should (= (claude-repl--ws-get "ws1" :prefix-counter) 1))))
+    (should (= (claude-repl--ws-get "ws1" :prefix-counter) 0))))
 
 (ert-deftest claude-repl-test-posthook-mark-done-sets-done ()
   "`claude-repl--posthook-mark-done' sets :claude-state :done for WS."
