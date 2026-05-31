@@ -28,7 +28,13 @@ case "${1:-}" in
     if ! command -v uuidgen >/dev/null 2>&1; then
       die "uuidgen is not available. Rebuild the sandbox image by running .claude/install.sh and try again."
     fi
-    exec bash "$(dirname "$0")/../emit-workspace-commands.sh"
+    # Resolve the sibling script via string-only `dirname` rather than a
+    # literal `..`: this script's install dir (`~/.claude/skills/<skill>`)
+    # is a symlink into a worktree, and a `..` segment is resolved by the
+    # kernel THROUGH that symlink, landing in the worktree (no sibling
+    # there) and failing with exit 127.  Double `dirname` collapses to the
+    # logical `~/.claude/skills` parent without traversing the symlink.
+    exec bash "$(dirname "$(dirname "$0")")/emit-workspace-commands.sh"
     ;;
   ""|-h|--help|help)
     cat <<USAGE >&2

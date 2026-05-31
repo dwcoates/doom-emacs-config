@@ -798,6 +798,44 @@ script. A non-executable or missing file breaks every dispatch."
     (should (file-exists-p run-sh))
     (should (file-executable-p run-sh))))
 
+(ert-deftest claude-repl-test-runtime-eval-code-dispatch-resolves-sibling-through-symlinked-dir ()
+  "`run.sh dispatch' must find `emit-workspace-commands.sh' even when its
+install dir is a symlink into a worktree.
+Regression guard for the exit-127 bug: the dispatch path used a literal
+`..', which the kernel resolved THROUGH the symlinked skill dir into the
+worktree (no sibling there).  This builds that exact layout and asserts
+dispatch exits 0 (resolves the install-dir sibling), which fails under
+the old `..' form and passes under the string-only `dirname' form."
+  (skip-unless (executable-find "bash"))
+  (skip-unless (executable-find "uuidgen"))
+  (let* ((src-dir (expand-file-name
+                   (or claude-repl-local-skills-src-dir
+                       (error "claude-repl-local-skills-src-dir is unset"))))
+         (checked-in-run-sh (expand-file-name "runtime-eval-code/run.sh" src-dir))
+         (root (make-temp-file "claude-repl-dispatch-" t))
+         ;; The "worktree" the skill dir really lives in; crucially its
+         ;; PARENT has no emit-workspace-commands.sh, mirroring production.
+         (worktree-rec (expand-file-name "worktree/runtime-eval-code" root))
+         ;; The install layout where the sibling DOES exist.
+         (install (expand-file-name "install" root))
+         (install-link (expand-file-name "runtime-eval-code" install))
+         (install-emit (expand-file-name "emit-workspace-commands.sh" install)))
+    (unwind-protect
+        (progn
+          (make-directory worktree-rec t)
+          (make-directory install t)
+          (copy-file checked-in-run-sh
+                     (expand-file-name "run.sh" worktree-rec) t nil nil t)
+          (with-temp-file install-emit
+            (insert "#!/usr/bin/env bash\nexit 0\n"))
+          (set-file-modes install-emit #o755)
+          (make-symbolic-link worktree-rec install-link t)
+          (should (= 0 (call-process
+                        "bash" nil nil nil
+                        (expand-file-name "run.sh" install-link)
+                        "dispatch"))))
+      (delete-directory root t))))
+
 (ert-deftest claude-repl-test-managed-local-skills-no-workspace-eval ()
   "The legacy `workspace-eval' skill name must NOT be present.
 Regression guard: it was renamed/absorbed into `runtime-eval-code'.
