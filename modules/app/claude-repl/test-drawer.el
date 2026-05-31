@@ -1296,6 +1296,16 @@ not MERGING."
                                        :merging         t)
     (should (eq (claude-repl-drawer--workspace-section "ws") :merged))))
 
+(ert-deftest claude-repl-drawer-test-workspace-section-merge-conflict-routes-to-merged ()
+  "`:repl-state :merge-conflict' buckets the workspace under MERGED, not
+MERGING.  A real cherry-pick conflict awaits human resolution and is
+NOT a member of the merge queue, so it must leave the MERGING bucket
+(which holds queue members only) and group with the other terminal
+merge outcomes under MERGED."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :repl-state :merge-conflict)
+    (should (eq (claude-repl-drawer--workspace-section "ws") :merged))))
+
 (ert-deftest claude-repl-drawer-test-workspace-section-hidden ()
   "Non-merged hidden workspaces land in :hidden."
   (claude-repl-test--with-clean-state

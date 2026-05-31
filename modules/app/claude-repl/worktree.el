@@ -3678,11 +3678,15 @@ declined OR interactive `--check-cherry-pick-conflict' aborted).  The
 drawer surfaces the 💥 badge so the user can tell a conflict failure
 from a vterm-death or silent git failure.
 
-Clears `:merging' and `:merge-completed' so the workspace exits the
-MERGING bucket and does not land in MERGED.  Keeps `:claude-state'
-untouched (unlike `--mark-merge-failed') because the workspace's vterm
-is still alive — the user can keep typing into it after they resolve
-the conflict outside.
+Clears `:merging' and `:merge-completed' so the workspace's
+render-status resolves to `:merge-conflict'.  This is NOT re-enqueued
+onto `claude-repl--merge-queue' (the merge attempt has ended and now
+awaits human resolution), so the workspace is no longer a merge-queue
+member and the drawer buckets it under MERGED — never MERGING, which
+holds queue members only — distinguished there by the 💥 glyph.  Keeps
+`:claude-state' untouched (unlike `--mark-merge-failed') because the
+workspace's vterm is still alive — the user can keep typing into it
+after they resolve the conflict outside.
 
 Set via the conflict-specific signal `claude-repl-merge-conflict-error'
 raised by `claude-repl--check-cherry-pick-conflict' and
