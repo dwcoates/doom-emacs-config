@@ -10,6 +10,17 @@ Hands an elisp snippet to the running Emacs and receives the value (plus any `pr
 
 This is the editor-instrumentation entry point. It does not touch git, perspectives, or the Claude session — it only hands code to the editor and waits for the response.
 
+## When To Reach For This
+
+Reach for this skill **proactively** — do not wait to be told to "eval some elisp."
+
+- **Whenever the user suggests or implies an unexpected or incorrect runtime state** for which actually investigating the live editor is useful, dispatch a snippet to inspect the relevant state rather than reasoning from source alone.
+  - Example: the user complains a UI element is the wrong color → proactively read that element's backing state (the face, the variable, the workspace plist key that drives it) instead of guessing from the code.
+  - The source tells you what *should* happen; only the running editor tells you what *is* happening.
+- **Always prefer this skill over asking the user to run elisp themselves.**
+  - If you would otherwise type "can you run `(...)` and paste the result?", dispatch it through this skill instead and read the roundtripped result.
+  - The sole exception is genuinely dangerous code (destructive mutations, anything irreversible) — surface that to the user and let them decide rather than dispatching it silently.
+
 ## Arguments
 
 | Argument | Behaviour |
@@ -137,6 +148,40 @@ Three reasons to reach for this pairing over a bare `/profile`:
 - **You need to inspect editor state before/after** the measured operation (e.g. confirm a cache was warm) — wrap your snippet with `princ` calls and they roundtrip in the `;; printed:` section of the eval response.
 
 `/profile` already wraps step 1 + step 3 — pair it with a single `/runtime-eval-code` dispatch in between for an end-to-end "measure exactly this code" run.
+
+## Cheatsheet
+
+Common operational inspections. Each entry: when to reach for it, the snippet to send, and what to watch out for. Snippets return data (or `princ` it) so the value roundtrips in the eval response.
+
+### Check the merge queue
+
+- **When**: the user reports a merge that didn't land, a workspace stuck "waiting to merge," or suspected serialization behind an in-flight cherry-pick.
+- **Send**:
+  ```elisp
+  (or claude-repl--merge-queue "<empty>")
+  ```
+- **Watch out for**:
+  - Empty state is `nil`, not an empty list — the `or` above surfaces `"<empty>"` so the response isn't ambiguous.
+  - Each element is a plist `(:source-ws WS :silent BOOL :auto-resolve BOOL)`; the queue is FIFO (head is next to run).
+  - The queue only holds *deferred* merges (parked behind an active cherry-pick) — an empty queue does not mean no merge is in flight, just that none are waiting.
+
+### Check the workspaces hashmap
+
+- **When**: the user reports a workspace in the wrong state (stale priority, wrong env, missing buffer, a tombstone that should be gone) or you need to confirm a UI element's backing per-workspace state.
+- **Send** (all live workspaces, one key of interest at a time keeps output small):
+  ```elisp
+  (mapcar (lambda (ws)
+            (list ws :priority (plist-get (gethash ws claude-repl--workspaces) :priority)))
+          (claude-repl--live-ws-names))
+  ```
+  - To dump one workspace's full plist (readably), target it by name:
+    ```elisp
+    (pp-to-string (gethash "<WS>" claude-repl--workspaces))
+    ```
+- **Watch out for**:
+  - Use `claude-repl--live-ws-names` (not `hash-table-keys`) — the raw keys include **tombstoned** entries (`:nuked-at` set) that liveness-filtered UI ignores.
+  - Values are large nested plists (`:vterm-buffer`, `:active-env` structs, etc.) — dumping the whole hash with `pp` is verbose and can hit the 8000-char truncation, so project the one or two keys you care about.
+  - A key bound to `nil` is distinct from an absent key; internals use the `claude-repl--ws-absent` sentinel to tell them apart, so don't read a `nil` `plist-get` as "key missing."
 
 ## Notes
 
