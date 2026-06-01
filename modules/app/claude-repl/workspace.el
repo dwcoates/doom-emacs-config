@@ -441,15 +441,20 @@ Returns one of (in precedence order; first match wins):
                     Same actionable rationale as :merge-conflict.
 
   :merged         — `:repl-state' is `:merged' OR `:merge-completed'
-                    is t (workspace's branch landed in its source;
-                    terminal positive).  The setter writes both in
-                    lockstep — either signal alone suffices.
-                    Accepting `:merge-completed' as equivalent here
-                    preserves the original drawer behavior across the
-                    brief transition window where `:merge-completed t'
-                    is set before `:repl-state :merged' has been
-                    written (and where `:merging' may not yet be
-                    cleared).
+                    is t AND no active `:claude-state' is present
+                    (workspace's branch landed in its source; terminal
+                    positive).  The setter writes both in lockstep —
+                    either signal alone suffices.  Accepting
+                    `:merge-completed' as equivalent here preserves the
+                    original drawer behavior across the brief transition
+                    window where `:merge-completed t' is set before
+                    `:repl-state :merged' has been written (and where
+                    `:merging' may not yet be cleared).
+                    When an active `:claude-state' is present the
+                    merged badge is suppressed and the claude-state
+                    wins: a merged workspace that resumes work (unusual
+                    but possible) should surface the live run-state
+                    rather than the stale merge badge.
 
   :merging        — `:merging' plist key is `t' (worker thread is
                     actively running cherry-pick).  Beats :dead so a
@@ -508,7 +513,13 @@ than whether Claude was thinking when the merge hit it)."
        ;; two writes (and any tests fixtures that set only one of
        ;; them) still resolves to :merged.  See `--ws-render-status'
        ;; docstring for the rationale.
-       ((or (eq repl :merged) (eq completed t)) :merged)
+       ;; Guard: when an active `:claude-state' is present the merged
+       ;; badge is suppressed so a merged workspace that resumes work
+       ;; surfaces its live run-state rather than the stale merge
+       ;; badge.  Without the (null claude) guard this arm would fire
+       ;; even when claude is :thinking / :done / etc., hiding those
+       ;; states behind the static 🔀 label.
+       ((and (or (eq repl :merged) (eq completed t)) (null claude)) :merged)
        ;; :merging plist key (in-flight worker) dominates :dead so
        ;; the merge UI signal survives the pre-merge UI teardown.
        ((eq merging t)                    :merging)
