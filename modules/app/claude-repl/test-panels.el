@@ -168,7 +168,7 @@
   "vterm-width-fraction defcustom defaults to 0.60."
   (should (boundp 'claude-repl-vterm-width-fraction))
   (should (floatp claude-repl-vterm-width-fraction))
-  (should (= (default-value 'claude-repl-vterm-width-fraction) 0.60)))
+  (should (= (default-value 'claude-repl-vterm-width-fraction) 0.40)))
 
 ;;;; ---- Tests: Docstring accuracy (migrated) ----
 
