@@ -407,6 +407,13 @@ call sequence and the resulting `claude-repl--workspaces' state."
                      (`("-C" "/tmp/parent/foo" "rev-parse" "--abbrev-ref" "HEAD")
                       "DWC/foo")
                      (_ (error "unmocked git-string: %S" args)))))
+                ((symbol-function 'claude-repl--git-string-quiet)
+                 (lambda (&rest args)
+                   (pcase args
+                     ;; --git-common-dir for git-cwd resolution.
+                     (`("-C" "/tmp/parent/foo" "rev-parse" "--git-common-dir")
+                      "/tmp/repo/.git")
+                     (_ (error "unmocked git-string-quiet: %S" args)))))
                 ((symbol-function 'file-directory-p)
                  (lambda (_p) nil))
                 ((symbol-function 'file-exists-p)

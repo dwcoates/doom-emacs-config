@@ -313,7 +313,13 @@ overlay.  Tests the workspace-anchored restoration path."
     (cl-letf (((symbol-function 'claude-repl--ws-name-for-dir)
                (lambda (dir)
                  (cond ((equal dir "/tmp/parent") "parent")
-                       ((equal dir "/tmp/child")  "child")))))
+                       ((equal dir "/tmp/child")  "child"))))
+              ((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
       (claude-repl-drawer-test--with-buffer
         (claude-repl-drawer--ensure-expanded-set)
         (puthash "parent" t claude-repl-drawer--expanded-set)
@@ -341,14 +347,21 @@ overlay.  Tests the workspace-anchored restoration path."
   "TAB toggle adds the entry to the expanded-set on first press, removes on second."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "ws" :priority "p1" :project-dir "/tmp/")
+    (cl-letf (((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
+              ((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
       (claude-repl-drawer--goto-first-workspace)
-      (cl-letf (((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore))
+      (progn
         (claude-repl-drawer-toggle-expand)
         (should (claude-repl-drawer--expanded-p "ws"))
         (claude-repl-drawer-toggle-expand)
-        (should-not (claude-repl-drawer--expanded-p "ws"))))))
+        (should-not (claude-repl-drawer--expanded-p "ws")))))))
 
 (ert-deftest claude-repl-drawer-test-render-detail-lines-shows-cached-fields ()
   "When an entry is expanded, render emits its `:detail-*' fields."
@@ -360,6 +373,12 @@ overlay.  Tests the workspace-anchored restoration path."
                                        :detail-master-ahead 7
                                        :detail-last-commit "fix: thing"
                                        :detail-last-commit-time "5 minutes ago")
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--ensure-expanded-set)
       (puthash "ws" t claude-repl-drawer--expanded-set)
@@ -368,7 +387,7 @@ overlay.  Tests the workspace-anchored restoration path."
         (should (string-match-p "feature/x" text))
         (should (string-match-p "ahead master:" text))
         (should (string-match-p "fix: thing" text))
-        (should (string-match-p "5 minutes ago" text))))))
+        (should (string-match-p "5 minutes ago" text)))))))
 
 (ert-deftest claude-repl-drawer-test-format-duration ()
   "`--format-duration' produces short human-readable strings."
@@ -386,6 +405,12 @@ overlay.  Tests the workspace-anchored restoration path."
      :detail-branch       "feature/x"
      :detail-master-ahead 5
      :detail-last-commit  "fix: thing")
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--ensure-expanded-set)
       (puthash "ws" t claude-repl-drawer--expanded-set)
@@ -400,7 +425,7 @@ overlay.  Tests the workspace-anchored restoration path."
                                  (if (listp f) f (list f))))))))
         (should (face-at "feature/x" 'claude-repl-drawer-detail-branch))
         (should (face-at "5"          'claude-repl-drawer-detail-ahead-master))
-        (should (face-at "fix: thing" 'claude-repl-drawer-detail-last-commit))))))
+        (should (face-at "fix: thing" 'claude-repl-drawer-detail-last-commit)))))))
 
 ;;;; ---- Per-entry action commands ----
 
@@ -506,6 +531,12 @@ into MERGED, so re-attempts must be possible."
           (progn
             (claude-repl-drawer-test--register
              "merged" :merge-completed t :project-dir tmp)
+            (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+                       (lambda (&rest args)
+                         (pcase args
+                           (`("-C" ,dir "rev-parse" "--git-common-dir")
+                            (concat (file-name-as-directory dir) ".git"))
+                           (_ (error "unmocked git-string-quiet: %S" args))))))
             (claude-repl-drawer-test--with-buffer
               (claude-repl-drawer--render)
               (claude-repl-drawer--goto-first-workspace)
@@ -519,7 +550,7 @@ into MERGED, so re-attempts must be possible."
                            (lambda () (setq merge-called t))))
                   (claude-repl-drawer-merge-into-master))
                 (should (equal established-with (list "merged" tmp)))
-                (should merge-called))))
+                (should merge-called)))))
         (delete-directory tmp t)))))
 
 (ert-deftest claude-repl-drawer-test-merge-child-on-merged-reactivates-then-merges ()
@@ -531,6 +562,12 @@ invokes the standard `claude-repl-workspace-merge'."
           (progn
             (claude-repl-drawer-test--register
              "merged" :merge-completed t :project-dir tmp)
+            (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+                       (lambda (&rest args)
+                         (pcase args
+                           (`("-C" ,dir "rev-parse" "--git-common-dir")
+                            (concat (file-name-as-directory dir) ".git"))
+                           (_ (error "unmocked git-string-quiet: %S" args))))))
             (claude-repl-drawer-test--with-buffer
               (claude-repl-drawer--render)
               (claude-repl-drawer--goto-first-workspace)
@@ -544,7 +581,7 @@ invokes the standard `claude-repl-workspace-merge'."
                            (lambda () (setq merge-called t))))
                   (claude-repl-drawer-merge-child))
                 (should (equal established-with (list "merged" tmp)))
-                (should merge-called))))
+                (should merge-called)))))
         (delete-directory tmp t)))))
 
 (ert-deftest claude-repl-drawer-test-merge-into-master-on-merged-clears-merge-flags ()
@@ -562,6 +599,12 @@ re-attempted merge runs against a live persp)."
              :merge-completed-at 1234567890.0
              :repl-state :merged
              :project-dir tmp)
+            (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+                       (lambda (&rest args)
+                         (pcase args
+                           (`("-C" ,dir "rev-parse" "--git-common-dir")
+                            (concat (file-name-as-directory dir) ".git"))
+                           (_ (error "unmocked git-string-quiet: %S" args))))))
             (claude-repl-drawer-test--with-buffer
               (claude-repl-drawer--render)
               (claude-repl-drawer--goto-first-workspace)
@@ -574,7 +617,7 @@ re-attempted merge runs against a live persp)."
                 (claude-repl-drawer-merge-into-master))
               (should-not (claude-repl--ws-get "merged" :merge-completed))
               (should-not (claude-repl--ws-get "merged" :merge-completed-at))
-              (should-not (claude-repl--ws-get "merged" :repl-state))))
+              (should-not (claude-repl--ws-get "merged" :repl-state)))))
         (delete-directory tmp t)))))
 
 (ert-deftest claude-repl-drawer-test-new-child-on-merged-errors ()
@@ -1758,6 +1801,12 @@ torn down at merge time)."
           (progn
             (claude-repl-drawer-test--register
              "merged-ws" :merge-completed t :project-dir tmp)
+            (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+                       (lambda (&rest args)
+                         (pcase args
+                           (`("-C" ,dir "rev-parse" "--git-common-dir")
+                            (concat (file-name-as-directory dir) ".git"))
+                           (_ (error "unmocked git-string-quiet: %S" args))))))
             (claude-repl-drawer-test--with-buffer
               (claude-repl-drawer--render)
               (claude-repl-drawer--goto-first-workspace)
@@ -1771,7 +1820,7 @@ torn down at merge time)."
                            (lambda (ws &rest _) (setq switched-to ws))))
                   (claude-repl-drawer-visit))
                 (should (equal established-with (list "merged-ws" tmp)))
-                (should-not switched-to))))
+                (should-not switched-to)))))
         (delete-directory tmp t)))))
 
 (ert-deftest claude-repl-drawer-test-visit-on-merged-clears-merge-flags ()
@@ -1788,6 +1837,12 @@ plist keys so the entry leaves the MERGED bucket on next render."
              :merge-completed-at 1234567890.0
              :repl-state :merged
              :project-dir tmp)
+            (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+                       (lambda (&rest args)
+                         (pcase args
+                           (`("-C" ,dir "rev-parse" "--git-common-dir")
+                            (concat (file-name-as-directory dir) ".git"))
+                           (_ (error "unmocked git-string-quiet: %S" args))))))
             (claude-repl-drawer-test--with-buffer
               (claude-repl-drawer--render)
               (claude-repl-drawer--goto-first-workspace)
@@ -1800,7 +1855,7 @@ plist keys so the entry leaves the MERGED bucket on next render."
               (should-not (claude-repl--ws-get "merged-ws" :merge-completed-at))
               (should-not (claude-repl--ws-get "merged-ws" :repl-state))
               (should-not (eq (claude-repl-drawer--workspace-section "merged-ws")
-                              :merged))))
+                              :merged)))))
         (delete-directory tmp t)))))
 
 (ert-deftest claude-repl-drawer-test-visit-on-merged-persists-cleared-flags ()
@@ -1813,6 +1868,12 @@ the workspace right back into MERGED on the next Emacs restart."
           (progn
             (claude-repl-drawer-test--register
              "merged-ws" :merge-completed t :project-dir tmp)
+            (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+                       (lambda (&rest args)
+                         (pcase args
+                           (`("-C" ,dir "rev-parse" "--git-common-dir")
+                            (concat (file-name-as-directory dir) ".git"))
+                           (_ (error "unmocked git-string-quiet: %S" args))))))
             (claude-repl-drawer-test--with-buffer
               (claude-repl-drawer--render)
               (claude-repl-drawer--goto-first-workspace)
@@ -1822,7 +1883,7 @@ the workspace right back into MERGED on the next Emacs restart."
                           ((symbol-function 'claude-repl--establish-workspace)
                            (lambda (&rest _) nil)))
                   (claude-repl-drawer-visit))
-                (should (equal state-saved-for "merged-ws")))))
+                (should (equal state-saved-for "merged-ws"))))))
         (delete-directory tmp t)))))
 
 (ert-deftest claude-repl-drawer-test-visit-on-merged-without-project-dir-errors ()
@@ -1832,6 +1893,12 @@ needs a valid worktree dir to establish into."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register
      "merged-ws" :merge-completed t :project-dir "/nonexistent/path/here")
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
       (claude-repl-drawer--goto-first-workspace)
@@ -1839,7 +1906,7 @@ needs a valid worktree dir to establish into."
         (cl-letf (((symbol-function 'claude-repl--establish-workspace)
                    (lambda (&rest _) (setq established-called t))))
           (should-error (claude-repl-drawer-visit) :type 'user-error))
-        (should-not established-called)))))
+        (should-not established-called))))))
 
 (ert-deftest claude-repl-drawer-test-visit-redirects-from-side-window-before-switch ()
   "`claude-repl-drawer-visit' leaves a side-window selection before calling

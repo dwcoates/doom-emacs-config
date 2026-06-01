@@ -560,9 +560,13 @@ guard's UNMOCKED error if not `cl-letf'-ed)."
     (cl-letf (((symbol-function 'claude-repl--recent-commit-emojis)
                (lambda (&optional _n) recents)))
       (dotimes (_ 20)
+        ;; Pass the branch explicitly via BRANCH-OVERRIDE so the
+        ;; pipeline never reaches the git boundary.  The current
+        ;; convention emits `<type>(<branch>): <emoji> <description>',
+        ;; so the emoji is the third whitespace-delimited token.
         (let* ((result (claude-repl--emoji-prefix-commit-message
-                        "feat(claude-repl): something"))
-               (emoji (car (split-string result " "))))
+                        "feat(claude-repl): something" "claude-repl"))
+               (emoji (nth 1 (split-string result " "))))
           (should (equal emoji allowed)))))))
 
 (provide 'test-emoji)
