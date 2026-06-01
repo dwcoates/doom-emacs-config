@@ -162,6 +162,14 @@
                    'fake-window))))
       (should-not (claude-repl--orphaned-panel-p "*claude-panel-input-abcd1234*")))))
 
+;;;; ---- Tests: Defcustom defaults ----
+
+(ert-deftest claude-repl-test-panels-vterm-width-fraction-default ()
+  "vterm-width-fraction defcustom defaults to 0.60."
+  (should (boundp 'claude-repl-vterm-width-fraction))
+  (should (floatp claude-repl-vterm-width-fraction))
+  (should (= (default-value 'claude-repl-vterm-width-fraction) 0.60)))
+
 ;;;; ---- Tests: Docstring accuracy (migrated) ----
 
 (ert-deftest claude-repl-test-panels-show-panels-docstring ()
