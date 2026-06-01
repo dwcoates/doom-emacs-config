@@ -145,6 +145,78 @@
       (when (get-file-buffer tmp) (kill-buffer (get-file-buffer tmp)))
       (delete-file tmp))))
 
+(ert-deftest claude-repl-cmd-test-link-code/with-workspace-selects-line-range ()
+  "link-code with WORKSPACE selects the line range inside the buffer."
+  (let ((tmp (make-temp-file "claude-repl-link-" nil ".txt"
+                             "one\ntwo\nthree\nfour\nfive\n")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--ws-resolve-persp) (lambda (_ws) nil))
+                  ((symbol-function 'claude-repl--ws-add-buffer) #'ignore))
+          (claude-repl-link-code tmp 2 4 "my-ws")
+          (let ((buf (get-file-buffer tmp)))
+            (should buf)
+            (with-current-buffer buf
+              (should (= (line-number-at-pos (region-beginning)) 2))
+              (should (= (line-number-at-pos (region-end)) 4)))))
+      (when (get-file-buffer tmp) (kill-buffer (get-file-buffer tmp)))
+      (delete-file tmp))))
+
+(ert-deftest claude-repl-cmd-test-link-code/with-workspace-adds-buffer-to-persp ()
+  "link-code with WORKSPACE calls ws-add-buffer with the resolved persp."
+  (let ((tmp (make-temp-file "claude-repl-link-" nil ".txt" "a\nb\nc\n"))
+        (fake-persp (list 'fake-persp))
+        (add-buffer-calls nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--ws-resolve-persp)
+                   (lambda (_ws) fake-persp))
+                  ((symbol-function 'claude-repl--ws-add-buffer)
+                   (lambda (buf persp switch)
+                     (push (list buf persp switch) add-buffer-calls))))
+          (claude-repl-link-code tmp 1 nil "my-ws")
+          (should (= (length add-buffer-calls) 1))
+          (should (eq (nth 1 (car add-buffer-calls)) fake-persp))
+          (should (null (nth 2 (car add-buffer-calls)))))
+      (when (get-file-buffer tmp) (kill-buffer (get-file-buffer tmp)))
+      (delete-file tmp))))
+
+(ert-deftest claude-repl-cmd-test-link-code/with-workspace-returns-buffer ()
+  "link-code with WORKSPACE returns the buffer, not a window."
+  (let ((tmp (make-temp-file "claude-repl-link-" nil ".txt" "a\nb\nc\n")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--ws-resolve-persp) (lambda (_ws) nil))
+                  ((symbol-function 'claude-repl--ws-add-buffer) #'ignore))
+          (let ((result (claude-repl-link-code tmp 1 nil "my-ws")))
+            (should (bufferp result))
+            (should (not (windowp result)))))
+      (when (get-file-buffer tmp) (kill-buffer (get-file-buffer tmp)))
+      (delete-file tmp))))
+
+(ert-deftest claude-repl-cmd-test-link-code/with-workspace-no-window-created ()
+  "link-code with WORKSPACE does not create a new window."
+  (let ((tmp (make-temp-file "claude-repl-link-" nil ".txt" "a\nb\nc\n"))
+        (windows-before nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--ws-resolve-persp) (lambda (_ws) nil))
+                  ((symbol-function 'claude-repl--ws-add-buffer) #'ignore))
+          (setq windows-before (window-list))
+          (claude-repl-link-code tmp 1 nil "my-ws")
+          (should (equal (length windows-before) (length (window-list)))))
+      (when (get-file-buffer tmp) (kill-buffer (get-file-buffer tmp)))
+      (delete-file tmp))))
+
+(ert-deftest claude-repl-cmd-test-link-code/with-workspace-skips-add-when-persp-nil ()
+  "link-code with WORKSPACE skips ws-add-buffer when persp resolves to nil."
+  (let ((tmp (make-temp-file "claude-repl-link-" nil ".txt" "a\nb\nc\n"))
+        (add-called nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--ws-resolve-persp) (lambda (_ws) nil))
+                  ((symbol-function 'claude-repl--ws-add-buffer)
+                   (lambda (&rest _) (setq add-called t))))
+          (claude-repl-link-code tmp 1 nil "missing-ws")
+          (should (not add-called)))
+      (when (get-file-buffer tmp) (kill-buffer (get-file-buffer tmp)))
+      (delete-file tmp))))
+
 ;;;; ---- claude-repl--format-file-ref ----
 
 (ert-deftest claude-repl-cmd-test-format-file-ref/no-region ()

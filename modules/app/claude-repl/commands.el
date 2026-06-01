@@ -196,29 +196,49 @@ into view."
       (goto-char beg)
       (activate-mark))))
 
-(defun claude-repl-link-code (file start-line &optional end-line)
-  "Open FILE in a left-side window and select lines START-LINE..END-LINE.
-Code-linking entry point for the runtime-eval-code skill: visits FILE,
-displays its buffer in a window docked to the leftmost edge of the
-frame, selects the inclusive line range START-LINE..END-LINE (END-LINE
-defaults to START-LINE) via `claude-repl--select-line-range', recenters
-on it, and selects the window so the user lands on the code.
+(defun claude-repl-link-code (file start-line &optional end-line workspace)
+  "Open FILE and select lines START-LINE..END-LINE.
+Code-linking entry point for the runtime-eval-code skill.
+
+When WORKSPACE is non-nil (a workspace name string), stages the file
+in WORKSPACE's perspective without stealing focus: the buffer is
+visited via `find-file-noselect', the line range is selected inside
+the buffer via `claude-repl--select-line-range', and the buffer is
+registered into WORKSPACE's perspective via `claude-repl--ws-add-buffer'
+so the user sees it when they next switch to WORKSPACE.  Returns the
+buffer in this case (no window is created, so returning a window is
+not meaningful).
+
+When WORKSPACE is nil, falls back to the focus-taking path (original
+behaviour): displays the buffer in a window docked to the leftmost
+edge of the frame, selects the range, recenters, and selects the
+window so the user lands on the code.  Returns the window, or nil
+when display failed.
 
 FILE is run through `expand-file-name', so pass an absolute path.
-START-LINE and END-LINE are 1-indexed inclusive line numbers.  Returns
-the window the file was shown in, or nil when display failed."
-  (let* ((buf (find-file-noselect (expand-file-name file)))
-         (win (display-buffer
-               buf
-               '((display-buffer-in-direction)
-                 (direction . leftmost)
-                 (window-width . 0.5)))))
-    (when win
-      (with-selected-window win
-        (claude-repl--select-line-range start-line end-line)
-        (recenter))
-      (select-window win))
-    win))
+START-LINE and END-LINE are 1-indexed inclusive line numbers."
+  (let ((buf (find-file-noselect (expand-file-name file))))
+    (if workspace
+        ;; No-focus path: stage the buffer in the originating workspace.
+        (progn
+          (with-current-buffer buf
+            (claude-repl--select-line-range start-line end-line))
+          (let ((persp (claude-repl--ws-resolve-persp workspace)))
+            (when persp
+              (claude-repl--ws-add-buffer buf persp nil)))
+          buf)
+      ;; Focus path: original behaviour for backward-compat / direct use.
+      (let ((win (display-buffer
+                  buf
+                  '((display-buffer-in-direction)
+                    (direction . leftmost)
+                    (window-width . 0.5)))))
+        (when win
+          (with-selected-window win
+            (claude-repl--select-line-range start-line end-line)
+            (recenter))
+          (select-window win))
+        win))))
 
 ;;;; Diff analysis infrastructure
 
