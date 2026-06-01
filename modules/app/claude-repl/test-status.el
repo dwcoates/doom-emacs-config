@@ -1630,6 +1630,21 @@ gate-tweak is needed here."
         (claude-repl--update-all-workspace-states)
         (should poll-called)))))
 
+(ert-deftest claude-repl-test-update-all-workspace-states-now-does-not-poll ()
+  "update-all-workspace-states-now must NOT call poll-workspace-notifications.
+The poll is a file-notify fallback that belongs only on the 1Hz timer
+path (`update-all-workspace-states').  Calling it on every event-driven
+refresh (workspace-switch, frame-focus, show-panels) would add a
+redundant `directory-files' scan to each."
+  (claude-repl-test--with-clean-state
+    (let ((poll-called nil))
+      (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications)
+                 (lambda () (setq poll-called t)))
+                ((symbol-function 'claude-repl--update-all-workspace-states--step)
+                 (lambda (&rest _) nil)))
+        (claude-repl--update-all-workspace-states-now)
+        (should-not poll-called)))))
+
 ;;;; ---- Tests: mark-dead-vterm ----
 
 (ert-deftest claude-repl-test-mark-dead-vterm-sets-dead-and-clears-claude-state ()
@@ -1872,7 +1887,8 @@ The counter feeds the mod-N git gate."
   "Timer entrypoint skips its tick when a chain is already in flight.
 Setting `--update-in-flight' to a recent float-time simulates a chain that
 started just now and hasn't finalized; the next call should skip the actual
-pass (no poll-workspace-notifications), but the tabline toggle still flips."
+update chain, but both the tabline toggle and poll-workspace-notifications
+still fire (poll runs before the in-flight check on the timer path)."
   (claude-repl-test--with-clean-state
     (let ((poll-called nil)
           (toggle-before claude-repl--tabline-space-toggle))
@@ -1880,7 +1896,8 @@ pass (no poll-workspace-notifications), but the tabline toggle still flips."
       (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications)
                  (lambda () (setq poll-called t))))
         (claude-repl--update-all-workspace-states)
-        (should-not poll-called)
+        ;; Poll fires on every timer tick regardless of in-flight state.
+        (should poll-called)
         ;; Toggle survives the in-flight guard so the tab-bar keeps animating.
         (should-not (eq toggle-before claude-repl--tabline-space-toggle))))))
 
@@ -1945,14 +1962,21 @@ callers see a fresh state."
 (ert-deftest claude-repl-test-update-all-now-bypasses-in-flight-flag ()
   "The unguarded `-now' entrypoint runs even when a chain is in flight.
 Event-driven callers (frame-focus, workspace-switch, show-panels) want to
-kick a refresh regardless of the timer's in-flight reentry guard."
+kick a refresh regardless of the timer's in-flight reentry guard.
+Does NOT call poll-workspace-notifications — that is the timer path's job."
   (claude-repl-test--with-clean-state
-    (let ((poll-called nil))
+    (let ((step-called nil)
+          (poll-called nil))
       (setq claude-repl--update-in-flight (float-time))
       (cl-letf (((symbol-function 'claude-repl--poll-workspace-notifications)
-                 (lambda () (setq poll-called t))))
+                 (lambda () (setq poll-called t)))
+                ((symbol-function 'claude-repl--update-all-workspace-states--step)
+                 (lambda (&rest _) (setq step-called t))))
         (claude-repl--update-all-workspace-states-now)
-        (should poll-called)))))
+        ;; Chain fires despite in-flight flag
+        (should step-called)
+        ;; Poll does NOT fire from the event-driven path
+        (should-not poll-called)))))
 
 (ert-deftest claude-repl-test-update-all-now-does-not-flip-tabline-toggle ()
   "Only the periodic-timer entrypoint flips the tabline toggle.

@@ -1495,8 +1495,15 @@ redisplay through other paths.
 For event-driven callers that want to kick a refresh independent of
 the 1Hz reentry guard.  Concurrent chains from rapid sync calls are
 permitted (rare in practice); each tracks its own snapshot and
-finalize, and the last to finalize clears the flag harmlessly."
-  (claude-repl--poll-workspace-notifications)
+finalize, and the last to finalize clears the flag harmlessly.
+
+Polling (`claude-repl--poll-workspace-notifications') is intentionally
+NOT called here.  The poll is a file-notify fallback — it has no
+purpose on event-driven refreshes (workspace-switch, frame-focus,
+show-panels) and its `directory-files' scan on every call is
+unnecessary overhead on those paths.  The periodic timer
+\(`claude-repl--update-all-workspace-states') is the sole caller of
+the poll."
   (setq claude-repl--update-tick-counter (1+ claude-repl--update-tick-counter))
   ;; Filter to live workspaces only — tombstoned entries have no
   ;; vterm/process to probe and would burn git status calls for no UI.
@@ -1551,6 +1558,10 @@ the in-flight slot."
   ;; `claude-repl--tabline-space-toggle'.  Happens before the in-flight
   ;; check so the animation survives long chains.
   (claude-repl--force-tab-bar-redraw)
+  ;; Poll here (timer path only) so the file-notify fallback scan runs once
+  ;; per second rather than on every event-driven refresh.  See
+  ;; `--update-all-workspace-states-now' for why it was moved here.
+  (claude-repl--poll-workspace-notifications)
   (unless (claude-repl--update-in-flight-p)
     (claude-repl--update-all-workspace-states-now)))
 
