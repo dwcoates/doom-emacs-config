@@ -482,17 +482,6 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
            "Non-top-level entries should not have any line spacing between entries"
            claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-tldr-entries-wrap-at-column-110 ()
-  "TLDR spec must require each entry in the tree to be hard-wrapped at a maximum column width of 110 characters."
-  (should (string-match-p
-           "Each entry in the TLDR tree MUST be hard-wrapped at a maximum column width of 110 characters"
-           claude-repl-command-prefix))
-  (should (string-match-p
-           "broken onto continuation lines that align under the entry's text"
-           claude-repl-command-prefix))
-  (should (string-match-p
-           "not under the ASCII connectors"
-           claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-depth-scales-with-response-length ()
   "TLDR spec must mandate that tree depth scales with the conceptual length of the response itself."
@@ -555,6 +544,30 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
            claude-repl-command-prefix))
   (should (string-match-p
            "forcing uniform depth across siblings defeats the purpose of using depth as a salience signal"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-defaults-to-minimal-detail ()
+  "TLDR spec must direct the tree to default to minimal detail, covering only critical points."
+  (should (string-match-p
+           "tree MUST default to minimal detail"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "covering only the critical points"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-broad-tree-can-be-expanded ()
+  "TLDR spec must state that a broad tree can always be expanded by the user asking for further explanation."
+  (should (string-match-p
+           "A broad tree can always be expanded by the user asking for further explanation"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-err-toward-omission ()
+  "TLDR spec must direct erring toward omission when in doubt whether a detail warrants inclusion."
+  (should (string-match-p
+           "Err toward omission"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "when in doubt whether a detail warrants inclusion"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-per-level-concision ()
