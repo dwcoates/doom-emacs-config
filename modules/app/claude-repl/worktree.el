@@ -1078,6 +1078,15 @@ should jump to the new ws) are not silently undone."
         :priority effective-priority
         :fork-session-id fork-session-id
         :source-ws-dir source-dir)
+      ;; Cache branch names at construction time so --merge-base-ancestor-args
+      ;; can skip the per-tick synchronous rev-parse calls on the warm path.
+      (let ((branch (claude-repl--git-string-quiet "-C" path "rev-parse" "--abbrev-ref" "HEAD")))
+        (when (and branch (not (string-empty-p branch)) (not (string-prefix-p "fatal" branch)))
+          (claude-repl--ws-put ws :branch-name branch)))
+      (when source-dir
+        (let ((parent-branch (claude-repl--git-string-quiet "-C" source-dir "rev-parse" "--abbrev-ref" "HEAD")))
+          (when (and parent-branch (not (string-empty-p parent-branch)) (not (string-prefix-p "fatal" parent-branch)))
+            (claude-repl--ws-put ws :parent-branch-name parent-branch))))
       (claude-repl--reorder-workspace-by-priority ws)
       (claude-repl--setup-worktree-session ws-id path ws force-sandbox)
       (when (fboundp 'claude-repl--events-record)
@@ -4446,7 +4455,8 @@ within INTERVAL of the previous successful refresh."
   :type 'integer
   :group 'claude-repl)
 
-(defun claude-repl--merge-base-ancestor-args (source-dir target-dir)
+(defun claude-repl--merge-base-ancestor-args (source-dir target-dir
+                                               &optional source-branch target-branch)
   "Return (SOURCE-BRANCH . TARGET-BRANCH) for an ancestry check, or nil.
 Resolves both worktrees' current branches via `git rev-parse
 --abbrev-ref HEAD' and returns nil when the check should be skipped:
@@ -4458,18 +4468,33 @@ The same-SHA bail covers the fresh-child case: `git worktree add -b
 CHILD PATH PARENT-HEAD' starts CHILD at PARENT's tip, so the ancestry
 check would trivially succeed (a commit is its own ancestor) and the
 empty child would be mis-bucketed as merged until it acquires its
-first commit.  Shared by the sync and async ancestry paths."
+first commit.  Shared by the sync and async ancestry paths.
+
+SOURCE-BRANCH and TARGET-BRANCH are optional cached branch-name hints.
+When provided and valid (non-empty, non-fatal), the two `git rev-parse
+--abbrev-ref HEAD' calls are skipped, reducing sync git I/O from 4
+calls to 2 on the warm path.  `--finalize-worktree-workspace' populates
+`:branch-name' and `:parent-branch-name' on the workspace plist at
+creation time so `--async-refresh-branch-merged' can supply these hints."
   (when (and source-dir target-dir)
-    (let ((source-branch (claude-repl--git-string-quiet
-                          "-C" source-dir "rev-parse" "--abbrev-ref" "HEAD"))
-          (target-branch (claude-repl--git-string-quiet
-                          "-C" target-dir "rev-parse" "--abbrev-ref" "HEAD")))
-      (when (and source-branch target-branch
-                 (not (string-empty-p source-branch))
-                 (not (string-empty-p target-branch))
-                 (not (string-prefix-p "fatal" source-branch))
-                 (not (string-prefix-p "fatal" target-branch))
-                 (not (string= source-branch target-branch)))
+    (let* ((sb (if (and source-branch
+                        (not (string-empty-p source-branch))
+                        (not (string-prefix-p "fatal" source-branch)))
+                   source-branch
+                 (claude-repl--git-string-quiet
+                  "-C" source-dir "rev-parse" "--abbrev-ref" "HEAD")))
+           (tb (if (and target-branch
+                        (not (string-empty-p target-branch))
+                        (not (string-prefix-p "fatal" target-branch)))
+                   target-branch
+                 (claude-repl--git-string-quiet
+                  "-C" target-dir "rev-parse" "--abbrev-ref" "HEAD"))))
+      (when (and sb tb
+                 (not (string-empty-p sb))
+                 (not (string-empty-p tb))
+                 (not (string-prefix-p "fatal" sb))
+                 (not (string-prefix-p "fatal" tb))
+                 (not (string= sb tb)))
         (let ((source-sha (claude-repl--git-string-quiet
                            "-C" source-dir "rev-parse" "HEAD"))
               (target-sha (claude-repl--git-string-quiet
@@ -4480,7 +4505,7 @@ first commit.  Shared by the sync and async ancestry paths."
                      (not (string-prefix-p "fatal" source-sha))
                      (not (string-prefix-p "fatal" target-sha))
                      (not (string= source-sha target-sha)))
-            (cons source-branch target-branch)))))))
+            (cons sb tb)))))))
 
 (defun claude-repl--async-refresh-branch-merged (ws)
   "Async refresh of `:branch-merged' cache for workspace WS.
@@ -4499,7 +4524,9 @@ ran within `claude-repl-branch-merged-refresh-interval' seconds."
       (when (> (- now last) claude-repl-branch-merged-refresh-interval)
         (claude-repl--ws-put ws :branch-merged-last-check now)
         (when-let* ((branches (claude-repl--merge-base-ancestor-args
-                               ws-dir parent-dir)))
+                               ws-dir parent-dir
+                               (claude-repl--ws-get ws :branch-name)
+                               (claude-repl--ws-get ws :parent-branch-name))))
           (let* ((default-directory ws-dir)
                  (proc (claude-repl--make-process-git
                         (format "claude-repl-merge-%s" ws)

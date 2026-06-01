@@ -4289,7 +4289,8 @@ JSON, so it eagerly resolves at entry-point time."
               ((symbol-function '+workspace-new) (lambda (_ws) nil))
               ((symbol-function 'claude-repl--setup-worktree-session)
                (lambda (&rest _) nil))
-              ((symbol-function 'claude-repl--path-canonical) #'identity))
+              ((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) "")))
       (claude-repl--finalize-worktree-workspace
        "/tmp/new-wt" "new-ws" nil nil nil nil nil "/tmp/source-repo/")
       (should (equal (claude-repl--ws-get "new-ws" :source-ws-dir)
@@ -4303,7 +4304,8 @@ JSON, so it eagerly resolves at entry-point time."
               ((symbol-function '+workspace-new) (lambda (_ws) nil))
               ((symbol-function 'claude-repl--setup-worktree-session)
                (lambda (&rest _) nil))
-              ((symbol-function 'claude-repl--path-canonical) #'identity))
+              ((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) "")))
       (claude-repl--finalize-worktree-workspace
        "/tmp/new-wt" "new-ws" nil nil nil nil nil nil)
       (should (null (claude-repl--ws-get "new-ws" :source-ws-dir))))))
@@ -4320,6 +4322,7 @@ Reorder must run after `apply-workspace-properties' so the new workspace's
                 ((symbol-function 'claude-repl--setup-worktree-session)
                  (lambda (&rest _) nil))
                 ((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) ""))
                 ((symbol-function 'claude-repl--reorder-workspace-by-priority)
                  (lambda (ws)
                    (setq reorder-called-with
@@ -4379,7 +4382,8 @@ Reorder must run after `apply-workspace-properties' so the new workspace's
                (lambda (&rest _) nil))
               ((symbol-function 'claude-repl--reorder-workspace-by-priority)
                (lambda (&rest _) nil))
-              ((symbol-function 'claude-repl--path-canonical) #'identity))
+              ((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) "")))
       (claude-repl--finalize-worktree-workspace
        "/tmp/new-wt" "child-ws" nil nil nil nil nil "/tmp/parent/")
       (should (equal (claude-repl--ws-get "child-ws" :priority) "p1")))))
@@ -4396,7 +4400,8 @@ Reorder must run after `apply-workspace-properties' so the new workspace's
                (lambda (&rest _) nil))
               ((symbol-function 'claude-repl--reorder-workspace-by-priority)
                (lambda (&rest _) nil))
-              ((symbol-function 'claude-repl--path-canonical) #'identity))
+              ((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) "")))
       (claude-repl--finalize-worktree-workspace
        "/tmp/new-wt" "child-ws" nil "p3" nil nil nil "/tmp/parent/")
       (should (equal (claude-repl--ws-get "child-ws" :priority) "p3")))))
@@ -4414,7 +4419,8 @@ Reorder must run after `apply-workspace-properties' so the new workspace's
                (lambda (&rest _) nil))
               ((symbol-function 'claude-repl--repo-default-priority-for-path)
                (lambda (_path) nil))
-              ((symbol-function 'claude-repl--path-canonical) #'identity))
+              ((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) "")))
       (claude-repl--finalize-worktree-workspace
        "/tmp/new-wt" "child-ws" nil nil nil nil nil "/tmp/parent/")
       (should-not (claude-repl--ws-get "child-ws" :priority)))))
@@ -4435,7 +4441,8 @@ Reorder must run after `apply-workspace-properties' so the new workspace's
               ((symbol-function 'claude-repl--repo-default-priority-for-path)
                (lambda (path)
                  (when (equal path "/tmp/new-wt") "p3")))
-              ((symbol-function 'claude-repl--path-canonical) #'identity))
+              ((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) "")))
       (claude-repl--finalize-worktree-workspace
        "/tmp/new-wt" "child-ws" nil nil nil nil nil "/tmp/parent/")
       (should (equal (claude-repl--ws-get "child-ws" :priority) "p3")))))
@@ -4452,7 +4459,8 @@ Reorder must run after `apply-workspace-properties' so the new workspace's
                (lambda (&rest _) nil))
               ((symbol-function 'claude-repl--repo-default-priority-for-path)
                (lambda (_path) "p3"))
-              ((symbol-function 'claude-repl--path-canonical) #'identity))
+              ((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) "")))
       (claude-repl--finalize-worktree-workspace
        "/tmp/new-wt" "child-ws" nil "p1" nil nil nil nil)
       (should (equal (claude-repl--ws-get "child-ws" :priority) "p1")))))
@@ -4471,7 +4479,8 @@ Reorder must run after `apply-workspace-properties' so the new workspace's
                (lambda (&rest _) nil))
               ((symbol-function 'claude-repl--repo-default-priority-for-path)
                (lambda (_path) "p3"))
-              ((symbol-function 'claude-repl--path-canonical) #'identity))
+              ((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) "")))
       (claude-repl--finalize-worktree-workspace
        "/tmp/new-wt" "child-ws" nil nil nil nil nil "/tmp/parent/")
       (should (equal (claude-repl--ws-get "child-ws" :priority) "p2")))))
@@ -7466,6 +7475,123 @@ were reached without the wrapper stub."
         (claude-repl--async-refresh-branch-merged "ws")
         (should-not spawned)))))
 
+;;;; ---- Tests: finalize-worktree-workspace branch caching ----
+
+(ert-deftest claude-repl-test-finalize-worktree-workspace-caches-branch-name ()
+  "Finalize stores the worktree's current branch as :branch-name on the plist."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+               (lambda (&rest _) nil))
+              ((symbol-function '+workspace-new) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--setup-worktree-session)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/new-wt" "rev-parse" "--abbrev-ref" "HEAD") "my-branch")
+                   (_ "")))))
+      (claude-repl--finalize-worktree-workspace
+       "/tmp/new-wt" "new-ws" nil nil nil nil nil nil)
+      (should (equal (claude-repl--ws-get "new-ws" :branch-name) "my-branch")))))
+
+(ert-deftest claude-repl-test-finalize-worktree-workspace-caches-parent-branch-name ()
+  "Finalize stores the parent dir's branch as :parent-branch-name when source-dir given."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+               (lambda (&rest _) nil))
+              ((symbol-function '+workspace-new) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--setup-worktree-session)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/new-wt" "rev-parse" "--abbrev-ref" "HEAD") "child")
+                   (`("-C" "/tmp/source/" "rev-parse" "--abbrev-ref" "HEAD") "master")
+                   (_ "")))))
+      (claude-repl--finalize-worktree-workspace
+       "/tmp/new-wt" "new-ws" nil nil nil nil nil "/tmp/source/")
+      (should (equal (claude-repl--ws-get "new-ws" :branch-name) "child"))
+      (should (equal (claude-repl--ws-get "new-ws" :parent-branch-name) "master")))))
+
+(ert-deftest claude-repl-test-finalize-worktree-workspace-skips-parent-branch-when-nil ()
+  "No :parent-branch-name set when source-dir is nil."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+               (lambda (&rest _) nil))
+              ((symbol-function '+workspace-new) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--setup-worktree-session)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/new-wt" "rev-parse" "--abbrev-ref" "HEAD") "my-branch")
+                   (_ "")))))
+      (claude-repl--finalize-worktree-workspace
+       "/tmp/new-wt" "new-ws" nil nil nil nil nil nil)
+      (should-not (claude-repl--ws-get "new-ws" :parent-branch-name)))))
+
+;;;; ---- Tests: merge-base-ancestor-args branch hints ----
+
+(ert-deftest claude-repl-test-merge-base-ancestor-args-uses-branch-hints ()
+  "When valid branch hints are supplied, skips the rev-parse --abbrev-ref calls."
+  (let ((git-calls nil))
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (push args git-calls)
+                 (pcase args
+                   ;; SHA calls still expected
+                   (`("-C" "/tmp/child" "rev-parse" "HEAD") "aaa111")
+                   (`("-C" "/tmp/parent" "rev-parse" "HEAD") "bbb222")
+                   (_ (error "unexpected git call: %S" args))))))
+      (let ((result (claude-repl--merge-base-ancestor-args
+                     "/tmp/child" "/tmp/parent" "child-branch" "master")))
+        (should (equal result '("child-branch" . "master")))
+        ;; Only the two SHA calls fired; no branch-name rev-parse calls
+        (should (= (length git-calls) 2))
+        (should (cl-every (lambda (c) (member "HEAD" c)) git-calls))))))
+
+(ert-deftest claude-repl-test-merge-base-ancestor-args-falls-back-without-hints ()
+  "Without branch hints, all four rev-parse calls still fire."
+  (let ((git-calls nil))
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (push args git-calls)
+                 (pcase args
+                   (`("-C" "/tmp/child" "rev-parse" "--abbrev-ref" "HEAD") "child")
+                   (`("-C" "/tmp/parent" "rev-parse" "--abbrev-ref" "HEAD") "master")
+                   (`("-C" "/tmp/child" "rev-parse" "HEAD") "aaa111")
+                   (`("-C" "/tmp/parent" "rev-parse" "HEAD") "bbb222")
+                   (_ (error "unexpected git call: %S" args))))))
+      (claude-repl--merge-base-ancestor-args "/tmp/child" "/tmp/parent")
+      (should (= (length git-calls) 4)))))
+
+;;;; ---- Tests: async-refresh-branch-merged passes cached branches ----
+
+(ert-deftest claude-repl-test-async-refresh-branch-merged-passes-cached-branches ()
+  "Passes :branch-name and :parent-branch-name plist values as hints to ancestor-args."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws" :project-dir "/some/")
+    (claude-repl--ws-put "ws" :branch-name "feature")
+    (claude-repl--ws-put "ws" :parent-branch-name "master")
+    (let ((captured-hints nil))
+      (cl-letf (((symbol-function 'claude-repl--ws-dir)
+                 (lambda (_) "/some/"))
+                ((symbol-function 'claude-repl--ws-merge-parent-dir)
+                 (lambda (_) "/parent/"))
+                ((symbol-function 'claude-repl--branch-merge-check-in-progress-p)
+                 (lambda (_) nil))
+                ((symbol-function 'claude-repl--merge-base-ancestor-args)
+                 (lambda (_src _tgt sb tb)
+                   (setq captured-hints (list sb tb))
+                   (cons sb tb)))
+                ((symbol-function 'claude-repl--make-process-git)
+                 (lambda (&rest _) :proc)))
+        (claude-repl--async-refresh-branch-merged "ws")
+        (should (equal captured-hints '("feature" "master")))))))
+
 ;;;; ---- Tests: ws-name-for-dir (reverse lookup) ----
 
 (ert-deftest claude-repl-test-ws-name-for-dir-nil-arg ()
@@ -7849,6 +7975,7 @@ must not steal focus away from whatever the user is currently doing."
                 ((symbol-function 'claude-repl--path-canonical) #'identity)
                 ((symbol-function 'claude-repl--repo-default-priority-for-path)
                  (lambda (_path) nil))
+                ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) ""))
                 ;; Simulate the bug: `+workspace-new' switches the current
                 ;; persp away from the caller's workspace.
                 ((symbol-function '+workspace-new)
@@ -7883,6 +8010,7 @@ by the restore step."
                 ((symbol-function 'claude-repl--path-canonical) #'identity)
                 ((symbol-function 'claude-repl--repo-default-priority-for-path)
                  (lambda (_path) nil))
+                ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) ""))
                 ((symbol-function '+workspace-new) #'ignore)
                 ((symbol-function '+workspace-current-name)
                  (lambda () current-persp))
