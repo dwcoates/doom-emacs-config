@@ -747,6 +747,50 @@ unification."
     (claude-repl--ws-put "ws1" :repl-state :merged)
     (should (eq :merged (claude-repl--ws-render-status "ws1")))))
 
+(ert-deftest claude-repl-test-ws-render-status-merged-no-claude-state-yields-merged ()
+  "`:repl-state :merged' with no active claude-state yields :merged.
+A merged workspace that has not resumed work shows the 🔀 badge."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/x")
+    (claude-repl--ws-put "ws1" :repl-state :merged)
+    (should (eq :merged (claude-repl--ws-render-status "ws1")))))
+
+(ert-deftest claude-repl-test-ws-render-status-merged-with-thinking-yields-thinking ()
+  "`:repl-state :merged' + `:claude-state :thinking' → :thinking.
+A merged workspace that resumes work should surface the live run-state
+rather than the stale merge badge."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/x")
+    (claude-repl--ws-put "ws1" :repl-state :merged)
+    (claude-repl--ws-put "ws1" :claude-state :thinking)
+    (should (eq :thinking (claude-repl--ws-render-status "ws1")))))
+
+(ert-deftest claude-repl-test-ws-render-status-merged-with-done-yields-done ()
+  "`:repl-state :merged' + `:claude-state :done' → :done."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/x")
+    (claude-repl--ws-put "ws1" :repl-state :merged)
+    (claude-repl--ws-put "ws1" :claude-state :done)
+    (should (eq :done (claude-repl--ws-render-status "ws1")))))
+
+(ert-deftest claude-repl-test-ws-render-status-merged-with-idle-yields-idle ()
+  "`:repl-state :merged' + `:claude-state :idle' → :idle."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/x")
+    (claude-repl--ws-put "ws1" :repl-state :merged)
+    (claude-repl--ws-put "ws1" :claude-state :idle)
+    (should (eq :idle (claude-repl--ws-render-status "ws1")))))
+
+(ert-deftest claude-repl-test-ws-render-status-merge-completed-with-thinking-yields-thinking ()
+  "`:merge-completed t' + `:claude-state :thinking' → :thinking.
+The merge-completed flag also yields to active claude-states so the
+transition-window case does not hide live work."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :project-dir "/tmp/x")
+    (claude-repl--ws-put "ws1" :merge-completed t)
+    (claude-repl--ws-put "ws1" :claude-state :thinking)
+    (should (eq :thinking (claude-repl--ws-render-status "ws1")))))
+
 (ert-deftest claude-repl-test-ws-render-status-merging-beats-dead ()
   "An in-flight cherry-pick (`:merging t') outranks a dead vterm.
 This is the motivating bug class: pre-merge `--close-workspace
