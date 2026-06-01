@@ -126,29 +126,13 @@
 ;;;; ---- Tests: git-exit-code / git-branch-exists-p ----
 ;;
 ;; The wrappers themselves (`claude-repl--git-exit-code',
-;; `claude-repl--git-branch-exists-p') are the external boundary; per
-;; AGENTS.md "No External Processes or External State in Tests", the
-;; wrappers are mocked in their callers' tests rather than exercised
-;; against a real git binary.  Below we keep tests for
-;; `claude-repl--git-branch-exists-p' that mock its sole dependency
-;; (`claude-repl--git-exit-code') and verify the predicate logic.
-;; The trivial wrapper-of-call-process functions are intentionally not
-;; tested in isolation — there is nothing to test that isn't a tautology
-;; against `call-process'.
-
-(ert-deftest claude-repl-test-git-branch-exists-p-true ()
-  "Existing branch returns non-nil (exit-code 0 from rev-parse --verify)."
-  (cl-letf (((symbol-function 'claude-repl--git-exit-code)
-             (lambda (_root &rest args)
-               (should (equal args '("rev-parse" "--verify" "feature")))
-               0)))
-    (should (claude-repl--git-branch-exists-p "/tmp/repo" "feature"))))
-
-(ert-deftest claude-repl-test-git-branch-exists-p-false ()
-  "Non-existent branch returns nil (non-zero exit-code)."
-  (cl-letf (((symbol-function 'claude-repl--git-exit-code)
-             (lambda (&rest _args) 128)))
-    (should-not (claude-repl--git-branch-exists-p "/tmp/repo" "nonexistent"))))
+;; `claude-repl--git-branch-exists-p', `claude-repl--git-tag-exists-p')
+;; are registered external boundaries; per AGENTS.md "No External
+;; Processes or External State in Tests" / "We test lisp, not external
+;; code", they are mocked in their callers' tests rather than exercised
+;; in isolation.  Tests that did nothing but call these wrappers against
+;; a mocked `--git-exit-code' have been removed — they only re-asserted
+;; the boundary itself, which does not belong in ERT.
 
 ;;;; ---- Tests: parse-worktree-porcelain ----
 
@@ -1518,8 +1502,8 @@ registered canonical `:project-dir'."
     (cl-letf (((symbol-function 'claude-repl--candidate-worktree-path)
                (lambda (&rest _args) "/tmp/repo-worktrees/fresh"))
               ((symbol-function 'file-directory-p) (lambda (_p) nil))
-              ((symbol-function 'claude-repl--git-exit-code)
-               (lambda (&rest _args) 128)))
+              ((symbol-function 'claude-repl--git-branch-exists-p)
+               (lambda (_root _branch) nil)))
       (should-not (claude-repl--workspace-name-collides-p "DWC/fresh" "/tmp/repo")))))
 
 (ert-deftest claude-repl-test-workspace-name-collides-p-in-flight ()
@@ -1578,12 +1562,9 @@ registered canonical `:project-dir'."
     (cl-letf (((symbol-function 'claude-repl--candidate-worktree-path)
                (lambda (&rest _args) "/tmp/repo-worktrees/existing-branch"))
               ((symbol-function 'file-directory-p) (lambda (_p) nil))
-              ((symbol-function 'claude-repl--git-exit-code)
-               (lambda (_root &rest args)
-                 ;; Only the branch-existence probe is reached here; return 0.
-                 (if (equal args '("rev-parse" "--verify" "DWC/existing-branch"))
-                     0
-                   (error "unexpected git-exit-code args: %S" args)))))
+              ;; Only the branch-existence probe is reached here; branch exists.
+              ((symbol-function 'claude-repl--git-branch-exists-p)
+               (lambda (_root _branch) t)))
       (should (claude-repl--workspace-name-collides-p "DWC/existing-branch" "/tmp/repo")))))
 
 (ert-deftest claude-repl-test-workspace-name-collides-p-start-tag ()
@@ -1594,14 +1575,12 @@ registered canonical `:project-dir'."
     (cl-letf (((symbol-function 'claude-repl--candidate-worktree-path)
                (lambda (&rest _args) "/tmp/repo-worktrees/has-tag"))
               ((symbol-function 'file-directory-p) (lambda (_p) nil))
-              ((symbol-function 'claude-repl--git-exit-code)
-               (lambda (_root &rest args)
-                 (cond
-                  ;; Branch does not exist.
-                  ((equal args '("rev-parse" "--verify" "DWC/has-tag")) 128)
-                  ;; Start tag DOES exist.
-                  ((equal args '("rev-parse" "--verify" "refs/tags/start/DWC/has-tag")) 0)
-                  (t (error "unexpected git-exit-code args: %S" args))))))
+              ;; Branch does not exist.
+              ((symbol-function 'claude-repl--git-branch-exists-p)
+               (lambda (_root _branch) nil))
+              ;; Start tag DOES exist.
+              ((symbol-function 'claude-repl--git-tag-exists-p)
+               (lambda (_root _tag) t)))
       (should (claude-repl--workspace-name-collides-p "DWC/has-tag" "/tmp/repo")))))
 
 (ert-deftest claude-repl-test-workspace-name-collides-p-tag-ignored-when-prefix-nil ()
@@ -1612,11 +1591,12 @@ registered canonical `:project-dir'."
     (cl-letf (((symbol-function 'claude-repl--candidate-worktree-path)
                (lambda (&rest _args) "/tmp/repo-worktrees/no-tag-check"))
               ((symbol-function 'file-directory-p) (lambda (_p) nil))
-              ((symbol-function 'claude-repl--git-exit-code)
-               (lambda (_root &rest args)
-                 ;; Branch probe is the only git call reached when prefix is nil.
-                 (if (equal args '("rev-parse" "--verify" "DWC/no-tag-check")) 128
-                   (error "unexpected git-exit-code args (start-tag check should be skipped): %S" args)))))
+              ;; Branch probe is the only predicate reached when prefix is nil.
+              ((symbol-function 'claude-repl--git-branch-exists-p)
+               (lambda (_root _branch) nil))
+              ((symbol-function 'claude-repl--git-tag-exists-p)
+               (lambda (&rest _args)
+                 (error "start-tag check should be skipped when prefix is nil"))))
       (should-not (claude-repl--workspace-name-collides-p "DWC/no-tag-check" "/tmp/repo")))))
 
 ;;;; ---- Tests: disambiguate-workspace-name ----
@@ -1716,8 +1696,8 @@ silently return a colliding name."
     (cl-letf (((symbol-function 'claude-repl--candidate-worktree-path)
                (lambda (&rest _args) "/tmp/repo-worktrees/dup"))
               ((symbol-function 'file-directory-p) (lambda (_p) nil))
-              ((symbol-function 'claude-repl--git-exit-code)
-               (lambda (&rest _args) 128))
+              ((symbol-function 'claude-repl--git-branch-exists-p)
+               (lambda (_root _branch) nil))
               ((symbol-function 'run-with-timer)
                (lambda (_delay _repeat _fn &rest args)
                  (push (nth 1 args) scheduled-names))))
@@ -1808,12 +1788,13 @@ silently return a colliding name."
                (lambda (_root &rest args)
                  (pcase args
                    (`("rev-parse" "--verify" "--quiet" "origin/master") 0)
-                   (`("rev-parse" "--verify" "master") 0) ; via --git-branch-exists-p
                    (`("merge-base" "--is-ancestor" "master" "origin/master") 0)
                    (`("update-ref" "refs/heads/master" "refs/remotes/origin/master")
                     (setq update-ref-args args)
                     0)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--git-branch-exists-p)
+               (lambda (_root _branch) t))
               ((symbol-function 'claude-repl--git-string)
                (lambda (&rest args)
                  (pcase args
@@ -1837,12 +1818,13 @@ silently return a colliding name."
                (lambda (_root &rest args)
                  (pcase args
                    (`("rev-parse" "--verify" "--quiet" "origin/master") 0)
-                   (`("rev-parse" "--verify" "master") 0)
                    ;; Non-zero means local master is NOT an ancestor — diverged.
                    (`("merge-base" "--is-ancestor" "master" "origin/master") 1)
                    (`("update-ref" . ,_) (setq update-ref-called t) 0)
                    (`("merge" . ,_) (setq merge-called t) 0)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--git-branch-exists-p)
+               (lambda (_root _branch) t))
               ((symbol-function 'claude-repl--git-string)
                (lambda (&rest args) (error "unmocked git-string args: %S" args)))
               ((symbol-function 'claude-repl--master-worktree-path)
@@ -1860,11 +1842,12 @@ silently return a colliding name."
                (lambda (_root &rest args)
                  (pcase args
                    (`("rev-parse" "--verify" "--quiet" "origin/master") 0)
-                   (`("rev-parse" "--verify" "master") 0)
                    (`("merge-base" "--is-ancestor" "master" "origin/master") 0)
                    (`("update-ref" . ,_) (setq update-ref-called t) 0)
                    (`("merge" . ,_) (setq merge-called t) 0)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--git-branch-exists-p)
+               (lambda (_root _branch) t))
               ((symbol-function 'claude-repl--git-string)
                (lambda (&rest args)
                  ;; Same SHA on both sides → equal branch.
@@ -1901,9 +1884,10 @@ silently return a colliding name."
                (lambda (_root &rest args)
                  (pcase args
                    (`("rev-parse" "--verify" "--quiet" "origin/master") 0)
-                   ;; Branch-exists-p says master is missing — second cond branch.
-                   (`("rev-parse" "--verify" "master") 128)
-                   (_ (cl-incf extra-calls) 0)))))
+                   (_ (cl-incf extra-calls) 0))))
+              ;; Branch-exists-p says master is missing — second cond branch.
+              ((symbol-function 'claude-repl--git-branch-exists-p)
+               (lambda (_root _branch) nil)))
       (claude-repl--maybe-fast-forward-master "/tmp/repo")
       (should (= extra-calls 0)))))
 
@@ -1916,13 +1900,14 @@ silently return a colliding name."
                (lambda (root &rest args)
                  (pcase args
                    (`("rev-parse" "--verify" "--quiet" "origin/master") 0)
-                   (`("rev-parse" "--verify" "master") 0)
                    (`("merge-base" "--is-ancestor" "master" "origin/master") 0)
                    (`("merge" "--ff-only" "origin/master")
                     (setq merge-call (list root args))
                     0)
                    (`("update-ref" . ,_) (setq update-ref-called t) 0)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--git-branch-exists-p)
+               (lambda (_root _branch) t))
               ((symbol-function 'claude-repl--git-string)
                (lambda (&rest args)
                  (pcase args
@@ -1947,12 +1932,13 @@ silently return a colliding name."
                (lambda (_root &rest args)
                  (pcase args
                    (`("rev-parse" "--verify" "--quiet" "origin/trunk") 0)
-                   (`("rev-parse" "--verify" "trunk") 0)
                    (`("merge-base" "--is-ancestor" "trunk" "origin/trunk") 0)
                    (`("update-ref" "refs/heads/trunk" "refs/remotes/origin/trunk")
                     (setq update-ref-args args)
                     0)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
+              ((symbol-function 'claude-repl--git-branch-exists-p)
+               (lambda (_root _branch) t))
               ((symbol-function 'claude-repl--git-string)
                (lambda (&rest args)
                  (pcase args
@@ -1987,11 +1973,8 @@ silently return a colliding name."
 (ert-deftest claude-repl-test-validate-worktree-creation-existing-branch ()
   "Existing branch signals user-error."
   (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) nil))
-            ((symbol-function 'claude-repl--git-exit-code)
-             (lambda (_root &rest args)
-               ;; Branch-exists-p probe: returning 0 means the branch exists.
-               (if (equal args '("rev-parse" "--verify" "feature")) 0
-                 (error "unmocked git-exit-code args: %S" args)))))
+            ((symbol-function 'claude-repl--git-branch-exists-p)
+             (lambda (_root _branch) t)))
     (should-error (claude-repl--validate-worktree-creation
                    "feature" "/tmp/repo" "feature" "feature" "/nonexistent")
                   :type 'user-error)))
@@ -2000,11 +1983,9 @@ silently return a colliding name."
   "Valid inputs do not signal."
   (let ((claude-repl-worktree-start-tag-prefix nil))
     (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) nil))
-              ((symbol-function 'claude-repl--git-exit-code)
-               (lambda (_root &rest args)
-                 ;; Branch check: 128 = missing → no collision.
-                 (if (equal args '("rev-parse" "--verify" "new-feature")) 128
-                   (error "unmocked git-exit-code args: %S" args)))))
+              ;; Branch missing → no collision.
+              ((symbol-function 'claude-repl--git-branch-exists-p)
+               (lambda (_root _branch) nil)))
       ;; Should not error
       (claude-repl--validate-worktree-creation
        "new-feature" "/tmp/repo" "new-feature" "new-feature" "/nonexistent"))))
@@ -2013,14 +1994,12 @@ silently return a colliding name."
   "Existing start tag (PREFIX+BRANCH) signals user-error."
   (let ((claude-repl-worktree-start-tag-prefix "start/"))
     (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) nil))
-              ((symbol-function 'claude-repl--git-exit-code)
-               (lambda (_root &rest args)
-                 (pcase args
-                   ;; Branch missing.
-                   (`("rev-parse" "--verify" "feature") 128)
-                   ;; Start tag EXISTS.
-                   (`("rev-parse" "--verify" "refs/tags/start/feature") 0)
-                   (_ (error "unmocked git-exit-code args: %S" args))))))
+              ;; Branch missing.
+              ((symbol-function 'claude-repl--git-branch-exists-p)
+               (lambda (_root _branch) nil))
+              ;; Start tag EXISTS.
+              ((symbol-function 'claude-repl--git-tag-exists-p)
+               (lambda (_root _tag) t)))
       (should-error (claude-repl--validate-worktree-creation
                      "feature" "/tmp/repo" "feature" "feature" "/nonexistent")
                     :type 'user-error))))
@@ -2029,11 +2008,13 @@ silently return a colliding name."
   "When start-tag prefix is nil, an existing 'start/feature' tag does not block."
   (let ((claude-repl-worktree-start-tag-prefix nil))
     (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) nil))
-              ((symbol-function 'claude-repl--git-exit-code)
-               (lambda (_root &rest args)
-                 ;; Branch missing.  Start-tag probe MUST NOT fire when prefix is nil.
-                 (if (equal args '("rev-parse" "--verify" "feature")) 128
-                   (error "unmocked git-exit-code args (start-tag probe should be skipped): %S" args)))))
+              ;; Branch missing.
+              ((symbol-function 'claude-repl--git-branch-exists-p)
+               (lambda (_root _branch) nil))
+              ;; Start-tag probe MUST NOT fire when prefix is nil.
+              ((symbol-function 'claude-repl--git-tag-exists-p)
+               (lambda (&rest _args)
+                 (error "start-tag probe should be skipped when prefix is nil"))))
       ;; Should not error
       (claude-repl--validate-worktree-creation
        "feature" "/tmp/repo" "feature" "feature" "/nonexistent"))))
@@ -2054,10 +2035,9 @@ existing worktree."
                  ;; PATH passed in does not exist; only assertion.
                  (cond ((equal p "/tmp/outer-repo/inner/new-wt") nil)
                        (t (error "unexpected file-directory-p arg: %S" p)))))
-              ((symbol-function 'claude-repl--git-exit-code)
-               (lambda (_root &rest args)
-                 (if (equal args '("rev-parse" "--verify" "new-wt")) 128
-                   (error "unmocked git-exit-code args: %S" args)))))
+              ;; Branch missing → no collision.
+              ((symbol-function 'claude-repl--git-branch-exists-p)
+               (lambda (_root _branch) nil)))
       ;; Should not error
       (claude-repl--validate-worktree-creation
        "new-wt" "/tmp/outer-repo" "new-wt" "new-wt" "/tmp/outer-repo/inner/new-wt"))))
@@ -4111,7 +4091,9 @@ liveness flip."
       (cl-letf (((symbol-function 'claude-repl--active-inst)
                  (lambda (_ws) inst))
                 ((symbol-function '+workspace-current-name)
-                 (lambda () "test-ws")))
+                 (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--resolve-current-git-root)
+                 (lambda () "/tmp/cur-repo/")))
         (should-error (claude-repl-fork-worktree-workspace nil)
                       :type 'user-error)))))
 
@@ -4833,7 +4815,9 @@ initial state file."
       (claude-repl--ws-put "source-ws" :active-env :bare-metal)
       (claude-repl--ws-put "source-ws" :bare-metal inst)
       (let ((captured-args nil))
-        (cl-letf (((symbol-function 'run-with-timer)
+        (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
+                   (lambda (&rest _) nil))
+                  ((symbol-function 'run-with-timer)
                    (lambda (_delay _repeat fn &rest args)
                      (setq captured-args args))))
           (claude-repl--handle-create-command
@@ -4849,7 +4833,9 @@ initial state file."
   "handle-create-command without fork_from should pass nil fork-session-id."
   (claude-repl-test--with-clean-state
     (let ((captured-args nil))
-      (cl-letf (((symbol-function 'run-with-timer)
+      (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'run-with-timer)
                  (lambda (_delay _repeat fn &rest args)
                    (setq captured-args args))))
         (claude-repl--handle-create-command
@@ -4895,6 +4881,8 @@ initial state file."
           (resolve-calls 0))
       (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
                  (lambda () (cl-incf resolve-calls) "/ambient/root/"))
+                ((symbol-function 'claude-repl--workspace-name-collides-p)
+                 (lambda (&rest _) nil))
                 ((symbol-function 'run-with-timer)
                  (lambda (_delay _repeat _fn &rest args)
                    (setq captured-args args))))
@@ -4912,6 +4900,8 @@ initial state file."
           (home (expand-file-name "~")))
       (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
                  (lambda () "/ambient/root/"))
+                ((symbol-function 'claude-repl--workspace-name-collides-p)
+                 (lambda (&rest _) nil))
                 ((symbol-function 'run-with-timer)
                  (lambda (_delay _repeat _fn &rest args)
                    (setq captured-args args))))
@@ -5030,7 +5020,9 @@ form collides with `persp-nil-name'."
 timer callback — letting the workspace-generation flow request HEAD without forking."
   (claude-repl-test--with-clean-state
     (let ((captured-args nil))
-      (cl-letf (((symbol-function 'run-with-timer)
+      (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'run-with-timer)
                  (lambda (_delay _repeat _fn &rest args)
                    (setq captured-args args))))
         (claude-repl--handle-create-command
@@ -5840,6 +5832,10 @@ new branch is rooted in."
               ;; and we can capture what got passed to worktree-add.
               ((symbol-function 'claude-repl--async-git)
                (lambda (_label _root _args cb) (funcall cb t "ok")))
+              ;; The fetch callback fast-forwards local master; that path is
+              ;; not under test here, so stub it out before it reaches git.
+              ((symbol-function 'claude-repl--maybe-fast-forward-master)
+               (lambda (&rest _) nil))
               ((symbol-function 'claude-repl--async-worktree-add)
                (lambda (_root _branch _path base &rest _) (setq add-base base))))
       (claude-repl--do-create-worktree-workspace "name" nil nil nil nil nil "master")
@@ -6217,6 +6213,8 @@ Covers the full call the interactive `SPC TAB n' path builds up."
                ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+               ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+               ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) (lambda (&rest _) nil))
                ((symbol-function 'load-file) (lambda (f) (setq loaded-file f))))
       (claude-repl--workspace-merge-do "other-ws")
@@ -6300,6 +6298,7 @@ cherry-pick, with the project-root and source workspace name."
                ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+               ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) (lambda (&rest _) nil))
                ((symbol-function 'load-file) #'ignore)
                ((symbol-function 'claude-repl--tag-merge-completion)
@@ -6345,6 +6344,7 @@ the target workspace before the auto-finish tear-down runs.  Stubs
                ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+               ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
@@ -6367,6 +6367,7 @@ bucket rather than routing into MERGED."
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits)
                 (lambda (_dir _ws _base _br &optional _auto _silent) 'failed))
+               ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
@@ -6393,6 +6394,7 @@ work, not auto-finish a workspace whose commits never landed."
                  ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'claude-repl--cherry-pick-commits)
                   (lambda (_dir _ws _base _br &optional _auto _silent) 'failed))
+                 ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'claude-repl--close-workspace)
                   (lambda (&rest _) (setq close-called t)))
@@ -6417,6 +6419,7 @@ the `merge/<ws>' tag would mislabel an unrelated commit."
                  ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'claude-repl--cherry-pick-commits)
                   (lambda (_dir _ws _base _br &optional _auto _silent) 'failed))
+                 ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'claude-repl--tag-merge-completion)
                   (lambda (_root _ws) (setq tagged t)))
                  ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
@@ -6437,6 +6440,7 @@ showing ❌ despite the latest run landing cleanly."
                ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+               ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
@@ -6456,6 +6460,7 @@ otherwise mark the (now-vterm-less) workspace `:dead'."
                ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+               ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
@@ -6480,6 +6485,7 @@ NOT called — that runs only when the user explicitly presses `x'."
                  ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'claude-repl--cherry-pick-commits)
                   (lambda (_dir _ws _base _br &optional _auto _silent) 'already-incorporated))
+                 ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'claude-repl--tag-merge-completion)
                   (lambda (_root _ws) (setq tagged t)))
                  ((symbol-function 'claude-repl--nuke-one-workspace)
@@ -6514,6 +6520,7 @@ Asserts:
                  ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                  ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+                 ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'claude-repl--close-workspace)
@@ -6597,6 +6604,7 @@ forwarded to the gate must call `--close-workspace' with
                  ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                  ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+                 ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'claude-repl--gns-sockets-close-then)
@@ -6629,6 +6637,7 @@ explicit drawer `x' (`--finish-workspace') removes it."
                  ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                  ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+                 ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'claude-repl--nuke-one-workspace)
@@ -6658,6 +6667,7 @@ whether the defer call was ever made."
                  ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                  ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+                 ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'claude-repl--defer-to-main-thread)
@@ -6678,6 +6688,7 @@ what we want to defer until the user explicitly chooses."
                  ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                  ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+                 ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
@@ -6697,6 +6708,7 @@ drawer can render an age/timestamp once that surfaces in the UI."
                ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+               ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
@@ -6763,6 +6775,7 @@ other repl-states are preserved."
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits)
                 (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+               ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'claude-repl--gns-sockets-close-then)
@@ -6915,6 +6928,7 @@ and enter MERGED in the same operation."
                ((symbol-function 'claude-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
+               ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
@@ -6959,6 +6973,7 @@ cherry-pick begins, not after."
                     (setq merging-mid-flight
                           (claude-repl--ws-get "other-ws" :merging))
                     nil))
+                 ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'claude-repl--nuke-one-workspace) #'ignore)
                  ((symbol-function 'load-file) #'ignore))
@@ -7313,7 +7328,7 @@ must not infinite-loop if it does."
 
 (ert-deftest claude-repl-test-branch-merged-into-p-same-branch ()
   "Returns nil when source and target have the same current branch."
-  (cl-letf (((symbol-function 'claude-repl--git-string)
+  (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
              (lambda (&rest _) "main")))
     (should-not (claude-repl--branch-merged-into-p "/a/" "/b/"))))
 
@@ -7440,6 +7455,9 @@ test-helpers.el would otherwise fire UNMOCKED if the production code
 were reached without the wrapper stub."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws" :project-dir "/some/")
+    ;; Pre-seed the merge-parent-dir cache so resolution succeeds without
+    ;; shelling out through `--master-worktree-path' / `--git-string-quiet'.
+    (claude-repl--ws-put "ws" :merge-parent-dir "/some-parent/")
     (let ((spawned nil))
       (cl-letf (((symbol-function 'claude-repl--branch-merge-check-in-progress-p)
                  (lambda (_) t))
@@ -7566,6 +7584,8 @@ target-dir decision shows up in merge-do's args."
                ((symbol-function 'claude-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'claude-repl--cherry-pick-commits)
                 (lambda (dir _ws _base _br &optional _auto _silent) (setq cherry-pick-dir dir)))
+               ((symbol-function 'claude-repl--tag-merge-completion) #'ignore)
+               ((symbol-function 'claude-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'claude-repl--nuke-one-workspace) (lambda (&rest _) nil))
                ((symbol-function 'load-file) #'ignore))
       (claude-repl--workspace-merge-do "other-ws" "/explicit/target/")
@@ -7693,6 +7713,8 @@ here would open it in the caller's workspace layout, not the new one."
     (claude-repl-test--with-clean-state
       (cl-letf (((symbol-function 'claude-repl--register-projectile-project) #'ignore)
                 ((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function 'claude-repl--repo-default-priority-for-path)
+                 (lambda (&rest _) nil))
                 ((symbol-function '+workspace-new) #'ignore)
                 ((symbol-function 'magit-status)
                  (lambda (&rest _) (setq magit-called t)))
@@ -7713,6 +7735,8 @@ here would open it in the caller's workspace layout, not the new one."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function 'claude-repl--register-projectile-project) #'ignore)
               ((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--repo-default-priority-for-path)
+               (lambda (&rest _) nil))
               ((symbol-function '+workspace-new) #'ignore)
               ((symbol-function 'magit-status) #'ignore)
               ((symbol-function 'claude-repl--remove-doom-dashboard) #'ignore)
@@ -7736,6 +7760,8 @@ leaking the opened buffers into the wrong workspace."
     (claude-repl-test--with-clean-state
       (cl-letf (((symbol-function 'claude-repl--register-projectile-project) #'ignore)
                 ((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function 'claude-repl--repo-default-priority-for-path)
+                 (lambda (&rest _) nil))
                 ((symbol-function '+workspace-new) #'ignore)
                 ((symbol-function 'magit-status) #'ignore)
                 ((symbol-function 'claude-repl--remove-doom-dashboard) #'ignore)
