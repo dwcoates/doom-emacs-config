@@ -34,6 +34,19 @@
 - Installing or uninstalling packages/tools.
 - Operating on files outside the current project.
 
+## Testing
+
+### There is no such thing as a "pre-existing" failing test
+
+- A failing test is a failing test, and the fact that it was already failing before my change NEVER excuses leaving it failing.
+  - "Pre-existing", "not introduced by me", "already broken on the base branch", and similar framings are NOT valid reasons to ignore a failure.
+  - When I encounter any failing test while working, I must drive it to passing, not dismiss it.
+- The ONLY permitted alternative to fixing a failing test is surfacing it to the user, and only when there is genuine ambiguity.
+  - Genuine ambiguity means the correct fix depends on a decision that is mine to make only with the user's input.
+  - In that case I surface the failure and the ambiguity explicitly rather than silently leaving it failing.
+  - Absent such ambiguity, I fix the failure outright.
+- At WORST a failing test is escalated to the user, and at no point is it silently tolerated because of its provenance.
+
 ## Response behavior
 
 ### No rhetorical questions
