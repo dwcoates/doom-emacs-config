@@ -867,12 +867,12 @@ metaprompt must NOT carry the old main-body emoji restriction."
                               claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-no-escaped-backticks-in-inline-code ()
-  "The metaprompt must forbid escaping backticks in inline code and instruct Claude to use raw unescaped backticks."
+  "The metaprompt must instruct Claude to use standard markdown inline code spawns."
   (should (string-match-p
-           "Do NOT escape backticks when denoting inline code"
+           "standard markdown inline code spawns"
            claude-repl-command-prefix))
   (should (string-match-p
-           "let the editor render them as inline code"
+           "renderable inline code"
            claude-repl-command-prefix)))
 
 ;;;; ---- Tests: metaprompt auto-reload ----
