@@ -1890,6 +1890,14 @@ Split out so the public entry point can wrap the body in
       (setq-local truncate-lines nil
                   word-wrap t)
       (claude-repl-drawer--apply-background)
+      ;; Expand the current workspace so its detail lines are visible
+      ;; immediately on open.  Refresh the detail cache only when the
+      ;; workspace was not already expanded to avoid redundant git calls.
+      (when current-ws
+        (claude-repl-drawer--ensure-expanded-set)
+        (unless (gethash current-ws claude-repl-drawer--expanded-set)
+          (claude-repl-drawer--refresh-detail-cache current-ws)
+          (puthash current-ws t claude-repl-drawer--expanded-set)))
       (claude-repl-drawer--render)
       ;; Position cursor on current-ws (or first entry) without
       ;; selecting the drawer window — the bounce hook would redirect
@@ -2091,41 +2099,31 @@ returns to the originating window — see `--call-in-drawer-focused'."
 (defun claude-repl-drawer--sync-cursor-to-current-ws (&rest _)
   "Position drawer cursor on the currently active workspace's entry.
 No-op when the drawer buffer doesn't exist or no current workspace
-can be resolved.  Used by `persp-activated-functions' and the global
-post-command hook to keep the drawer cursor sync'd with the active
-workspace whenever the user isn't actively navigating the drawer.
+can be resolved.  Used by `persp-activated-functions' to keep the
+drawer cursor sync'd with the active workspace on workspace switches.
+
+Expands the current workspace to show its detail lines, refreshing
+the detail cache when the workspace was not already expanded.  Only
+fires on workspace-switch (persp-activated) and explicit drawer-open
+paths — never from the 1Hz poll or focus-change hooks.
 
 Also repositions the current-entry arrow overlay synchronously so the
 arrow snaps to the active workspace immediately, not after the next
-1Hz status-poll re-render.  The buffer-local `post-command-hook'
-doesn't fire here because the actual command is running in a
-different buffer (or via a persp-mode hook), so we mirror its
-overlay-refresh action explicitly."
+1Hz status-poll re-render."
   (when-let* ((buf (get-buffer claude-repl-drawer-buffer-name))
               (current-ws (claude-repl--ws-current-name)))
     (let ((win (get-buffer-window buf t)))
       (with-current-buffer buf
+        (claude-repl-drawer--ensure-expanded-set)
+        (unless (gethash current-ws claude-repl-drawer--expanded-set)
+          (claude-repl-drawer--refresh-detail-cache current-ws)
+          (puthash current-ws t claude-repl-drawer--expanded-set))
+        (claude-repl-drawer--render)
         (when (claude-repl-drawer--goto-workspace-line current-ws)
           (when win (set-window-point win (point)))
           (claude-repl-drawer--update-current-entry-overlay)
           (claude-repl-drawer--center-selection buf))))))
 
-(defvar claude-repl-drawer--last-was-drawer nil
-  "Tracks whether the last command ran with the drawer buffer current.
-Read by `--global-post-command' to detect focus-leave-drawer events.")
-
-(defun claude-repl-drawer--global-post-command ()
-  "Snap drawer cursor to current workspace when focus leaves the drawer.
-Compares current buffer to drawer buffer; on transition `drawer →
-elsewhere' calls `--sync-cursor-to-current-ws'.  Cheap (one buffer
-identity compare) so safe as a global `post-command-hook'."
-  (let* ((buf (get-buffer claude-repl-drawer-buffer-name))
-         (in-drawer (and buf (eq (current-buffer) buf))))
-    (when (and (not in-drawer) claude-repl-drawer--last-was-drawer)
-      (claude-repl-drawer--sync-cursor-to-current-ws))
-    (setq claude-repl-drawer--last-was-drawer in-drawer)))
-
-(add-hook 'post-command-hook #'claude-repl-drawer--global-post-command)
 
 (claude-repl--ws-add-activated-hook
  #'claude-repl-drawer--sync-cursor-to-current-ws)

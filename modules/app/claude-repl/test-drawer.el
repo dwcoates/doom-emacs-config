@@ -899,6 +899,54 @@ the popup is decoupled and manages its own visibility independently."
       (should-not explain-show-called))
     (when-let ((b (get-buffer " *test-drawer-buf*"))) (kill-buffer b))))
 
+(ert-deftest claude-repl-drawer-test-show-expands-current-workspace ()
+  "`drawer-show--inner' adds the current workspace to the expanded-set and
+calls `--refresh-detail-cache' for it before the render."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
+          (cache-called-for nil))
+      (unwind-protect
+          (with-current-buffer buf
+            (claude-repl-drawer-mode)
+            (cl-letf (((symbol-function 'claude-repl-drawer--current-ws)
+                       (lambda () "ws"))
+                      ((symbol-function 'display-buffer)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'claude-repl-drawer--refresh-detail-cache)
+                       (lambda (ws) (push ws cache-called-for)))
+                      ((symbol-function 'claude-repl-window--harden) #'ignore)
+                      ((symbol-function 'claude-repl-drawer--apply-width) #'ignore))
+              (claude-repl-drawer-show--inner))
+            (should (claude-repl-drawer--expanded-p "ws"))
+            (should (member "ws" cache-called-for)))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-drawer-test-show-skips-cache-when-already-expanded ()
+  "`drawer-show--inner' does not call `--refresh-detail-cache' when the
+current workspace is already expanded."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
+          (cache-called 0))
+      (unwind-protect
+          (with-current-buffer buf
+            (claude-repl-drawer-mode)
+            ;; Pre-expand.
+            (claude-repl-drawer--ensure-expanded-set)
+            (puthash "ws" t claude-repl-drawer--expanded-set)
+            (cl-letf (((symbol-function 'claude-repl-drawer--current-ws)
+                       (lambda () "ws"))
+                      ((symbol-function 'display-buffer)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'claude-repl-drawer--refresh-detail-cache)
+                       (lambda (_ws) (setq cache-called (1+ cache-called))))
+                      ((symbol-function 'claude-repl-window--harden) #'ignore)
+                      ((symbol-function 'claude-repl-drawer--apply-width) #'ignore))
+              (claude-repl-drawer-show--inner))
+            (should (= cache-called 0)))
+        (kill-buffer buf)))))
+
 (ert-deftest claude-repl-drawer-test-hide-does-not-touch-explain-config ()
   "`claude-repl-drawer-hide' must not call `--explain-config-hide' —
 the popup is decoupled and manages its own visibility independently."
@@ -1234,20 +1282,71 @@ doesn't fire (e.g. focus elsewhere or persp-mode-driven sync)."
                                "beta")))))
         (kill-buffer buf)))))
 
-(ert-deftest claude-repl-drawer-test-global-post-command-fires-sync-on-leave ()
-  "`--global-post-command' calls sync when transitioning out of the drawer."
+(ert-deftest claude-repl-drawer-test-sync-cursor-expands-current-workspace ()
+  "`--sync-cursor-to-current-ws' adds the current workspace to the expanded-set
+and calls `--refresh-detail-cache' when the workspace was not already expanded."
   (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :priority "p1")
+    (claude-repl-drawer-test--register "beta"  :priority "p2")
     (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
-          (sync-called 0))
+          (cache-called-for nil))
       (unwind-protect
-          (cl-letf (((symbol-function 'claude-repl-drawer--sync-cursor-to-current-ws)
-                     (lambda (&rest _) (setq sync-called (1+ sync-called)))))
-            ;; Simulate "last command was in drawer".
-            (let ((claude-repl-drawer--last-was-drawer t))
-              ;; Now we're elsewhere (not in drawer buffer).
-              (with-temp-buffer
-                (claude-repl-drawer--global-post-command)))
-            (should (= sync-called 1)))
+          (progn
+            (with-current-buffer buf
+              (claude-repl-drawer-mode)
+              (claude-repl-drawer--render))
+            (cl-letf (((symbol-function '+workspace-current-name)
+                       (lambda () "beta"))
+                      ((symbol-function 'claude-repl-drawer--refresh-detail-cache)
+                       (lambda (ws) (push ws cache-called-for))))
+              (claude-repl-drawer--sync-cursor-to-current-ws))
+            (with-current-buffer buf
+              (should (claude-repl-drawer--expanded-p "beta"))
+              (should (member "beta" cache-called-for))))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-drawer-test-sync-cursor-skips-cache-when-already-expanded ()
+  "`--sync-cursor-to-current-ws' does not call `--refresh-detail-cache' when
+the current workspace is already in the expanded-set."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
+          (cache-called 0))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (claude-repl-drawer-mode)
+              (claude-repl-drawer--render)
+              ;; Pre-expand so the cache refresh should be skipped.
+              (claude-repl-drawer--ensure-expanded-set)
+              (puthash "ws" t claude-repl-drawer--expanded-set))
+            (cl-letf (((symbol-function '+workspace-current-name)
+                       (lambda () "ws"))
+                      ((symbol-function 'claude-repl-drawer--refresh-detail-cache)
+                       (lambda (_ws) (setq cache-called (1+ cache-called)))))
+              (claude-repl-drawer--sync-cursor-to-current-ws))
+            (should (= cache-called 0)))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-drawer-test-sync-cursor-calls-render ()
+  "`--sync-cursor-to-current-ws' calls `--render' so expanded state appears
+immediately without waiting for the next 1Hz poll."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
+          (render-called 0))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (claude-repl-drawer-mode))
+            (cl-letf (((symbol-function '+workspace-current-name)
+                       (lambda () "ws"))
+                      ((symbol-function 'claude-repl-drawer--render)
+                       (lambda () (setq render-called (1+ render-called))))
+                      ((symbol-function 'claude-repl-drawer--refresh-detail-cache)
+                       #'ignore))
+              (claude-repl-drawer--sync-cursor-to-current-ws))
+            (should (= render-called 1)))
         (kill-buffer buf)))))
 
 ;;;; ---- Repo grouping ----
@@ -2542,14 +2641,23 @@ already-bound symbols and palette tweaks would require an Emacs restart."
     (should (equal (claude-repl-drawer--state-glyph "busy")
                    (alist-get :thinking claude-repl-drawer-state-icons)))))
 
-(ert-deftest claude-repl-drawer-test-state-glyph-merged-overrides-claude-state ()
-  ":repl-state :merged takes precedence over :claude-state for the glyph."
+(ert-deftest claude-repl-drawer-test-state-glyph-merged-shows-merged-when-no-claude-state ()
+  ":repl-state :merged shows the 🔀 glyph when :claude-state is nil."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "merged-ws"
+                                       :repl-state :merged)
+    (should (equal (claude-repl-drawer--state-glyph "merged-ws")
+                   (alist-get :merged claude-repl-drawer-state-icons)))))
+
+(ert-deftest claude-repl-drawer-test-state-glyph-active-claude-state-beats-merged ()
+  "An active :claude-state wins over :repl-state :merged — a merged workspace
+that resumes work shows its live activity badge rather than the static 🔀."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "merged-ws"
                                        :claude-state :thinking
                                        :repl-state :merged)
     (should (equal (claude-repl-drawer--state-glyph "merged-ws")
-                   (alist-get :merged claude-repl-drawer-state-icons)))))
+                   (alist-get :thinking claude-repl-drawer-state-icons)))))
 
 (ert-deftest claude-repl-drawer-test-state-glyph-merge-conflict-surfaces-collision ()
   ":repl-state :merge-conflict renders the 💥 glyph — a real cherry-pick
