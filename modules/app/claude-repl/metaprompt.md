@@ -78,10 +78,6 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 
 - Top-level entries in the tree should be separated by a newline
   - Non-top-level entries should not have any line spacing between entries
-- Each entry in the TLDR tree MUST be hard-wrapped at a maximum column width of 110 characters.
-  - Any entry whose text would otherwise extend past column 110 is broken onto continuation lines that align under the entry's text (not under the ASCII connectors).
-  - This ensures the tree remains readable at standard editor widths.
-
 ### Depth
 
 - TLDR tree depth MUST scale with the conceptual length of the response itself.
@@ -104,6 +100,10 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 
 ### Content selection
 
+- The tree MUST default to minimal detail, covering only the critical points needed to understand the response.
+  - A broad tree can always be expanded by the user asking for further explanation.
+  - Err toward omission: when in doubt whether a detail warrants inclusion, leave it out.
+  - The user can always ask for expansion of specific branches.
 - Entries at the same level of the tree SHOULD be a bit more concise than the fuller resolution carried by their child subtrees.
   - Not so much more concise that meaning is shed, since dropping content to chase brevity defeats the tree's purpose.
   - Each level reads as a quick scan of its siblings.
