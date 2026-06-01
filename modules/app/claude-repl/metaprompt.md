@@ -87,10 +87,12 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
   - Don't put a trailing branch on a bullet if it's the last of its siblings
     - Of course, such a branch will never connect to a subsequent bullet, because its eminating from a bullet with no next sibling
 
-### Spacing and wrapping
+### Spacing 
 
 - Top-level entries in the tree should be separated by a newline
   - Non-top-level entries should not have any line spacing between entries
+- Do not wrap the lines of any entries at any depth
+
 ### Depth
 
 - TLDR tree depth MUST scale with the conceptual length of the response itself.
@@ -207,8 +209,8 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 
 ### Formatting
 
-- Always use standard markdown inline code spawns -- don't get confused in emacs context and use backtick+apostraphe or any other representation strategy
-- Do NOT escape backticks when denoting inline code -- use raw unescaped backticks and let the editor render them as inline code rather than displaying literal escaped backticks
+- Always use standard markdown inline code spawns
+- Be sure the return the renderable inline code whenever a symbol (code symbol, filename, etc) is referenced!
 
 ### Expansion of prior bullets
 
