@@ -2729,6 +2729,24 @@ through `--initialize-ws-env' for merged entries)."
 
 (defvar recentf-list)
 
+(defun claude-repl--record-last-file-visit ()
+  "Cache the visited file as `:last-file' on the current workspace plist.
+Called from `find-file-hook'; no-op when the visited buffer has no
+file, when there is no registered current workspace, or when the file
+is not inside the workspace's project directory.
+
+Keeps the `:last-file' cache fresh at zero per-switch cost so
+`--most-recent-project-file' can satisfy the warm path with a plist
+lookup instead of a linear `recentf-list' scan."
+  (when-let* ((file buffer-file-name)
+              (ws (claude-repl--ws-current-name))
+              ((gethash ws claude-repl--workspaces))
+              (project-dir (ignore-errors (claude-repl--ws-dir ws)))
+              ((file-in-directory-p file project-dir)))
+    (claude-repl--ws-put ws :last-file file)))
+
+(add-hook 'find-file-hook #'claude-repl--record-last-file-visit)
+
 (defun claude-repl--most-recent-project-file (project-root)
   "Return the most-recently-accessed file under PROJECT-ROOT, or nil.
 Uses `file-in-directory-p' (boundary-aware) rather than
@@ -2736,14 +2754,28 @@ Uses `file-in-directory-p' (boundary-aware) rather than
 file under `/p/foo-bar/' because the prefix isn't terminated at a
 path separator.
 
-Returns nil if `recentf-list' is unbound (recentf not loaded yet) or
-contains no live file under PROJECT-ROOT.  Callers must still verify
-the returned path exists before opening — `recentf-list' lags
-filesystem deletions."
-  (seq-find (lambda (file)
-              (and (file-exists-p file)
-                   (file-in-directory-p file project-root)))
-            (bound-and-true-p recentf-list)))
+Prefers the `:last-file' key on the live workspace for PROJECT-ROOT —
+populated by `claude-repl--record-last-file-visit' whenever a file is
+opened — so the common warm-path is a zero-syscall plist lookup.
+Falls back to scanning `recentf-list' on the cold path (no live
+workspace or no `:last-file' cached yet).
+
+Callers must still verify the returned path exists before opening —
+both the plist cache and `recentf-list' lag filesystem deletions."
+  (when project-root
+    (or
+     ;; Warm path: plist cache populated by find-file-hook — zero syscalls
+     ;; until the file-exists-p guard, which is a single stat vs. the O(N)
+     ;; scan below.
+     (when-let* ((ws (claude-repl--ws-name-for-dir project-root))
+                 (cached (claude-repl--ws-get ws :last-file))
+                 ((file-exists-p cached)))
+       cached)
+     ;; Cold path: scan recentf for first-time project opens / no live ws.
+     (seq-find (lambda (file)
+                 (and (file-exists-p file)
+                      (file-in-directory-p file project-root)))
+               (bound-and-true-p recentf-list)))))
 
 ;;;; Project picker (SPC p p)
 ;;
@@ -3016,11 +3048,18 @@ name."
   (let ((project (or project (claude-repl--read-project-via-picker))))
     (when project
       (claude-repl--ws-switch-project project)
-      (when-let ((recent-file (claude-repl--most-recent-project-file project)))
-        (when (file-exists-p recent-file)
-          (find-file recent-file)))
-      (claude-repl--load-display-state (ignore-errors (claude-repl--ws-current-name))
-                                       project)
+      ;; Defer the file open and display-state disk read so the persp switch
+      ;; completes and Emacs redraws before any blocking I/O fires.  Both are
+      ;; deferred together in one timer so they run in order on the same idle
+      ;; cycle rather than racing across two separate timers.
+      (run-at-time 0 nil
+                   (lambda ()
+                     (when-let ((recent-file (claude-repl--most-recent-project-file project)))
+                       (when (file-exists-p recent-file)
+                         (find-file recent-file)))
+                     (claude-repl--load-display-state
+                      (ignore-errors (claude-repl--ws-current-name))
+                      project)))
       (claude-repl--flash-current-tab))))
 
 ;;;; Workspace cycling (hide-mode aware)

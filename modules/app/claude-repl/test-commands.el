@@ -5068,6 +5068,17 @@ finalization, not a standalone teardown."
 
 ;;;; ---- claude-repl-switch-to-project ----
 
+;; Helper: mock run-at-time to execute the deferred thunk immediately so
+;; switch-to-project tests can assert on find-file / load-display-state
+;; effects without firing a real idle timer.
+(defmacro claude-repl-test--with-sync-run-at-time (&rest body)
+  "Execute BODY with `run-at-time' replaced by an immediate-call shim.
+The shim invokes (funcall FN) for every (run-at-time TIME REPEAT FN)
+call, making deferred closures synchronous in tests."
+  `(cl-letf (((symbol-function 'run-at-time)
+               (lambda (_time _repeat fn &rest _args) (funcall fn))))
+     ,@body))
+
 (ert-deftest claude-repl-cmd-test-switch-to-project/switches-then-hydrates ()
   "switch-to-project switches via projectile, then hydrates priority."
   (claude-repl-test--with-clean-state
@@ -5078,19 +5089,20 @@ finalization, not a standalone teardown."
             (claude-repl-test--seed-file
              (claude-repl--state-file tmp-dir)
              (prin1-to-string '(:priority "p2")))
-            (cl-letf (((symbol-function 'projectile-switch-project-by-name)
-                       (lambda (project) (setq switched-with project)))
-                      ((symbol-function 'claude-repl--most-recent-project-file)
-                       (lambda (_d) nil))
-                      ((symbol-function '+workspace-current-name)
-                       (lambda () "switched-ws"))
-                      ((symbol-function 'force-mode-line-update)
-                       (lambda (&optional _all) nil))
-                      ((symbol-function 'claude-repl-flash-tab)
-                       (lambda (&rest _) nil)))
-              (claude-repl-switch-to-project tmp-dir)
-              (should (equal switched-with tmp-dir))
-              (should (equal (claude-repl--ws-get "switched-ws" :priority) "p2"))))
+            (claude-repl-test--with-sync-run-at-time
+              (cl-letf (((symbol-function 'projectile-switch-project-by-name)
+                         (lambda (project) (setq switched-with project)))
+                        ((symbol-function 'claude-repl--most-recent-project-file)
+                         (lambda (_d) nil))
+                        ((symbol-function '+workspace-current-name)
+                         (lambda () "switched-ws"))
+                        ((symbol-function 'force-mode-line-update)
+                         (lambda (&optional _all) nil))
+                        ((symbol-function 'claude-repl-flash-tab)
+                         (lambda (&rest _) nil)))
+                (claude-repl-switch-to-project tmp-dir)
+                (should (equal switched-with tmp-dir))
+                (should (equal (claude-repl--ws-get "switched-ws" :priority) "p2")))))
         (delete-directory tmp-dir t)))))
 
 (ert-deftest claude-repl-cmd-test-switch-to-project/flashes-activated-ws ()
@@ -5099,18 +5111,19 @@ finalization, not a standalone teardown."
     (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-switch-" t)))
           flashed-ws)
       (unwind-protect
-          (cl-letf (((symbol-function 'projectile-switch-project-by-name)
-                     (lambda (_p) nil))
-                    ((symbol-function 'claude-repl--most-recent-project-file)
-                     (lambda (_d) nil))
-                    ((symbol-function '+workspace-current-name)
-                     (lambda () "switched-ws"))
-                    ((symbol-function 'force-mode-line-update)
-                     (lambda (&optional _all) nil))
-                    ((symbol-function 'claude-repl-flash-tab)
-                     (lambda (ws &rest _) (setq flashed-ws ws))))
-            (claude-repl-switch-to-project tmp-dir)
-            (should (equal flashed-ws "switched-ws")))
+          (claude-repl-test--with-sync-run-at-time
+            (cl-letf (((symbol-function 'projectile-switch-project-by-name)
+                       (lambda (_p) nil))
+                      ((symbol-function 'claude-repl--most-recent-project-file)
+                       (lambda (_d) nil))
+                      ((symbol-function '+workspace-current-name)
+                       (lambda () "switched-ws"))
+                      ((symbol-function 'force-mode-line-update)
+                       (lambda (&optional _all) nil))
+                      ((symbol-function 'claude-repl-flash-tab)
+                       (lambda (ws &rest _) (setq flashed-ws ws))))
+              (claude-repl-switch-to-project tmp-dir)
+              (should (equal flashed-ws "switched-ws"))))
         (delete-directory tmp-dir t)))))
 
 (ert-deftest claude-repl-cmd-test-switch-to-project/opens-most-recent-file ()
@@ -5119,6 +5132,56 @@ finalization, not a standalone teardown."
     (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-switch-" t)))
            (tmp-file (expand-file-name "hello.el" tmp-dir))
            (opened nil))
+      (unwind-protect
+          (progn
+            (with-temp-file tmp-file (insert ";; placeholder"))
+            (claude-repl-test--with-sync-run-at-time
+              (cl-letf (((symbol-function 'projectile-switch-project-by-name)
+                         (lambda (_p) nil))
+                        ((symbol-function 'claude-repl--most-recent-project-file)
+                         (lambda (_d) tmp-file))
+                        ((symbol-function 'find-file)
+                         (lambda (f) (setq opened f)))
+                        ((symbol-function '+workspace-current-name)
+                         (lambda () "switched-ws"))
+                        ((symbol-function 'force-mode-line-update)
+                         (lambda (&optional _all) nil))
+                        ((symbol-function 'claude-repl-flash-tab)
+                         (lambda (&rest _) nil)))
+                (claude-repl-switch-to-project tmp-dir)
+                (should (equal opened tmp-file)))))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-project/skips-most-recent-when-gone ()
+  "switch-to-project skips find-file when the most-recent path doesn't exist."
+  (claude-repl-test--with-clean-state
+    (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-switch-" t)))
+          (find-file-called nil))
+      (unwind-protect
+          (claude-repl-test--with-sync-run-at-time
+            (cl-letf (((symbol-function 'projectile-switch-project-by-name)
+                       (lambda (_p) nil))
+                      ((symbol-function 'claude-repl--most-recent-project-file)
+                       (lambda (_d) "/nonexistent/gone.el"))
+                      ((symbol-function 'find-file)
+                       (lambda (&rest _) (setq find-file-called t)))
+                      ((symbol-function '+workspace-current-name)
+                       (lambda () "switched-ws"))
+                      ((symbol-function 'force-mode-line-update)
+                       (lambda (&optional _all) nil))
+                      ((symbol-function 'claude-repl-flash-tab)
+                       (lambda (&rest _) nil)))
+              (claude-repl-switch-to-project tmp-dir)
+              (should-not find-file-called)))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-project/defers-find-file ()
+  "switch-to-project defers find-file via run-at-time, not synchronously."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-switch-" t)))
+           (tmp-file (expand-file-name "hello.el" tmp-dir))
+           (opened nil)
+           (timer-fired nil))
       (unwind-protect
           (progn
             (with-temp-file tmp-file (insert ";; placeholder"))
@@ -5133,31 +5196,15 @@ finalization, not a standalone teardown."
                       ((symbol-function 'force-mode-line-update)
                        (lambda (&optional _all) nil))
                       ((symbol-function 'claude-repl-flash-tab)
-                       (lambda (&rest _) nil)))
+                       (lambda (&rest _) nil))
+                      ;; Capture the timer but do NOT fire it
+                      ((symbol-function 'run-at-time)
+                       (lambda (_time _repeat _fn &rest _args)
+                         (setq timer-fired t))))
               (claude-repl-switch-to-project tmp-dir)
-              (should (equal opened tmp-file))))
-        (delete-directory tmp-dir t)))))
-
-(ert-deftest claude-repl-cmd-test-switch-to-project/skips-most-recent-when-gone ()
-  "switch-to-project skips find-file when the most-recent path doesn't exist."
-  (claude-repl-test--with-clean-state
-    (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-switch-" t)))
-          (find-file-called nil))
-      (unwind-protect
-          (cl-letf (((symbol-function 'projectile-switch-project-by-name)
-                     (lambda (_p) nil))
-                    ((symbol-function 'claude-repl--most-recent-project-file)
-                     (lambda (_d) "/nonexistent/gone.el"))
-                    ((symbol-function 'find-file)
-                     (lambda (&rest _) (setq find-file-called t)))
-                    ((symbol-function '+workspace-current-name)
-                     (lambda () "switched-ws"))
-                    ((symbol-function 'force-mode-line-update)
-                     (lambda (&optional _all) nil))
-                    ((symbol-function 'claude-repl-flash-tab)
-                     (lambda (&rest _) nil)))
-            (claude-repl-switch-to-project tmp-dir)
-            (should-not find-file-called))
+              ;; Timer was scheduled but find-file not yet called
+              (should timer-fired)
+              (should-not opened)))
         (delete-directory tmp-dir t)))))
 
 ;;;; ---- claude-repl--most-recent-project-file ----
@@ -5204,6 +5251,104 @@ finalization, not a standalone teardown."
           (let ((recentf-list (list sibling)))
             (should-not (claude-repl--most-recent-project-file foo-bar))))
       (delete-directory parent t))))
+
+;;;; ---- claude-repl--most-recent-project-file: plist cache ----
+
+(ert-deftest claude-repl-cmd-test-most-recent-project-file/prefers-plist-cache ()
+  "Returns the :last-file plist entry when present and the file exists."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-plist-" t)))
+           (cached-file (expand-file-name "cached.el" tmp-dir))
+           (recentf-file (expand-file-name "recentf.el" tmp-dir)))
+      (unwind-protect
+          (progn
+            (with-temp-file cached-file (insert ""))
+            (with-temp-file recentf-file (insert ""))
+            (claude-repl--ws-put "ws1" :project-dir tmp-dir)
+            (claude-repl--ws-put "ws1" :last-file cached-file)
+            (cl-letf (((symbol-function 'claude-repl--ws-name-for-dir)
+                       (lambda (_) "ws1")))
+              (let ((recentf-list (list recentf-file)))
+                (should (equal (claude-repl--most-recent-project-file tmp-dir)
+                               cached-file)))))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-most-recent-project-file/falls-back-when-cache-gone ()
+  "Falls back to recentf when :last-file cached path no longer exists."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-plist-" t)))
+           (recentf-file (expand-file-name "recentf.el" tmp-dir)))
+      (unwind-protect
+          (progn
+            (with-temp-file recentf-file (insert ""))
+            (claude-repl--ws-put "ws1" :project-dir tmp-dir)
+            (claude-repl--ws-put "ws1" :last-file "/nonexistent/gone.el")
+            (cl-letf (((symbol-function 'claude-repl--ws-name-for-dir)
+                       (lambda (_) "ws1")))
+              (let ((recentf-list (list recentf-file)))
+                (should (equal (claude-repl--most-recent-project-file tmp-dir)
+                               recentf-file)))))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-most-recent-project-file/falls-back-when-no-workspace ()
+  "Falls back to recentf when no live workspace matches the project root."
+  (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-plist-" t)))
+         (recentf-file (expand-file-name "x.el" tmp-dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file recentf-file (insert ""))
+          (cl-letf (((symbol-function 'claude-repl--ws-name-for-dir)
+                     (lambda (_) nil)))
+            (let ((recentf-list (list recentf-file)))
+              (should (equal (claude-repl--most-recent-project-file tmp-dir)
+                             recentf-file)))))
+      (delete-directory tmp-dir t))))
+
+;;;; ---- claude-repl--record-last-file-visit ----
+
+(ert-deftest claude-repl-cmd-test-record-last-file-visit/records-in-project ()
+  "Records buffer-file-name as :last-file when file is inside the workspace project."
+  (claude-repl-test--with-clean-state
+    (let* ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-lfv-" t)))
+           (project-file (expand-file-name "foo.el" tmp-dir)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :project-dir tmp-dir)
+            (cl-letf (((symbol-function 'claude-repl--ws-current-name)
+                       (lambda () "ws1"))
+                      ((symbol-function 'claude-repl--ws-dir)
+                       (lambda (_ws) tmp-dir)))
+              (let ((buffer-file-name project-file))
+                (claude-repl--record-last-file-visit)
+                (should (equal (claude-repl--ws-get "ws1" :last-file)
+                               project-file)))))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-record-last-file-visit/ignores-outside-project ()
+  "Does not write :last-file when the visited file is outside the workspace project."
+  (claude-repl-test--with-clean-state
+    (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-lfv-" t))))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :project-dir tmp-dir)
+            (cl-letf (((symbol-function 'claude-repl--ws-current-name)
+                       (lambda () "ws1"))
+                      ((symbol-function 'claude-repl--ws-dir)
+                       (lambda (_ws) tmp-dir)))
+              (let ((buffer-file-name "/some/other/place/file.el"))
+                (claude-repl--record-last-file-visit)
+                (should-not (claude-repl--ws-get "ws1" :last-file)))))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-record-last-file-visit/noop-with-no-ws ()
+  "Does not error and writes nothing when there is no current registered workspace."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--ws-current-name)
+               (lambda () "nonexistent-ws")))
+      (let ((buffer-file-name "/some/file.el"))
+        ;; Should not error and should not create a hash entry
+        (claude-repl--record-last-file-visit)
+        (should-not (gethash "nonexistent-ws" claude-repl--workspaces))))))
 
 ;;;; ---- Tests: snapshot archive picker ----
 
