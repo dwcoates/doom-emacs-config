@@ -2254,8 +2254,11 @@ to auto-finish."
                  (`("-C" "/tmp/repo" "rev-list" "--count" "HEAD..feature") "0")
                  (_ (error "unmocked git-string args: %S" args)))))
             ((symbol-function 'claude-repl--git-exit-code)
-             (lambda (&rest _args)
-               (error "git-exit-code must not be called for empty range"))))
+             (lambda (_root &rest args)
+               (pcase args
+                 ;; Wrapper always issues --abort on unwind; no-op here.
+                 (`("cherry-pick" "--abort") 1)
+                 (_ (error "git-exit-code must not be called for empty range (got %S)" args))))))
     (should (eq (claude-repl--cherry-pick-commits "/tmp/repo" "feature" "HEAD" "feature")
                 'already-incorporated))))
 
@@ -2275,6 +2278,8 @@ to auto-finish."
                    (`("cherry-pick" "-x" ,_)
                     (setq cherry-pick-called t)
                     0)
+                   ;; Wrapper always issues --abort on unwind; no-op here.
+                   (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
               ;; No CHERRY_PICK_HEAD remains — clean cherry-pick.
               ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
@@ -2298,6 +2303,8 @@ is in flight), `--cherry-pick-commits' returns `failed'."
                  (pcase args
                    ;; Non-zero exit but no conflict-head left behind.
                    (`("cherry-pick" "-x" ,_) 128)
+                   ;; Wrapper always issues --abort on unwind; no-op here.
+                   (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
               ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
                (lambda (_root) nil)))
@@ -2322,6 +2329,8 @@ left to resolve)."
                (lambda (_root &rest args)
                  (pcase args
                    (`("cherry-pick" "-x" ,_) 1)
+                   ;; Wrapper always issues --abort on unwind; no-op here.
+                   (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
               ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
                (lambda (_root) in-progress))
@@ -3081,6 +3090,8 @@ the cherry-pick and signals user-error."
                (lambda (_root &rest args)
                  (pcase args
                    (`("cherry-pick" "-x" ,_) 1)
+                   ;; Wrapper always issues --abort on unwind; no-op here.
+                   (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
               ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
                (lambda (_root) in-progress))
@@ -3120,6 +3131,8 @@ is gone."
                (lambda (_root &rest args)
                  (pcase args
                    (`("cherry-pick" "-x" ,_) 1)
+                   ;; Wrapper always issues --abort on unwind; no-op here.
+                   (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
               ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
                (lambda (_root) (pop in-progress-states)))
@@ -3146,6 +3159,8 @@ cherry-pick and signals user-error."
                (lambda (_root &rest args)
                  (pcase args
                    (`("cherry-pick" "-x" ,_) 1)
+                   ;; Wrapper always issues --abort on unwind; no-op here.
+                   (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
               ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
                (lambda (_root) in-progress))
@@ -3176,6 +3191,8 @@ for existing callers."
                (lambda (_root &rest args)
                  (pcase args
                    (`("cherry-pick" "-x" ,_) 1)
+                   ;; Wrapper always issues --abort on unwind; no-op here.
+                   (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
               ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
                (lambda (_root) in-progress))
@@ -3210,6 +3227,8 @@ of being aborted via `--check-cherry-pick-conflict'."
                (lambda (_root &rest args)
                  (pcase args
                    (`("cherry-pick" "-x" ,_) 1)
+                   ;; Wrapper issues --abort on unwind; allow it (no-op).
+                   (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
               ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
                (lambda (_root) in-progress))
@@ -3244,6 +3263,8 @@ helper is not invoked.  Guards the interactive `SPC TAB M' path."
                (lambda (_root &rest args)
                  (pcase args
                    (`("cherry-pick" "-x" ,_) 1)
+                   ;; Wrapper always issues --abort on unwind; no-op here.
+                   (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
               ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
                (lambda (_root) in-progress))
@@ -3664,7 +3685,7 @@ workspace's claude has no in-band signal that a merge failed."
         (should (stringp dispatched-prompt))
         (should (string-match-p "merge attempt for this workspace just failed"
                                 dispatched-prompt))
-        (should (string-match-p "Do NOT take any action — analysis only"
+        (should (string-match-p "/workspace-merge"
                                 dispatched-prompt))
         (should (string-match-p "boom" dispatched-prompt))))))
 
@@ -9096,13 +9117,13 @@ AGENTS.md `No External Processes or External State in Tests')."
     (should (string-match-p "boom" prompt))
     (should (string-match-p "error" prompt))))
 
-(ert-deftest claude-repl-test-format-merge-failure-prompt-ends-with-analyze-only-directive ()
-  "Prompt ends with the analyze-only directive — re-dispatch is human-
-initiated, claude must not attempt repair on its own."
+(ert-deftest claude-repl-test-format-merge-failure-prompt-contains-workspace-merge-retry-directive ()
+  "Prompt directs claude to run /workspace-merge again — the skill's
+rebase step is more likely to resolve conflicts than a raw retry."
   (let ((prompt (claude-repl--format-merge-failure-prompt
                  '(error "boom"))))
-    (should (string-match-p "Do NOT take any action — analysis only"
-                            prompt))))
+    (should (string-match-p "/workspace-merge" prompt))
+    (should (string-match-p "rebase directive" prompt))))
 
 (ert-deftest claude-repl-test-abort-cherry-pick-if-in-flight-noop-on-nil-dir ()
   "Robustness: nil dir → no-op (no call to git, no error)."
