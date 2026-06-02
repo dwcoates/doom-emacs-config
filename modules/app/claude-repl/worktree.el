@@ -1721,14 +1721,17 @@ mid-flight failure (cherry-pick must be aborted to leave a clean tree)."
 (defun claude-repl--format-merge-failure-prompt (err)
   "Format the prompt sent to a workspace's claude after a failed merge.
 ERR is the elisp error tuple caught by `--workspace-merge-async'.
-The directive at the tail is intentional — Claude should analyze the
-failure, not attempt to retry or repair it.  Re-dispatch of the merge
-is a separate human-initiated step."
+The directive instructs Claude to retry via `/workspace-merge' — the
+skill rebases onto the target branch before dispatching, which resolves
+most ordering conflicts that the downstream cherry-pick cannot handle."
   (format
    (concat
     "A merge attempt for this workspace just failed with the following error:\n\n"
     "```\n%S\n```\n\n"
-    "Analyze this merge failure. Do NOT take any action — analysis only.")
+    "Please run `/workspace-merge' again.  The cherry-pick conflict was aborted "
+    "and the target branch is clean.  The `/workspace-merge' skill's built-in "
+    "rebase directive is likely to succeed where the failed downstream attempt "
+    "could not.")
    err))
 
 (defun claude-repl--current-head-sha (dir)
@@ -2925,8 +2928,8 @@ Resolves via :project-dir stored in `claude-repl--workspaces'."
           sha)
       branch)))
 
-(defun claude-repl--cherry-pick-commits (root target-ws base-branch target-branch
-                                              &optional auto-resolve silent)
+(defun claude-repl--cherry-pick-commits--impl (root target-ws base-branch target-branch
+                                                   &optional auto-resolve silent)
   "Cherry-pick commits BASE-BRANCH..TARGET-BRANCH in repo at ROOT.
 TARGET-WS is used only for error messages.
 Returns `already-incorporated' (sentinel) when the range is empty —
@@ -3006,6 +3009,23 @@ surface depends on SILENT:
         ;; `failed' sentinel for the caller to flip the workspace into
         ;; the :merge-failed bucket.
         (if (= 0 exit-code) nil 'failed))))))
+
+(defun claude-repl--cherry-pick-commits (root target-ws base-branch target-branch
+                                              &optional auto-resolve silent)
+  "Wrapper around `--cherry-pick-commits--impl' that guarantees cherry-pick
+abort on any exit — normal return or signal.
+
+Delegates entirely to the impl.  On the way out (via `unwind-protect'),
+runs `git cherry-pick --abort' unconditionally: a no-op when the pick
+finished cleanly, a genuine cleanup when the impl returned early due to
+conflict or signaled an error.  The impl's return value and any signal
+are propagated to callers unchanged."
+  (unwind-protect
+      (claude-repl--cherry-pick-commits--impl
+       root target-ws base-branch target-branch auto-resolve silent)
+    (claude-repl--log target-ws
+                      "cherry-pick-commits: unwind abort root=%s" root)
+    (claude-repl--git-exit-code root "cherry-pick" "--abort")))
 
 (defun claude-repl--cherry-pick-in-progress-p (root)
   "Return non-nil when a cherry-pick is in flight in repo at ROOT.
