@@ -4331,6 +4331,30 @@ Reorder must run after `apply-workspace-properties' so the new workspace's
          "/tmp/new-wt" "new-ws" nil "p1" nil nil nil nil)
         (should (equal reorder-called-with '("new-ws" . "p1")))))))
 
+(ert-deftest claude-repl-test-finalize-tags-workspace-project ()
+  "Finalize creates the persp via --ws-create, tagging +workspace-project
+with the canonical project dir.  Without this tag, a later `SPC p p' into
+the worktree falls into Doom's uniquify-by-parent-dir branch and recreates
+the workspace under a parent-dir-prefixed name (the bug under test)."
+  (claude-repl-test--with-clean-state
+    (let (param-call)
+      (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--repo-default-priority-for-path)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--path-canonical)
+                 (lambda (_p) "/canonical/new-wt"))
+                ((symbol-function 'persp-add-new) (lambda (_ws) 'a-persp))
+                ((symbol-function 'set-persp-parameter)
+                 (lambda (key val persp) (setq param-call (list key val persp))))
+                ((symbol-function 'claude-repl--setup-worktree-session)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) "")))
+        (claude-repl--finalize-worktree-workspace
+         "/tmp/new-wt" "new-ws" nil nil nil nil nil nil)
+        (should (equal param-call
+                       '(+workspace-project "/canonical/new-wt" a-persp)))))))
+
 ;;;; ---- Tests: inherit-priority-from-source ----
 
 (ert-deftest claude-repl-test-inherit-priority-explicit-wins ()
@@ -7853,7 +7877,9 @@ here would open it in the caller's workspace layout, not the new one."
                 ((symbol-function 'claude-repl--path-canonical) #'identity)
                 ((symbol-function 'claude-repl--repo-default-priority-for-path)
                  (lambda (&rest _) nil))
-                ((symbol-function '+workspace-new) #'ignore)
+                ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) ""))
+                ((symbol-function 'persp-add-new) (lambda (_ws) 'a-persp))
+                ((symbol-function 'set-persp-parameter) #'ignore)
                 ((symbol-function 'magit-status)
                  (lambda (&rest _) (setq magit-called t)))
                 ((symbol-function 'claude-repl--remove-doom-dashboard)
@@ -7877,7 +7903,9 @@ here would open it in the caller's workspace layout, not the new one."
               ((symbol-function 'claude-repl--path-canonical) #'identity)
               ((symbol-function 'claude-repl--repo-default-priority-for-path)
                (lambda (&rest _) nil))
-              ((symbol-function '+workspace-new) #'ignore)
+              ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) ""))
+              ((symbol-function 'persp-add-new) (lambda (_ws) 'a-persp))
+              ((symbol-function 'set-persp-parameter) #'ignore)
               ((symbol-function 'magit-status) #'ignore)
               ((symbol-function 'claude-repl--remove-doom-dashboard) #'ignore)
               ((symbol-function '+workspace-current-name) (lambda () "test-ws"))
@@ -7904,7 +7932,9 @@ leaking the opened buffers into the wrong workspace."
                 ((symbol-function 'claude-repl--path-canonical) #'identity)
                 ((symbol-function 'claude-repl--repo-default-priority-for-path)
                  (lambda (&rest _) nil))
-                ((symbol-function '+workspace-new) #'ignore)
+                ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) ""))
+                ((symbol-function 'persp-add-new) (lambda (_ws) 'a-persp))
+                ((symbol-function 'set-persp-parameter) #'ignore)
                 ((symbol-function 'magit-status) #'ignore)
                 ((symbol-function 'claude-repl--remove-doom-dashboard) #'ignore)
                 ((symbol-function '+workspace-current-name) (lambda () "test-ws"))
@@ -7994,10 +8024,12 @@ must not steal focus away from whatever the user is currently doing."
                 ((symbol-function 'claude-repl--repo-default-priority-for-path)
                  (lambda (_path) nil))
                 ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) ""))
-                ;; Simulate the bug: `+workspace-new' switches the current
-                ;; persp away from the caller's workspace.
-                ((symbol-function '+workspace-new)
-                 (lambda (name) (setq current-persp name)))
+                ;; Simulate the bug: workspace creation (now `persp-add-new'
+                ;; via --ws-create) switches the current persp away from the
+                ;; caller's workspace.
+                ((symbol-function 'persp-add-new)
+                 (lambda (name) (setq current-persp name) 'a-persp))
+                ((symbol-function 'set-persp-parameter) #'ignore)
                 ((symbol-function '+workspace-current-name)
                  (lambda () current-persp))
                 ((symbol-function '+workspace-switch)

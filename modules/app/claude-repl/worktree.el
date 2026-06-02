@@ -1063,7 +1063,14 @@ should jump to the new ws) are not silently undone."
            (effective-priority (or (claude-repl--inherit-priority-from-source priority source-dir)
                                    (claude-repl--repo-default-priority-for-path path))))
       (claude-repl--log ws "worktree creating workspace %s effective-priority=%s" ws (or effective-priority "nil"))
-      (claude-repl--ws-new ws)
+      ;; Tag the new persp with `+workspace-project' (via --ws-create) so a
+      ;; later `SPC p p' into this worktree matches it through Doom's
+      ;; `+workspaces-switch-to-project-h' instead of falling into that hook's
+      ;; uniquify-by-parent-dir branch, which recreates the workspace under a
+      ;; parent-dir-prefixed name like `doom-worktrees/<ws>'.  See --ws-create
+      ;; for the full rationale.  --ws-new (plain `+workspace-new') left the
+      ;; parameter unset, which was the cause of the prefixed-name bug.
+      (claude-repl--ws-create ws canonical)
       (claude-repl--ws-put ws :pending-magit t)
       (claude-repl--ws-put ws :pending-initial-buffers t)
       (claude-repl--enqueue-preemptive-prompt ws preemptive-prompt)
