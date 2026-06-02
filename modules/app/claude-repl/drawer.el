@@ -219,6 +219,11 @@ Default is near-black."
   "Face for the branch name in expanded detail view."
   :group 'claude-repl)
 
+(defface claude-repl-drawer-detail-merge-target
+  '((t :foreground "spring green"))
+  "Face for the merge-target branch in the MERGED-section detail view."
+  :group 'claude-repl)
+
 (defface claude-repl-drawer-detail-ahead-master
   '((t :foreground "spring green" :weight bold))
   "Face for the ahead-master commit count in expanded detail view."
@@ -1662,6 +1667,8 @@ invokes git.  Caller is `--render-workspace-expanded'."
   (let* ((indent-str (make-string (* depth claude-repl-drawer-indent-per-level) ?\s))
          (detail-prefix (concat claude-repl-drawer-gutter indent-str "    "))
          (branch       (claude-repl--ws-get ws :detail-branch))
+         (merge-target (and (eq (claude-repl-drawer--workspace-section ws) :merged)
+                            (claude-repl--ws-get ws :merge-target-name)))
          (master-ahead (claude-repl--ws-get ws :detail-master-ahead))
          (source-ahead (claude-repl--ws-get ws :detail-source-ahead))
          (last-commit  (claude-repl--ws-get ws :detail-last-commit))
@@ -1678,6 +1685,9 @@ invokes git.  Caller is `--render-workspace-expanded'."
                         "\n")))
       (when branch
         (line "branch:" branch 'claude-repl-drawer-detail-branch))
+      (when merge-target
+        (line "merged into:" merge-target
+              'claude-repl-drawer-detail-merge-target))
       (when master-ahead
         (line "ahead master:" (format "%d" master-ahead)
               'claude-repl-drawer-detail-ahead-master))

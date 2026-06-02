@@ -7084,6 +7084,8 @@ called on the happy path — the assertion is on merge-do's TARGET-DIR arg."
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project)
                        (lambda (&rest _) (setq switch-called t)))
+                      ((symbol-function 'claude-repl--git-branch-of-dir)
+                       (lambda (_) nil))
                       ((symbol-function 'claude-repl--workspace-merge-do)
                        (lambda (&rest args) (setq merge-do-args args))))
               (claude-repl-workspace-merge-current-into-source)
@@ -7154,6 +7156,8 @@ background-triggered /workspace-merge does not yank the user's focus."
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project)
                        (lambda (&rest _) (setq switch-called t)))
+                      ((symbol-function 'claude-repl--git-branch-of-dir)
+                       (lambda (_) nil))
                       ((symbol-function 'claude-repl--workspace-merge-do)
                        (lambda (&rest args) (setq merge-do-args args))))
               (claude-repl--workspace-merge-into-source "wt-ws" t)
@@ -7208,6 +7212,8 @@ background-triggered /workspace-merge does not yank the user's focus."
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project)
                        (lambda (target) (setq target-arg target)))
+                      ((symbol-function 'claude-repl--git-branch-of-dir)
+                       (lambda (_) nil))
                       ((symbol-function 'claude-repl--workspace-merge-do)
                        (lambda (&rest args) (setq merge-do-args args))))
               (claude-repl--workspace-merge-into-source "named-ws")
@@ -7232,6 +7238,8 @@ background-triggered /workspace-merge does not yank the user's focus."
                       ((symbol-function 'claude-repl--assert-clean-worktree)
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project) #'ignore)
+                      ((symbol-function 'claude-repl--git-branch-of-dir)
+                       (lambda (_) nil))
                       ((symbol-function 'claude-repl--workspace-merge-do)
                        (lambda (&rest args) (setq merge-do-args args))))
               (claude-repl--workspace-merge-into-source "DWC/feature-one")
@@ -7660,6 +7668,8 @@ visible in merge-do's TARGET-DIR arg rather than in `switch-to-project'."
                       ((symbol-function 'claude-repl--assert-clean-worktree)
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project) #'ignore)
+                      ((symbol-function 'claude-repl--git-branch-of-dir)
+                       (lambda (_) nil))
                       ((symbol-function 'claude-repl--workspace-merge-do)
                        (lambda (&rest args) (setq merge-do-args args))))
               (claude-repl-workspace-merge-current-into-source)
@@ -7691,6 +7701,8 @@ target-dir decision shows up in merge-do's args."
                       ((symbol-function 'claude-repl--assert-clean-worktree)
                        (lambda (&rest _) nil))
                       ((symbol-function 'claude-repl-switch-to-project) #'ignore)
+                      ((symbol-function 'claude-repl--git-branch-of-dir)
+                       (lambda (_) nil))
                       ((symbol-function 'claude-repl--workspace-merge-do)
                        (lambda (&rest args) (setq merge-do-args args))))
               (claude-repl-workspace-merge-current-into-source)
@@ -7850,6 +7862,8 @@ here would open it in the caller's workspace layout, not the new one."
                 ((symbol-function 'claude-repl--open-initial-buffers) #'ignore)
                 ((symbol-function 'claude-repl--enqueue-preemptive-prompt) #'ignore)
                 ((symbol-function 'claude-repl--apply-workspace-properties) #'ignore)
+                ((symbol-function 'claude-repl--git-string-quiet)
+                 (lambda (&rest _) "DWC/test-ws"))
                 ((symbol-function 'claude-repl--setup-worktree-session) #'ignore))
         (claude-repl--finalize-worktree-workspace
          "/tmp/fake" "test-ws" nil nil nil nil nil)
@@ -7870,6 +7884,8 @@ here would open it in the caller's workspace layout, not the new one."
               ((symbol-function 'claude-repl--open-initial-buffers) #'ignore)
               ((symbol-function 'claude-repl--enqueue-preemptive-prompt) #'ignore)
               ((symbol-function 'claude-repl--apply-workspace-properties) #'ignore)
+              ((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest _) "DWC/test-ws"))
               ((symbol-function 'claude-repl--setup-worktree-session) #'ignore))
       (claude-repl--finalize-worktree-workspace
        "/tmp/fake" "test-ws" "do something" nil nil nil nil)
@@ -7896,6 +7912,8 @@ leaking the opened buffers into the wrong workspace."
                  (lambda (&rest _) (setq open-called t)))
                 ((symbol-function 'claude-repl--enqueue-preemptive-prompt) #'ignore)
                 ((symbol-function 'claude-repl--apply-workspace-properties) #'ignore)
+                ((symbol-function 'claude-repl--git-string-quiet)
+                 (lambda (&rest _) "DWC/test-ws"))
                 ((symbol-function 'claude-repl--setup-worktree-session) #'ignore))
         (claude-repl--finalize-worktree-workspace
          "/tmp/fake" "test-ws" nil nil nil nil nil)
@@ -8811,6 +8829,8 @@ than running."
                  (lambda (_) "/tmp/master"))
                 ((symbol-function 'claude-repl--resolve-merge-into-source-target)
                  (lambda (parent _master) parent))
+                ((symbol-function 'claude-repl--git-branch-of-dir)
+                 (lambda (_) nil))
                 ;; The resolved target ("/tmp/parent") has a cherry-pick in flight.
                 ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
                  (lambda (root) (equal root "/tmp/parent"))))
@@ -8840,6 +8860,8 @@ inspects this merge's own destination."
                 ((symbol-function 'claude-repl--resolve-merge-into-source-target)
                  (lambda (parent _master) parent))
                 ((symbol-function 'claude-repl--assert-clean-worktree) #'ignore)
+                ((symbol-function 'claude-repl--git-branch-of-dir)
+                 (lambda (_) nil))
                 ;; An unrelated worktree is busy, but NOT this merge's target.
                 ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
                  (lambda (root) (equal root "/tmp/unrelated"))))
@@ -9156,12 +9178,16 @@ worker thread."
                 ((symbol-function 'claude-repl--cherry-pick-in-progress-p)
                  (lambda (_) nil))
                 ((symbol-function 'claude-repl--assert-clean-worktree) #'ignore)
+                ((symbol-function 'claude-repl--git-branch-of-dir)
+                 (lambda (_) "DWC/parent-branch"))
                 ((symbol-function 'claude-repl--workspace-merge-do)
                  (lambda (ws target &rest _)
                    (push (list ws target) merge-do-args))))
         (claude-repl--workspace-merge-into-source "ws1" t t)
         (should (equal (claude-repl--ws-get "ws1" :resolved-target-dir)
                        "/tmp/parent"))
+        (should (equal (claude-repl--ws-get "ws1" :merge-target-name)
+                       "DWC/parent-branch"))
         (should (equal merge-do-args '(("ws1" "/tmp/parent"))))))))
 
 ;;;; ---- Tests: claude-repl-create-explanation-engine-oneshot-workspace ----
@@ -10263,5 +10289,41 @@ double-schedule."
         (setq claude-repl--debug-heartbeat-timer nil)
         (claude-repl--debug-heartbeat-uninstall)
         (should-not cancelled)))))
+
+;;;; ---- Tests: git-branch-of-dir ----
+
+(ert-deftest claude-repl-test-git-branch-of-dir-returns-branch ()
+  "Returns the abbreviated branch name for a valid dir."
+  (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) t))
+            ((symbol-function 'claude-repl--git-string)
+             (lambda (&rest _args) "DWC/parent-branch")))
+    (should (equal (claude-repl--git-branch-of-dir "/tmp/x")
+                   "DWC/parent-branch"))))
+
+(ert-deftest claude-repl-test-git-branch-of-dir-nil-when-missing-dir ()
+  "Returns nil when DIR does not exist."
+  (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) nil)))
+    (should (null (claude-repl--git-branch-of-dir "/nope")))))
+
+(ert-deftest claude-repl-test-git-branch-of-dir-nil-when-detached ()
+  "Returns nil for a detached HEAD (git reports literal \"HEAD\")."
+  (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) t))
+            ((symbol-function 'claude-repl--git-string)
+             (lambda (&rest _args) "HEAD")))
+    (should (null (claude-repl--git-branch-of-dir "/tmp/x")))))
+
+(ert-deftest claude-repl-test-git-branch-of-dir-nil-when-fatal ()
+  "Returns nil when git emits a fatal error string."
+  (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) t))
+            ((symbol-function 'claude-repl--git-string)
+             (lambda (&rest _args) "fatal: not a git repository")))
+    (should (null (claude-repl--git-branch-of-dir "/tmp/x")))))
+
+(ert-deftest claude-repl-test-git-branch-of-dir-nil-when-empty ()
+  "Returns nil when git emits an empty string."
+  (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) t))
+            ((symbol-function 'claude-repl--git-string)
+             (lambda (&rest _args) "")))
+    (should (null (claude-repl--git-branch-of-dir "/tmp/x")))))
 
 ;;; test-worktree.el ends here

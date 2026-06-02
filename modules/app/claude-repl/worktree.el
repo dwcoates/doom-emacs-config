@@ -2886,6 +2886,21 @@ replayed. Falls back to `merge-base HEAD TARGET-BRANCH' when no annotations matc
         (claude-repl--git-string
          "-C" project-root "merge-base" "HEAD" target-branch))))
 
+(defun claude-repl--git-branch-of-dir (dir)
+  "Return the abbreviated git branch checked out in DIR, or nil.
+Thin wrapper over `git -C DIR rev-parse --abbrev-ref HEAD' that filters
+the empty / `fatal' / detached-`HEAD' degenerate outputs down to nil.
+Used to label a merge's destination worktree by the branch it lands on
+\(see `:merge-target-name')."
+  (when (and dir (file-directory-p dir))
+    (let ((branch (claude-repl--git-string
+                   "-C" dir "rev-parse" "--abbrev-ref" "HEAD")))
+      (and branch
+           (not (string-empty-p branch))
+           (not (string-prefix-p "fatal" branch))
+           (not (string= branch "HEAD"))
+           branch))))
+
 (defun claude-repl--workspace-branch (ws)
   "Return the git branch checked out in workspace WS's worktree, or nil.
 Workspace name != branch name: e.g. persp \"fix-login\" was created from
@@ -4713,6 +4728,14 @@ cherry-pick for that target clears."
       ;; handler in `--workspace-merge-async' (and the drain loop-guard) can
       ;; find the cherry-pick destination without re-running resolution.
       (claude-repl--ws-put source-ws :resolved-target-dir target-dir)
+      ;; Record the destination branch so the drawer's MERGED-section
+      ;; folded detail can show what this workspace merged into.  Falls
+      ;; back to the target dir's basename when the branch can't be read
+      ;; (detached HEAD, transient git error).
+      (claude-repl--ws-put source-ws :merge-target-name
+                           (or (claude-repl--git-branch-of-dir target-dir)
+                               (file-name-nondirectory
+                                (directory-file-name target-dir))))
       (cond
        ;; Per-target gate: only defer when a cherry-pick is in flight in the
        ;; SAME target worktree.  Different targets drain concurrently.
