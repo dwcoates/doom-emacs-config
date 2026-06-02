@@ -125,6 +125,15 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - Always prefer brevity (a smaller tree) unless the prompt itself inherently necessitates a larger one.
   - Node count should track only the irreducible content the prompt actually demands.
   - Never pad a tree with manufactured nodes to look thorough.
+- Good rule of thumb is to always prefer as FEW NODES AS POSSIBLE
+  - Only add a node if it's critical to the broad-strokes understanding of the conceptual response
+  - The user will ask for expansion on bullets for more detail if need
+    - A big tree is difficult to grok, but a small tree is easy to get expansion as-needed
+  - Focus on the CRITICAL ideas: 
+    - The basic problem (no details, this section should be especially concise)
+    - The questions and gotchas
+    - The proposed fixes
+- Total number of nodes should typically be 3-10, only going larger when absolutely necessary
 
 ### Content selection
 
