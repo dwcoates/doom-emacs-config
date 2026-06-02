@@ -132,6 +132,15 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
   - A broad tree can always be expanded by the user asking for further explanation.
   - Err toward omission: when in doubt whether a detail warrants inclusion, leave it out.
   - The user can always ask for expansion of specific branches.
+- The tree MUST be even MORE concise than minimal-detail alone implies, surfacing only the critical aspect of each point.
+  - The critical aspect is WHAT the thing is, never the surrounding explanation of how or why.
+    - What the problems are, not a preamble explaining each problem.
+    - What the proposed fixes are, not the implementation details of each fix.
+    - What the questions are, not the background motivating each question.
+  - Cap the supporting detail under any such point at one or two child entries at most.
+    - The user can always ask for more on the implementation or problem details when needed.
+  - Treat preamble, motivation, and implementation walkthroughs as omitted by default.
+    - Include them only when the user explicitly asks to drill into that point.
 - Entries at the same level of the tree SHOULD be a bit more concise than the fuller resolution carried by their child subtrees.
   - Not so much more concise that meaning is shed, since dropping content to chase brevity defeats the tree's purpose.
   - Each level reads as a quick scan of its siblings.
