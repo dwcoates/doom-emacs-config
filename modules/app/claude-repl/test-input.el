@@ -866,14 +866,15 @@ metaprompt must NOT carry the old main-body emoji restriction."
   (should-not (string-match-p "Do NOT prefix top-level bullets with emojis"
                               claude-repl-command-prefix)))
 
-(ert-deftest claude-repl-test-command-prefix-no-escaped-backticks-in-inline-code ()
-  "The metaprompt must instruct Claude to use standard markdown inline code spawns."
-  (should (string-match-p
-           "standard markdown inline code spawns"
-           claude-repl-command-prefix))
-  (should (string-match-p
-           "renderable inline code"
-           claude-repl-command-prefix)))
+(ert-deftest claude-repl-test-command-prefix-omits-inline-code-formatting-directive ()
+  "The inline-code-formatting directive was dropped because it confused Claude,
+so the metaprompt must NOT carry it any longer."
+  (should-not (string-match-p
+               "standard markdown inline code spawns"
+               claude-repl-command-prefix))
+  (should-not (string-match-p
+               "renderable inline code"
+               claude-repl-command-prefix)))
 
 ;;;; ---- Tests: metaprompt auto-reload ----
 
