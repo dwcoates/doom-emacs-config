@@ -196,49 +196,66 @@ into view."
       (goto-char beg)
       (activate-mark))))
 
+(defun claude-repl--link-code-display (buf start-line end-line)
+  "Display BUF in a left-docked window with START-LINE..END-LINE selected.
+Docks a window to the leftmost edge of the frame (half width), selects
+the inclusive line range via `claude-repl--select-line-range', and
+recenters so the region's top is brought into view.  Does NOT select
+the displayed window, so input focus stays wherever it was.  Returns the
+window, or nil when `display-buffer' declined to produce one."
+  (let ((win (display-buffer
+              buf
+              '((display-buffer-in-direction)
+                (direction . leftmost)
+                (window-width . 0.5)))))
+    (when win
+      (with-selected-window win
+        (claude-repl--select-line-range start-line end-line)
+        (recenter)))
+    win))
+
 (defun claude-repl-link-code (file start-line &optional end-line workspace)
-  "Open FILE and select lines START-LINE..END-LINE.
+  "Open FILE in a window and select lines START-LINE..END-LINE.
 Code-linking entry point for the runtime-eval-code skill.
 
-When WORKSPACE is non-nil (a workspace name string), stages the file
-in WORKSPACE's perspective without stealing focus: the buffer is
-visited via `find-file-noselect', the line range is selected inside
-the buffer via `claude-repl--select-line-range', and the buffer is
-registered into WORKSPACE's perspective via `claude-repl--ws-add-buffer'
-so the user sees it when they next switch to WORKSPACE.  Returns the
-buffer in this case (no window is created, so returning a window is
-not meaningful).
+In all cases the buffer is genuinely OPENED in a visible window docked
+to the leftmost edge of the frame (not merely visited in the
+background): the file is visited via `find-file-noselect', displayed via
+`claude-repl--link-code-display', the line range selected, and the
+window recentered.
 
-When WORKSPACE is nil, falls back to the focus-taking path (original
-behaviour): displays the buffer in a window docked to the leftmost
-edge of the frame, selects the range, recenters, and selects the
-window so the user lands on the code.  Returns the window, or nil
-when display failed.
+When WORKSPACE is non-nil (a workspace name string), the buffer is also
+registered into WORKSPACE's perspective via `claude-repl--ws-add-buffer'
+so it is owned by the right perspective, and input focus is NOT stolen
+(the window is displayed but not selected).  This is the path the
+runtime-eval-code skill uses.
+
+When WORKSPACE is nil (direct interactive use), the displayed window is
+additionally selected so the user lands directly on the code.
+
+Either way returns the window the buffer was displayed in, or nil when
+`display-buffer' declined to produce one.
 
 FILE is run through `expand-file-name', so pass an absolute path.
 START-LINE and END-LINE are 1-indexed inclusive line numbers."
-  (let ((buf (find-file-noselect (expand-file-name file))))
+  (let* ((path (expand-file-name file))
+         (buf (find-file-noselect path))
+         (win (claude-repl--link-code-display buf start-line end-line)))
     (if workspace
-        ;; No-focus path: stage the buffer in the originating workspace.
-        (progn
-          (with-current-buffer buf
-            (claude-repl--select-line-range start-line end-line))
-          (let ((persp (claude-repl--ws-resolve-persp workspace)))
-            (when persp
-              (claude-repl--ws-add-buffer buf persp nil)))
-          buf)
-      ;; Focus path: original behaviour for backward-compat / direct use.
-      (let ((win (display-buffer
-                  buf
-                  '((display-buffer-in-direction)
-                    (direction . leftmost)
-                    (window-width . 0.5)))))
-        (when win
-          (with-selected-window win
-            (claude-repl--select-line-range start-line end-line)
-            (recenter))
-          (select-window win))
-        win))))
+        (let ((persp (claude-repl--ws-resolve-persp workspace)))
+          (when persp
+            (claude-repl--ws-add-buffer buf persp nil))
+          (claude-repl--log workspace
+                            "link-code: no-focus path file=%s lines=%s..%s persp=%s win=%s"
+                            path start-line (or end-line start-line)
+                            (if persp "resolved" "nil")
+                            (if win "displayed" "nil")))
+      (when win (select-window win))
+      (claude-repl--log nil
+                        "link-code: focus path file=%s lines=%s..%s win=%s"
+                        path start-line (or end-line start-line)
+                        (if win "displayed+selected" "nil")))
+    win))
 
 ;;;; Diff analysis infrastructure
 

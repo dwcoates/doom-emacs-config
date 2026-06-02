@@ -178,7 +178,7 @@ Common operational inspections. Each entry: when to reach for it, the snippet to
   - Applies when the user is *explicitly* asking about specific code.
   - Applies equally when the user is asking about implementation *logic* (not code per se) but there is code that answers it — find it and link it anyway.
   - In these situations, proactively grep/search the repo for the most relevant definition first, then link it rather than only describing it in prose.
-- **Send** (`claude-repl-link-code` stages the file in the originating workspace without stealing focus; the user sees it when they switch back):
+- **Send** (`claude-repl-link-code` actually OPENS the file in a visible left-docked window in the workspace without stealing focus — it does NOT just stage/return the buffer):
   ```elisp
   (claude-repl-link-code "<absolute-path-to-file>" <start-line> <end-line> "<WS>")
   ```
@@ -187,8 +187,8 @@ Common operational inspections. Each entry: when to reach for it, the snippet to
 - **Watch out for**:
   - Pass an **absolute** path (resolve relative paths against the workspace root yourself before sending).
   - Line numbers are **1-indexed and inclusive**; the selected region runs from the start line's beginning to the end line's end.
-  - Passing `WS` uses the no-focus path: the buffer is visited, the line range is selected, and the buffer is registered in the workspace's perspective — no window is created and focus is never stolen.
-  - Omitting `WS` (or passing `nil`) falls back to the original focus-taking path (opens a left-docked window and selects it) — only use that form for direct interactive calls, never from a skill dispatch.
+  - Passing `WS` displays the buffer in a left-docked window, selects the line range, recenters, and registers the buffer in the workspace's perspective — the window IS opened and visible, but focus is not stolen (the window is shown but not selected). It returns that window.
+  - Omitting `WS` (or passing `nil`) uses the focus-taking path: same display, but the window is also selected so the user lands directly on the code — only use that form for direct interactive calls, never from a skill dispatch.
 
 ### Check the workspaces hashmap
 

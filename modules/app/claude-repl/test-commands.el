@@ -179,28 +179,61 @@
       (when (get-file-buffer tmp) (kill-buffer (get-file-buffer tmp)))
       (delete-file tmp))))
 
-(ert-deftest claude-repl-cmd-test-link-code/with-workspace-returns-buffer ()
-  "link-code with WORKSPACE returns the buffer, not a window."
+(ert-deftest claude-repl-cmd-test-link-code/with-workspace-returns-window ()
+  "link-code with WORKSPACE returns the window the buffer was opened in."
   (let ((tmp (make-temp-file "claude-repl-link-" nil ".txt" "a\nb\nc\n")))
     (unwind-protect
         (cl-letf (((symbol-function 'claude-repl--ws-resolve-persp) (lambda (_ws) nil))
                   ((symbol-function 'claude-repl--ws-add-buffer) #'ignore))
           (let ((result (claude-repl-link-code tmp 1 nil "my-ws")))
-            (should (bufferp result))
-            (should (not (windowp result)))))
+            (should (window-live-p result))))
       (when (get-file-buffer tmp) (kill-buffer (get-file-buffer tmp)))
       (delete-file tmp))))
 
-(ert-deftest claude-repl-cmd-test-link-code/with-workspace-no-window-created ()
-  "link-code with WORKSPACE does not create a new window."
-  (let ((tmp (make-temp-file "claude-repl-link-" nil ".txt" "a\nb\nc\n"))
-        (windows-before nil))
+(ert-deftest claude-repl-cmd-test-link-code/with-workspace-opens-buffer-in-window ()
+  "link-code with WORKSPACE displays the buffer in a live window (actually opens it)."
+  (let ((tmp (make-temp-file "claude-repl-link-" nil ".txt" "a\nb\nc\n")))
     (unwind-protect
         (cl-letf (((symbol-function 'claude-repl--ws-resolve-persp) (lambda (_ws) nil))
                   ((symbol-function 'claude-repl--ws-add-buffer) #'ignore))
-          (setq windows-before (window-list))
           (claude-repl-link-code tmp 1 nil "my-ws")
-          (should (equal (length windows-before) (length (window-list)))))
+          (let ((buf (get-file-buffer tmp)))
+            (should (get-buffer-window buf))))
+      (when (get-file-buffer tmp) (kill-buffer (get-file-buffer tmp)))
+      (delete-file tmp))))
+
+(ert-deftest claude-repl-cmd-test-link-code/with-workspace-does-not-select-window ()
+  "link-code with WORKSPACE never calls `select-window' (focus is not stolen)."
+  (let ((tmp (make-temp-file "claude-repl-link-" nil ".txt" "a\nb\nc\n"))
+        (select-calls 0)
+        (real-select (symbol-function 'select-window)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--ws-resolve-persp) (lambda (_ws) nil))
+                  ((symbol-function 'claude-repl--ws-add-buffer) #'ignore)
+                  ;; Count only NORECORD-less calls; `with-selected-window'
+                  ;; (used to recenter) always passes 'norecord, so those are
+                  ;; excluded — we only want to catch a focus-stealing select.
+                  ((symbol-function 'select-window)
+                   (lambda (win &optional norecord)
+                     (unless norecord (cl-incf select-calls))
+                     (funcall real-select win norecord))))
+          (claude-repl-link-code tmp 1 nil "my-ws")
+          (should (= select-calls 0)))
+      (when (get-file-buffer tmp) (kill-buffer (get-file-buffer tmp)))
+      (delete-file tmp))))
+
+(ert-deftest claude-repl-cmd-test-link-code/without-workspace-selects-window ()
+  "link-code without WORKSPACE selects the displayed window (focus path)."
+  (let ((tmp (make-temp-file "claude-repl-link-" nil ".txt" "a\nb\nc\n"))
+        (select-calls 0)
+        (real-select (symbol-function 'select-window)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'select-window)
+                   (lambda (win &optional norecord)
+                     (unless norecord (cl-incf select-calls))
+                     (funcall real-select win norecord))))
+          (claude-repl-link-code tmp 1)
+          (should (> select-calls 0)))
       (when (get-file-buffer tmp) (kill-buffer (get-file-buffer tmp)))
       (delete-file tmp))))
 
