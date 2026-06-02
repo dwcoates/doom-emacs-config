@@ -1724,25 +1724,31 @@ invokes git.  Caller is `--render-workspace-expanded'."
 
 (defun claude-repl-drawer--max-depth ()
   "Return the deepest workspace nesting depth in `claude-repl--workspaces'.
-Walks each workspace's `:source-ws-dir' chain and returns the maximum
-hop count.  Cycle-capped via `claude-repl-drawer-tree-max-depth'.
-Slight overestimate when merged ancestors exist (the rendered tree
-flattens through them, but this counts raw chain hops) — acceptable;
-the drawer ends up a couple cols wider than strictly needed.
+Walks each workspace's source-ws chain and returns the maximum rendered
+depth.  Skips flattenable (merged) ancestors so the depth bonus tracks
+the *rendered* tree depth -- matching `--effective-parent''s flattening
+-- rather than raw chain length.  Without this, long merge histories
+inflate the depth bonus on every `--apply-width' call, causing the
+drawer to widen as workspaces accumulate over a session.
+Cycle-capped via `claude-repl-drawer-tree-max-depth'.
 
 Wrapped in `--with-dir-map' so the N parent-chain walks share one O(N)
-reverse-lookup build, dropping the cold-cache cost from O(N²) to O(N).
+reverse-lookup build, dropping the cold-cache cost from O(N2) to O(N).
 Called from `--window-width', which the side-window display-action
 invokes once at window creation AND `--apply-width' re-invokes on every
-show — so cheap matters even when `:source-ws-name' caches are warm."
+show -- so cheap matters even when `:source-ws-name' caches are warm."
   (claude-repl-drawer--with-dir-map
    (let ((maxd 0))
      (dolist (ws (claude-repl-drawer--visible-workspace-keys))
        (let ((d 0)
              (cur (claude-repl-drawer--source-ws-name ws)))
          (while (and cur (< d claude-repl-drawer-tree-max-depth))
-           (setq d (1+ d))
-           (setq cur (claude-repl-drawer--source-ws-name cur)))
+           (if (claude-repl-drawer--ws-flattenable-ancestor-p cur)
+               ;; Skip merged ancestors: the render flattens through them
+               ;; via `--effective-parent', so they add no visible depth.
+               (setq cur (claude-repl-drawer--source-ws-name cur))
+             (setq d (1+ d))
+             (setq cur (claude-repl-drawer--source-ws-name cur))))
          (when (> d maxd) (setq maxd d))))
      maxd)))
 
