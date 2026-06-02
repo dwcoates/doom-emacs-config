@@ -4302,6 +4302,28 @@ JSON, so it eagerly resolves at entry-point time."
         (claude-repl--create-worktree-from-command "/tmp/cmd-repo/" "name" "prompt" 5)
         (should (equal captured-source-dir "/tmp/cmd-repo/"))))))
 
+(ert-deftest claude-repl-test-create-worktree-from-command-forwards-force-sandbox ()
+  "FORCE-SANDBOX from the JSON command flows through to
+`claude-repl--do-create-worktree-workspace' as the second positional arg."
+  (claude-repl-test--with-clean-state
+    (let ((captured-force-sandbox :unset))
+      (cl-letf (((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name force-sandbox &rest _)
+                   (setq captured-force-sandbox force-sandbox))))
+        (claude-repl--create-worktree-from-command "/tmp/repo/" "name" "prompt" 5 nil nil t)
+        (should captured-force-sandbox)))))
+
+(ert-deftest claude-repl-test-create-worktree-from-command-passes-nil-force-sandbox-when-absent ()
+  "When FORCE-SANDBOX is not supplied, `claude-repl--do-create-worktree-workspace'
+receives nil so the workspace uses bare-metal by default."
+  (claude-repl-test--with-clean-state
+    (let ((captured-force-sandbox :unset))
+      (cl-letf (((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name force-sandbox &rest _)
+                   (setq captured-force-sandbox force-sandbox))))
+        (claude-repl--create-worktree-from-command "/tmp/repo/" "name" "prompt" 5)
+        (should (null captured-force-sandbox))))))
+
 (ert-deftest claude-repl-test-finalize-worktree-workspace-stores-source-ws-dir ()
   "Finalize persists :source-ws-dir on the new workspace's plist."
   (claude-repl-test--with-clean-state
@@ -4945,7 +4967,40 @@ initial state file."
          0)
         ;; captured-args = (git-root name prompt priority fork-session-id)
         (should (equal (nth 0 captured-args) "/explicit/root/"))
-        (should (equal resolve-calls 0))))))
+        (should (equal resolve-calls 0)))))
+
+(ert-deftest claude-repl-test-handle-create-command-passes-force-sandbox-true ()
+  "handle-create-command with force_sandbox: true in cmd forwards it as the
+last positional arg to `claude-repl--create-worktree-from-command'."
+  (claude-repl-test--with-clean-state
+    (let ((captured-args nil))
+      (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat _fn &rest args)
+                   (setq captured-args args))))
+        (claude-repl--handle-create-command
+         '((type . "create") (name . "DWC/new-ws")
+           (git_root . "/fake/root") (force_sandbox . t))
+         0)
+        ;; captured-args = (git-root name prompt priority fork-session-id base-commit force-sandbox)
+        (should (nth 6 captured-args))))))
+
+(ert-deftest claude-repl-test-handle-create-command-passes-force-sandbox-nil-when-absent ()
+  "handle-create-command with no force_sandbox field passes nil so the
+workspace defaults to bare-metal."
+  (claude-repl-test--with-clean-state
+    (let ((captured-args nil))
+      (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat _fn &rest args)
+                   (setq captured-args args))))
+        (claude-repl--handle-create-command
+         '((type . "create") (name . "DWC/new-ws") (git_root . "/fake/root"))
+         0)
+        ;; captured-args = (git-root name prompt priority fork-session-id base-commit force-sandbox)
+        (should (null (nth 6 captured-args))))))))
 
 (ert-deftest claude-repl-test-handle-create-command-expands-tilde-in-git-root ()
   "handle-create-command should expand `~' in an explicit git_root before dispatch."
@@ -5339,6 +5394,20 @@ when `dolist' iterated the alist's cons cells."
   (let ((out (claude-repl--workspace-generation-prompt
               "raw" "prefixed" "/tmp/repo/" "HEAD" nil)))
     (should (string-match-p "MUST be an array" out))))
+
+(ert-deftest claude-repl-test-workspace-generation-prompt-emits-force-sandbox-when-set ()
+  "When FORCE-SANDBOX is non-nil the prompt instructs the model to emit
+`\"force_sandbox\": true' so the spawned workspace runs in the sandbox."
+  (let ((out (claude-repl--workspace-generation-prompt
+              "raw" "prefixed" "/tmp/repo/" "HEAD" nil t)))
+    (should (string-match-p "\"force_sandbox\": true" out))))
+
+(ert-deftest claude-repl-test-workspace-generation-prompt-omits-force-sandbox-when-nil ()
+  "When FORCE-SANDBOX is nil the prompt does not mention force_sandbox
+at all — no false field emitted for non-sandboxed repos."
+  (let ((out (claude-repl--workspace-generation-prompt
+              "raw" "prefixed" "/tmp/repo/" "HEAD" nil nil)))
+    (should-not (string-match-p "force_sandbox" out))))
 
 ;;;; ---- Tests: workspace-commands JSON normalization ----
 
@@ -8149,7 +8218,7 @@ edit the doom config."
                 ((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-git-root git-root))))
         (claude-repl-create-doom-oneshot-workspace)
         (should (equal captured-git-root claude-repl--doom-config-dir))
@@ -8164,7 +8233,7 @@ edit the doom config."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from)
+                 (lambda (_raw _prefixed _git-root base _fork-from &optional _force-sandbox)
                    (setq captured-base base))))
         (claude-repl-create-doom-oneshot-workspace)
         (should (equal captured-base "master"))))))
@@ -8178,7 +8247,7 @@ spawned agent's first message) so the inner agent knows to invoke
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-prefixed prefixed))))
         (claude-repl-create-doom-oneshot-workspace)
         (should (string-match-p "/workspace-merge" captured-prefixed))
@@ -8195,7 +8264,7 @@ for slug generation and should not get polluted with skill names like
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (raw _prefixed _git-root _base _fork-from)
+                 (lambda (raw _prefixed _git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-raw raw))))
         (claude-repl-create-doom-oneshot-workspace)
         (should (equal captured-raw "tweak the modeline"))
@@ -8209,7 +8278,7 @@ prefix so the spawned agent runs autonomously without waiting."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-prefixed prefixed))))
         (claude-repl-create-doom-oneshot-workspace)
         (should (string-prefix-p claude-repl--autonomous-prompt-prefix
@@ -8236,10 +8305,36 @@ starts a fresh Claude session rather than resuming someone else's."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root _base fork-from)
+                 (lambda (_raw _prefixed _git-root _base fork-from &optional _force-sandbox)
                    (setq captured-fork-from fork-from))))
         (claude-repl-create-doom-oneshot-workspace)
         (should (null captured-fork-from))))))
+
+(ert-deftest claude-repl-test-create-doom-oneshot-passes-force-sandbox-t ()
+  "doom-oneshot passes force-sandbox = t so the spawned workspace runs in
+the Docker sandbox rather than bare-metal."
+  (claude-repl-test--with-clean-state
+    (let ((captured-force-sandbox :unset))
+      (cl-letf (((symbol-function 'read-from-minibuffer)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root _base _fork-from &optional force-sandbox)
+                   (setq captured-force-sandbox force-sandbox))))
+        (claude-repl-create-doom-oneshot-workspace)
+        (should captured-force-sandbox)))))
+
+(ert-deftest claude-repl-test-create-doom-oneshot-from-current-branch-passes-force-sandbox-t ()
+  "The current-branch variant also passes force-sandbox = t — both doom
+oneshot flavours run in the sandbox, regardless of which base ref is used."
+  (claude-repl-test--with-clean-state
+    (let ((captured-force-sandbox :unset))
+      (cl-letf (((symbol-function 'read-from-minibuffer)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root _base _fork-from &optional force-sandbox)
+                   (setq captured-force-sandbox force-sandbox))))
+        (claude-repl-create-doom-oneshot-workspace-from-current-branch)
+        (should captured-force-sandbox)))))
 
 (ert-deftest claude-repl-test-oneshot-merge-suffix-mentions-stop-on-ambiguity ()
   "The merge suffix tells the spawned agent to STOP (not push on) when it
@@ -8265,7 +8360,7 @@ top of in-flight doom-config work."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from)
+                 (lambda (_raw _prefixed _git-root base _fork-from &optional _force-sandbox)
                    (setq captured-base base))))
         (claude-repl-create-doom-oneshot-workspace-from-current-branch)
         (should (equal captured-base "HEAD"))))))
@@ -8283,7 +8378,7 @@ changes from `master' to HEAD."
                 ((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-git-root git-root))))
         (claude-repl-create-doom-oneshot-workspace-from-current-branch)
         (should (equal captured-git-root claude-repl--doom-config-dir))))))
@@ -8297,7 +8392,7 @@ to the prefixed prompt — the spawned agent still needs to know to invoke
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-prefixed prefixed))))
         (claude-repl-create-doom-oneshot-workspace-from-current-branch)
         (should (string-match-p "/workspace-merge" captured-prefixed))
@@ -8313,7 +8408,7 @@ generation — same constraint as the master variant."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (raw _prefixed _git-root _base _fork-from)
+                 (lambda (raw _prefixed _git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-raw raw))))
         (claude-repl-create-doom-oneshot-workspace-from-current-branch)
         (should (equal captured-raw "tweak the modeline"))
@@ -8342,7 +8437,7 @@ and existing call sites that pass no arguments."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from)
+                 (lambda (_raw _prefixed _git-root base _fork-from &optional _force-sandbox)
                    (setq captured-base base))))
         (claude-repl-create-doom-oneshot-workspace)
         (should (equal captured-base "master"))))))
@@ -9258,7 +9353,7 @@ workspace's project, so SPC j O always dispatches into that repo."
                 ((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-git-root git-root))))
         (claude-repl-create-explanation-engine-oneshot-workspace)
         (should (equal captured-git-root
@@ -9276,7 +9371,7 @@ workspace's project, so SPC j O always dispatches into that repo."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from)
+                 (lambda (_raw _prefixed _git-root base _fork-from &optional _force-sandbox)
                    (setq captured-base base))))
         (claude-repl-create-explanation-engine-oneshot-workspace)
         (should (equal captured-base "master"))))))
@@ -9291,7 +9386,7 @@ the spawned agent knows to invoke
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-prefixed prefixed))))
         (claude-repl-create-explanation-engine-oneshot-workspace)
         (should (string-match-p
@@ -9312,7 +9407,7 @@ must mention `/workspace-merge', and it must appear textually AFTER the
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-prefixed prefixed))))
         (claude-repl-create-explanation-engine-oneshot-workspace)
         (let ((pr-pos (string-match
@@ -9332,7 +9427,7 @@ commands like `/create-or-update-pr', which would derail the slug."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (raw _prefixed _git-root _base _fork-from)
+                 (lambda (raw _prefixed _git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-raw raw))))
         (claude-repl-create-explanation-engine-oneshot-workspace)
         (should (equal captured-raw "add caching to thing"))
@@ -9347,7 +9442,7 @@ prefix so the spawned agent runs autonomously without waiting."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-prefixed prefixed))))
         (claude-repl-create-explanation-engine-oneshot-workspace)
         (should (string-prefix-p claude-repl--autonomous-prompt-prefix
@@ -9376,10 +9471,23 @@ someone else's."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root _base fork-from)
+                 (lambda (_raw _prefixed _git-root _base fork-from &optional _force-sandbox)
                    (setq captured-fork-from fork-from))))
         (claude-repl-create-explanation-engine-oneshot-workspace)
         (should (null captured-fork-from))))))
+
+(ert-deftest claude-repl-test-explanation-engine-oneshot-passes-no-force-sandbox ()
+  "The explanation-engine one-shot does NOT pass force-sandbox — that repo
+uses bare-metal Claude, not the Docker sandbox."
+  (claude-repl-test--with-clean-state
+    (let ((captured-force-sandbox :unset))
+      (cl-letf (((symbol-function 'read-from-minibuffer)
+                 (lambda (&rest _) "add caching to thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root _base _fork-from &optional force-sandbox)
+                   (setq captured-force-sandbox force-sandbox))))
+        (claude-repl-create-explanation-engine-oneshot-workspace)
+        (should (null captured-force-sandbox))))))
 
 (ert-deftest claude-repl-test-oneshot-create-pr-command-has-expected-flags ()
   "The PR command string must match exactly what the user specified for
@@ -9555,7 +9663,7 @@ variant inherits the validation — no caller can accidentally skip it."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "do a thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-git-root git-root))))
         (claude-repl--create-pinned-oneshot-workspace
          "/tmp/some-pinned-repo/" 'master "SUFFIX" "test-tag")
@@ -9571,7 +9679,7 @@ workspace-name slug clean across every one-shot variant."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "do a thing"))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (raw prefixed _git-root _base _fork-from)
+                 (lambda (raw prefixed _git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-raw raw)
                    (setq captured-prefixed prefixed))))
         (claude-repl--create-pinned-oneshot-workspace
@@ -9674,13 +9782,41 @@ to the spawned agent."
                    (concat "do a thing"
                            claude-repl--oneshot-no-action-suffix)))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-prefixed prefixed))))
         (claude-repl--create-pinned-oneshot-workspace
          "/tmp/repo/" 'master "SUFFIX" "test-tag")
         (should (string-match-p
                  (regexp-quote claude-repl--oneshot-no-action-suffix)
                  captured-prefixed))))))
+
+(ert-deftest claude-repl-test-create-pinned-oneshot-forwards-force-sandbox ()
+  "FORCE-SANDBOX passed to `claude-repl--create-pinned-oneshot-workspace'
+is forwarded verbatim to `claude-repl--spawn-workspace-generation'."
+  (claude-repl-test--with-clean-state
+    (let ((captured-force-sandbox :unset))
+      (cl-letf (((symbol-function 'read-from-minibuffer)
+                 (lambda (&rest _) "do a thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root _base _fork-from &optional force-sandbox)
+                   (setq captured-force-sandbox force-sandbox))))
+        (claude-repl--create-pinned-oneshot-workspace
+         "/tmp/repo/" 'master "SUFFIX" "test-tag" t)
+        (should captured-force-sandbox)))))
+
+(ert-deftest claude-repl-test-create-pinned-oneshot-no-force-sandbox-by-default ()
+  "When FORCE-SANDBOX is omitted, `claude-repl--spawn-workspace-generation'
+receives nil — the default is bare-metal for repos that do not opt in."
+  (claude-repl-test--with-clean-state
+    (let ((captured-force-sandbox :unset))
+      (cl-letf (((symbol-function 'read-from-minibuffer)
+                 (lambda (&rest _) "do a thing"))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root _base _fork-from &optional force-sandbox)
+                   (setq captured-force-sandbox force-sandbox))))
+        (claude-repl--create-pinned-oneshot-workspace
+         "/tmp/repo/" 'master "SUFFIX" "test-tag")
+        (should (null captured-force-sandbox))))))
 
 ;;;; ---- Tests: eval-code-string ----
 
