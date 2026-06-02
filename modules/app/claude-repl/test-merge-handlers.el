@@ -516,18 +516,21 @@ the handler must not call `--refresh-magit-status-for-dir' with nil
   (should (assq 'refresh-master-from-origin
                 claude-repl--merge-handler-registry)))
 
-;;;; ---- Tests: explanation-engine default override ----
+;;;; ---- Tests: default override is empty (cherry-pick everywhere) ----
 
-(ert-deftest claude-repl-test-explanation-engine-default-routes-to-refresh-master ()
-  "The default value of `--workspace-merge-handler-overrides' routes the
-explanation-engine repo to `refresh-master-from-origin'."
+(ert-deftest claude-repl-test-default-overrides-are-empty ()
+  "The default value of `--workspace-merge-handler-overrides' is nil, so no
+repo is special-cased away from the cherry-pick default."
   (let ((default (eval (car (get 'claude-repl-workspace-merge-handler-overrides
                                   'standard-value)))))
-    (should (assoc "~/workspace/ChessCom/explanation-engine" default))
-    (should (eq (alist-get
-                 'handler
-                 (cdr (assoc "~/workspace/ChessCom/explanation-engine" default)))
-                'refresh-master-from-origin))))
+    (should-not default)))
+
+(ert-deftest claude-repl-test-default-overrides-omit-explanation-engine ()
+  "The explanation-engine repo no longer carries a special-case override —
+it merges via the cherry-pick default like every other repo."
+  (let ((default (eval (car (get 'claude-repl-workspace-merge-handler-overrides
+                                  'standard-value)))))
+    (should-not (assoc "~/workspace/ChessCom/explanation-engine" default))))
 
 (provide 'test-merge-handlers)
 

@@ -48,9 +48,7 @@ definition without leaving stale function references behind."
         (cons (cons symbol fn)
               (assq-delete-all symbol claude-repl--merge-handler-registry))))
 
-(defcustom claude-repl-workspace-merge-handler-overrides
-  '(("~/workspace/ChessCom/explanation-engine"
-     . ((handler . refresh-master-from-origin))))
+(defcustom claude-repl-workspace-merge-handler-overrides nil
   "User-side fallback merge handler config, keyed by repo root path.
 Each entry is `(REPO-ROOT . CONFIG)' where CONFIG is an alist with
 keys `handler' (registered symbol) and optional `args' (plist passed
@@ -61,11 +59,12 @@ normalised.
 Consulted only when the repo itself does not provide
 `.claude/emacs/workspace-merge.eld' — the repo-local file always wins.
 
-Default entry routes `~/workspace/ChessCom/explanation-engine' to
-`refresh-master-from-origin' because that repo's `/workspace-merge'
-contract is \"the PR has already landed via merge queue, just bring
-the local master worktree up to date with origin\" rather than the
-cherry-pick-into-source default."
+Empty by default: every repo falls through to the `cherry-pick'
+default unless it opts into a different handler via its repo-local
+`.claude/emacs/workspace-merge.eld' or an entry added here.  The
+`~/workspace/ChessCom/explanation-engine' repo previously routed to
+`refresh-master-from-origin' here, but now merges via the cherry-pick
+default like every other repo."
   :type '(alist :key-type directory
                 :value-type (alist :key-type symbol :value-type sexp))
   :group 'claude-repl)
@@ -220,10 +219,9 @@ merges.  Ignores ARGS (none defined for this handler)."
 Handler for repos whose `/workspace-merge' contract is \"the PR has
 already landed via merge queue, just bring the local master worktree
 up to date with origin and leave the main worktree checked out to
-master\" — opposite of the cherry-pick default.  The explanation-engine
-repo opts into this via the repo-local
-`.claude/emacs/workspace-merge.eld' (and the matching default in
-`claude-repl-workspace-merge-handler-overrides' as a safety net).
+master\" — opposite of the cherry-pick default.  A repo opts into this
+via its repo-local `.claude/emacs/workspace-merge.eld' (or an entry in
+`claude-repl-workspace-merge-handler-overrides').
 
 Steps:
   1. Resolve the MAIN worktree path of TARGET-WS's repo via
