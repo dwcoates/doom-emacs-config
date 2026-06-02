@@ -2346,6 +2346,52 @@ to one O(N) build + O(1) lookups."
         (should (= build-count 1))
         (should (= legacy-calls 0))))))
 
+(ert-deftest claude-repl-drawer-test-max-depth-skips-merged-ancestor ()
+  "`--max-depth' does not count a flattenable (merged) ancestor.
+Chain: gp (branch-merged=merged) <- p <- c.
+The rendered tree flattens through gp, so visible depth for c is 1
+(c is one level under p), not 2.  Without the fix, the depth bonus
+is 2x indent-per-level, causing the drawer to widen as workspaces
+accumulate in a session."
+  (claude-repl-test--with-clean-state
+    (puthash "gp" (list :project-dir "/gp/" :branch-merged 'merged)
+             claude-repl--workspaces)
+    (puthash "p"  (list :project-dir "/p/" :source-ws-dir "/gp/")
+             claude-repl--workspaces)
+    (puthash "c"  (list :project-dir "/c/" :source-ws-dir "/p/")
+             claude-repl--workspaces)
+    ;; p is 1 level under gp (but gp is flattenable so rendered depth = 0 for p).
+    ;; c is 1 rendered level under p.  Max rendered depth = 1.
+    (should (= (claude-repl-drawer--max-depth) 1))))
+
+(ert-deftest claude-repl-drawer-test-max-depth-skips-multiple-merged-ancestors ()
+  "`--max-depth' skips consecutive merged ancestors in a chain.
+Chain: ggp (merged) <- gp (merged) <- p <- c.
+Both ggp and gp are flattenable, so visible depth for c is 1."
+  (claude-repl-test--with-clean-state
+    (puthash "ggp" (list :project-dir "/ggp/" :branch-merged 'merged)
+             claude-repl--workspaces)
+    (puthash "gp"  (list :project-dir "/gp/"  :branch-merged 'merged
+                         :source-ws-dir "/ggp/")
+             claude-repl--workspaces)
+    (puthash "p"   (list :project-dir "/p/"   :source-ws-dir "/gp/")
+             claude-repl--workspaces)
+    (puthash "c"   (list :project-dir "/c/"   :source-ws-dir "/p/")
+             claude-repl--workspaces)
+    (should (= (claude-repl-drawer--max-depth) 1))))
+
+(ert-deftest claude-repl-drawer-test-max-depth-unmerged-chain-unchanged ()
+  "`--max-depth' still counts unmerged ancestors in full.
+Chain: gp <- p <- c where nobody is merged: rendered depth = 2."
+  (claude-repl-test--with-clean-state
+    (puthash "gp" (list :project-dir "/gp/")
+             claude-repl--workspaces)
+    (puthash "p"  (list :project-dir "/p/"  :source-ws-dir "/gp/")
+             claude-repl--workspaces)
+    (puthash "c"  (list :project-dir "/c/"  :source-ws-dir "/p/")
+             claude-repl--workspaces)
+    (should (= (claude-repl-drawer--max-depth) 2))))
+
 ;;;; ---- apply-background idempotence ----
 
 (ert-deftest claude-repl-drawer-test-apply-background-idempotent ()
