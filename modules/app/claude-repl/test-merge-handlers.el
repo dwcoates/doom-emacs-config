@@ -356,6 +356,38 @@ write is incidental to handler semantics."
           (should (eq (claude-repl--ws-get "foo" :repl-state) :merged))
           (should-not (claude-repl--ws-get "foo" :merging)))))))
 
+(ert-deftest claude-repl-test-refresh-master-records-merge-target-from-main ()
+  "Successful refresh records :merge-target-name from the main worktree's branch."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--git-branch-of-dir)
+                 (lambda (_dir) "master")))
+        (claude-repl-test--with-refresh-mocks
+          (claude-repl--merge-handler-refresh-master-from-origin "foo")
+          (should (equal (claude-repl--ws-get "foo" :merge-target-name)
+                         "master")))))))
+
+(ert-deftest claude-repl-test-refresh-master-merge-target-falls-back-to-master-name ()
+  "When the main branch can't be read, :merge-target-name falls back to the master name."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--git-branch-of-dir)
+                 (lambda (_dir) nil)))
+        (claude-repl-test--with-refresh-mocks
+          (claude-repl--merge-handler-refresh-master-from-origin "foo")
+          (should (equal (claude-repl--ws-get "foo" :merge-target-name)
+                         claude-repl-master-branch-name)))))))
+
 (ert-deftest claude-repl-test-refresh-master-fetches-origin-when-clean ()
   "When the main worktree is clean, the handler runs `git fetch origin master'."
   (claude-repl-test--with-clean-state

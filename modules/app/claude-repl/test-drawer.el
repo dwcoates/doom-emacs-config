@@ -389,6 +389,74 @@ overlay.  Tests the workspace-anchored restoration path."
         (should (string-match-p "fix: thing" text))
         (should (string-match-p "5 minutes ago" text)))))))
 
+(ert-deftest claude-repl-drawer-test-merged-detail-shows-merge-target ()
+  "A MERGED-section entry's folded detail shows the merge-target branch."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :repl-state :merged
+                                       :detail-branch "feature/x"
+                                       :merge-target-name "DWC/parent-branch")
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
+      (claude-repl-drawer-test--with-buffer
+        (claude-repl-drawer--ensure-expanded-set)
+        (puthash "ws" t claude-repl-drawer--expanded-set)
+        (claude-repl-drawer--render)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          (should (string-match-p "merged into:" text))
+          (should (string-match-p "DWC/parent-branch" text)))))))
+
+(ert-deftest claude-repl-drawer-test-merged-detail-target-has-face ()
+  "The merge-target value carries `claude-repl-drawer-detail-merge-target'."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :repl-state :merged
+                                       :merge-target-name "DWC/parent-branch")
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
+      (claude-repl-drawer-test--with-buffer
+        (claude-repl-drawer--ensure-expanded-set)
+        (puthash "ws" t claude-repl-drawer--expanded-set)
+        (claude-repl-drawer--render)
+        (let* ((all (buffer-substring-no-properties (point-min) (point-max)))
+               (pos (string-match (regexp-quote "DWC/parent-branch") all))
+               (f (and pos (get-text-property (1+ pos) 'face))))
+          (should (memq 'claude-repl-drawer-detail-merge-target
+                        (if (listp f) f (list f)))))))))
+
+(ert-deftest claude-repl-drawer-test-non-merged-detail-omits-merge-target ()
+  "A non-MERGED entry's folded detail omits the merge-target line even when set."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :detail-branch "feature/x"
+                                       :merge-target-name "DWC/parent-branch")
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
+      (claude-repl-drawer-test--with-buffer
+        (claude-repl-drawer--ensure-expanded-set)
+        (puthash "ws" t claude-repl-drawer--expanded-set)
+        (claude-repl-drawer--render)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          (should-not (string-match-p "merged into:" text)))))))
+
 (ert-deftest claude-repl-drawer-test-format-duration ()
   "`--format-duration' produces short human-readable strings."
   (should (equal (claude-repl-drawer--format-duration 30)   "30s ago"))

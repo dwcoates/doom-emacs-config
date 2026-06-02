@@ -300,6 +300,13 @@ local mirror could be advanced this run."
     (claude-repl--ws-put target-ws :merge-completed t)
     (claude-repl--ws-put target-ws :merge-completed-at (float-time))
     (claude-repl--ws-put target-ws :merge-failed nil)
+    ;; Record the destination branch (master, possibly via its main
+    ;; worktree) so the drawer's MERGED-section folded detail can show
+    ;; what this workspace merged into.
+    (claude-repl--ws-put target-ws :merge-target-name
+                         (or (and main-dir
+                                  (claude-repl--git-branch-of-dir main-dir))
+                             claude-repl-master-branch-name))
     (when (fboundp 'claude-repl--events-record)
       (claude-repl--events-record target-ws :merge))
     (claude-repl--ws-put target-ws :repl-state :merged)
