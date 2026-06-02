@@ -859,7 +859,7 @@ When CAP is nil, returns S unchanged.  S may be nil; treated as \"\"."
         (concat (substring s 0 cap) "...[truncated]")
       s)))
 
-(defun claude-repl--workspace-generation-prompt (raw-prompt prefixed-prompt git-root base-commit fork-from)
+(defun claude-repl--workspace-generation-prompt (raw-prompt prefixed-prompt git-root base-commit fork-from &optional force-sandbox)
   "Build the prompt sent to headless claude for workspace generation.
 RAW-PROMPT is the user's preemptive prompt — used purely as the source
 material for the slugified workspace name.
@@ -868,7 +868,10 @@ new workspace's first message; emitted verbatim into the JSON `prompt'
 field.
 GIT-ROOT, BASE-COMMIT, FORK-FROM are the deterministic values the
 caller already knows; the model is told to copy them through unchanged
-rather than re-derive them."
+rather than re-derive them.
+When FORCE-SANDBOX is non-nil, the prompt instructs the model to emit
+`\"force_sandbox\": true' so the spawned workspace runs inside the
+Docker sandbox rather than bare-metal."
   (concat
    "Use the /workspace-generation skill to create a workspace (or, rarely, multiple"
    " workspaces) for the provided user prompt..\n"
@@ -886,6 +889,8 @@ rather than re-derive them."
    (format "  \"base_commit\": %S\n" base-commit)
    (when fork-from
      (format "  \"fork_from\": %S\n" fork-from))
+   (when force-sandbox
+     (format "  \"force_sandbox\": true\n"))
    "\n"
    "Generate the `name' field as DWC/<short-slug> (lowercase, hyphenated, 3 words max after the DWC/ prefix) based on the DESCRIPTION above.\n"
    "\n"
@@ -947,10 +952,12 @@ stays unit-testable without a real process."
             (claude-repl--workspace-generation-finalize gen-id status event raw-out git-root))
         (when (buffer-live-p out-buf) (kill-buffer out-buf))))))
 
-(defun claude-repl--spawn-workspace-generation (raw-prompt prefixed-prompt git-root base-commit fork-from)
+(defun claude-repl--spawn-workspace-generation (raw-prompt prefixed-prompt git-root base-commit fork-from &optional force-sandbox)
   "Async-spawn `claude -p --model haiku' to generate a workspace command file.
 RAW-PROMPT, PREFIXED-PROMPT, GIT-ROOT, BASE-COMMIT, FORK-FROM are
 threaded through to `claude-repl--workspace-generation-prompt'.
+When FORCE-SANDBOX is non-nil it is forwarded to the prompt builder so
+the emitted JSON includes `\"force_sandbox\": true'.
 
 A short correlation ID (GEN-ID) is generated per spawn and embedded in
 every log line — spawn-time summary, prompt-body dump, sentinel exit,
@@ -969,7 +976,7 @@ asynchronously."
                             "-p" "--model" claude-repl-workspace-generation-model)
                       claude-repl-workspace-generation-extra-args))
          (proc-input (claude-repl--workspace-generation-prompt
-                      raw-prompt prefixed-prompt git-root base-commit fork-from))
+                      raw-prompt prefixed-prompt git-root base-commit fork-from force-sandbox))
          (prompt-snippet (claude-repl--workspace-generation-truncate
                           proc-input
                           claude-repl-workspace-generation-prompt-log-cap)))
@@ -1405,7 +1412,7 @@ Inherits `minibuffer-local-map' so `RET' submits the typed text
 unchanged; `C-RET' submits it with `claude-repl--oneshot-no-action-suffix'
 appended via `claude-repl--oneshot-prompt-submit-no-action'.")
 
-(defun claude-repl--create-pinned-oneshot-workspace (git-root base suffix tag)
+(defun claude-repl--create-pinned-oneshot-workspace (git-root base suffix tag &optional force-sandbox)
   "Internal helper for one-shot workspace creators pinned to GIT-ROOT.
 Shared by every `claude-repl-create-<repo>-oneshot-workspace' command —
 do not duplicate this body in a new one-shot, dispatch through here.
@@ -1433,7 +1440,12 @@ explicit.
 The preemptive prompt is read with `claude-repl--oneshot-prompt-map':
 `RET' submits the typed text as-is, while `C-RET' submits it with
 `claude-repl--oneshot-no-action-suffix' appended so the spawned agent
-investigates and reports without making changes."
+investigates and reports without making changes.
+
+When FORCE-SANDBOX is non-nil, the spawned workspace runs inside the
+Docker sandbox rather than bare-metal (forwarded to
+`claude-repl--spawn-workspace-generation' and thence into the emitted
+JSON command as `\"force_sandbox\": true')."
   (let* ((base-commit (claude-repl--resolve-worktree-base base))
          (raw-prompt (read-from-minibuffer
                       (format "One-shot %s prompt: " tag)
@@ -1443,8 +1455,8 @@ investigates and reports without making changes."
     (let* ((suffixed-raw (concat raw-prompt suffix))
            (prefixed-prompt (concat claude-repl--autonomous-prompt-prefix
                                     suffixed-raw)))
-      (claude-repl--log nil "%s: base=%s git-root=%s base-commit=%s"
-                        tag base git-root base-commit)
+      (claude-repl--log nil "%s: base=%s git-root=%s base-commit=%s force-sandbox=%s"
+                        tag base git-root base-commit (if force-sandbox "t" "nil"))
       ;; Reset tracking BEFORE the spawn so any `SPC j C-o' / `SPC j C-O'
       ;; pressed while generation is in-flight queues onto this oneshot
       ;; rather than the previous one's workspace.
@@ -1453,7 +1465,7 @@ investigates and reports without making changes."
       (message "Generating %s workspace name via `claude -p --model %s'..."
                tag claude-repl-workspace-generation-model)
       (claude-repl--spawn-workspace-generation
-       raw-prompt prefixed-prompt git-root base-commit nil))))
+       raw-prompt prefixed-prompt git-root base-commit nil force-sandbox))))
 
 (defun claude-repl-create-doom-oneshot-workspace (&optional base)
   "Create a one-shot worktree workspace rooted in `~/.config/doom'.
@@ -1477,7 +1489,8 @@ symbol key in `claude-repl--worktree-base-commits':
    claude-repl--doom-config-dir
    (or base 'master)
    claude-repl--oneshot-merge-suffix
-   "doom-oneshot"))
+   "doom-oneshot"
+   t))
 
 (defun claude-repl-create-doom-oneshot-workspace-from-current-branch ()
   "Create a one-shot doom-config worktree branched off HEAD.
@@ -1958,7 +1971,7 @@ silently degrade to the default base when forking was explicitly requested."
         (error "Cannot fork from workspace '%s': no active session ID (workspace unknown or session not started)" fork-from))
       sid)))
 
-(defun claude-repl--create-worktree-from-command (git-root name prompt priority &optional fork-session-id base-commit)
+(defun claude-repl--create-worktree-from-command (git-root name prompt priority &optional fork-session-id base-commit force-sandbox)
   "Timer callback: create a worktree workspace for NAME with PROMPT and PRIORITY.
 GIT-ROOT is the repository captured at enqueue time (in
 `claude-repl--handle-create-command'); it is threaded through so the
@@ -1968,6 +1981,8 @@ When FORK-SESSION-ID is non-nil, the new worktree branches from HEAD and
 resumes the fork source's Claude session.
 BASE-COMMIT, when non-nil, overrides the default base ref (which is
 \"HEAD\" for forks and `claude-repl-worktree-default-base' otherwise).
+When FORCE-SANDBOX is non-nil, the new workspace's Claude session is
+launched inside the Docker sandbox rather than bare-metal.
 
 The new workspace's `:source-ws-dir' is derived from BASE-COMMIT:
 - When BASE-COMMIT equals `claude-repl-master-branch-name', the parent
@@ -1985,10 +2000,11 @@ The new workspace's `:source-ws-dir' is derived from BASE-COMMIT:
          (if (and base-commit (equal base-commit claude-repl-master-branch-name))
              (claude-repl--master-worktree-path git-root)
            git-root)))
-    (claude-repl--log name "create-worktree-from-command: name=%s git-root=%s priority=%s fork-session-id=%s base-commit=%s source-dir=%s"
-                      name git-root priority fork-session-id (or base-commit "nil") (or source-dir "nil"))
+    (claude-repl--log name "create-worktree-from-command: name=%s git-root=%s priority=%s fork-session-id=%s base-commit=%s source-dir=%s force-sandbox=%s"
+                      name git-root priority fork-session-id (or base-commit "nil") (or source-dir "nil")
+                      (if force-sandbox "t" "nil"))
     (claude-repl--do-create-worktree-workspace
-     name nil fork-session-id prompt nil priority base-commit git-root source-dir)))
+     name force-sandbox fork-session-id prompt nil priority base-commit git-root source-dir)))
 
 (defcustom claude-repl-worktree-stagger-seconds 5
   "Seconds between staggered worktree creation timers.
@@ -2143,6 +2159,7 @@ empty, the default applies (HEAD for forks,
          (prompt (alist-get 'prompt cmd nil))
          (priority (alist-get 'priority cmd nil))
          (fork-from (alist-get 'fork_from cmd nil))
+         (force-sandbox (alist-get 'force_sandbox cmd nil))
          (cmd-git-root (alist-get 'git_root cmd nil))
          (cmd-base-commit (alist-get 'base_commit cmd nil))
          (base-commit (and (stringp cmd-base-commit)
@@ -2201,11 +2218,12 @@ empty, the default applies (HEAD for forks,
         (when effective-name
           (claude-repl--reserve-workspace-name effective-name)
           (claude-repl--log effective-name
-                            "workspace-commands-file create: %s (delay %.1fs, requested=%s) priority=%s fork-session-id=%s git-root=%s base-commit=%s"
-                            effective-name delay name priority fork-session-id git-root (or base-commit "nil"))
+                            "workspace-commands-file create: %s (delay %.1fs, requested=%s) priority=%s fork-session-id=%s git-root=%s base-commit=%s force-sandbox=%s"
+                            effective-name delay name priority fork-session-id git-root (or base-commit "nil")
+                            (if force-sandbox "t" "nil"))
           (run-with-timer delay nil
                           #'claude-repl--create-worktree-from-command
-                          git-root effective-name prompt priority fork-session-id base-commit)))))))
+                          git-root effective-name prompt priority fork-session-id base-commit force-sandbox)))))))
 
 (defun claude-repl--handle-prompt-command (cmd)
   "Handle a \"prompt\" workspace command CMD."
