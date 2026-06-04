@@ -15,12 +15,13 @@ Do NOT attempt to merge the workspaces yourself in any way — **with the explic
 
 2. **Rebase onto the merge target, or create a PR — current workspace only.** Skip this step entirely if the current workspace is NOT among the named merge targets identified in step 1.
 
-   a. Determine the merge target branch:
+   a. Determine the merge target branch and handler:
       - Read `.claude/emacs/state.el` under the current worktree root (obtain the root via `git rev-parse --show-toplevel`).
       - Extract the `:source-ws-dir` value from the plist.
       - Run `git -C <source-ws-dir> branch --show-current` to get the merge target branch name.
+      - Check whether the repo uses the `refresh-master-from-origin` handler by reading `<git-toplevel>/.claude/emacs/workspace-merge.eld` and checking if `(alist-get 'handler ...)` equals `refresh-master-from-origin`. If the file does not exist or names a different handler, the repo uses cherry-pick and step 2M does NOT apply regardless of branch name.
 
-   b. **If the merge target branch is NOT `master`** — rebase:
+   b. **If the merge target branch is NOT `master`, OR if the repo does not use `refresh-master-from-origin`** — rebase:
       ```bash
       git rebase <merge-target-branch>
       ```
@@ -31,7 +32,7 @@ Do NOT attempt to merge the workspaces yourself in any way — **with the explic
       - **Orthogonal motivations** (the commits address independent concerns that happen to touch the same lines): resolve the conflict by incorporating both sets of changes, then run `git add <file>`. Once all files in the current hunk are staged, run `git rebase --continue`. Repeat for each subsequent conflict that arises.
       - **Conceptually conflicting motivations** (the commits represent genuinely competing design decisions or mutually exclusive changes): run `git rebase --abort` IMMEDIATELY, surface the specific conflict along with both commit motivations to the user, and STOP — do not proceed to step 3 or beyond.
 
-   **2M. If the merge target branch IS `master`** — create PR and add to merge queue (skip 2b/2c entirely):
+   **2M. If the merge target branch IS `master` AND the repo uses `refresh-master-from-origin`** — create PR and add to merge queue (skip 2b/2c entirely):
 
    i. Create the PR with the `patch` and `self-certified` labels:
       ```bash
