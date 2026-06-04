@@ -316,6 +316,98 @@ Guards against the untracked-fallback regressing the tracked path."
       (+dwc/magit-status-workspace)
       (should (null (claude-repl--ws-get "test-ws" :fullscreen-config))))))
 
+;;;; ---- Tests: +dwc/magit-status-workspace (fullscreen panel handling) ----
+
+(ert-deftest claude-repl-test-magit-status-workspace-fullscreen-closes-input-window ()
+  "When fullscreen, closes the input window so magit can fill the vterm window."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :project-dir "/tmp/proj")
+    (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
+    (claude-repl--ws-put "test-ws" :input-buffer 'fake-input-buf)
+    (claude-repl--ws-put "test-ws" :vterm-buffer 'fake-vterm-buf)
+    (let ((closed-bufs '()))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'window-parameter) (lambda (_w _p) nil))
+                ((symbol-function 'claude-repl--close-buffer-window)
+                 (lambda (buf) (push buf closed-bufs)))
+                ((symbol-function 'get-buffer-window)
+                 (lambda (_buf) 'fake-vterm-win))
+                ((symbol-function 'set-window-dedicated-p) #'ignore)
+                ((symbol-function 'select-window) #'ignore)
+                ((symbol-function 'magit-status) #'ignore))
+        (+dwc/magit-status-workspace)
+        (should (memq 'fake-input-buf closed-bufs))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-fullscreen-undedicates-vterm-window ()
+  "When fullscreen, un-dedicates the vterm window so same-window display succeeds."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :project-dir "/tmp/proj")
+    (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
+    (claude-repl--ws-put "test-ws" :input-buffer 'fake-input-buf)
+    (claude-repl--ws-put "test-ws" :vterm-buffer 'fake-vterm-buf)
+    (let ((dedicate-args nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'window-parameter) (lambda (_w _p) nil))
+                ((symbol-function 'claude-repl--close-buffer-window) #'ignore)
+                ((symbol-function 'get-buffer-window)
+                 (lambda (_buf) 'fake-vterm-win))
+                ((symbol-function 'set-window-dedicated-p)
+                 (lambda (win dedicated) (setq dedicate-args (list win dedicated))))
+                ((symbol-function 'select-window) #'ignore)
+                ((symbol-function 'magit-status) #'ignore))
+        (+dwc/magit-status-workspace)
+        (should (equal dedicate-args '(fake-vterm-win nil)))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-fullscreen-selects-vterm-window ()
+  "When fullscreen, selects the vterm window before calling magit-status."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :project-dir "/tmp/proj")
+    (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
+    (claude-repl--ws-put "test-ws" :input-buffer 'fake-input-buf)
+    (claude-repl--ws-put "test-ws" :vterm-buffer 'fake-vterm-buf)
+    (let ((selected-wins '()))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'window-parameter) (lambda (_w _p) nil))
+                ((symbol-function 'claude-repl--close-buffer-window) #'ignore)
+                ((symbol-function 'get-buffer-window)
+                 (lambda (_buf) 'fake-vterm-win))
+                ((symbol-function 'set-window-dedicated-p) #'ignore)
+                ((symbol-function 'select-window)
+                 (lambda (w) (push w selected-wins)))
+                ((symbol-function 'magit-status) #'ignore))
+        (+dwc/magit-status-workspace)
+        (should (memq 'fake-vterm-win selected-wins))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-not-fullscreen-no-panel-close ()
+  "When NOT fullscreen, does not close the input window or un-dedicate vterm."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :project-dir "/tmp/proj")
+    ;; :fullscreen-config left nil — not fullscreen
+    (claude-repl--ws-put "test-ws" :input-buffer 'fake-input-buf)
+    (let ((close-calls 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'window-parameter) (lambda (_w _p) nil))
+                ((symbol-function 'claude-repl--close-buffer-window)
+                 (lambda (_buf) (cl-incf close-calls)))
+                ((symbol-function 'magit-status) #'ignore))
+        (+dwc/magit-status-workspace)
+        (should (= close-calls 0))))))
+
+(ert-deftest claude-repl-test-magit-status-workspace-fullscreen-no-input-buf-no-error ()
+  "When fullscreen but no input buffer stored, does not error and skips close."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :project-dir "/tmp/proj")
+    (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
+    ;; :input-buffer and :vterm-buffer left nil
+    (let ((close-calls 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'window-parameter) (lambda (_w _p) nil))
+                ((symbol-function 'claude-repl--close-buffer-window)
+                 (lambda (_buf) (cl-incf close-calls)))
+                ((symbol-function 'magit-status) #'ignore))
+        (+dwc/magit-status-workspace)
+        (should (= close-calls 0))))))
+
 ;;;; ---- Tests: claude-repl--magit-display-buffer-same-window ----
 
 (ert-deftest claude-repl-test-magit-display-buffer-same-window-uses-display-buffer-same-window ()
