@@ -23,6 +23,18 @@
 ;; is responsible for performing the post-merge work and recording
 ;; terminal state via the shared helpers in worktree.el
 ;; (`--mark-merge-failed', `--close-workspace', drawer refresh, etc.).
+;;
+;; PR polling (`refresh-master-from-origin' handler):
+;;   When the handler is invoked for a repo whose PR is still in the
+;;   merge queue (or not yet merged), it does NOT block the worker
+;;   thread.  Instead it defers an async polling loop to the main
+;;   thread.  Each poll tick spawns `gh pr view --json state,mergedAt'
+;;   as a subprocess (`make-process') so the main thread is never
+;;   blocked waiting for the GitHub API.  The process sentinel handles
+;;   the result: merged → fetch+ff+close; closed-not-merged → revive
+;;   workspace; still-open → wait for the next tick.  Active polls are
+;;   tracked in `claude-repl--active-pr-polls' so they can be cancelled
+;;   cleanly if the workspace is otherwise torn down.
 
 ;;; Code:
 
@@ -212,57 +224,202 @@ merges.  Ignores ARGS (none defined for this handler)."
 (claude-repl--register-merge-handler 'cherry-pick
                                      #'claude-repl--merge-handler-cherry-pick)
 
+;;; PR merge-queue polling
+
+(defcustom claude-repl-pr-poll-interval 60
+  "Seconds between successive `gh pr view' polls when waiting for a PR
+to exit the merge queue.  Each tick spawns an async subprocess so the
+main thread is never blocked between polls."
+  :type 'integer
+  :group 'claude-repl)
+
+(defvar claude-repl--active-pr-polls (make-hash-table :test 'equal)
+  "Hash table of workspace-name → active poll timer.
+Populated by `claude-repl--pr-poll-start'; entries are removed by
+`claude-repl--pr-poll-cancel' when a terminal PR state is reached.")
+
+(defun claude-repl--pr-poll-cancel (ws)
+  "Cancel and remove any active poll timer registered for workspace WS.
+Safe to call when no poll is active — no-ops silently."
+  (when-let ((timer (gethash ws claude-repl--active-pr-polls)))
+    (cancel-timer timer)
+    (remhash ws claude-repl--active-pr-polls)
+    (claude-repl--log ws "pr-poll-cancel: ws=%s timer cancelled" ws)))
+
+(defun claude-repl--pr-poll-start (ws project-dir main-dir)
+  "Start async PR polling for workspace WS.
+Fires an immediate first tick, then repeats every
+`claude-repl-pr-poll-interval' seconds.  PROJECT-DIR is the worktree
+used to invoke `gh'; MAIN-DIR is the main worktree used for the
+eventual fetch+ff+checkout on merge success.
+
+Must be called on the main thread (uses `run-with-timer' and
+`make-process').  Cancels any pre-existing poll for WS before
+registering the new one."
+  (claude-repl--pr-poll-cancel ws)
+  (claude-repl--log ws "pr-poll-start: ws=%s project-dir=%s main-dir=%s"
+                    ws project-dir (or main-dir "nil"))
+  ;; Fire immediately so the caller gets a fast result when the PR has
+  ;; already merged (e.g. race between skill invocation and landing).
+  (claude-repl--pr-poll-tick ws project-dir main-dir)
+  (let ((timer (run-with-timer
+                claude-repl-pr-poll-interval
+                claude-repl-pr-poll-interval
+                #'claude-repl--pr-poll-tick
+                ws project-dir main-dir)))
+    (puthash ws timer claude-repl--active-pr-polls)))
+
+(defun claude-repl--pr-poll-tick (ws project-dir main-dir)
+  "One poll iteration: asynchronously query the PR state for WS.
+Spawns `gh pr view --json state,mergedAt,number' via
+`claude-repl--async-gh' in PROJECT-DIR.  MAIN-DIR is forwarded to the
+callback so `claude-repl--pr-poll-handle-result' can pass it to the
+on-merged handler.  Runs on the main thread (timer callbacks and the
+direct call from `claude-repl--pr-poll-start'); non-blocking."
+  (claude-repl--log ws "pr-poll-tick: ws=%s project-dir=%s" ws project-dir)
+  (claude-repl--async-gh
+   (format "pr-poll-%s" ws)
+   project-dir
+   '("pr" "view" "--json" "state,mergedAt,number")
+   (lambda (_ok output)
+     (claude-repl--pr-poll-handle-result ws project-dir main-dir output))))
+
+(defun claude-repl--pr-poll-handle-result (ws project-dir main-dir output)
+  "Interpret gh OUTPUT for WS and act on the PR state.
+Called on the main thread from the process sentinel.
+
+  MERGED  → cancel poll, fetch+ff+checkout+close via
+            `claude-repl--pr-poll-on-merged'.
+  CLOSED  → cancel poll, revive workspace via
+            `claude-repl--pr-poll-on-failed'.
+  OPEN    → log and do nothing; next timer tick will poll again.
+  error   → log the raw output and keep polling; transient gh
+            failures (network hiccup, rate-limit) should not abort
+            the loop."
+  (let* ((json (condition-case err
+                   (json-parse-string output
+                                      :object-type 'alist
+                                      :false-object nil
+                                      :null-object nil)
+                 (error
+                  (claude-repl--log ws
+                                    "pr-poll-handle-result: ws=%s JSON parse error %S — output=%S"
+                                    ws err output)
+                  nil)))
+         (state (and json (alist-get 'state json))))
+    (claude-repl--log ws "pr-poll-handle-result: ws=%s state=%s"
+                      ws (or state "nil/error"))
+    (cond
+     ((null json)
+      ;; gh returned non-JSON (error message, network failure, etc.).
+      ;; If the PR number was not found at all, gh exits non-zero and
+      ;; `finished' is replaced with `exited abnormally'; but the
+      ;; sentinel only fires here on clean exit.  Log and keep polling.
+      (claude-repl--log ws
+                        "pr-poll-handle-result: ws=%s could not parse output — continuing to poll"
+                        ws))
+     ((equal state "MERGED")
+      (claude-repl--log ws
+                        "pr-poll-handle-result: ws=%s PR merged — advancing master"
+                        ws)
+      (claude-repl--pr-poll-cancel ws)
+      (claude-repl--pr-poll-on-merged ws main-dir))
+     ((equal state "CLOSED")
+      (claude-repl--log ws
+                        "pr-poll-handle-result: ws=%s PR closed without merging — reviving workspace"
+                        ws)
+      (claude-repl--pr-poll-cancel ws)
+      (claude-repl--pr-poll-on-failed ws))
+     (t
+      (claude-repl--log ws
+                        "pr-poll-handle-result: ws=%s PR state=%s — still open, polling continues"
+                        ws state)))))
+
+(defun claude-repl--pr-poll-on-merged (ws main-dir)
+  "PR for WS has merged: fetch origin, fast-forward master, close workspace.
+MAIN-DIR is the main worktree path; git work is skipped (with a log
+line) when it is nil.  The workspace state and UI teardown mirror the
+success path of `claude-repl--merge-handler-refresh-master-from-origin'.
+
+Runs on the main thread (called from the process sentinel)."
+  (when main-dir
+    (let ((ec (claude-repl--git-exit-code
+               main-dir "fetch" "origin"
+               claude-repl-master-branch-name)))
+      (claude-repl--log ws "pr-poll-on-merged: ws=%s fetch origin %s exit=%d"
+                        ws claude-repl-master-branch-name ec))
+    (claude-repl--maybe-fast-forward-master main-dir)
+    (claude-repl--checkout-master-in-worktree main-dir))
+  (claude-repl--ws-put ws :merging nil)
+  (claude-repl--ws-put ws :merge-completed t)
+  (claude-repl--ws-put ws :merge-completed-at (float-time))
+  (claude-repl--ws-put ws :merge-failed nil)
+  (claude-repl--ws-put ws :merge-target-name
+                       (or (and main-dir
+                                (claude-repl--git-branch-of-dir main-dir))
+                           claude-repl-master-branch-name))
+  (when (fboundp 'claude-repl--events-record)
+    (claude-repl--events-record ws :merge))
+  (claude-repl--ws-put ws :repl-state :merged)
+  (claude-repl--ws-put ws :claude-state nil)
+  (claude-repl--gns-sockets-close-then
+   ws
+   (lambda ()
+     (claude-repl--close-workspace ws 'preserve-entry)
+     (when main-dir
+       (claude-repl--refresh-magit-status-for-dir main-dir ws)))))
+
+(defun claude-repl--pr-poll-on-failed (ws)
+  "PR for WS closed without merging: mark merge-failed and revive workspace.
+Sets `:repl-state :merge-failed' then calls
+`claude-repl--reopen-workspace-from-state' to restore the workspace UI
+\(requires the plist entry to still carry `:project-dir', which
+`workspace-merge-async' preserves via `preserve-entry').
+
+Runs on the main thread (called from the process sentinel)."
+  (claude-repl--ws-put ws :merging nil)
+  (claude-repl--ws-put ws :merge-completed nil)
+  (claude-repl--ws-put ws :merge-failed t)
+  (claude-repl--ws-put ws :repl-state :merge-failed)
+  (claude-repl--reopen-workspace-from-state ws)
+  (claude-repl--dispatch-prompt-command
+   ws
+   (format
+    "The pull request for workspace '%s' was closed without merging into master. \
+The workspace has been revived — please investigate and retry the merge when ready."
+    ws)))
+
 (defun claude-repl--merge-handler-refresh-master-from-origin
     (target-ws &optional _args)
-  "Refresh master from origin and ensure the main worktree is on master.
+  "Poll for TARGET-WS's PR to merge, then refresh master from origin.
 
-Handler for repos whose `/workspace-merge' contract is \"the PR has
-already landed via merge queue, just bring the local master worktree
-up to date with origin and leave the main worktree checked out to
-master\" — opposite of the cherry-pick default.  A repo opts into this
-via its repo-local `.claude/emacs/workspace-merge.eld' (or an entry in
+Handler for repos whose `/workspace-merge' contract is \"the PR is in
+the merge queue; poll until it lands, then bring the local master
+worktree up to date with origin\" — as opposed to the cherry-pick
+default.  A repo opts into this via its repo-local
+`.claude/emacs/workspace-merge.eld' (or an entry in
 `claude-repl-workspace-merge-handler-overrides').
 
 Steps:
-  1. Resolve the MAIN worktree path of TARGET-WS's repo via
-     `claude-repl--main-worktree-path' (the original clone — the
-     worktree whose `.git' is a directory, NOT a sibling worktree
-     added via `git worktree add'), starting from the workspace's
-     own `:project-dir' or `:source-ws-dir'.  Skip the git work
-     with a log line when neither can be resolved.
-  2. SIGNAL `user-error' if the main worktree has uncommitted
-     changes (`claude-repl--worktree-dirty-p').  Advancing master
-     while the user has dirty work in the trunk checkout would risk
-     ambiguity; the merge-async failure path re-enqueues the source
-     workspace with `:halt-until-human t' so the user can resolve
-     the dirty state before further merges proceed.
-  3. Run `git fetch origin <master-branch-name>' in the main
-     worktree synchronously — this thread runs on the merge worker,
-     so blocking git here does not freeze the main UI thread.
-  4. Hand off to `claude-repl--maybe-fast-forward-master', which
-     advances the local <master> ref (via `merge --ff-only' on
-     whatever worktree is on master, else `update-ref').  No-ops
-     on diverged history, equal HEADs, or missing refs.
-  5. Hand off to `claude-repl--checkout-master-in-worktree' against
-     the main worktree so it ends checked out to the freshly-advanced
-     <master>.  No-op when already on master, no-op-with-log when
-     another worktree currently holds master (and checkout therefore
-     refuses).
+  1. Resolve source-dir (`:project-dir' or `:source-ws-dir') and the
+     MAIN worktree path via `claude-repl--main-worktree-path'.
+  2. SIGNAL `user-error' if the main worktree has uncommitted changes
+     (`claude-repl--worktree-dirty-p').  Advancing master while dirty
+     work sits in the trunk checkout is ambiguous; the merge-async
+     failure path re-enqueues with `:halt-until-human t'.
+  3. Defer `claude-repl--pr-poll-start' to the main thread.  Polling
+     is driven by repeating async subprocesses (`make-process') so the
+     main thread is never blocked between ticks.  When a terminal PR
+     state is reached the sentinel calls either
+     `claude-repl--pr-poll-on-merged' (fetch+ff+close) or
+     `claude-repl--pr-poll-on-failed' (revive workspace).
 
-After the git work, marks TARGET-WS `:merge-completed t' /
-`:repl-state :merged' so the drawer renders the 🔀 badge, then defers
-`claude-repl--gns-sockets-close-then' + `claude-repl--close-workspace'
-to the main thread so the workspace UI tears down cleanly — same
-teardown chain the cherry-pick handler uses on success.
+When source-dir cannot be resolved, logs and no-ops (same as the
+previous immediate-fetch behaviour for that edge case).
 
 ARGS is currently unused; reserved for future tuning.
 
-SIGNALS `user-error' on a dirty main worktree (step 2).
-Deliberately does NOT signal on the other git failures (fetch
-hiccup, diverged history, missing local master, checkout refused
-because another worktree holds master): the PR has already landed
-upstream, so the workspace's job is done regardless of whether the
-local mirror could be advanced this run."
+SIGNALS `user-error' on a dirty main worktree (step 2)."
   (let* ((source-dir (or (claude-repl--ws-get target-ws :project-dir)
                          (claude-repl--ws-get target-ws :source-ws-dir)))
          (main-dir (and source-dir
@@ -271,11 +428,11 @@ local mirror could be advanced this run."
                       "merge-handler-refresh-master-from-origin: ws=%s source-dir=%s main-dir=%s"
                       target-ws (or source-dir "nil") (or main-dir "nil"))
     (cond
-     ((not main-dir)
+     ((not source-dir)
       (claude-repl--log target-ws
-                        "merge-handler-refresh-master-from-origin: ws=%s no main worktree resolvable — skipping"
+                        "merge-handler-refresh-master-from-origin: ws=%s no source-dir — skipping poll"
                         target-ws))
-     ((claude-repl--worktree-dirty-p main-dir)
+     ((and main-dir (claude-repl--worktree-dirty-p main-dir))
       (claude-repl--log target-ws
                         "merge-handler-refresh-master-from-origin: ws=%s main worktree %s is dirty — signaling error"
                         target-ws main-dir)
@@ -283,51 +440,12 @@ local mirror could be advanced this run."
        "Cannot advance master from origin: main worktree '%s' has uncommitted changes — stash or commit first"
        main-dir))
      (t
-      (let ((ec (claude-repl--git-exit-code
-                 main-dir "fetch" "origin"
-                 claude-repl-master-branch-name)))
-        (claude-repl--log target-ws
-                          "merge-handler-refresh-master-from-origin: ws=%s fetch origin %s exit=%d"
-                          target-ws claude-repl-master-branch-name ec))
-      (claude-repl--maybe-fast-forward-master main-dir)
-      (claude-repl--checkout-master-in-worktree main-dir)))
-    ;; Mark merged for the non-error branches (no main-dir / clean +
-    ;; fetched).  The dirty-main case never reaches here because the
-    ;; `user-error' above propagates out of the worker thread and into
-    ;; `--workspace-merge-async''s centralized failure path, which
-    ;; re-enqueues the source workspace with `:halt-until-human t'.
-    (claude-repl--ws-put target-ws :merging nil)
-    (claude-repl--ws-put target-ws :merge-completed t)
-    (claude-repl--ws-put target-ws :merge-completed-at (float-time))
-    (claude-repl--ws-put target-ws :merge-failed nil)
-    ;; Record the destination branch (master, possibly via its main
-    ;; worktree) so the drawer's MERGED-section folded detail can show
-    ;; what this workspace merged into.
-    (claude-repl--ws-put target-ws :merge-target-name
-                         (or (and main-dir
-                                  (claude-repl--git-branch-of-dir main-dir))
-                             claude-repl-master-branch-name))
-    (when (fboundp 'claude-repl--events-record)
-      (claude-repl--events-record target-ws :merge))
-    (claude-repl--ws-put target-ws :repl-state :merged)
-    (claude-repl--ws-put target-ws :claude-state nil)
-    ;; Defer the UI teardown to the main thread — this handler runs on
-    ;; the merge worker thread spawned by
-    ;; `claude-repl--workspace-merge-async', and persp/vterm kills must
-    ;; happen on main.  Once the close is done, refresh any open
-    ;; magit-status buffer for MAIN-DIR so it reflects the post-ff
-    ;; state — magit's own auto-revert may have last fired before the
-    ;; `git fetch' + `merge --ff-only' + checkout completed, leaving
-    ;; the buffer stuck on the pre-ff HEAD.
-    (claude-repl--defer-to-main-thread
-     (lambda ()
-       (claude-repl--gns-sockets-close-then
-        target-ws
-        (lambda ()
-          (claude-repl--close-workspace target-ws 'preserve-entry)
-          (when main-dir
-            (claude-repl--refresh-magit-status-for-dir
-             main-dir target-ws))))))))
+      ;; Defer poll start to the main thread — `make-process' and
+      ;; `run-with-timer' must run on main.  This handler is invoked
+      ;; from the merge worker thread.
+      (claude-repl--defer-to-main-thread
+       (lambda ()
+         (claude-repl--pr-poll-start target-ws source-dir main-dir)))))))
 
 (claude-repl--register-merge-handler
  'refresh-master-from-origin
