@@ -1,6 +1,6 @@
 ---
 name: build-skill
-description: "Create, audit, or update a Claude Code skill. Use for any modification to a SKILL.md or run.sh — new skills and edits to existing ones alike. Carries a Specializations section with extra conventions for skill families (currently: position-analysis skills)."
+description: "Create, audit, or update a Claude Code skill. ALWAYS use this skill when creating, modifying, or generating any skill — never write or edit skill files directly. Use for any modification to a SKILL.md or run.sh — new skills and edits to existing ones alike. Carries a Specializations section with extra conventions for skill families (currently: position-analysis skills)."
 argument-hint: "<new|audit|update> <skill-name>"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(ls:*)
 ---
@@ -195,7 +195,7 @@ In addition to the general conventions, every skill in this family follows these
   - Parent skills (see #4) additionally need whatever tools they use to dispatch children (the `Agent` tool when dispatched via subagent).
 
 2. **Arguments table is fixed.**
-  - One row for `<prelim-json-path>` pointing at the `gns cee prelim` response file written by `/analyze-position`'s setup step.
+  - One row for `<prelim-json-path>` pointing at the `gns cee run prelim` response file written by `/analyze-position`'s setup step.
   - The row directs readers to `gns cee run prelim --help` for the response schema rather than re-documenting the schema inline.
 
 3. **Output Contract section is required**, replacing the freer `Steps` body the general conventions describe. It declares the response shape:
