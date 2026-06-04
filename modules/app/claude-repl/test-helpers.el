@@ -274,6 +274,27 @@ advice's effect would be invisible)."
     nil)
   (advice-add 'file-notify-add-watch :override #'file-notify-add-watch--test-stub))
 
+;; In batch mode, Emacs uses a tiny terminal frame (typically 9 rows x 10 cols).
+;; Tests that create real windows (split-window, display-buffer-in-side-window)
+;; fail when window-min-height / window-min-width enforce larger minimum sizes
+;; than the tiny frame allows.  Lowering both to 1 lets the frame be split into
+;; as many sub-windows as needed for layout-level tests without changing any
+;; behavioural logic (the minimums only gate whether a split is geometrically
+;; possible).
+(when noninteractive
+  (setq-default window-min-height 1)
+  (setq-default window-min-width  1))
+
+;; Stub notification backend so notifications.el loads without error in
+;; environments lacking terminal-notifier / osascript.  `defvar' only
+;; initialises the variable when it is void; pre-binding it here means the
+;; `(defvar claude-repl--notification-backend (claude-repl--select-notification-backend))'
+;; form in notifications.el skips the init-form evaluation entirely, which
+;; is the call that would otherwise signal the FATAL load error.
+(unless (boundp 'claude-repl--notification-backend)
+  (defvar claude-repl--notification-backend (lambda (_title _msg) nil)
+    "Stub: no-op notification backend for test environments."))
+
 ;; Suppress timers at load time
 (defvar claude-repl-test--orig-run-with-timer (symbol-function 'run-with-timer))
 (advice-add 'run-with-timer :override (lambda (&rest _) nil))

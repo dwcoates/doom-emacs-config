@@ -323,7 +323,10 @@ write is incidental to handler semantics."
          (((symbol-function 'claude-repl--events-record) (lambda (&rest _) nil))
           ((symbol-function 'claude-repl--git-exit-code)
            (lambda (&rest args)
-             (push args (plist-get captured :fetch))
+             ;; Use plist-put explicitly for Emacs 27 compatibility —
+             ;; (push x (plist-get plist key)) requires setf on plist-get
+             ;; which was only added in Emacs 29.
+             (plist-put captured :fetch (cons args (plist-get captured :fetch)))
              0))
           ((symbol-function 'claude-repl--maybe-fast-forward-master)
            (lambda (dir) (plist-put captured :ff dir)))
