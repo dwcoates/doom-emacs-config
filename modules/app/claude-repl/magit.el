@@ -208,7 +208,12 @@ window).  When the workspace is NOT tracked by claude-repl (e.g.,
 the main \"doom\" workspace, or a workspace whose entry has been
 nuked), falls back to `default-directory' so magit still opens and
 skips the `:fullscreen-config' write to avoid creating a stub entry
-(see `claude-repl--ws-put' STUB-CREATE warning)."
+(see `claude-repl--ws-put' STUB-CREATE warning).
+
+When claude-repl is fullscreen (both input and output are the only
+visible windows), closes the input window and un-dedicates the vterm
+window before opening magit so that `display-buffer-same-window' can
+replace the vterm window cleanly instead of splitting it."
   (interactive)
   (when (window-parameter (selected-window) 'window-side)
     (select-window (window-main-window)))
@@ -221,6 +226,18 @@ skips the `:fullscreen-config' write to avoid creating a stub entry
       (claude-repl--log ws "magit-status-workspace: same-window dir=%s tracked=%s"
                         dir (if tracked-dir "yes" "no")))
     (when tracked-dir
+      ;; When fullscreen, close the input window and un-dedicate the vterm window
+      ;; so magit can replace the vterm window via same-window display without
+      ;; splitting it (the vterm window is dedicated, which blocks same-window).
+      (when (claude-repl--ws-get ws :fullscreen-config)
+        (let ((input-buf (claude-repl--ws-get ws :input-buffer))
+              (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+          (when input-buf
+            (claude-repl--close-buffer-window input-buf))
+          (when vterm-buf
+            (when-let ((vterm-win (get-buffer-window vterm-buf)))
+              (set-window-dedicated-p vterm-win nil)
+              (select-window vterm-win)))))
       (claude-repl--ws-put ws :fullscreen-config nil))
     (magit-status dir)))
 
