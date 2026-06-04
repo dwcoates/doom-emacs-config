@@ -7,6 +7,15 @@ description: Generate git branch/worktree names for planned work. Use when the u
 
 The user will describe work they want to do across one or more workspaces in plain English. Your job is to generate practical git branch/worktree names for each workspace, write them to a JSON file, and confirm. A downstream text editor is going to use this file you generate to create workspaces for itself (which will have a corresponding branch/worktree it'll create for them as well).
 
+> ⛔ **NEVER manually create git worktrees or branches.**
+> This prohibition is absolute and applies to this skill and to every agent acting on its behalf.
+> Commands such as `git worktree add`, `git checkout -b`, `git switch -c`, or any other git
+> command that creates a branch or worktree are **strictly forbidden** here.
+> Worktrees and branches MUST be created exclusively through the workspace-generation dispatch
+> machinery — that is, by emitting the dispatch JSON and piping it through `run.sh`.
+> There are no exceptions. Manual worktree/branch creation bypasses the downstream pipeline,
+> produces state the editor cannot track, and is the root cause of real production incidents.
+
 Do NOT attempt to generate git branches or worktrees yourself in git. Under NO circumstances. The handling of branch/worktree generation is EXCLUSIVELY the responsibility and right of downstream consumers. Your EXCLUSIVE job is to generate the aforementioned JSON file, and NOTHING else. To that end, no code or any other files or mutating effects should be done, either.
 
 ## Scope: no investigation, only synthesis
