@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
-# Reads a JSON workspace commands array from stdin, decorates each create
+# Reads a JSON workspace commands array from stdin, validates the
+# source_ws invariant on every create entry, decorates each create
 # entry's "name" field, then writes the result atomically to
 # ~/.claude/output/workspace_commands_<uuid>.json.
+#
+# Source-ws invariant (enforced before any write):
+#   Every `create` entry MUST carry a `source_ws` object of shape
+#     {"name": "<non-empty-str>", "path": "<non-empty-str>"}
+#   Dispatches missing either component are rejected with a clear
+#   stderr diagnostic identifying the offending entry, and nothing is
+#   written to ~/.claude/output/. Prompt-only entries (type=="prompt")
+#   are exempt — they target existing workspaces and do not need a
+#   source workspace.
 #
 # When CLAUDE_WORKSPACE_PREFIX is set in the environment, it is prepended
 # to each create entry's name as "PREFIX/name-<suffix>". When unset or
@@ -28,6 +38,9 @@ mkdir -p ~/.claude/output
 # BSD mktemp on macOS only substitutes X's at the END of the template, so
 # don't put an extension after them — pick up the .json on the final mv.
 tmp=$(mktemp ~/.claude/output/.workspace_commands_XXXXXX)
+# Clean up the staging file on any error so failed validations don't
+# leave half-written turds in ~/.claude/output/.
+trap 'rm -f "$tmp"' EXIT
 
 # Pass the python program via -c so python3's stdin stays connected to
 # run.sh's stdin (a `python3 - <<'PY'` heredoc would shadow it).
@@ -50,6 +63,51 @@ except json.JSONDecodeError as e:
 
 if not isinstance(data, list):
     print("ERROR: workspace commands payload must be a JSON array", file=sys.stderr)
+    sys.exit(2)
+
+
+# Enforce the source_ws invariant before any mutation or write. Every
+# `create` entry must carry source_ws={"name": <non-empty-str>,
+# "path": <non-empty-str>}. Prompt-only entries are exempt.
+validation_errors = []
+for idx, entry in enumerate(data):
+    if not isinstance(entry, dict):
+        continue
+    if entry.get("type") != "create":
+        continue
+    label = f"entry[{idx}] (create, name={entry.get('name')!r})"
+    sw = entry.get("source_ws")
+    if not isinstance(sw, dict):
+        validation_errors.append(
+            f"  {label}: missing or non-object `source_ws` field"
+        )
+        continue
+    name = sw.get("name")
+    path = sw.get("path")
+    if not isinstance(name, str) or not name.strip():
+        validation_errors.append(
+            f"  {label}: `source_ws.name` is missing or empty"
+        )
+    if not isinstance(path, str) or not path.strip():
+        validation_errors.append(
+            f"  {label}: `source_ws.path` is missing or empty"
+        )
+
+if validation_errors:
+    print(
+        "ERROR: source_ws invariant violated on one or more create entries:",
+        file=sys.stderr,
+    )
+    for line in validation_errors:
+        print(line, file=sys.stderr)
+    print("", file=sys.stderr)
+    print(
+        'Every `create` entry MUST carry source_ws={"name": <non-empty-str>, '
+        '"path": <non-empty-str>}. Resolve via Step 1 of SKILL.md (explicit '
+        '[source-ws:<name> path:<dir>] tag or current-workspace fallback via '
+        '`git rev-parse --abbrev-ref HEAD` + `git rev-parse --show-toplevel`).',
+        file=sys.stderr,
+    )
     sys.exit(2)
 
 

@@ -1345,6 +1345,8 @@ Shared by the interactive `claude-repl-nuke-workspace' and
 deliberately offers both kinds of candidates via
 `claude-repl--nukeable-workspace-names') can hand the chosen WS to a
 single routing point."
+  (claude-repl--log ws "nuke-or-kill-workspace: ENTRY ws=%s live=%s"
+                    ws (if (claude-repl--ws-live-p ws) "t" "nil"))
   (cond
    ((claude-repl--ws-live-p ws)
     (claude-repl--nuke-one-workspace ws)
@@ -1379,12 +1381,22 @@ preserved, so re-opening the workspace later resumes the Claude
 session — accidental invocations are easily recoverable."
   (interactive)
   (let* ((ws (or ws (claude-repl--read-nukeable-workspace "Nuke workspace: ")))
-         (action (claude-repl--nuke-or-kill-workspace ws)))
-    (force-mode-line-update t)
-    (message (if (eq action 'nuke)
-                 "Nuked workspace: %s"
-               "Killed persp workspace: %s")
-             ws)))
+         (t0 (float-time)))
+    (claude-repl--log ws "nuke-workspace: ENTRY ws=%s" ws)
+    (let ((action (claude-repl--nuke-or-kill-workspace ws)))
+      (claude-repl--log ws
+                        "nuke-workspace: nuke-or-kill-workspace returned action=%s elapsed=%.3fs — about to force-mode-line-update"
+                        action (- (float-time) t0))
+      (force-mode-line-update t)
+      (claude-repl--log ws
+                        "nuke-workspace: force-mode-line-update done elapsed=%.3fs — about to message"
+                        (- (float-time) t0))
+      (message (if (eq action 'nuke)
+                   "Nuked workspace: %s"
+                 "Killed persp workspace: %s")
+               ws)
+      (claude-repl--log ws "nuke-workspace: COMPLETE ws=%s action=%s total-elapsed=%.3fs"
+                        ws action (- (float-time) t0)))))
 
 (defun claude-repl-nuke-all-workspaces ()
   "Tear down ALL claude-repl workspaces.

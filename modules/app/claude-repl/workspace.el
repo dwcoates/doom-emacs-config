@@ -606,9 +606,11 @@ finish-workspace path."
             (condition-case err
                 (delete-process proc)
               (error (claude-repl--log ws "nuke-one-workspace: git-proc kill error: %S" err)))))
+        (claude-repl--log ws "nuke-one-workspace: calling kill-session ws=%s" ws)
         (condition-case err
             (claude-repl--kill-session ws)
-          (error (claude-repl--log ws "nuke-one-workspace: kill-session error: %S" err))))
+          (error (claude-repl--log ws "nuke-one-workspace: kill-session error: %S" err)))
+        (claude-repl--log ws "nuke-one-workspace: kill-session returned ws=%s" ws))
     ;; Cleanup: always remove the hashmap entry regardless of any error
     ;; in the steps above (unless PRESERVE-ENTRY was requested).
     ;; Persisted state.el is intentionally NOT touched here — see the
@@ -631,9 +633,11 @@ finish-workspace path."
     ;; this sweep catches file buffers, magit buffers, auxiliary shells,
     ;; or anything else the user opened while inside the workspace so
     ;; nothing is orphaned after the persp goes away.
+    (claude-repl--log ws "nuke-one-workspace: calling kill-workspace-buffers ws=%s" ws)
     (condition-case err
         (claude-repl--kill-workspace-buffers ws)
       (error (claude-repl--log ws "nuke-one-workspace: kill-workspace-buffers error: %S" err)))
+    (claude-repl--log ws "nuke-one-workspace: kill-workspace-buffers returned ws=%s" ws)
     ;; Kill the persp workspace last so all internal state is already
     ;; cleaned up before the UI workspace disappears.
     ;;
@@ -659,7 +663,8 @@ finish-workspace path."
           (+workspace/kill ws)
           (claude-repl--log ws "nuke-one-workspace: post-persp-kill ws=%s in-cache=%s cache=%S"
                             ws (if (member ws persp-names-cache) "t" "nil") persp-names-cache))
-      (error (claude-repl--log ws "nuke-one-workspace: workspace-kill error: %S" err)))))
+      (error (claude-repl--log ws "nuke-one-workspace: workspace-kill error: %S" err)))
+    (claude-repl--log ws "nuke-one-workspace: DONE ws=%s all-cleanup-complete" ws)))
 
 (defun claude-repl--reorder-workspace-by-priority (ws)
   "Reorder workspace WS in `persp-names-cache' by its `:priority'.
