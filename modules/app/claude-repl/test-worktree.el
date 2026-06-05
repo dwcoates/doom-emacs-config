@@ -534,6 +534,16 @@ the rev-parse comparison and the checkout invocation."
           (should (= new-delay 10))
           (should (= (length handled) 1)))))))
 
+(ert-deftest claude-repl-test-dispatch-workspace-command-send ()
+  "Send commands do not change delay and route to the handler."
+  (let ((handled nil))
+    (cl-letf (((symbol-function 'claude-repl--handle-send-command)
+               (lambda (cmd) (push cmd handled))))
+      (let ((cmd '((type . "send") (workspace . "ws1") (data . "hi"))))
+        (let ((new-delay (claude-repl--dispatch-workspace-command cmd 10)))
+          (should (= new-delay 10))
+          (should (= (length handled) 1)))))))
+
 (ert-deftest claude-repl-test-dispatch-workspace-command-profile ()
   "Profile commands route to the profile handler and do not change delay."
   (let ((handled nil))
@@ -887,6 +897,49 @@ reflects the post-expansion content rather than the default collapsed view."
     (claude-repl--handle-clipboard-command
      '((workspace . "ws1") (text . "second")))
     (should (equal (claude-repl--ws-get "ws1" :clipboard) "second"))))
+
+;;;; ---- Tests: handle-send-command ----
+
+(ert-deftest claude-repl-test-handle-send-command-stores-data ()
+  "handle-send-command stores arbitrary `data' on the workspace under `:send-data'."
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+    (puthash "ws1" '() claude-repl--workspaces)
+    (claude-repl--handle-send-command
+     '((type . "send") (workspace . "ws1") (data . ((link . "https://x.test")))))
+    (should (equal (claude-repl--ws-get "ws1" :send-data)
+                   '((link . "https://x.test"))))))
+
+(ert-deftest claude-repl-test-handle-send-command-missing-workspace ()
+  "Missing `workspace' is logged and skipped — no error, no state change."
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+    (claude-repl--handle-send-command
+     '((type . "send") (data . "payload")))
+    (should (= 0 (hash-table-count claude-repl--workspaces)))))
+
+(ert-deftest claude-repl-test-handle-send-command-missing-data-key ()
+  "Absent `data' key is logged and skipped — no error, slot stays nil."
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+    (puthash "ws1" '() claude-repl--workspaces)
+    (claude-repl--handle-send-command
+     '((type . "send") (workspace . "ws1")))
+    (should-not (claude-repl--ws-get "ws1" :send-data))))
+
+(ert-deftest claude-repl-test-handle-send-command-falsey-payload-still-dispatches ()
+  "A present-but-falsey `data' payload (nil) still reaches the store branch.
+Gating is by KEY PRESENCE, not truthiness, so `:send-data' is written even
+for nil — distinguished from the missing-key case (which never writes) by
+spying on the store rather than reading back the indistinguishable nil."
+  (let ((stored nil))
+    (cl-letf (((symbol-function 'claude-repl--ws-put)
+               (lambda (_ws key val) (push (cons key val) stored))))
+      (claude-repl--handle-send-command
+       '((type . "send") (workspace . "ws1") (data . nil)))
+      (should (equal stored '((:send-data . nil))))
+      ;; Missing data KEY must NOT write, proving the gate is key-presence.
+      (setq stored nil)
+      (claude-repl--handle-send-command
+       '((type . "send") (workspace . "ws1")))
+      (should (null stored)))))
 
 ;;;; ---- Tests: close-workspace ----
 
