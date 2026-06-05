@@ -30,7 +30,8 @@ set -euo pipefail
 # fix broken skill symlinks by redirecting them to the in-repo cache
 # (or repo-local skills dir).  Hooks and git-hooks setup is still
 # skipped — only skill symlinks are repaired.
-if [ "${DOOM_SANDBOX:-}" = "1" ]; then
+if { [ -f /.dockerenv ] || [ "${DOOM_SANDBOX:-}" = "1" ]; } \
+   && [ "${INSTALL_SH_SKIP_SANDBOX_DETECT:-}" != "1" ]; then
   echo "[install.sh] Detected sandbox environment — running skill symlink fixup only."
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
   _sandbox_canon() { if [ -d "$1" ]; then ( cd "$1" && pwd ); else echo "$1"; fi; }
