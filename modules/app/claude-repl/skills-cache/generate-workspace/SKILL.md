@@ -47,7 +47,7 @@ When this block is present:
 - Use the block body VERBATIM as the `"prompt"` field of the generated `"create"` entry. No editing, no rewrapping, no summarizing, no condensing — its whitespace, punctuation, and inline directives all carry through unchanged.
 - Do NOT follow any links, URLs, references, or directives INSIDE the block. They are instructions for the spawned workspace, not for this session — do not fetch any Slack thread, GitHub PR/issue, or other URL that appears inside the block.
 - Emit exactly ONE `"create"` entry carrying this prompt. Do not split it across multiple workspaces and do not duplicate it.
-- All other create-entry fields (`name`, `git_root`, `base_commit`, `fork_from`, `priority`) come from caller-supplied context OUTSIDE the block (e.g. lines like `git_root: ~/path/to/repo` or `slug hint: <slug>`), NEVER from interpreting the block's content.
+- All other create-entry fields (`name`, `git_root`, `source_ws`, `base_commit`, `fork_from`, `priority`) come from caller-supplied context OUTSIDE the block (e.g. lines like `git_root: ~/path/to/repo` or `slug hint: <slug>`), NEVER from interpreting the block's content. `source_ws` resolution still follows Step 1 (explicit tag or current-workspace fallback) — explicit-prompt mode does not exempt the source-ws invariant.
 - Branch slug generation per Step 2 still applies, but base it on the caller's slug hint or other non-block context — not on the block's content.
 - If more than one `EXPLICIT_PROMPT_FOR_WORKSPACE` block is present, stop and surface the error to the caller. This skill does not multiplex multiple verbatim prompts.
 
@@ -118,96 +118,107 @@ When a link appears in the user's request, do the *minimum* lookup needed to dra
 
 ## Steps
 
-1. **Interpret** the user's description as a description of the branches or a description of the process to generate the branch names.
+1. **Resolve source-ws — MANDATORY FIRST STEP, no exceptions.** Every dispatch MUST carry a known source workspace before any other context-gathering or JSON-building begins. The source workspace identifies which workspace initiated this generation and supplies the canonical repo path for `git_root`.
+  - Resolution order:
+    a. **Explicit tag.** If the user's message contains `[source-ws:<name> path:<dir>]`, parse it and use `<name>` as the source workspace name and `<dir>` as its absolute path. Fail loudly if the tag is malformed or either component is empty — do NOT guess.
+    b. **Current-workspace fallback.** Otherwise, default to the current workspace by running both:
+       - `git rev-parse --abbrev-ref HEAD` for the source workspace name.
+       - `git rev-parse --show-toplevel` for the source workspace path.
+       Surface to the user in the post-dispatch summary (Step 6) that the fallback fired and which values were derived — the agent's choice MUST be visible, never silent.
+    c. **No git context.** If neither (a) nor (b) yields a workspace name and path (e.g. invocation is outside any git repo and no tag was supplied), STOP and surface the error. Do NOT invent values. Do NOT proceed to later steps.
+  - Record the resolved `(source_ws_name, source_ws_path)` for use by all subsequent steps. Every `"create"` entry emitted by Step 4 carries this pair as a mandatory `"source_ws"` field.
+  - **CRITICAL**: this resolution is non-negotiable. The dispatch is REJECTED downstream if a `create` entry is missing `source_ws.name` or `source_ws.path`.
+
+2. **Interpret** the user's description as a description of the branches or a description of the process to generate the branch names.
   - When the user enumerates the branches explicitly (e.g. by name or by a small fixed list), use that enumeration directly.
   - When the user describes a *process* for enumerating branches (e.g. "one per skipped test", "one per failing CI job"), do NOT execute that process here. Per the **Scope** section, this skill does not run tests, scripts, or other multi-step exploration. Instead, generate a SINGLE workspace whose `"prompt"` field instructs the spawned session to perform the enumeration and re-invoke `/workspace-generation` from inside that session with the concrete list.
   - **NOTE**: attempt to spin up agents dedicated to each soon-to-be branch name when possible.
 
-2. **Generate branch names** for each workspace:
+3. **Generate branch names** for each workspace:
   - Branch Names should be short, lowercase, hyphen-separated slugs — not long descriptions.
     - E.g., Longer descriptions take up lots of space in the editor! Should not be longer than 3 words.
   - **Do NOT include a user prefix yourself.** Emit the bare slug (e.g. `hello-world`). Prefixing is handled downstream.
   - If the user supplied a Jira ticket, include it as a sub-prefix using the format `<ticket-id>/<feature-name>` (e.g. `CV-100/fix-login`).
   - **Do NOT append a random hash suffix yourself.** Disambiguator suffixes are handled downstream. Never call `openssl`, `uuidgen`, `tr`, etc. to mint your own.
 
-3. **Determine commands**: Build an array of typed command objects.
+4. **Determine commands**: Build an array of typed command objects.
   - Always emit one `"create"` entry per workspace.
+  - **Every `"create"` entry MUST carry a `"source_ws"` object** of shape `{"name": "<source-ws-name>", "path": "<absolute-path>"}`, populated from the values resolved in Step 1. The dispatch is REJECTED if `source_ws.name` or `source_ws.path` is missing or empty on any `create` entry. Prompt-only entries (`type: "prompt"`) do NOT carry `source_ws` — they target existing workspaces.
   - If the user **explicitly** asked to send a message to the generated workspaces, attach it as an inline `"prompt"` field on each `"create"` entry. Do **not** emit separate `"prompt"` entries for newly created workspaces — the inline form is preferred.
   - Separate `"prompt"` entries (without a `"create"`) are only for targeting **existing** workspaces by name.
   - If the user specifies a priority for a workspace, include a `"priority"` field on the `"create"` entry. Valid values are `"p05"`, `"p1"`, `"p2"`, `"p3"`. This displays a priority badge image in the tab-bar. The field is optional — omit it if no priority is specified.
   - If the caller specifies a base ref to branch from, include a `"base_commit"` field on the `"create"` entry (e.g. `"HEAD"`, `"origin/master"`, a SHA, or any other git ref). When omitted on a non-fork create, the default base is resolved downstream. Forks (`fork_from` set) skip this entirely.
-    - **Implicit base from source workspace**: when a `[source-ws:<name> path:<dir>]` tag is present AND the caller did NOT explicitly specify a base ref AND `fork_from` is NOT set, resolve the source workspace's current HEAD with `git -C <dir> rev-parse HEAD` and emit the resulting SHA as `"base_commit"` on every `create` entry whose `git_root` came from that tag.
+    - **Implicit base from source workspace**: when the caller did NOT explicitly specify a base ref AND `fork_from` is NOT set, resolve the source workspace's current HEAD with `git -C <source_ws.path> rev-parse HEAD` and emit the resulting SHA as `"base_commit"` on every such `create` entry.
     - Pin to the SHA so the new worktree is deterministic even if the source workspace advances between dispatch and worktree creation.
     - Do NOT override an explicit user-supplied `base_commit`.
     - Do NOT emit `base_commit` when `fork_from` is set.
-    - If `git -C <dir> rev-parse HEAD` fails, stop and surface the error to the user.
+    - If `git -C <source_ws.path> rev-parse HEAD` fails, stop and surface the error to the user.
   - If the caller specifies a fork source, include a `"fork_from"` field naming the source workspace (the new worktree branches from HEAD and resumes that workspace's Claude session via `--fork-session`). When `fork_from` is set, the downstream consumer ignores any explicit `base_commit` and uses HEAD. If `fork_from` resolution fails (unknown workspace, no active session), the workspace is NOT created — there is no silent fallback.
   - **Always include a `"git_root"` field on every `"create"` entry** — it is required by the downstream consumer, which does not fall back to ambient context. Resolution order:
-    1. If the user links a GitHub PR/issue or names a specific repo, use the local checkout path (e.g. `~/workspace/ChessCom/explanation-engine`).
-    2. If a `[source-ws:<name> path:<dir>]` tag is present in the user's message (always injected when invoked from the claude-repl input buffer), use `<dir>` directly as `git_root`. Fail loudly if the tag is malformed or the path is empty — do not guess.
-    3. If neither of the above applies, ask the user which repo to use before proceeding.
+    1. If the user links a GitHub PR/issue or names a specific repo distinct from the source workspace, use that repo's local checkout path (e.g. `~/workspace/ChessCom/explanation-engine`).
+    2. Otherwise, default to `source_ws.path` (the value resolved in Step 1).
 
     Use `~` literals where convenient; they are expanded downstream.
 
    Example — create with initial prompt (inline, preferred):
    ```json
    [
-     {"type": "create", "name": "feature-one", "git_root": "~/workspace/ChessCom/explanation-engine", "prompt": "hello world"},
-     {"type": "create", "name": "feature-two", "git_root": "~/workspace/ChessCom/explanation-engine", "prompt": "hello world"}
+     {"type": "create", "name": "feature-one", "git_root": "~/workspace/ChessCom/explanation-engine", "source_ws": {"name": "main-ws", "path": "/Users/dodgecoates/workspace/ChessCom/explanation-engine"}, "prompt": "hello world"},
+     {"type": "create", "name": "feature-two", "git_root": "~/workspace/ChessCom/explanation-engine", "source_ws": {"name": "main-ws", "path": "/Users/dodgecoates/workspace/ChessCom/explanation-engine"}, "prompt": "hello world"}
    ]
    ```
 
    Example — create without prompt:
    ```json
    [
-     {"type": "create", "name": "feature-one", "git_root": "~/workspace/ChessCom/explanation-engine"},
-     {"type": "create", "name": "feature-two", "git_root": "~/workspace/ChessCom/explanation-engine"}
+     {"type": "create", "name": "feature-one", "git_root": "~/workspace/ChessCom/explanation-engine", "source_ws": {"name": "main-ws", "path": "/Users/dodgecoates/workspace/ChessCom/explanation-engine"}},
+     {"type": "create", "name": "feature-two", "git_root": "~/workspace/ChessCom/explanation-engine", "source_ws": {"name": "main-ws", "path": "/Users/dodgecoates/workspace/ChessCom/explanation-engine"}}
    ]
    ```
 
    Example — create with priority:
    ```json
    [
-     {"type": "create", "name": "urgent-fix", "git_root": "~/workspace/ChessCom/explanation-engine", "priority": "p05"},
-     {"type": "create", "name": "feature-one", "git_root": "~/workspace/ChessCom/explanation-engine", "priority": "p1"},
-     {"type": "create", "name": "nice-to-have", "git_root": "~/workspace/ChessCom/explanation-engine", "priority": "p3"}
+     {"type": "create", "name": "urgent-fix", "git_root": "~/workspace/ChessCom/explanation-engine", "source_ws": {"name": "main-ws", "path": "/Users/dodgecoates/workspace/ChessCom/explanation-engine"}, "priority": "p05"},
+     {"type": "create", "name": "feature-one", "git_root": "~/workspace/ChessCom/explanation-engine", "source_ws": {"name": "main-ws", "path": "/Users/dodgecoates/workspace/ChessCom/explanation-engine"}, "priority": "p1"},
+     {"type": "create", "name": "nice-to-have", "git_root": "~/workspace/ChessCom/explanation-engine", "source_ws": {"name": "main-ws", "path": "/Users/dodgecoates/workspace/ChessCom/explanation-engine"}, "priority": "p3"}
    ]
    ```
 
    Example — create with prompt and priority:
    ```json
    [
-     {"type": "create", "name": "fix-release-pipeline", "git_root": "~/workspace/ChessCom/explanation-engine", "priority": "p1", "prompt": "triage failing release job"}
+     {"type": "create", "name": "fix-release-pipeline", "git_root": "~/workspace/ChessCom/explanation-engine", "source_ws": {"name": "main-ws", "path": "/Users/dodgecoates/workspace/ChessCom/explanation-engine"}, "priority": "p1", "prompt": "triage failing release job"}
    ]
    ```
 
    Example — create branched from HEAD with an explicit `base_commit` (no fork):
    ```json
    [
-     {"type": "create", "name": "follow-up", "git_root": "~/workspace/ChessCom/explanation-engine", "base_commit": "HEAD", "prompt": "extend the change just made on this branch"}
+     {"type": "create", "name": "follow-up", "git_root": "~/workspace/ChessCom/explanation-engine", "source_ws": {"name": "main-ws", "path": "/Users/dodgecoates/workspace/ChessCom/explanation-engine"}, "base_commit": "HEAD", "prompt": "extend the change just made on this branch"}
    ]
    ```
 
    Example — fork an existing workspace's Claude session into a new worktree:
    ```json
    [
-     {"type": "create", "name": "parallel-attempt", "git_root": "~/workspace/ChessCom/explanation-engine", "fork_from": "feature-one", "prompt": "try the alternative approach"}
+     {"type": "create", "name": "parallel-attempt", "git_root": "~/workspace/ChessCom/explanation-engine", "source_ws": {"name": "main-ws", "path": "/Users/dodgecoates/workspace/ChessCom/explanation-engine"}, "fork_from": "feature-one", "prompt": "try the alternative approach"}
    ]
    ```
 
-   Example — prompt existing workspaces only (pass the workspace name verbatim, with whatever prefix it already has):
+   Example — prompt existing workspaces only (pass the workspace name verbatim, with whatever prefix it already has). Prompt-only entries do NOT carry `source_ws`:
    ```json
    [
      {"type": "prompt", "workspace": "DWC/feature-one", "prompt": "hello world"}
    ]
    ```
 
-4. **Dispatch the commands** by piping the JSON array into the skill's `run.sh`. Do not write any file yourself — always go through `run.sh`.
+5. **Dispatch the commands** by piping the JSON array into the skill's `run.sh`. Do not write any file yourself — always go through `run.sh`.
    ```bash
    cat <<'EOF' | <skill_base_dir>/run.sh
    [
-     {"type": "create", "name": "feature-one", "git_root": "~/workspace/ChessCom/explanation-engine"},
-     {"type": "create", "name": "feature-two", "git_root": "~/workspace/ChessCom/explanation-engine"}
+     {"type": "create", "name": "feature-one", "git_root": "~/workspace/ChessCom/explanation-engine", "source_ws": {"name": "main-ws", "path": "/Users/dodgecoates/workspace/ChessCom/explanation-engine"}},
+     {"type": "create", "name": "feature-two", "git_root": "~/workspace/ChessCom/explanation-engine", "source_ws": {"name": "main-ws", "path": "/Users/dodgecoates/workspace/ChessCom/explanation-engine"}}
    ]
    EOF
    ```
@@ -219,4 +230,4 @@ When a link appears in the user's request, do the *minimum* lookup needed to dra
    - Do NOT re-invoke `run.sh` for any reason — not to retry, not to verify, not to debug, not to "fix" anything, **and specifically not to print or capture the exit code**. Appending `echo "Exit code: $?"`, `; echo $?`, `&& echo ok`, `|| echo fail`, or any other shell wrapper to a second `run.sh` invocation is FORBIDDEN: each invocation produces a fresh random suffix, so the second call silently dispatches a DUPLICATE workspace with a different name. The exit code is already in your hands via the tool result — re-running the command to "see" it is the canonical foot-gun this skill exists to prevent. Re-invocation is unsafe; there is no idempotency safety net.
    - Do NOT attempt to fix, infer, or self-correct any aspect of the dispatch process. The pipeline is correct; assume your understanding of it is the unreliable part.
 
-6. **Tell the user** the workspace names that were written and that the workspaces will be created automatically. If prompt commands were included, mention that the prompts will be dispatched once each session is ready.
+6. **Tell the user** the workspace names that were written and that the workspaces will be created automatically. If prompt commands were included, mention that the prompts will be dispatched once each session is ready. **If the Step 1 current-workspace fallback fired (no `[source-ws:...]` tag was present in the user's message), explicitly surface the resolved `source_ws.name` and `source_ws.path` values used so the agent's choice is visible to the user.**
