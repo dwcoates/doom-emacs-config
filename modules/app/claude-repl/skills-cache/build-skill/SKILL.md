@@ -190,13 +190,14 @@ Specializations are named families of skills that share extra conventions on top
 In addition to the general conventions, every skill in this family follows these rules:
 
 1. **Frontmatter is fixed.**
-  - `argument-hint: "<prelim-json-path>"` — always.
+  - `argument-hint: "<prelim-json-path> [--defer-footer]"` — always.
   - `allowed-tools: Read, Bash(jq:*), Bash(gns cee:*)` — for leaf skills.
   - Parent skills (see #4) additionally need whatever tools they use to dispatch children (the `Agent` tool when dispatched via subagent).
 
 2. **Arguments table is fixed.**
   - One row for `<prelim-json-path>` pointing at the `gns cee run prelim` response file written by `/analyze-position`'s setup step.
   - The row directs readers to `gns cee run prelim --help` for the response schema rather than re-documenting the schema inline.
+  - One row for the optional `--defer-footer` flag that suppresses footer construction, directing readers to **Footer construction is opt-out** in `position-analysis-spec.md` rather than re-documenting the rule inline.
 
 3. **Output Contract section is required**, replacing the freer `Steps` body the general conventions describe. It declares the response shape:
   - One **~50-sentence prose analysis**, no separate summary, no verdict line, no enumerated classification — the prose IS the entire output.
@@ -205,9 +206,10 @@ In addition to the general conventions, every skill in this family follows these
   - **SAN only, never LAN, for string representation.** Where LAN is the only representation available, surface that fact explicitly rather than silently converting.
 
 4. **Parent vs leaf is declared in the Output Contract.**
-  - **Leaf analyst skills** analyze their aspect of the position directly and do not invoke other analyst skills.
+  - **Leaf analyst skills** analyze their aspect of the position directly and do not invoke other analyst skills, though they MAY invoke non-analysis presentation/utility skills (e.g. annotate-pgn) to render output.
   - **Parent analyst skills** dispatch one or more named child analyst skills via the `Agent` tool, then perform the MIXTURE from `MODEL.md` — synthesizing the children's prose AND gap-filling new analysis anchored on the children's SAN+gamepoint citations.
   - Parent skills name their permitted children explicitly in the Output Contract; the dispatcher does nothing else.
+  - **Parent skills MUST dispatch every child with `--defer-footer`**, propagating the suppression transitively even when the parent itself received `--defer-footer`, so only the outermost caller renders a footer.
 
 5. **Per-run memoization is the orchestrator's job, not the skill's.**
   - The skill body just runs its analysis whenever invoked.
@@ -217,7 +219,7 @@ In addition to the general conventions, every skill in this family follows these
   - **CRITICAL NOTE: SAN only, never LAN.** Convert nothing; surface LAN-only cases explicitly.
   - **IMPORTANT NOTE: Always include the game point alongside the move** unless the move is genuinely thematic across multiple lines, in which case cite several example game points.
   - **IMPORTANT NOTE: Read the prelim file lazily via `jq`** for surgical field access. Do not load the whole file into context.
-  - For **leaf** skills only: **CRITICAL NOTE: This skill is a leaf RPC.** Do not invoke other skills, do not edit files, do not take any actions outside this analysis.
+  - For **leaf** skills only: **CRITICAL NOTE: This skill is a leaf RPC in the position-analysis decomposition.** It delegates no further position analysis, so it MUST NOT invoke other analyst (`analyze-position-*`) skills, and MUST NOT edit files. It MAY invoke non-analysis presentation/utility skills (e.g. annotate-pgn) to render its output. External resources (CEE, and Wikipedia/Web where applicable) are not skills and are permitted.
   - For **parent** skills: omit the leaf-RPC restriction and instead add a CRITICAL note naming the exact set of permitted child skills.
 
 ---
