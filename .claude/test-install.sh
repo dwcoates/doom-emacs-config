@@ -64,7 +64,7 @@ mkfake_home() {
 # captured so tests can grep over it without polluting test output.
 run_install() {
   local repo="$1" home="$2" action="${3:-install}"
-  HOME="$home" bash "$repo/.claude/install.sh" "$action" >"$repo/.install.log" 2>&1 || true
+  INSTALL_SH_SKIP_SANDBOX_DETECT=1 HOME="$home" bash "$repo/.claude/install.sh" "$action" >"$repo/.install.log" 2>&1 || true
 }
 
 cleanup() { rm -rf "$1" "$2"; }
