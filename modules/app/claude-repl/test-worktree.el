@@ -941,6 +941,131 @@ spying on the store rather than reading back the indistinguishable nil."
        '((type . "send") (workspace . "ws1")))
       (should (null stored)))))
 
+;;;; ---- Tests: handle-send-pgn ----
+
+(ert-deftest claude-repl-test-handle-send-pgn-creates-buffer-with-content ()
+  "handle-send-pgn creates a buffer named *claude-repl-pgn:<WS>* with the PGN text."
+  (let ((displayed-bufs nil)
+        (board-calls nil))
+    (cl-letf (((symbol-function 'pygn-mode) #'ignore)
+              ((symbol-function 'display-buffer)
+               (lambda (buf &rest _) (push buf displayed-bufs)))
+              ((symbol-function 'pygn-mode-display-gui-board-at-pos)
+               (lambda (pos) (push pos board-calls))))
+      (let ((buf (claude-repl--handle-send-pgn
+                  "ws1" "1. e4 e5 2. Nf3 *")))
+        (unwind-protect
+            (progn
+              (should (buffer-live-p buf))
+              (should (string= (buffer-name buf) "*claude-repl-pgn:ws1*"))
+              (with-current-buffer buf
+                (should (string= (buffer-string) "1. e4 e5 2. Nf3 *"))))
+          (kill-buffer buf))))))
+
+(ert-deftest claude-repl-test-handle-send-pgn-activates-pygn-mode ()
+  "handle-send-pgn calls pygn-mode on the buffer."
+  (let ((mode-calls nil))
+    (cl-letf (((symbol-function 'pygn-mode)
+               (lambda () (push t mode-calls)))
+              ((symbol-function 'display-buffer) #'ignore)
+              ((symbol-function 'pygn-mode-display-gui-board-at-pos) #'ignore))
+      (let ((buf (claude-repl--handle-send-pgn "ws1" "1. d4 *")))
+        (unwind-protect
+            (should (= (length mode-calls) 1))
+          (kill-buffer buf))))))
+
+(ert-deftest claude-repl-test-handle-send-pgn-displays-buffer ()
+  "handle-send-pgn passes the buffer to display-buffer."
+  (let ((displayed nil))
+    (cl-letf (((symbol-function 'pygn-mode) #'ignore)
+              ((symbol-function 'display-buffer)
+               (lambda (buf &rest _) (setq displayed buf)))
+              ((symbol-function 'pygn-mode-display-gui-board-at-pos) #'ignore))
+      (let ((buf (claude-repl--handle-send-pgn "ws1" "1. e4 *")))
+        (unwind-protect
+            (should (eq displayed buf))
+          (kill-buffer buf))))))
+
+(ert-deftest claude-repl-test-handle-send-pgn-renders-board-at-point-min ()
+  "handle-send-pgn calls pygn-mode-display-gui-board-at-pos at point-min."
+  (let ((board-pos nil))
+    (cl-letf (((symbol-function 'pygn-mode) #'ignore)
+              ((symbol-function 'display-buffer) #'ignore)
+              ((symbol-function 'pygn-mode-display-gui-board-at-pos)
+               (lambda (pos) (setq board-pos pos))))
+      (let ((buf (claude-repl--handle-send-pgn "ws1" "1. e4 e5 *")))
+        (unwind-protect
+            (should (= board-pos 1))
+          (kill-buffer buf))))))
+
+(ert-deftest claude-repl-test-handle-send-pgn-reuses-existing-buffer ()
+  "Calling handle-send-pgn twice for the same workspace reuses the buffer."
+  (cl-letf (((symbol-function 'pygn-mode) #'ignore)
+            ((symbol-function 'display-buffer) #'ignore)
+            ((symbol-function 'pygn-mode-display-gui-board-at-pos) #'ignore))
+    (let ((buf1 (claude-repl--handle-send-pgn "ws1" "1. e4 *"))
+          (buf2 (claude-repl--handle-send-pgn "ws1" "1. d4 *")))
+      (unwind-protect
+          (progn
+            (should (eq buf1 buf2))
+            (with-current-buffer buf2
+              (should (string= (buffer-string) "1. d4 *"))))
+        (kill-buffer buf1)))))
+
+(ert-deftest claude-repl-test-handle-send-command-dispatches-pgn ()
+  "handle-send-command routes data containing a pgn key to handle-send-pgn."
+  (let ((pgn-calls nil))
+    (cl-letf (((symbol-function 'claude-repl--handle-send-pgn)
+               (lambda (ws pgn) (push (cons ws pgn) pgn-calls))))
+      (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+        (puthash "ws1" '() claude-repl--workspaces)
+        (claude-repl--handle-send-command
+         '((type . "send") (workspace . "ws1") (data . ((pgn . "1. e4 *")))))
+        (should (equal pgn-calls '(("ws1" . "1. e4 *"))))))))
+
+(ert-deftest claude-repl-test-handle-send-command-skips-pgn-for-empty-string ()
+  "handle-send-command does NOT dispatch to handle-send-pgn for an empty pgn string."
+  (let ((pgn-calls nil))
+    (cl-letf (((symbol-function 'claude-repl--handle-send-pgn)
+               (lambda (ws pgn) (push (cons ws pgn) pgn-calls))))
+      (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+        (puthash "ws1" '() claude-repl--workspaces)
+        (claude-repl--handle-send-command
+         '((type . "send") (workspace . "ws1") (data . ((pgn . "")))))
+        (should (null pgn-calls))))))
+
+(ert-deftest claude-repl-test-handle-send-command-skips-pgn-for-non-string ()
+  "handle-send-command does NOT dispatch to handle-send-pgn when pgn is not a string."
+  (let ((pgn-calls nil))
+    (cl-letf (((symbol-function 'claude-repl--handle-send-pgn)
+               (lambda (ws pgn) (push (cons ws pgn) pgn-calls))))
+      (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+        (puthash "ws1" '() claude-repl--workspaces)
+        (claude-repl--handle-send-command
+         '((type . "send") (workspace . "ws1") (data . ((pgn . 42)))))
+        (should (null pgn-calls))))))
+
+(ert-deftest claude-repl-test-handle-send-command-no-pgn-key-no-dispatch ()
+  "handle-send-command does NOT dispatch to handle-send-pgn when data lacks pgn key."
+  (let ((pgn-calls nil))
+    (cl-letf (((symbol-function 'claude-repl--handle-send-pgn)
+               (lambda (ws pgn) (push (cons ws pgn) pgn-calls))))
+      (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+        (puthash "ws1" '() claude-repl--workspaces)
+        (claude-repl--handle-send-command
+         '((type . "send") (workspace . "ws1") (data . ((link . "https://x.test")))))
+        (should (null pgn-calls))))))
+
+(ert-deftest claude-repl-test-handle-send-command-pgn-still-stores-send-data ()
+  "handle-send-command stores :send-data even when PGN dispatch occurs."
+  (cl-letf (((symbol-function 'claude-repl--handle-send-pgn) #'ignore))
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (puthash "ws1" '() claude-repl--workspaces)
+      (claude-repl--handle-send-command
+       '((type . "send") (workspace . "ws1") (data . ((pgn . "1. e4 *")))))
+      (should (equal (claude-repl--ws-get "ws1" :send-data)
+                     '((pgn . "1. e4 *")))))))
+
 ;;;; ---- Tests: close-workspace ----
 
 (ert-deftest claude-repl-test-close-workspace-delegates-to-nuke ()

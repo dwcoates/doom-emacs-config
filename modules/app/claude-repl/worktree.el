@@ -2373,6 +2373,26 @@ annotation must not error out the whole batch."
                ws (length text)
                (if note (format ": %s" note) ""))))))
 
+(defun claude-repl--handle-send-pgn (ws pgn-string)
+  "Open PGN-STRING in a temporary popup buffer with `pygn-mode'.
+The buffer is named \"*claude-repl-pgn:<WS>*\", placed in `pygn-mode',
+and the GUI board is rendered at the initial position via
+`pygn-mode-display-gui-board-at-pos'."
+  (let* ((buf-name (format "*claude-repl-pgn:%s*" ws))
+         (buf (get-buffer-create buf-name)))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert pgn-string))
+      (pygn-mode)
+      (goto-char (point-min)))
+    (display-buffer buf)
+    (claude-repl--log ws "workspace-commands-file send: opened PGN buffer %s" buf-name)
+    ;; Render the board at the initial position.
+    (with-current-buffer buf
+      (pygn-mode-display-gui-board-at-pos (point)))
+    buf))
+
 (defun claude-repl--handle-send-command (cmd)
   "Handle a \"send\" workspace command CMD.
 Stores the arbitrary `data' payload on workspace WS at `:send-data',
@@ -2381,6 +2401,10 @@ text for the user to copy, open a link, etc).  The payload is opaque —
 no shape is assumed, and falsey JSON values (`false', `0', \"\") are
 valid payloads, so presence of the `data' key — not its truthiness — is
 what gates dispatch.
+
+When `data' is an alist containing a `pgn' key whose value is a
+non-empty string, the PGN is additionally opened in a temporary popup
+buffer via `claude-repl--handle-send-pgn'.
 
 Skips (logs only) when `workspace' is missing or the `data' key is
 absent — a malformed command must not error out the whole batch."
@@ -2396,6 +2420,10 @@ absent — a malformed command must not error out the whole batch."
         (claude-repl--log ws "workspace-commands-file send: ws=%s data-type=%s"
                           ws (type-of data))
         (claude-repl--ws-put ws :send-data data)
+        ;; Dispatch PGN sub-handler when data contains a pgn string.
+        (let ((pgn (and (listp data) (alist-get 'pgn data))))
+          (when (and (stringp pgn) (not (string-empty-p pgn)))
+            (claude-repl--handle-send-pgn ws pgn)))
         (message "[claude-repl] %s data received" ws))))))
 
 (defcustom claude-repl-profile-default-mode 'cpu+mem
