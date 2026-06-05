@@ -2365,6 +2365,31 @@ annotation must not error out the whole batch."
                ws (length text)
                (if note (format ": %s" note) ""))))))
 
+(defun claude-repl--handle-send-command (cmd)
+  "Handle a \"send\" workspace command CMD.
+Stores the arbitrary `data' payload on workspace WS at `:send-data',
+where any downstream UI gateway may consume it however it likes (expose
+text for the user to copy, open a link, etc).  The payload is opaque —
+no shape is assumed, and falsey JSON values (`false', `0', \"\") are
+valid payloads, so presence of the `data' key — not its truthiness — is
+what gates dispatch.
+
+Skips (logs only) when `workspace' is missing or the `data' key is
+absent — a malformed command must not error out the whole batch."
+  (let ((ws (alist-get 'workspace cmd))
+        (data-cell (assq 'data cmd)))
+    (cond
+     ((not ws)
+      (claude-repl--log nil "workspace-commands-file send: missing workspace, skipping"))
+     ((not data-cell)
+      (claude-repl--log ws "workspace-commands-file send: missing data, skipping"))
+     (t
+      (let ((data (cdr data-cell)))
+        (claude-repl--log ws "workspace-commands-file send: ws=%s data-type=%s"
+                          ws (type-of data))
+        (claude-repl--ws-put ws :send-data data)
+        (message "[claude-repl] %s data received" ws))))))
+
 (defcustom claude-repl-profile-default-mode 'cpu+mem
   "Default `profiler-start' mode for `/workspace-profile' when JSON omits `mode'.
 Must be one of `cpu', `mem', or `cpu+mem'."
@@ -2800,6 +2825,9 @@ unchanged otherwise)."
       create-delay)
      ((string= type "clipboard")
       (claude-repl--handle-clipboard-command cmd)
+      create-delay)
+     ((string= type "send")
+      (claude-repl--handle-send-command cmd)
       create-delay)
      ((string= type "merge")
       (claude-repl--handle-merge-command cmd)
