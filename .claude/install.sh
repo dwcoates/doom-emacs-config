@@ -24,11 +24,48 @@
 set -euo pipefail
 
 # --- Sandbox detection ---
-# When executing inside the agent sandbox, the host's ~/.claude/ is not
-# visible and writes hit the container FS, which is useless and surprising.
-if [ -f /.dockerenv ] || [ "${DOOM_SANDBOX:-}" = "1" ]; then
-  echo "[install.sh] Detected sandbox environment; skipping."
-  echo "[install.sh] Run this script from the host to manage hooks."
+# When executing inside the agent sandbox, the host's ~/.claude/ is
+# bind-mounted but many symlinks in ~/.claude/skills/ point to absolute
+# host paths that don't exist in the container.  Instead of no-oping,
+# fix broken skill symlinks by redirecting them to the in-repo cache
+# (or repo-local skills dir).  Hooks and git-hooks setup is still
+# skipped — only skill symlinks are repaired.
+if [ "${DOOM_SANDBOX:-}" = "1" ]; then
+  echo "[install.sh] Detected sandbox environment — running skill symlink fixup only."
+  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  _sandbox_canon() { if [ -d "$1" ]; then ( cd "$1" && pwd ); else echo "$1"; fi; }
+  SKILLS_DIR="$HOME/.claude/skills"
+  SKILLS_CACHE_DIR="$(_sandbox_canon "$SCRIPT_DIR/../modules/app/claude-repl/skills-cache")"
+  LOCAL_SKILLS_SRC="$(_sandbox_canon "$SCRIPT_DIR/../modules/app/claude-repl/skills")"
+  SKILLS_CACHE_MANIFEST="$SKILLS_CACHE_DIR/manifest.sh"
+
+  # Repair cached skills (from manifest).
+  if [ -f "$SKILLS_CACHE_MANIFEST" ]; then
+    # shellcheck source=../modules/app/claude-repl/skills-cache/manifest.sh
+    source "$SKILLS_CACHE_MANIFEST"
+    for entry in "${CACHED_SKILLS[@]}"; do
+      IFS='|' read -r name impl <<< "$entry"
+      dest="$SKILLS_DIR/$name"
+      cache="$SKILLS_CACHE_DIR/$name"
+      if [ -L "$dest" ] && [ ! -e "$dest" ] && [ -e "$cache" ]; then
+        ln -sfn "$cache" "$dest"
+        echo "[install.sh/sandbox] Fixed broken symlink: $name -> $cache"
+      fi
+    done
+  fi
+
+  # Repair local skills (checked into this repo).
+  LOCAL_SKILLS=( "debug-logs" "profile" "runtime-eval-code" "workspace-close" "workspace-profile" )
+  for name in "${LOCAL_SKILLS[@]}"; do
+    dest="$SKILLS_DIR/$name"
+    src="$LOCAL_SKILLS_SRC/$name"
+    if [ -L "$dest" ] && [ ! -e "$dest" ] && [ -e "$src" ]; then
+      ln -sfn "$src" "$dest"
+      echo "[install.sh/sandbox] Fixed broken symlink: $name -> $src"
+    fi
+  done
+
+  echo "[install.sh] Sandbox skill fixup complete."
   exit 0
 fi
 
