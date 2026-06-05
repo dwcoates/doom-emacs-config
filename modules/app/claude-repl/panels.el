@@ -1078,17 +1078,27 @@ the user has already confirmed the destructive nuke."
         (claude-repl--log ws "kill-workspace-buffers: count=%d" (length bufs))
         (dolist (buf bufs)
           (condition-case err
-              (when (buffer-live-p buf)
-                (when-let ((proc (get-buffer-process buf)))
-                  (set-process-query-on-exit-flag proc nil)
-                  (ignore-errors (delete-process proc))
-                  (claude-repl--schedule-sigkill proc))
-                (with-current-buffer buf
-                  (set-buffer-modified-p nil))
-                (kill-buffer buf))
+              (let* ((buf-name (claude-repl--safe-buffer-name buf))
+                     (live (buffer-live-p buf))
+                     (proc (and live (get-buffer-process buf)))
+                     (t-buf (float-time)))
+                (claude-repl--log ws "kill-workspace-buffers: buf=%s live=%s proc=%s"
+                                  buf-name (if live "t" "nil")
+                                  (if proc (process-name proc) "nil"))
+                (when live
+                  (when proc
+                    (set-process-query-on-exit-flag proc nil)
+                    (ignore-errors (delete-process proc))
+                    (claude-repl--schedule-sigkill proc))
+                  (with-current-buffer buf
+                    (set-buffer-modified-p nil))
+                  (kill-buffer buf))
+                (claude-repl--log ws "kill-workspace-buffers: buf=%s done elapsed=%.3fs"
+                                  buf-name (- (float-time) t-buf)))
             (error
              (claude-repl--log ws "kill-workspace-buffers: error on %s: %S"
-                               (claude-repl--safe-buffer-name buf) err))))))))
+                               (claude-repl--safe-buffer-name buf) err))))
+        (claude-repl--log ws "kill-workspace-buffers: dolist done count=%d" (length bufs))))))
 
 ;;;; User commands
 

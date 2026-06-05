@@ -1889,36 +1889,44 @@ All UI ops INSIDE the merge body must use `--defer-to-main-thread'
 because they run from the worker thread; the existing call sites in
 `--workspace-merge-do' and `--surface-silent-merge-conflict' already
 do this."
-  (claude-repl--log ws
-                    "workspace-merge-async: ws=%s repo-root=%s — closing UI and spawning worker thread"
-                    ws (or repo-root "nil"))
-  (claude-repl--close-workspace ws 'preserve-entry)
-  (make-thread
-   (lambda ()
-     (condition-case err
-         (progn
-           (claude-repl--dispatch-merge-handler ws repo-root)
-           (claude-repl--log ws
-                             "workspace-merge-async: ws=%s thread completed cleanly"
-                             ws))
-       (error
-        (claude-repl--log ws
-                          "workspace-merge-async: ws=%s thread caught err=%S — handling failure"
-                          ws err)
-        ;; Non-UI recovery (abort + classify-reenqueue + conditional
-        ;; drain) is shared with the queue-drain path via the helper, so
-        ;; the two cannot drift.
-        (claude-repl--reenqueue-and-redrive-on-failure ws err)
-        ;; UI recovery is async-dispatch-specific: restore the workspace
-        ;; and send the error to its claude with the analyze-only
-        ;; directive.  Both are UI ops, so defer to the main thread.
-        (run-at-time
-         0 nil
-         (lambda ()
-           (claude-repl--reopen-workspace-from-state ws)
-           (claude-repl--dispatch-prompt-command
-            ws (claude-repl--format-merge-failure-prompt err)))))))
-   (format "claude-repl-merge-%s" ws)))
+  (let ((t0-async (float-time)))
+    (claude-repl--log ws
+                      "workspace-merge-async: ws=%s repo-root=%s — closing UI and spawning worker thread"
+                      ws (or repo-root "nil"))
+    (claude-repl--log ws "workspace-merge-async: calling close-workspace ws=%s" ws)
+    (claude-repl--close-workspace ws 'preserve-entry)
+    (claude-repl--log ws "workspace-merge-async: close-workspace done elapsed=%.3fs — spawning thread"
+                      (- (float-time) t0-async))
+    (make-thread
+     (lambda ()
+       (claude-repl--log ws "workspace-merge-async: worker thread started ws=%s thread=%s"
+                         ws (thread-name (current-thread)))
+       (condition-case err
+           (progn
+             (claude-repl--dispatch-merge-handler ws repo-root)
+             (claude-repl--log ws
+                               "workspace-merge-async: ws=%s thread completed cleanly elapsed=%.3fs"
+                               ws (- (float-time) t0-async)))
+         (error
+          (claude-repl--log ws
+                            "workspace-merge-async: ws=%s thread caught err=%S — handling failure"
+                            ws err)
+          ;; Non-UI recovery (abort + classify-reenqueue + conditional
+          ;; drain) is shared with the queue-drain path via the helper, so
+          ;; the two cannot drift.
+          (claude-repl--reenqueue-and-redrive-on-failure ws err)
+          ;; UI recovery is async-dispatch-specific: restore the workspace
+          ;; and send the error to its claude with the analyze-only
+          ;; directive.  Both are UI ops, so defer to the main thread.
+          (run-at-time
+           0 nil
+           (lambda ()
+             (claude-repl--reopen-workspace-from-state ws)
+             (claude-repl--dispatch-prompt-command
+              ws (claude-repl--format-merge-failure-prompt err)))))))
+     (format "claude-repl-merge-%s" ws))
+    (claude-repl--log ws "workspace-merge-async: make-thread returned ws=%s elapsed=%.3fs"
+                      ws (- (float-time) t0-async))))
 
 (defun claude-repl--reopen-workspace-from-state (ws)
   "Recreate UI for workspace WS from its preserved state in
@@ -3870,9 +3878,11 @@ When AUTO-RESOLVE is non-nil, cherry-pick conflicts are first sent to
 skill-invoked path passes t — interactive merges leave the resolver
 off so the user resolves in magit directly."
   (let* ((current-ws (claude-repl--ws-current-name))
-         (target-branch (claude-repl--workspace-branch target-ws)))
-    (claude-repl--log current-ws "workspace-merge-do current-ws=%s target-ws=%s target-branch=%s project-root-override=%s silent=%s auto-resolve=%s"
-                      current-ws target-ws target-branch (or project-root-override "nil") silent (if auto-resolve "t" "nil"))
+         (target-branch (claude-repl--workspace-branch target-ws))
+         (t0-do (float-time))
+         (thread-label (if (eq (current-thread) main-thread) "main" "worker")))
+    (claude-repl--log current-ws "workspace-merge-do ENTRY thread=%s current-ws=%s target-ws=%s target-branch=%s project-root-override=%s silent=%s auto-resolve=%s"
+                      thread-label current-ws target-ws target-branch (or project-root-override "nil") silent (if auto-resolve "t" "nil"))
     (unless target-branch
       (user-error "Cannot resolve branch for workspace '%s'" target-ws))
     (let* ((project-root (or project-root-override
@@ -3905,10 +3915,20 @@ off so the user resolves in magit directly."
       ;; queue for retry.
       (claude-repl--push-in-flight-merge target-ws project-root)
       (condition-case err
-          (let* ((base (claude-repl--cherry-pick-base project-root target-branch))
+          (let* ((t0-cp (float-time))
+                 (_ (claude-repl--log current-ws
+                                      "workspace-merge-do: cherry-pick-base starting ws=%s branch=%s elapsed=%.3fs"
+                                      target-ws target-branch (- (float-time) t0-do)))
+                 (base (claude-repl--cherry-pick-base project-root target-branch))
+                 (_ (claude-repl--log current-ws
+                                      "workspace-merge-do: cherry-pick-commits starting ws=%s base=%s elapsed=%.3fs"
+                                      target-ws base (- (float-time) t0-do)))
                  (result (claude-repl--cherry-pick-commits
                           project-root target-ws base target-branch
                           auto-resolve silent))
+                 (_ (claude-repl--log current-ws
+                                      "workspace-merge-do: cherry-pick-commits returned result=%s elapsed=%.3fs cp-elapsed=%.3fs"
+                                      result (- (float-time) t0-do) (- (float-time) t0-cp)))
                  (already (eq result 'already-incorporated))
                  (failed  (eq result 'failed)))
             ;; Cherry-pick completed without signaling.  Two routes:
@@ -3987,15 +4007,30 @@ off so the user resolves in magit directly."
                        target-ws current-ws))
              (t
               (message "Merged workspace '%s' -> '%s'." target-ws current-ws)))
+            (claude-repl--log current-ws
+                              "workspace-merge-do: load-file config STARTING thread=%s elapsed=%.3fs"
+                              thread-label (- (float-time) t0-do))
             (load-file claude-repl--config-file)
+            (claude-repl--log current-ws
+                              "workspace-merge-do: load-file config DONE thread=%s elapsed=%.3fs"
+                              thread-label (- (float-time) t0-do))
             ;; Cherry-pick reached a terminal state (success / already /
             ;; silent-fail) — clear the in-flight bookkeeping so the
             ;; next-start recovery doesn't see a stale orphan.
             (claude-repl--clear-in-flight-merge target-ws)
+            (claude-repl--log current-ws
+                              "workspace-merge-do: clear-in-flight done elapsed=%.3fs"
+                              (- (float-time) t0-do))
             ;; Cherry-pick complete (success/already/silent-fail) — the
             ;; in-flight gate is now clear from this merge's perspective,
             ;; so attempt to drain any merges parked behind this one.
-            (claude-repl--drain-merge-queue))
+            (claude-repl--log current-ws
+                              "workspace-merge-do: drain-merge-queue STARTING elapsed=%.3fs"
+                              (- (float-time) t0-do))
+            (claude-repl--drain-merge-queue)
+            (claude-repl--log current-ws
+                              "workspace-merge-do: drain-merge-queue DONE elapsed=%.3fs"
+                              (- (float-time) t0-do)))
         (claude-repl-merge-conflict-error
          ;; Real cherry-pick conflict — distinguish from generic merge
          ;; failure so the drawer can render 💥 (conflict awaiting
@@ -4010,6 +4045,9 @@ off so the user resolves in magit directly."
          ;; `claude-repl--drain-merge-queue' for a drained one — both routed
          ;; through `claude-repl--reenqueue-and-redrive-on-failure'.  Doing
          ;; them here as well would double-enqueue and double-drain.
+         (claude-repl--log current-ws
+                           "workspace-merge-do: CONFLICT thread=%s elapsed=%.3fs err=%S"
+                           thread-label (- (float-time) t0-do) err)
          (claude-repl--mark-merge-conflict target-ws err)
          (claude-repl--clear-in-flight-merge target-ws)
          (signal (car err) (cdr err)))
@@ -4017,6 +4055,9 @@ off so the user resolves in magit directly."
          ;; Generic failure — mark ❌ and drop bookkeeping, then re-signal.
          ;; Abort / re-enqueue-with-halt are owned by the outer handler,
          ;; exactly as in the conflict branch above.
+         (claude-repl--log current-ws
+                           "workspace-merge-do: ERROR thread=%s elapsed=%.3fs err=%S"
+                           thread-label (- (float-time) t0-do) err)
          (claude-repl--mark-merge-failed target-ws err)
          (claude-repl--clear-in-flight-merge target-ws)
          (signal (car err) (cdr err)))))))
