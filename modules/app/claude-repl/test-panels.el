@@ -3507,4 +3507,157 @@ otherwise signal `Cannot split side window' and leave panels half-shown."
         (mapc (lambda (b) (when (buffer-live-p b) (kill-buffer b)))
               (list drawer-buf work-buf vterm-buf input-buf))))))
 
+;;;; ---- Tests: stale-panel-windows ----
+
+(ert-deftest claude-repl-test-panels-stale-panel-windows-returns-foreign-panels ()
+  "stale-panel-windows returns windows showing panels from a different workspace."
+  (claude-repl-test--with-clean-state
+    (let ((foreign-buf (get-buffer-create "*claude-panel-other-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                    ((symbol-function 'window-list) (lambda (&rest _) (list (selected-window))))
+                    ((symbol-function 'window-buffer) (lambda (_w) foreign-buf)))
+            (let ((result (claude-repl--stale-panel-windows)))
+              (should (= (length result) 1))
+              (should (eq (car result) (selected-window)))))
+        (kill-buffer foreign-buf)))))
+
+(ert-deftest claude-repl-test-panels-stale-panel-windows-nil-for-own-panels ()
+  "stale-panel-windows returns nil when panels belong to the current workspace."
+  (claude-repl-test--with-clean-state
+    (let ((own-buf (get-buffer-create "*claude-panel-my-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                    ((symbol-function 'window-list) (lambda (&rest _) (list (selected-window))))
+                    ((symbol-function 'window-buffer) (lambda (_w) own-buf)))
+            (should-not (claude-repl--stale-panel-windows)))
+        (kill-buffer own-buf)))))
+
+(ert-deftest claude-repl-test-panels-stale-panel-windows-nil-for-non-panel-buffers ()
+  "stale-panel-windows returns nil when no Claude panel buffers are visible."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+              ((symbol-function 'window-list) (lambda (&rest _) (list (selected-window))))
+              ((symbol-function 'window-buffer) (lambda (_w) (get-buffer-create "*scratch*"))))
+      (should-not (claude-repl--stale-panel-windows)))))
+
+(ert-deftest claude-repl-test-panels-stale-panel-windows-nil-when-ws-nil ()
+  "stale-panel-windows returns nil when current workspace is nil."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
+      (should-not (claude-repl--stale-panel-windows)))))
+
+(ert-deftest claude-repl-test-panels-stale-panel-windows-includes-input-buffers ()
+  "stale-panel-windows detects foreign input panel buffers too."
+  (claude-repl-test--with-clean-state
+    (let ((foreign-input (get-buffer-create "*claude-panel-input-other-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                    ((symbol-function 'window-list) (lambda (&rest _) (list (selected-window))))
+                    ((symbol-function 'window-buffer) (lambda (_w) foreign-input)))
+            (should (= (length (claude-repl--stale-panel-windows)) 1)))
+        (kill-buffer foreign-input)))))
+
+;;;; ---- Tests: ensure-own-panels-on-persp-switch ----
+
+(ert-deftest claude-repl-test-panels-ensure-own-closes-stale-windows ()
+  "ensure-own-panels-on-persp-switch closes stale panel windows."
+  (claude-repl-test--with-clean-state
+    (let ((deleted nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                ((symbol-function 'claude-repl--stale-panel-windows)
+                 (lambda () (list (selected-window))))
+                ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+                ((symbol-function 'delete-window)
+                 (lambda (w) (push w deleted)))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil)))
+        (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
+        (should (= (length deleted) 1))))))
+
+(ert-deftest claude-repl-test-panels-ensure-own-restores-when-panels-were-visible ()
+  "ensure-own-panels-on-persp-switch re-shows panels when :panels-were-visible is set."
+  (claude-repl-test--with-clean-state
+    (let ((show-called nil))
+      (claude-repl--ws-put "my-ws" :panels-were-visible t)
+      (let ((vterm-buf (get-buffer-create "*claude-panel-my-ws*"))
+            (input-buf (get-buffer-create "*claude-panel-input-my-ws*")))
+        (unwind-protect
+            (progn
+              (claude-repl--ws-put "my-ws" :vterm-buffer vterm-buf)
+              (claude-repl--ws-put "my-ws" :input-buffer input-buf)
+              (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                        ((symbol-function 'claude-repl--stale-panel-windows) (lambda () nil))
+                        ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+                        ((symbol-function 'claude-repl--show-panels)
+                         (lambda () (setq show-called t))))
+                (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
+                (should show-called)))
+          (kill-buffer vterm-buf)
+          (kill-buffer input-buf))))))
+
+(ert-deftest claude-repl-test-panels-ensure-own-noop-when-panels-already-visible ()
+  "ensure-own-panels-on-persp-switch does not re-show if panels are already visible."
+  (claude-repl-test--with-clean-state
+    (let ((show-called nil))
+      (claude-repl--ws-put "my-ws" :panels-were-visible t)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                ((symbol-function 'claude-repl--stale-panel-windows) (lambda () nil))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
+                ((symbol-function 'claude-repl--show-panels)
+                 (lambda () (setq show-called t))))
+        (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
+        (should-not show-called)))))
+
+(ert-deftest claude-repl-test-panels-ensure-own-noop-when-no-stale-no-flag ()
+  "ensure-own-panels-on-persp-switch is a no-op with no stale panels and no flag."
+  (claude-repl-test--with-clean-state
+    (let ((show-called nil)
+          (delete-called nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                ((symbol-function 'claude-repl--stale-panel-windows) (lambda () nil))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'claude-repl--show-panels)
+                 (lambda () (setq show-called t)))
+                ((symbol-function 'delete-window)
+                 (lambda (_w) (setq delete-called t))))
+        (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
+        (should-not show-called)
+        (should-not delete-called)))))
+
+(ert-deftest claude-repl-test-panels-ensure-own-skips-restore-when-buffers-dead ()
+  "ensure-own-panels-on-persp-switch does not re-show if panel buffers are dead."
+  (claude-repl-test--with-clean-state
+    (let ((show-called nil))
+      (claude-repl--ws-put "my-ws" :panels-were-visible t)
+      ;; Buffers are nil (dead) — should not try to show.
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                ((symbol-function 'claude-repl--stale-panel-windows) (lambda () nil))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'claude-repl--show-panels)
+                 (lambda () (setq show-called t))))
+        (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
+        (should-not show-called)))))
+
+;;;; ---- Tests: before-persp-deactivate records panels-were-visible ----
+
+(ert-deftest claude-repl-test-panels-before-persp-deactivate-records-visible ()
+  "before-persp-deactivate saves :panels-were-visible t when panels are visible."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
+              ((symbol-function 'claude-repl--redirect-from-claude-before-save) #'ignore)
+              ((symbol-function 'claude-repl--ws-frame-save-state) #'ignore))
+      (claude-repl--before-persp-deactivate)
+      (should (eq (claude-repl--ws-get "ws1" :panels-were-visible) t)))))
+
+(ert-deftest claude-repl-test-panels-before-persp-deactivate-records-hidden ()
+  "before-persp-deactivate saves :panels-were-visible nil when panels are hidden."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+              ((symbol-function 'claude-repl--redirect-from-claude-before-save) #'ignore)
+              ((symbol-function 'claude-repl--ws-frame-save-state) #'ignore))
+      (claude-repl--before-persp-deactivate)
+      (should-not (claude-repl--ws-get "ws1" :panels-were-visible)))))
+
 ;;; test-panels.el ends here
