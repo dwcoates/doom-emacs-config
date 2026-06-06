@@ -344,6 +344,61 @@ single redisplay step — a snap, not a scroll."
       (claude-repl--log ws "maybe-autoselect-input: selecting input-win=%s" win)
       (select-window win))))
 
+(defun claude-repl--stale-panel-windows ()
+  "Return a list of windows showing Claude panel buffers from a different workspace.
+Each element is a window whose buffer is a Claude panel (vterm or input) whose
+workspace identifier (extracted from the buffer name) does not match the
+currently active workspace.  Returns nil when all visible panels belong to the
+current workspace or no panels are visible."
+  (let* ((ws (claude-repl--ws-current-name))
+         (sanitized (and ws (claude-repl--sanitize-ws-name ws))))
+    (when sanitized
+      (cl-loop for win in (window-list)
+               for buf = (window-buffer win)
+               for name = (buffer-name buf)
+               for id = (claude-repl--extract-panel-id name)
+               when (and id (not (string= id sanitized)))
+               collect win))))
+
+(defun claude-repl--ensure-own-panels-on-persp-switch (ws)
+  "Reconcile panel visibility with workspace ownership after a persp switch.
+
+Closes any panel windows that belong to a *different* workspace —
+persp-mode's `window-state-put' can leave stale panel windows when
+the target workspace has no saved window config (first visit) or
+when the saved config itself carried drifted panels from a prior
+save.
+
+After purging stale panels, restores this workspace's own panels if
+they were visible when this workspace was last deactivated
+\(`:panels-were-visible' flag set by `--before-persp-deactivate').
+
+Mirrors the drawer's `ensure-visible-on-persp-switch' approach:
+the drawer uses a global visibility flag; panels use a per-workspace
+flag because each workspace has its own panel buffers."
+  (let ((stale (claude-repl--stale-panel-windows)))
+    (when stale
+      (claude-repl--log ws "ensure-own-panels: closing %d stale panel windows: %S"
+                        (length stale)
+                        (mapcar (lambda (w) (buffer-name (window-buffer w))) stale))
+      (dolist (win stale)
+        (when (window-live-p win)
+          ;; Un-dedicate before deleting so `delete-window' doesn't error.
+          (set-window-dedicated-p win nil)
+          (delete-window win)))))
+  ;; If this workspace's panels were visible before its last deactivation
+  ;; but are not visible now (persp dropped them or we just purged stale
+  ;; ones), re-show them.
+  (when (and (claude-repl--ws-get ws :panels-were-visible)
+             (not (claude-repl--panels-visible-p))
+             ;; Only restore if this ws actually has live panel buffers.
+             (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer))
+                   (input-buf (claude-repl--ws-get ws :input-buffer)))
+               (and vterm-buf (buffer-live-p vterm-buf)
+                    input-buf (buffer-live-p input-buf))))
+    (claude-repl--log ws "ensure-own-panels: re-showing panels (were-visible but now missing)")
+    (claude-repl--show-panels)))
+
 (defun claude-repl--on-workspace-switch (&optional ws)
   "Handle workspace switch: update all workspace states, refresh vterm, reset cursors.
 WS is the workspace name to operate on; when nil, falls back to
@@ -373,6 +428,11 @@ read as the user wanting to work on it directly rather than have its
 pending merge auto-fire."
   (let ((ws (or ws (claude-repl--ws-current-name))))
     (claude-repl--log-verbose ws "workspace-switch ws=%s" ws)
+    ;; Purge stale panel windows from other workspaces and restore own
+    ;; panels if they were visible before this workspace was deactivated.
+    ;; Must run BEFORE refresh-vterm / autoselect so they see the correct
+    ;; panel windows.
+    (claude-repl--ensure-own-panels-on-persp-switch ws)
     (when (eq (claude-repl--ws-claude-state ws) :done)
       (claude-repl--ws-put ws :done-acked t)
       (claude-repl--ws-put ws :done-acked-at (float-time)))
@@ -453,18 +513,24 @@ periods — a quick transit (< delay) leaves the workspace green."
 (defun claude-repl--before-persp-deactivate (&rest _)
   "Save window state before perspective deactivation.
 Redirects away from Claude buffers and saves frame state.  Also
-clears the `:done' focus-dwell tracking on the outgoing workspace so
+records `:panels-were-visible' so `--ensure-own-panels-on-persp-switch'
+can restore the correct workspace's panels after activation.
+Clears the `:done' focus-dwell tracking on the outgoing workspace so
 a sub-`claude-repl-done-idle-delay' transit never decays it.
 Logs `persp-names-cache' so cache mutations across persp lifecycle
 events (kill, switch, add) are traceable."
-  (claude-repl--log (claude-repl--ws-current-name) "before-persp-deactivate: entry cache=%S"
-                    (or (claude-repl--ws-names-cache) "(unbound)"))
-  (claude-repl--clear-done-ack-on-switch-away (claude-repl--ws-current-name))
-  (claude-repl--redirect-from-claude-before-save)
-  (condition-case err
-      (claude-repl--ws-frame-save-state)
-    (error (message "[claude-repl] WARNING: persp-frame-save-state failed: %S" err)
-           (claude-repl--log (claude-repl--ws-current-name) "before-persp-deactivate: persp-frame-save-state error: %S" err))))
+  (let ((ws (claude-repl--ws-current-name)))
+    (claude-repl--log ws "before-persp-deactivate: entry cache=%S"
+                      (or (claude-repl--ws-names-cache) "(unbound)"))
+    (claude-repl--clear-done-ack-on-switch-away ws)
+    ;; Record whether panels are visible BEFORE redirecting/saving so
+    ;; the activated hook can restore them if persp-mode drops them.
+    (claude-repl--ws-put ws :panels-were-visible (claude-repl--panels-visible-p))
+    (claude-repl--redirect-from-claude-before-save)
+    (condition-case err
+        (claude-repl--ws-frame-save-state)
+      (error (message "[claude-repl] WARNING: persp-frame-save-state failed: %S" err)
+             (claude-repl--log ws "before-persp-deactivate: persp-frame-save-state error: %S" err)))))
 
 (defun claude-repl--after-persp-activated (&rest _)
   "Handle perspective activation by scheduling a workspace switch.
