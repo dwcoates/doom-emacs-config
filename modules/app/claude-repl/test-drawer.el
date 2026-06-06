@@ -1769,16 +1769,14 @@ This is the success path for an explicit merge command."
 
 ;;;; ---- Render ----
 
-(ert-deftest claude-repl-drawer-test-render-empty-shows-both-sections ()
-  "Empty registry still renders MAIN and HIDDEN headers with placeholders."
+(ert-deftest claude-repl-drawer-test-render-empty-shows-main-not-hidden ()
+  "Empty registry renders MAIN header but omits HIDDEN (no hidden entries)."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
       (let ((text (buffer-substring-no-properties (point-min) (point-max))))
         (should (string-match-p "MAIN" text))
-        (should (string-match-p "HIDDEN" text))
-        (should (string-match-p (regexp-quote claude-repl-drawer-empty-section-label)
-                                text))))))
+        (should-not (string-match-p "HIDDEN" text))))))
 
 (ert-deftest claude-repl-drawer-test-render-contains-name ()
   "Render includes the workspace name in its line."
@@ -1814,25 +1812,26 @@ This is the success path for an explicit merge command."
                               (buffer-substring-no-properties
                                (point-min) (point-max)))))))
 
-(ert-deftest claude-repl-drawer-test-render-always-shows-both-section-headers ()
-  "Both MAIN and HIDDEN sections always render, regardless of contents."
+(ert-deftest claude-repl-drawer-test-render-hides-empty-hidden-section ()
+  "HIDDEN section is omitted when no workspaces have hidden state."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "vis" :priority "p1")
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
       (let ((text (buffer-substring-no-properties (point-min) (point-max))))
         (should (string-match-p "MAIN" text))
-        (should (string-match-p "HIDDEN" text))))))
+        (should-not (string-match-p "HIDDEN" text))))))
 
-(ert-deftest claude-repl-drawer-test-render-empty-hidden-shows-none-placeholder ()
-  "Empty HIDDEN section renders the (none) placeholder."
+(ert-deftest claude-repl-drawer-test-render-shows-hidden-section-when-populated ()
+  "HIDDEN section appears when at least one workspace is hidden."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "vis" :priority "p1")
+    (claude-repl-drawer-test--register "hid" :repl-state :hidden)
     (claude-repl-drawer-test--with-buffer
       (claude-repl-drawer--render)
-      (should (string-match-p (regexp-quote claude-repl-drawer-empty-section-label)
-                              (buffer-substring-no-properties
-                               (point-min) (point-max)))))))
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p "HIDDEN (1)" text))
+        (should (string-match-p "hid" text))))))
 
 (ert-deftest claude-repl-drawer-test-render-section-headers-styled ()
   "Section headers carry the `claude-repl-drawer-section-title' face."

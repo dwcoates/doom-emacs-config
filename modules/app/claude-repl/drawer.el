@@ -1040,9 +1040,10 @@ must set those in the current buffer before calling."
       (claude-repl-drawer--insert-section
        (format "MAIN (%d)" (length mains))      mains    current :main)
       (insert "\n")
-      (claude-repl-drawer--insert-section
-       (format "HIDDEN (%d)" (length hiddens))  hiddens  current :hidden)
-      (insert "\n")
+      (when hiddens
+        (claude-repl-drawer--insert-section
+         (format "HIDDEN (%d)" (length hiddens))  hiddens  current :hidden)
+        (insert "\n"))
       (claude-repl-drawer--insert-section
        (format "MERGING (%d)" (length mergings)) mergings current :merging)
       (insert "\n")
