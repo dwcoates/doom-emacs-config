@@ -1,1 +1,11 @@
-[]
+{
+  "defaults": [
+    {
+      "source": "~/workspace",
+      "target": "/home/claude/workspace",
+      "type": "bind",
+      "readonly": false
+    }
+  ],
+  "custom": []
+}
