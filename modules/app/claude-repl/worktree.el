@@ -2377,7 +2377,13 @@ annotation must not error out the whole batch."
   "Open PGN-STRING in a temporary popup buffer with `pygn-mode'.
 The buffer is named \"*claude-repl-pgn:<WS>*\", placed in `pygn-mode',
 and the GUI board is rendered at the initial position via
-`pygn-mode-display-gui-board-at-pos'."
+`pygn-mode-display-gui-board-at-pos'.
+
+The buffer is attached to the WS perspective via
+`claude-repl--ws-add-buffer' so it belongs to the correct workspace.
+`display-buffer' is only called when WS is the currently-active
+workspace — otherwise the buffer is prepared silently and will be
+visible next time the user switches to WS."
   (let* ((buf-name (format "*claude-repl-pgn:%s*" ws))
          (buf (get-buffer-create buf-name)))
     (with-current-buffer buf
@@ -2386,7 +2392,12 @@ and the GUI board is rendered at the initial position via
         (insert pgn-string))
       (pygn-mode)
       (goto-char (point-min)))
-    (display-buffer buf)
+    ;; Attach buffer to the target workspace's perspective.
+    (when-let ((persp (claude-repl--ws-resolve-persp ws)))
+      (claude-repl--ws-add-buffer buf persp nil))
+    ;; Only pop up the buffer when the target workspace is active.
+    (when (equal ws (claude-repl--ws-current-name))
+      (display-buffer buf))
     (claude-repl--log ws "workspace-commands-file send: opened PGN buffer %s" buf-name)
     ;; Render the board at the initial position.
     (with-current-buffer buf
