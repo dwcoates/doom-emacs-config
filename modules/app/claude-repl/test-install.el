@@ -269,7 +269,11 @@ entry would silently revert to the lagging Notification path."
 (ert-deftest claude-repl-test-doctor-missing-settings ()
   "Settings missing or unreadable produces a single top-level error."
   (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
-            ((symbol-function 'claude-repl--settings-json) (lambda () nil)))
+            ((symbol-function 'claude-repl--settings-json) (lambda () nil))
+            ((symbol-function 'claude-repl--check-skill-links)
+             (lambda (_issues) nil))
+            ((symbol-function 'claude-repl--check-unmanaged-broken-links)
+             (lambda (_issues) nil)))
     (let ((issues (claude-repl--doctor-issues)))
       (should (= 1 (length issues)))
       (should (eq 'error (car (car issues))))
@@ -282,6 +286,10 @@ entry would silently revert to the lagging Notification path."
             ((symbol-function 'claude-repl--settings-json)
              #'test-install--json-with-all-hooks)
             ((symbol-function 'claude-repl--check-script-files)
+             (lambda (_issues) nil))
+            ((symbol-function 'claude-repl--check-skill-links)
+             (lambda (_issues) nil))
+            ((symbol-function 'claude-repl--check-unmanaged-broken-links)
              (lambda (_issues) nil)))
     (should-not (claude-repl--doctor-issues))))
 
@@ -868,5 +876,75 @@ when the live impl isn't on the host."
       (should (looking-at "^---\n"))
       (should (re-search-forward "^name: build-skill$" nil t))
       (should (re-search-forward "^description: " nil t)))))
+
+;;;; ---- unmanaged broken symlink detection ----
+
+(ert-deftest claude-repl-test-check-unmanaged-broken-link-detected ()
+  "A broken symlink not in the managed set produces a warn-level issue."
+  (test-install--with-skill-dirs ()
+    ;; Create a broken symlink for a name we don't manage.
+    (make-symbolic-link "/nonexistent/workspace-eval"
+                        (expand-file-name "workspace-eval" dest))
+    (let ((issues (list nil)))
+      (claude-repl--check-unmanaged-broken-links issues)
+      (should (= 1 (length (car issues))))
+      (should (eq 'warn (caar (car issues))))
+      (should (string-match-p "Unmanaged broken symlink"
+                              (cdar (car issues)))))))
+
+(ert-deftest claude-repl-test-check-unmanaged-broken-link-ignores-managed ()
+  "A broken symlink for a managed skill name is NOT flagged by this check.
+That case is already covered by `claude-repl--check-skill-links'."
+  (test-install--with-skill-dirs ()
+    ;; Create a broken symlink for a managed name.
+    (make-symbolic-link "/nonexistent/target"
+                        (expand-file-name (car claude-repl--managed-local-skills) dest))
+    (let ((issues (list nil)))
+      (claude-repl--check-unmanaged-broken-links issues)
+      (should (null (car issues))))))
+
+(ert-deftest claude-repl-test-check-unmanaged-broken-link-ignores-valid ()
+  "A non-broken unmanaged symlink produces no issue."
+  (test-install--with-skill-dirs ()
+    ;; Create a valid symlink to a real directory.
+    (let ((target (make-temp-file "real-target-" t)))
+      (unwind-protect
+          (progn
+            (make-symbolic-link target
+                                (expand-file-name "some-foreign-skill" dest))
+            (let ((issues (list nil)))
+              (claude-repl--check-unmanaged-broken-links issues)
+              (should (null (car issues)))))
+        (delete-directory target t)))))
+
+(ert-deftest claude-repl-test-check-unmanaged-broken-link-empty-dir ()
+  "No issues when the skills dest dir is empty."
+  (test-install--with-skill-dirs ()
+    (let ((issues (list nil)))
+      (claude-repl--check-unmanaged-broken-links issues)
+      (should (null (car issues))))))
+
+(ert-deftest claude-repl-test-check-unmanaged-broken-link-nonexistent-dir ()
+  "No issues when the skills dest dir does not exist."
+  (let ((claude-repl--skills-dest-dir "/tmp/this-dir-should-not-exist-12345/"))
+    (let ((issues (list nil)))
+      (claude-repl--check-unmanaged-broken-links issues)
+      (should (null (car issues))))))
+
+(ert-deftest claude-repl-test-doctor-includes-unmanaged-broken-links ()
+  "doctor-issues surfaces unmanaged broken symlinks alongside managed checks."
+  (test-install--with-skill-dirs ()
+    ;; Link all managed skills correctly so those checks pass.
+    (test-install--link-all-skills)
+    ;; Add an unmanaged broken symlink.
+    (make-symbolic-link "/nonexistent/stale-skill"
+                        (expand-file-name "stale-skill" dest))
+    (cl-letf (((symbol-function 'claude-repl--in-sandbox-p) (lambda () nil))
+              ((symbol-function 'claude-repl--settings-json)
+               #'test-install--json-with-all-hooks)
+              ((symbol-function 'claude-repl--check-script-files)
+               (lambda (_issues) nil)))
+      (let ((issues (claude-repl--doctor-issues)))
+        (should (test-install--doctor-find issues "Unmanaged broken symlink"))))))
 
 ;;; test-install.el ends here
