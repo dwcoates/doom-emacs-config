@@ -1245,19 +1245,49 @@ now lives inside `--delete-where' itself, so we get both properties."
    (lambda (win)
      (not (memq (window-buffer win) (list vterm-buf input-buf))))))
 
+(defun claude-repl--fullscreen-p ()
+  "Return non-nil when the Claude panels currently fill the frame.
+
+Detection is layout-based rather than reliant on a saved
+`:fullscreen-config', so a frame manually reduced to only the Claude
+panels (by deleting every other window) is recognized as fullscreen
+just the same as one reached via `claude-repl-toggle-fullscreen'.
+
+A frame qualifies when both panels are visible and every non-side
+window displays a Claude panel buffer (so no ordinary work window
+remains alongside the panels)."
+  (and (claude-repl--panels-visible-p)
+       (cl-every (lambda (win)
+                   (or (claude-repl-window--side-window-p win)
+                       (claude-repl--claude-panel-buffer-p (window-buffer win))))
+                 (window-list))))
+
 (defun claude-repl-toggle-fullscreen ()
   "Toggle fullscreen for the Claude REPL vterm and input windows.
 Saves the current window configuration per-workspace and expands the
-Claude panels to fill the frame.  Calling again restores the layout."
+Claude panels to fill the frame.  Calling again restores the layout.
+
+Fullscreen state is recognized both from a saved `:fullscreen-config'
+AND from the live layout via `claude-repl--fullscreen-p', so a frame
+that was manually fullscreened (all other windows deleted by hand) is
+not mistaken for a normal layout — toggling it neither re-enters
+fullscreen nor poisons the saved config."
   (interactive)
   (let* ((ws (claude-repl--ws-current-name))
-         (saved (claude-repl--ws-get ws :fullscreen-config)))
-    (claude-repl--log ws "toggle-fullscreen ws=%s currently=%s" ws (if saved "fullscreen" "normal"))
+         (saved (claude-repl--ws-get ws :fullscreen-config))
+         (fullscreen (or saved (claude-repl--fullscreen-p))))
+    (claude-repl--log ws "toggle-fullscreen ws=%s currently=%s saved=%s"
+                      ws (if fullscreen "fullscreen" "normal") (if saved "yes" "no"))
     (cond
-     ;; Already fullscreen — restore
+     ;; Already fullscreen with a saved layout — restore it.
      (saved
       (set-window-configuration saved)
       (claude-repl--ws-put ws :fullscreen-config nil))
+     ;; Already fullscreen but manually so (no saved layout) — there is
+     ;; nothing to restore to, so don't re-enter fullscreen (which would
+     ;; otherwise save the fullscreen layout as the "normal" config).
+     (fullscreen
+      (message "Claude panels are already fullscreen (no saved layout to restore)."))
      ;; Not fullscreen — go fullscreen if panels are visible
      ((claude-repl--vterm-live-p)
       (let* ((vterm-buf (claude-repl--ws-get ws :vterm-buffer))
