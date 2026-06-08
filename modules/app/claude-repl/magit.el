@@ -210,10 +210,14 @@ nuked), falls back to `default-directory' so magit still opens and
 skips the `:fullscreen-config' write to avoid creating a stub entry
 (see `claude-repl--ws-put' STUB-CREATE warning).
 
-When claude-repl is fullscreen (both input and output are the only
-visible windows), closes the input window and un-dedicates the vterm
-window before opening magit so that `display-buffer-same-window' can
-replace the vterm window cleanly instead of splitting it."
+When claude-repl is fullscreen, closes the input window and
+un-dedicates the vterm window before opening magit so that
+`display-buffer-same-window' can replace the vterm window cleanly
+instead of splitting it.  Fullscreen is detected from a saved
+`:fullscreen-config' OR the live layout via `claude-repl--fullscreen-p'
+(mirroring `claude-repl-toggle-fullscreen'), so a frame manually
+reduced to just the panels is handled the same as one reached via
+`SPC w f'."
   (interactive)
   (when (window-parameter (selected-window) 'window-side)
     (select-window (window-main-window)))
@@ -229,7 +233,11 @@ replace the vterm window cleanly instead of splitting it."
       ;; When fullscreen, close the input window and un-dedicate the vterm window
       ;; so magit can replace the vterm window via same-window display without
       ;; splitting it (the vterm window is dedicated, which blocks same-window).
-      (when (claude-repl--ws-get ws :fullscreen-config)
+      ;; Detect fullscreen from a saved `:fullscreen-config' OR the live layout
+      ;; via `claude-repl--fullscreen-p', mirroring `claude-repl-toggle-fullscreen',
+      ;; so a frame manually reduced to the panels is handled too.
+      (when (or (claude-repl--ws-get ws :fullscreen-config)
+                (claude-repl--fullscreen-p))
         (let ((input-buf (claude-repl--ws-get ws :input-buffer))
               (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
           (when input-buf

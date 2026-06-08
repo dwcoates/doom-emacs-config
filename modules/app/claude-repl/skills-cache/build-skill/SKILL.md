@@ -210,6 +210,9 @@ In addition to the general conventions, every skill in this family follows these
   - **Parent analyst skills** dispatch one or more named child analyst skills via the `Agent` tool, then perform the MIXTURE from `MODEL.md` — synthesizing the children's prose AND gap-filling new analysis anchored on the children's SAN+gamepoint citations.
   - Parent skills name their permitted children explicitly in the Output Contract; the dispatcher does nothing else.
   - **Parent skills MUST dispatch every child with `--defer-footer`**, propagating the suppression transitively even when the parent itself received `--defer-footer`, so only the outermost caller renders a footer.
+  - **Any skill that invokes `annotate-pgn` as a non-terminal step MUST pass `--defer-send`**, deferring the run's single workspace-send to the outermost caller, per **The workspace-send is opt-out** in `position-analysis-spec.md`.
+    - This applies to leaf skills rendering their own output and to the orchestrator's footer PGN alike.
+    - The outermost caller performs exactly one send of the final accepted PGN, so a forgotten `--defer-send` silently regresses to duplicate sends.
 
 5. **Per-run memoization is the orchestrator's job, not the skill's.**
   - The skill body just runs its analysis whenever invoked.
