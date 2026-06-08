@@ -557,7 +557,7 @@ runs `/workspace-generation') to invoke `/workspace-merge' on success,
 or stop and surface on genuine ambiguity.")
 
 (defconst claude-repl--oneshot-create-pr-command
-  "/create-or-update-pr --patch --add-to-merge-queue --skip-tests"
+  "/create-or-update-pr --patch --add-to-merge-queue"
   "Slash command the explanation-engine one-shot agent invokes on success
 as the FIRST stage of the wrap-up.  The PR-creation flow pushes the
 branch and queues it for merge directly (which makes sense for a service
