@@ -66,6 +66,14 @@ if { [ -f /.dockerenv ] || [ "${DOOM_SANDBOX:-}" = "1" ]; } \
     fi
   done
 
+  # Warn about any remaining broken symlinks in $SKILLS_DIR that we
+  # don't manage — so the user knows they exist and can clean them up.
+  for dest in "$SKILLS_DIR"/*; do
+    [ -L "$dest" ] || continue
+    [ -e "$dest" ] && continue
+    echo "[install.sh/sandbox] WARNING: unmanaged broken symlink: $(basename "$dest") -> $(readlink "$dest")"
+  done
+
   echo "[install.sh] Sandbox skill fixup complete."
   exit 0
 fi

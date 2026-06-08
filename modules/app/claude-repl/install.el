@@ -394,6 +394,10 @@ directory the expected target is computed from."
          (equal (expand-file-name target (file-name-directory dest))
                 expected))))
 
+(defun claude-repl--all-managed-skill-names ()
+  "Return a list of all managed skill names (cached + local)."
+  (append claude-repl--managed-skills claude-repl--managed-local-skills))
+
 (defun claude-repl--check-skill-links (issues-cell)
   "Populate ISSUES-CELL with problems for managed skill symlinks.
 Covers both external skills (`claude-repl--managed-skills') and
@@ -417,6 +421,23 @@ repo-local skills (`claude-repl--managed-local-skills')."
              (format "Skill symlink points elsewhere: %s — run M-x claude-repl-reinstall-hooks"
                      dest)))))))))
 
+(defun claude-repl--check-unmanaged-broken-links (issues-cell)
+  "Populate ISSUES-CELL with warnings for broken symlinks we don't manage.
+Scans `claude-repl--skills-dest-dir' for symlinks that are both broken
+and not in our managed set — likely stale leftovers from old worktrees."
+  (let ((skills-dir (expand-file-name claude-repl--skills-dest-dir))
+        (managed (claude-repl--all-managed-skill-names)))
+    (when (file-directory-p skills-dir)
+      (dolist (entry (directory-files skills-dir t))
+        (let ((name (file-name-nondirectory entry)))
+          (when (and (file-symlink-p entry)
+                     (not (file-exists-p entry))
+                     (not (member name managed)))
+            (claude-repl--push-issue
+             issues-cell 'warn
+             (format "Unmanaged broken symlink: %s -> %s — consider removing"
+                     entry (file-symlink-p entry)))))))))
+
 (defun claude-repl--doctor-issues ()
   "Return a list of (LEVEL . MESSAGE) describing hook-install problems.
 LEVEL is `error' or `warn'.  Empty list means all managed hooks are
@@ -436,6 +457,7 @@ returned and the per-hook checks are skipped."
         (claude-repl--check-registration (cdr (assq 'hooks json)) issues)
         (claude-repl--check-script-files issues))
       (claude-repl--check-skill-links issues)
+      (claude-repl--check-unmanaged-broken-links issues)
       (nreverse (car issues)))))
 
 ;; Run inline at load time so hooks are registered before later
