@@ -50,7 +50,7 @@
   :group 'claude-repl)
 
 (defcustom claude-repl-create-or-update-pr-base-flags
-  '("commit" "--patch" "--self-certified" "--add-to-merge-queue" "--skip-tests")
+  '("commit" "--patch" "--self-certified" "--add-to-merge-queue")
   "Default flag list for the /create-or-update-pr slash command.
 `claude-repl-create-or-update-pr' joins these into the prompt, dropping
 any flag whose exclusion symbol appears in its EXCLUDED argument."

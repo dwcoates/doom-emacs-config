@@ -86,7 +86,7 @@ default like every other repo."
   "Repo-relative path that declares a workspace-merge handler.
 Format: a single alist sexp like
   ((handler . create-pr)
-   (args . (:add-to-merge-queue t :skip-tests t))).
+   (args . (:add-to-merge-queue t))).
 Read with `read', never `eval'.")
 
 (defun claude-repl--read-merge-handler-config-file (repo-root)

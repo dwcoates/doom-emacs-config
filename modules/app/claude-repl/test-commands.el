@@ -1826,24 +1826,24 @@ No interrupt was actually delivered, so the state should not change."
 (ert-deftest claude-repl-cmd-test-build-coup-prompt/no-exclusions-keeps-all-flags ()
   "With nil EXCLUDED, the prompt contains every base flag."
   (let ((claude-repl-create-or-update-pr-base-flags
-         '("--patch" "--self-certified" "--add-to-merge-queue" "--skip-tests")))
+         '("--patch" "--self-certified" "--add-to-merge-queue")))
     (should (equal (claude-repl--build-create-or-update-pr-prompt nil)
-                   "/create-or-update-pr --patch --self-certified --add-to-merge-queue --skip-tests"))))
+                   "/create-or-update-pr --patch --self-certified --add-to-merge-queue"))))
 
 (ert-deftest claude-repl-cmd-test-build-coup-prompt/single-exclusion ()
   "A single exclusion drops just that flag."
   (let ((claude-repl-create-or-update-pr-base-flags
-         '("--patch" "--self-certified" "--add-to-merge-queue" "--skip-tests")))
+         '("--patch" "--self-certified" "--add-to-merge-queue")))
     (should (equal (claude-repl--build-create-or-update-pr-prompt '(no-self-certified))
-                   "/create-or-update-pr --patch --add-to-merge-queue --skip-tests"))))
+                   "/create-or-update-pr --patch --add-to-merge-queue"))))
 
 (ert-deftest claude-repl-cmd-test-build-coup-prompt/multiple-exclusions ()
   "Multiple exclusions drop each named flag."
   (let ((claude-repl-create-or-update-pr-base-flags
-         '("--patch" "--self-certified" "--add-to-merge-queue" "--skip-tests")))
+         '("--patch" "--self-certified" "--add-to-merge-queue")))
     (should (equal (claude-repl--build-create-or-update-pr-prompt
                     '(no-self-certified no-add-to-merge-queue))
-                   "/create-or-update-pr --patch --skip-tests"))))
+                   "/create-or-update-pr --patch"))))
 
 (ert-deftest claude-repl-cmd-test-build-coup-prompt/unknown-exclusion-errors ()
   "Excluding a flag not present in the base list signals an error."
