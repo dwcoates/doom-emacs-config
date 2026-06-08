@@ -9747,10 +9747,10 @@ uses bare-metal Claude, not the Docker sandbox."
 (ert-deftest claude-repl-test-oneshot-create-pr-command-has-expected-flags ()
   "The PR command string must match exactly what the user specified for
 the explanation-engine one-shot: `/create-or-update-pr --patch
---add-to-merge-queue --skip-tests' (no --self-certified, no `commit'
+--add-to-merge-queue' (no --self-certified, no `commit'
 subcommand)."
   (should (equal claude-repl--oneshot-create-pr-command
-                 "/create-or-update-pr --patch --add-to-merge-queue --skip-tests")))
+                 "/create-or-update-pr --patch --add-to-merge-queue")))
 
 (ert-deftest claude-repl-test-oneshot-create-pr-suffix-mentions-stop-on-ambiguity ()
   "The create-PR suffix tells the spawned agent to STOP (not push on)
