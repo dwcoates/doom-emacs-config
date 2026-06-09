@@ -546,6 +546,27 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
            "forcing uniform depth across siblings defeats the purpose of using depth as a salience signal"
            claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-tldr-brief-ten-node-hard-limit ()
+  "TLDR spec must mandate brevity with a hard cap of 10 total nodes."
+  (should (string-match-p
+           "MUST be BRIEF: no more than 10 nodes in total"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "10-node cap is a HARD limit that may NEVER be exceeded for any reason"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-node-cap-counts-all-nodes ()
+  "TLDR spec must state the 10-node cap counts ALL nodes, not just leaf nodes."
+  (should (string-match-p
+           "counts ALL nodes in the tree (internal and leaf alike), not just leaf nodes"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-no-soft-node-count-escape ()
+  "Regression guard: the prior soft 'only going larger when absolutely necessary' escape hatch must be gone from the node-count rule."
+  (should-not (string-match-p
+               "only going larger when absolutely necessary"
+               claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-tldr-defaults-to-minimal-detail ()
   "TLDR spec must direct the tree to default to minimal detail, covering only critical points."
   (should (string-match-p
