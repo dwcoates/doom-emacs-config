@@ -162,8 +162,7 @@ Returns the empty string when disabled, the workspace is unknown, or no
 title is yet available."
   (if (not claude-repl-ai-title-enabled)
       ""
-    (let ((ws (and (boundp 'claude-repl--owning-workspace)
-                   claude-repl--owning-workspace)))
+    (let ((ws (claude-repl--buffer-owner (current-buffer))))
       (if (not ws)
           ""
         (let ((title (claude-repl--ai-title-for-ws ws)))

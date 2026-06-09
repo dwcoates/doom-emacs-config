@@ -2016,10 +2016,7 @@ persp routing."
   (let* ((fallback (and (fboundp 'doom-fallback-buffer) (doom-fallback-buffer)))
          (all (window-list nil 'nomini))
          (foreign-p (lambda (w)
-                      (let ((owner (buffer-local-value
-                                    'claude-repl--owning-workspace
-                                    (window-buffer w))))
-                        (and owner (not (equal owner ws))))))
+                      (claude-repl--foreign-owned-buffer-p (window-buffer w) ws)))
          (foreign (cl-remove-if-not foreign-p all))
          (any-native (< (length foreign) (length all))))
     (when foreign
