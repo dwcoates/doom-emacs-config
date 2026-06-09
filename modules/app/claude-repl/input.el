@@ -784,7 +784,13 @@ Handles input preparation, sending, history, and persistence."
        ((and raw-empty vterm-buf (buffer-live-p vterm-buf))
         (claude-repl--log ws "send: empty raw input -- forwarding bare RET to vterm via libvterm")
         (with-current-buffer vterm-buf
-          (claude-repl--vterm-send-return-key-logged "send-empty-bare-ret")))
+          (claude-repl--vterm-send-return-key-logged "send-empty-bare-ret"))
+        ;; A bare RET answering a permission prompt (e.g. accepting the
+        ;; default option) is, like `claude-repl--do-send' and
+        ;; `claude-repl-send-char', the only signal that Claude is now
+        ;; working on the permitted action — transition to `:thinking'.
+        (when (eq (claude-repl--ws-claude-state ws) :permission)
+          (claude-repl--mark-ws-thinking ws)))
        ((and (not raw-empty) vterm-buf (buffer-live-p vterm-buf))
         (let ((input (claude-repl--prepare-input ws raw force-metaprompt)))
           (claude-repl--do-send ws input raw on-settle)
