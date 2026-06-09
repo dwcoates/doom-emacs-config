@@ -133,7 +133,10 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
     - The basic problem (no details, this section should be especially concise)
     - The questions and gotchas
     - The proposed fixes
-- Total number of nodes should typically be 3-10, only going larger when absolutely necessary
+- The TLDR MUST be BRIEF: no more than 10 nodes in total.
+  - The 10-node cap is a HARD limit that may NEVER be exceeded for any reason.
+  - The cap counts ALL nodes in the tree (internal and leaf alike), not just leaf nodes.
+  - Typical responses should land at 3-10 total nodes.
 
 ### Content selection
 
