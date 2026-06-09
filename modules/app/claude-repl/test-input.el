@@ -1902,6 +1902,36 @@ should still forward RET so the keystroke reaches Claude."
           (claude-repl--send nil "ws1")
           (should (eq ret-buf (claude-repl--ws-get "ws1" :vterm-buffer))))))))
 
+(ert-deftest claude-repl-test-send-bare-ret-transitions-permission-to-thinking ()
+  "`claude-repl--send' transitions :permission -> :thinking on a bare-RET send.
+Answering a permission prompt by pressing RET on an empty input buffer is the
+only signal that Claude is now working on the permitted action."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-send-bare-ret-perm-input*"
+      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+      (claude-repl-test--with-temp-buffer "*claude-panel-bare-ret-perm-vterm*"
+        (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+        (claude-repl--ws-set-claude-state "ws1" :permission)
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                  ((symbol-function 'claude-repl--vterm-send-return-key-logged) #'ignore))
+          (claude-repl--send nil "ws1")
+          (should (eq (claude-repl--ws-state "ws1") :thinking)))))))
+
+(ert-deftest claude-repl-test-send-bare-ret-leaves-non-permission-state-unchanged ()
+  "`claude-repl--send' bare-RET does NOT force :thinking from a non-:permission state.
+Only the :permission -> :thinking transition is owned by the Emacs-side keypress;
+other states (e.g. :idle) must be left untouched on a bare RET."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-send-bare-ret-idle-input*"
+      (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
+      (claude-repl-test--with-temp-buffer "*claude-panel-bare-ret-idle-vterm*"
+        (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+        (claude-repl--ws-set-claude-state "ws1" :idle)
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                  ((symbol-function 'claude-repl--vterm-send-return-key-logged) #'ignore))
+          (claude-repl--send nil "ws1")
+          (should (eq (claude-repl--ws-state "ws1") :idle)))))))
+
 (ert-deftest claude-repl-test-send-skips-bare-ret-when-no-vterm-buffer ()
   "`claude-repl--send' does NOT forward RET when no vterm buffer is registered.
 There's no terminal to receive the keystroke."
