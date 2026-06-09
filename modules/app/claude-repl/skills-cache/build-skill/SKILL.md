@@ -201,13 +201,13 @@ In addition to the general conventions, every skill in this family follows these
 
 3. **Output Contract section is required**, replacing the freer `Steps` body the general conventions describe. It declares the response shape:
   - One **~50-sentence prose analysis**, no separate summary, no verdict line, no enumerated classification — the prose IS the entire output.
-  - Every substantive claim is anchored on a specific move in **SAN** notation AND the specific **game-point handle** where it occurs -- this allows downstream agents (who are invoking the given position analysis skill) to guide their own analysis predicated on this information.
-  - Thematic moves recurring across transpositions may cite several representative game points alongside the move instead of one.
+  - Every substantive claim is anchored on a specific move in **SAN** notation AND the full citation triple `(gp:XXXXXXXX, h:<humanness>, <CLASSIFICATION>)` — the game-point handle, the Charm humanness, and the move classification — per the **Citations** rule in `position-analysis-spec.md`. This lets downstream agents guide their own analysis (including the inclusion gate, which keys on humanness) without re-deriving these values.
+  - Thematic moves recurring across transpositions may cite several representative game points within the triple alongside the move instead of one.
   - **SAN only, never LAN, for string representation.** Where LAN is the only representation available, surface that fact explicitly rather than silently converting.
 
 4. **Parent vs leaf is declared in the Output Contract.**
   - **Leaf analyst skills** analyze their aspect of the position directly and do not invoke other analyst skills, though they MAY invoke non-analysis presentation/utility skills (e.g. annotate-pgn) to render output.
-  - **Parent analyst skills** dispatch one or more named child analyst skills via the `Agent` tool, then perform the MIXTURE from `MODEL.md` — synthesizing the children's prose AND gap-filling new analysis anchored on the children's SAN+gamepoint citations.
+  - **Parent analyst skills** dispatch one or more named child analyst skills via the `Agent` tool, then perform the MIXTURE from `MODEL.md` — synthesizing the children's prose AND gap-filling new analysis anchored on the children's SAN + `(gp, humanness, classification)` triple citations.
   - Parent skills name their permitted children explicitly in the Output Contract; the dispatcher does nothing else.
   - **Parent skills MUST dispatch every child with `--defer-footer`**, propagating the suppression transitively even when the parent itself received `--defer-footer`, so only the outermost caller renders a footer.
   - **Any skill that invokes `annotate-pgn` as a non-terminal step MUST pass `--defer-send`**, deferring the run's single workspace-send to the outermost caller, per **The workspace-send is opt-out** in `position-analysis-spec.md`.
@@ -220,7 +220,7 @@ In addition to the general conventions, every skill in this family follows these
 
 6. **Notes section gains family-mandatory bullets:**
   - **CRITICAL NOTE: SAN only, never LAN.** Convert nothing; surface LAN-only cases explicitly.
-  - **IMPORTANT NOTE: Always include the game point alongside the move** unless the move is genuinely thematic across multiple lines, in which case cite several example game points.
+  - **IMPORTANT NOTE: Always include the `(gp, humanness, classification)` triple alongside the move** unless the move is genuinely thematic across multiple lines, in which case cite several example game points within the triple.
   - **IMPORTANT NOTE: Read the prelim file lazily via `jq`** for surgical field access. Do not load the whole file into context.
   - For **leaf** skills only: **CRITICAL NOTE: This skill is a leaf RPC in the position-analysis decomposition.** It delegates no further position analysis, so it MUST NOT invoke other analyst (`analyze-position-*`) skills, and MUST NOT edit files. It MAY invoke non-analysis presentation/utility skills (e.g. annotate-pgn) to render its output. External resources (CEE, and Wikipedia/Web where applicable) are not skills and are permitted.
   - For **parent** skills: omit the leaf-RPC restriction and instead add a CRITICAL note naming the exact set of permitted child skills.

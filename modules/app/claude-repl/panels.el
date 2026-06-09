@@ -1129,19 +1129,6 @@ Captures the current buffer references before teardown clears them."
     (claude-repl--teardown-session-state ws)
     (claude-repl--destroy-session-buffers vterm-buf input-buf)))
 
-(defun claude-repl--foreign-owned-buffer-p (buf ws)
-  "Return non-nil if BUF is a Claude buffer owned by a workspace other than WS.
-A buffer is foreign-owned when its buffer-local
-`claude-repl--owning-workspace' holds a non-nil name unequal to WS.
-Buffers with no owner (nil) — e.g. magit, file, or other non-Claude
-buffers that persp-mode swept into the perspective — are NOT foreign
-and stay eligible for the nuke.  Guards against persp-mode drifting
-another workspace's live Claude panel into this persp, which would
-otherwise nuke that workspace's session along with WS's own."
-  (and (buffer-live-p buf)
-       (let ((owner (buffer-local-value 'claude-repl--owning-workspace buf)))
-         (and owner (not (equal owner ws))))))
-
 (defun claude-repl--kill-workspace-buffers (ws)
   "Kill every buffer (and attached process) belonging to persp WS.
 Idempotent: no-op when persp-mode is inactive, the persp does not
@@ -1165,7 +1152,7 @@ would wipe that workspace's running session."
               (if (claude-repl--foreign-owned-buffer-p buf ws)
                   (claude-repl--log ws "kill-workspace-buffers: SKIP foreign buf=%s owner=%s"
                                     (claude-repl--safe-buffer-name buf)
-                                    (buffer-local-value 'claude-repl--owning-workspace buf))
+                                    (claude-repl--buffer-owner buf))
                 (let* ((buf-name (claude-repl--safe-buffer-name buf))
                        (live (buffer-live-p buf))
                        (proc (and live (get-buffer-process buf)))

@@ -1604,6 +1604,74 @@ The master kill-switch overrides the always-on file-write decoupling."
       (claude-repl--do-log-to-file "x"))
     (should (= 7 claude-repl--log-write-counter))))
 
+;;;; ---- Tests: buffer-owner accessor ----
+
+(ert-deftest claude-repl-test-core-buffer-owner-returns-owner ()
+  "buffer-owner returns the buffer-local owning workspace."
+  (let ((buf (get-buffer-create "*bo-owned*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (setq-local claude-repl--owning-workspace "owner-ws"))
+          (should (equal "owner-ws" (claude-repl--buffer-owner buf))))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-core-buffer-owner-nil-when-unset ()
+  "buffer-owner returns nil for a buffer with no owner set."
+  (let ((buf (get-buffer-create "*bo-unset*")))
+    (unwind-protect
+        (should-not (claude-repl--buffer-owner buf))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-core-buffer-owner-nil-when-dead ()
+  "buffer-owner returns nil for a dead buffer instead of erroring."
+  (let ((buf (get-buffer-create "*bo-dead*")))
+    (with-current-buffer buf
+      (setq-local claude-repl--owning-workspace "owner-ws"))
+    (kill-buffer buf)
+    (should-not (claude-repl--buffer-owner buf))))
+
+(ert-deftest claude-repl-test-core-buffer-owner-nil-when-nil-buffer ()
+  "buffer-owner returns nil for a nil buffer argument."
+  (should-not (claude-repl--buffer-owner nil)))
+
+;;;; ---- Tests: foreign-owned-buffer-p ----
+
+(ert-deftest claude-repl-test-core-foreign-owned-buffer-p/foreign-owner ()
+  "foreign-owned-buffer-p is non-nil for a buffer owned by another workspace."
+  (let ((buf (get-buffer-create "*fo-foreign*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (setq-local claude-repl--owning-workspace "other-ws"))
+          (should (claude-repl--foreign-owned-buffer-p buf "this-ws")))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-core-foreign-owned-buffer-p/same-owner ()
+  "foreign-owned-buffer-p is nil for a buffer owned by the same workspace."
+  (let ((buf (get-buffer-create "*fo-own*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (setq-local claude-repl--owning-workspace "this-ws"))
+          (should-not (claude-repl--foreign-owned-buffer-p buf "this-ws")))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-core-foreign-owned-buffer-p/no-owner ()
+  "foreign-owned-buffer-p is nil for an unowned buffer (e.g. magit/file)."
+  (let ((buf (get-buffer-create "*fo-unowned*")))
+    (unwind-protect
+        (should-not (claude-repl--foreign-owned-buffer-p buf "this-ws"))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-core-foreign-owned-buffer-p/dead-buffer ()
+  "foreign-owned-buffer-p is nil for a dead buffer."
+  (let ((buf (get-buffer-create "*fo-dead*")))
+    (with-current-buffer buf
+      (setq-local claude-repl--owning-workspace "other-ws"))
+    (kill-buffer buf)
+    (should-not (claude-repl--foreign-owned-buffer-p buf "this-ws"))))
+
 (provide 'test-core)
 
 ;;; test-core.el ends here
