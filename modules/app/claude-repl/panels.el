@@ -1129,6 +1129,19 @@ Captures the current buffer references before teardown clears them."
     (claude-repl--teardown-session-state ws)
     (claude-repl--destroy-session-buffers vterm-buf input-buf)))
 
+(defun claude-repl--foreign-owned-buffer-p (buf ws)
+  "Return non-nil if BUF is a Claude buffer owned by a workspace other than WS.
+A buffer is foreign-owned when its buffer-local
+`claude-repl--owning-workspace' holds a non-nil name unequal to WS.
+Buffers with no owner (nil) — e.g. magit, file, or other non-Claude
+buffers that persp-mode swept into the perspective — are NOT foreign
+and stay eligible for the nuke.  Guards against persp-mode drifting
+another workspace's live Claude panel into this persp, which would
+otherwise nuke that workspace's session along with WS's own."
+  (and (buffer-live-p buf)
+       (let ((owner (buffer-local-value 'claude-repl--owning-workspace buf)))
+         (and owner (not (equal owner ws))))))
+
 (defun claude-repl--kill-workspace-buffers (ws)
   "Kill every buffer (and attached process) belonging to persp WS.
 Idempotent: no-op when persp-mode is inactive, the persp does not
@@ -1136,7 +1149,12 @@ exist, or the persp slot holds a symbol sentinel rather than a real
 perspective.  Each buffer is killed inside its own `condition-case' so
 one bad buffer cannot block the rest.  File-visiting buffers are
 marked unmodified before killing so `kill-buffer' does not prompt —
-the user has already confirmed the destructive nuke."
+the user has already confirmed the destructive nuke.
+
+Claude buffers owned by a different workspace (see
+`claude-repl--foreign-owned-buffer-p') are skipped, not killed: persp-mode
+can drift another workspace's live panel into this persp, and nuking it
+would wipe that workspace's running session."
   (when (claude-repl--ws-system-available-p)
     (when-let ((persp (claude-repl--ws-resolve-persp ws)))
       (let ((bufs (claude-repl--ws-buffers persp))
@@ -1144,23 +1162,27 @@ the user has already confirmed the destructive nuke."
         (claude-repl--log ws "kill-workspace-buffers: count=%d" (length bufs))
         (dolist (buf bufs)
           (condition-case err
-              (let* ((buf-name (claude-repl--safe-buffer-name buf))
-                     (live (buffer-live-p buf))
-                     (proc (and live (get-buffer-process buf)))
-                     (t-buf (float-time)))
-                (claude-repl--log ws "kill-workspace-buffers: buf=%s live=%s proc=%s"
-                                  buf-name (if live "t" "nil")
-                                  (if proc (process-name proc) "nil"))
-                (when live
-                  (when proc
-                    (set-process-query-on-exit-flag proc nil)
-                    (ignore-errors (delete-process proc))
-                    (claude-repl--schedule-sigkill proc))
-                  (with-current-buffer buf
-                    (set-buffer-modified-p nil))
-                  (kill-buffer buf))
-                (claude-repl--log ws "kill-workspace-buffers: buf=%s done elapsed=%.3fs"
-                                  buf-name (- (float-time) t-buf)))
+              (if (claude-repl--foreign-owned-buffer-p buf ws)
+                  (claude-repl--log ws "kill-workspace-buffers: SKIP foreign buf=%s owner=%s"
+                                    (claude-repl--safe-buffer-name buf)
+                                    (buffer-local-value 'claude-repl--owning-workspace buf))
+                (let* ((buf-name (claude-repl--safe-buffer-name buf))
+                       (live (buffer-live-p buf))
+                       (proc (and live (get-buffer-process buf)))
+                       (t-buf (float-time)))
+                  (claude-repl--log ws "kill-workspace-buffers: buf=%s live=%s proc=%s"
+                                    buf-name (if live "t" "nil")
+                                    (if proc (process-name proc) "nil"))
+                  (when live
+                    (when proc
+                      (set-process-query-on-exit-flag proc nil)
+                      (ignore-errors (delete-process proc))
+                      (claude-repl--schedule-sigkill proc))
+                    (with-current-buffer buf
+                      (set-buffer-modified-p nil))
+                    (kill-buffer buf))
+                  (claude-repl--log ws "kill-workspace-buffers: buf=%s done elapsed=%.3fs"
+                                    buf-name (- (float-time) t-buf))))
             (error
              (claude-repl--log ws "kill-workspace-buffers: error on %s: %S"
                                (claude-repl--safe-buffer-name buf) err))))

@@ -2431,6 +2431,69 @@ loop is skipped entirely."
           (should-not (buffer-live-p live)))
       (when (buffer-live-p live) (kill-buffer live)))))
 
+(ert-deftest claude-repl-test-panels-foreign-owned-buffer-p/foreign-owner ()
+  "foreign-owned-buffer-p is non-nil for a buffer owned by another workspace."
+  (let ((buf (get-buffer-create "*kwb-foreign*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (setq-local claude-repl--owning-workspace "other-ws"))
+          (should (claude-repl--foreign-owned-buffer-p buf "this-ws")))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-panels-foreign-owned-buffer-p/same-owner ()
+  "foreign-owned-buffer-p is nil for a buffer owned by the same workspace."
+  (let ((buf (get-buffer-create "*kwb-own*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (setq-local claude-repl--owning-workspace "this-ws"))
+          (should-not (claude-repl--foreign-owned-buffer-p buf "this-ws")))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-panels-foreign-owned-buffer-p/no-owner ()
+  "foreign-owned-buffer-p is nil for an unowned buffer (e.g. magit/file)."
+  (let ((buf (get-buffer-create "*kwb-unowned*")))
+    (unwind-protect
+        (should-not (claude-repl--foreign-owned-buffer-p buf "this-ws"))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-panels-foreign-owned-buffer-p/dead-buffer ()
+  "foreign-owned-buffer-p is nil for a dead buffer."
+  (let ((buf (get-buffer-create "*kwb-dead-owner*")))
+    (with-current-buffer buf
+      (setq-local claude-repl--owning-workspace "other-ws"))
+    (kill-buffer buf)
+    (should-not (claude-repl--foreign-owned-buffer-p buf "this-ws"))))
+
+(ert-deftest claude-repl-test-panels-kill-workspace-buffers/spares-foreign-owned ()
+  "kill-workspace-buffers does NOT kill a buffer owned by a different workspace.
+Regression guard: persp-mode can drift another workspace's live Claude panel
+into this persp, and nuking it would wipe that workspace's running session."
+  (let ((persp-mode t)
+        (foreign (get-buffer-create "*claude-panel-other-ws*")))
+    (with-current-buffer foreign
+      (setq-local claude-repl--owning-workspace "other-ws"))
+    (unwind-protect
+        (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_ws) (list 'persp)))
+                  ((symbol-function 'persp-buffers) (lambda (_p) (list foreign))))
+          (claude-repl--kill-workspace-buffers "this-ws")
+          (should (buffer-live-p foreign)))
+      (when (buffer-live-p foreign) (kill-buffer foreign)))))
+
+(ert-deftest claude-repl-test-panels-kill-workspace-buffers/kills-own-owned ()
+  "kill-workspace-buffers kills a buffer owned by the workspace being nuked."
+  (let ((persp-mode t)
+        (own (get-buffer-create "*claude-panel-this-ws*")))
+    (with-current-buffer own
+      (setq-local claude-repl--owning-workspace "this-ws"))
+    (unwind-protect
+        (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_ws) (list 'persp)))
+                  ((symbol-function 'persp-buffers) (lambda (_p) (list own))))
+          (claude-repl--kill-workspace-buffers "this-ws")
+          (should-not (buffer-live-p own)))
+      (when (buffer-live-p own) (kill-buffer own)))))
+
 (ert-deftest claude-repl-test-panels-kill-workspace-buffers/kills-attached-process ()
   "kill-workspace-buffers deletes a process attached to a workspace buffer."
   (let* ((persp-mode t)
