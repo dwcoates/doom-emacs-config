@@ -174,7 +174,7 @@ the original ALIST order."
   "Format BUF's name, owning workspace, and persp workspace as a diagnostic string."
   (format "  %s  owning=%s  persp=%s"
           (buffer-name buf)
-          (or (buffer-local-value 'claude-repl--owning-workspace buf) "nil")
+          (or (claude-repl--buffer-owner buf) "nil")
           (or (claude-repl--workspace-for-buffer buf) "nil")))
 
 (defun claude-repl--kill-before-workspace-delete (&optional name &rest _)
@@ -495,7 +495,7 @@ and silences process exit queries before killing."
   (dolist (buf (buffer-list))
     (when (and (buffer-live-p buf)
                (claude-repl--claude-panel-buffer-p buf)
-               (equal ws (buffer-local-value 'claude-repl--owning-workspace buf)))
+               (equal ws (claude-repl--buffer-owner buf)))
       (claude-repl--log ws "kill-owned-panel-buffers: killing buffer=%s" (buffer-name buf))
       (claude-repl-window--delete-buffer-windows buf :all-frames nil)
       (let ((proc (get-buffer-process buf)))
@@ -619,8 +619,7 @@ Returns a plist with keys :vterm-buf :proc-alive :owning-ws :has-window
                              return buf))
          (proc (and vterm-buf (get-buffer-process vterm-buf)))
          (proc-alive (and proc (process-live-p proc)))
-         (owning-ws (and vterm-buf
-                         (buffer-local-value 'claude-repl--owning-workspace vterm-buf)))
+         (owning-ws (claude-repl--buffer-owner vterm-buf))
          (has-window (and vterm-buf (get-buffer-window vterm-buf t))))
     (list :vterm-buf vterm-buf :proc-alive proc-alive
           :owning-ws owning-ws :has-window has-window

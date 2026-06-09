@@ -680,6 +680,24 @@ Set when the user sends a message; used to correctly target workspace
 state changes regardless of which persp the buffer drifts into.")
 (put 'claude-repl--owning-workspace 'permanent-local t)
 
+(defun claude-repl--buffer-owner (buf)
+  "Return the workspace name that owns BUF, or nil.
+Reads the permanent-local `claude-repl--owning-workspace'.  Returns nil
+for a nil or dead BUF, so callers need not guard liveness themselves."
+  (and (buffer-live-p buf)
+       (buffer-local-value 'claude-repl--owning-workspace buf)))
+
+(defun claude-repl--foreign-owned-buffer-p (buf ws)
+  "Return non-nil if BUF is a Claude buffer owned by a workspace other than WS.
+A buffer is foreign-owned when its owner (see `claude-repl--buffer-owner')
+is a non-nil name unequal to WS.  Buffers with no owner (nil) — e.g. magit,
+file, or other non-Claude buffers that persp-mode swept into a perspective
+or window — are NOT foreign and stay eligible for teardown.  Guards against
+persp-mode drifting another workspace's live Claude panel into this persp,
+which would otherwise nuke that workspace's session along with WS's own."
+  (let ((owner (claude-repl--buffer-owner buf)))
+    (and owner (not (equal owner ws)))))
+
 ;;; Buffer naming and predicates
 
 ;; Panel buffers use the "claude-panel-" prefix to distinguish them from

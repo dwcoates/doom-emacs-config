@@ -640,8 +640,7 @@ timestamp (orthogonal to `:repl-state'):
 
 (defun claude-repl--refresh-vterm-after-finish (vterm-buf)
   "Refresh display and scroll position for VTERM-BUF if it is still live."
-  (let ((ws (and (buffer-live-p vterm-buf)
-                 (buffer-local-value 'claude-repl--owning-workspace vterm-buf))))
+  (let ((ws (claude-repl--buffer-owner vterm-buf)))
     (claude-repl--log ws "refresh-vterm-after-finish: buf=%s" (buffer-name vterm-buf))
     (if (buffer-live-p vterm-buf)
         (progn
