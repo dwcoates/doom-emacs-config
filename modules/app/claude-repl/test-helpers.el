@@ -327,8 +327,8 @@ advice's effect would be invisible)."
 sync-stub advice.  Tests that need to exercise the actual async wrapper
 behavior can rebind via `cl-letf'.")
 (advice-add 'claude-repl--workspace-merge-async :override
-            (lambda (ws repo-root)
-              (claude-repl--dispatch-merge-handler ws repo-root)))
+            (lambda (ws repo-root &optional onto-master)
+              (claude-repl--dispatch-merge-handler ws repo-root onto-master)))
 
 ;; Make `claude-repl--defer-to-main-thread' synchronous in tests.  In
 ;; production the helper schedules its thunk via `run-at-time' so the work

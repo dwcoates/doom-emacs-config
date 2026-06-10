@@ -1839,10 +1839,15 @@ async-dispatch-specific and stays in `claude-repl--workspace-merge-async'."
     (when conflict-rejection
       (claude-repl--drain-merge-queue))))
 
-(defun claude-repl--workspace-merge-async (ws repo-root)
+(defun claude-repl--workspace-merge-async (ws repo-root &optional onto-master)
   "Run a workspace merge asynchronously.  Single unified entry for both
 the interactive `SPC TAB M' path and the `/workspace-merge' skill
 dispatch — there is no behavioral difference between the two callers.
+
+ONTO-MASTER is forwarded to `claude-repl--dispatch-merge-handler': when
+non-nil it forces the `onto-master' handler (advance local trunk to
+`origin/master' for an already-merged PR) regardless of the repo's
+checked-in handler.
 
 Flow:
   1. `claude-repl--close-workspace ws \\='preserve-entry' — tear down the
@@ -1903,7 +1908,7 @@ do this."
                          ws (thread-name (current-thread)))
        (condition-case err
            (progn
-             (claude-repl--dispatch-merge-handler ws repo-root)
+             (claude-repl--dispatch-merge-handler ws repo-root onto-master)
              (claude-repl--log ws
                                "workspace-merge-async: ws=%s thread completed cleanly elapsed=%.3fs"
                                ws (- (float-time) t0-async)))
@@ -2651,27 +2656,33 @@ auto-resolving cherry-pick into the source workspace) — other repos
 can opt into a different strategy by checking in
 `.claude/emacs/workspace-merge.eld' (see merge-handlers.el).
 
-Reads two optional fields from CMD:
+Reads three optional fields from CMD:
   - `project_dir' — canonical filesystem path of the target workspace
     (preferred, since paths are unambiguous across the name/branch
     drift that bites the bare-name path; see
     `claude-repl--resolve-merge-workspace-name' for the order).
   - `workspace' — workspace name or branch (fallback when project_dir
     is absent or doesn't match a live workspace).
+  - `onto_master' — when non-nil, forces the `onto-master' merge handler
+    (advance local trunk to `origin/master' for an already-merged PR)
+    regardless of the repo's checked-in `.eld' handler.  Set by
+    `/workspace-merge --onto-master'.
 
 When neither resolves, logs an `unknown workspace' line (with both
 attempted inputs so the failure is debuggable) and returns — no error
 is raised, since a missing workspace is not actionable here."
   (let* ((ws (alist-get 'workspace cmd))
          (project-dir (alist-get 'project_dir cmd))
+         (onto-master (alist-get 'onto_master cmd))
          (resolved (claude-repl--resolve-merge-workspace-name ws project-dir)))
     (cond
      (resolved
       (let ((repo-root (claude-repl--ws-merge-routing-root resolved)))
         (claude-repl--log ws
-                          "workspace-commands-file merge: ws=%s project_dir=%s resolved=%s repo-root=%s"
-                          ws (or project-dir "nil") resolved (or repo-root "nil"))
-        (claude-repl--workspace-merge-async resolved repo-root)))
+                          "workspace-commands-file merge: ws=%s project_dir=%s onto_master=%s resolved=%s repo-root=%s"
+                          ws (or project-dir "nil") (if onto-master "t" "nil")
+                          resolved (or repo-root "nil"))
+        (claude-repl--workspace-merge-async resolved repo-root onto-master)))
      (t
       (let ((tail (and (stringp ws) (string-match-p "/" ws)
                        (claude-repl--bare-workspace-name ws))))

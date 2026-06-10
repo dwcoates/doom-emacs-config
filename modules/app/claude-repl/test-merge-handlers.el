@@ -740,6 +740,118 @@ it merges via the cherry-pick default like every other repo."
                                   'standard-value)))))
     (should-not (assoc "~/workspace/ChessCom/explanation-engine" default))))
 
+;;;; ---- Tests: onto-master handler + per-command routing ----
+
+(ert-deftest claude-repl-test-onto-master-handler-registered ()
+  "The `onto-master' handler symbol is wired into the registry."
+  (should (assq 'onto-master claude-repl--merge-handler-registry)))
+
+(ert-deftest claude-repl-test-dispatch-onto-master-flag-forces-handler ()
+  "A non-nil ONTO-MASTER arg forces the `onto-master' handler even when the
+repo's `.eld' prescribes a different handler (cherry-pick)."
+  (claude-repl-test--with-clean-registry
+    (let ((captured nil))
+      (claude-repl--register-merge-handler
+       'onto-master (lambda (ws _args) (setq captured ws)))
+      (claude-repl-test--with-temp-repo root
+        ;; .eld says cherry-pick, but the flag must win.
+        (claude-repl-test--seed-merge-config root "((handler . cherry-pick))")
+        (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                   (lambda (dir) dir)))
+          (claude-repl--dispatch-merge-handler "DWC/foo" root t)
+          (should (equal captured "DWC/foo")))))))
+
+(ert-deftest claude-repl-test-dispatch-without-onto-master-uses-eld ()
+  "Without the flag, dispatch still honors the repo's `.eld' handler."
+  (claude-repl-test--with-clean-registry
+    (let ((captured nil))
+      (claude-repl--register-merge-handler
+       'onto-master (lambda (_ws _args) (setq captured 'onto-master)))
+      (cl-letf (((symbol-function 'claude-repl--workspace-merge-into-source)
+                 (lambda (&rest _) (setq captured 'cherry-pick)))
+                ((symbol-function 'claude-repl--main-worktree-path)
+                 (lambda (dir) dir)))
+        (claude-repl-test--with-temp-repo root
+          (claude-repl--dispatch-merge-handler "DWC/foo" root nil)
+          (should (eq captured 'cherry-pick)))))))
+
+(ert-deftest claude-repl-test-onto-master-skips-when-no-source-dir ()
+  "Handler no-ops (no finalize) when neither :project-dir nor :source-ws-dir set."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (finalized nil))
+      (claude-repl--ws-put "foo" :repl-state nil)
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                 (lambda (_dir) (error "should not be called")))
+                ((symbol-function 'claude-repl--finalize-merged-workspace)
+                 (lambda (&rest _) (setq finalized t))))
+        (claude-repl--merge-handler-onto-master "foo")
+        (should-not finalized)))))
+
+(ert-deftest claude-repl-test-onto-master-errors-on-dirty-main ()
+  "A dirty main worktree signals `user-error' before any git advance."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (finalized nil))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) t))
+                ((symbol-function 'claude-repl--git-exit-code)
+                 (lambda (&rest _) (error "git should not run on dirty main")))
+                ((symbol-function 'claude-repl--finalize-merged-workspace)
+                 (lambda (&rest _) (setq finalized t))))
+        (should-error (claude-repl--merge-handler-onto-master "foo")
+                      :type 'user-error)
+        (should-not finalized)))))
+
+(ert-deftest claude-repl-test-onto-master-errors-on-divergence ()
+  "Local master diverged from origin/master signals `user-error' (ff-only,
+no reset over divergent commits) and never finalizes."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (finalized nil))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--git-exit-code)
+                 (lambda (&rest args)
+                   ;; fetch -> 0; is-ancestor -> 1 (diverged).
+                   (if (member "merge-base" args) 1 0)))
+                ((symbol-function 'claude-repl--finalize-merged-workspace)
+                 (lambda (&rest _) (setq finalized t))))
+        (should-error (claude-repl--merge-handler-onto-master "foo")
+                      :type 'user-error)
+        (should-not finalized)))))
+
+(ert-deftest claude-repl-test-onto-master-ff-and-finalizes ()
+  "Happy path: clean main, ancestor, ff succeeds in the master worktree, then
+finalize tears the workspace down on the (synchronous-in-test) main thread."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (git-calls nil)
+          (finalized nil))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--git-exit-code)
+                 (lambda (&rest args) (push args git-calls) 0))
+                ((symbol-function 'claude-repl--finalize-merged-workspace)
+                 (lambda (ws main-dir) (setq finalized (list ws main-dir)))))
+        (claude-repl--merge-handler-onto-master "foo")
+        (should (equal finalized '("foo" "/repo/main")))
+        ;; A fast-forward merge was issued in the master worktree.
+        (should (cl-some (lambda (args)
+                           (and (member "merge" args) (member "--ff-only" args)))
+                         git-calls))))))
+
 (provide 'test-merge-handlers)
 
 ;;; test-merge-handlers.el ends here
