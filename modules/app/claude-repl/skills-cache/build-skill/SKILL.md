@@ -225,6 +225,11 @@ In addition to the general conventions, every skill in this family follows these
   - For **leaf** skills only: **CRITICAL NOTE: This skill is a leaf RPC in the position-analysis decomposition.** It delegates no further position analysis, so it MUST NOT invoke other analyst (`analyze-position-*`) skills, and MUST NOT edit files. It MAY invoke non-analysis presentation/utility skills (e.g. annotate-pgn) to render its output. External resources (CEE, and Wikipedia/Web where applicable) are not skills and are permitted.
   - For **parent** skills: omit the leaf-RPC restriction and instead add a CRITICAL note naming the exact set of permitted child skills.
 
+7. **CEE failure policy is mandatory.** The cee-usage contract MUST propagate explicitly into every family member, because a dispatched subagent does not inherit the parent's loaded skills.
+  - **Step 0 MUST read `.claude/skills/cee-usage/SKILL.md`** in addition to `position-analysis-spec.md`, and MUST state that every `gns cee` call obeys cee-usage's **STOP triggers** and **Standard failure procedure**.
+  - **Leaf and child skills** (anything dispatched under the `Agent` tool) MUST follow cee-usage's **Subagent variant**: on a STOP trigger, ABORT and return the failure bundle as the entire response with `CEE_STOP_TRIGGER` as its first line, never retrying or silently recovering by re-issuing with different gamepoints or split parameters.
+  - **Parent skills** MUST, at every child-dispatch site, both (a) instruct the child of the STOP policy in the dispatch prompt and (b) detect a `CEE_STOP_TRIGGER` first line on any child response and re-propagate that bundle upward rather than synthesizing over it.
+
 ---
 
 ## Notes

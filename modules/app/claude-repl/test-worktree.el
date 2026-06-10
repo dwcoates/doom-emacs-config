@@ -1455,7 +1455,7 @@ repo name (e.g. \"explanation-engine\")."
           (received :unset))
       (unwind-protect
           (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
-                     (lambda (ws _root) (setq received ws))))
+                     (lambda (ws _root &optional _onto) (setq received ws))))
             (claude-repl--ws-put "explanation-engine" :project-dir dir)
             (claude-repl--handle-merge-command
              `((type . "merge")
@@ -1471,7 +1471,7 @@ don't block an otherwise-resolvable name."
   (claude-repl-test--with-clean-state
     (let ((received :unset))
       (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
-                 (lambda (ws _root) (setq received ws))))
+                 (lambda (ws _root &optional _onto) (setq received ws))))
         (claude-repl--ws-put "feature-one" :project-dir "/tmp/feature-one")
         (claude-repl--handle-merge-command
          '((type . "merge")
@@ -1568,7 +1568,7 @@ Mocks the dispatcher and verifies it receives the resolved ws + routing root."
             (claude-repl--ws-put "feature-one" :project-dir "/tmp/feature-one")
             (claude-repl--ws-put "feature-one" :source-ws-dir src-dir)
             (cl-letf (((symbol-function 'claude-repl--dispatch-merge-handler)
-                       (lambda (ws root) (setq captured (list ws root)))))
+                       (lambda (ws root &optional _onto) (setq captured (list ws root)))))
               (claude-repl--handle-merge-command
                '((type . "merge") (workspace . "feature-one")))
               (should (equal (car captured) "feature-one"))
@@ -1588,12 +1588,27 @@ UI, run the merge on a worker thread, and reopen on failure."
             (claude-repl--ws-put "feature-one" :project-dir "/tmp/feature-one")
             (claude-repl--ws-put "feature-one" :source-ws-dir src-dir)
             (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
-                       (lambda (ws root) (setq async-args (list ws root)))))
+                       (lambda (ws root &optional _onto) (setq async-args (list ws root)))))
               (claude-repl--handle-merge-command
                '((type . "merge") (workspace . "feature-one")))
               (should (equal (car async-args) "feature-one"))
               (should (equal (cadr async-args) src-dir))))
         (delete-directory src-dir t)))))
+
+(ert-deftest claude-repl-test-handle-merge-command-threads-onto-master ()
+  "A merge command's `onto_master' field is forwarded to
+`--workspace-merge-async' (and defaults to nil when the field is absent)."
+  (claude-repl-test--with-clean-state
+    (let ((onto :unset))
+      (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+                 (lambda (_ws _root &optional onto-master) (setq onto onto-master))))
+        (claude-repl--ws-put "feature-one" :project-dir "/tmp/feature-one")
+        (claude-repl--handle-merge-command
+         '((type . "merge") (workspace . "feature-one") (onto_master . t)))
+        (should (eq onto t))
+        (claude-repl--handle-merge-command
+         '((type . "merge") (workspace . "feature-one")))
+        (should (eq onto nil))))))
 
 ;;;; ---- Tests: resolve-merge-workspace-name ----
 
@@ -3710,10 +3725,27 @@ both end up here via the same dispatch."
               ((symbol-function 'make-thread)
                (lambda (thunk &optional _name) (funcall thunk) nil))
               ((symbol-function 'claude-repl--dispatch-merge-handler)
-               (lambda (ws repo-root)
-                 (setq dispatch-args (list ws repo-root)))))
+               (lambda (ws repo-root &optional onto-master)
+                 (setq dispatch-args (list ws repo-root onto-master)))))
       (claude-repl--workspace-merge-async "ws1" "/tmp/repo"))
-    (should (equal dispatch-args (list "ws1" "/tmp/repo")))))
+    ;; onto-master defaults to nil when not supplied.
+    (should (equal dispatch-args (list "ws1" "/tmp/repo" nil)))))
+
+(ert-deftest claude-repl-test-workspace-merge-async-threads-onto-master ()
+  "The optional ONTO-MASTER arg is forwarded verbatim to
+`--dispatch-merge-handler' so the `/workspace-merge --onto-master' intent
+reaches the handler-routing layer."
+  (let ((dispatch-args nil))
+    (cl-letf (((symbol-function 'claude-repl--workspace-merge-async)
+               claude-repl-test--orig-workspace-merge-async)
+              ((symbol-function 'claude-repl--close-workspace) #'ignore)
+              ((symbol-function 'make-thread)
+               (lambda (thunk &optional _name) (funcall thunk) nil))
+              ((symbol-function 'claude-repl--dispatch-merge-handler)
+               (lambda (ws repo-root &optional onto-master)
+                 (setq dispatch-args (list ws repo-root onto-master)))))
+      (claude-repl--workspace-merge-async "ws1" "/tmp/repo" t))
+    (should (equal dispatch-args (list "ws1" "/tmp/repo" t)))))
 
 (ert-deftest claude-repl-test-workspace-merge-async-on-error-schedules-reopen ()
   "When the dispatch handler signals (conflict or any error), the wrapper's

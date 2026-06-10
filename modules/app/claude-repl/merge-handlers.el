@@ -166,8 +166,16 @@ cannot wedge merge dispatch."
                   (t 'cherry-pick))))
     (cons symbol args)))
 
-(defun claude-repl--dispatch-merge-handler (target-ws repo-root)
+(defun claude-repl--dispatch-merge-handler (target-ws repo-root &optional onto-master)
   "Resolve and invoke the merge handler for TARGET-WS.
+
+When ONTO-MASTER is non-nil, the repo-routed resolution is BYPASSED and
+the `onto-master' handler is used unconditionally.  This is the
+`/workspace-merge --onto-master' path: the workspace's PR has already
+merged into `origin/master', so the per-invocation intent (advance the
+local trunk, do not cherry-pick) MUST win over the repo's checked-in
+`.eld' handler.
+
 REPO-ROOT is the directory used to locate the repo-local handler
 config; it is the workspace's `:source-ws-dir' when recorded, else
 its `:project-dir'.  Either is typically a sibling worktree path
@@ -197,16 +205,19 @@ could leave the registry short an entry."
   (let* ((resolved-root (or (and repo-root
                                  (claude-repl--main-worktree-path repo-root))
                             repo-root))
-         (descriptor (claude-repl--resolve-merge-handler resolved-root))
+         (descriptor (if onto-master
+                         (cons 'onto-master nil)
+                       (claude-repl--resolve-merge-handler resolved-root)))
          (symbol (car descriptor))
          (args (cdr descriptor))
          (entry (assq symbol claude-repl--merge-handler-registry))
          (fn (and entry (cdr entry))))
     (when (fboundp 'claude-repl--log)
       (claude-repl--log target-ws
-                        "dispatch-merge-handler: ws=%s repo-root=%s resolved-root=%s handler=%S args=%S"
+                        "dispatch-merge-handler: ws=%s repo-root=%s resolved-root=%s onto-master=%s handler=%S args=%S"
                         target-ws (or repo-root "nil")
-                        (or resolved-root "nil") symbol args))
+                        (or resolved-root "nil") (if onto-master "t" "nil")
+                        symbol args))
     (unless fn
       (user-error "No merge handler registered for symbol '%s'" symbol))
     (funcall fn target-ws args)))
@@ -335,21 +346,16 @@ Called on the main thread from the process sentinel.
                         "pr-poll-handle-result: ws=%s PR state=%s — still open, polling continues"
                         ws state)))))
 
-(defun claude-repl--pr-poll-on-merged (ws main-dir)
-  "PR for WS has merged: fetch origin, fast-forward master, close workspace.
-MAIN-DIR is the main worktree path; git work is skipped (with a log
-line) when it is nil.  The workspace state and UI teardown mirror the
-success path of `claude-repl--merge-handler-refresh-master-from-origin'.
+(defun claude-repl--finalize-merged-workspace (ws main-dir)
+  "Record terminal :merged state for WS and tear its workspace down.
+Shared teardown tail for every \"the trunk now carries this work\"
+path — `claude-repl--pr-poll-on-merged' (PR-poll handler) and
+`claude-repl--merge-handler-onto-master' (--onto-master handler) both
+call it after they have advanced the local trunk.  MAIN-DIR is the
+main worktree path (used for the magit refresh and the merge-target
+name); teardown still runs when it is nil.
 
-Runs on the main thread (called from the process sentinel)."
-  (when main-dir
-    (let ((ec (claude-repl--git-exit-code
-               main-dir "fetch" "origin"
-               claude-repl-master-branch-name)))
-      (claude-repl--log ws "pr-poll-on-merged: ws=%s fetch origin %s exit=%d"
-                        ws claude-repl-master-branch-name ec))
-    (claude-repl--maybe-fast-forward-master main-dir)
-    (claude-repl--checkout-master-in-worktree main-dir))
+Runs on the main thread (UI ops: close-workspace + magit refresh)."
   (claude-repl--ws-put ws :merging nil)
   (claude-repl--ws-put ws :merge-completed t)
   (claude-repl--ws-put ws :merge-completed-at (float-time))
@@ -368,6 +374,23 @@ Runs on the main thread (called from the process sentinel)."
      (claude-repl--close-workspace ws 'preserve-entry)
      (when main-dir
        (claude-repl--refresh-magit-status-for-dir main-dir ws)))))
+
+(defun claude-repl--pr-poll-on-merged (ws main-dir)
+  "PR for WS has merged: fetch origin, fast-forward master, close workspace.
+MAIN-DIR is the main worktree path; git work is skipped (with a log
+line) when it is nil.  The workspace state and UI teardown are recorded
+via `claude-repl--finalize-merged-workspace'.
+
+Runs on the main thread (called from the process sentinel)."
+  (when main-dir
+    (let ((ec (claude-repl--git-exit-code
+               main-dir "fetch" "origin"
+               claude-repl-master-branch-name)))
+      (claude-repl--log ws "pr-poll-on-merged: ws=%s fetch origin %s exit=%d"
+                        ws claude-repl-master-branch-name ec))
+    (claude-repl--maybe-fast-forward-master main-dir)
+    (claude-repl--checkout-master-in-worktree main-dir))
+  (claude-repl--finalize-merged-workspace ws main-dir))
 
 (defun claude-repl--pr-poll-on-failed (ws)
   "PR for WS closed without merging: mark merge-failed and revive workspace.
@@ -450,6 +473,104 @@ SIGNALS `user-error' on a dirty main worktree (step 2)."
 (claude-repl--register-merge-handler
  'refresh-master-from-origin
  #'claude-repl--merge-handler-refresh-master-from-origin)
+
+(defun claude-repl--merge-handler-onto-master (target-ws &optional _args)
+  "Advance local master to origin/master for an ALREADY-MERGED PR, then close.
+
+Handler for the `/workspace-merge --onto-master' contract: the
+workspace's PR has already merged into `origin/master', so there is
+nothing to cherry-pick or poll for — the only work is to bring the
+main worktree's local trunk up to the merged commit and tear the
+workspace down.  Selected per-invocation by the dispatcher's
+`onto-master' argument, NOT by the repo's `.eld' handler, so it
+overrides the checked-in cherry-pick prescription.
+
+Fast-forward only, so it can NEVER discard local-only trunk commits:
+  - SIGNALS `user-error' on a dirty main worktree (so the merge-async
+    failure path revives the workspace for the user), mirroring
+    `claude-repl--merge-handler-refresh-master-from-origin'.
+  - SIGNALS `user-error' when local master has diverged from
+    `origin/master' (not an ancestor), rather than resetting over the
+    divergent commits.
+  - SIGNALS `user-error' when the fetch or the fast-forward itself
+    fails.
+
+Git work runs synchronously on the merge worker thread (the same
+thread context the cherry-pick handler does its git work on); only
+the UI teardown is deferred to the main thread via
+`claude-repl--finalize-merged-workspace'.
+
+When the source dir cannot be resolved, logs and no-ops (mirroring the
+refresh handler's same edge case).  ARGS is unused."
+  (let* ((source-dir (or (claude-repl--ws-get target-ws :project-dir)
+                         (claude-repl--ws-get target-ws :source-ws-dir)))
+         (main-dir (and source-dir
+                        (claude-repl--main-worktree-path source-dir)))
+         (branch claude-repl-master-branch-name)
+         (origin-ref (concat "origin/" branch)))
+    (claude-repl--log target-ws
+                      "merge-handler-onto-master: ws=%s source-dir=%s main-dir=%s"
+                      target-ws (or source-dir "nil") (or main-dir "nil"))
+    (cond
+     ((not main-dir)
+      (claude-repl--log target-ws
+                        "merge-handler-onto-master: ws=%s no main-dir — skipping"
+                        target-ws))
+     ((claude-repl--worktree-dirty-p main-dir)
+      (claude-repl--log target-ws
+                        "merge-handler-onto-master: ws=%s main worktree %s is dirty — signaling error"
+                        target-ws main-dir)
+      (user-error
+       "Cannot advance master from origin: main worktree '%s' has uncommitted changes — stash or commit first"
+       main-dir))
+     (t
+      ;; Fetch the merged commit (synchronous git on the worker thread,
+      ;; same as the cherry-pick handler's git work).
+      (let ((fec (claude-repl--git-exit-code main-dir "fetch" "origin" branch)))
+        (claude-repl--log target-ws
+                          "merge-handler-onto-master: ws=%s fetch origin %s exit=%d"
+                          target-ws branch fec)
+        (unless (= fec 0)
+          (user-error "Cannot advance master: `git fetch origin %s' failed in %s (exit %d)"
+                      branch main-dir fec)))
+      ;; Refuse to advance when local master carries commits not on
+      ;; origin (divergence) — fast-forward only, no data loss.
+      (unless (= 0 (claude-repl--git-exit-code
+                    main-dir "merge-base" "--is-ancestor" branch origin-ref))
+        (user-error
+         "Cannot fast-forward %s to %s: local %s has commits not in %s (diverged) — resolve manually"
+         branch origin-ref branch origin-ref))
+      ;; Advance the trunk: fast-forward the worktree that holds master
+      ;; (so its working tree advances too), else move the ref directly.
+      (let ((master-wt (claude-repl--master-worktree-path main-dir)))
+        (if master-wt
+            (let ((mec (claude-repl--git-exit-code
+                        master-wt "merge" "--ff-only" origin-ref)))
+              (claude-repl--log target-ws
+                                "merge-handler-onto-master: ws=%s merge --ff-only %s in %s exit=%d"
+                                target-ws origin-ref master-wt mec)
+              (unless (= mec 0)
+                (user-error "Cannot fast-forward %s to %s in %s (exit %d)"
+                            branch origin-ref master-wt mec)))
+          (let ((uec (claude-repl--git-exit-code
+                      main-dir "update-ref"
+                      (concat "refs/heads/" branch)
+                      (concat "refs/remotes/origin/" branch))))
+            (claude-repl--log target-ws
+                              "merge-handler-onto-master: ws=%s update-ref %s -> %s exit=%d"
+                              target-ws branch origin-ref uec)
+            (unless (= uec 0)
+              (user-error "Cannot advance %s to %s via update-ref in %s (exit %d)"
+                          branch origin-ref main-dir uec)))))
+      ;; Trunk is now at the merged commit: tear the workspace down on
+      ;; the main thread (UI ops).
+      (claude-repl--defer-to-main-thread
+       (lambda ()
+         (claude-repl--finalize-merged-workspace target-ws main-dir)))))))
+
+(claude-repl--register-merge-handler
+ 'onto-master
+ #'claude-repl--merge-handler-onto-master)
 
 (provide 'merge-handlers)
 
