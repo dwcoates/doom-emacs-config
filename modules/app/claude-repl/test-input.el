@@ -3592,6 +3592,21 @@ and surfaces a user-visible error."
 
 ;;;; ---- Tests: Permission state clearing on send ----
 
+(ert-deftest claude-repl-test-note-permission-answered-flips-permission-to-thinking ()
+  "`claude-repl--note-permission-answered-by-send' flips :permission -> :thinking.
+This is the centralized helper every send path delegates to."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :permission)
+    (claude-repl--note-permission-answered-by-send "ws1")
+    (should (eq (claude-repl--ws-claude-state "ws1") :thinking))))
+
+(ert-deftest claude-repl-test-note-permission-answered-leaves-non-permission-unchanged ()
+  "`claude-repl--note-permission-answered-by-send' leaves a non-:permission state alone."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :idle)
+    (claude-repl--note-permission-answered-by-send "ws1")
+    (should (eq (claude-repl--ws-claude-state "ws1") :idle))))
+
 (ert-deftest claude-repl-test-do-send-transitions-permission-to-thinking ()
   "`claude-repl--do-send' transitions :permission -> :thinking after sending.
 Claude Code does not emit UserPromptSubmit for permission responses,

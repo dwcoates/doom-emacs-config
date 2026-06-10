@@ -689,6 +689,20 @@ a previously-armed retry would be stale or duplicative."
   (claude-repl--ws-set-claude-state ws :thinking)
   (claude-repl--backoff-retry-cancel-timer ws))
 
+(defun claude-repl--note-permission-answered-by-send (ws)
+  "Flip WS from `:permission' to `:thinking' after a send, if applicable.
+Claude Code emits no `UserPromptSubmit' hook when the user answers a
+permission prompt, so the Emacs-side keypress is the only available
+signal that Claude is now working on the permitted action.  Every send
+entry point (full send, bare RET, single char, slash RET, predefined
+prompts) routes through here so the `:permission' -> `:thinking'
+transition is centralized rather than copy-pasted.
+
+Only the `:permission' state is touched — any other state is left
+untouched so a normal send does not spuriously force `:thinking'."
+  (when (eq (claude-repl--ws-claude-state ws) :permission)
+    (claude-repl--mark-ws-thinking ws)))
+
 (defun claude-repl--increment-prefix-counter (ws)
   "Increment the metaprompt prefix counter for workspace WS."
   (let ((new-val (1+ (or (claude-repl--ws-get ws :prefix-counter) 0))))
@@ -728,8 +742,7 @@ permitted action — `:thinking' is the correct state."
     (claude-repl--ws-put ws :last-prompt-time (float-time))
     (claude-repl--pin-owning-workspace vterm-buf ws)
     (claude-repl--send-input-to-vterm vterm-buf input on-settle)
-    (when (eq (claude-repl--ws-claude-state ws) :permission)
-      (claude-repl--mark-ws-thinking ws))
+    (claude-repl--note-permission-answered-by-send ws)
     (claude-repl--run-send-posthooks ws raw)
     (claude-repl--kickoff-prompt-summary ws raw)))
 
@@ -786,11 +799,9 @@ Handles input preparation, sending, history, and persistence."
         (with-current-buffer vterm-buf
           (claude-repl--vterm-send-return-key-logged "send-empty-bare-ret"))
         ;; A bare RET answering a permission prompt (e.g. accepting the
-        ;; default option) is, like `claude-repl--do-send' and
-        ;; `claude-repl-send-char', the only signal that Claude is now
-        ;; working on the permitted action — transition to `:thinking'.
-        (when (eq (claude-repl--ws-claude-state ws) :permission)
-          (claude-repl--mark-ws-thinking ws)))
+        ;; default option) is, like every other send path, the only signal
+        ;; that Claude is now working on the permitted action.
+        (claude-repl--note-permission-answered-by-send ws))
        ((and (not raw-empty) vterm-buf (buffer-live-p vterm-buf))
         (let ((input (claude-repl--prepare-input ws raw force-metaprompt)))
           (claude-repl--do-send ws input raw on-settle)
@@ -898,8 +909,7 @@ Transitions `:permission' → `:thinking' after sending — see
           (with-current-buffer vterm-buf
             (vterm-send-string char)
             (vterm-send-return))
-          (when (eq (claude-repl--ws-claude-state ws) :permission)
-            (claude-repl--mark-ws-thinking ws)))
+          (claude-repl--note-permission-answered-by-send ws))
       (message "[claude-repl] no live Claude session — '%s' not sent" char)
       (claude-repl--log ws "send-char: no live vterm, skipping char=%s" char))))
 
@@ -1107,8 +1117,7 @@ green-❓ until Stop fires."
                 (with-current-buffer input-buf (erase-buffer)))
             (with-current-buffer vterm-buf
               (vterm-send-return)))
-          (when (eq (claude-repl--ws-claude-state ws) :permission)
-            (claude-repl--mark-ws-thinking ws)))
+          (claude-repl--note-permission-answered-by-send ws))
       (claude-repl--slash-no-vterm-error "return" nil))
     (claude-repl--run-send-posthooks ws cmd))
   (claude-repl--exit-slash-mode))
