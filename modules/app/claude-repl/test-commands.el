@@ -6630,6 +6630,33 @@ With ws-list (a b c d) and current=c, the result should be (a c b d)."
         (should-not switched)
         (should-not claude-repl--opened-recent-workspaces)))))
 
+(ert-deftest claude-repl-test-send-to-claude-transitions-permission-to-thinking ()
+  "`claude-repl--send-to-claude' flips :permission -> :thinking after dispatching.
+This predefined-prompt path goes straight to vterm and does NOT funnel
+through `claude-repl--do-send', so it routes the flip through the shared
+`claude-repl--note-permission-answered-by-send' helper itself."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-send-to-claude-perm*"
+      (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+      (claude-repl--ws-set-claude-state "ws1" :permission)
+      (cl-letf (((symbol-function 'claude-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) t))
+                ((symbol-function 'claude-repl--send-input-to-vterm) #'ignore))
+        (claude-repl--send-to-claude "do the thing"))
+      (should (eq (claude-repl--ws-claude-state "ws1") :thinking)))))
+
+(ert-deftest claude-repl-test-send-to-claude-leaves-non-permission-state-unchanged ()
+  "`claude-repl--send-to-claude' only transitions :permission, not other states."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-send-to-claude-idle*"
+      (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+      (claude-repl--ws-set-claude-state "ws1" :idle)
+      (cl-letf (((symbol-function 'claude-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda (&rest _) t))
+                ((symbol-function 'claude-repl--send-input-to-vterm) #'ignore))
+        (claude-repl--send-to-claude "do the thing"))
+      (should (eq (claude-repl--ws-claude-state "ws1") :idle)))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here
