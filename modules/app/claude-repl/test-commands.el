@@ -2167,6 +2167,14 @@ No interrupt was actually delivered, so the state should not change."
   (should (> (length claude-repl-create-or-update-pr-base-flags) 0))
   (should (cl-every #'stringp claude-repl-create-or-update-pr-base-flags)))
 
+(ert-deftest claude-repl-cmd-test-base-flags-default/includes-rebase ()
+  "Default base flags include --rebase."
+  (should (member "--rebase" claude-repl-create-or-update-pr-base-flags)))
+
+(ert-deftest claude-repl-cmd-test-base-flags-default/excludes-skip-tests ()
+  "Default base flags do not include --skip-tests."
+  (should-not (member "--skip-tests" claude-repl-create-or-update-pr-base-flags)))
+
 ;;;; ---- claude-repl-nuke-workspace ----
 
 (ert-deftest claude-repl-cmd-test-nuke-workspace/no-workspaces ()
