@@ -587,23 +587,32 @@ PTY but does not always produce a visible action in Ink-based TUIs.
 
 When `vterm--term' is nil — meaning `vterm-send-key' would silently
 no-op — logs a WARNING instead, making this common silent-failure mode
-visible."
+visible.
+
+Flips `:permission' -> `:thinking' when the return is actually
+delivered (a bare RET accepting a permission prompt's default option
+is, like every other send, the only available answer signal) — and
+deliberately NOT on the warning branch, where nothing reached Claude."
   (if (bound-and-true-p vterm--term)
       (progn
         (claude-repl--log (claude-repl--ws-current-name) "%s: return key delivered via libvterm" label)
-        (vterm-send-key "<return>"))
+        (vterm-send-key "<return>")
+        (claude-repl--note-permission-answered-for-vterm))
     (claude-repl--log (claude-repl--ws-current-name) "%s: WARNING — vterm--term is %s, return-key NOT delivered"
                       label (if (boundp 'vterm--term) "nil" "unbound"))))
 
 (defun claude-repl--send-input-direct (vterm-buf input &optional on-settle)
   "Send small INPUT string directly to VTERM-BUF and refresh.
 When ON-SETTLE is non-nil, call it after sending — the send is fully
-committed with no pending timers, so the callback fires immediately."
+committed with no pending timers, so the callback fires immediately.
+Flips `:permission' -> `:thinking' after sending — see
+`claude-repl--note-permission-answered-by-send'."
   (claude-repl--log-verbose (claude-repl--ws-current-name) "send-input-direct: len=%d" (length input))
   (with-current-buffer vterm-buf
     (vterm-send-string input)
     (vterm-send-return)
     (claude-repl--refresh-vterm))
+  (claude-repl--note-permission-answered-for-vterm vterm-buf)
   (when on-settle (funcall on-settle)))
 
 (defun claude-repl--run-deferred-action (buf action)
@@ -675,10 +684,16 @@ character stream (delivered through libvterm's keyboard handler via
 race — the Return byte may arrive at the PTY before libvterm has
 flushed all keyboard output, causing the submission to be lost.
 When ON-SETTLE is non-nil, it is called once the send is fully
-committed (after all deferred actions complete)."
+committed (after all deferred actions complete).
+
+This is the lowest-level funnel for every string send (full sends,
+predefined prompts, backoff retries, slash-mode pastes), so it owns
+the `:permission' -> `:thinking' flip for all of them — see
+`claude-repl--note-permission-answered-by-send'."
   (claude-repl--log-verbose (claude-repl--ws-current-name) "send-input-to-vterm len=%d"
                     (length input))
-  (claude-repl--send-input-bracketed vterm-buf input on-settle))
+  (claude-repl--send-input-bracketed vterm-buf input on-settle)
+  (claude-repl--note-permission-answered-for-vterm vterm-buf))
 
 (defun claude-repl--mark-ws-thinking (ws)
   "Mark workspace WS as thinking: set claude-state.
@@ -693,15 +708,41 @@ a previously-armed retry would be stale or duplicative."
   "Flip WS from `:permission' to `:thinking' after a send, if applicable.
 Claude Code emits no `UserPromptSubmit' hook when the user answers a
 permission prompt, so the Emacs-side keypress is the only available
-signal that Claude is now working on the permitted action.  Every send
-entry point (full send, bare RET, single char, slash RET, predefined
-prompts) routes through here so the `:permission' -> `:thinking'
-transition is centralized rather than copy-pasted.
+signal that Claude is now working on the permitted action.
+
+The flip lives in the LOWEST-LEVEL send primitives — the functions
+that actually write input to the Claude vterm — so every send path
+\(full send, bare RET, single char, slash/digit passthrough chars,
+slash RET, predefined prompts, programmatic sends) inherits it
+without each entry point having to remember to call it:
+
+- `claude-repl--send-input-to-vterm' (all string sends)
+- `claude-repl--slash-vterm-send' (passthrough char forwards)
+- `claude-repl--vterm-send-return-key-logged' (bare-RET key path)
+- `claude-repl-send-char' (single-char + return sends)
+- `claude-repl--slash-return' (raw return finalizing slash mode)
+
+Deliberately NOT flipped: navigation/edit forwards (arrow keys,
+backspace, C-v paste-without-submit) and interrupts (Ctrl-C, Escape)
+— those interact with the permission dialog without answering it.
 
 Only the `:permission' state is touched — any other state is left
 untouched so a normal send does not spuriously force `:thinking'."
   (when (eq (claude-repl--ws-claude-state ws) :permission)
     (claude-repl--mark-ws-thinking ws)))
+
+(defun claude-repl--note-permission-answered-for-vterm (&optional vterm-buf)
+  "Flip the workspace owning VTERM-BUF from `:permission' to `:thinking'.
+VTERM-BUF defaults to the current buffer (the lowest-level return
+senders run inside the vterm buffer).  Resolves the workspace from the
+buffer-local `claude-repl--owning-workspace' — pinned at buffer
+creation and re-pinned on every full send — falling back to the
+current workspace when the buffer carries no owner.  The lowest-level
+send primitives receive only a vterm buffer, not a workspace name, so
+this is their bridge to `claude-repl--note-permission-answered-by-send'."
+  (when-let ((ws (or (claude-repl--buffer-owner (or vterm-buf (current-buffer)))
+                     (claude-repl--ws-current-name))))
+    (claude-repl--note-permission-answered-by-send ws)))
 
 (defun claude-repl--increment-prefix-counter (ws)
   "Increment the metaprompt prefix counter for workspace WS."
@@ -731,18 +772,20 @@ through `on-prompt-submit-event').  The brief gap between RET and the
 red tab reflects that the hook is the source of truth for Claude's
 state.
 
-Exception: transitions `:permission' → `:thinking' after sending.
-Claude Code does not emit a `UserPromptSubmit' hook when the user
-answers a permission prompt, so the Emacs-side keypress is the only
-available signal.  After the user responds, Claude is working on the
-permitted action — `:thinking' is the correct state."
+Exception: a `:permission' → `:thinking' transition happens inside
+`claude-repl--send-input-to-vterm' (the lowest-level send primitive
+this function dispatches to).  Claude Code does not emit a
+`UserPromptSubmit' hook when the user answers a permission prompt, so
+the Emacs-side send is the only available signal — see
+`claude-repl--note-permission-answered-by-send'.  The owning-workspace
+pin below runs BEFORE the send so the primitive resolves the correct
+workspace from the vterm buffer."
   (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
     (claude-repl--log ws "do-send ws=%s len=%d" ws (length input))
     (claude-repl--increment-prefix-counter ws)
     (claude-repl--ws-put ws :last-prompt-time (float-time))
     (claude-repl--pin-owning-workspace vterm-buf ws)
     (claude-repl--send-input-to-vterm vterm-buf input on-settle)
-    (claude-repl--note-permission-answered-by-send ws)
     (claude-repl--run-send-posthooks ws raw)
     (claude-repl--kickoff-prompt-summary ws raw)))
 
@@ -796,12 +839,11 @@ Handles input preparation, sending, history, and persistence."
        ;; — there's no input to record.
        ((and raw-empty vterm-buf (buffer-live-p vterm-buf))
         (claude-repl--log ws "send: empty raw input -- forwarding bare RET to vterm via libvterm")
+        ;; The :permission -> :thinking flip for a bare RET answering a
+        ;; permission prompt happens inside the return-key primitive,
+        ;; and only when the return is actually delivered.
         (with-current-buffer vterm-buf
-          (claude-repl--vterm-send-return-key-logged "send-empty-bare-ret"))
-        ;; A bare RET answering a permission prompt (e.g. accepting the
-        ;; default option) is, like every other send path, the only signal
-        ;; that Claude is now working on the permitted action.
-        (claude-repl--note-permission-answered-by-send ws))
+          (claude-repl--vterm-send-return-key-logged "send-empty-bare-ret")))
        ((and (not raw-empty) vterm-buf (buffer-live-p vterm-buf))
         (let ((input (claude-repl--prepare-input ws raw force-metaprompt)))
           (claude-repl--do-send ws input raw on-settle)
@@ -900,7 +942,10 @@ can recall it via the history keys."
 (defun claude-repl-send-char (char)
   "Send a single character to Claude.
 Transitions `:permission' → `:thinking' after sending — see
-`claude-repl--do-send' docstring for rationale."
+`claude-repl--note-permission-answered-by-send' for rationale.  The
+raw `vterm-send-string' + `vterm-send-return' writes below make this
+function itself a lowest-level send primitive, so it carries its own
+flip."
   (let ((ws (claude-repl--ws-current-name)))
     (claude-repl--log ws "send-char: char=%s" char)
     (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
@@ -975,12 +1020,21 @@ mode must be surfaced to the user and logged with enough state to diagnose."
 Return t on success, nil if there is no live vterm.  Must run the send
 inside the vterm buffer via `with-current-buffer' — `vterm-send-string'
 reads `vterm--term' buffer-locally and silently no-ops otherwise.
-On failure, logs + surfaces a user-visible error."
+On failure, logs + surfaces a user-visible error.
+
+Flips `:permission' -> `:thinking' on every successful forward — see
+`claude-repl--note-permission-answered-by-send'.  This is the path a
+bare digit takes when answering a permission prompt (empty input
+buffer + digit enters passthrough mode), and Claude's permission
+dialog commits on that digit IMMEDIATELY, with no RET ever following
+— so `claude-repl--slash-return' never fires and the char forward
+itself is the only place the answer can be observed."
   (claude-repl--log-verbose (claude-repl--ws-current-name) "slash-vterm-send: str=%S" str)
   (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
       (progn
         (with-current-buffer vterm-buf
           (vterm-send-string str))
+        (claude-repl--note-permission-answered-for-vterm vterm-buf)
         t)
     (claude-repl--slash-no-vterm-error "send" str)
     nil))
@@ -1094,10 +1148,12 @@ the same posthooks as a buffered-and-sent `/clear'.  Posthooks run
 before `claude-repl--exit-slash-mode' clears the stack.
 
 Transitions `:permission' → `:thinking' when return is actually sent —
-see `claude-repl--do-send' docstring for rationale.  The slash-mode
-passthrough path is the dominant way users answer permission prompts
-(empty input buffer + digit + RET), so without this the tab stays
-green-❓ until Stop fires."
+see `claude-repl--note-permission-answered-by-send' for rationale.
+The raw `vterm-send-return' write below makes the no-pasted branch a
+lowest-level send in its own right, so the flip stays here (covering
+the case where `:permission' arrives only after the slash chars were
+already forwarded); the pasted branch additionally inherits the flip
+from `claude-repl--send-input-to-vterm', which is idempotent."
   (interactive)
   (claude-repl--log (claude-repl--ws-current-name) "slash-return: exiting slash mode")
   (claude-repl--slash-maybe-inject-source-ws)
