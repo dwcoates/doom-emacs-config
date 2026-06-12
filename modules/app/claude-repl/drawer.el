@@ -1575,7 +1575,20 @@ Intended to be called from the 1Hz poll in `status.el'."
   (when-let* ((buf (get-buffer claude-repl-drawer-buffer-name))
               ((get-buffer-window buf t)))
     (with-current-buffer buf
-      (claude-repl-drawer--render))))
+      (claude-repl-drawer--render)
+      ;; The poll renders via `with-current-buffer', which moves only the
+      ;; buffer's point.  An unfocused drawer window keeps its own
+      ;; `window-point', and the `erase-buffer' inside `--render'
+      ;; collapses that window-point to `point-min' — so without this the
+      ;; drawer cursor snaps to the top on every content-changing poll
+      ;; while the user is focused elsewhere.  Mirror the restored
+      ;; buffer-point onto every live drawer window (matching the
+      ;; `set-window-point' idiom in `--show--inner' and
+      ;; `--call-in-drawer').  The selected-window case is a no-op since
+      ;; its window-point already tracks the buffer's point.
+      (dolist (win (get-buffer-window-list buf nil t))
+        (when (window-live-p win)
+          (set-window-point win (point)))))))
 
 ;;;; Display + toggle -------------------------------------------------------
 
