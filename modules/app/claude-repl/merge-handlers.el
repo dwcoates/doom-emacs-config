@@ -474,6 +474,77 @@ SIGNALS `user-error' on a dirty main worktree (step 2)."
  'refresh-master-from-origin
  #'claude-repl--merge-handler-refresh-master-from-origin)
 
+;;; cee-agent reinstall-and-bounce (onto-master post-advance hook)
+
+(defconst claude-repl--cee-agent-dir-prefix "apps/cee-agent/"
+  "Repo-relative directory whose changes trigger the reinstall-and-bounce.
+A merge whose delta touches any path at or under this prefix runs
+`claude-repl--cee-agent-reinstall-script' after the `onto-master'
+handler advances the trunk.")
+
+(defconst claude-repl--cee-agent-reinstall-script
+  "apps/cee-agent/scripts/reinstall-and-bounce.sh"
+  "Repo-relative path to the cee-agent reinstall-and-bounce script.
+Run by `claude-repl--merge-handler-onto-master' after the trunk
+fast-forwards, but only when the merged delta touches
+`claude-repl--cee-agent-dir-prefix'.  May not yet exist on every
+trunk; absence surfaces as a non-zero exit code that is logged,
+never signaled.")
+
+(defun claude-repl--merge-delta-touches-dir-p (main-dir from-ref to-ref dir-prefix)
+  "Return non-nil if the FROM-REF..TO-REF delta in MAIN-DIR touches DIR-PREFIX.
+Lists changed paths via `git -C MAIN-DIR diff --name-only FROM-REF
+TO-REF' and returns non-nil when any path is at or under DIR-PREFIX
+\(a repo-relative directory, with or without a trailing slash).
+
+Read-only: queries refs, never mutates them.  Used by the
+`onto-master' handler to decide whether the just-merged work warrants
+the cee-agent reinstall-and-bounce, so it MUST be called BEFORE the
+fast-forward — afterwards local trunk equals TO-REF and the diff is
+empty."
+  (let* ((prefix (file-name-as-directory dir-prefix))
+         (out (claude-repl--git-string-quiet
+               "-C" main-dir "diff" "--name-only" from-ref to-ref)))
+    (and out
+         (not (string-empty-p out))
+         (cl-some (lambda (path) (string-prefix-p prefix path))
+                  (split-string out "\n" t)))))
+
+(defun claude-repl--cee-agent-reinstall-and-bounce-exit-code (worktree)
+  "Run the cee-agent reinstall-and-bounce script in WORKTREE; return its exit code.
+WORKTREE is the MAIN worktree the service is installed and run out of
+\(e.g. `~/workspace/ChessCom/explanation-engine'); the script path
+`claude-repl--cee-agent-reinstall-script' is resolved relative to it
+and run with WORKTREE as the working directory.
+
+This IS the external-boundary wrapper for the script (registered in
+`claude-repl--external-boundary-functions'): tests MUST mock it via
+`cl-letf' rather than execute the real script."
+  (let ((default-directory (file-name-as-directory worktree)))
+    (call-process ;; ALLOW-EXTERNAL-BOUNDARY
+     (expand-file-name claude-repl--cee-agent-reinstall-script worktree)
+     nil nil nil)))
+
+(defun claude-repl--onto-master-run-cee-agent-bounce (target-ws worktree)
+  "Run the cee-agent reinstall-and-bounce script for TARGET-WS in WORKTREE.
+Invoked by `claude-repl--merge-handler-onto-master' after the trunk
+fast-forwards, but only when the merged delta touched
+`claude-repl--cee-agent-dir-prefix'.  Returns the script's exit code.
+
+NON-FATAL by design: the trunk has already advanced, so a script
+failure must NOT signal `user-error' — that would drive the
+merge-async failure path to revive an already-merged workspace.  A
+non-zero exit is logged for human follow-up and teardown proceeds."
+  (let ((ec (claude-repl--cee-agent-reinstall-and-bounce-exit-code worktree)))
+    (claude-repl--log target-ws
+                      "merge-handler-onto-master: ws=%s cee-agent touched — reinstall-and-bounce in %s exit=%d"
+                      target-ws worktree ec)
+    (unless (= ec 0)
+      (claude-repl--log target-ws
+                        "merge-handler-onto-master: ws=%s WARNING reinstall-and-bounce FAILED (exit=%d) — trunk already advanced, NOT reverting"
+                        target-ws ec))
+    ec))
+
 (defun claude-repl--merge-handler-onto-master (target-ws &optional _args)
   "Advance local master to origin/master for an ALREADY-MERGED PR, then close.
 
@@ -540,9 +611,15 @@ refresh handler's same edge case).  ARGS is unused."
         (user-error
          "Cannot fast-forward %s to %s: local %s has commits not in %s (diverged) — resolve manually"
          branch origin-ref branch origin-ref))
-      ;; Advance the trunk: fast-forward the worktree that holds master
-      ;; (so its working tree advances too), else move the ref directly.
-      (let ((master-wt (claude-repl--master-worktree-path main-dir)))
+      ;; Whether the merged work touches `apps/cee-agent' MUST be sampled
+      ;; BEFORE the fast-forward — afterwards local trunk equals
+      ;; `origin-ref' and the `branch..origin-ref' diff is empty.
+      (let ((cee-touched
+             (claude-repl--merge-delta-touches-dir-p
+              main-dir branch origin-ref claude-repl--cee-agent-dir-prefix))
+            (master-wt (claude-repl--master-worktree-path main-dir)))
+        ;; Advance the trunk: fast-forward the worktree that holds master
+        ;; (so its working tree advances too), else move the ref directly.
         (if master-wt
             (let ((mec (claude-repl--git-exit-code
                         master-wt "merge" "--ff-only" origin-ref)))
@@ -561,12 +638,20 @@ refresh handler's same edge case).  ARGS is unused."
                               target-ws branch origin-ref uec)
             (unless (= uec 0)
               (user-error "Cannot advance %s to %s via update-ref in %s (exit %d)"
-                          branch origin-ref main-dir uec)))))
-      ;; Trunk is now at the merged commit: tear the workspace down on
-      ;; the main thread (UI ops).
-      (claude-repl--defer-to-main-thread
-       (lambda ()
-         (claude-repl--finalize-merged-workspace target-ws main-dir)))))))
+                          branch origin-ref main-dir uec))))
+        ;; Trunk now carries the merged work: if it touched cee-agent,
+        ;; reinstall and bounce the service.  Always run from the MAIN
+        ;; worktree (the original clone, e.g.
+        ;; `~/workspace/ChessCom/explanation-engine'), never the merged
+        ;; workspace's sibling worktree — the service is installed and
+        ;; run out of the main clone.
+        (when cee-touched
+          (claude-repl--onto-master-run-cee-agent-bounce
+           target-ws main-dir))
+        ;; Tear the workspace down on the main thread (UI ops).
+        (claude-repl--defer-to-main-thread
+         (lambda ()
+           (claude-repl--finalize-merged-workspace target-ws main-dir))))))))
 
 (claude-repl--register-merge-handler
  'onto-master

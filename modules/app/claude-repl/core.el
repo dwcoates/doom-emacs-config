@@ -580,7 +580,8 @@ introducing a sibling raw `make-process' site."
     claude-repl--early-git-exit-code
     claude-repl--docker-exit-code
     claude-repl--make-process-git
-    claude-repl--async-gh)
+    claude-repl--async-gh
+    claude-repl--cee-agent-reinstall-and-bounce-exit-code)
   "Symbols of every function that wraps an external process or external-state mutation.
 Each MUST be mocked by tests that reach it via production code.  The
 test harness installs guards so unmocked invocations fail loudly.
