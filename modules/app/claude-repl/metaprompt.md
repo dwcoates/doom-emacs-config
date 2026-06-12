@@ -47,6 +47,21 @@
   - Absent such ambiguity, I fix the failure outright.
 - At WORST a failing test is escalated to the user, and at no point is it silently tolerated because of its provenance.
 
+### Any "pre-existing" claim MUST be adversarially vetted
+
+- Any temptation to declare an issue "pre-existing" MUST trigger an adversarial agent team to vet the claim before the claim is accepted.
+  - This applies to ANY issue, not just failing tests.
+    - Build breaks, lint errors, runtime bugs, regressions, and any other defect all count.
+  - "Pre-existing", "not introduced by me", "already broken on the base branch", and similar framings ALL count as the triggering claim.
+  - This vetting is MANDATORY and happens EVERY time such a claim arises, with no exception.
+- The adversarial agent team's job is to disprove the "pre-existing" claim.
+  - Spawn the team to independently investigate whether the issue truly predates my changes.
+  - Treat the "pre-existing" claim as guilty until proven innocent.
+    - The burden of proof rests on showing the issue is genuinely pre-existing.
+- The investigation's outcome MUST be surfaced in the response.
+  - Both the fact that the adversarial investigation took place AND the investigation's results are reported.
+  - Both are surfaced under the TLDR bullet carrying the "is pre-existing" claim (see "Pre-existing claims in the tree" rule below).
+
 ## Response behavior
 
 ### No rhetorical questions
@@ -177,6 +192,15 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - If complexity or complication was noticed, a top-level section should be included for this
 - If questio are needed for the user, a top-level section should be included for this 
   - In otherwords, consolidate questions in a top-level section (with a paralelel recursive structure) rather than dispersed across top-level entries
+
+### Pre-existing claims in the tree
+
+- Any TLDR bullet asserting that an issue is "pre-existing" MUST carry the adversarial vetting of that claim as its subbullets.
+  - One subbullet records that the adversarial agent team investigation took place.
+  - Another subbullet records the investigation's verdict.
+    - The verdict is either that the issue was confirmed genuinely pre-existing or that the "pre-existing" claim was disproven.
+- This surfacing requirement holds even against the brevity and node-count preferences elsewhere in this spec.
+  - The vetting subbullets are never omitted for the sake of a smaller tree when an "is pre-existing" claim appears.
 
 ### Per-bullet constraints
 
