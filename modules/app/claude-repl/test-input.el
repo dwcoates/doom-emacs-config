@@ -1905,15 +1905,19 @@ should still forward RET so the keystroke reaches Claude."
 (ert-deftest claude-repl-test-send-bare-ret-transitions-permission-to-thinking ()
   "`claude-repl--send' transitions :permission -> :thinking on a bare-RET send.
 Answering a permission prompt by pressing RET on an empty input buffer is the
-only signal that Claude is now working on the permitted action."
+only signal that Claude is now working on the permitted action.  The flip
+lives inside `claude-repl--vterm-send-return-key-logged' (the lowest-level
+return primitive), so the real primitive must run — `vterm--term' is set
+buffer-locally so the delivered branch is taken."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-temp-buffer " *test-send-bare-ret-perm-input*"
       (claude-repl--ws-put "ws1" :input-buffer (current-buffer))
       (claude-repl-test--with-temp-buffer "*claude-panel-bare-ret-perm-vterm*"
         (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
         (claude-repl--ws-set-claude-state "ws1" :permission)
+        (setq-local vterm--term t)
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                  ((symbol-function 'claude-repl--vterm-send-return-key-logged) #'ignore))
+                  ((symbol-function 'vterm-send-key) #'ignore))
           (claude-repl--send nil "ws1")
           (should (eq (claude-repl--ws-state "ws1") :thinking)))))))
 
@@ -1927,8 +1931,9 @@ other states (e.g. :idle) must be left untouched on a bare RET."
       (claude-repl-test--with-temp-buffer "*claude-panel-bare-ret-idle-vterm*"
         (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
         (claude-repl--ws-set-claude-state "ws1" :idle)
+        (setq-local vterm--term t)
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                  ((symbol-function 'claude-repl--vterm-send-return-key-logged) #'ignore))
+                  ((symbol-function 'vterm-send-key) #'ignore))
           (claude-repl--send nil "ws1")
           (should (eq (claude-repl--ws-state "ws1") :idle)))))))
 
@@ -3609,14 +3614,17 @@ This is the centralized helper every send path delegates to."
 
 (ert-deftest claude-repl-test-do-send-transitions-permission-to-thinking ()
   "`claude-repl--do-send' transitions :permission -> :thinking after sending.
-Claude Code does not emit UserPromptSubmit for permission responses,
-so do-send is the only place to clear the state.  Claude is working
-on the permitted action, so :thinking is correct."
+Claude Code does not emit UserPromptSubmit for permission responses.
+The flip lives inside `claude-repl--send-input-to-vterm' (the
+lowest-level string-send primitive), so the real primitive must run —
+only the bracketed transport beneath it is stubbed.  do-send pins the
+owning workspace on the vterm buffer before sending, which is what the
+primitive resolves the workspace from."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-temp-buffer "*claude-panel-do-send-perm*"
       (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (claude-repl--ws-set-claude-state "ws1" :permission)
-      (cl-letf (((symbol-function 'claude-repl--send-input-to-vterm) #'ignore)
+      (cl-letf (((symbol-function 'claude-repl--send-input-bracketed) #'ignore)
                 ((symbol-function 'claude-repl--run-send-posthooks) #'ignore))
         (claude-repl--do-send "ws1" "y" "y"))
       (should (eq (claude-repl--ws-claude-state "ws1") :thinking)))))
@@ -3627,7 +3635,7 @@ on the permitted action, so :thinking is correct."
     (claude-repl-test--with-temp-buffer "*claude-panel-do-send-think2*"
       (claude-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (claude-repl--ws-set-claude-state "ws1" :thinking)
-      (cl-letf (((symbol-function 'claude-repl--send-input-to-vterm) #'ignore)
+      (cl-letf (((symbol-function 'claude-repl--send-input-bracketed) #'ignore)
                 ((symbol-function 'claude-repl--run-send-posthooks) #'ignore))
         (claude-repl--do-send "ws1" "input" "raw"))
       (should (eq (claude-repl--ws-claude-state "ws1") :thinking)))))
@@ -3722,6 +3730,130 @@ The return was never sent, so the permission prompt is still active."
         (with-current-buffer " *test-slash-return-no-vterm*"
           (claude-repl--slash-return)))
       (should (eq (claude-repl--ws-claude-state "test-ws") :permission)))))
+
+;;;; ---- Tests: lowest-level send primitives own the :permission flip ----
+
+(ert-deftest claude-repl-test-slash-vterm-send-flips-permission-to-thinking ()
+  "`claude-repl--slash-vterm-send' flips :permission -> :thinking on a forward.
+A bare digit answering a permission prompt enters passthrough mode and is
+committed by Claude's dialog IMMEDIATELY — no RET ever follows — so the
+char forward itself is the only observable answer signal."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-slash-send-perm*"
+      (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+      (claude-repl--ws-set-claude-state "test-ws" :permission)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'vterm-send-string) #'ignore))
+        (should (claude-repl--slash-vterm-send "1")))
+      (should (eq (claude-repl--ws-claude-state "test-ws") :thinking)))))
+
+(ert-deftest claude-repl-test-slash-vterm-send-leaves-non-permission-unchanged ()
+  "`claude-repl--slash-vterm-send' only transitions :permission, not other states."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-slash-send-done*"
+      (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+      (claude-repl--ws-set-claude-state "test-ws" :done)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'vterm-send-string) #'ignore))
+        (should (claude-repl--slash-vterm-send "/")))
+      (should (eq (claude-repl--ws-claude-state "test-ws") :done)))))
+
+(ert-deftest claude-repl-test-slash-vterm-send-no-vterm-keeps-permission ()
+  "`claude-repl--slash-vterm-send' does not transition when no live vterm exists.
+The char was never forwarded, so the permission prompt is still active."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :vterm-buffer nil)
+    (claude-repl--ws-set-claude-state "test-ws" :permission)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (should-not (claude-repl--slash-vterm-send "1")))
+    (should (eq (claude-repl--ws-claude-state "test-ws") :permission))))
+
+(ert-deftest claude-repl-test-passthrough-digit-flips-permission-to-thinking ()
+  "Typing a digit into an empty input buffer flips :permission -> :thinking.
+End-to-end over the dominant permission-answer path:
+`claude-repl--passthrough-start' -> slash mode -> char forward."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-passthrough-digit-input*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-passthrough-digit-vterm*"
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (claude-repl--ws-set-claude-state "test-ws" :permission)
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'vterm-send-string) #'ignore))
+          (with-current-buffer " *test-passthrough-digit-input*"
+            (claude-repl--passthrough-start "1")))
+        (should (eq (claude-repl--ws-claude-state "test-ws") :thinking))))))
+
+(ert-deftest claude-repl-test-send-input-to-vterm-flips-permission-to-thinking ()
+  "`claude-repl--send-input-to-vterm' flips :permission -> :thinking after dispatch."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-sitv-perm*"
+      (setq-local claude-repl--owning-workspace "wsA")
+      (claude-repl--ws-set-claude-state "wsA" :permission)
+      (cl-letf (((symbol-function 'claude-repl--send-input-bracketed) #'ignore))
+        (claude-repl--send-input-to-vterm (current-buffer) "hello"))
+      (should (eq (claude-repl--ws-claude-state "wsA") :thinking)))))
+
+(ert-deftest claude-repl-test-send-input-to-vterm-resolves-ws-from-buffer-owner ()
+  "`claude-repl--send-input-to-vterm' flips the OWNER workspace, not the current one.
+A programmatic send can target a vterm whose workspace is not the
+selected one (deferred drains, backoff retries); the owner pin on the
+buffer is the source of truth."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-sitv-owner*"
+      (setq-local claude-repl--owning-workspace "wsA")
+      (claude-repl--ws-set-claude-state "wsA" :permission)
+      (claude-repl--ws-set-claude-state "wsB" :permission)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wsB"))
+                ((symbol-function 'claude-repl--send-input-bracketed) #'ignore))
+        (claude-repl--send-input-to-vterm (current-buffer) "hello"))
+      (should (eq (claude-repl--ws-claude-state "wsA") :thinking))
+      (should (eq (claude-repl--ws-claude-state "wsB") :permission)))))
+
+(ert-deftest claude-repl-test-send-input-direct-flips-permission-to-thinking ()
+  "`claude-repl--send-input-direct' flips :permission -> :thinking after sending."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-sid-perm*"
+      (setq-local claude-repl--owning-workspace "wsA")
+      (claude-repl--ws-set-claude-state "wsA" :permission)
+      (cl-letf (((symbol-function 'vterm-send-string) #'ignore)
+                ((symbol-function 'vterm-send-return) #'ignore)
+                ((symbol-function 'claude-repl--refresh-vterm) #'ignore))
+        (claude-repl--send-input-direct (current-buffer) "y"))
+      (should (eq (claude-repl--ws-claude-state "wsA") :thinking)))))
+
+(ert-deftest claude-repl-test-return-key-logged-flips-permission-when-delivered ()
+  "`claude-repl--vterm-send-return-key-logged' flips :permission when delivered.
+With `vterm--term' set, the return reaches libvterm and the flip fires."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-rkl-perm*"
+      (setq-local claude-repl--owning-workspace "wsA")
+      (setq-local vterm--term t)
+      (claude-repl--ws-set-claude-state "wsA" :permission)
+      (cl-letf (((symbol-function 'vterm-send-key) #'ignore))
+        (claude-repl--vterm-send-return-key-logged "test-label"))
+      (should (eq (claude-repl--ws-claude-state "wsA") :thinking)))))
+
+(ert-deftest claude-repl-test-return-key-logged-no-flip-when-term-nil ()
+  "`claude-repl--vterm-send-return-key-logged' does NOT flip when vterm--term is nil.
+The return was never delivered (warning branch), so the permission
+prompt is still active and :permission must persist."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-rkl-nil*"
+      (setq-local claude-repl--owning-workspace "wsA")
+      (claude-repl--ws-set-claude-state "wsA" :permission)
+      (claude-repl--vterm-send-return-key-logged "test-label")
+      (should (eq (claude-repl--ws-claude-state "wsA") :permission)))))
+
+(ert-deftest claude-repl-test-note-permission-answered-for-vterm-falls-back-to-current-ws ()
+  "`claude-repl--note-permission-answered-for-vterm' falls back to the current ws.
+When the buffer carries no owner pin, the current workspace is flipped."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-npafv-fallback*"
+      (claude-repl--ws-set-claude-state "ws1" :permission)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+        (claude-repl--note-permission-answered-for-vterm (current-buffer)))
+      (should (eq (claude-repl--ws-claude-state "ws1") :thinking)))))
 
 (provide 'test-input)
 

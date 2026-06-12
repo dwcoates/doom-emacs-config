@@ -113,18 +113,17 @@ First %s is the change-spec, second %s is the prompt."
 
 (defun claude-repl--send-to-claude (text)
   "Send TEXT to Claude, starting it if needed.
-Routes the `:permission' -> `:thinking' flip through
-`claude-repl--note-permission-answered-by-send' so predefined-prompt
-sends (e.g. `claude-repl-create-or-update-pr') answer permission
-prompts the same way every other send path does — this path dispatches
-straight to vterm and does NOT funnel through `claude-repl--do-send'."
+The `:permission' -> `:thinking' flip is inherited from
+`claude-repl--send-input-to-vterm' (the lowest-level send primitive),
+so predefined-prompt sends (e.g. `claude-repl-create-or-update-pr')
+answer permission prompts the same way every other send path does
+even though this path does NOT funnel through `claude-repl--do-send'."
   (let ((ws (claude-repl--ws-current-name)))
     (claude-repl--log ws "send-to-claude len=%d" (length text))
     (unless (claude-repl--claude-running-p ws)
       (claude-repl--initialize-claude ws))
     (claude-repl--send-input-to-vterm
-     (claude-repl--ws-get ws :vterm-buffer) text)
-    (claude-repl--note-permission-answered-by-send ws)))
+     (claude-repl--ws-get ws :vterm-buffer) text)))
 
 ;;;; File reference helpers
 
