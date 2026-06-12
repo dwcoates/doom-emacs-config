@@ -1081,6 +1081,35 @@ the file means a stale variable that won't reflect file edits."
                         (buffer-string))))
     (should (equal claude-repl-command-prefix file-content))))
 
+(ert-deftest claude-repl-test-metaprompt-preexisting-claim-requires-adversarial-team ()
+  "The metaprompt must mandate an adversarial agent team to vet any \"pre-existing\" claim.
+Any temptation to declare an issue pre-existing has to trigger an
+independent adversarial investigation before the claim is accepted."
+  (should (string-match-p "adversarial agent team to vet"
+                          claude-repl-command-prefix))
+  (should (string-match-p "disprove the \"pre-existing\" claim"
+                          claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-metaprompt-preexisting-vetting-is-mandatory ()
+  "The metaprompt must make the pre-existing vetting unconditional.
+The adversarial investigation happens every time such a claim arises,
+not just for failing tests."
+  (should (string-match-p "MANDATORY and happens EVERY time"
+                          claude-repl-command-prefix))
+  (should (string-match-p "ANY issue, not just failing tests"
+                          claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-metaprompt-preexisting-claim-surfaced-in-tldr ()
+  "The metaprompt must require surfacing the vetting under the TLDR pre-existing bullet.
+Both the fact that the investigation took place and its verdict must
+appear as subbullets of the \"is pre-existing\" claim."
+  (should (string-match-p "Pre-existing claims in the tree"
+                          claude-repl-command-prefix))
+  (should (string-match-p "adversarial agent team investigation took place"
+                          claude-repl-command-prefix))
+  (should (string-match-p "records the investigation's verdict"
+                          claude-repl-command-prefix)))
+
 ;;;; ---- Tests: should-prepend-metaprompt-p ----
 
 (ert-deftest claude-repl-test-should-prepend-metaprompt-p-all-conditions ()
