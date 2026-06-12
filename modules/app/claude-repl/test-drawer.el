@@ -2425,6 +2425,54 @@ each one.  Pins the leak fix."
       (when buf (kill-buffer buf)))
     (should-not (claude-repl-drawer--refresh-if-visible))))
 
+(ert-deftest claude-repl-drawer-test-refresh-if-visible-restores-unfocused-window-point ()
+  "On a content-changing poll, `--refresh-if-visible' mirrors the restored
+buffer-point onto an unfocused drawer window so its cursor does not snap
+back to `point-min'.  Reproduces the reported reset that only manifested
+while the drawer was not the selected window: the poll renders via
+`with-current-buffer', so the `erase-buffer' in `--render' collapses the
+unfocused window's `window-point' to the top unless it is re-synced."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "alpha" :project-dir "/tmp/alpha")
+    (claude-repl-drawer-test--register "beta"  :project-dir "/tmp/beta")
+    (cl-letf (((symbol-function 'claude-repl--ws-name-for-dir) (lambda (_) nil))
+              ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) "")))
+      (let ((drawer-buf (get-buffer-create claude-repl-drawer-buffer-name))
+            (other-buf  (get-buffer-create "*refresh-other*"))
+            (drawer-win nil))
+        (unwind-protect
+            (progn
+              (with-current-buffer drawer-buf (claude-repl-drawer-mode))
+              ;; Drawer lives in a sibling window; selection stays on the
+              ;; other window so the drawer window is genuinely unfocused.
+              (set-window-buffer (selected-window) other-buf)
+              (setq drawer-win (split-window))
+              (set-window-buffer drawer-win drawer-buf)
+              ;; First render, then park both the buffer-point and the
+              ;; unfocused window's window-point on the second entry.
+              (with-current-buffer drawer-buf
+                (claude-repl-drawer--render)
+                (should (claude-repl-drawer--goto-workspace-line "beta"))
+                (set-window-point drawer-win (point)))
+              ;; Mutate state so the next render actually rewrites the
+              ;; buffer (signature + content both differ).
+              (claude-repl-drawer-test--register "beta"
+                                                 :project-dir "/tmp/beta"
+                                                 :claude-state :thinking)
+              ;; Sanity: the drawer window is not the selected one.
+              (should-not (eq (selected-window) drawer-win))
+              (claude-repl-drawer--refresh-if-visible)
+              ;; The unfocused window's cursor must still sit on beta
+              ;; rather than snapping to the top of the buffer.
+              (should (equal (get-text-property (window-point drawer-win)
+                                                'claude-repl-drawer-workspace
+                                                drawer-buf)
+                             "beta")))
+          (when (and drawer-win (window-live-p drawer-win))
+            (ignore-errors (delete-window drawer-win)))
+          (when (buffer-live-p drawer-buf) (kill-buffer drawer-buf))
+          (when (buffer-live-p other-buf) (kill-buffer other-buf)))))))
+
 ;;;; ---- Window width ----
 
 (ert-deftest claude-repl-drawer-test-width-fraction-default-is-0.20 ()
