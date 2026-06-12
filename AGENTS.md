@@ -338,6 +338,10 @@ Example (this is the canonical reference): the one-shot creators `claude-repl-cr
 
 The comment must explain *why*, not *what*. "Calls foo before bar" describes the code; "foo must run first because bar reads state foo writes via hook X" is the comment. If you can delete the comment without losing information a reader needs, it shouldn't have been written; if a reader would have to git-blame or grep to understand the line, the comment is required.
 
+## Sandbox-portable paths in `settings.json`
+
+When adding or updating hooks/permissions that reference a home-relative path, use `~` rather than a hardcoded host home like `/Users/dodgecoates`, so the path resolves in both the host and the `DOOM_SANDBOX` container (whose `$HOME` is `/home/claude`).
+
 ## Git
 
 When asked to make changes, commit your work when done. Commit freely and often. **Never** rebase, pull, merge, push, or run any other mutating git commands without explicit instruction from the user.
