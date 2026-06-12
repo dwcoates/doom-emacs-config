@@ -843,6 +843,9 @@ finalize tears the workspace down on the (synchronous-in-test) main thread."
                  (lambda (_dir) nil))
                 ((symbol-function 'claude-repl--git-exit-code)
                  (lambda (&rest args) (push args git-calls) 0))
+                ;; No cee-agent paths in the merged delta.
+                ((symbol-function 'claude-repl--git-string-quiet)
+                 (lambda (&rest _) ""))
                 ((symbol-function 'claude-repl--finalize-merged-workspace)
                  (lambda (ws main-dir) (setq finalized (list ws main-dir)))))
         (claude-repl--merge-handler-onto-master "foo")
@@ -851,6 +854,152 @@ finalize tears the workspace down on the (synchronous-in-test) main thread."
         (should (cl-some (lambda (args)
                            (and (member "merge" args) (member "--ff-only" args)))
                          git-calls))))))
+
+;;;; ---- Tests: merge-delta-touches-dir-p ----
+
+(ert-deftest claude-repl-test-merge-delta-touches-dir-p-true-when-under-prefix ()
+  "Returns non-nil when a changed path is under the directory prefix."
+  (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+             (lambda (&rest _)
+               "README.md\napps/cee-agent/main.go\npkg/util.go")))
+    (should (claude-repl--merge-delta-touches-dir-p
+             "/repo/main" "master" "origin/master" "apps/cee-agent/"))))
+
+(ert-deftest claude-repl-test-merge-delta-touches-dir-p-accepts-prefix-sans-slash ()
+  "A DIR-PREFIX without a trailing slash still matches paths under it."
+  (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+             (lambda (&rest _) "apps/cee-agent/scripts/run.sh")))
+    (should (claude-repl--merge-delta-touches-dir-p
+             "/repo/main" "master" "origin/master" "apps/cee-agent"))))
+
+(ert-deftest claude-repl-test-merge-delta-touches-dir-p-false-when-only-sibling ()
+  "A path that shares a name prefix but not the directory does not match."
+  (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+             (lambda (&rest _) "apps/cee-agent-extra/main.go\nREADME.md")))
+    (should-not (claude-repl--merge-delta-touches-dir-p
+                 "/repo/main" "master" "origin/master" "apps/cee-agent/"))))
+
+(ert-deftest claude-repl-test-merge-delta-touches-dir-p-false-when-empty ()
+  "An empty diff (no changed paths) returns nil."
+  (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+             (lambda (&rest _) "")))
+    (should-not (claude-repl--merge-delta-touches-dir-p
+                 "/repo/main" "master" "origin/master" "apps/cee-agent/"))))
+
+(ert-deftest claude-repl-test-merge-delta-touches-dir-p-samples-given-refs ()
+  "The diff is taken between the supplied FROM-REF and TO-REF in MAIN-DIR."
+  (let ((seen nil))
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args) (setq seen args) "")))
+      (claude-repl--merge-delta-touches-dir-p
+       "/repo/main" "master" "origin/master" "apps/cee-agent/")
+      (should (equal seen
+                     '("-C" "/repo/main" "diff" "--name-only"
+                       "master" "origin/master"))))))
+
+;;;; ---- Tests: onto-master cee-agent reinstall-and-bounce ----
+
+(ert-deftest claude-repl-test-onto-master-bounces-cee-agent-when-touched ()
+  "A merged delta touching apps/cee-agent runs reinstall-and-bounce in the
+MAIN worktree after the fast-forward, then finalizes."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (bounce-dir nil)
+          (finalized nil))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) "/repo/master-wt"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--git-exit-code)
+                 (lambda (&rest _) 0))
+                ((symbol-function 'claude-repl--git-string-quiet)
+                 (lambda (&rest _) "apps/cee-agent/main.go"))
+                ((symbol-function
+                  'claude-repl--cee-agent-reinstall-and-bounce-exit-code)
+                 (lambda (worktree) (setq bounce-dir worktree) 0))
+                ((symbol-function 'claude-repl--finalize-merged-workspace)
+                 (lambda (ws main-dir) (setq finalized (list ws main-dir)))))
+        (claude-repl--merge-handler-onto-master "foo")
+        ;; Script ran in the MAIN worktree, not the master worktree.
+        (should (equal bounce-dir "/repo/main"))
+        (should (equal finalized '("foo" "/repo/main")))))))
+
+(ert-deftest claude-repl-test-onto-master-skips-bounce-when-not-touched ()
+  "A merged delta that does not touch apps/cee-agent never runs the script."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (bounced nil)
+          (finalized nil))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--git-exit-code)
+                 (lambda (&rest _) 0))
+                ((symbol-function 'claude-repl--git-string-quiet)
+                 (lambda (&rest _) "pkg/util.go\nREADME.md"))
+                ((symbol-function
+                  'claude-repl--cee-agent-reinstall-and-bounce-exit-code)
+                 (lambda (&rest _) (setq bounced t) 0))
+                ((symbol-function 'claude-repl--finalize-merged-workspace)
+                 (lambda (ws main-dir) (setq finalized (list ws main-dir)))))
+        (claude-repl--merge-handler-onto-master "foo")
+        (should-not bounced)
+        (should (equal finalized '("foo" "/repo/main")))))))
+
+(ert-deftest claude-repl-test-onto-master-bounce-failure-is-non-fatal ()
+  "A non-zero script exit does NOT signal and still finalizes (trunk already
+advanced, so the workspace must not be revived)."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (finalized nil))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--git-exit-code)
+                 (lambda (&rest _) 0))
+                ((symbol-function 'claude-repl--git-string-quiet)
+                 (lambda (&rest _) "apps/cee-agent/main.go"))
+                ((symbol-function
+                  'claude-repl--cee-agent-reinstall-and-bounce-exit-code)
+                 (lambda (&rest _) 1))
+                ((symbol-function 'claude-repl--finalize-merged-workspace)
+                 (lambda (ws main-dir) (setq finalized (list ws main-dir)))))
+        (claude-repl--merge-handler-onto-master "foo")
+        (should (equal finalized '("foo" "/repo/main")))))))
+
+(ert-deftest claude-repl-test-onto-master-samples-touch-before-ff ()
+  "The cee-agent touch is sampled between local master and origin/master
+BEFORE the fast-forward (so the delta is non-empty)."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (diff-args nil))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--git-exit-code)
+                 (lambda (&rest _) 0))
+                ((symbol-function 'claude-repl--git-string-quiet)
+                 (lambda (&rest args) (setq diff-args args) ""))
+                ((symbol-function 'claude-repl--finalize-merged-workspace)
+                 (lambda (&rest _) nil)))
+        (claude-repl--merge-handler-onto-master "foo")
+        (should (member "master" diff-args))
+        (should (member "origin/master" diff-args))))))
 
 (provide 'test-merge-handlers)
 
