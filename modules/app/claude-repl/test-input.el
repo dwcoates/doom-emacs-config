@@ -467,6 +467,24 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
   ;; The numeral-drop counter-example must also be trailing-dot-free.
   (should-not (string-match-p "'2\\.1\\.'" claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-tldr-cross-ref-requires-number ()
+  "TLDR spec must require that a bullet referencing another tree item ALWAYS cites that item's dotted number."
+  (should (string-match-p
+           "references another item in the same tree, it MUST ALWAYS cite that item's dotted hierarchical number"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-cross-ref-example ()
+  "TLDR spec must illustrate the cross-reference requirement with the parenthesized-number example."
+  (should (string-match-p
+           "want me to implement the refactor (2\\.4\\.1)"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-tldr-cross-ref-forbids-name-only ()
+  "TLDR spec must forbid referring to another item by name alone without its number."
+  (should (string-match-p
+           "Never refer to another item by name or description alone without its number"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-tldr-blank-line-between-parent-and-children ()
   "TLDR spec must require a blank line separating top-level entries and no line spacing between non-top-level entries."
   (should (string-match-p

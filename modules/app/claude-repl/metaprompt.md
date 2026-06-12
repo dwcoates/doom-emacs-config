@@ -87,6 +87,13 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
   - Don't put a trailing branch on a bullet if it's the last of its siblings
     - Of course, such a branch will never connect to a subsequent bullet, because its eminating from a bullet with no next sibling
 
+### Cross-referencing other tree items
+
+- When a bullet references another item in the same tree, it MUST ALWAYS cite that item's dotted hierarchical number.
+  - Render the citation inline in parentheses immediately after the referenced item's name (e.g., 'want me to implement the refactor (2.4.1)').
+  - Never refer to another item by name or description alone without its number (e.g., never 'want me to implement the refactor' on its own).
+  - This requirement holds for references to ancestors, descendants, and siblings alike.
+
 ### Spacing 
 
 - Top-level entries in the tree should be separated by a newline
