@@ -2376,6 +2376,30 @@ existing worktree."
                    (_ (error "unmocked git-string args: %S" args))))))
       (should (equal (claude-repl--cherry-pick-base "/tmp/repo" "branch-b") sha-m)))))
 
+(ert-deftest claude-repl-test-cherry-pick-base-logs-entry-and-resolved-base ()
+  "`--cherry-pick-base' logs an entry breadcrumb and the resolved base
+so a frozen merge's post-mortem can pin which step it reached."
+  (let ((sha-m "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        (logs nil))
+    (cl-letf (((symbol-function 'claude-repl--git-string)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp/repo" "log" "--right-only" "--pretty=%H" "--no-merges" "HEAD...branch-b")
+                    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+                   (`("-C" "/tmp/repo" "log" "--left-only" "--pretty=%B" "HEAD...branch-b")
+                    "M\n\nA1\n")
+                   (`("-C" "/tmp/repo" "merge-base" "HEAD" "branch-b")
+                    sha-m)
+                   (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'claude-repl--log)
+               (lambda (_ws fmt &rest args)
+                 (push (apply #'format fmt args) logs))))
+      (claude-repl--cherry-pick-base "/tmp/repo" "branch-b")
+      (should (cl-some (lambda (l) (string-match-p "cherry-pick-base: entry" l)) logs))
+      (should (cl-some (lambda (l)
+                         (string-match-p (concat "resolved base=" sha-m) l))
+                       logs)))))
+
 (ert-deftest claude-repl-test-merge-fork-clean-chain ()
   "After merging B (with -x), fork for C (descends from B) is B's tip SHA."
   ;; branch-c contains B1, B2, C1 (each unique vs HEAD).  HEAD's log carries
