@@ -575,6 +575,16 @@ Precedence is encoded in `--ws-render-status' itself."
      ((eq (claude-repl--ws-get ws :repl-state) :hidden) :hidden)
      (t                                                 :main))))
 
+(defun claude-repl-drawer--auto-expand-p (ws)
+  "Return non-nil if WS should be auto-expanded when the drawer opens or switches.
+Only MERGING-section entries auto-expand so their in-flight detail
+lines stay visible while the merge is live.  Every other entry is
+left folded — the drawer surfaces detail automatically only for the
+merge queue.  Manual `TAB' expansion via
+`claude-repl-drawer-toggle-expand' is unaffected and still works on
+any entry."
+  (eq (claude-repl-drawer--workspace-section ws) :merging))
+
 (defvar claude-repl-drawer--dir->name-map nil
   "Dynamic-binding cache: canonical project-dir → workspace name.
 When non-nil (bound by `claude-repl-drawer--with-dir-map'),
@@ -1921,9 +1931,13 @@ Split out so the public entry point can wrap the body in
                   word-wrap t)
       (claude-repl-drawer--apply-background)
       ;; Expand the current workspace so its detail lines are visible
-      ;; immediately on open.  Refresh the detail cache only when the
-      ;; workspace was not already expanded to avoid redundant git calls.
-      (when current-ws
+      ;; immediately on open, but ONLY when it sits in the MERGING
+      ;; section — every other entry stays folded (see
+      ;; `claude-repl-drawer--auto-expand-p').  Refresh the detail cache
+      ;; only when the workspace was not already expanded to avoid
+      ;; redundant git calls.
+      (when (and current-ws
+                 (claude-repl-drawer--auto-expand-p current-ws))
         (claude-repl-drawer--ensure-expanded-set)
         (unless (gethash current-ws claude-repl-drawer--expanded-set)
           (claude-repl-drawer--refresh-detail-cache current-ws)
@@ -2132,10 +2146,12 @@ No-op when the drawer buffer doesn't exist or no current workspace
 can be resolved.  Used by `persp-activated-functions' to keep the
 drawer cursor sync'd with the active workspace on workspace switches.
 
-Expands the current workspace to show its detail lines, refreshing
-the detail cache when the workspace was not already expanded.  Only
-fires on workspace-switch (persp-activated) and explicit drawer-open
-paths — never from the 1Hz poll or focus-change hooks.
+Expands the current workspace to show its detail lines ONLY when it
+sits in the MERGING section (`--auto-expand-p'); every other entry
+stays folded on switch.  Refreshes the detail cache when the
+workspace was not already expanded.  Only fires on workspace-switch
+(persp-activated) and explicit drawer-open paths — never from the
+1Hz poll or focus-change hooks.
 
 Also repositions the current-entry arrow overlay synchronously so the
 arrow snaps to the active workspace immediately, not after the next
@@ -2144,10 +2160,13 @@ arrow snaps to the active workspace immediately, not after the next
               (current-ws (claude-repl--ws-current-name)))
     (let ((win (get-buffer-window buf t)))
       (with-current-buffer buf
-        (claude-repl-drawer--ensure-expanded-set)
-        (unless (gethash current-ws claude-repl-drawer--expanded-set)
-          (claude-repl-drawer--refresh-detail-cache current-ws)
-          (puthash current-ws t claude-repl-drawer--expanded-set))
+        ;; Auto-expand only MERGING-section entries; every other
+        ;; workspace stays folded on switch (`--auto-expand-p').
+        (when (claude-repl-drawer--auto-expand-p current-ws)
+          (claude-repl-drawer--ensure-expanded-set)
+          (unless (gethash current-ws claude-repl-drawer--expanded-set)
+            (claude-repl-drawer--refresh-detail-cache current-ws)
+            (puthash current-ws t claude-repl-drawer--expanded-set)))
         (claude-repl-drawer--render)
         (when (claude-repl-drawer--goto-workspace-line current-ws)
           (when win (set-window-point win (point)))

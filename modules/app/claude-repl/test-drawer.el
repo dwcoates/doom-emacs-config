@@ -967,11 +967,11 @@ the popup is decoupled and manages its own visibility independently."
       (should-not explain-show-called))
     (when-let ((b (get-buffer " *test-drawer-buf*"))) (kill-buffer b))))
 
-(ert-deftest claude-repl-drawer-test-show-expands-current-workspace ()
-  "`drawer-show--inner' adds the current workspace to the expanded-set and
+(ert-deftest claude-repl-drawer-test-show-expands-current-merging-workspace ()
+  "`drawer-show--inner' auto-expands a MERGING current workspace and
 calls `--refresh-detail-cache' for it before the render."
   (claude-repl-test--with-clean-state
-    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (claude-repl-drawer-test--register "ws" :priority "p1" :merging t)
     (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
           (cache-called-for nil))
       (unwind-protect
@@ -992,9 +992,9 @@ calls `--refresh-detail-cache' for it before the render."
 
 (ert-deftest claude-repl-drawer-test-show-skips-cache-when-already-expanded ()
   "`drawer-show--inner' does not call `--refresh-detail-cache' when the
-current workspace is already expanded."
+current (MERGING) workspace is already expanded."
   (claude-repl-test--with-clean-state
-    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (claude-repl-drawer-test--register "ws" :priority "p1" :merging t)
     (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
           (cache-called 0))
       (unwind-protect
@@ -1013,6 +1013,70 @@ current workspace is already expanded."
                       ((symbol-function 'claude-repl-drawer--apply-width) #'ignore))
               (claude-repl-drawer-show--inner))
             (should (= cache-called 0)))
+        (kill-buffer buf)))))
+
+;;;; ---- Auto-expand gating (MERGING only) ----
+
+(ert-deftest claude-repl-drawer-test-auto-expand-p-true-for-merging ()
+  "`--auto-expand-p' is non-nil for a MERGING-section workspace."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :merging t)
+    (should (claude-repl-drawer--auto-expand-p "ws"))))
+
+(ert-deftest claude-repl-drawer-test-auto-expand-p-nil-for-main ()
+  "`--auto-expand-p' is nil for a MAIN-section workspace."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (should-not (claude-repl-drawer--auto-expand-p "ws"))))
+
+(ert-deftest claude-repl-drawer-test-auto-expand-p-nil-for-merged ()
+  "`--auto-expand-p' is nil for a MERGED-section workspace."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :repl-state :merged)
+    (should-not (claude-repl-drawer--auto-expand-p "ws"))))
+
+(ert-deftest claude-repl-drawer-test-show-does-not-expand-non-merging-workspace ()
+  "`drawer-show--inner' leaves a non-MERGING current workspace folded and
+does not call `--refresh-detail-cache' for it."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
+          (cache-called-for nil))
+      (unwind-protect
+          (with-current-buffer buf
+            (claude-repl-drawer-mode)
+            (cl-letf (((symbol-function 'claude-repl-drawer--current-ws)
+                       (lambda () "ws"))
+                      ((symbol-function 'display-buffer)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'claude-repl-drawer--refresh-detail-cache)
+                       (lambda (ws) (push ws cache-called-for)))
+                      ((symbol-function 'claude-repl-window--harden) #'ignore)
+                      ((symbol-function 'claude-repl-drawer--apply-width) #'ignore))
+              (claude-repl-drawer-show--inner))
+            (should-not (claude-repl-drawer--expanded-p "ws"))
+            (should-not (member "ws" cache-called-for)))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-drawer-test-sync-cursor-does-not-expand-non-merging ()
+  "`--sync-cursor-to-current-ws' leaves a non-MERGING current workspace folded."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
+          (cache-called-for nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'claude-repl--ws-current-name)
+                     (lambda () "ws"))
+                    ((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
+                    ((symbol-function 'claude-repl-drawer--refresh-detail-cache)
+                     (lambda (ws) (push ws cache-called-for)))
+                    ((symbol-function 'claude-repl-drawer--render) #'ignore)
+                    ((symbol-function 'claude-repl-drawer--goto-workspace-line)
+                     (lambda (&rest _) nil)))
+            (claude-repl-drawer--sync-cursor-to-current-ws)
+            (with-current-buffer buf
+              (should-not (claude-repl-drawer--expanded-p "ws")))
+            (should-not (member "ws" cache-called-for)))
         (kill-buffer buf)))))
 
 (ert-deftest claude-repl-drawer-test-hide-does-not-touch-explain-config ()
@@ -1351,11 +1415,11 @@ doesn't fire (e.g. focus elsewhere or persp-mode-driven sync)."
         (kill-buffer buf)))))
 
 (ert-deftest claude-repl-drawer-test-sync-cursor-expands-current-workspace ()
-  "`--sync-cursor-to-current-ws' adds the current workspace to the expanded-set
-and calls `--refresh-detail-cache' when the workspace was not already expanded."
+  "`--sync-cursor-to-current-ws' adds the current (MERGING) workspace to the
+expanded-set and calls `--refresh-detail-cache' when it was not already expanded."
   (claude-repl-test--with-clean-state
     (claude-repl-drawer-test--register "alpha" :priority "p1")
-    (claude-repl-drawer-test--register "beta"  :priority "p2")
+    (claude-repl-drawer-test--register "beta"  :priority "p2" :merging t)
     (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
           (cache-called-for nil))
       (unwind-protect
@@ -1375,9 +1439,9 @@ and calls `--refresh-detail-cache' when the workspace was not already expanded."
 
 (ert-deftest claude-repl-drawer-test-sync-cursor-skips-cache-when-already-expanded ()
   "`--sync-cursor-to-current-ws' does not call `--refresh-detail-cache' when
-the current workspace is already in the expanded-set."
+the current (MERGING) workspace is already in the expanded-set."
   (claude-repl-test--with-clean-state
-    (claude-repl-drawer-test--register "ws" :priority "p1")
+    (claude-repl-drawer-test--register "ws" :priority "p1" :merging t)
     (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
           (cache-called 0))
       (unwind-protect
