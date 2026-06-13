@@ -97,8 +97,10 @@ Tested indirectly through the macro expansion tests:
 
 | # | Edge Case | Test? | Test Name |
 |---|-----------|-------|-----------|
-| 1 | Live buffer: sends "i" | YES | `claude-repl-cmd-test-enter-insert-mode/live-buffer` |
-| 2 | Dead (killed) buffer: no-op | YES | `claude-repl-cmd-test-enter-insert-mode/dead-buffer` |
+| 1 | Current ws, live input buffer: enters evil insert state | YES | `claude-repl-cmd-test-enter-insert-mode/live-input-buffer` |
+| 2 | Never forwards a literal "i" to the vterm (regression) | YES | `claude-repl-cmd-test-enter-insert-mode/never-sends-i-to-vterm` |
+| 3 | WS not current: no-op (no focus steal / hidden-buffer flip) | YES | `claude-repl-cmd-test-enter-insert-mode/noop-when-ws-not-current` |
+| 4 | Dead input buffer: no-op | YES | `claude-repl-cmd-test-enter-insert-mode/dead-input-buffer` |
 
 ### 12. `claude-repl-interrupt` (interactive)
 

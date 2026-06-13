@@ -1630,24 +1630,66 @@ does not appear in the output."
 
 ;;;; ---- claude-repl--enter-insert-mode ----
 
-(ert-deftest claude-repl-cmd-test-enter-insert-mode/live-buffer ()
-  "enter-insert-mode sends 'i' to a live buffer."
-  (let (sent-string)
-    (claude-repl-test--with-temp-buffer " *test-vterm-insert*"
-      (cl-letf (((symbol-function 'vterm-send-string)
-                 (lambda (str) (setq sent-string str))))
-        (claude-repl--enter-insert-mode (current-buffer))
-        (should (equal sent-string "i"))))))
+(ert-deftest claude-repl-cmd-test-enter-insert-mode/live-input-buffer ()
+  "enter-insert-mode enters evil insert state in a live input buffer."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-input-insert*"
+      (let ((input-buf (current-buffer))
+            (insert-called nil))
+        (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+        (cl-letf (((symbol-function '+workspace-current-name)
+                   (lambda () "test-ws"))
+                  ((symbol-function 'evil-insert-state)
+                   (lambda (&rest _) (setq insert-called t))))
+          (claude-repl--enter-insert-mode "test-ws")
+          (should insert-called))))))
 
-(ert-deftest claude-repl-cmd-test-enter-insert-mode/dead-buffer ()
-  "enter-insert-mode is a no-op for a killed buffer."
-  (let ((buf (get-buffer-create " *test-dead-buf*"))
-        (send-called nil))
-    (kill-buffer buf)
-    (cl-letf (((symbol-function 'vterm-send-string)
-               (lambda (_str) (setq send-called t))))
-      (claude-repl--enter-insert-mode buf)
-      (should-not send-called))))
+(ert-deftest claude-repl-cmd-test-enter-insert-mode/never-sends-i-to-vterm ()
+  "enter-insert-mode must NOT forward a literal \"i\" keystroke to the vterm.
+Regression: sending \"i\" double-dispatched the mode switch and leaked a
+stray \"i\" onto Claude's prompt line."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-input-no-i*"
+      (let ((input-buf (current-buffer))
+            (sent-string nil))
+        (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+        (cl-letf (((symbol-function '+workspace-current-name)
+                   (lambda () "test-ws"))
+                  ((symbol-function 'evil-insert-state) #'ignore)
+                  ((symbol-function 'vterm-send-string)
+                   (lambda (str) (setq sent-string str))))
+          (claude-repl--enter-insert-mode "test-ws")
+          (should-not sent-string))))))
+
+(ert-deftest claude-repl-cmd-test-enter-insert-mode/noop-when-ws-not-current ()
+  "enter-insert-mode is a no-op when WS is not the current workspace.
+A drawer-triggered interrupt on a background workspace must not steal
+focus or flip a hidden buffer's evil state."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-input-bg*"
+      (let ((input-buf (current-buffer))
+            (insert-called nil))
+        (claude-repl--ws-put "bg-ws" :input-buffer input-buf)
+        (cl-letf (((symbol-function '+workspace-current-name)
+                   (lambda () "other-ws"))
+                  ((symbol-function 'evil-insert-state)
+                   (lambda (&rest _) (setq insert-called t))))
+          (claude-repl--enter-insert-mode "bg-ws")
+          (should-not insert-called))))))
+
+(ert-deftest claude-repl-cmd-test-enter-insert-mode/dead-input-buffer ()
+  "enter-insert-mode is a no-op when the input buffer is dead."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create " *test-dead-input-buf*"))
+          (insert-called nil))
+      (claude-repl--ws-put "test-ws" :input-buffer buf)
+      (kill-buffer buf)
+      (cl-letf (((symbol-function '+workspace-current-name)
+                 (lambda () "test-ws"))
+                ((symbol-function 'evil-insert-state)
+                 (lambda (&rest _) (setq insert-called t))))
+        (claude-repl--enter-insert-mode "test-ws")
+        (should-not insert-called)))))
 
 ;;;; ---- claude-repl-interrupt ----
 
