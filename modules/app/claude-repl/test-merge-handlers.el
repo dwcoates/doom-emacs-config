@@ -978,6 +978,58 @@ advanced, so the workspace must not be revived)."
         (claude-repl--merge-handler-onto-master "foo")
         (should (equal finalized '("foo" "/repo/main")))))))
 
+(ert-deftest claude-repl-test-onto-master-bounce-timeout-is-non-fatal ()
+  "A `timeout' result from the bounce wrapper does NOT signal and still
+finalizes — the trunk already advanced, so the workspace must not be
+revived, and a `%d'-style log on the symbol must not crash the handler."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+          (finalized nil))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'claude-repl--main-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'claude-repl--worktree-dirty-p)
+                 (lambda (_dir) nil))
+                ((symbol-function 'claude-repl--git-exit-code)
+                 (lambda (&rest _) 0))
+                ((symbol-function 'claude-repl--git-string-quiet)
+                 (lambda (&rest _) "apps/cee-agent/main.go"))
+                ((symbol-function
+                  'claude-repl--cee-agent-reinstall-and-bounce-exit-code)
+                 (lambda (&rest _) 'timeout))
+                ((symbol-function 'claude-repl--finalize-merged-workspace)
+                 (lambda (ws main-dir) (setq finalized (list ws main-dir)))))
+        (claude-repl--merge-handler-onto-master "foo")
+        (should (equal finalized '("foo" "/repo/main")))))))
+
+(ert-deftest claude-repl-test-run-cee-agent-bounce-returns-wrapper-timeout ()
+  "`--onto-master-run-cee-agent-bounce' returns the wrapper's `timeout'
+symbol unchanged so callers can distinguish an overrun from a clean
+exit, and the `timeout' branch's log must not raise."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function
+                  'claude-repl--cee-agent-reinstall-and-bounce-exit-code)
+                 (lambda (&rest _) 'timeout)))
+        (should (eq 'timeout
+                    (claude-repl--onto-master-run-cee-agent-bounce
+                     "foo" "/repo/main")))))))
+
+(ert-deftest claude-repl-test-run-cee-agent-bounce-returns-wrapper-exit-code ()
+  "`--onto-master-run-cee-agent-bounce' returns the wrapper's integer
+exit code unchanged on a normal (non-timeout) finish."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--workspaces (make-hash-table :test 'equal)))
+      (claude-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function
+                  'claude-repl--cee-agent-reinstall-and-bounce-exit-code)
+                 (lambda (&rest _) 3)))
+        (should (= 3 (claude-repl--onto-master-run-cee-agent-bounce
+                      "foo" "/repo/main")))))))
+
 (ert-deftest claude-repl-test-onto-master-samples-touch-before-ff ()
   "The cee-agent touch is sampled between local master and origin/master
 BEFORE the fast-forward (so the delta is non-empty)."
