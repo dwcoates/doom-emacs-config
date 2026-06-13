@@ -133,6 +133,37 @@
 ;; in isolation.  Tests that did nothing but call these wrappers against
 ;; a mocked `--git-exit-code' have been removed — they only re-asserted
 ;; the boundary itself, which does not belong in ERT.
+;;
+;; The worker-side logic AROUND the boundary is lisp we own, so it IS
+;; tested: worker status pass-through, and worker timeout → 124.  The
+;; main-thread dispatch arm is the registered boundary itself (the
+;; unmocked-boundary guard rejects calling it in ERT), so it stays
+;; untested per the same policy.
+
+(ert-deftest claude-repl-test-git-exit-code-worker-returns-wait-status ()
+  "The worker implementation returns the exit status produced by
+`claude-repl--wait-for-process-exit' unchanged on a normal exit."
+  (cl-letf (((symbol-function 'start-process)
+             (lambda (&rest _) 'fake-proc))
+            ((symbol-function 'set-process-query-on-exit-flag)
+             (lambda (&rest _) nil))
+            ((symbol-function 'claude-repl--wait-for-process-exit)
+             (lambda (&rest _) 5)))
+    (should (= 5 (claude-repl--git-exit-code--worker "/repo" '("status"))))))
+
+(ert-deftest claude-repl-test-git-exit-code-worker-maps-timeout-to-124 ()
+  "The worker implementation maps the symbol `timeout' from the wait
+helper to exit code 124 so numeric callers (`=', `%d' logs) never see
+a symbol."
+  (cl-letf (((symbol-function 'start-process)
+             (lambda (&rest _) 'fake-proc))
+            ((symbol-function 'set-process-query-on-exit-flag)
+             (lambda (&rest _) nil))
+            ((symbol-function 'claude-repl--wait-for-process-exit)
+             (lambda (&rest _) 'timeout))
+            ((symbol-function 'claude-repl--log)
+             (lambda (&rest _) nil)))
+    (should (= 124 (claude-repl--git-exit-code--worker "/repo" '("fetch"))))))
 
 ;;;; ---- Tests: parse-worktree-porcelain ----
 
