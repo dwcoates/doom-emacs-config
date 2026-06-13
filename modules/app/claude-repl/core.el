@@ -442,7 +442,16 @@ explode."
           (let ((status (claude-repl--wait-for-process-exit
                          proc timeout nil nil)))
             (cond
-             ((eq status 'timeout) "")
+             ((eq status 'timeout)
+              ;; A timeout here means a child outlived its budget and was
+              ;; killed; the silent "" return otherwise erases all trace
+              ;; of it.  Log so post-mortems can see WHICH command stalled
+              ;; (the per-call cherry-pick-base stalls were invisible
+              ;; until this line existed).
+              (claude-repl--log nil
+                                "capture-process-output: TIMEOUT after %ss %s %S"
+                                timeout program args)
+              "")
              (t
               (with-current-buffer stdout-buf
                 (string-trim
