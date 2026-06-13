@@ -122,11 +122,48 @@ Tears down any existing watch first to avoid duplicates on re-eval."
 
 ;;; Git helpers
 
+(defconst claude-repl--git-exit-code-worker-timeout-seconds 300
+  "Seconds a worker-thread `claude-repl--git-exit-code' call may run.
+Generous because network-bound subcommands (fetch, push) route through
+here; on expiry the child is killed and the exit code maps to 124
+\(the GNU `timeout' convention).")
+
 (defun claude-repl--git-exit-code (root &rest args)
   "Run git in ROOT with ARGS, return exit code.
 This IS the external-boundary wrapper — tests mock it via `cl-letf'
-\(see `claude-repl--external-boundary-functions' in core.el)."
-  (apply #'call-process "git" nil nil nil "-C" root args)) ;; ALLOW-EXTERNAL-BOUNDARY
+\(see `claude-repl--external-boundary-functions' in core.el).
+
+Thread-aware: a worker-thread `call-process' — even with the nil
+destination used here — holds the global Lisp lock for the child's
+entire runtime, freezing every other thread including the UI (the
+2026-06-12 merge hang).  So worker-thread callers route through
+`claude-repl--git-exit-code--worker' (sentinel + condvar wait); the
+main thread keeps the raw `call-process'."
+  (if (eq (current-thread) main-thread)
+      (apply #'call-process "git" nil nil nil "-C" root args) ;; ALLOW-EXTERNAL-BOUNDARY
+    (claude-repl--git-exit-code--worker root args)))
+
+(defun claude-repl--git-exit-code--worker (root args)
+  "Worker-thread implementation of `claude-repl--git-exit-code'.
+Spawns git asynchronously with discarded output and blocks on
+`claude-repl--wait-for-process-exit' (condvar wait — releases the
+global Lisp lock) instead of `call-process' (which holds it).  Returns
+the exit code, or 124 when
+`claude-repl--git-exit-code-worker-timeout-seconds' elapses first."
+  (let* ((proc (apply #'start-process ;; ALLOW-EXTERNAL-BOUNDARY
+                      "claude-repl-git-exit-code" nil "git" "-C" root args))
+         (_ (set-process-query-on-exit-flag proc nil))
+         (status (claude-repl--wait-for-process-exit
+                  proc claude-repl--git-exit-code-worker-timeout-seconds
+                  nil nil)))
+    (if (eq status 'timeout)
+        (progn
+          (claude-repl--log nil
+                            "git-exit-code: TIMEOUT after %ss git -C %s %S"
+                            claude-repl--git-exit-code-worker-timeout-seconds
+                            root args)
+          124)
+      status)))
 
 (defun claude-repl--git-branch-exists-p (root branch)
   "Return non-nil if BRANCH exists in git repo at ROOT."
