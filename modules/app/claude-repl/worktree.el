@@ -3440,16 +3440,29 @@ AppKit code on macOS)."
              (setq done t)
              (setq status (process-exit-status p))
              (condition-notify condvar))))))
-    (setq timeout-timer
-          (run-at-time
-           timeout-seconds nil
-           (lambda ()
-             (with-mutex mutex
-               (unless done
-                 (setq done t)
-                 (setq status 'timeout)
-                 (ignore-errors (delete-process proc))
-                 (condition-notify condvar))))))
+    ;; Close the install race: a fast child can exit BEFORE the sentinel
+    ;; above is installed, in which case Emacs has already consumed the
+    ;; status-change notification and the sentinel never fires — the wait
+    ;; would then burn the full TIMEOUT-SECONDS for a long-dead process
+    ;; (the silent 60s-per-call cherry-pick stalls of 2026-06-12).  Sample
+    ;; the status once after installing the sentinel; the `done' guard
+    ;; keeps a concurrently-firing sentinel from double-completing.
+    (when (memq (process-status proc) '(exit signal))
+      (with-mutex mutex
+        (unless done
+          (setq done t)
+          (setq status (process-exit-status proc)))))
+    (unless done
+      (setq timeout-timer
+            (run-at-time
+             timeout-seconds nil
+             (lambda ()
+               (with-mutex mutex
+                 (unless done
+                   (setq done t)
+                   (setq status 'timeout)
+                   (ignore-errors (delete-process proc))
+                   (condition-notify condvar)))))))
     (unwind-protect
         (with-mutex mutex
           (while (not done)
