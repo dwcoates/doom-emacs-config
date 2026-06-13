@@ -460,7 +460,8 @@ Both helpers dispatch on `current-thread`:
 ### What to avoid
 
 - ❌ `(accept-process-output proc TIMEOUT)` inside `(make-thread ...)` — even with `JUST-THIS-ONE=t`, the syscall still routes through `ns_select_1`. The flag only restricts which process's filters fire, not which select implementation is used.
-- ❌ `(call-process ...)`, `(shell-command-to-string ...)`, `(process-file ...)` inside `(make-thread ...)` when the call captures stdout — same path, same trap. `call-process` with `destination=nil` (output discarded, e.g. `(apply #'call-process "git" nil nil nil "-C" root args)`) is fine because Emacs doesn't need to read the child's pipes.
+- ❌ `(call-process ...)`, `(shell-command-to-string ...)`, `(process-file ...)` inside `(make-thread ...)` when the call captures stdout — same path, same trap.
+- ❌ `(call-process ...)` with `destination=nil` (output discarded, e.g. `(apply #'call-process "git" nil nil nil "-C" root args)`) inside `(make-thread ...)`. It does NOT trap in `ns_select_1` (Emacs reads no pipes, so it never reaches `wait_reading_process_output`), but it is still SYNCHRONOUS and holds the global Lisp lock for the child's ENTIRE runtime — a worker thread executing C `call-process` never yields the lock until the child exits, so the main thread cannot run Lisp and the UI freezes for as long as the subprocess runs. This is the 2026-06-12 merge hang: the `onto-master` handler's `git fetch` and the cee-agent reinstall-and-bounce script (both destination-nil) starved the main-thread heartbeat for the whole subprocess duration. An earlier revision of this doc wrongly called destination-nil "fine"; it avoids the trap but not the freeze. Use the sentinel + condvar wait (`--wait-for-process-exit`, which DOES release the lock via `condition-wait`) instead. `claude-repl--git-exit-code` dispatches to that helper automatically on worker threads.
 - ❌ Polling via `sit-for` / `sleep-for` in a worker thread — same path.
 
 ### What's fine
