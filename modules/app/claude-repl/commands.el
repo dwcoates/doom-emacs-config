@@ -1185,22 +1185,42 @@ WS is the current workspace name for logging."
     (dotimes (_ claude-repl-interrupt-escape-count)
       (vterm-send-key "<escape>"))))
 
-(defun claude-repl--enter-insert-mode (vterm-buf)
-  "Send \"i\" to VTERM-BUF to re-enter insert mode."
-  (if (buffer-live-p vterm-buf)
-      (progn
-        (claude-repl--log (claude-repl--ws-current-name) "enter-insert-mode: sending \"i\" to vterm=%s" (buffer-name vterm-buf))
-        (with-current-buffer vterm-buf
-          (vterm-send-string "i")))
-    (claude-repl--log (claude-repl--ws-current-name) "enter-insert-mode: vterm is dead, skipping")))
+(defun claude-repl--enter-insert-mode (ws)
+  "Re-enter evil insert state in WS's input buffer after an interrupt.
+Switches the Emacs-side input buffer back to evil insert state so the
+user can keep typing where they left off.
+
+Does NOT send a literal \"i\" keystroke to the Claude vterm.  The input
+buffer — not the vterm — is the surface the user types into, so
+forwarding \"i\" to the terminal both double-dispatches the mode switch
+\(evil already owns insert mode) and leaks a stray \"i\" character onto
+Claude's prompt line, which then prefixes the next message the user
+sends.
+
+No-op when WS is not the current workspace (a drawer-triggered
+interrupt on a background workspace must not steal focus or flip a
+hidden buffer's state) or when the input buffer is dead."
+  (if (not (equal ws (claude-repl--ws-current-name)))
+      (claude-repl--log ws "enter-insert-mode: ws not current, skipping")
+    (let ((input-buf (claude-repl--ws-get ws :input-buffer)))
+      (if (buffer-live-p input-buf)
+          (let ((win (get-buffer-window input-buf)))
+            (claude-repl--log ws "enter-insert-mode: evil insert state in input buffer=%s win=%s" (buffer-name input-buf) win)
+            (when win (select-window win))
+            (with-current-buffer input-buf
+              (evil-insert-state)))
+        (claude-repl--log ws "enter-insert-mode: input buffer is dead, skipping")))))
 
 (defun claude-repl-interrupt (&optional ws)
   "Interrupt Claude in workspace WS and re-enter insert mode after a delay.
-Sends Escape to stop the current operation, then automatically sends
-\"i\" after `claude-repl-interrupt-reinsert-delay' seconds to return
-to insert mode.  Defaults to the current workspace when WS is nil
-(matches the interactive `SPC o x' behavior); the drawer passes the
-entry-at-point so interrupts target the selected entry.
+Sends Escape to stop the current operation, then automatically returns
+the input buffer to evil insert state after
+`claude-repl-interrupt-reinsert-delay' seconds (via
+`claude-repl--enter-insert-mode', which switches evil state rather than
+forwarding a literal \"i\" keystroke to the vterm).  Defaults to the
+current workspace when WS is nil (matches the interactive `SPC o x'
+behavior); the drawer passes the entry-at-point so interrupts target
+the selected entry.
 
 After issuing the escape, marks the workspace's claude-state as
 `:done' and clears the Stop / SubagentStop tracking — interrupting
@@ -1218,7 +1238,7 @@ is the sole observer here."
           (claude-repl--ws-clear-stop-tracking ws)
           (claude-repl--mark-claude-done ws)
           (run-at-time claude-repl-interrupt-reinsert-delay nil
-                       #'claude-repl--enter-insert-mode vterm-buf))
+                       #'claude-repl--enter-insert-mode ws))
       (claude-repl--log ws "interrupt: vterm not live, skipping"))))
 
 (defun claude-repl-update-pr ()
