@@ -3018,6 +3018,12 @@ of the form \"(cherry picked from commit SHA)\". Returns the most recent TARGET
 commit whose SHA appears in those annotations — so only genuinely new commits are
 replayed. Falls back to `merge-base HEAD TARGET-BRANCH' when no annotations match
 (first-time merge, or pre-annotation history)."
+  ;; Each `git-string' below is a synchronous subprocess that, before
+  ;; the worker-safe wait existed, could stall the whole editor.  Log
+  ;; around them so a post-mortem can see exactly which step hung when a
+  ;; merge appears frozen (the 2026-06-12 hang had no such breadcrumbs).
+  (claude-repl--log nil "cherry-pick-base: entry root=%s target=%s"
+                    project-root target-branch)
   (let* ((symmetric-range (format "HEAD...%s" target-branch))
          (target-commits
           (split-string
@@ -3026,16 +3032,21 @@ replayed. Falls back to `merge-base HEAD TARGET-BRANCH' when no annotations matc
             "log" "--right-only" "--pretty=%H" "--no-merges"
             symmetric-range)
            "\n" t))
+         (_ (claude-repl--log nil
+                              "cherry-pick-base: target-commits=%d — scanning HEAD log for -x annotations"
+                              (length target-commits)))
          (head-log
           (claude-repl--git-string
            "-C" project-root
            "log" "--left-only" "--pretty=%B"
            symmetric-range))
-         (incorporated (claude-repl--extract-cherry-pick-shas head-log)))
-    (or (cl-find-if (lambda (sha) (member sha incorporated))
-                    target-commits)
-        (claude-repl--git-string
-         "-C" project-root "merge-base" "HEAD" target-branch))))
+         (incorporated (claude-repl--extract-cherry-pick-shas head-log))
+         (base (or (cl-find-if (lambda (sha) (member sha incorporated))
+                               target-commits)
+                   (claude-repl--git-string
+                    "-C" project-root "merge-base" "HEAD" target-branch))))
+    (claude-repl--log nil "cherry-pick-base: resolved base=%s" base)
+    base))
 
 (defun claude-repl--git-branch-of-dir (dir)
   "Return the abbreviated git branch checked out in DIR, or nil.
