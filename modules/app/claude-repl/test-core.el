@@ -715,6 +715,25 @@ must not explode when git hangs or doesn't terminate in time."
                     "git" '("rev-parse" "HEAD"))
                    ""))))
 
+(ert-deftest claude-repl-test-capture-process-output-logs-on-timeout ()
+  "On timeout, `--capture-process-output' emits a log line naming the
+stalled program and args so the otherwise-silent \"\" return leaves a
+post-mortem breadcrumb."
+  (let ((logged nil))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name buf &rest _cmd) (list :fake-proc buf)))
+              ((symbol-function 'set-process-query-on-exit-flag)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--wait-for-process-exit)
+               (lambda (&rest _) 'timeout))
+              ((symbol-function 'claude-repl--log)
+               (lambda (_ws fmt &rest args)
+                 (setq logged (apply #'format fmt args)))))
+      (claude-repl--capture-process-output "git" '("fetch" "origin"))
+      (should (string-match-p "TIMEOUT" logged))
+      (should (string-match-p "git" logged))
+      (should (string-match-p "fetch" logged)))))
+
 (ert-deftest claude-repl-test-capture-process-output-uses-make-process-when-suppress-stderr ()
   "When SUPPRESS-STDERR is non-nil, `--capture-process-output' uses
 `make-process' with `:stderr' set to a separate buffer so stderr is
