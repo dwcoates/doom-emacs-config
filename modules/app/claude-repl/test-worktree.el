@@ -2859,6 +2859,36 @@ thread-check guard is wired correctly."
     (should called-main)
     (should-not called-worker)))
 
+(ert-deftest claude-repl-test-wait-for-process-exit-worker-already-exited-returns-immediately ()
+  "A process that exited BEFORE the worker wait installed its sentinel
+completes immediately with the real exit status instead of blocking
+until the timeout.  Guards the sentinel-install race: the status-change
+notification was already consumed, so the sentinel never fires and the
+post-install status sample is the only completion path."
+  (let ((proc (start-process "test-already-exited" nil "sh" "-c" "exit 7")))
+    (while (process-live-p proc)
+      (accept-process-output proc 0.05))
+    ;; Drain any pending status-change so the default sentinel consumes it.
+    (accept-process-output nil 0.05)
+    (cl-letf (((symbol-function 'condition-wait)
+               (lambda (&rest _) (error "condition-wait must not be reached"))))
+      (should (= 7 (claude-repl--wait-for-process-exit--worker proc 5 nil nil))))))
+
+(ert-deftest claude-repl-test-wait-for-process-exit-worker-already-exited-skips-timeout-timer ()
+  "When the post-install status sample finds the process already dead,
+no timeout timer is scheduled — there is nothing left to deadline."
+  (let ((proc (start-process "test-already-exited-timer" nil "true"))
+        (timer-created nil))
+    (while (process-live-p proc)
+      (accept-process-output proc 0.05))
+    (accept-process-output nil 0.05)
+    (cl-letf (((symbol-function 'run-at-time)
+               (lambda (&rest _) (setq timer-created t) nil))
+              ((symbol-function 'condition-wait)
+               (lambda (&rest _) nil)))
+      (claude-repl--wait-for-process-exit--worker proc 5 nil nil))
+    (should-not timer-created)))
+
 (ert-deftest claude-repl-test-spawn-and-wait-kills-buffer-when-keep-buffer-nil ()
   "Default behavior of `claude-repl--spawn-and-wait' is to kill OUT-BUF
 after extracting + logging output.  Callers (e.g. verify) rely on this
