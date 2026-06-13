@@ -510,6 +510,13 @@ empty."
          (cl-some (lambda (path) (string-prefix-p prefix path))
                   (split-string out "\n" t)))))
 
+(defconst claude-repl--cee-agent-bounce-timeout-seconds 600
+  "Seconds the cee-agent reinstall-and-bounce script may run.
+The script rebuilds and restarts a service, so the budget is generous;
+on expiry the child is killed and the wrapper returns the symbol
+`timeout' (the caller logs it as a non-fatal failure, never reverts
+the already-advanced trunk).")
+
 (defun claude-repl--cee-agent-reinstall-and-bounce-exit-code (worktree)
   "Run the cee-agent reinstall-and-bounce script in WORKTREE; return its exit code.
 WORKTREE is the MAIN worktree the service is installed and run out of
@@ -517,32 +524,60 @@ WORKTREE is the MAIN worktree the service is installed and run out of
 `claude-repl--cee-agent-reinstall-script' is resolved relative to it
 and run with WORKTREE as the working directory.
 
+Returns the script's integer exit code, or the symbol `timeout' when
+`claude-repl--cee-agent-bounce-timeout-seconds' elapses first.
+
+Worker-thread safe: the `onto-master' handler runs this on the merge
+worker thread, where a blocking `call-process' would hold the global
+Lisp lock for the script's entire (service-rebuild) runtime and freeze
+the UI (the 2026-06-12 merge hang).  So it spawns the script
+asynchronously with discarded output and blocks on
+`claude-repl--wait-for-process-exit' (sentinel + condvar — releases
+the lock) instead.
+
 This IS the external-boundary wrapper for the script (registered in
 `claude-repl--external-boundary-functions'): tests MUST mock it via
 `cl-letf' rather than execute the real script."
-  (let ((default-directory (file-name-as-directory worktree)))
-    (call-process ;; ALLOW-EXTERNAL-BOUNDARY
-     (expand-file-name claude-repl--cee-agent-reinstall-script worktree)
-     nil nil nil)))
+  (let* ((default-directory (file-name-as-directory worktree))
+         (script (expand-file-name claude-repl--cee-agent-reinstall-script
+                                   worktree))
+         (proc (start-process ;; ALLOW-EXTERNAL-BOUNDARY
+                "claude-repl-cee-bounce" nil script)))
+    (set-process-query-on-exit-flag proc nil)
+    (claude-repl--wait-for-process-exit
+     proc claude-repl--cee-agent-bounce-timeout-seconds nil nil)))
 
 (defun claude-repl--onto-master-run-cee-agent-bounce (target-ws worktree)
   "Run the cee-agent reinstall-and-bounce script for TARGET-WS in WORKTREE.
 Invoked by `claude-repl--merge-handler-onto-master' after the trunk
 fast-forwards, but only when the merged delta touched
-`claude-repl--cee-agent-dir-prefix'.  Returns the script's exit code.
+`claude-repl--cee-agent-dir-prefix'.  Returns the script's exit code,
+or the symbol `timeout' when the script overran its budget.
 
 NON-FATAL by design: the trunk has already advanced, so a script
-failure must NOT signal `user-error' — that would drive the
-merge-async failure path to revive an already-merged workspace.  A
-non-zero exit is logged for human follow-up and teardown proceeds."
+failure (non-zero exit OR timeout) must NOT signal `user-error' —
+that would drive the merge-async failure path to revive an
+already-merged workspace.  The failure is logged for human follow-up
+and teardown proceeds."
+  ;; Log BEFORE spawning: if the script hangs past its timeout (or Emacs
+  ;; is killed mid-run), this line is the only on-disk record that the
+  ;; bounce was even attempted.
+  (claude-repl--log target-ws
+                    "merge-handler-onto-master: ws=%s cee-agent touched — running reinstall-and-bounce in %s"
+                    target-ws worktree)
   (let ((ec (claude-repl--cee-agent-reinstall-and-bounce-exit-code worktree)))
     (claude-repl--log target-ws
-                      "merge-handler-onto-master: ws=%s cee-agent touched — reinstall-and-bounce in %s exit=%d"
-                      target-ws worktree ec)
-    (unless (= ec 0)
+                      "merge-handler-onto-master: ws=%s reinstall-and-bounce finished result=%S in %s"
+                      target-ws ec worktree)
+    (cond
+     ((eq ec 'timeout)
+      (claude-repl--log target-ws
+                        "merge-handler-onto-master: ws=%s WARNING reinstall-and-bounce TIMED OUT after %ss — trunk already advanced, NOT reverting"
+                        target-ws claude-repl--cee-agent-bounce-timeout-seconds))
+     ((/= ec 0)
       (claude-repl--log target-ws
                         "merge-handler-onto-master: ws=%s WARNING reinstall-and-bounce FAILED (exit=%d) — trunk already advanced, NOT reverting"
-                        target-ws ec))
+                        target-ws ec)))
     ec))
 
 (defun claude-repl--merge-handler-onto-master (target-ws &optional _args)
