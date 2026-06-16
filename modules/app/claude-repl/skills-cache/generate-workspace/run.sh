@@ -1,10 +1,34 @@
 #!/usr/bin/env bash
-# Reads a JSON workspace commands array from stdin, validates the
-# source_ws invariant on every create entry, decorates each create
-# entry's "name" field, then writes the result atomically to
-# ~/.claude/output/workspace_commands_<uuid>.json.
+# run.sh — workspace-generation dispatch + read-only main-branch resolver.
 #
-# Source-ws invariant (enforced before any write):
+# Verbs:
+#   (no args)                    DISPATCH mode (fire-and-forget). Reads a JSON
+#                                workspace-commands array from stdin, validates
+#                                the source_ws invariant on every create entry,
+#                                decorates each create entry's "name" field,
+#                                auto-resolves base_commit for non-fork creates
+#                                lacking one, then writes the result atomically
+#                                to ~/.claude/output/workspace_commands_<uuid>.json.
+#                                NEVER re-invoke: each call mints a fresh suffix.
+#
+#   --resolve-master [git_root]  READ-ONLY resolve mode. Prints the resolved
+#                                main/default branch name (e.g. "master" or
+#                                "main") for git_root to stdout, then exits.
+#                                git_root defaults to the current directory and
+#                                a leading "~" is expanded. Creates NO dispatch
+#                                file and mutates nothing — safe to call freely.
+#                                Resolution order:
+#                                  1. local `origin/HEAD` symref (no network).
+#                                  2. `git ls-remote --symref origin HEAD`.
+#                                Exits 3 if neither yields a branch.
+#
+# Exit codes:
+#   0  success (dispatch written, or branch name printed)
+#   1  unknown verb (usage error)
+#   2  dispatch input/validation error, or missing tooling
+#   3  --resolve-master could not determine the main branch
+#
+# Source-ws invariant (enforced before any write, DISPATCH mode only):
 #   Every `create` entry MUST carry a `source_ws` object of shape
 #     {"name": "<non-empty-str>", "path": "<non-empty-str>"}
 #   Dispatches missing either component are rejected with a clear
@@ -17,22 +41,69 @@
 # to each create entry's name as "PREFIX/name-<suffix>". When unset or
 # empty, no prefix is added and the name is emitted as "name-<suffix>".
 # There is no derivation or fallback — absent env var means no prefix.
-set -e
+#
+# When CLAUDE_WORKSPACE_ONE_SHOT is set to a non-empty value (the
+# skill exports it when invoked with `--one-shot`), every `create`
+# entry's "prompt" is augmented with a trailing instruction telling the
+# spawned workspace to open and merge its PR when the work is done. If
+# the entry already carries a prompt, the instruction is appended after
+# a blank-line separator; if it has no prompt, a prompt carrying just
+# the instruction is created. Prompt-only entries (type=="prompt") and
+# the no-one-shot case are left untouched.
+set -euo pipefail
+
+# --- Read-only resolve mode: must run BEFORE any stdin read, mktemp, or write,
+#     so a resolve call never touches ~/.claude/output/ and never consumes the
+#     dispatch payload. ---
+case "${1:-}" in
+  --resolve-master)
+    git_root="${2:-.}"
+    git_root="${git_root/#\~/$HOME}"
+    if [[ ! -d "$git_root" ]]; then
+      echo "ERROR: --resolve-master: git_root '$git_root' is not a directory" >&2
+      exit 3
+    fi
+    # 1. Local origin/HEAD symref (fast, no network). Strip the "origin/" prefix.
+    branch=$(git -C "$git_root" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##') || true
+    if [[ -z "$branch" ]]; then
+      # 2. Authoritative remote query.
+      branch=$(git -C "$git_root" ls-remote --symref origin HEAD 2>/dev/null \
+        | sed -n 's#^ref: refs/heads/\([^[:space:]]*\)[[:space:]].*#\1#p' | head -n1) || true
+    fi
+    if [[ -z "$branch" ]]; then
+      echo "ERROR: --resolve-master: could not resolve the main branch for '$git_root'." >&2
+      echo "       No local origin/HEAD symref and 'git ls-remote --symref origin HEAD' returned nothing." >&2
+      echo "       Set the local symref with 'git -C $git_root remote set-head origin -a', or verify the 'origin' remote exists and is reachable." >&2
+      exit 3
+    fi
+    printf '%s\n' "$branch"
+    exit 0
+    ;;
+  "")
+    : # No verb → DISPATCH mode (handled below).
+    ;;
+  *)
+    echo "ERROR: unknown verb '$1' (expected no args for dispatch, or '--resolve-master [git_root]')" >&2
+    exit 1
+    ;;
+esac
 
 if ! command -v uuidgen &>/dev/null; then
   echo "ERROR: uuidgen is not available. Please rebuild the sandbox image by running .claude/install.sh and try again." >&2
-  exit 1
+  exit 2
 fi
 
 if ! command -v python3 &>/dev/null; then
   echo "ERROR: python3 is not available. Please rebuild the sandbox image by running .claude/install.sh and try again." >&2
-  exit 1
+  exit 2
 fi
 
 WS_PREFIX="${CLAUDE_WORKSPACE_PREFIX:-}"
 if [[ -z "$WS_PREFIX" ]]; then
   echo "NOTICE: CLAUDE_WORKSPACE_PREFIX is unset — emitting workspace name(s) with no branch prefix. Export CLAUDE_WORKSPACE_PREFIX=<your-prefix> in the calling environment if you want one prepended (e.g. 'JB/<slug>')." >&2
 fi
+
+WS_ONE_SHOT="${CLAUDE_WORKSPACE_ONE_SHOT:-}"
 
 mkdir -p ~/.claude/output
 # BSD mktemp on macOS only substitutes X's at the END of the template, so
@@ -44,7 +115,7 @@ trap 'rm -f "$tmp"' EXIT
 
 # Pass the python program via -c so python3's stdin stays connected to
 # run.sh's stdin (a `python3 - <<'PY'` heredoc would shadow it).
-WS_PREFIX="$WS_PREFIX" python3 -c "$(cat <<'PY'
+WS_PREFIX="$WS_PREFIX" WS_ONE_SHOT="$WS_ONE_SHOT" python3 -c "$(cat <<'PY'
 import json
 import os
 import re
@@ -54,6 +125,12 @@ import subprocess
 import sys
 
 prefix = os.environ.get("WS_PREFIX", "")
+one_shot = bool(os.environ.get("WS_ONE_SHOT", "").strip())
+
+ONE_SHOT_INSTRUCTION = (
+    "When finished with the work, run /create-or-update-pr --self-certified "
+    "--rebase --add-to-merge-queue --patch to open the PR and merge it."
+)
 
 try:
     data = json.load(sys.stdin)
@@ -159,6 +236,17 @@ for entry in data:
         name = entry["name"]
         suffix = "".join(secrets.choice(string.ascii_lowercase) for _ in range(3))
         entry["name"] = f"{prefix}/{name}-{suffix}" if prefix else f"{name}-{suffix}"
+
+        # When --one-shot was requested, append the open-and-merge
+        # instruction to this create entry's prompt. Compose with an
+        # existing inline prompt via a blank-line separator, or create a
+        # prompt carrying just the instruction when none was supplied.
+        if one_shot:
+            existing = entry.get("prompt")
+            if isinstance(existing, str) and existing.strip():
+                entry["prompt"] = existing.rstrip() + "\n\n" + ONE_SHOT_INSTRUCTION
+            else:
+                entry["prompt"] = ONE_SHOT_INSTRUCTION
 
         # Auto-resolve `base_commit` for non-fork creates that didn't
         # specify one, so the downstream consumer never falls back to a

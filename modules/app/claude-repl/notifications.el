@@ -40,12 +40,12 @@
   "Select the best available desktop notification backend.
 Signals an error if no supported notification tool is found."
   (cond
+   ((executable-find claude-repl-osascript-executable)
+    (claude-repl--log nil "select-notification-backend: backend=osascript")
+    #'claude-repl--notify-backend-osascript)
    ((executable-find claude-repl-terminal-notifier-executable)
     (claude-repl--log nil "select-notification-backend: backend=terminal-notifier")
     #'claude-repl--notify-backend-terminal-notifier)
-   ((executable-find "osascript")
-    (claude-repl--log nil "select-notification-backend: backend=osascript")
-    #'claude-repl--notify-backend-osascript)
    (t
     (error "claude-repl: no notification backend available (neither terminal-notifier nor osascript found)"))))
 
