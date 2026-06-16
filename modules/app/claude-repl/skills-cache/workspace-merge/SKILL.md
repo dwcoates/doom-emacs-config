@@ -9,11 +9,18 @@ The user will name one or more existing workspaces to merge. Your job is to writ
 
 Do NOT attempt to merge the workspaces yourself in any way — **with the two explicit carve-outs below**. The handling of the merge is EXCLUSIVELY the responsibility and right of downstream consumers. Your EXCLUSIVE job is to generate the aforementioned JSON file, and NOTHING else. **Carve-outs**: (1) when the current workspace is one of the named merge targets, it MUST be rebased onto the merge target branch before dispatch (see step 2) — the goal is that downstream consumers receive conflict-free commits and do not have to reason about conflicts themselves; (2) gns-sockets subscriptions bound to the current Claude session MUST be closed before the dispatch file is written when the current workspace is one of the named merge targets (see step 3). Without the sockets cleanup, the downstream editor tears down the workspace while leaving live subscriptions wired to a dead session, dangling the daemon's state and any associated hooks.
 
+## Arguments
+
+| Argument | Behaviour |
+|---|---|
+| `<workspace>...` | One or more workspace names to merge (e.g. `DWC/feature-one`). |
+| `--onto-master` | The named workspace's PR has **already merged into `origin/master`**. The dispatch JSON carries `"onto_master": true` for each merge entry, and the downstream editor advances local `master` to `origin/master` (fast-forward) and closes the workspace, instead of cherry-picking the branch's commits. **When `--onto-master` is passed, SKIP the step-2 rebase entirely** — the commits are already upstream, so there is nothing to rebase or cherry-pick. The callers `create-or-update-pr` and `check-cicd` pass this flag because they only invoke `/workspace-merge` after confirming the PR merged. |
+
 ## Steps
 
 1. **Interpret** the user's request to identify which workspaces to merge (by name, e.g. `DWC/feature-one`).
 
-2. **Rebase onto the merge target (current workspace only).** Skip this step if the current workspace is NOT among the named merge targets identified in step 1.
+2. **Rebase onto the merge target (current workspace only).** Skip this step if the current workspace is NOT among the named merge targets identified in step 1. **Also skip this step entirely when `--onto-master` was passed** — the PR has already merged into `origin/master`, so the commits are already upstream and a rebase would only replay already-merged commits (the exact conflict the `--onto-master` path exists to avoid).
 
    a. Determine the merge target branch:
       - Read `.claude/emacs/state.el` under the current worktree root (obtain the root via `git rev-parse --show-toplevel`).
@@ -34,7 +41,7 @@ Do NOT attempt to merge the workspaces yourself in any way — **with the two ex
 3. **Close any gns-sockets subscriptions bound to this Claude session** before writing the dispatch file. The downstream editor will tear the workspace down; any subscription whose `session_id` equals the current Claude session would otherwise outlive the session that owned it. Pass every named workspace from step 1 — the script itself decides whether the current branch is among them and no-ops when it is not. Subscriptions for workspaces not currently checked out are bound to different Claude sessions and are not reachable from here.
 
    ```bash
-   bash ~/.claude/skills/workspace-merge/run.sh \
+   bash .claude/skills/workspace-merge/run.sh \
      --close-current-session-sockets DWC/feature-one DWC/feature-two
    ```
 
@@ -43,10 +50,19 @@ Do NOT attempt to merge the workspaces yourself in any way — **with the two ex
 
 4. **Write the commands** by piping JSON to `run.sh --emit-commands` using the Bash tool:
    ```bash
-   bash ~/.claude/skills/workspace-merge/run.sh --emit-commands << 'EOF'
+   bash .claude/skills/workspace-merge/run.sh --emit-commands << 'EOF'
    [
      {"type": "merge", "workspace": "DWC/feature-one"},
      {"type": "merge", "workspace": "DWC/feature-two"}
+   ]
+   EOF
+   ```
+
+   **When `--onto-master` was passed, add `"onto_master": true` to every merge entry** so the downstream editor advances local `master` from `origin/master` instead of cherry-picking:
+   ```bash
+   bash .claude/skills/workspace-merge/run.sh --emit-commands << 'EOF'
+   [
+     {"type": "merge", "workspace": "DWC/feature-one", "onto_master": true}
    ]
    EOF
    ```
