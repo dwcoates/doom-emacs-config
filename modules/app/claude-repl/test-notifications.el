@@ -13,19 +13,26 @@
 
 ;;;; ---- Tests: notification backend selection ----
 
-(ert-deftest claude-repl-test-select-backend-prefers-terminal-notifier ()
-  "When terminal-notifier is available, select it as backend."
+(ert-deftest claude-repl-test-select-backend-prefers-osascript-when-both-available ()
+  "When both osascript and terminal-notifier are available, prefer osascript."
   (cl-letf (((symbol-function 'executable-find)
-             (lambda (cmd) (when (equal cmd "terminal-notifier") "/usr/local/bin/terminal-notifier"))))
+             (lambda (_cmd) "/usr/bin/found")))
     (should (eq (claude-repl--select-notification-backend)
-                #'claude-repl--notify-backend-terminal-notifier))))
+                #'claude-repl--notify-backend-osascript))))
 
-(ert-deftest claude-repl-test-select-backend-falls-back-to-osascript ()
-  "When terminal-notifier is NOT available but osascript is, use osascript."
+(ert-deftest claude-repl-test-select-backend-uses-osascript-when-only-osascript ()
+  "When only osascript is available, select osascript."
   (cl-letf (((symbol-function 'executable-find)
              (lambda (cmd) (when (equal cmd "osascript") "/usr/bin/osascript"))))
     (should (eq (claude-repl--select-notification-backend)
                 #'claude-repl--notify-backend-osascript))))
+
+(ert-deftest claude-repl-test-select-backend-falls-back-to-terminal-notifier ()
+  "When osascript is NOT available but terminal-notifier is, use terminal-notifier."
+  (cl-letf (((symbol-function 'executable-find)
+             (lambda (cmd) (when (equal cmd "terminal-notifier") "/usr/local/bin/terminal-notifier"))))
+    (should (eq (claude-repl--select-notification-backend)
+                #'claude-repl--notify-backend-terminal-notifier))))
 
 (ert-deftest claude-repl-test-select-backend-errors-when-none-available ()
   "When neither terminal-notifier nor osascript is available, signal an error."
