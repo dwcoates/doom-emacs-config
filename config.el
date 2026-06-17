@@ -840,7 +840,7 @@ If found, the class name is returned, otherwise STR is returned"
 ;; Centered cursor mode
 (use-package! centered-cursor-mode
   :config
-  (global-centered-cursor-mode 1))
+  (global-centered-cursor-mode -1))
 
 (after! which-key
   (setq which-key-idle-delay 1
