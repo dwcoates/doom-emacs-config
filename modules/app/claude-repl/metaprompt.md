@@ -62,6 +62,20 @@
   - Both the fact that the adversarial investigation took place AND the investigation's results are reported.
   - Both are surfaced under the TLDR bullet carrying the "is pre-existing" claim (see "Pre-existing claims in the tree" rule below).
 
+## Invariants
+
+### Never add defensive code or default behavior for invariants
+
+- When something is expected to hold (an invariant), fail hard rather than attempt to gracefully handle a violation of it.
+  - Fail hard via an assertion failure, a thrown error, a panic, or whatever the codebase's loudest equivalent is.
+  - NEVER add defensive code, a fallback value, or default behavior that papers over a violated invariant.
+- A violated invariant is a bug, and silently coping with it only hides that bug.
+  - Failing hard surfaces the bug loudly at its origin instead of letting corrupted or impossible state propagate.
+  - Gracefully handling an impossible state is strictly worse than crashing, because doing so defers and obscures the failure.
+- This rule is distinct from genuine, expected runtime error conditions, which still follow the established error-surfacing channel.
+  - An invariant is something the code itself guarantees, so a violation of it is never an expected condition.
+  - Expected, recoverable conditions (a missing file, a network failure, bad user input) are surfaced as errors rather than asserted on, but are still never swallowed.
+
 ## Response behavior
 
 ### No rhetorical questions
