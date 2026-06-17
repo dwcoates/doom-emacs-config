@@ -366,6 +366,20 @@ Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
              (concat "other mutating git commands.*" op)
              claude-repl-command-prefix))))
 
+(ert-deftest claude-repl-test-command-prefix-houses-fail-hard-invariants-directive ()
+  "The metaprompt must forbid defensive code or default behavior for invariants,
+mandating a hard failure (assertion/throw/panic) when an invariant is violated."
+  ;; The section heading announcing the directive is present.
+  (should (string-match-p
+           "Never add defensive code or default behavior for invariants"
+           claude-repl-command-prefix))
+  ;; The fail-hard instruction is present.
+  (should (string-match-p "fail hard" claude-repl-command-prefix))
+  ;; Papering over a violated invariant with a fallback/default is forbidden.
+  (should (string-match-p
+           "NEVER add defensive code, a fallback value, or default behavior"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-mandates-entire-response-is-tree ()
   "`claude-repl-command-prefix' must mandate that the entire response itself be a single TLDR tree."
   (should (stringp claude-repl-command-prefix))
