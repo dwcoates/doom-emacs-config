@@ -1362,6 +1362,13 @@ invocation of the `/workspace-generation' skill.  The skill writes a
 JSON command file to ~/.claude/output/, which the existing file-watcher
 picks up to actually create the worktree.
 
+The preemptive prompt is OPTIONAL.  When it is left empty (or
+whitespace-only), no name generation and no worktree creation happen at
+all: instead a plain workspace is created via `claude-repl--new-workspace'
+(rooted at the resolved GIT-ROOT, Claude not started) and focus switches
+to it.  A non-empty prompt drives the full worktree-workspace flow
+described above.
+
 BASE selects the git ref the new branch is created from.  It is a
 symbol key in `claude-repl--worktree-base-commits':
   `head'   — branch off the current worktree's HEAD (default; edits
@@ -1396,17 +1403,22 @@ the JSON file lands and the file-watcher dispatches it."
          (effective-source-ws (or source-ws (claude-repl--ws-current-name)))
          (source-dir (ignore-errors (claude-repl--ws-dir effective-source-ws)))
          (git-root (or source-dir (claude-repl--resolve-current-git-root)))
-         (raw-prompt (read-string "Preemptive prompt: ")))
-    (when (string-empty-p (string-trim (or raw-prompt "")))
-      (claude-repl--log nil "create-worktree-workspace: ABORT empty preemptive prompt, signalling user-error")
-      (user-error "Preemptive prompt is required"))
-    (let ((prefixed-prompt (concat claude-repl--autonomous-prompt-prefix raw-prompt)))
-      (claude-repl--log nil "create-worktree-workspace: base=%s base-commit=%s source-ws=%s git-root=%s"
-                        base base-commit (or source-ws "nil") git-root)
-      (message "Generating workspace name via `claude -p --model %s'..."
-               claude-repl-workspace-generation-model)
-      (claude-repl--spawn-workspace-generation
-       raw-prompt prefixed-prompt git-root base-commit nil))))
+         (raw-prompt (read-string "Preemptive prompt (empty for plain workspace): ")))
+    (if (string-empty-p (string-trim (or raw-prompt "")))
+        ;; No preemptive prompt: skip name-generation entirely and create a
+        ;; plain workspace (Claude not started) rooted at GIT-ROOT, switching
+        ;; focus to it. A blank prompt is no longer an error.
+        (progn
+          (claude-repl--log nil "create-worktree-workspace: empty preemptive prompt, creating plain workspace (claude not started) rooted at %s"
+                            git-root)
+          (claude-repl--new-workspace git-root))
+      (let ((prefixed-prompt (concat claude-repl--autonomous-prompt-prefix raw-prompt)))
+        (claude-repl--log nil "create-worktree-workspace: base=%s base-commit=%s source-ws=%s git-root=%s"
+                          base base-commit (or source-ws "nil") git-root)
+        (message "Generating workspace name via `claude -p --model %s'..."
+                 claude-repl-workspace-generation-model)
+        (claude-repl--spawn-workspace-generation
+         raw-prompt prefixed-prompt git-root base-commit nil)))))
 
 (defconst claude-repl--oneshot-no-action-suffix ". dont take action"
   "Suffix appended to a one-shot preemptive prompt when the user dispatches
@@ -1615,17 +1627,23 @@ SOURCE-WS from the persp workspace list."
         (claude-repl--spawn-workspace-generation
          raw-prompt prefixed-prompt git-root "HEAD" fork-ws)))))
 
-(defun claude-repl--new-workspace ()
+(defun claude-repl--new-workspace (&optional root)
   "Create a new workspace and open magit-status in it, mirroring
 the behavior of `+workspaces-switch-project-function'.
 Signals an error if not inside a git repository.
+
+ROOT, when non-nil, is the absolute git root the new workspace is rooted
+in; otherwise it is resolved from `default-directory' via
+`claude-repl--git-root'.  Callers that have already resolved a root
+(e.g. the empty-prompt path of `claude-repl-create-worktree-workspace')
+pass it here so the new workspace honors the same source repository.
 
 Applies `claude-repl-repo-default-priorities' for ROOT's repo: the
 default priority is written onto the workspace plist before
 `--initialize-ws-env' so it survives the initial state-save (and is
 overridden by any saved priority for the same project)."
   (interactive)
-  (let ((root (claude-repl--git-root)))
+  (let ((root (or root (claude-repl--git-root))))
     (unless root
       (error "claude-repl--new-workspace: not in a git repository"))
     (claude-repl--log (claude-repl--ws-current-name) "new-workspace: root=%s" root)
