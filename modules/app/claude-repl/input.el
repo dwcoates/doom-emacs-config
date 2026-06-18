@@ -9,7 +9,7 @@
   :type 'boolean
   :group 'claude-repl)
 
-(defcustom claude-repl-prefix-period 7
+(defcustom claude-repl-prefix-period 14
   "Number of prompts between metaprompt prefix injections.
 The prefix is sent on the first prompt and every Nth prompt thereafter."
   :type 'integer

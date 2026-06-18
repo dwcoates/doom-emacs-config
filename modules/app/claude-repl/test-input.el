@@ -3396,8 +3396,8 @@ Mirrors the append-to-input-buffer dead-buffer case."
   (should (eq (default-value 'claude-repl-skip-permissions) t)))
 
 (ert-deftest claude-repl-test-prefix-period-default ()
-  "`claude-repl-prefix-period' should default to 7."
-  (should (= (default-value 'claude-repl-prefix-period) 7)))
+  "`claude-repl-prefix-period' should default to 14."
+  (should (= (default-value 'claude-repl-prefix-period) 14)))
 
 (ert-deftest claude-repl-test-scroll-lines-default ()
   "`claude-repl-scroll-lines' should default to 15."
