@@ -190,6 +190,52 @@ recovered source workspaces appended to `:merge-queue' for retry."
 
 (claude-repl--early-recover-orphan-cherry-picks)
 
+;; ---- Loaded-version SHA ----
+;;
+;; `claude-repl--version' caches the git SHA of the doom config that this
+;; module was loaded from.  It is refreshed via `setq' (NOT `defvar') on
+;; every load below, so `M-x doom/reload' updates it to the freshly
+;; checked-out SHA instead of keeping the value captured at first startup.
+;; `claude-repl-version' surfaces it interactively.
+
+(defvar claude-repl--version nil
+  "Git SHA of the doom config this claude-repl module was last loaded from.
+Refreshed on every load (including `M-x doom/reload') by the
+`noninteractive'-gated `setq' below, so it always reflects the version
+actually running rather than a stale first-startup value.  nil when the
+SHA could not be determined.")
+
+(defun claude-repl--compute-version ()
+  "Return the git SHA of the doom repo this module was loaded from, or nil.
+Resolves the repo from `claude-repl--config-file's directory so a linked
+worktree reports its own checked-out SHA rather than the primary
+worktree's.  Returns nil when the config-file path is unknown or git
+cannot resolve a SHA (for example outside a repository).
+
+Uses the early-boundary `claude-repl--early-git-string' wrapper so this
+helper has no dependency on `core.el' having loaded — it runs at the
+config-loader top level alongside the early-recovery code."
+  (when claude-repl--config-file
+    (let ((sha (claude-repl--early-git-string
+                "-C" (file-name-directory claude-repl--config-file)
+                "rev-parse" "HEAD")))
+      (and (not (string-empty-p sha)) sha))))
+
+;; Refresh on EVERY load so reloads pick up the new SHA.  Gated against
+;; `noninteractive' (mirroring core.el's startup log rotate) so batch ERT
+;; runs neither shell out to real `git' nor depend on the repo state.
+(unless noninteractive
+  (setq claude-repl--version (claude-repl--compute-version)))
+
+(defun claude-repl-version ()
+  "Display the git SHA of the loaded doom config in the echo area.
+Reads the cached `claude-repl--version', refreshed on every load, and
+returns the SHA string (or the sentinel \"unknown\" when undetermined)."
+  (interactive)
+  (let ((version (or claude-repl--version "unknown")))
+    (message "claude-repl version: %s" version)
+    version))
+
 (claude-repl--load-module "core")
 ;; WHY: workspace.el owns `claude-repl--workspaces' and the hash
 ;; accessors that nearly every other module uses.  Must load right

@@ -214,6 +214,68 @@ must not even probe for CHERRY_PICK_HEAD against a partial entry."
           (should (null ifm))
           (should (null mq)))))))
 
+;;;; ---- Tests: loaded-version SHA ----
+
+(ert-deftest claude-repl-config-test-version/defvar-defaults-nil ()
+  "`claude-repl--version' is declared (the batch load leaves it nil since
+the refresh `setq' is gated behind `noninteractive')."
+  (should (boundp 'claude-repl--version)))
+
+(ert-deftest claude-repl-config-test-compute-version/returns-trimmed-sha ()
+  "`--compute-version' returns the SHA produced by the early-git wrapper."
+  (let ((claude-repl--config-file "/tmp/doom/modules/app/claude-repl/config.el"))
+    (cl-letf (((symbol-function 'claude-repl--early-git-string)
+               (lambda (&rest _args) "deadbeefcafef00d")))
+      (should (equal (claude-repl--compute-version) "deadbeefcafef00d")))))
+
+(ert-deftest claude-repl-config-test-compute-version/passes-config-dir-to-git ()
+  "`--compute-version' runs `rev-parse HEAD' in the config file's directory
+so a linked worktree reports its own SHA."
+  (let ((claude-repl--config-file "/tmp/doom/modules/app/claude-repl/config.el")
+        (captured nil))
+    (cl-letf (((symbol-function 'claude-repl--early-git-string)
+               (lambda (&rest args) (setq captured args) "abc123")))
+      (claude-repl--compute-version)
+      (should (equal captured
+                     '("-C" "/tmp/doom/modules/app/claude-repl/"
+                       "rev-parse" "HEAD"))))))
+
+(ert-deftest claude-repl-config-test-compute-version/empty-sha-is-nil ()
+  "An empty string from git (not a repo, etc.) maps to nil, not \"\"."
+  (let ((claude-repl--config-file "/tmp/doom/modules/app/claude-repl/config.el"))
+    (cl-letf (((symbol-function 'claude-repl--early-git-string)
+               (lambda (&rest _args) "")))
+      (should (null (claude-repl--compute-version))))))
+
+(ert-deftest claude-repl-config-test-compute-version/nil-config-file-is-nil ()
+  "When the config-file path is unknown, `--compute-version' returns nil
+without shelling out to git."
+  (let ((claude-repl--config-file nil)
+        (git-called nil))
+    (cl-letf (((symbol-function 'claude-repl--early-git-string)
+               (lambda (&rest _args) (setq git-called t) "abc")))
+      (should (null (claude-repl--compute-version)))
+      (should-not git-called))))
+
+(ert-deftest claude-repl-config-test-version-command/messages-and-returns-sha ()
+  "`claude-repl-version' messages and returns the cached SHA."
+  (let ((claude-repl--version "feedface1234")
+        (messaged nil))
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args) (setq messaged (apply #'format fmt args)))))
+      (should (equal (claude-repl-version) "feedface1234"))
+      (should (equal messaged "claude-repl version: feedface1234")))))
+
+(ert-deftest claude-repl-config-test-version-command/unknown-when-nil ()
+  "`claude-repl-version' reports the \"unknown\" sentinel when the cached
+SHA is nil."
+  (let ((claude-repl--version nil)
+        (messaged nil))
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args) (setq messaged (apply #'format fmt args)))))
+      (should (equal (claude-repl-version) "unknown"))
+      (should (equal messaged "claude-repl version: unknown")))))
+
 (provide 'test-config)
 
 ;;; test-config.el ends here
