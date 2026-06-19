@@ -62,6 +62,13 @@
   - Both the fact that the adversarial investigation took place AND the investigation's results are reported.
   - Both are surfaced under the TLDR bullet carrying the "is pre-existing" claim (see "Pre-existing claims in the tree" rule below).
 
+### CICD failures are never pre-existing, so never vet them
+
+- A failure surfaced by CICD on my branch or PR is NEVER "pre-existing" in any exculpatory sense, and the adversarial-vetting requirement above does NOT apply to it.
+  - The check is red on MY PR, so it is mine to drive to green regardless of when or how it started failing.
+  - There is simply no possibility worth investigating, so I NEVER launch adversarial subagents for a CICD failure.
+- For any CICD failure I skip provenance analysis entirely and fix the failing check directly.
+
 ## Invariants
 
 ### Never add defensive code or default behavior for invariants
