@@ -2064,18 +2064,28 @@ silently return a colliding name."
     (cl-letf (((symbol-function 'claude-repl--finalize-worktree-workspace)
                (lambda (&rest _args) (setq finalized t))))
       (claude-repl--worktree-add-callback
-       "/tmp/path" "dirname" nil nil nil nil nil nil nil "git error output")
+       "/tmp/path" "dirname" nil nil nil nil nil nil nil nil "git error output")
       (should-not finalized))))
 
 (ert-deftest claude-repl-test-worktree-add-callback-success ()
   "When git worktree add succeeds, finalize is called."
   (let ((finalized nil))
     (cl-letf (((symbol-function 'claude-repl--finalize-worktree-workspace)
-               (lambda (path dirname prompt priority fork-id bare-metal _cb &optional source-dir)
-                 (setq finalized (list path dirname prompt priority fork-id bare-metal source-dir)))))
+               (lambda (path dirname prompt priority fork-id bare-metal _cb &optional source-dir no-claude)
+                 (setq finalized (list path dirname prompt priority fork-id bare-metal source-dir no-claude)))))
       (claude-repl--worktree-add-callback
-       "/tmp/path" "dirname" "prompt" 5 "fork-123" nil nil "/src/dir" t "ok")
-      (should (equal finalized '("/tmp/path" "dirname" "prompt" 5 "fork-123" nil "/src/dir"))))))
+       "/tmp/path" "dirname" "prompt" 5 "fork-123" nil nil "/src/dir" nil t "ok")
+      (should (equal finalized '("/tmp/path" "dirname" "prompt" 5 "fork-123" nil "/src/dir" nil))))))
+
+(ert-deftest claude-repl-test-worktree-add-callback-forwards-no-claude ()
+  "NO-CLAUDE is forwarded to `claude-repl--finalize-worktree-workspace'."
+  (let ((captured :unset))
+    (cl-letf (((symbol-function 'claude-repl--finalize-worktree-workspace)
+               (lambda (_path _dirname _prompt _priority _fork _bm _cb &optional _src no-claude)
+                 (setq captured no-claude))))
+      (claude-repl--worktree-add-callback
+       "/tmp/path" "dirname" nil nil nil nil nil "/src/dir" t t "ok")
+      (should (eq captured t)))))
 
 ;;;; ---- Tests: worktree-fetch-callback ----
 
@@ -4767,6 +4777,66 @@ receives nil so the workspace uses bare-metal by default."
        "/tmp/new-wt" "new-ws" nil nil nil nil nil nil)
       (should (null (claude-repl--ws-get "new-ws" :source-ws-dir))))))
 
+(ert-deftest claude-repl-test-finalize-worktree-workspace-forwards-no-claude ()
+  "Finalize forwards NO-CLAUDE to `claude-repl--setup-worktree-session'."
+  (claude-repl-test--with-clean-state
+    (let ((captured :unset))
+      (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+                 (lambda (&rest _) nil))
+                ((symbol-function '+workspace-new) (lambda (_ws) nil))
+                ((symbol-function 'claude-repl--setup-worktree-session)
+                 (lambda (_ws-id _path _ws _force-sandbox &optional no-claude)
+                   (setq captured no-claude)))
+                ((symbol-function 'claude-repl--path-canonical) #'identity)
+                ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) "")))
+        (claude-repl--finalize-worktree-workspace
+         "/tmp/new-wt" "new-ws" nil nil nil nil nil "/tmp/source-repo/" t)
+        (should (eq captured t))))))
+
+;;;; ---- Tests: setup-worktree-session no-claude branch ----
+
+(ert-deftest claude-repl-test-setup-worktree-session-boots-claude-by-default ()
+  "Without NO-CLAUDE, setup starts Claude via `initialize-claude'."
+  (let ((init-claude-called nil)
+        (init-env-called nil))
+    (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--initialize-claude)
+               (lambda (&rest _) (setq init-claude-called t)))
+              ((symbol-function 'claude-repl--initialize-ws-env)
+               (lambda (&rest _) (setq init-env-called t)))
+              ((symbol-function 'claude-repl--active-inst)
+               (lambda (_ws) (make-claude-repl-instantiation :start-cmd "claude"))))
+      (claude-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil)
+      (should init-claude-called)
+      (should-not init-env-called))))
+
+(ert-deftest claude-repl-test-setup-worktree-session-no-claude-skips-boot ()
+  "With NO-CLAUDE, setup hydrates env via `initialize-ws-env' and never boots Claude."
+  (let ((init-claude-called nil)
+        (init-env-called nil))
+    (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--initialize-claude)
+               (lambda (&rest _) (setq init-claude-called t)))
+              ((symbol-function 'claude-repl--initialize-ws-env)
+               (lambda (&rest _) (setq init-env-called t))))
+      (claude-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil t)
+      (should-not init-claude-called)
+      (should init-env-called))))
+
+(ert-deftest claude-repl-test-setup-worktree-session-no-claude-still-registers-worktree ()
+  "With NO-CLAUDE, the workspace is still registered as a worktree workspace."
+  (let ((registered nil))
+    (cl-letf (((symbol-function 'claude-repl--register-worktree-ws)
+               (lambda (_ws-id &optional _ws) (setq registered t)))
+              ((symbol-function 'claude-repl--initialize-claude)
+               (lambda (&rest _) (error "should not boot Claude")))
+              ((symbol-function 'claude-repl--initialize-ws-env)
+               (lambda (&rest _) nil)))
+      (claude-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil t)
+      (should registered))))
+
 (ert-deftest claude-repl-test-finalize-worktree-workspace-calls-reorder-by-priority ()
   "Finalize invokes reorder-workspace-by-priority after applying properties.
 Reorder must run after `apply-workspace-properties' so the new workspace's
@@ -6237,38 +6307,149 @@ unprefixed — the prefix is reserved for the new ws session, not for naming."
         (should (equal captured-raw "do the thing"))
         (should-not (string-prefix-p claude-repl--autonomous-prompt-prefix captured-raw))))))
 
-(ert-deftest claude-repl-test-create-worktree-workspace-blank-prompt-creates-plain-workspace ()
-  "An empty preemptive prompt no longer errors: it creates a plain workspace
-\(Claude not started) via `claude-repl--new-workspace' instead of spawning
-name generation."
+(ert-deftest claude-repl-test-create-worktree-workspace-blank-prompt-prompts-for-name ()
+  "An empty preemptive prompt prompts for the workspace name with a second
+minibuffer read rather than erroring or spawning name generation."
   (claude-repl-test--with-clean-state
-    (let ((new-ws-called nil))
+    (let ((prompts nil))
       (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
                  (lambda () "/tmp/repo/"))
                 ((symbol-function 'read-string)
-                 (lambda (&rest _) "   "))
-                ((symbol-function 'claude-repl--new-workspace)
-                 (lambda (&rest _) (setq new-ws-called t)))
+                 (lambda (prompt &rest _)
+                   (push prompt prompts)
+                   (if (= (length prompts) 1) "" "my-ws")))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (&rest _) nil))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (&rest _) (error "should not be called"))))
         (claude-repl-create-worktree-workspace 'head)
-        (should new-ws-called)))))
+        (should (= (length prompts) 2))
+        (should (string-match-p "Workspace name" (car prompts)))))))
 
-(ert-deftest claude-repl-test-create-worktree-workspace-blank-prompt-passes-git-root ()
-  "The empty-prompt plain-workspace path roots the new workspace at the
-resolved GIT-ROOT (so a source-ws selection is honored)."
+(ert-deftest claude-repl-test-create-worktree-workspace-blank-prompt-creates-worktree-no-claude ()
+  "An empty preemptive prompt creates the worktree via
+`claude-repl--do-create-worktree-workspace' with NO-CLAUDE = t (Claude
+not auto-booted) instead of spawning name generation."
   (claude-repl-test--with-clean-state
-    (let ((captured-root nil))
+    (let ((captured-name nil)
+          (captured-no-claude :unset))
       (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
                  (lambda () "/tmp/repo/"))
                 ((symbol-function 'read-string)
-                 (lambda (&rest _) ""))
-                ((symbol-function 'claude-repl--new-workspace)
-                 (lambda (&optional root) (setq captured-root root)))
+                 (let ((n 0))
+                   (lambda (&rest _)
+                     (setq n (1+ n))
+                     (if (= n 1) "" "my-ws"))))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (name &optional _fs _fork _prompt _cb _prio _base _root _src no-claude)
+                   (setq captured-name name)
+                   (setq captured-no-claude no-claude)))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (&rest _) (error "should not be called"))))
+        (claude-repl-create-worktree-workspace 'head)
+        (should (equal captured-name "my-ws"))
+        (should (eq captured-no-claude t))))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-blank-prompt-empty-name-errors ()
+  "An empty preemptive prompt followed by an empty workspace name signals a
+`user-error' rather than creating a worktree."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+               (lambda () "/tmp/repo/"))
+              ((symbol-function 'read-string)
+               (lambda (&rest _) "   "))
+              ((symbol-function 'claude-repl--do-create-worktree-workspace)
+               (lambda (&rest _) (error "should not be called")))
+              ((symbol-function 'claude-repl--spawn-workspace-generation)
+               (lambda (&rest _) (error "should not be called"))))
+      (should-error (claude-repl-create-worktree-workspace 'head)
+                    :type 'user-error))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-blank-prompt-passes-git-root ()
+  "The empty-prompt named-worktree path roots the new worktree at the
+resolved GIT-ROOT (so a source-ws selection is honored)."
+  (claude-repl-test--with-clean-state
+    (let ((captured-root :unset))
+      (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+                 (lambda () "/tmp/repo/"))
+                ((symbol-function 'read-string)
+                 (let ((n 0))
+                   (lambda (&rest _)
+                     (setq n (1+ n))
+                     (if (= n 1) "" "my-ws"))))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name &optional _fs _fork _prompt _cb _prio _base git-root &rest _)
+                   (setq captured-root git-root)))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (&rest _) (error "should not be called"))))
         (claude-repl-create-worktree-workspace 'head)
         (should (equal captured-root "/tmp/repo/"))))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-blank-prompt-head-source-dir-is-git-root ()
+  "For BASE = `head' the empty-prompt path passes GIT-ROOT as the worktree's
+source-dir (drawer parent), never the master worktree."
+  (claude-repl-test--with-clean-state
+    (let ((captured-src :unset)
+          (master-called nil))
+      (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+                 (lambda () "/tmp/repo/"))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_root) (setq master-called t) "/tmp/master/"))
+                ((symbol-function 'read-string)
+                 (let ((n 0))
+                   (lambda (&rest _)
+                     (setq n (1+ n))
+                     (if (= n 1) "" "my-ws"))))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name &optional _fs _fork _prompt _cb _prio _base _root src &rest _)
+                   (setq captured-src src)))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (&rest _) (error "should not be called"))))
+        (claude-repl-create-worktree-workspace 'head)
+        (should-not master-called)
+        (should (equal captured-src "/tmp/repo/"))))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-blank-prompt-master-source-dir-is-master-worktree ()
+  "For BASE = `master' the empty-prompt path derives the worktree's source-dir
+from the master worktree (mirroring `--create-worktree-from-command')."
+  (claude-repl-test--with-clean-state
+    (let ((captured-src :unset))
+      (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+                 (lambda () "/tmp/repo/"))
+                ((symbol-function 'claude-repl--master-worktree-path)
+                 (lambda (_root) "/tmp/master/"))
+                ((symbol-function 'read-string)
+                 (let ((n 0))
+                   (lambda (&rest _)
+                     (setq n (1+ n))
+                     (if (= n 1) "" "my-ws"))))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name &optional _fs _fork _prompt _cb _prio _base _root src &rest _)
+                   (setq captured-src src)))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (&rest _) (error "should not be called"))))
+        (claude-repl-create-worktree-workspace 'master)
+        (should (equal captured-src "/tmp/master/"))))))
+
+(ert-deftest claude-repl-test-create-worktree-workspace-blank-prompt-switches-focus ()
+  "The empty-prompt path passes the switch callback so focus jumps to the
+newly created worktree."
+  (claude-repl-test--with-clean-state
+    (let ((captured-cb :unset))
+      (cl-letf (((symbol-function 'claude-repl--resolve-current-git-root)
+                 (lambda () "/tmp/repo/"))
+                ((symbol-function 'read-string)
+                 (let ((n 0))
+                   (lambda (&rest _)
+                     (setq n (1+ n))
+                     (if (= n 1) "" "my-ws"))))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name &optional _fs _fork _prompt cb &rest _)
+                   (setq captured-cb cb)))
+                ((symbol-function 'claude-repl--spawn-workspace-generation)
+                 (lambda (&rest _) (error "should not be called"))))
+        (claude-repl-create-worktree-workspace 'head)
+        (should (eq captured-cb #'claude-repl--worktree-creation-switch-callback))))))
 
 (ert-deftest claude-repl-test-create-worktree-workspace-logs-entry-before-prompt-read ()
   "An ENTRY log line is emitted BEFORE `read-string' so a cancelled minibuffer
@@ -6295,8 +6476,8 @@ or empty prompt still leaves a trace that the keybinding fired."
                            (string-match-p "create-worktree-workspace: ENTRY" s))
                          logs))))))
 
-(ert-deftest claude-repl-test-create-worktree-workspace-logs-plain-workspace-on-empty-prompt ()
-  "Empty preemptive prompt logs the plain-workspace creation path, so the
+(ert-deftest claude-repl-test-create-worktree-workspace-logs-named-worktree-on-empty-prompt ()
+  "Empty preemptive prompt logs the named-worktree creation path, so the
 no-prompt branch is visible in the log."
   (claude-repl-test--with-clean-state
     (let ((logs nil))
@@ -6306,14 +6487,17 @@ no-prompt branch is visible in the log."
                 ((symbol-function 'claude-repl--resolve-current-git-root)
                  (lambda () "/tmp/repo/"))
                 ((symbol-function 'read-string)
-                 (lambda (&rest _) "   "))
-                ((symbol-function 'claude-repl--new-workspace)
+                 (let ((n 0))
+                   (lambda (&rest _)
+                     (setq n (1+ n))
+                     (if (= n 1) "" "my-ws"))))
+                ((symbol-function 'claude-repl--do-create-worktree-workspace)
                  (lambda (&rest _) nil))
                 ((symbol-function 'claude-repl--spawn-workspace-generation)
                  (lambda (&rest _) (error "should not be called"))))
         (claude-repl-create-worktree-workspace 'head)
         (should (cl-some (lambda (s)
-                           (string-match-p "empty preemptive prompt, creating plain workspace" s))
+                           (string-match-p "empty preemptive prompt, creating worktree" s))
                          logs))))))
 
 (ert-deftest claude-repl-test-create-worktree-workspace-from-origin-master-logs-entry ()

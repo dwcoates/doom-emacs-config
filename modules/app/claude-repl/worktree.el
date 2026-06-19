@@ -449,16 +449,27 @@ root is recorded by `claude-repl--initialize-ws-env', not here."
     (claude-repl--log ws "register-worktree-ws ws-id=%s ws=%s" ws-id ws)
     (claude-repl--ws-put ws :worktree-p t)))
 
-(defun claude-repl--setup-worktree-session (ws-id path ws force-sandbox)
+(defun claude-repl--setup-worktree-session (ws-id path ws force-sandbox &optional no-claude)
   "Register WS as a worktree at PATH and start its Claude session.
 Passes PATH and the desired environment as hints to `initialize-claude',
 which threads them into `initialize-ws-env' (the sole writer of
-`:project-dir', `:active-env', and per-env instantiation structs)."
+`:project-dir', `:active-env', and per-env instantiation structs).
+
+When NO-CLAUDE is non-nil, the worktree is still registered as a
+worktree workspace but Claude is NOT booted: only the env state is
+hydrated via `initialize-ws-env' (the same hints `initialize-claude'
+would have threaded through), mirroring `claude-repl--new-workspace'.
+This is the `SPC TAB n/N' empty-preemptive-prompt path — a worktree
+created exactly as usual, minus the auto-started Claude session."
   (claude-repl--register-worktree-ws ws-id ws)
   (let ((default-directory (file-name-as-directory path)))
-    (claude-repl--initialize-claude ws path (if force-sandbox :sandbox :bare-metal)))
-  (claude-repl--log ws "worktree pre-started Claude ws=%s cmd=%s"
-                    ws (claude-repl-instantiation-start-cmd (claude-repl--active-inst ws))))
+    (if no-claude
+        (progn
+          (claude-repl--initialize-ws-env ws path (if force-sandbox :sandbox :bare-metal))
+          (claude-repl--log ws "worktree NOT starting Claude (no-claude) ws=%s" ws))
+      (claude-repl--initialize-claude ws path (if force-sandbox :sandbox :bare-metal))
+      (claude-repl--log ws "worktree pre-started Claude ws=%s cmd=%s"
+                        ws (claude-repl-instantiation-start-cmd (claude-repl--active-inst ws))))))
 
 (defun claude-repl--async-git-sentinel (proc _event)
   "Process sentinel for `claude-repl--async-git'.
@@ -1073,7 +1084,7 @@ not resolve to a known workspace, or that workspace has no priority."
 
 (defun claude-repl--finalize-worktree-workspace (path dirname preemptive-prompt
                                                        priority fork-session-id force-sandbox
-                                                       callback &optional source-dir)
+                                                       callback &optional source-dir no-claude)
   "Finalize a new worktree workspace at PATH with directory name DIRNAME.
 Registers the project with projectile, creates a Doom workspace, applies
 optional PREEMPTIVE-PROMPT, PRIORITY, FORK-SESSION-ID, and SOURCE-DIR
@@ -1101,7 +1112,12 @@ stays invisible to the user — the caller's workspace and window
 remain selected when finalize returns.  CALLBACK, when provided,
 runs OUTSIDE the focus-preservation wrapper so callers that
 deliberately want to switch (e.g. interactive worktree creation that
-should jump to the new ws) are not silently undone."
+should jump to the new ws) are not silently undone.
+
+NO-CLAUDE, when non-nil, is forwarded to
+`claude-repl--setup-worktree-session' so the worktree is registered
+without booting a Claude session — the `SPC TAB n/N'
+empty-preemptive-prompt path."
   (claude-repl--log dirname "finalize-worktree-workspace: path=%s dirname=%s priority=%s fork-session-id=%s force-sandbox=%s source-dir=%s"
                     path dirname priority fork-session-id force-sandbox (or source-dir "nil"))
   (claude-repl--with-preserved-focus
@@ -1144,7 +1160,7 @@ should jump to the new ws) are not silently undone."
           (when (and parent-branch (not (string-empty-p parent-branch)) (not (string-prefix-p "fatal" parent-branch)))
             (claude-repl--ws-put ws :parent-branch-name parent-branch))))
       (claude-repl--reorder-workspace-by-priority ws)
-      (claude-repl--setup-worktree-session ws-id path ws force-sandbox)
+      (claude-repl--setup-worktree-session ws-id path ws force-sandbox no-claude)
       (when (fboundp 'claude-repl--events-record)
         (claude-repl--events-record ws :create))
       (message "Worktree '%s' ready." dirname)))
@@ -1158,19 +1174,20 @@ should jump to the new ws) are not silently undone."
 
 (defun claude-repl--worktree-add-callback (path dirname preemptive-prompt
                                                priority fork-session-id force-sandbox
-                                               callback source-dir ok output)
+                                               callback source-dir no-claude ok output)
   "Handle the result of an async git-worktree-add operation.
 OK and OUTPUT are the success flag and git output.  The remaining arguments
 describe the workspace being created and are forwarded to
 `claude-repl--finalize-worktree-workspace' (including SOURCE-DIR, the
-project-dir of the workspace this worktree was created from)."
+project-dir of the workspace this worktree was created from, and
+NO-CLAUDE, which suppresses booting Claude for the new worktree)."
   (claude-repl--log dirname "worktree git result: %s" output)
   (if ok
       (progn
         (claude-repl--log dirname "worktree-add-callback: ok=t path=%s dirname=%s" path dirname)
         (claude-repl--finalize-worktree-workspace
          path dirname preemptive-prompt
-         priority fork-session-id force-sandbox callback source-dir))
+         priority fork-session-id force-sandbox callback source-dir no-claude))
     (claude-repl--log dirname "worktree-add-callback: ok=nil (git worktree add failed) path=%s" path)
     (message "git worktree add failed: %s" output)))
 
@@ -1178,7 +1195,7 @@ project-dir of the workspace this worktree was created from)."
                                               fork-session-id
                                               dirname preemptive-prompt
                                               priority force-sandbox callback
-                                              &optional source-dir)
+                                              &optional source-dir no-claude)
   "Run `git worktree add' asynchronously for a new worktree.
 Creates the worktree at PATH on BRANCH-NAME off BASE-COMMIT in GIT-ROOT.
 On success, also creates the companion start tag at BASE-COMMIT (see
@@ -1187,7 +1204,8 @@ remain stable as the upstream base branch advances.
 When the git command finishes, `claude-repl--worktree-add-callback'
 finalizes the workspace.  SOURCE-DIR is the project-dir of the workspace
 this worktree was created from; threaded through to be persisted as
-`:source-ws-dir' on the new workspace."
+`:source-ws-dir' on the new workspace.  NO-CLAUDE, when non-nil, is
+forwarded so the new worktree is registered without booting Claude."
   (let* ((add-args (list "worktree" "add" "-b" branch-name path base-commit))
          (after-add (lambda (ok output)
                       (when ok
@@ -1196,7 +1214,7 @@ this worktree was created from; threaded through to be persisted as
                       (claude-repl--worktree-add-callback
                        path dirname preemptive-prompt
                        priority fork-session-id force-sandbox callback source-dir
-                       ok output))))
+                       no-claude ok output))))
     (claude-repl--log dirname "worktree async git add: %S" add-args)
     (claude-repl--async-git "worktree-add" git-root add-args after-add)))
 
@@ -1242,10 +1260,15 @@ report the new path as an existing project."
       (claude-repl--log name "ERROR: start tag '%s' already exists — cannot create worktree" start-tag)
       (user-error "Start tag '%s' already exists — delete it first or choose a different name" start-tag))))
 
-(defun claude-repl--do-create-worktree-workspace (name &optional force-sandbox fork-session-id preemptive-prompt callback priority base-commit git-root source-dir)
+(defun claude-repl--do-create-worktree-workspace (name &optional force-sandbox fork-session-id preemptive-prompt callback priority base-commit git-root source-dir no-claude)
   "Create a git worktree and Doom workspace for NAME.
 Git fetch and worktree-add run asynchronously so Emacs is not blocked.
 When everything is ready, CALLBACK (if non-nil) is called with (PATH DIRNAME).
+
+NO-CLAUDE, when non-nil, creates the worktree exactly as usual but does
+NOT boot a Claude session for it (only the env state is hydrated).  This
+backs the `SPC TAB n/N' empty-preemptive-prompt path, where the user
+names a plain worktree workspace and Claude is started later on demand.
 
 BASE-COMMIT is the git ref the new branch is created from.  When nil,
 defaults to \"HEAD\" if FORK-SESSION-ID is set (forks track the live
@@ -1286,7 +1309,8 @@ from; persisted as `:source-ws-dir' on the new workspace so
                                    git-root branch-name path base-commit
                                    fork-session-id
                                    dirname preemptive-prompt
-                                   priority force-sandbox callback source-dir)))
+                                   priority force-sandbox callback source-dir
+                                   no-claude)))
       (message "Creating worktree '%s' from %s..." dirname base-commit)
       (cond
        (fork-session-id
@@ -1368,11 +1392,14 @@ JSON command file to ~/.claude/output/, which the existing file-watcher
 picks up to actually create the worktree.
 
 The preemptive prompt is OPTIONAL.  When it is left empty (or
-whitespace-only), no name generation and no worktree creation happen at
-all: instead a plain workspace is created via `claude-repl--new-workspace'
-(rooted at the resolved GIT-ROOT, Claude not started) and focus switches
-to it.  A non-empty prompt drives the full worktree-workspace flow
-described above.
+whitespace-only), name generation is skipped and a second minibuffer
+prompts for the workspace name directly; the worktree is then created
+exactly as the non-empty path would (same async git-worktree-add, same
+finalize), with two differences only: no preemptive prompt is enqueued
+and Claude is NOT auto-booted (NO-CLAUDE is passed to
+`claude-repl--do-create-worktree-workspace').  Focus switches to the new
+worktree.  A non-empty prompt drives the full async name-generation
+worktree-workspace flow described above.
 
 BASE selects the git ref the new branch is created from.  It is a
 symbol key in `claude-repl--worktree-base-commits':
@@ -1408,15 +1435,25 @@ the JSON file lands and the file-watcher dispatches it."
          (effective-source-ws (or source-ws (claude-repl--ws-current-name)))
          (source-dir (ignore-errors (claude-repl--ws-dir effective-source-ws)))
          (git-root (or source-dir (claude-repl--resolve-current-git-root)))
-         (raw-prompt (read-string "Preemptive prompt (empty for plain workspace): ")))
+         (raw-prompt (read-string "Preemptive prompt (empty to name a plain worktree): ")))
     (if (string-empty-p (string-trim (or raw-prompt "")))
-        ;; No preemptive prompt: skip name-generation entirely and create a
-        ;; plain workspace (Claude not started) rooted at GIT-ROOT, switching
-        ;; focus to it. A blank prompt is no longer an error.
-        (progn
-          (claude-repl--log nil "create-worktree-workspace: empty preemptive prompt, creating plain workspace (claude not started) rooted at %s"
-                            git-root)
-          (claude-repl--new-workspace git-root))
+        ;; No preemptive prompt: skip name-generation, prompt for the
+        ;; workspace name directly, and create the worktree exactly as the
+        ;; non-empty path would — only without a preemptive prompt and
+        ;; without auto-booting Claude (NO-CLAUDE). Focus switches to it.
+        (let ((name (string-trim (read-string "Workspace name: "))))
+          (when (string-empty-p name)
+            (user-error "Workspace name is required"))
+          (let ((worktree-source-dir
+                 (if (equal base-commit claude-repl-master-branch-name)
+                     (claude-repl--master-worktree-path git-root)
+                   git-root)))
+            (claude-repl--log nil "create-worktree-workspace: empty preemptive prompt, creating worktree '%s' (claude not started) rooted at %s source-dir=%s"
+                              name git-root (or worktree-source-dir "nil"))
+            (claude-repl--do-create-worktree-workspace
+             name nil nil nil
+             #'claude-repl--worktree-creation-switch-callback
+             nil base-commit git-root worktree-source-dir t)))
       (let ((prefixed-prompt (concat claude-repl--autonomous-prompt-prefix raw-prompt)))
         (claude-repl--log nil "create-worktree-workspace: base=%s base-commit=%s source-ws=%s git-root=%s"
                           base base-commit (or source-ws "nil") git-root)
