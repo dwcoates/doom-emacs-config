@@ -2114,10 +2114,72 @@ bypassed by `window--resize-mini-window' (ignore=t), so the stronger
             (claude-repl--ws-put "test-ws" :input-buffer buf)
             (setq new-win (split-window))
             (set-window-buffer new-win buf)
-            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                      ((symbol-function 'evil-insert-state) (lambda () nil)))
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
               (claude-repl--focus-input-panel)
               (should (eq (window-buffer (selected-window)) buf))))
+        (when (and new-win (window-live-p new-win))
+          (ignore-errors (delete-window new-win)))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest claude-repl-test-panels-focus-input-panel-no-insert-state ()
+  "focus-input-panel does NOT enter evil insert state on focus."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create "*focus-input-no-insert*"))
+          (new-win nil)
+          (insert-called nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :input-buffer buf)
+            (setq new-win (split-window))
+            (set-window-buffer new-win buf)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                      ((symbol-function 'evil-insert-state)
+                       (lambda (&rest _) (setq insert-called t))))
+              (claude-repl--focus-input-panel)
+              (should-not insert-called)))
+        (when (and new-win (window-live-p new-win))
+          (ignore-errors (delete-window new-win)))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+;;;; ---- Tests: focus-input show-or-focus branch ----
+
+(ert-deftest claude-repl-test-panels-focus-input-selects-window ()
+  "focus-input selects the input window in the running/visible branch."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create "*focus-input-cmd-win*"))
+          (new-win nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :input-buffer buf)
+            (setq new-win (split-window))
+            (set-window-buffer new-win buf)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                      ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
+                      ((symbol-function 'claude-repl--panels-visible-p) (lambda () t)))
+              (claude-repl-focus-input)
+              (should (eq (window-buffer (selected-window)) buf))))
+        (when (and new-win (window-live-p new-win))
+          (ignore-errors (delete-window new-win)))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest claude-repl-test-panels-focus-input-no-insert-state ()
+  "focus-input does NOT enter evil insert state when focusing the input window."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create "*focus-input-cmd-no-insert*"))
+          (new-win nil)
+          (insert-called nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :input-buffer buf)
+            (setq new-win (split-window))
+            (set-window-buffer new-win buf)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                      ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
+                      ((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
+                      ((symbol-function 'evil-insert-state)
+                       (lambda (&rest _) (setq insert-called t))))
+              (claude-repl-focus-input)
+              (should-not insert-called)))
         (when (and new-win (window-live-p new-win))
           (ignore-errors (delete-window new-win)))
         (when (buffer-live-p buf) (kill-buffer buf))))))
@@ -3823,10 +3885,34 @@ of the redirect."
             (setq new-win (split-window))
             (set-window-buffer new-win input-buf)
             (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen) #'ignore)
-                      ((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                      ((symbol-function 'evil-insert-state) #'ignore))
+                      ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
               (claude-repl-fullscreen-and-focus)
               (should (eq (window-buffer (selected-window)) input-buf))))
+        (when (and new-win (window-live-p new-win))
+          (ignore-errors (delete-window new-win)))
+        (switch-to-buffer "*scratch*")
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))
+        (when (buffer-live-p claude-buf) (kill-buffer claude-buf))))))
+
+(ert-deftest claude-repl-test-panels-fullscreen-and-focus-no-insert-state ()
+  "fullscreen-and-focus does NOT enter evil insert state after focusing input."
+  (claude-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*claude-panel-input-abcd1234*"))
+          (claude-buf (get-buffer-create "*claude-panel-abcd1234*"))
+          (new-win nil)
+          (insert-called nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (switch-to-buffer claude-buf)
+            (setq new-win (split-window))
+            (set-window-buffer new-win input-buf)
+            (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen) #'ignore)
+                      ((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                      ((symbol-function 'evil-insert-state)
+                       (lambda (&rest _) (setq insert-called t))))
+              (claude-repl-fullscreen-and-focus)
+              (should-not insert-called)))
         (when (and new-win (window-live-p new-win))
           (ignore-errors (delete-window new-win)))
         (switch-to-buffer "*scratch*")
