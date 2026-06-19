@@ -14,13 +14,13 @@ Do NOT attempt to merge the workspaces yourself in any way — **with the two ex
 | Argument | Behaviour |
 |---|---|
 | `<workspace>...` | One or more workspace names to merge (e.g. `DWC/feature-one`). |
-| `--onto-master` | The named workspace's PR has **already merged into `origin/master`**. The dispatch JSON carries `"onto_master": true` for each merge entry, and the downstream editor advances local `master` to `origin/master` (fast-forward) and closes the workspace, instead of cherry-picking the branch's commits. **When `--onto-master` is passed, SKIP the step-2 rebase entirely** — the commits are already upstream, so there is nothing to rebase or cherry-pick. The callers `create-or-update-pr` and `check-cicd` pass this flag because they only invoke `/workspace-merge` after confirming the PR merged. |
+| `--pr-was-merged` | The named workspace's PR has **already merged into `origin/master`**. The dispatch JSON carries `"pr_was_merged": true` for each merge entry, and the downstream editor advances local `master` to `origin/master` (fast-forward) and closes the workspace, instead of cherry-picking the branch's commits. **When `--pr-was-merged` is passed, SKIP the step-2 rebase entirely** — the commits are already upstream, so there is nothing to rebase or cherry-pick. The callers `create-or-update-pr` and `check-cicd` pass this flag because they only invoke `/workspace-merge` after confirming the PR merged. |
 
 ## Steps
 
 1. **Interpret** the user's request to identify which workspaces to merge (by name, e.g. `DWC/feature-one`).
 
-2. **Rebase onto the merge target (current workspace only).** Skip this step if the current workspace is NOT among the named merge targets identified in step 1. **Also skip this step entirely when `--onto-master` was passed** — the PR has already merged into `origin/master`, so the commits are already upstream and a rebase would only replay already-merged commits (the exact conflict the `--onto-master` path exists to avoid).
+2. **Rebase onto the merge target (current workspace only).** Skip this step if the current workspace is NOT among the named merge targets identified in step 1. **Also skip this step entirely when `--pr-was-merged` was passed** — the PR has already merged into `origin/master`, so the commits are already upstream and a rebase would only replay already-merged commits (the exact conflict the `--pr-was-merged` path exists to avoid).
 
    a. Determine the merge target branch:
       - Read `.claude/emacs/state.el` under the current worktree root (obtain the root via `git rev-parse --show-toplevel`).
@@ -58,11 +58,11 @@ Do NOT attempt to merge the workspaces yourself in any way — **with the two ex
    EOF
    ```
 
-   **When `--onto-master` was passed, add `"onto_master": true` to every merge entry** so the downstream editor advances local `master` from `origin/master` instead of cherry-picking:
+   **When `--pr-was-merged` was passed, add `"pr_was_merged": true` to every merge entry** so the downstream editor advances local `master` from `origin/master` instead of cherry-picking:
    ```bash
    bash .claude/skills/workspace-merge/run.sh --emit-commands << 'EOF'
    [
-     {"type": "merge", "workspace": "DWC/feature-one", "onto_master": true}
+     {"type": "merge", "workspace": "DWC/feature-one", "pr_was_merged": true}
    ]
    EOF
    ```
