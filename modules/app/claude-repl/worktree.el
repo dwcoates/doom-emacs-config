@@ -2723,23 +2723,23 @@ Reads three optional fields from CMD:
     `claude-repl--resolve-merge-workspace-name' for the order).
   - `workspace' — workspace name or branch (fallback when project_dir
     is absent or doesn't match a live workspace).
-  - `onto_master' — when non-nil, forces the `onto-master' merge handler
+  - `pr_was_merged' — when non-nil, forces the `onto-master' merge handler
     (advance local trunk to `origin/master' for an already-merged PR)
     regardless of the repo's checked-in `.eld' handler.  Set by
-    `/workspace-merge --onto-master'.
+    `/workspace-merge --pr-was-merged'.
 
 When neither resolves, logs an `unknown workspace' line (with both
 attempted inputs so the failure is debuggable) and returns — no error
 is raised, since a missing workspace is not actionable here."
   (let* ((ws (alist-get 'workspace cmd))
          (project-dir (alist-get 'project_dir cmd))
-         (onto-master (alist-get 'onto_master cmd))
+         (onto-master (alist-get 'pr_was_merged cmd))
          (resolved (claude-repl--resolve-merge-workspace-name ws project-dir)))
     (cond
      (resolved
       (let ((repo-root (claude-repl--ws-merge-routing-root resolved)))
         (claude-repl--log ws
-                          "workspace-commands-file merge: ws=%s project_dir=%s onto_master=%s resolved=%s repo-root=%s"
+                          "workspace-commands-file merge: ws=%s project_dir=%s pr_was_merged=%s resolved=%s repo-root=%s"
                           ws (or project-dir "nil") (if onto-master "t" "nil")
                           resolved (or repo-root "nil"))
         (claude-repl--workspace-merge-async resolved repo-root onto-master)))

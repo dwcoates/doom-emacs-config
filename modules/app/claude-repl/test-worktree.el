@@ -1645,7 +1645,7 @@ UI, run the merge on a worker thread, and reopen on failure."
         (delete-directory src-dir t)))))
 
 (ert-deftest claude-repl-test-handle-merge-command-threads-onto-master ()
-  "A merge command's `onto_master' field is forwarded to
+  "A merge command's `pr_was_merged' field is forwarded to
 `--workspace-merge-async' (and defaults to nil when the field is absent)."
   (claude-repl-test--with-clean-state
     (let ((onto :unset))
@@ -1653,7 +1653,7 @@ UI, run the merge on a worker thread, and reopen on failure."
                  (lambda (_ws _root &optional onto-master) (setq onto onto-master))))
         (claude-repl--ws-put "feature-one" :project-dir "/tmp/feature-one")
         (claude-repl--handle-merge-command
-         '((type . "merge") (workspace . "feature-one") (onto_master . t)))
+         '((type . "merge") (workspace . "feature-one") (pr_was_merged . t)))
         (should (eq onto t))
         (claude-repl--handle-merge-command
          '((type . "merge") (workspace . "feature-one")))
