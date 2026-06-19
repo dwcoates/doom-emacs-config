@@ -2060,6 +2060,37 @@ persp routing."
         (when (and fallback (car foreign) (window-live-p (car foreign)))
           (set-window-buffer (car foreign) fallback)))))))
 
+(defun claude-repl--hydrate-and-reorder-on-open (ws project-root)
+  "Hydrate WS's display state from PROJECT-ROOT then reseat WS by priority.
+Shared post-open step for every path that opens or activates a
+workspace — interactive `SPC p p' (`claude-repl-switch-to-project'),
+the snapshot/worktree restore path (`claude-repl--establish-workspace'),
+and any future opener.  Centralizing the sequence guarantees that a
+workspace lands in priority order no matter how it was opened.
+
+Steps:
+
+- hydrates the persisted priority badge and drawer glyphs via
+  `claude-repl--load-display-state', so `:priority' is in memory
+  before the reseat reads it,
+- pulls WS to its priority slot in `persp-names-cache' via
+  `claude-repl--reorder-workspace-by-priority', so the tab-bar order
+  reflects priority the moment the workspace is opened.
+
+The reorder is SKIPPED while a snapshot load is in flight
+(`claude-repl--snapshot-load-state' non-nil): the loader visits
+entries in saved tab-bar order, and a per-entry priority reseating
+would shuffle them back into priority order, defeating the order
+preservation `claude-repl--collect-snapshot-entries' encodes on save.
+
+Both inner calls are `fboundp'-guarded so a partial-load test
+environment that has not defined them does not crash here."
+  (when (fboundp 'claude-repl--load-display-state)
+    (claude-repl--load-display-state ws project-root))
+  (when (and (fboundp 'claude-repl--reorder-workspace-by-priority)
+             (not claude-repl--snapshot-load-state))
+    (claude-repl--reorder-workspace-by-priority ws)))
+
 (defun claude-repl--establish-workspace (ws dir)
   "Synchronously create + activate + fully set up workspace WS for DIR.
 Mirrors what `claude-repl-switch-to-project' would do on an
@@ -2150,20 +2181,11 @@ Each call:
     ;; with the post-establish state.
     (claude-repl--ws-put ws :nuked-at nil)
     (claude-repl--ws-put ws :project-dir dir)
-    (when (fboundp 'claude-repl--load-display-state)
-      (claude-repl--load-display-state ws dir))
-    ;; Priority-based reorder: pulls this ws to its priority slot so a
-    ;; user-driven creation (drawer-driven restore, worktree hydration)
-    ;; lands in priority order regardless of when the badge hydrates.
-    ;; Skipped during snapshot load (`claude-repl--snapshot-load-state'
-    ;; non-nil) — the loader processes entries in saved tab-bar order
-    ;; and per-entry priority reseating would shuffle that visual order
-    ;; back to priority order, defeating the order-preservation that
-    ;; `claude-repl--collect-snapshot-entries' encodes on save.  Guarded
-    ;; on fboundp so a partial-load test environment doesn't crash here.
-    (when (and (fboundp 'claude-repl--reorder-workspace-by-priority)
-               (not claude-repl--snapshot-load-state))
-      (claude-repl--reorder-workspace-by-priority ws))
+    ;; Hydrate the priority badge then reseat this ws into its priority
+    ;; slot, via the shared opener step so `SPC p p' and snapshot/worktree
+    ;; restore agree on ordering.  The reorder is skipped mid-snapshot-load
+    ;; (see `claude-repl--hydrate-and-reorder-on-open').
+    (claude-repl--hydrate-and-reorder-on-open ws dir)
     (when (and (fboundp 'claude-repl--initialize-claude)
                (fboundp 'claude-repl--claude-running-p)
                (not (claude-repl--claude-running-p ws)))
@@ -3105,9 +3127,12 @@ Switches via `projectile-switch-project-by-name' (which fires Doom's
 on the project basename), then opens the most-recently-accessed file
 under PROJECT via `claude-repl--most-recent-project-file', hydrates
 the saved display state (`:priority' and the drawer badges) from the
-per-project state file via `claude-repl--load-display-state' (so the
-tabline badge appears immediately on `SPC p p' instead of only once
-Claude starts), and flashes the activated tab.
+per-project state file and reseats the workspace into its priority
+slot — both via the shared `claude-repl--hydrate-and-reorder-on-open'
+step, so the tabline badge appears immediately on `SPC p p' (instead
+of only once Claude starts) and the workspace lands in priority order
+just like the snapshot/worktree restore path — and flashes the
+activated tab.
 
 Distinct from `claude-repl--switch-to-workspace': that primitive is
 name-keyed and assumes the persp already exists; this one is
@@ -3128,7 +3153,11 @@ name."
                      (when-let ((recent-file (claude-repl--most-recent-project-file project)))
                        (when (file-exists-p recent-file)
                          (find-file recent-file)))
-                     (claude-repl--load-display-state
+                     ;; Hydrate the priority badge then reseat the just-opened
+                     ;; ws into its priority slot via the shared opener step, so
+                     ;; `SPC p p' lands the workspace in priority order exactly
+                     ;; like the snapshot/worktree restore path does.
+                     (claude-repl--hydrate-and-reorder-on-open
                       (ignore-errors (claude-repl--ws-current-name))
                       project)))
       (claude-repl--flash-current-tab))))
