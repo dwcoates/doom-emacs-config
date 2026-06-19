@@ -3498,6 +3498,78 @@ behavior for ad-hoc creations."
           (claude-repl--establish-workspace "ws-a" "/tmp/ws-a"))
         (should (equal reorder-calls '("ws-a")))))))
 
+;;;; ---- Tests: hydrate-and-reorder-on-open (shared opener step) ----
+
+(ert-deftest claude-repl-cmd-test-hydrate-and-reorder-on-open/loads-before-reorder ()
+  "`--hydrate-and-reorder-on-open' hydrates display state BEFORE reseating
+by priority, so the reorder reads a freshly-hydrated `:priority' rather
+than a stale one."
+  (claude-repl-test--with-clean-state
+    (let ((events nil))
+      (cl-letf (((symbol-function 'claude-repl--load-display-state)
+                 (lambda (&rest _) (push 'load events)))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+                 (lambda (_ws) (push 'reorder events))))
+        (let ((claude-repl--snapshot-load-state nil))
+          (claude-repl--hydrate-and-reorder-on-open "ws-a" "/tmp/ws-a"))
+        (let ((ordered (reverse events)))
+          (should (< (cl-position 'load ordered)
+                     (cl-position 'reorder ordered))))))))
+
+(ert-deftest claude-repl-cmd-test-hydrate-and-reorder-on-open/passes-ws-and-root-to-load ()
+  "`--hydrate-and-reorder-on-open' forwards its WS and PROJECT-ROOT
+arguments verbatim to `--load-display-state'."
+  (claude-repl-test--with-clean-state
+    (let ((load-args nil))
+      (cl-letf (((symbol-function 'claude-repl--load-display-state)
+                 (lambda (ws root) (setq load-args (list ws root))))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+                 (lambda (_ws) nil)))
+        (let ((claude-repl--snapshot-load-state nil))
+          (claude-repl--hydrate-and-reorder-on-open "ws-a" "/tmp/ws-a"))
+        (should (equal load-args '("ws-a" "/tmp/ws-a")))))))
+
+(ert-deftest claude-repl-cmd-test-hydrate-and-reorder-on-open/reorders-target-ws ()
+  "`--hydrate-and-reorder-on-open' reseats the WS it was given (not some
+other) when no snapshot load is in flight."
+  (claude-repl-test--with-clean-state
+    (let ((reorder-calls nil))
+      (cl-letf (((symbol-function 'claude-repl--load-display-state)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+                 (lambda (ws) (push ws reorder-calls))))
+        (let ((claude-repl--snapshot-load-state nil))
+          (claude-repl--hydrate-and-reorder-on-open "ws-a" "/tmp/ws-a"))
+        (should (equal reorder-calls '("ws-a")))))))
+
+(ert-deftest claude-repl-cmd-test-hydrate-and-reorder-on-open/skips-reorder-during-snapshot-load ()
+  "`--hydrate-and-reorder-on-open' must NOT reseat by priority while a
+snapshot load is in flight (`claude-repl--snapshot-load-state' non-nil),
+preserving the loader's saved tab-bar order."
+  (claude-repl-test--with-clean-state
+    (let ((reorder-calls nil))
+      (cl-letf (((symbol-function 'claude-repl--load-display-state)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+                 (lambda (ws) (push ws reorder-calls))))
+        (let ((claude-repl--snapshot-load-state '(:queue nil)))
+          (claude-repl--hydrate-and-reorder-on-open "ws-a" "/tmp/ws-a"))
+        (should-not reorder-calls)))))
+
+(ert-deftest claude-repl-cmd-test-hydrate-and-reorder-on-open/still-hydrates-during-snapshot-load ()
+  "`--hydrate-and-reorder-on-open' still hydrates display state during a
+snapshot load even though it skips the reorder, so badges render while
+order preservation is honored."
+  (claude-repl-test--with-clean-state
+    (let ((loaded nil))
+      (cl-letf (((symbol-function 'claude-repl--load-display-state)
+                 (lambda (&rest _) (setq loaded t)))
+                ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+                 (lambda (_ws) nil)))
+        (let ((claude-repl--snapshot-load-state '(:queue nil)))
+          (claude-repl--hydrate-and-reorder-on-open "ws-a" "/tmp/ws-a"))
+        (should loaded)))))
+
 ;;;; ---- Tests: clean-frame-foreign-windows ----
 
 (defun claude-repl-test--make-owned-buffer (name ws)
@@ -5360,6 +5432,34 @@ call, making deferred closures synchronous in tests."
               ;; Timer was scheduled but find-file not yet called
               (should timer-fired)
               (should-not opened)))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-project/reseats-by-priority ()
+  "switch-to-project reseats the activated workspace by priority on `SPC p p',
+via the shared `--hydrate-and-reorder-on-open' step, so an opened
+workspace lands in priority order like the snapshot/worktree restore path."
+  (claude-repl-test--with-clean-state
+    (let ((tmp-dir (file-name-as-directory (make-temp-file "claude-repl-switch-" t)))
+          reorder-calls)
+      (unwind-protect
+          (claude-repl-test--with-sync-run-at-time
+            (cl-letf (((symbol-function 'projectile-switch-project-by-name)
+                       (lambda (_p) nil))
+                      ((symbol-function 'claude-repl--most-recent-project-file)
+                       (lambda (_d) nil))
+                      ((symbol-function 'claude-repl--load-display-state)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'claude-repl--reorder-workspace-by-priority)
+                       (lambda (ws) (push ws reorder-calls)))
+                      ((symbol-function '+workspace-current-name)
+                       (lambda () "switched-ws"))
+                      ((symbol-function 'force-mode-line-update)
+                       (lambda (&optional _all) nil))
+                      ((symbol-function 'claude-repl-flash-tab)
+                       (lambda (&rest _) nil)))
+              (let ((claude-repl--snapshot-load-state nil))
+                (claude-repl-switch-to-project tmp-dir))
+              (should (equal reorder-calls '("switched-ws")))))
         (delete-directory tmp-dir t)))))
 
 ;;;; ---- claude-repl--most-recent-project-file ----
