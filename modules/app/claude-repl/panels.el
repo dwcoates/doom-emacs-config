@@ -971,14 +971,36 @@ survived upstream."
     (claude-repl--update-hide-overlay)
     (claude-repl--flash-current-tab)))
 
+(defun claude-repl--drain-pending-fullscreen (ws)
+  "Enter fullscreen for WS if it was created with `:pending-fullscreen' set.
+Set by `claude-repl--enqueue-preemptive-prompt' so a workspace
+materialized via `/workspace-generation' opens its Claude panels
+fullscreen rather than splitscreen.  Clears the flag and, when it was
+set, toggles fullscreen via `claude-repl-toggle-fullscreen' — which
+saves the just-built splitscreen layout as `:fullscreen-config' so the
+user can restore it with the same toggle.  No-op when the flag is nil,
+which is every non-generation panel-show (e.g. re-showing hidden panels
+via `SPC o c')."
+  (if (claude-repl--ws-get ws :pending-fullscreen)
+      (progn
+        (claude-repl--log ws "drain-pending-fullscreen: ws=%s branch=had-pending entering fullscreen" ws)
+        (claude-repl--ws-put ws :pending-fullscreen nil)
+        (claude-repl-toggle-fullscreen))
+    (claude-repl--log-verbose ws "drain-pending-fullscreen: ws=%s branch=no-pending no-op" ws)))
+
 (defun claude-repl--show-hidden-panels ()
   "Restore hidden panels.  `show-existing-panels' writes :repl-state :active.
 `:claude-state' is untouched; rendering follows the same rule whether
-panels are visible or hidden."
+panels are visible or hidden.
+
+After the panels are visible, `claude-repl--drain-pending-fullscreen'
+maximizes them when `:pending-fullscreen' is set (the
+`/workspace-generation' path)."
   (let ((ws (claude-repl--ws-current-name)))
     (claude-repl--log ws "showing panels ws=%s claude-state=%s"
-                      ws (claude-repl--ws-claude-state ws)))
-  (claude-repl--show-existing-panels))
+                      ws (claude-repl--ws-claude-state ws))
+    (claude-repl--show-existing-panels)
+    (claude-repl--drain-pending-fullscreen ws)))
 
 (defun claude-repl--hide-and-preserve-status ()
   "Hide Claude panels with full deprio + tab-bar shuffle (the `SPC o C' path).
