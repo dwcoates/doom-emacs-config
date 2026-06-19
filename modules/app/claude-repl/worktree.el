@@ -2988,41 +2988,45 @@ affect another agent's commands in the same JSON array."
           (message "[claude-repl] eval: result sent to %s%s"
                    ws (if error-string " (eval raised)" "")))))))))
 
+(defconst claude-repl--workspace-command-dispatch-table
+  '(("create"    . (claude-repl--handle-create-command    . t))
+    ("prompt"    . (claude-repl--handle-prompt-command     . nil))
+    ("finish"    . (claude-repl--handle-finish-command     . nil))
+    ("close"     . (claude-repl--handle-close-command      . nil))
+    ("clipboard" . (claude-repl--handle-clipboard-command  . nil))
+    ("send"      . (claude-repl--handle-send-command       . nil))
+    ("merge"     . (claude-repl--handle-merge-command      . nil))
+    ("profile"   . (claude-repl--handle-profile-command    . nil))
+    ("eval"      . (claude-repl--handle-eval-command        . nil)))
+  "Maps a workspace-command `type' string to (HANDLER . STAGGERS).
+HANDLER is the function `claude-repl--dispatch-workspace-command'
+invokes for that `type'.  STAGGERS non-nil marks a `create'-style
+handler invoked as (HANDLER CMD DELAY), after which the dispatch
+advances the create-delay by `claude-repl-worktree-stagger-seconds';
+STAGGERS nil marks a handler invoked as (HANDLER CMD) that leaves the
+delay unchanged.  Add a new workspace verb by adding a row here — the
+dispatcher itself needs no edit.")
+
 (defun claude-repl--dispatch-workspace-command (cmd create-delay)
   "Dispatch a single workspace command CMD with current CREATE-DELAY.
-Returns the new create-delay value (incremented for \"create\" commands,
-unchanged otherwise)."
-  (let ((type (alist-get 'type cmd)))
+Looks CMD's `type' up in `claude-repl--workspace-command-dispatch-table'
+and invokes the mapped handler.  Returns the new create-delay value:
+advanced by `claude-repl-worktree-stagger-seconds' for staggering
+handlers, unchanged otherwise.  An unknown (or missing) `type' is logged
+and skipped without error."
+  (let* ((type (alist-get 'type cmd))
+         (entry (cdr (assoc type claude-repl--workspace-command-dispatch-table)))
+         (handler (car entry))
+         (staggers (cdr entry)))
     (cond
-     ((string= type "create")
-      (claude-repl--handle-create-command cmd create-delay)
-      (+ create-delay claude-repl-worktree-stagger-seconds))
-     ((string= type "prompt")
-      (claude-repl--handle-prompt-command cmd)
-      create-delay)
-     ((string= type "finish")
-      (claude-repl--handle-finish-command cmd)
-      create-delay)
-     ((string= type "close")
-      (claude-repl--handle-close-command cmd)
-      create-delay)
-     ((string= type "clipboard")
-      (claude-repl--handle-clipboard-command cmd)
-      create-delay)
-     ((string= type "send")
-      (claude-repl--handle-send-command cmd)
-      create-delay)
-     ((string= type "merge")
-      (claude-repl--handle-merge-command cmd)
-      create-delay)
-     ((string= type "profile")
-      (claude-repl--handle-profile-command cmd)
-      create-delay)
-     ((string= type "eval")
-      (claude-repl--handle-eval-command cmd)
-      create-delay)
-     (t
+     ((null entry)
       (claude-repl--log nil "workspace-commands-file unknown type: %s" type)
+      create-delay)
+     (staggers
+      (funcall handler cmd create-delay)
+      (+ create-delay claude-repl-worktree-stagger-seconds))
+     (t
+      (funcall handler cmd)
       create-delay))))
 
 (defun claude-repl--normalize-workspace-commands (parsed)
