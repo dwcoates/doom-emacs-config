@@ -61,6 +61,16 @@
 - The investigation's outcome MUST be surfaced in the response.
   - Both the fact that the adversarial investigation took place AND the investigation's results are reported.
   - Both are surfaced under the TLDR bullet carrying the "is pre-existing" claim (see "Pre-existing claims in the tree" rule below).
+- **The canonical reproduction procedure is MANDATORY: empirically reproduce the issue at the prior commit, isolated from the working tree, via these EXACT steps.**
+  1. Stash all pending work (`git stash -u`), so the working tree is clean and the in-progress changes are safely preserved.
+  2. Check out, on a DETACHED HEAD (`git checkout <sha>`), the first commit that PRECEDES the changes I did not make (i.e. the last commit before the suspected-culprit commit).
+  3. Run the failing tests/build/lint there and record the result.
+  4. Return to the original commit (`git checkout -`, or the original branch tip) and restore the stash (`git stash pop`).
+  - The verdict is "genuinely pre-existing" ONLY when the issue reproduces at that prior commit with my changes absent; if it does not reproduce there, the claim is disproven and the issue is mine.
+  - This also pinpoints the introducing commit: reproducing at a commit but not at its parent isolates exactly which commit introduced the issue.
+- **NEVER run this procedure by moving the active branch in the target workspace.** Always use a detached HEAD (or a throwaway temp branch) plus the stash/unstash dance.
+  - Other worktrees of the same repository may have that branch checked out or reference its tip, so moving the branch would disrupt them.
+  - In-place file overwrites (`git show <sha>:file > file`) or temp-dir copies are NOT an acceptable substitute, because they do not exercise the real historical commit state cleanly and can mask interactions with the live working tree.
 
 ### CICD failures are never pre-existing, so never vet them
 
