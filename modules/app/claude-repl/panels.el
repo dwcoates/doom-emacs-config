@@ -157,7 +157,7 @@ split, and we must never touch the drawer."
   (claude-repl--update-all-workspace-states-now))
 
 (defun claude-repl--focus-input-panel ()
-  "Focus the input panel window and enter insert state.
+  "Focus the input panel window.
 Signals an error if the input buffer or its window cannot be found —
 callers should ensure panels are displayed before calling this.
 Buffer/window resolution delegates to
@@ -171,8 +171,7 @@ Buffer/window resolution delegates to
       (unless win
         (error "claude-repl--focus-input-panel: input buffer %s is not displayed in any window"
                (buffer-name buf)))
-      (select-window win)
-      (evil-insert-state))))
+      (select-window win))))
 
 (defun claude-repl--show-panels-and-focus ()
   "Display both Claude panels and focus the input panel.
@@ -1372,9 +1371,7 @@ If Claude isn't running, start it (same as `claude-repl')."
       (unless (claude-repl--panels-visible-p)
         (claude-repl--show-panels))
       (when-let ((win (get-buffer-window (claude-repl--ws-get ws :input-buffer))))
-        (select-window win)
-        (when (bound-and-true-p evil-mode)
-          (evil-insert-state)))))))
+        (select-window win))))))
 
 (defun claude-repl--delete-non-panel-windows (vterm-buf input-buf)
   "Delete every window NOT showing VTERM-BUF or INPUT-BUF.
@@ -1575,9 +1572,7 @@ real main-area window — see
                (input-buf (claude-repl--ws-get ws :input-buffer))
                (input-win (and input-buf (get-buffer-window input-buf))))
           (when input-win
-            (select-window input-win)
-            (when (bound-and-true-p evil-mode)
-              (evil-insert-state)))))
+            (select-window input-win))))
     (if claude-repl--window-fullscreen-config
         (progn
           (set-window-configuration claude-repl--window-fullscreen-config)
