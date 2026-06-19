@@ -163,6 +163,7 @@ producer can be identified without first turning debug logging on."
 (defconst claude-repl--ws-runtime-keys
   '(:claude-state :repl-state :vterm-buffer :input-buffer :vterm-status
     :ready-timer :git-proc :flashing :pending-subagents :pending-show-panels
+    :pending-fullscreen
     :fork-session-id :fullscreen-config :active-env :sandbox :bare-metal
     :deferred-input-queue :done-ack :permission-prompt-active
     :done-ack-pending :source-ws-name)
