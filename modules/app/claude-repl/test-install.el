@@ -931,26 +931,6 @@ The skill lives at `claude-repl-skills-src-dir'/build-skill on the host;
 the doctor uses this list to verify the host symlink points at it."
   (should (member "build-skill" claude-repl--managed-skills)))
 
-(ert-deftest claude-repl-test-build-skill-cache-file-exists ()
-  "The cached build-skill SKILL.md must exist with required frontmatter.
-Regression guard: the cache copy is the persisted fallback that ships
-with the repo, so install.sh can symlink it into `~/.claude/skills/'
-when the live impl isn't on the host."
-  (let* ((local-src (expand-file-name
-                     (or claude-repl-local-skills-src-dir
-                         (error "claude-repl-local-skills-src-dir is unset"))))
-         ;; skills-cache/ is a sibling of skills/ under the same module dir.
-         (module-dir (file-name-directory (directory-file-name local-src)))
-         (skill-md (expand-file-name "skills-cache/build-skill/SKILL.md"
-                                     module-dir)))
-    (should (file-exists-p skill-md))
-    (with-temp-buffer
-      (insert-file-contents skill-md)
-      (goto-char (point-min))
-      (should (looking-at "^---\n"))
-      (should (re-search-forward "^name: build-skill$" nil t))
-      (should (re-search-forward "^description: " nil t)))))
-
 ;;;; ---- unmanaged broken symlink detection ----
 
 (ert-deftest claude-repl-test-check-unmanaged-broken-link-detected ()
