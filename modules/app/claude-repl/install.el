@@ -199,10 +199,21 @@ script cannot be located."
       (goto-char (point-min)))
     (current-buffer)))
 
-(defun claude-repl--run-install-action (action)
+(defun claude-repl--run-install-action (action &optional quiet)
   "Run install script ACTION (install / uninstall / reinstall).
 No-op in sandbox.  On success, messages the user with a pointer to the
-output buffer.  On failure, pops the output buffer and signals an error."
+output buffer.  On failure, surfaces the output buffer and signals an
+error.
+
+When QUIET is non-nil (the auto-install-on-load path driven by
+`claude-repl--maybe-install-hooks'), a failure routes the script output
+to the claude-repl log via `claude-repl--log' INSTEAD of popping a window
+with `display-buffer' — every `SPC j R' reload would otherwise drop the
+`*claude-repl-install*' window into the frame whenever `doctor.el' still
+reports an issue.  The output buffer is still populated for later
+inspection, and the error is still signaled so the caller's surfacing is
+preserved.  Interactive callers leave QUIET nil so a failure pops the
+output window as before."
   (if (claude-repl--in-sandbox-p)
       (message "[claude-repl] Sandbox detected; skipping hooks %s." action)
     (pcase-let ((`(,code ,output)
@@ -211,7 +222,11 @@ output buffer.  On failure, pops the output buffer and signals an error."
       (if (= code 0)
           (message "[claude-repl] hooks %s succeeded (see %s)."
                    action claude-repl--install-output-buffer)
-        (display-buffer claude-repl--install-output-buffer)
+        (if quiet
+            (claude-repl--log nil
+                              "hooks %s failed (exit %d); output:\n%s"
+                              action code output)
+          (display-buffer claude-repl--install-output-buffer))
         (error "[claude-repl] hooks %s failed (exit %d); see %s"
                action code claude-repl--install-output-buffer)))))
 
@@ -253,13 +268,20 @@ problems.  No-op inside the sandbox."
   :group 'claude-repl)
 
 (defun claude-repl--maybe-install-hooks ()
-  "Run `claude-repl-install-hooks' only when registration or scripts are off.
+  "Run the install action only when registration or scripts are off.
 Guarded by `claude-repl--doctor-issues' so a healthy load is a pure
 JSON-parse (no bash, no backup file).  No-op in sandbox, in a
 `noninteractive' (batch) session, or when `claude-repl-auto-install-hooks'
 is nil.  Called inline from this file's load so hooks are registered
 before later claude-repl sub-modules (sentinel, notifications, ...)
 start relying on them.
+
+Dispatches through `claude-repl--run-install-action' with QUIET set so a
+failed install (common when `doctor.el' still flags a stale skill
+symlink) routes its output to the claude-repl log rather than popping the
+`*claude-repl-install*' window on every `SPC j R' reload.  A failure is
+still surfaced — both as the quiet log line from the action and as the
+caught-error log line here.
 
 The `noninteractive' guard keeps batch invocations (the ERT test
 suite, CI, ad-hoc scripts) from silently rewriting
@@ -272,9 +294,9 @@ corrupts window-layout assertions in the test suite."
              (not (claude-repl--in-sandbox-p))
              (claude-repl--doctor-issues))
     (condition-case err
-        (claude-repl-install-hooks)
+        (claude-repl--run-install-action "install" t)
       (error
-       (message "[claude-repl] auto-install failed: %S" err)))))
+       (claude-repl--log nil "auto-install failed: %S" err)))))
 
 ;; The actual call happens at the bottom of this file, after
 ;; `claude-repl--doctor-issues' and its helpers are defined.
