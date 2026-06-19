@@ -408,17 +408,35 @@ the rev-parse comparison and the checkout invocation."
     (should (equal (claude-repl--ws-get "ws1" :pending-prompts) '("do the thing")))
     (should (eq (claude-repl--ws-get "ws1" :pending-show-panels) t))))
 
+(ert-deftest claude-repl-test-enqueue-preemptive-prompt-sets-fullscreen ()
+  "Non-empty prompt sets :pending-fullscreen so generation opens fullscreen."
+  (claude-repl-test--with-clean-state
+    (claude-repl--enqueue-preemptive-prompt "ws1" "do the thing")
+    (should (eq (claude-repl--ws-get "ws1" :pending-fullscreen) t))))
+
 (ert-deftest claude-repl-test-enqueue-preemptive-prompt-nil ()
   "Nil prompt does not store anything."
   (claude-repl-test--with-clean-state
     (claude-repl--enqueue-preemptive-prompt "ws1" nil)
     (should (null (claude-repl--ws-get "ws1" :pending-prompts)))))
 
+(ert-deftest claude-repl-test-enqueue-preemptive-prompt-nil-no-fullscreen ()
+  "Nil prompt does not set :pending-fullscreen."
+  (claude-repl-test--with-clean-state
+    (claude-repl--enqueue-preemptive-prompt "ws1" nil)
+    (should (null (claude-repl--ws-get "ws1" :pending-fullscreen)))))
+
 (ert-deftest claude-repl-test-enqueue-preemptive-prompt-empty-string ()
   "Empty string prompt does not store anything."
   (claude-repl-test--with-clean-state
     (claude-repl--enqueue-preemptive-prompt "ws1" "")
     (should (null (claude-repl--ws-get "ws1" :pending-prompts)))))
+
+(ert-deftest claude-repl-test-enqueue-preemptive-prompt-empty-no-fullscreen ()
+  "Empty string prompt does not set :pending-fullscreen."
+  (claude-repl-test--with-clean-state
+    (claude-repl--enqueue-preemptive-prompt "ws1" "")
+    (should (null (claude-repl--ws-get "ws1" :pending-fullscreen)))))
 
 ;;;; ---- Tests: dispatch-prompt-command ----
 

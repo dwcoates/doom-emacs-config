@@ -213,6 +213,46 @@
         (claude-repl--drain-pending-show-panels "test-ws")
         (should-not called)))))
 
+;;;; ---- Tests: drain-pending-fullscreen ----
+
+(ert-deftest claude-repl-test-panels-drain-fullscreen-when-set ()
+  "drain-pending-fullscreen toggles fullscreen when :pending-fullscreen is set."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :pending-fullscreen t)
+    (let ((called nil))
+      (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen)
+                 (lambda () (setq called t))))
+        (claude-repl--drain-pending-fullscreen "test-ws")
+        (should called)))))
+
+(ert-deftest claude-repl-test-panels-drain-fullscreen-clears-flag ()
+  "drain-pending-fullscreen clears :pending-fullscreen after toggling."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :pending-fullscreen t)
+    (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen) #'ignore))
+      (claude-repl--drain-pending-fullscreen "test-ws")
+      (should-not (claude-repl--ws-get "test-ws" :pending-fullscreen)))))
+
+(ert-deftest claude-repl-test-panels-drain-fullscreen-when-not-set ()
+  "drain-pending-fullscreen does nothing when :pending-fullscreen is nil."
+  (claude-repl-test--with-clean-state
+    (let ((called nil))
+      (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen)
+                 (lambda () (setq called t))))
+        (claude-repl--drain-pending-fullscreen "test-ws")
+        (should-not called)))))
+
+(ert-deftest claude-repl-test-panels-drain-fullscreen-only-once ()
+  "drain-pending-fullscreen is one-shot: a second call does not re-toggle."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :pending-fullscreen t)
+    (let ((count 0))
+      (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen)
+                 (lambda () (setq count (1+ count)))))
+        (claude-repl--drain-pending-fullscreen "test-ws")
+        (claude-repl--drain-pending-fullscreen "test-ws")
+        (should (= count 1))))))
+
 ;;;; ---- Tests: drain-pending-magit ----
 
 (ert-deftest claude-repl-test-panels-drain-pending-magit-when-set ()
@@ -741,6 +781,19 @@ is on."
                  (lambda () (setq show-called t))))
         (claude-repl--show-hidden-panels)
         (should show-called)))))
+
+(ert-deftest claude-repl-test-panels-show-hidden-drains-fullscreen ()
+  "show-hidden-panels drains :pending-fullscreen after showing panels."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :pending-fullscreen t)
+    (let ((fullscreen-called nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--show-existing-panels) #'ignore)
+                ((symbol-function 'claude-repl-toggle-fullscreen)
+                 (lambda () (setq fullscreen-called t))))
+        (claude-repl--show-hidden-panels)
+        (should fullscreen-called)
+        (should-not (claude-repl--ws-get "test-ws" :pending-fullscreen))))))
 
 (ert-deftest claude-repl-test-panels-show-hidden-sets-active ()
   "show-hidden-panels (via show-existing-panels) sets :repl-state :active."

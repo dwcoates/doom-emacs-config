@@ -1047,12 +1047,17 @@ asynchronously."
 
 (defun claude-repl--enqueue-preemptive-prompt (ws prompt)
   "Enqueue PROMPT on workspace WS for delivery once Claude is ready.
-Sets :pending-show-panels so panels open after switching to WS."
+Sets :pending-show-panels so panels open after switching to WS.
+Also sets :pending-fullscreen so the panels open in fullscreen mode
+rather than splitscreen — a workspace materialized by
+`/workspace-generation' (the only path that carries a preemptive
+prompt) should present its Claude panels maximized."
   (if (and prompt (not (string-empty-p prompt)))
       (progn
         (claude-repl--log ws "enqueue-preemptive-prompt: ws=%s enqueuing prompt" ws)
         (claude-repl--ws-put ws :pending-prompts (list prompt))
-        (claude-repl--ws-put ws :pending-show-panels t))
+        (claude-repl--ws-put ws :pending-show-panels t)
+        (claude-repl--ws-put ws :pending-fullscreen t))
     (claude-repl--log ws "enqueue-preemptive-prompt: ws=%s prompt empty, skipping" ws)))
 
 (defun claude-repl--inherit-priority-from-source (priority source-dir)

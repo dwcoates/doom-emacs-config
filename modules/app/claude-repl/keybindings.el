@@ -76,6 +76,7 @@
       :merge-failed :merge-proc :merge-queued :merging))
     ("🪟 UI / Panels"
      (:input-buffer :pending-magit :pending-show-panels
+      :pending-fullscreen
       :pending-initial-buffers :fullscreen-config :ai-title-cache
       :saved-tab-index))
     ("🔢 Counters"
