@@ -447,6 +447,7 @@ pending merge auto-fire."
     (claude-repl--drain-pending-magit ws)
     (claude-repl--drain-pending-initial-buffers ws)
     (claude-repl--drain-pending-show-panels ws)
+    (claude-repl--maybe-fullscreen-on-switch ws)
     (claude-repl--maybe-autoselect-input ws)
     ;; Flip the emacs-side bit on the fully-loaded latch.  If
     ;; --on-session-start-event has also fired, this fires the
@@ -988,6 +989,29 @@ via `SPC o c')."
         (claude-repl-toggle-fullscreen))
     (claude-repl--log-verbose ws "drain-pending-fullscreen: ws=%s branch=no-pending no-op" ws)))
 
+(defun claude-repl--maybe-fullscreen-on-switch (ws)
+  "Enter fullscreen for WS's Claude panels when switching to WS.
+
+Reuses `claude-repl-toggle-fullscreen' — the exact command `SPC w f'
+drives through `claude-repl-fullscreen-and-focus' — so the
+splitscreen layout is saved as `:fullscreen-config' and a subsequent
+`SPC w f' restores it.  The undo is therefore inherent in the shared
+toggle rather than bolted on.
+
+Guarded so it only ever ENTERS fullscreen, never exits:
+- No-op unless WS is the live current workspace, so a background or
+  raced switch (see `claude-repl--on-workspace-switch') does not
+  fullscreen the wrong workspace via the ws-agnostic toggle.
+- No-op when the panels are not visible, so non-Claude workspaces
+  (e.g. the main workspace) are left untouched.
+- No-op when the panels are already fullscreen, so re-switching to an
+  already-fullscreen workspace does not toggle it back out."
+  (when (and (equal ws (claude-repl--ws-current-name))
+             (claude-repl--panels-visible-p)
+             (not (claude-repl--fullscreen-active-p ws)))
+    (claude-repl--log ws "maybe-fullscreen-on-switch: ws=%s entering fullscreen" ws)
+    (claude-repl-toggle-fullscreen)))
+
 (defun claude-repl--show-hidden-panels ()
   "Restore hidden panels.  `show-existing-panels' writes :repl-state :active.
 `:claude-state' is untouched; rendering follows the same rule whether
@@ -1293,6 +1317,21 @@ remains alongside the panels)."
                        (claude-repl--claude-panel-buffer-p (window-buffer win))))
                  (window-list))))
 
+(defun claude-repl--fullscreen-active-p (ws)
+  "Return non-nil when WS's Claude panels are currently fullscreen.
+
+Recognizes fullscreen from a saved `:fullscreen-config' OR from the
+live layout via `claude-repl--fullscreen-p', so a frame manually
+fullscreened (all other windows deleted by hand, no saved config) is
+detected just the same as one reached via
+`claude-repl-toggle-fullscreen'.
+
+Shared by `claude-repl-toggle-fullscreen' (which must not re-enter
+fullscreen) and `claude-repl--maybe-fullscreen-on-switch' (which must
+not toggle an already-fullscreen workspace back out)."
+  (or (claude-repl--ws-get ws :fullscreen-config)
+      (claude-repl--fullscreen-p)))
+
 (defun claude-repl-toggle-fullscreen ()
   "Toggle fullscreen for the Claude REPL vterm and input windows.
 Saves the current window configuration per-workspace and expands the
@@ -1306,7 +1345,7 @@ fullscreen nor poisons the saved config."
   (interactive)
   (let* ((ws (claude-repl--ws-current-name))
          (saved (claude-repl--ws-get ws :fullscreen-config))
-         (fullscreen (or saved (claude-repl--fullscreen-p))))
+         (fullscreen (claude-repl--fullscreen-active-p ws)))
     (claude-repl--log ws "toggle-fullscreen ws=%s currently=%s saved=%s"
                       ws (if fullscreen "fullscreen" "normal") (if saved "yes" "no"))
     (cond

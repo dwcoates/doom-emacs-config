@@ -253,6 +253,85 @@
         (claude-repl--drain-pending-fullscreen "test-ws")
         (should (= count 1))))))
 
+;;;; ---- Tests: fullscreen-active-p ----
+
+(ert-deftest claude-repl-test-panels-fullscreen-active-p-saved-config ()
+  "fullscreen-active-p is non-nil when :fullscreen-config is set."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :fullscreen-config 'some-config)
+    (cl-letf (((symbol-function 'claude-repl--fullscreen-p) (lambda () nil)))
+      (should (claude-repl--fullscreen-active-p "test-ws")))))
+
+(ert-deftest claude-repl-test-panels-fullscreen-active-p-layout ()
+  "fullscreen-active-p is non-nil when the live layout is fullscreen."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--fullscreen-p) (lambda () t)))
+      (should (claude-repl--fullscreen-active-p "test-ws")))))
+
+(ert-deftest claude-repl-test-panels-fullscreen-active-p-neither ()
+  "fullscreen-active-p is nil with no saved config and a non-fullscreen layout."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--fullscreen-p) (lambda () nil)))
+      (should-not (claude-repl--fullscreen-active-p "test-ws")))))
+
+;;;; ---- Tests: maybe-fullscreen-on-switch ----
+
+(ert-deftest claude-repl-test-panels-maybe-fullscreen-on-switch-enters ()
+  "maybe-fullscreen-on-switch enters fullscreen for the current visible ws."
+  (claude-repl-test--with-clean-state
+    (let ((called nil))
+      (cl-letf (((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
+                ((symbol-function 'claude-repl--fullscreen-p) (lambda () nil))
+                ((symbol-function 'claude-repl-toggle-fullscreen)
+                 (lambda () (setq called t))))
+        (claude-repl--maybe-fullscreen-on-switch "test-ws")
+        (should called)))))
+
+(ert-deftest claude-repl-test-panels-maybe-fullscreen-on-switch-no-panels ()
+  "maybe-fullscreen-on-switch is a no-op when the panels are not visible."
+  (claude-repl-test--with-clean-state
+    (let ((called nil))
+      (cl-letf (((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'claude-repl--fullscreen-p) (lambda () nil))
+                ((symbol-function 'claude-repl-toggle-fullscreen)
+                 (lambda () (setq called t))))
+        (claude-repl--maybe-fullscreen-on-switch "test-ws")
+        (should-not called)))))
+
+(ert-deftest claude-repl-test-panels-maybe-fullscreen-on-switch-already-saved ()
+  "maybe-fullscreen-on-switch is a no-op when :fullscreen-config is already set."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :fullscreen-config 'some-config)
+    (let ((called nil))
+      (cl-letf (((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
+                ((symbol-function 'claude-repl--fullscreen-p) (lambda () nil))
+                ((symbol-function 'claude-repl-toggle-fullscreen)
+                 (lambda () (setq called t))))
+        (claude-repl--maybe-fullscreen-on-switch "test-ws")
+        (should-not called)))))
+
+(ert-deftest claude-repl-test-panels-maybe-fullscreen-on-switch-already-layout ()
+  "maybe-fullscreen-on-switch is a no-op when the live layout is already fullscreen."
+  (claude-repl-test--with-clean-state
+    (let ((called nil))
+      (cl-letf (((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
+                ((symbol-function 'claude-repl--fullscreen-p) (lambda () t))
+                ((symbol-function 'claude-repl-toggle-fullscreen)
+                 (lambda () (setq called t))))
+        (claude-repl--maybe-fullscreen-on-switch "test-ws")
+        (should-not called)))))
+
+(ert-deftest claude-repl-test-panels-maybe-fullscreen-on-switch-not-current ()
+  "maybe-fullscreen-on-switch is a no-op when WS is not the current workspace."
+  (claude-repl-test--with-clean-state
+    (let ((called nil))
+      (cl-letf (((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
+                ((symbol-function 'claude-repl--fullscreen-p) (lambda () nil))
+                ((symbol-function 'claude-repl-toggle-fullscreen)
+                 (lambda () (setq called t))))
+        (claude-repl--maybe-fullscreen-on-switch "other-ws")
+        (should-not called)))))
+
 ;;;; ---- Tests: drain-pending-magit ----
 
 (ert-deftest claude-repl-test-panels-drain-pending-magit-when-set ()
