@@ -795,11 +795,14 @@ value and writes :repl-state :dead."
 ;;;; ---- Tests: claude-repl-debug/mock-workspace-generation ----
 
 (ert-deftest claude-repl-test-mock-workspace-generation-default ()
-  "mock-workspace-generation should write a default mock file."
+  "mock-workspace-generation should write a default mock file.
+The default name is built from the workspace prefix (here stubbed to
+\"DWC\" via CLAUDE_WORKSPACE_PREFIX) plus the bare default slug."
   (let* ((tmpdir (make-temp-file "claude-repl-test-" t))
          (claude-repl--output-dir tmpdir))
     (unwind-protect
-        (progn
+        (cl-letf (((symbol-function 'getenv)
+                   (lambda (k) (and (equal k "CLAUDE_WORKSPACE_PREFIX") "DWC"))))
           (claude-repl-debug/mock-workspace-generation)
           (let ((file (expand-file-name "workspace_generation.json" tmpdir)))
             (should (file-exists-p file))
@@ -808,6 +811,23 @@ value and writes :repl-state :dead."
               (let ((data (json-read-from-string (buffer-string))))
                 (should (vectorp data))
                 (should (equal (aref data 0) "DWC/mock-test"))))))
+      (delete-directory tmpdir t))))
+
+(ert-deftest claude-repl-test-mock-workspace-generation-default-no-prefix ()
+  "mock-workspace-generation default name drops the prefix when the env
+var is unset, yielding the bare slug with no leading slash."
+  (let* ((tmpdir (make-temp-file "claude-repl-test-" t))
+         (claude-repl--output-dir tmpdir))
+    (unwind-protect
+        (cl-letf (((symbol-function 'getenv) (lambda (_) nil)))
+          (claude-repl-debug/mock-workspace-generation)
+          (let ((file (expand-file-name "workspace_generation.json" tmpdir)))
+            (should (file-exists-p file))
+            (with-temp-buffer
+              (insert-file-contents file)
+              (let ((data (json-read-from-string (buffer-string))))
+                (should (vectorp data))
+                (should (equal (aref data 0) "mock-test"))))))
       (delete-directory tmpdir t))))
 
 (ert-deftest claude-repl-test-mock-workspace-generation-custom-names ()
