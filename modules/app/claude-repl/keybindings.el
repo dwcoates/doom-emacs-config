@@ -5,13 +5,19 @@
 (defconst claude-repl--output-dir (expand-file-name "~/.claude/output/")
   "Directory for workspace command files and other IPC output.")
 
-(defcustom claude-repl-debug-mock-workspace-default-name "DWC/mock-test"
-  "Default branch name used in mock workspace generation."
+(defcustom claude-repl-debug-mock-workspace-default-slug "mock-test"
+  "Default bare slug used in mock workspace generation.
+The full branch name is built at the consumption site by prepending the
+workspace prefix from `claude-repl--workspace-prefix-slash' (derived from
+CLAUDE_WORKSPACE_PREFIX), so this holds no literal prefix."
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-debug-mock-priority-branch-default "DWC/mock-priority-test"
-  "Default branch name used in mock workspace priority generation."
+(defcustom claude-repl-debug-mock-priority-branch-default-slug "mock-priority-test"
+  "Default bare slug used in mock workspace priority generation.
+The full branch name is built at the consumption site by prepending the
+workspace prefix from `claude-repl--workspace-prefix-slash' (derived from
+CLAUDE_WORKSPACE_PREFIX), so this holds no literal prefix."
   :type 'string
   :group 'claude-repl)
 
@@ -434,7 +440,9 @@ doom-config worktree reloads its own checkout."
   "Write a mock workspace_generation.json to trigger the file watcher.
 NAMES is an optional list of branch name strings; defaults to a single test entry."
   (interactive)
-  (let* ((names (or names (list claude-repl-debug-mock-workspace-default-name)))
+  (let* ((names (or names
+                     (list (concat (claude-repl--workspace-prefix-slash)
+                                   claude-repl-debug-mock-workspace-default-slug))))
          (file (claude-repl--write-output-json "workspace_generation.json" names)))
     (claude-repl--log (claude-repl--ws-current-name) "mock workspace-generation file written: %s names=%s" file names)
     (message "Wrote mock workspace_generation.json: %s" names)))
@@ -443,7 +451,9 @@ NAMES is an optional list of branch name strings; defaults to a single test entr
   "Write a mock workspace_commands file with a priority field to test image badges."
   (interactive)
   (let* ((priority (completing-read "Priority: " claude-repl-priority-levels nil t))
-         (name (read-string "Branch name: " claude-repl-debug-mock-priority-branch-default))
+         (name (read-string "Branch name: "
+                            (concat (claude-repl--workspace-prefix-slash)
+                                    claude-repl-debug-mock-priority-branch-default-slug)))
          (filename (format "workspace_commands_%s.json" (format-time-string "%s")))
          (commands (vector `((type . "create")
                              (name . ,name)

@@ -5917,6 +5917,24 @@ at all — no false field emitted for non-sandboxed repos."
               "raw" "prefixed" "/tmp/repo/" "HEAD" nil nil)))
     (should-not (string-match-p "force_sandbox" out))))
 
+(ert-deftest claude-repl-test-workspace-generation-prompt-slug-uses-prefix-when-set ()
+  "The slug instruction includes the `<prefix>/' form when
+CLAUDE_WORKSPACE_PREFIX is set, so generated names carry the prefix."
+  (cl-letf (((symbol-function 'getenv)
+             (lambda (k) (and (equal k "CLAUDE_WORKSPACE_PREFIX") "DWC"))))
+    (let ((out (claude-repl--workspace-generation-prompt
+                "raw" "prefixed" "/tmp/repo/" "HEAD" nil)))
+      (should (string-match-p "Generate the `name' field as DWC/<short-slug>" out)))))
+
+(ert-deftest claude-repl-test-workspace-generation-prompt-slug-bare-when-prefix-unset ()
+  "The slug instruction omits any prefix when CLAUDE_WORKSPACE_PREFIX is
+unset, instructing a bare `<short-slug>' with no leading slash."
+  (cl-letf (((symbol-function 'getenv) (lambda (_) nil)))
+    (let ((out (claude-repl--workspace-generation-prompt
+                "raw" "prefixed" "/tmp/repo/" "HEAD" nil)))
+      (should (string-match-p "Generate the `name' field as <short-slug>" out))
+      (should-not (string-match-p "<short-slug> prefix" out)))))
+
 ;;;; ---- Tests: workspace-commands JSON normalization ----
 
 (ert-deftest claude-repl-test-normalize-workspace-commands-vector-becomes-list ()

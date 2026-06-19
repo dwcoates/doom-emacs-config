@@ -102,6 +102,28 @@ First %s is the suffix (e.g. \"-input\" or empty), second %s is the workspace na
   :type 'string
   :group 'claude-repl)
 
+;;; Workspace-name prefix
+
+(defun claude-repl--workspace-prefix ()
+  "Return the workspace-name prefix from the CLAUDE_WORKSPACE_PREFIX env var.
+Returns the bare prefix with no trailing slash (e.g. \"DWC\"), or the
+empty string when the env var is unset or empty.  This mirrors how the
+workspace-dispatch run.sh derives the branch prefix solely from
+CLAUDE_WORKSPACE_PREFIX, so the Emacs process must be launched with that
+env var set to obtain a prefix."
+  (or (getenv "CLAUDE_WORKSPACE_PREFIX") ""))
+
+(defun claude-repl--workspace-prefix-slash ()
+  "Return the workspace-name prefix in `<prefix>/' form, or \"\" when unset.
+Builds on `claude-repl--workspace-prefix': when a non-empty prefix is
+set this appends a single trailing slash so callers can concatenate a
+bare slug directly; when no prefix is set this returns the empty string
+so names are generated without any leading slash."
+  (let ((prefix (claude-repl--workspace-prefix)))
+    (if (string-empty-p prefix)
+        ""
+      (concat prefix "/"))))
+
 ;;; Logging
 
 (defun claude-repl--ws-id-cached (ws)
