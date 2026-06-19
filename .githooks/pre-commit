@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# pre-commit — keep modules/app/claude-repl/skills-cache/ in sync with
-# the live workspace-* impls, then stage the cache update so the
-# commit ships the refreshed copy.
+# pre-commit — enforce the claude-repl ERT suite (and the external-boundary
+# lint) whenever claude-repl source/test files are staged.
 #
-# Also enforces claude-repl ERT suite when claude-repl files staged.
 # Per AGENTS.md zero-tolerance rule, ANY failing test blocks the commit.
 # Do not bypass with --no-verify; fix the failures.
 #
@@ -14,28 +12,10 @@
 # marker string below lets install/uninstall recognize this script as
 # managed (so it can be refreshed or removed without touching foreign
 # pre-commit hooks).  Don't edit the marker.
-# CLAUDE_REPL_MANAGED_HOOK: claude-repl-skills-cache-sync
+# CLAUDE_REPL_MANAGED_HOOK: claude-repl-precommit
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-SYNC="$REPO_ROOT/modules/app/claude-repl/skills-cache/sync.sh"
-CACHE_DIR="$REPO_ROOT/modules/app/claude-repl/skills-cache"
-
-if [ ! -x "$SYNC" ]; then
-  echo "[pre-commit] sync.sh missing or not executable at $SYNC — skipping cache sync." >&2
-elif ! "$SYNC"; then
-  # Don't fail the commit on a transient sync error — the cache is checked in,
-  # so we'd rather let an unrelated commit proceed than block on a flaky rsync.
-  echo "[pre-commit] WARNING: skills-cache sync exited non-zero — continuing without staging." >&2
-else
-  # Stage anything sync produced.  Use --name-only against HEAD so we
-  # pick up both unstaged and untracked cache files in one pass.
-  mapfile -t changed < <(git -C "$REPO_ROOT" status --porcelain -- "$CACHE_DIR" | awk '{print $NF}')
-  if [ "${#changed[@]}" -gt 0 ]; then
-    echo "[pre-commit] Staging ${#changed[@]} skills-cache change(s)."
-    git -C "$REPO_ROOT" add -- "$CACHE_DIR"
-  fi
-fi
 
 # Skip the test gate entirely during cherry-picks.  The commit being
 # replayed was already tested on its source branch; re-running ERT here
