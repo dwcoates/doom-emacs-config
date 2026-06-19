@@ -940,7 +940,11 @@ Docker sandbox rather than bare-metal."
    (when force-sandbox
      (format "  \"force_sandbox\": true\n"))
    "\n"
-   "Generate the `name' field as DWC/<short-slug> (lowercase, hyphenated, 3 words max after the DWC/ prefix) based on the DESCRIPTION above.\n"
+   (let ((prefix (claude-repl--workspace-prefix-slash)))
+     (if (string-empty-p prefix)
+         "Generate the `name' field as <short-slug> (lowercase, hyphenated, 3 words max) based on the DESCRIPTION above.\n"
+       (format "Generate the `name' field as %s<short-slug> (lowercase, hyphenated, 3 words max after the %s prefix) based on the DESCRIPTION above.\n"
+               prefix prefix)))
    "\n"
    "Constraints:\n"
    "- The JSON top-level MUST be an array, even when emitting only one workspace, e.g. `[{\"type\":\"create\", ...}]'. The downstream parser iterates the top-level as a list of commands; a bare object `{...}' is rejected.\n"

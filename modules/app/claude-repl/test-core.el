@@ -1691,6 +1691,30 @@ The master kill-switch overrides the always-on file-write decoupling."
     (kill-buffer buf)
     (should-not (claude-repl--foreign-owned-buffer-p buf "this-ws"))))
 
+;;;; ---- Tests: workspace-name prefix ----
+
+(ert-deftest claude-repl-test-workspace-prefix-env-set ()
+  "workspace-prefix returns the CLAUDE_WORKSPACE_PREFIX value when set."
+  (cl-letf (((symbol-function 'getenv)
+             (lambda (k) (and (equal k "CLAUDE_WORKSPACE_PREFIX") "DWC"))))
+    (should (equal (claude-repl--workspace-prefix) "DWC"))))
+
+(ert-deftest claude-repl-test-workspace-prefix-env-unset ()
+  "workspace-prefix returns the empty string when the env var is unset."
+  (cl-letf (((symbol-function 'getenv) (lambda (_) nil)))
+    (should (equal (claude-repl--workspace-prefix) ""))))
+
+(ert-deftest claude-repl-test-workspace-prefix-slash-env-set ()
+  "workspace-prefix-slash appends a trailing slash to a non-empty prefix."
+  (cl-letf (((symbol-function 'getenv)
+             (lambda (k) (and (equal k "CLAUDE_WORKSPACE_PREFIX") "DWC"))))
+    (should (equal (claude-repl--workspace-prefix-slash) "DWC/"))))
+
+(ert-deftest claude-repl-test-workspace-prefix-slash-env-unset ()
+  "workspace-prefix-slash returns the empty string when the env var is unset."
+  (cl-letf (((symbol-function 'getenv) (lambda (_) nil)))
+    (should (equal (claude-repl--workspace-prefix-slash) ""))))
+
 (provide 'test-core)
 
 ;;; test-core.el ends here
