@@ -1120,6 +1120,30 @@ spying on the store rather than reading back the indistinguishable nil."
             (should (= board-pos 1))
           (kill-buffer buf))))))
 
+(ert-deftest claude-repl-test-handle-send-pgn-skips-board-render-when-ws-is-not-current ()
+  "handle-send-pgn does NOT render the GUI board when WS is not the active workspace.
+Regression guard: the board render is a side effect in the selected
+window, so rendering it while another workspace is focused leaks the
+board into the wrong window.  It must be gated on ws-active just like
+display-buffer."
+  (let ((board-calls nil)
+        (displayed nil))
+    (cl-letf (((symbol-function 'pygn-mode) #'ignore)
+              ((symbol-function 'display-buffer)
+               (lambda (buf &rest _) (setq displayed buf)))
+              ((symbol-function 'pygn-mode-display-gui-board-at-pos)
+               (lambda (pos) (push pos board-calls)))
+              ((symbol-function 'claude-repl--ws-resolve-persp)
+               (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--ws-current-name)
+               (lambda () "other-ws")))
+      (let ((buf (claude-repl--handle-send-pgn "ws1" "1. e4 *")))
+        (unwind-protect
+            (progn
+              (should (null board-calls))
+              (should (null displayed)))
+          (kill-buffer buf))))))
+
 (ert-deftest claude-repl-test-handle-send-pgn-reuses-existing-buffer ()
   "Calling handle-send-pgn twice for the same workspace reuses the buffer."
   (cl-letf (((symbol-function 'pygn-mode) #'ignore)

@@ -2440,15 +2440,20 @@ annotation must not error out the whole batch."
 
 (defun claude-repl--handle-send-pgn (ws pgn-string)
   "Open PGN-STRING in a temporary popup buffer with `pygn-mode'.
-The buffer is named \"*claude-repl-pgn:<WS>*\", placed in `pygn-mode',
-and the GUI board is rendered at the initial position via
-`pygn-mode-display-gui-board-at-pos'.
+The buffer is named \"*claude-repl-pgn:<WS>*\" and placed in `pygn-mode'.
 
 The buffer is attached to the WS perspective via
-`claude-repl--ws-add-buffer' so it belongs to the correct workspace.
-`display-buffer' is only called when WS is the currently-active
-workspace — otherwise the buffer is prepared silently and will be
-visible next time the user switches to WS."
+`claude-repl--ws-add-buffer' so it belongs to the correct workspace,
+regardless of which workspace is focused when this runs.
+
+Both visible side effects — `display-buffer' AND the GUI board render via
+`pygn-mode-display-gui-board-at-pos' — happen ONLY when WS is the
+currently-active workspace.  Otherwise the buffer is prepared silently
+and homed to its perspective, becoming visible the next time the user
+switches to WS.  Gating the board render this way is essential: it is a
+side effect in the selected window, so rendering it while a different
+workspace is focused would surface the board in the WRONG window (this
+send is async and frequently fires while another workspace is active)."
   (let* ((buf-name (format "*claude-repl-pgn:%s*" ws))
          (buf (get-buffer-create buf-name)))
     (with-current-buffer buf
@@ -2457,16 +2462,39 @@ visible next time the user switches to WS."
         (insert pgn-string))
       (pygn-mode)
       (goto-char (point-min)))
-    ;; Attach buffer to the target workspace's perspective.
-    (when-let ((persp (claude-repl--ws-resolve-persp ws)))
-      (claude-repl--ws-add-buffer buf persp nil))
-    ;; Only pop up the buffer when the target workspace is active.
-    (when (equal ws (claude-repl--ws-current-name))
-      (display-buffer buf))
-    (claude-repl--log ws "workspace-commands-file send: opened PGN buffer %s" buf-name)
-    ;; Render the board at the initial position.
-    (with-current-buffer buf
-      (pygn-mode-display-gui-board-at-pos (point)))
+    ;; Capture send-time context: the active workspace at send time often
+    ;; differs from the target WS, because the commands-file watcher fires no
+    ;; matter which persp is focused.  Logging it makes async display leaks
+    ;; visible instead of having to infer the active persp from other lines.
+    (let* ((current-ws (claude-repl--ws-current-name))
+           (persp (claude-repl--ws-resolve-persp ws))
+           (ws-active (equal ws current-ws)))
+      (claude-repl--log ws "send-pgn: target=%s active-ws=%s persp-resolved=%s ws-active=%s"
+                        ws (or current-ws "nil") (if persp "t" "nil") (if ws-active "t" "nil"))
+      ;; Attach buffer to the target workspace's perspective.
+      (if persp
+          (progn
+            (claude-repl--ws-add-buffer buf persp nil)
+            (claude-repl--log ws "send-pgn: attached buffer to persp for ws=%s" ws))
+        (claude-repl--log ws "send-pgn: NO persp resolved for ws=%s, buffer left unhomed" ws))
+      ;; Display the buffer AND render the GUI board ONLY when the target
+      ;; workspace is the active one.  Both are visible side effects in the
+      ;; selected window, so performing them while a DIFFERENT workspace is
+      ;; focused pops the PGN/board into the WRONG window.  The board render was
+      ;; previously unconditional, which leaked it into whatever window happened
+      ;; to be active at the async send moment; gating it on ws-active (the same
+      ;; condition as display-buffer) keeps the buffer homed to its persp for
+      ;; later viewing without surfacing it in the focused workspace.
+      (if ws-active
+          (progn
+            (display-buffer buf)
+            (with-current-buffer buf
+              (pygn-mode-display-gui-board-at-pos (point)))
+            (claude-repl--log ws "send-pgn: displayed PGN buffer and rendered board (target ws active) windows=%S"
+                              (mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))))
+        (claude-repl--log ws "send-pgn: deferred display+board, target=%s not active (active=%s), buffer homed for later"
+                          ws (or current-ws "nil")))
+      (claude-repl--log ws "workspace-commands-file send: opened PGN buffer %s" buf-name))
     buf))
 
 (defun claude-repl--handle-send-command (cmd)
