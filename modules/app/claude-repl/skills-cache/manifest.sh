@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
-# manifest.sh — declarative spec of which workspace-* skills are cached
-# in this repo, and where their canonical impl lives on the host.
+# manifest.sh — declarative spec of which workspace-* skills are managed,
+# and where each skill's canonical impl lives on the host.
 #
-# Source this file from install.sh / sync.sh — it defines:
+# Source this file from install.sh — it defines:
 #
-#   CACHED_SKILLS  array of "name|impl-source-path" entries.
+#   CACHED_SKILLS  array of "name|impl-source-path" entries.  (The name is
+#                  retained for back-compat; there is no cache anymore.)
 #
 # `name`          basename installed under $HOME/.claude/skills/<name>.
 #                 May be a directory (the usual SKILL.md + run.sh layout)
 #                 or a single file (e.g. emit-workspace-commands.sh).
-# `impl-source`   absolute path on the host to the canonical impl.  May
-#                 reference $HOME.  When sync.sh runs and this path
-#                 exists, its contents are mirrored into this directory
-#                 under <name>; that mirrored copy is the persisted
-#                 cache that ships with the repo and is what install.sh
-#                 falls back to when the live impl isn't on the host.
+# `impl-source`   absolute path on the host to the CANONICAL impl.  May
+#                 reference $HOME.  install.sh symlinks $HOME/.claude/
+#                 skills/<name> straight to this path — there is NO cache
+#                 fallback.  If the impl is absent, install FAILS HARD
+#                 rather than serve a stale copy.  Most impls live in the
+#                 explanation-engine repo; workspace-annotate is the lone
+#                 exception, sourced from a doom-worktree.
 
 CACHED_SKILLS=(
   "workspace-annotate|$HOME/.config/doom-worktrees/copy-to-clipboard-skill/.claude/skills/workspace-annotate"

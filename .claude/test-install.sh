@@ -2,14 +2,13 @@
 # test-install.sh — tests for .claude/install.sh.
 #
 # Each test builds a self-contained synthetic repo in a tmpdir
-# (install.sh + manifest + cache + hook scripts), inits it as a git
-# repo, and runs install.sh against a fake HOME.  The real host
+# (install.sh + manifest + pre-commit hook + local-skill dirs), inits it
+# as a git repo, and runs install.sh against a fake HOME.  The real host
 # ~/.claude/ and the real repo's git config are never touched.
 #
-# Focuses on the cached-skill install/uninstall logic and the
-# pre-commit hook install/uninstall logic — the hook-script + jq
-# bits in install.sh are tested by exercise (we just check they
-# don't error).
+# Focuses on the skill install/uninstall logic (always symlink straight
+# to the canonical impl, NO cache fallback, FAIL HARD when an impl is
+# absent) and the pre-commit hook install/uninstall logic.
 #
 # Run with:   bash .claude/test-install.sh
 set -euo pipefail
@@ -22,34 +21,42 @@ FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); shift; if [ $# -gt 0 ]; then printf '%s\n' "$@" | sed 's/^/        /'; fi; }
 
+# Local skills install.sh expects to find under modules/app/claude-repl/skills/.
+LOCAL_SKILL_NAMES=( debug-logs profile runtime-eval-code workspace-close workspace-profile )
+
 # Build a synthetic repo containing a fresh copy of install.sh, the
-# pre-commit hook, and a minimal cache+manifest with one cached skill
-# 'foo' whose impl points at $1 (default: a non-existent path so
-# install.sh exercises the cache-fallback branch).
+# pre-commit hook, a manifest with one cached skill 'foo' whose impl is
+# $1, and the local-skill source dirs.  When $1 is omitted, an existing
+# impl dir is created under the repo so install succeeds; pass a
+# nonexistent path to exercise the FAIL-HARD branch.
 mkfake_repo() {
-  local impl_path="${1:-/nonexistent/impl-$$}"
   local root; root="$(mktemp -d)"
+  local impl_path="${1:-$root/impl/foo}"
   mkdir -p "$root/.claude" \
            "$root/.githooks" \
-           "$root/modules/app/claude-repl/skills-cache/foo" \
+           "$root/modules/app/claude-repl/skills-cache" \
            "$root/modules/app/claude-repl/skills" \
            "$root/modules/app/claude-repl/hooks"
   cp "$REPO_ROOT/.claude/install.sh" "$root/.claude/install.sh"
   cp "$REPO_ROOT/.githooks/pre-commit" "$root/.githooks/pre-commit"
   chmod +x "$root/.claude/install.sh" "$root/.githooks/pre-commit"
-  # Cache content
-  echo "cache-content" > "$root/modules/app/claude-repl/skills-cache/foo/SKILL.md"
+  # Create the default impl only when the caller did not supply one.
+  if [ -z "${1:-}" ]; then
+    mkdir -p "$root/impl/foo"
+    echo "impl-content" > "$root/impl/foo/SKILL.md"
+  fi
   cat > "$root/modules/app/claude-repl/skills-cache/manifest.sh" <<EOF
 CACHED_SKILLS=("foo|$impl_path")
 EOF
-  # Minimum sync.sh so any test path that runs it works
-  cp "$REPO_ROOT/modules/app/claude-repl/skills-cache/sync.sh" \
-     "$root/modules/app/claude-repl/skills-cache/sync.sh"
-  chmod +x "$root/modules/app/claude-repl/skills-cache/sync.sh"
-  # Dummy hook script so install.sh's hook-copy loop has something to do
+  # Local-skill source dirs (install.sh links straight to these).
+  for s in "${LOCAL_SKILL_NAMES[@]}"; do
+    mkdir -p "$root/modules/app/claude-repl/skills/$s"
+    printf 'name: %s\n' "$s" > "$root/modules/app/claude-repl/skills/$s/SKILL.md"
+  done
+  # Dummy hook script so install.sh's hook-copy loop has something to do.
   printf '#!/usr/bin/env bash\nexit 0\n' > "$root/modules/app/claude-repl/hooks/dummy.sh"
   chmod +x "$root/modules/app/claude-repl/hooks/dummy.sh"
-  # Init git so install.sh can resolve --show-toplevel + --git-path
+  # Init git so install.sh can resolve --show-toplevel + --git-path.
   (cd "$root" && git init -q && git config user.email t@t && git config user.name t)
   echo "$root"
 }
@@ -60,72 +67,70 @@ mkfake_home() {
   echo "$home"
 }
 
-# Run install.sh in the isolated repo with fake HOME.  stdout+stderr
-# captured so tests can grep over it without polluting test output.
+# Run install.sh in the isolated repo with fake HOME, capturing the exit
+# code into LAST_RC and stdout+stderr into $repo/.install.log.
+LAST_RC=0
 run_install() {
   local repo="$1" home="$2" action="${3:-install}"
-  INSTALL_SH_SKIP_SANDBOX_DETECT=1 HOME="$home" bash "$repo/.claude/install.sh" "$action" >"$repo/.install.log" 2>&1 || true
+  set +e
+  INSTALL_SH_SKIP_SANDBOX_DETECT=1 HOME="$home" bash "$repo/.claude/install.sh" "$action" >"$repo/.install.log" 2>&1
+  LAST_RC=$?
+  set -e
 }
 
 cleanup() { rm -rf "$1" "$2"; }
 
-# --- install: fresh fallback to cache symlink ---
-test_install_fresh_falls_back_to_cache() {
+# --- install: fresh install symlinks straight to the canonical impl ---
+test_install_fresh_symlinks_to_impl() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
   run_install "$repo" "$home"
-  local link="$home/.claude/skills/foo"
-  local expected="$repo/modules/app/claude-repl/skills-cache/foo"
-  local actual; actual="$(readlink "$link" 2>/dev/null || echo MISSING)"
-  if [ "$actual" = "$expected" ]; then
-    pass "fresh install symlinks cache fallback"
+  local actual; actual="$(readlink "$home/.claude/skills/foo" 2>/dev/null || echo MISSING)"
+  if [ "$LAST_RC" -eq 0 ] && [ "$actual" = "$repo/impl/foo" ]; then
+    pass "fresh install symlinks straight to impl"
   else
-    fail "fresh install cache fallback" "expected: $expected" "actual:   $actual"
+    fail "fresh install impl symlink" "rc: $LAST_RC" "expected: $repo/impl/foo" "actual:   $actual"
   fi
   cleanup "$repo" "$home"
 }
 
-# --- install: existing live-impl symlink is preserved ---
-test_install_preserves_live_impl_symlink() {
-  local live_impl; live_impl="$(mktemp -d)"
-  echo "live" > "$live_impl/SKILL.md"
-  local repo home; repo="$(mkfake_repo "$live_impl")"; home="$(mkfake_home)"
-  ln -s "$live_impl" "$home/.claude/skills/foo"
+# --- install: a pre-existing (stale) symlink is repaired to the impl ---
+test_install_relinks_existing_symlink_to_impl() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  ln -s /some/stale/sandbox/path "$home/.claude/skills/foo"
   run_install "$repo" "$home"
   local actual; actual="$(readlink "$home/.claude/skills/foo")"
-  if [ "$actual" = "$live_impl" ] && grep -q "live-impl symlink already in place" "$repo/.install.log"; then
-    pass "existing live-impl symlink is preserved"
+  if [ "$LAST_RC" -eq 0 ] && [ "$actual" = "$repo/impl/foo" ]; then
+    pass "stale symlink is repaired to the impl"
   else
-    fail "live-impl preservation" "actual: $actual" "$(cat "$repo/.install.log")"
-  fi
-  rm -rf "$live_impl"
-  cleanup "$repo" "$home"
-}
-
-# --- install: existing cache symlink is preserved ---
-test_install_preserves_cache_symlink() {
-  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
-  local cache="$repo/modules/app/claude-repl/skills-cache/foo"
-  ln -s "$cache" "$home/.claude/skills/foo"
-  run_install "$repo" "$home"
-  if grep -q "cache symlink already in place" "$repo/.install.log"; then
-    pass "existing cache symlink is preserved"
-  else
-    fail "cache symlink preservation" "$(cat "$repo/.install.log")"
+    fail "stale symlink repair" "rc: $LAST_RC" "actual: $actual" "$(cat "$repo/.install.log")"
   fi
   cleanup "$repo" "$home"
 }
 
-# --- install: foreign symlink is left alone ---
-test_install_skips_foreign_symlink() {
-  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
-  ln -s /tmp/something-foreign "$home/.claude/skills/foo"
+# --- install: FAIL HARD when the canonical impl is missing (no fallback) ---
+test_install_fails_hard_when_impl_missing() {
+  local repo home; repo="$(mkfake_repo "/nonexistent/impl-$$")"; home="$(mkfake_home)"
   run_install "$repo" "$home"
-  local actual; actual="$(readlink "$home/.claude/skills/foo")"
-  if [ "$actual" = "/tmp/something-foreign" ] \
-     && grep -q "foreign symlink" "$repo/.install.log"; then
-    pass "foreign symlink is left alone with a warning"
+  if [ "$LAST_RC" -ne 0 ] \
+     && grep -q "ERROR: canonical impl for 'foo' not found" "$repo/.install.log" \
+     && [ ! -L "$home/.claude/skills/foo" ]; then
+    pass "missing impl fails hard with no symlink created"
   else
-    fail "foreign symlink" "$(cat "$repo/.install.log")"
+    fail "missing-impl fail-hard" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+# --- install: a real (non-symlink) file at the dest is NOT trampled ---
+test_install_preserves_non_symlink_file() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  echo "user file" > "$home/.claude/skills/foo"
+  run_install "$repo" "$home"
+  if [ -f "$home/.claude/skills/foo" ] && [ ! -L "$home/.claude/skills/foo" ] \
+     && grep -q "non-symlink file" "$repo/.install.log"; then
+    pass "non-symlink file is left untouched with a warning"
+  else
+    fail "non-symlink preservation" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
   fi
   cleanup "$repo" "$home"
 }
@@ -135,7 +140,7 @@ test_install_installs_pre_commit_hook() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
   run_install "$repo" "$home"
   local dest="$repo/.git/hooks/pre-commit"
-  if [ -x "$dest" ] && grep -q "claude-repl-skills-cache-sync" "$dest"; then
+  if [ -x "$dest" ] && grep -q "claude-repl-precommit" "$dest"; then
     pass "pre-commit hook installed into repo .git/hooks"
   else
     fail "pre-commit install" "$(cat "$repo/.install.log")"
@@ -147,7 +152,7 @@ test_install_installs_pre_commit_hook() {
 test_install_refreshes_managed_hook() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
   run_install "$repo" "$home"  # first install
-  # Tamper: append junk so we can detect refresh
+  # Tamper: append junk so we can detect refresh.
   echo "# tampered" >> "$repo/.git/hooks/pre-commit"
   run_install "$repo" "$home"  # rerun
   if ! grep -q "^# tampered" "$repo/.git/hooks/pre-commit" \
@@ -175,21 +180,21 @@ test_install_preserves_foreign_pre_commit() {
   cleanup "$repo" "$home"
 }
 
-# --- uninstall: removes cache symlink ---
-test_uninstall_removes_cache_symlink() {
+# --- uninstall: removes the impl symlink ---
+test_uninstall_removes_impl_symlink() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
   run_install "$repo" "$home"
-  [ -L "$home/.claude/skills/foo" ] || { fail "uninstall precondition (cache link missing)"; cleanup "$repo" "$home"; return; }
+  [ -L "$home/.claude/skills/foo" ] || { fail "uninstall precondition (impl link missing)" "$(cat "$repo/.install.log")"; cleanup "$repo" "$home"; return; }
   run_install "$repo" "$home" uninstall
   if [ ! -e "$home/.claude/skills/foo" ] && [ ! -L "$home/.claude/skills/foo" ]; then
-    pass "uninstall removes cache symlink"
+    pass "uninstall removes impl symlink"
   else
-    fail "uninstall cache symlink"
+    fail "uninstall impl symlink"
   fi
   cleanup "$repo" "$home"
 }
 
-# --- uninstall: removes only managed pre-commit hook ---
+# --- uninstall: removes only the managed pre-commit hook ---
 test_uninstall_only_removes_managed_hook() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
   run_install "$repo" "$home"
@@ -215,14 +220,14 @@ test_uninstall_only_removes_managed_hook() {
 }
 
 echo "=== test-install.sh ==="
-test_install_fresh_falls_back_to_cache
-test_install_preserves_live_impl_symlink
-test_install_preserves_cache_symlink
-test_install_skips_foreign_symlink
+test_install_fresh_symlinks_to_impl
+test_install_relinks_existing_symlink_to_impl
+test_install_fails_hard_when_impl_missing
+test_install_preserves_non_symlink_file
 test_install_installs_pre_commit_hook
 test_install_refreshes_managed_hook
 test_install_preserves_foreign_pre_commit
-test_uninstall_removes_cache_symlink
+test_uninstall_removes_impl_symlink
 test_uninstall_only_removes_managed_hook
 
 echo
