@@ -255,11 +255,20 @@ problems.  No-op inside the sandbox."
 (defun claude-repl--maybe-install-hooks ()
   "Run `claude-repl-install-hooks' only when registration or scripts are off.
 Guarded by `claude-repl--doctor-issues' so a healthy load is a pure
-JSON-parse (no bash, no backup file).  No-op in sandbox or when
-`claude-repl-auto-install-hooks' is nil.  Called inline from this file's
-load so hooks are registered before later claude-repl sub-modules
-(sentinel, notifications, ...) start relying on them."
+JSON-parse (no bash, no backup file).  No-op in sandbox, in a
+`noninteractive' (batch) session, or when `claude-repl-auto-install-hooks'
+is nil.  Called inline from this file's load so hooks are registered
+before later claude-repl sub-modules (sentinel, notifications, ...)
+start relying on them.
+
+The `noninteractive' guard keeps batch invocations (the ERT test
+suite, CI, ad-hoc scripts) from silently rewriting
+`~/.claude/settings.json', spawning bash, and `display-buffer'ing the
+install-output buffer into the session's frame — none of which is
+meaningful without an interactive startup, and the stray window
+corrupts window-layout assertions in the test suite."
   (when (and claude-repl-auto-install-hooks
+             (not noninteractive)
              (not (claude-repl--in-sandbox-p))
              (claude-repl--doctor-issues))
     (condition-case err
