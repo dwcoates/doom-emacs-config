@@ -53,6 +53,32 @@
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
       (should-not (claude-repl--panels-visible-p)))))
 
+;;;; ---- Tests: output-visible-input-hidden-p ----
+
+(ert-deftest claude-repl-test-panels-output-visible-input-hidden-p-true ()
+  "output-visible-input-hidden-p is t when output is visible but input is not."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'claude-repl--vterm-visible-p) (lambda () t))
+              ((symbol-function 'claude-repl--input-visible-p) (lambda () nil)))
+      (should (claude-repl--output-visible-input-hidden-p)))))
+
+(ert-deftest claude-repl-test-panels-output-visible-input-hidden-p-both-visible ()
+  "output-visible-input-hidden-p is nil when both panels are visible."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'claude-repl--vterm-visible-p) (lambda () t))
+              ((symbol-function 'claude-repl--input-visible-p) (lambda () t)))
+      (should-not (claude-repl--output-visible-input-hidden-p)))))
+
+(ert-deftest claude-repl-test-panels-output-visible-input-hidden-p-output-hidden ()
+  "output-visible-input-hidden-p is nil when the output panel is not visible."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'claude-repl--vterm-visible-p) (lambda () nil))
+              ((symbol-function 'claude-repl--input-visible-p) (lambda () nil)))
+      (should-not (claude-repl--output-visible-input-hidden-p)))))
+
 ;;;; ---- Tests: Safe buffer name ----
 
 (ert-deftest claude-repl-test-panels-safe-buffer-name-nil ()
@@ -177,6 +203,95 @@
   (let ((doc (documentation 'claude-repl--show-panels)))
     (should (string-match-p "60%" doc))
     (should (string-match-p "15%" doc))))
+
+;;;; ---- Tests: show-input-beside-output ----
+
+(ert-deftest claude-repl-test-panels-show-input-beside-output-splits-output ()
+  "show-input-beside-output splits the output window and shows the input buffer."
+  (claude-repl-test--with-clean-state
+    (let* ((input-buf (get-buffer-create "*claude-panel-input-test-ws*"))
+           (vterm-win (selected-window))
+           (split-arg nil)
+           (set-win nil)
+           (set-buf nil)
+           (hardened nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                      ((symbol-function 'claude-repl-window--panel-window)
+                       (lambda (_kind &rest _) vterm-win))
+                      ((symbol-function 'split-window)
+                       (lambda (win &rest _) (setq split-arg win) 'input-win))
+                      ((symbol-function 'window-total-height) (lambda (_w) 40))
+                      ((symbol-function 'set-window-buffer)
+                       (lambda (w b) (setq set-win w set-buf b)))
+                      ((symbol-function 'claude-repl-window--harden)
+                       (lambda (w &rest _) (setq hardened w))))
+              (should (eq (claude-repl--show-input-beside-output) 'input-win))
+              ;; Split happens on the existing output window.
+              (should (eq split-arg vterm-win))
+              ;; Input buffer is shown in the new window and it is hardened.
+              (should (eq set-win 'input-win))
+              (should (eq set-buf input-buf))
+              (should (eq hardened 'input-win))))
+        (kill-buffer input-buf)))))
+
+(ert-deftest claude-repl-test-panels-show-input-beside-output-noop-no-output-window ()
+  "show-input-beside-output is a no-op when the output window is not visible."
+  (claude-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*claude-panel-input-test-ws*"))
+          (split-called nil))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                      ((symbol-function 'claude-repl-window--panel-window)
+                       (lambda (_kind &rest _) nil))
+                      ((symbol-function 'split-window)
+                       (lambda (&rest _) (setq split-called t) 'input-win)))
+              (should-not (claude-repl--show-input-beside-output))
+              (should-not split-called)))
+        (kill-buffer input-buf)))))
+
+(ert-deftest claude-repl-test-panels-show-input-beside-output-noop-dead-input ()
+  "show-input-beside-output is a no-op when the input buffer is not live."
+  (claude-repl-test--with-clean-state
+    (let ((split-called nil))
+      ;; No :input-buffer set — buffer is nil/dead.
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl-window--panel-window)
+                 (lambda (_kind &rest _) (selected-window)))
+                ((symbol-function 'split-window)
+                 (lambda (&rest _) (setq split-called t) 'input-win)))
+        (should-not (claude-repl--show-input-beside-output))
+        (should-not split-called)))))
+
+;;;; ---- Tests: ensure-input-beside-output ----
+
+(ert-deftest claude-repl-test-panels-ensure-input-beside-output-repairs ()
+  "ensure-input-beside-output adds the input window when output is up, input down."
+  (claude-repl-test--with-clean-state
+    (let ((shown nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--output-visible-input-hidden-p)
+                 (lambda () t))
+                ((symbol-function 'claude-repl--show-input-beside-output)
+                 (lambda () (setq shown t))))
+        (claude-repl--ensure-input-beside-output)
+        (should shown)))))
+
+(ert-deftest claude-repl-test-panels-ensure-input-beside-output-noop ()
+  "ensure-input-beside-output is a no-op when the layout is not half-shown."
+  (claude-repl-test--with-clean-state
+    (let ((shown nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--output-visible-input-hidden-p)
+                 (lambda () nil))
+                ((symbol-function 'claude-repl--show-input-beside-output)
+                 (lambda () (setq shown t))))
+        (claude-repl--ensure-input-beside-output)
+        (should-not shown)))))
 
 ;;;; ---- Tests: drain-pending-show-panels ----
 
@@ -1073,6 +1188,30 @@ contrast to SPC o C, which hides further)."
                  (lambda () (setq shown t))))
         (claude-repl-simple)
         (should shown)))))
+
+(ert-deftest claude-repl-test-panels-entry-point-simple-output-only-adds-input ()
+  "claude-repl-simple (SPC o c): when only the output window is visible, it
+adds the input window beside it and focuses it — rather than rebuilding the
+whole layout (which would duplicate the already-visible output window)."
+  (claude-repl-test--with-clean-state
+    (let ((added nil) (focused nil) (shown-hidden nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'claude-repl--claude-running-p) (lambda () t))
+                ((symbol-function 'claude-repl--session-starting-p) (lambda () nil))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'claude-repl--output-visible-input-hidden-p)
+                 (lambda () t))
+                ((symbol-function 'use-region-p) (lambda () nil))
+                ((symbol-function 'claude-repl--show-input-beside-output)
+                 (lambda () (setq added t)))
+                ((symbol-function 'claude-repl--focus-input-panel)
+                 (lambda () (setq focused t)))
+                ((symbol-function 'claude-repl--show-hidden-panels)
+                 (lambda () (setq shown-hidden t))))
+        (claude-repl-simple)
+        (should added)
+        (should focused)
+        (should-not shown-hidden)))))
 
 ;;;; ---- Tests: validate-env-switch ----
 
@@ -3932,6 +4071,51 @@ otherwise signal `Cannot split side window' and leave panels half-shown."
                  (lambda () (setq show-called t))))
         (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
         (should-not show-called)))))
+
+(ert-deftest claude-repl-test-panels-ensure-own-adds-input-when-output-visible ()
+  "ensure-own-panels-on-persp-switch adds only the input window (not a full
+rebuild) when the output window survived but the input window was dropped."
+  (claude-repl-test--with-clean-state
+    (let ((show-panels-called nil)
+          (add-input-called nil))
+      (claude-repl--ws-put "my-ws" :panels-were-visible t)
+      (let ((vterm-buf (get-buffer-create "*claude-panel-my-ws*"))
+            (input-buf (get-buffer-create "*claude-panel-input-my-ws*")))
+        (unwind-protect
+            (progn
+              (claude-repl--ws-put "my-ws" :vterm-buffer vterm-buf)
+              (claude-repl--ws-put "my-ws" :input-buffer input-buf)
+              (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                        ((symbol-function 'claude-repl--stale-panel-windows) (lambda () nil))
+                        ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+                        ((symbol-function 'claude-repl--vterm-visible-p) (lambda () t))
+                        ((symbol-function 'claude-repl--output-visible-input-hidden-p)
+                         (lambda () nil))
+                        ((symbol-function 'claude-repl--show-panels)
+                         (lambda () (setq show-panels-called t)))
+                        ((symbol-function 'claude-repl--show-input-beside-output)
+                         (lambda () (setq add-input-called t))))
+                (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
+                (should add-input-called)
+                (should-not show-panels-called)))
+          (kill-buffer vterm-buf)
+          (kill-buffer input-buf))))))
+
+(ert-deftest claude-repl-test-panels-ensure-own-repairs-fullscreen-output-only ()
+  "ensure-own-panels-on-persp-switch repairs a fullscreen output-only frame via
+the trailing ensure-input-beside-output call, even when :panels-were-visible
+was never recorded."
+  (claude-repl-test--with-clean-state
+    (let ((repair-called nil))
+      ;; :panels-were-visible intentionally unset — the restore branch must
+      ;; not fire; only the trailing repair should.
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                ((symbol-function 'claude-repl--stale-panel-windows) (lambda () nil))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'claude-repl--ensure-input-beside-output)
+                 (lambda () (setq repair-called t))))
+        (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
+        (should repair-called)))))
 
 ;;;; ---- Tests: before-persp-deactivate records panels-were-visible ----
 
