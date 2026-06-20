@@ -2332,7 +2332,7 @@ fall back to the legacy `--ws-name-for-dir' path."
   "Nested `--with-dir-map' reuses the outer map instead of rebuilding.
 The `or' branch in the macro guards against paying a second O(N)
 `maphash' when a caller (e.g. `drawer-show') already wrapped an inner
-`--render' or `--max-depth'."
+`--render'."
   (claude-repl-test--with-clean-state
     (puthash "a" '(:project-dir "/a/") claude-repl--workspaces)
     (let ((build-count 0))
@@ -2382,78 +2382,6 @@ keep behaving exactly as before."
         (let ((claude-repl-drawer--dir->name-map nil))
           (should (equal (claude-repl-drawer--source-ws-name "child") "parent"))
           (should (= legacy-calls 1)))))))
-
-(ert-deftest claude-repl-drawer-test-max-depth-cold-path-builds-map-once ()
-  "Cold `--max-depth' over N workspaces builds the dir→name map exactly once.
-Without the map the function would call `--ws-name-for-dir' O(N×depth)
-times, each doing its own O(N) maphash.  The reverse-map collapses this
-to one O(N) build + O(1) lookups."
-  (claude-repl-test--with-clean-state
-    (puthash "root"  '(:project-dir "/root/")  claude-repl--workspaces)
-    (puthash "mid"   '(:project-dir "/mid/"  :source-ws-dir "/root/")
-             claude-repl--workspaces)
-    (puthash "leaf1" '(:project-dir "/l1/"   :source-ws-dir "/mid/")
-             claude-repl--workspaces)
-    (puthash "leaf2" '(:project-dir "/l2/"   :source-ws-dir "/mid/")
-             claude-repl--workspaces)
-    (let ((build-count 0)
-          (legacy-calls 0))
-      (cl-letf* ((orig (symbol-function 'claude-repl-drawer--build-dir->name-map))
-                 ((symbol-function 'claude-repl-drawer--build-dir->name-map)
-                  (lambda (&rest args)
-                    (cl-incf build-count)
-                    (apply orig args)))
-                 ((symbol-function 'claude-repl--ws-name-for-dir)
-                  (lambda (_dir) (cl-incf legacy-calls) nil)))
-        (claude-repl-drawer--max-depth)
-        (should (= build-count 1))
-        (should (= legacy-calls 0))))))
-
-(ert-deftest claude-repl-drawer-test-max-depth-skips-merged-ancestor ()
-  "`--max-depth' does not count a flattenable (merged) ancestor.
-Chain: gp (branch-merged=merged) <- p <- c.
-The rendered tree flattens through gp, so visible depth for c is 1
-(c is one level under p), not 2.  Without the fix, the depth bonus
-is 2x indent-per-level, causing the drawer to widen as workspaces
-accumulate in a session."
-  (claude-repl-test--with-clean-state
-    (puthash "gp" (list :project-dir "/gp/" :branch-merged 'merged)
-             claude-repl--workspaces)
-    (puthash "p"  (list :project-dir "/p/" :source-ws-dir "/gp/")
-             claude-repl--workspaces)
-    (puthash "c"  (list :project-dir "/c/" :source-ws-dir "/p/")
-             claude-repl--workspaces)
-    ;; p is 1 level under gp (but gp is flattenable so rendered depth = 0 for p).
-    ;; c is 1 rendered level under p.  Max rendered depth = 1.
-    (should (= (claude-repl-drawer--max-depth) 1))))
-
-(ert-deftest claude-repl-drawer-test-max-depth-skips-multiple-merged-ancestors ()
-  "`--max-depth' skips consecutive merged ancestors in a chain.
-Chain: ggp (merged) <- gp (merged) <- p <- c.
-Both ggp and gp are flattenable, so visible depth for c is 1."
-  (claude-repl-test--with-clean-state
-    (puthash "ggp" (list :project-dir "/ggp/" :branch-merged 'merged)
-             claude-repl--workspaces)
-    (puthash "gp"  (list :project-dir "/gp/"  :branch-merged 'merged
-                         :source-ws-dir "/ggp/")
-             claude-repl--workspaces)
-    (puthash "p"   (list :project-dir "/p/"   :source-ws-dir "/gp/")
-             claude-repl--workspaces)
-    (puthash "c"   (list :project-dir "/c/"   :source-ws-dir "/p/")
-             claude-repl--workspaces)
-    (should (= (claude-repl-drawer--max-depth) 1))))
-
-(ert-deftest claude-repl-drawer-test-max-depth-unmerged-chain-unchanged ()
-  "`--max-depth' still counts unmerged ancestors in full.
-Chain: gp <- p <- c where nobody is merged: rendered depth = 2."
-  (claude-repl-test--with-clean-state
-    (puthash "gp" (list :project-dir "/gp/")
-             claude-repl--workspaces)
-    (puthash "p"  (list :project-dir "/p/"  :source-ws-dir "/gp/")
-             claude-repl--workspaces)
-    (puthash "c"  (list :project-dir "/c/"  :source-ws-dir "/p/")
-             claude-repl--workspaces)
-    (should (= (claude-repl-drawer--max-depth) 2))))
 
 ;;;; ---- apply-background idempotence ----
 
@@ -2569,8 +2497,10 @@ unfocused window's `window-point' to the top unless it is re-synced."
                 ((symbol-function 'frame-width)  (lambda (_) 200)))
         (should (= (claude-repl-drawer--window-width 'fake-window) 2))))))
 
-(ert-deftest claude-repl-drawer-test-window-width-adds-depth-bonus ()
-  "Width = base fraction + (max-depth × indent-per-level)."
+(ert-deftest claude-repl-drawer-test-window-width-constant-regardless-of-depth ()
+  "Width is purely the fraction of frame-width, with NO depth bonus.
+A deep workspace tree must not widen the drawer: the width is constant
+at runtime and depends only on the fraction and the frame width."
   (claude-repl-test--with-clean-state
     (puthash "gp" '(:project-dir "/gp/") claude-repl--workspaces)
     (puthash "p"  '(:project-dir "/p/"  :source-ws-dir "/gp/")
@@ -2586,105 +2516,9 @@ unfocused window's `window-point' to the top unless it is re-synced."
                    (cond ((equal dir "/gp/") "gp")
                          ((equal dir "/p/")  "p")
                          (t nil)))))
-        ;; Base = 0.10 × 200 = 20.  Max depth = 2 (c → p → gp).
-        ;; Indent-per-level = 2.  Bonus = 2 × 2 = 4.  Total = 24.
-        (should (= (claude-repl-drawer--window-width 'fake-window) 24))))))
-
-(ert-deftest claude-repl-drawer-test-persisted-cols-overrides-fraction ()
-  "When `--persisted-cols' is non-nil it overrides fraction-based width."
-  (claude-repl-test--with-clean-state
-    (let ((claude-repl-drawer-width-fraction 0.20)
-          (claude-repl-drawer--persisted-cols 73))
-      (cl-letf (((symbol-function 'window-frame) (lambda (_) 'fake-frame))
-                ((symbol-function 'frame-width)  (lambda (_) 200)))
-        ;; Fraction would give 40; persisted-cols wins.
-        (should (= (claude-repl-drawer--window-width 'fake-window) 73))))))
-
-(ert-deftest claude-repl-drawer-test-persisted-cols-nil-falls-back-to-fraction ()
-  "When `--persisted-cols' is nil, fraction-based computation drives width."
-  (claude-repl-test--with-clean-state
-    (let ((claude-repl-drawer-width-fraction 0.20)
-          (claude-repl-drawer--persisted-cols nil))
-      (cl-letf (((symbol-function 'window-frame) (lambda (_) 'fake-frame))
-                ((symbol-function 'frame-width)  (lambda (_) 200)))
-        (should (= (claude-repl-drawer--window-width 'fake-window) 40))))))
-
-(ert-deftest claude-repl-drawer-test-persisted-cols-floors-at-one ()
-  "Persisted-cols clamps at 1 even if a zero/negative slipped in."
-  (claude-repl-test--with-clean-state
-    (let ((claude-repl-drawer--persisted-cols 0))
-      (should (= (claude-repl-drawer--window-width 'fake-window) 1)))))
-
-(ert-deftest claude-repl-drawer-test-capture-resize-pins-width-on-diverge ()
-  "`--capture-resize' pins `--persisted-cols' when actual ≠ expected.
-Simulates a manual user resize: after `--apply-width' set expected=40,
-the user dragged the side window to 55; the size-change hook should
-treat the new value as user intent and pin it."
-  (claude-repl-test--with-clean-state
-    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
-          (claude-repl-drawer--persisted-cols nil)
-          (claude-repl-drawer--expected-cols 40))
-      (unwind-protect
-          (cl-letf (((symbol-function 'get-buffer-window)
-                     (lambda (b &optional _f) (and (eq b buf) 'fake-win)))
-                    ((symbol-function 'window-total-width)
-                     (lambda (_) 55)))
-            (claude-repl-drawer--capture-resize 'fake-frame)
-            (should (= claude-repl-drawer--persisted-cols 55))
-            (should (= claude-repl-drawer--expected-cols 55)))
-        (when (buffer-live-p buf) (kill-buffer buf))))))
-
-(ert-deftest claude-repl-drawer-test-capture-resize-noop-when-matches-expected ()
-  "`--capture-resize' is a no-op when actual matches expected.
-Simulates persp-restore + our reapply: net width = expected, so no
-spurious capture overwrites a previously-pinned width."
-  (claude-repl-test--with-clean-state
-    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
-          (claude-repl-drawer--persisted-cols 73)
-          (claude-repl-drawer--expected-cols 73))
-      (unwind-protect
-          (cl-letf (((symbol-function 'get-buffer-window)
-                     (lambda (b &optional _f) (and (eq b buf) 'fake-win)))
-                    ((symbol-function 'window-total-width)
-                     (lambda (_) 73)))
-            (claude-repl-drawer--capture-resize 'fake-frame)
-            (should (= claude-repl-drawer--persisted-cols 73)))
-        (when (buffer-live-p buf) (kill-buffer buf))))))
-
-(ert-deftest claude-repl-drawer-test-capture-resize-noop-without-expected ()
-  "`--capture-resize' is a no-op until `--apply-width' has set expected.
-Guards against the size-change hook persisting spurious widths during
-the bootstrap period before the drawer has ever been displayed."
-  (claude-repl-test--with-clean-state
-    (let ((buf (get-buffer-create claude-repl-drawer-buffer-name))
-          (claude-repl-drawer--persisted-cols nil)
-          (claude-repl-drawer--expected-cols nil))
-      (unwind-protect
-          (cl-letf (((symbol-function 'get-buffer-window)
-                     (lambda (b &optional _f) (and (eq b buf) 'fake-win)))
-                    ((symbol-function 'window-total-width)
-                     (lambda (_) 99)))
-            (claude-repl-drawer--capture-resize 'fake-frame)
-            (should-not claude-repl-drawer--persisted-cols))
-        (when (buffer-live-p buf) (kill-buffer buf))))))
-
-(ert-deftest claude-repl-drawer-test-capture-resize-noop-when-no-window ()
-  "`--capture-resize' is a no-op when the drawer buffer has no window."
-  (claude-repl-test--with-clean-state
-    (let ((claude-repl-drawer--persisted-cols nil)
-          (claude-repl-drawer--expected-cols 40))
-      (cl-letf (((symbol-function 'get-buffer-window)
-                 (lambda (&rest _) nil)))
-        (claude-repl-drawer--capture-resize 'fake-frame)
-        (should-not claude-repl-drawer--persisted-cols)))))
-
-(ert-deftest claude-repl-drawer-test-reset-width-clears-persisted ()
-  "`claude-repl-drawer-reset-width' clears `--persisted-cols'."
-  (claude-repl-test--with-clean-state
-    (let ((claude-repl-drawer--persisted-cols 73))
-      (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil)))
-        (claude-repl-drawer-reset-width)
-        (should-not claude-repl-drawer--persisted-cols)))))
+        ;; Pre-change this returned 24 (base 20 + depth-bonus 4).  Now the
+        ;; bonus is gone, so the width is exactly the fraction base: 20.
+        (should (= (claude-repl-drawer--window-width 'fake-window) 20))))))
 
 (ert-deftest claude-repl-drawer-test-ensure-visible-reapplies-width-when-already-visible ()
   "`--ensure-visible-on-persp-switch' reapplies width when drawer is already
@@ -2701,27 +2535,6 @@ just restored from the destination workspace's saved config."
           (claude-repl-drawer--ensure-visible-on-persp-switch)
           (should (eq apply-called 'fake-win)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
-
-(ert-deftest claude-repl-drawer-test-max-depth-walks-chain ()
-  "`--max-depth' returns the longest source-chain hop count."
-  (claude-repl-test--with-clean-state
-    (puthash "root" '(:project-dir "/root/") claude-repl--workspaces)
-    (puthash "mid"  '(:project-dir "/mid/"  :source-ws-dir "/root/")
-             claude-repl--workspaces)
-    (puthash "leaf" '(:project-dir "/leaf/" :source-ws-dir "/mid/")
-             claude-repl--workspaces)
-    (cl-letf (((symbol-function 'claude-repl--ws-name-for-dir)
-               (lambda (dir)
-                 (cond ((equal dir "/root/") "root")
-                       ((equal dir "/mid/")  "mid")
-                       (t nil)))))
-      (should (= (claude-repl-drawer--max-depth) 2)))))
-
-(ert-deftest claude-repl-drawer-test-max-depth-zero-when-no-chains ()
-  "Max-depth returns 0 when no workspace has a recorded source."
-  (claude-repl-test--with-clean-state
-    (puthash "alone" '(:project-dir "/a/") claude-repl--workspaces)
-    (should (= (claude-repl-drawer--max-depth) 0))))
 
 ;;;; ---- Priority display ----
 

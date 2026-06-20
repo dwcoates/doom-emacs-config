@@ -27,37 +27,24 @@
 
 (defcustom claude-repl-drawer-width-fraction 0.20
   "Fraction of the frame width the drawer should occupy.
-Computed against `frame-width' at display time so the drawer scales
-with the frame.  Capped at 20% by default — the drawer is meant to
-stay open during work, not dominate the layout.
+Computed against `frame-width' so the drawer scales with the frame.
+Capped at 20% by default — the drawer is meant to stay open during
+work, not dominate the layout.
 
-Acts as the seed/default; once the user manually resizes the drawer
-the override in `claude-repl-drawer--persisted-cols' takes precedence
-across every workspace/persp until cleared via
-`claude-repl-drawer-reset-width'."
+This is the SOLE determinant of drawer width: the width is always
+`round(claude-repl-drawer-width-fraction × frame-width)' and is
+constant at runtime.  There is no manual-resize override and no
+depth-based adjustment, so the only thing that ever changes the
+drawer width is editing this fraction (or resizing the frame
+itself)."
   :type 'float
   :group 'claude-repl)
 
-(defvar claude-repl-drawer--persisted-cols nil
-  "User-pinned drawer width in columns, or nil to fall back to the fraction.
-Captured from manual resize gestures by
-`claude-repl-drawer--capture-resize' and reapplied across every
-workspace by `claude-repl-drawer--apply-width' so the drawer behaves
-as a frame-level UI element rather than a per-persp artifact.")
-
-(defvar claude-repl-drawer--expected-cols nil
-  "Width applied by the last `claude-repl-drawer--apply-width' call.
-Read by `claude-repl-drawer--capture-resize' to tell apart programmatic
-size changes (matching) from manual user resizes (diverging) without
-needing a dynamic flag — the size-change hook fires after redisplay,
-long after any `let'-bound suppression flag has unwound.")
-
 (defcustom claude-repl-drawer-indent-per-level 2
   "Columns to indent each nesting level in the drawer.
-Read by both the render (per-depth indent string) and the window
-width calculation (depth bonus added to fraction-derived base width),
-so changing this single value resizes the drawer in proportion to
-the indent change — no other knobs needed."
+Read by the render to build the per-depth indent string.  Does NOT
+affect the drawer's window width, which is constant (see
+`claude-repl-drawer-width-fraction')."
   :type 'integer
   :group 'claude-repl)
 
@@ -621,7 +608,7 @@ Builds the reverse-lookup map exactly once for the duration of BODY so
 nested `--source-ws-name' calls amortize against a single O(N) walk.
 Nested invocations reuse the outer binding (the `or' branch) so a
 caller wrapping `claude-repl-drawer-show' doesn't pay a second build
-when an inner `--render' or `--max-depth' also wraps."
+when an inner `--render' also wraps."
   (declare (indent 0) (debug t))
   `(let ((claude-repl-drawer--dir->name-map
           (or claude-repl-drawer--dir->name-map
@@ -1746,53 +1733,17 @@ invokes git.  Caller is `--render-workspace-expanded'."
      (no-other-window . nil)))
   "Display action for the drawer buffer.")
 
-(defun claude-repl-drawer--max-depth ()
-  "Return the deepest workspace nesting depth in `claude-repl--workspaces'.
-Walks each workspace's source-ws chain and returns the maximum rendered
-depth.  Skips flattenable (merged) ancestors so the depth bonus tracks
-the *rendered* tree depth -- matching `--effective-parent''s flattening
--- rather than raw chain length.  Without this, long merge histories
-inflate the depth bonus on every `--apply-width' call, causing the
-drawer to widen as workspaces accumulate over a session.
-Cycle-capped via `claude-repl-drawer-tree-max-depth'.
-
-Wrapped in `--with-dir-map' so the N parent-chain walks share one O(N)
-reverse-lookup build, dropping the cold-cache cost from O(N2) to O(N).
-Called from `--window-width', which the side-window display-action
-invokes once at window creation AND `--apply-width' re-invokes on every
-show -- so cheap matters even when `:source-ws-name' caches are warm."
-  (claude-repl-drawer--with-dir-map
-   (let ((maxd 0))
-     (dolist (ws (claude-repl-drawer--visible-workspace-keys))
-       (let ((d 0)
-             (cur (claude-repl-drawer--source-ws-name ws)))
-         (while (and cur (< d claude-repl-drawer-tree-max-depth))
-           (if (claude-repl-drawer--ws-flattenable-ancestor-p cur)
-               ;; Skip merged ancestors: the render flattens through them
-               ;; via `--effective-parent', so they add no visible depth.
-               (setq cur (claude-repl-drawer--source-ws-name cur))
-             (setq d (1+ d))
-             (setq cur (claude-repl-drawer--source-ws-name cur))))
-         (when (> d maxd) (setq maxd d))))
-     maxd)))
-
 (defun claude-repl-drawer--window-width (window)
-  "Return the configured drawer width in columns for WINDOW.
-When `claude-repl-drawer--persisted-cols' is non-nil (set by a prior
-user resize), that value wins — the user's pinned width follows them
-across every workspace.  Otherwise the width is the sum of
-`claude-repl-drawer-width-fraction' × frame-width and a depth bonus
-equal to (max-tree-depth × `claude-repl-drawer-indent-per-level').
-The bonus expands the drawer by exactly the same amount the render
-indents children, so deep trees never get clipped — and changing
-either knob propagates through both render and width consistently."
-  (if claude-repl-drawer--persisted-cols
-      (max 1 claude-repl-drawer--persisted-cols)
-    (let* ((frame-cols (frame-width (window-frame window)))
-           (base       (round (* claude-repl-drawer-width-fraction frame-cols)))
-           (depth-bonus (* (claude-repl-drawer--max-depth)
-                           claude-repl-drawer-indent-per-level)))
-      (max 1 (+ base depth-bonus)))))
+  "Return the constant drawer width in columns for WINDOW.
+The width is always `round(claude-repl-drawer-width-fraction ×
+frame-width)', floored at 1.  It is fully determined by the fraction
+and the frame width, so it is constant at runtime: there is no
+manual-resize override and no depth-based adjustment, and the only
+thing that changes it is editing the fraction (or resizing the
+frame)."
+  (let* ((frame-cols (frame-width (window-frame window)))
+         (width      (round (* claude-repl-drawer-width-fraction frame-cols))))
+    (max 1 width)))
 
 (defun claude-repl-drawer--get-or-create-buffer ()
   "Return the drawer buffer, creating and initializing if necessary."
@@ -1814,10 +1765,10 @@ either knob propagates through both render and width consistently."
     found))
 
 (defun claude-repl-drawer--apply-width (window)
-  "Resize WINDOW to the configured drawer width.
+  "Resize WINDOW to the constant drawer width.
 Side-window action alists honor `window-width' only at window-creation
 time, so a re-shown drawer keeps its old width even when the fraction
-changed.  This forces the resize on every show.
+changed.  This re-applies the same constant width on every show.
 
 Uses `shrink-window'/`enlarge-window' rather than `window-resize'
 because side windows route through `window--resize-side-windows',
@@ -1826,11 +1777,7 @@ constraints (parent window slack, fixed-size flags, etc.) — the
 shrink/enlarge wrappers go through the side-window aware codepath
 and actually apply the delta.  Locally lowers `window-min-width' so
 fractions below the global default (10 cols) are honored, and clears
-`window-size-fixed' on the buffer in case a prior pass locked it.
-
-Records the applied width in `claude-repl-drawer--expected-cols' so
-`--capture-resize' can distinguish this programmatic resize from a
-subsequent user gesture."
+`window-size-fixed' on the buffer in case a prior pass locked it."
   (let* ((target (claude-repl-drawer--window-width window))
          (window-min-width 1))
     (with-selected-window window
@@ -1838,50 +1785,7 @@ subsequent user gesture."
       (let ((delta (- target (window-total-width window))))
         (cond
          ((> delta 0) (enlarge-window delta t))
-         ((< delta 0) (shrink-window (abs delta) t))))
-      (setq claude-repl-drawer--expected-cols
-            (window-total-width window)))))
-
-(defun claude-repl-drawer--capture-resize (frame-or-window)
-  "Persist a manual drawer-window resize so it survives workspace switches.
-Compares the drawer's current total width to
-`claude-repl-drawer--expected-cols' (last value applied programmatically
-by `--apply-width').  Divergence signals a user gesture (S-arrow drag,
-`enlarge-window-horizontally', mouse drag of the side window edge,
-...), and the new width is pinned into
-`claude-repl-drawer--persisted-cols' so every subsequent persp
-activation re-establishes it via `--apply-width'.
-
-Hooked into `window-size-change-functions', which fires once per frame
-at the end of redisplay — by which point persp-mode's restore +
-`--ensure-visible-on-persp-switch's reapply have already settled,
-so persp-driven sizing transients don't get mistaken for user intent
-(actual = expected after our reapply).
-
-The argument may be a frame or a window depending on the Emacs
-version's calling convention; both are tolerated."
-  (let ((frame (if (windowp frame-or-window)
-                   (window-frame frame-or-window)
-                 frame-or-window)))
-    (when-let* ((buf (get-buffer claude-repl-drawer-buffer-name))
-                (win (get-buffer-window buf frame)))
-      (let ((actual (window-total-width win)))
-        (when (and claude-repl-drawer--expected-cols
-                   (/= actual claude-repl-drawer--expected-cols))
-          (setq claude-repl-drawer--persisted-cols actual
-                claude-repl-drawer--expected-cols actual))))))
-
-(add-hook 'window-size-change-functions
-          #'claude-repl-drawer--capture-resize)
-
-(defun claude-repl-drawer-reset-width ()
-  "Clear the user-pinned drawer width and revert to the fraction default.
-Reapplies width immediately to any live drawer window."
-  (interactive)
-  (setq claude-repl-drawer--persisted-cols nil)
-  (when-let* ((buf (get-buffer claude-repl-drawer-buffer-name))
-              (win (get-buffer-window buf t)))
-    (claude-repl-drawer--apply-width win)))
+         ((< delta 0) (shrink-window (abs delta) t)))))))
 
 (defvar claude-repl-drawer--global-visible-p nil
   "Non-nil when the drawer should appear in every workspace/persp.
