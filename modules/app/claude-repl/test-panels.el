@@ -4466,6 +4466,176 @@ was never recorded."
         (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
         (should repair-called)))))
 
+;;;; ---- Tests: stale-window-buffers ----
+
+(ert-deftest claude-repl-test-panels-stale-window-buffers-unique-live ()
+  "stale-window-buffers returns each live window's buffer once."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create "*claude-panel-other-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
+                    ((symbol-function 'window-buffer) (lambda (_w) buf)))
+            (should (equal (claude-repl--stale-window-buffers '(w1 w2))
+                           (list buf))))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-panels-stale-window-buffers-drops-dead ()
+  "stale-window-buffers drops dead windows."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create "*claude-panel-other-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'window-live-p) (lambda (w) (eq w 'live)))
+                    ((symbol-function 'window-buffer) (lambda (_w) buf)))
+            (should (equal (claude-repl--stale-window-buffers '(live dead))
+                           (list buf))))
+        (kill-buffer buf)))))
+
+;;;; ---- Tests: detach-foreign-panel-buffers ----
+
+(ert-deftest claude-repl-test-panels-detach-foreign-removes-each ()
+  "detach-foreign-panel-buffers removes each live buffer from the persp."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create "*claude-panel-other-ws*"))
+          (removed nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'claude-repl--ws-remove-buffer)
+                     (lambda (b) (push b removed))))
+            (claude-repl--detach-foreign-panel-buffers "my-ws" (list buf))
+            (should (equal removed (list buf))))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-panels-detach-foreign-skips-dead ()
+  "detach-foreign-panel-buffers does not remove a dead buffer."
+  (claude-repl-test--with-clean-state
+    (let ((dead (get-buffer-create "*claude-panel-dead-ws*"))
+          (removed nil))
+      (kill-buffer dead)
+      (cl-letf (((symbol-function 'claude-repl--ws-remove-buffer)
+                 (lambda (b) (push b removed))))
+        (claude-repl--detach-foreign-panel-buffers "my-ws" (list dead))
+        (should-not removed)))))
+
+;;;; ---- Tests: reclaim-frame-fullscreen ----
+
+(ert-deftest claude-repl-test-panels-reclaim-fullscreen-noop-no-buffers ()
+  "reclaim-frame-fullscreen is a no-op when ws has no live panel buffers."
+  (claude-repl-test--with-clean-state
+    (let ((show-called nil)
+          (fs-called nil))
+      (cl-letf (((symbol-function 'claude-repl--show-panels)
+                 (lambda () (setq show-called t)))
+                ((symbol-function 'claude-repl--enter-fullscreen)
+                 (lambda (_ws) (setq fs-called t))))
+        (claude-repl--reclaim-frame-fullscreen "my-ws")
+        (should-not show-called)
+        (should-not fs-called)))))
+
+(ert-deftest claude-repl-test-panels-reclaim-fullscreen-shows-then-enters ()
+  "reclaim-frame-fullscreen shows own panels then enters fullscreen when not visible."
+  (claude-repl-test--with-clean-state
+    (let ((visible nil)
+          (show-called nil)
+          (fs-called nil)
+          (vterm (get-buffer-create "*claude-panel-my-ws*"))
+          (input (get-buffer-create "*claude-panel-input-my-ws*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "my-ws" :vterm-buffer vterm)
+            (claude-repl--ws-put "my-ws" :input-buffer input)
+            (cl-letf (((symbol-function 'claude-repl--panels-visible-p)
+                       (lambda () visible))
+                      ((symbol-function 'claude-repl--show-panels)
+                       (lambda () (setq show-called t visible t)))
+                      ((symbol-function 'claude-repl--enter-fullscreen)
+                       (lambda (_ws) (setq fs-called t))))
+              (claude-repl--reclaim-frame-fullscreen "my-ws")
+              (should show-called)
+              (should fs-called)))
+        (kill-buffer vterm)
+        (kill-buffer input)))))
+
+(ert-deftest claude-repl-test-panels-reclaim-fullscreen-skips-show-when-visible ()
+  "reclaim-frame-fullscreen does not re-show panels when already visible."
+  (claude-repl-test--with-clean-state
+    (let ((show-called nil)
+          (fs-called nil)
+          (vterm (get-buffer-create "*claude-panel-my-ws*"))
+          (input (get-buffer-create "*claude-panel-input-my-ws*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "my-ws" :vterm-buffer vterm)
+            (claude-repl--ws-put "my-ws" :input-buffer input)
+            (cl-letf (((symbol-function 'claude-repl--panels-visible-p)
+                       (lambda () t))
+                      ((symbol-function 'claude-repl--show-panels)
+                       (lambda () (setq show-called t)))
+                      ((symbol-function 'claude-repl--enter-fullscreen)
+                       (lambda (_ws) (setq fs-called t))))
+              (claude-repl--reclaim-frame-fullscreen "my-ws")
+              (should-not show-called)
+              (should fs-called)))
+        (kill-buffer vterm)
+        (kill-buffer input)))))
+
+;;;; ---- Tests: ensure-own reclaim/detach on foreign panels ----
+
+(ert-deftest claude-repl-test-panels-ensure-own-detaches-foreign-buffers ()
+  "ensure-own-panels-on-persp-switch detaches foreign panel buffers when stale present."
+  (claude-repl-test--with-clean-state
+    (let ((detached nil)
+          (foreign (get-buffer-create "*claude-panel-other-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                    ((symbol-function 'claude-repl--stale-panel-windows)
+                     (lambda () (list (selected-window))))
+                    ((symbol-function 'claude-repl--stale-window-buffers)
+                     (lambda (_w) (list foreign)))
+                    ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+                    ((symbol-function 'delete-window) (lambda (_w) nil))
+                    ((symbol-function 'claude-repl--detach-foreign-panel-buffers)
+                     (lambda (_ws bufs) (setq detached bufs)))
+                    ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+                    ((symbol-function 'claude-repl--ensure-input-beside-output) #'ignore)
+                    ((symbol-function 'claude-repl--reclaim-frame-fullscreen) #'ignore))
+            (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
+            (should (equal detached (list foreign))))
+        (kill-buffer foreign)))))
+
+(ert-deftest claude-repl-test-panels-ensure-own-reclaims-fullscreen-when-stale ()
+  "ensure-own-panels-on-persp-switch reclaims the frame in fullscreen when stale present."
+  (claude-repl-test--with-clean-state
+    (let ((reclaimed nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                ((symbol-function 'claude-repl--stale-panel-windows)
+                 (lambda () (list (selected-window))))
+                ((symbol-function 'claude-repl--stale-window-buffers) (lambda (_w) nil))
+                ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+                ((symbol-function 'delete-window) (lambda (_w) nil))
+                ((symbol-function 'claude-repl--detach-foreign-panel-buffers) #'ignore)
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'claude-repl--ensure-input-beside-output) #'ignore)
+                ((symbol-function 'claude-repl--reclaim-frame-fullscreen)
+                 (lambda (ws) (setq reclaimed ws))))
+        (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
+        (should (equal reclaimed "my-ws"))))))
+
+(ert-deftest claude-repl-test-panels-ensure-own-no-reclaim-when-no-stale ()
+  "ensure-own-panels-on-persp-switch does not reclaim or detach when no stale panels."
+  (claude-repl-test--with-clean-state
+    (let ((reclaimed nil)
+          (detached nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                ((symbol-function 'claude-repl--stale-panel-windows) (lambda () nil))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'claude-repl--ensure-input-beside-output) #'ignore)
+                ((symbol-function 'claude-repl--detach-foreign-panel-buffers)
+                 (lambda (_ws _bufs) (setq detached t)))
+                ((symbol-function 'claude-repl--reclaim-frame-fullscreen)
+                 (lambda (_ws) (setq reclaimed t))))
+        (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
+        (should-not reclaimed)
+        (should-not detached)))))
+
 ;;;; ---- Tests: before-persp-deactivate records panels-were-visible ----
 
 (ert-deftest claude-repl-test-panels-before-persp-deactivate-records-visible ()
