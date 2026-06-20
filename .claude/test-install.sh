@@ -121,6 +121,51 @@ test_install_fails_hard_when_impl_missing() {
   cleanup "$repo" "$home"
 }
 
+# --- install: FORBID a skill impl that lives inside a non-main worktree ---
+test_install_rejects_nonmain_worktree_impl() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  # A linked worktree requires at least one commit to branch from.
+  (cd "$repo" && git add -A && git commit -qm init >/dev/null 2>&1)
+  git -C "$repo" worktree add -q --detach "$repo/linked-wt" >/dev/null 2>&1
+  # Point the manifest's skill impl INSIDE the linked (non-main) worktree.
+  mkdir -p "$repo/linked-wt/impl/bar"
+  echo x > "$repo/linked-wt/impl/bar/SKILL.md"
+  cat > "$repo/modules/app/claude-repl/skills-cache/manifest.sh" <<EOF
+CACHED_SKILLS=("bar|$repo/linked-wt/impl/bar")
+EOF
+  run_install "$repo" "$home"
+  if [ "$LAST_RC" -ne 0 ] \
+     && grep -q "non-main worktree" "$repo/.install.log" \
+     && [ ! -L "$home/.claude/skills/bar" ]; then
+    pass "rejects a skill impl inside a non-main worktree"
+  else
+    fail "non-main worktree rejection" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+# --- install: local skills link to the MAIN worktree even when install.sh
+#     is invoked from a linked worktree (symlinks must never dangle on prune) ---
+test_local_skills_link_to_main_worktree() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  (cd "$repo" && git add -A && git commit -qm init >/dev/null 2>&1)
+  git -C "$repo" worktree add -q --detach "$repo/linked-wt" >/dev/null 2>&1
+  # Invoke install.sh from the LINKED worktree's own checkout.
+  set +e
+  INSTALL_SH_SKIP_SANDBOX_DETECT=1 HOME="$home" \
+    bash "$repo/linked-wt/.claude/install.sh" install >"$repo/.install.log" 2>&1
+  LAST_RC=$?
+  set -e
+  local actual; actual="$(readlink "$home/.claude/skills/debug-logs" 2>/dev/null || echo MISSING)"
+  local expected="$repo/modules/app/claude-repl/skills/debug-logs"
+  if [ "$LAST_RC" -eq 0 ] && [ "$actual" = "$expected" ]; then
+    pass "local skills link to main worktree when run from a linked worktree"
+  else
+    fail "local-skill main-worktree linkage" "rc: $LAST_RC" "expected: $expected" "actual:   $actual" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
 # --- install: a real (non-symlink) file at the dest is NOT trampled ---
 test_install_preserves_non_symlink_file() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
@@ -223,6 +268,8 @@ echo "=== test-install.sh ==="
 test_install_fresh_symlinks_to_impl
 test_install_relinks_existing_symlink_to_impl
 test_install_fails_hard_when_impl_missing
+test_install_rejects_nonmain_worktree_impl
+test_local_skills_link_to_main_worktree
 test_install_preserves_non_symlink_file
 test_install_installs_pre_commit_hook
 test_install_refreshes_managed_hook

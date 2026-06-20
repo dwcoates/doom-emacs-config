@@ -101,6 +101,17 @@ New code added to the claude-repl module must include instrumentation via `claud
 
 **Instrument every new or changed code path.** Skip only for "extremely hot" paths — code that fires more than ~once per second across all workspaces (per-keystroke handlers, per-timer-tick callbacks, redisplay hooks, char-output filters) where the file-write itself would multiply log volume and bury other events. For merely-frequent-but-load-bearing paths, use `claude-repl--log-verbose` (echo-gated, always file-written) instead of omitting the log. Default to logging; "no log" is the harder choice and warrants a one-line comment naming the firing frequency and why instrumentation would be counterproductive.
 
+## Skill symlinks: always target the MAIN worktree, never a linked one
+
+The skill installer (`.claude/install.sh` + `modules/app/claude-repl/skills-cache/manifest.sh`) symlinks each managed skill into `~/.claude/skills/`. **Every symlink MUST point into the MAIN worktree of its repo, never a transient linked worktree.**
+
+- A linked worktree (anything under `~/.config/doom-worktrees/*`, sandbox worktrees, etc.) is ephemeral — its path dangles the moment the worktree is pruned, leaving a broken skill symlink.
+- `install.sh` resolves the main worktree via `git worktree list --porcelain` (its first `worktree` entry) and sources repo-local skills from there, regardless of which worktree the script is invoked from.
+- `install.sh` **fails hard** (`_impl_in_nonmain_worktree`) when any manifest impl path resolves inside a non-main worktree. Do not add such an entry to `manifest.sh`.
+- A skill with no home in the main worktree is NOT eligible to be managed. Re-home it (commit it into `modules/app/claude-repl/skills/` for repo-local skills, or its repo's main checkout for external skills) before adding it back.
+
+The workspace-command skills (`workspace-merge`, `workspace-status`, `workspace-update`, `generate-workspace`) were folded into the single `/workspace` skill — manage `workspace`, not the removed per-command names.
+
 ## Debugging skills: when to use each
 
 The doom-claude-repl ecosystem ships several Claude Code skills for debugging. Pick by the *kind* of evidence you need.
