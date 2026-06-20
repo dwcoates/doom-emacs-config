@@ -4577,6 +4577,67 @@ was never recorded."
         (kill-buffer vterm)
         (kill-buffer input)))))
 
+;;;; ---- Tests: lone-output-window ----
+
+(ert-deftest claude-repl-test-panels-lone-output-window-returns-sole-output ()
+  "lone-output-window returns the sole non-side window showing a Claude output buffer."
+  (claude-repl-test--with-clean-state
+    (let ((out (get-buffer-create "*claude-panel-my-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'window-list) (lambda (&rest _) '(w1)))
+                    ((symbol-function 'claude-repl-window--side-window-p) (lambda (_w) nil))
+                    ((symbol-function 'window-buffer) (lambda (_w) out)))
+            (should (eq (claude-repl--lone-output-window) 'w1)))
+        (kill-buffer out)))))
+
+(ert-deftest claude-repl-test-panels-lone-output-window-nil-when-multiple ()
+  "lone-output-window returns nil when more than one non-side window is present."
+  (claude-repl-test--with-clean-state
+    (let ((out (get-buffer-create "*claude-panel-my-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'window-list) (lambda (&rest _) '(w1 w2)))
+                    ((symbol-function 'claude-repl-window--side-window-p) (lambda (_w) nil))
+                    ((symbol-function 'window-buffer) (lambda (_w) out)))
+            (should-not (claude-repl--lone-output-window)))
+        (kill-buffer out)))))
+
+(ert-deftest claude-repl-test-panels-lone-output-window-nil-non-claude ()
+  "lone-output-window returns nil when the sole non-side window shows a non-Claude buffer."
+  (claude-repl-test--with-clean-state
+    (let ((reg (get-buffer-create "*regular-buffer*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'window-list) (lambda (&rest _) '(w1)))
+                    ((symbol-function 'claude-repl-window--side-window-p) (lambda (_w) nil))
+                    ((symbol-function 'window-buffer) (lambda (_w) reg)))
+            (should-not (claude-repl--lone-output-window)))
+        (kill-buffer reg)))))
+
+(ert-deftest claude-repl-test-panels-lone-output-window-nil-input-buffer ()
+  "lone-output-window returns nil when the sole non-side window shows a Claude input buffer."
+  (claude-repl-test--with-clean-state
+    (let ((inp (get-buffer-create "*claude-panel-input-my-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'window-list) (lambda (&rest _) '(w1)))
+                    ((symbol-function 'claude-repl-window--side-window-p) (lambda (_w) nil))
+                    ((symbol-function 'window-buffer) (lambda (_w) inp)))
+            (should-not (claude-repl--lone-output-window)))
+        (kill-buffer inp)))))
+
+(ert-deftest claude-repl-test-panels-lone-output-window-ignores-side-windows ()
+  "lone-output-window ignores side windows when finding the sole non-side output window."
+  (claude-repl-test--with-clean-state
+    (let ((out (get-buffer-create "*claude-panel-my-ws*"))
+          (drawer (get-buffer-create "*drawer*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'window-list) (lambda (&rest _) '(side main)))
+                    ((symbol-function 'claude-repl-window--side-window-p)
+                     (lambda (w) (eq w 'side)))
+                    ((symbol-function 'window-buffer)
+                     (lambda (w) (if (eq w 'main) out drawer))))
+            (should (eq (claude-repl--lone-output-window) 'main)))
+        (kill-buffer out)
+        (kill-buffer drawer)))))
+
 ;;;; ---- Tests: ensure-own reclaim/detach on foreign panels ----
 
 (ert-deftest claude-repl-test-panels-ensure-own-detaches-foreign-buffers ()
@@ -4620,12 +4681,13 @@ was never recorded."
         (should (equal reclaimed "my-ws"))))))
 
 (ert-deftest claude-repl-test-panels-ensure-own-no-reclaim-when-no-stale ()
-  "ensure-own-panels-on-persp-switch does not reclaim or detach when no stale panels."
+  "ensure-own-panels-on-persp-switch does not reclaim or detach when no stale panels and no lone output."
   (claude-repl-test--with-clean-state
     (let ((reclaimed nil)
           (detached nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                 ((symbol-function 'claude-repl--stale-panel-windows) (lambda () nil))
+                ((symbol-function 'claude-repl--lone-output-window) (lambda () nil))
                 ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'claude-repl--ensure-input-beside-output) #'ignore)
                 ((symbol-function 'claude-repl--detach-foreign-panel-buffers)
@@ -4635,6 +4697,39 @@ was never recorded."
         (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
         (should-not reclaimed)
         (should-not detached)))))
+
+(ert-deftest claude-repl-test-panels-ensure-own-reclaims-fullscreen-when-lone-output ()
+  "ensure-own-panels-on-persp-switch reclaims fullscreen for a lone output window with no stale panels."
+  (claude-repl-test--with-clean-state
+    (let ((reclaimed nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                ((symbol-function 'claude-repl--stale-panel-windows) (lambda () nil))
+                ((symbol-function 'claude-repl--lone-output-window) (lambda () 'some-win))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'claude-repl--ensure-input-beside-output) #'ignore)
+                ((symbol-function 'claude-repl--reclaim-frame-fullscreen)
+                 (lambda (ws) (setq reclaimed ws))))
+        (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
+        (should (equal reclaimed "my-ws"))))))
+
+(ert-deftest claude-repl-test-panels-ensure-own-reclaims-once-when-stale-and-lone-output ()
+  "ensure-own-panels-on-persp-switch reclaims exactly once when both stale and lone output are present."
+  (claude-repl-test--with-clean-state
+    (let ((reclaim-count 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                ((symbol-function 'claude-repl--stale-panel-windows)
+                 (lambda () (list (selected-window))))
+                ((symbol-function 'claude-repl--stale-window-buffers) (lambda (_w) nil))
+                ((symbol-function 'claude-repl--lone-output-window) (lambda () 'some-win))
+                ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+                ((symbol-function 'delete-window) (lambda (_w) nil))
+                ((symbol-function 'claude-repl--detach-foreign-panel-buffers) #'ignore)
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'claude-repl--ensure-input-beside-output) #'ignore)
+                ((symbol-function 'claude-repl--reclaim-frame-fullscreen)
+                 (lambda (_ws) (setq reclaim-count (1+ reclaim-count)))))
+        (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
+        (should (= reclaim-count 1))))))
 
 ;;;; ---- Tests: before-persp-deactivate records panels-were-visible ----
 
