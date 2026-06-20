@@ -227,7 +227,7 @@
   ;; standard `:side 'bottom' frame-wide popup.
   (set-popup-rule! "\\.*doom:vterm\\.*"
     :actions '(claude-repl-sibling-popup-display-fn)
-    :size 0.3 :side 'bottom :select t :quit nil :ttl nil)
+    :size 0.4 :side 'right :select t :quit nil :ttl nil)
   (defun +dwc/vterm-toggle (ARG)
     (interactive "P")
     (if (and (s-contains-p  "vterm" (buffer-name)) (= (length (window-list)) 1))
