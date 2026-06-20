@@ -685,7 +685,16 @@ to compare equal under propertized-string semantics."
 Sets `:repl-state :inactive' on WS (`:claude-state' untouched so an
 in-flight :thinking / :permission survives the close), then hides
 the panel windows.  No save-tab-index, no push-to-back, no flash —
-this is the simple-close audit point that `SPC o c' is bound to."
+this is the simple-close audit point that `SPC o c' is bound to.
+
+When WS is fullscreen with a saved layout, first restores that
+pre-fullscreen splitscreen layout via
+`claude-repl--restore-fullscreen-config' so the subsequent
+`claude-repl--hide-panels' leaves the underlying work windows behind —
+otherwise deleting the panels that fill the whole frame would hit
+`delete-window's sole-ordinary-window refusal and leave one panel
+stuck onscreen.  This makes `SPC o c' in fullscreen go away exactly as
+it does from splitscreen."
   (let ((ws (or ws (claude-repl--ws-current-name))))
     (claude-repl--log ws "on-simple-close: CALLED this-command=%s last-command=%s"
                       this-command last-command)
@@ -693,6 +702,7 @@ this is the simple-close audit point that `SPC o c' is bound to."
       (claude-repl--log ws "on-simple-close ws=%s claude-state=%s -> repl-state=:inactive"
                         ws (claude-repl--ws-claude-state ws))
       (claude-repl--ws-set-repl-state ws :inactive))
+    (claude-repl--restore-fullscreen-config ws)
     (claude-repl--hide-panels)))
 
 (defun claude-repl--on-close (&optional ws)
@@ -1457,6 +1467,21 @@ vterm and input buffers must already be displayed in a window."
     (claude-repl--ws-put ws :fullscreen-config (current-window-configuration))
     (claude-repl--delete-non-panel-windows vterm-buf input-buf)))
 
+(defun claude-repl--restore-fullscreen-config (ws)
+  "Restore WS's saved pre-fullscreen layout, clearing `:fullscreen-config'.
+Returns non-nil when a restore happened, nil when WS had no saved config.
+
+Extracted so both `claude-repl-toggle-fullscreen' (its restore branch)
+and the `SPC o c' close path (`claude-repl--on-simple-close') exit
+fullscreen the same way — re-establishing the splitscreen layout that was
+live before `claude-repl--enter-fullscreen' swept it.  Only the saved-config
+case is handled: a frame manually fullscreened (no `:fullscreen-config') has
+no layout to restore to."
+  (when-let ((saved (and ws (claude-repl--ws-get ws :fullscreen-config))))
+    (set-window-configuration saved)
+    (claude-repl--ws-put ws :fullscreen-config nil)
+    t))
+
 (defun claude-repl-toggle-fullscreen ()
   "Toggle fullscreen for the Claude REPL vterm and input windows.
 Saves the current window configuration per-workspace and expands the
@@ -1478,8 +1503,7 @@ fullscreen nor poisons the saved config."
     (cond
      ;; Already fullscreen with a saved layout — restore it.
      (saved
-      (set-window-configuration saved)
-      (claude-repl--ws-put ws :fullscreen-config nil))
+      (claude-repl--restore-fullscreen-config ws))
      ;; Already fullscreen but manually so (no saved layout) — there is
      ;; nothing to restore to, so don't re-enter fullscreen (which would
      ;; otherwise save the fullscreen layout as the "normal" config).
