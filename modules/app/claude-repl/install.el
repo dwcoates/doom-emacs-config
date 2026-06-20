@@ -87,15 +87,18 @@ of where the Doom config tree is mounted.")
   "Destination directory where managed hook scripts are installed.")
 
 (defconst claude-repl--managed-skills
-  '("emit-workspace-commands.sh"
-    "generate-workspace"
-    "workspace-update"
+  '("workspace"
+    "emit-workspace-commands.sh"
     "build-skill")
   "Bare names for managed host-level skill symlinks.
 Subset of cached skills (see `CACHED_SKILLS' in
 `modules/app/claude-repl/skills-cache/manifest.sh') whose impl source
 lives under `claude-repl-skills-src-dir', so the doctor's
-`points-elsewhere' check has the right expected target.")
+`points-elsewhere' check has the right expected target.
+
+The former `workspace-merge', `workspace-status', `workspace-update',
+and `generate-workspace' skills were folded into the single `workspace'
+skill and are no longer managed.")
 
 (defconst claude-repl--skills-dest-dir "~/.claude/skills/"
   "Destination directory where managed skill symlinks are created.")

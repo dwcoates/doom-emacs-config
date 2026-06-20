@@ -48,9 +48,48 @@ _canonpath() {
   fi
 }
 
+# --- Main-worktree resolution ---
+# Skill symlinks must ALWAYS target the MAIN worktree, never a transient
+# linked worktree (whose path dangles the moment the worktree is pruned).
+# `git worktree list --porcelain` emits the main worktree as its FIRST
+# `worktree` line; every entry after it is a linked (non-main) worktree.
+_main_worktree_root() {
+  git -C "$SCRIPT_DIR" worktree list --porcelain 2>/dev/null \
+    | awk '/^worktree /{print $2; exit}'
+}
+
+# Roots of all NON-main worktrees (every entry after the first).
+_nonmain_worktree_roots() {
+  git -C "$SCRIPT_DIR" worktree list --porcelain 2>/dev/null \
+    | awk '/^worktree /{print $2}' | tail -n +2
+}
+
+# Resolve the main worktree, falling back to the SCRIPT_DIR-relative repo
+# root when git is unavailable (e.g. the dir is not a git checkout).
+MAIN_WORKTREE="$(_main_worktree_root || true)"
+if [ -z "$MAIN_WORKTREE" ]; then
+  MAIN_WORKTREE="$(_canonpath "$SCRIPT_DIR/..")"
+fi
+
+# Return 0 when IMPL resolves inside a non-main worktree of this repo.
+# Used to FORBID linking a skill to a transient-worktree path: such links
+# dangle once the worktree is pruned, so we fail hard instead.
+_impl_in_nonmain_worktree() {
+  local impl="$1" root
+  while IFS= read -r root; do
+    [ -n "$root" ] || continue
+    case "$impl/" in
+      "$root"/*) return 0 ;;
+    esac
+  done < <(_nonmain_worktree_roots)
+  return 1
+}
+
 # Skills checked into THIS (doom) repo, under modules/app/claude-repl/skills/.
-# Symlinked into $SKILLS_DIR straight to the in-tree source.
-LOCAL_SKILLS_SRC="$(_canonpath "$SCRIPT_DIR/../modules/app/claude-repl/skills")"
+# Symlinked into $SKILLS_DIR straight to the MAIN worktree's in-tree source —
+# NEVER the invoking (possibly linked) worktree, so the link survives a
+# worktree prune.
+LOCAL_SKILLS_SRC="$MAIN_WORKTREE/modules/app/claude-repl/skills"
 LOCAL_SKILLS=(
   "debug-logs"
   "profile"
@@ -72,6 +111,14 @@ SKILLS_MANIFEST="$(_canonpath "$SCRIPT_DIR/../modules/app/claude-repl/skills-cac
 link_skill_to_impl() {
   local name="$1" impl="$2" tag="${3:-install}"
   local dest="$SKILLS_DIR/$name"
+  # FORBID linking into a non-main worktree: the link would dangle once
+  # that transient worktree is pruned.  Fail hard so the bad manifest
+  # entry (or a worktree-relative source) surfaces loudly.
+  if _impl_in_nonmain_worktree "$impl"; then
+    echo "[$tag] ERROR: skill '$name' impl is inside a non-main worktree: $impl" >&2
+    echo "[$tag]        symlinks must target the main worktree: $MAIN_WORKTREE" >&2
+    return 1
+  fi
   if [ ! -e "$impl" ] && [ ! -L "$impl" ]; then
     echo "[$tag] ERROR: canonical impl for '$name' not found at $impl" >&2
     return 1
