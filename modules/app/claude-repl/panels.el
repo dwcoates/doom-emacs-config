@@ -58,6 +58,19 @@ window is selected so the user can start typing immediately."
     (claude-repl--log-verbose (claude-repl--ws-current-name) "panels-visible-p: result=%s" (if result "visible" "hidden"))
     result))
 
+(defun claude-repl--output-visible-input-hidden-p ()
+  "Return t when the output (vterm) panel is visible but the input is not.
+This is the inconsistent half-shown state — e.g. a fullscreen frame
+showing only the Claude output window — that
+`claude-repl--show-input-beside-output' repairs by adding the input
+window alongside the existing output window."
+  (let ((result (and (claude-repl--vterm-visible-p)
+                     (not (claude-repl--input-visible-p)))))
+    (claude-repl--log-verbose (claude-repl--ws-current-name)
+                              "output-visible-input-hidden-p: result=%s"
+                              (if result "yes" "no"))
+    result))
+
 ;;;; Panel display and hide
 
 (defun claude-repl--safe-buffer-name (b)
@@ -167,6 +180,55 @@ Convenience wrapper combining `claude-repl--show-panels' and
 `claude-repl--focus-input-panel'."
   (claude-repl--show-panels)
   (claude-repl--focus-input-panel))
+
+(defun claude-repl--show-input-beside-output ()
+  "Add the input panel below the already-visible output (vterm) window.
+
+For the half-shown state where the output window is visible but the
+input window is not (e.g. a fullscreen frame with only the output
+window): splits the existing output window and displays the input
+buffer beneath it, using the same normal below-split layout
+`claude-repl--show-panels' applies.  Deliberately does NOT recreate
+the output window or clear any other windows — only the missing input
+window is added, alongside the output window already on screen.
+
+Returns the new input window, or nil when the output window is not
+visible or the input buffer is unavailable.  Hardens the input window
+with the same recipe as `claude-repl--show-panels' (dedicated,
+height-locked, delete-protected, height-preserved)."
+  (let* ((ws (claude-repl--ws-current-name))
+         (input-buf (claude-repl--ws-get ws :input-buffer))
+         (vterm-win (claude-repl-window--panel-window :vterm ws)))
+    (claude-repl--log ws "show-input-beside-output vterm-win=%s input-buf=%s"
+                      vterm-win (claude-repl--safe-buffer-name input-buf))
+    (if (not (and vterm-win input-buf (buffer-live-p input-buf)))
+        (claude-repl--log ws "show-input-beside-output: no-op (vterm-win=%s input-live=%s)"
+                          vterm-win (and input-buf (buffer-live-p input-buf)))
+      (let ((input-win (split-window
+                        vterm-win
+                        (round (* (- claude-repl-input-height-fraction)
+                                  (window-total-height vterm-win)))
+                        'below)))
+        (claude-repl--log ws "show-input-beside-output: input-win=%s" input-win)
+        (set-window-buffer input-win input-buf)
+        (claude-repl-window--harden input-win
+                                    :dedicate       t
+                                    :size-fix       'height
+                                    :delete-protect t
+                                    :preserve-size  'height)
+        input-win))))
+
+(defun claude-repl--ensure-input-beside-output ()
+  "Repair a half-shown layout by adding the input window beside the output.
+No-op unless the output (vterm) panel is visible while the input panel
+is not (see `claude-repl--output-visible-input-hidden-p').  When that
+state holds — including a fullscreen frame showing only the output
+window after a workspace switch — `claude-repl--show-input-beside-output'
+adds the input window alongside the existing output window."
+  (when (claude-repl--output-visible-input-hidden-p)
+    (claude-repl--log (claude-repl--ws-current-name)
+                      "ensure-input-beside-output: repairing half-shown layout")
+    (claude-repl--show-input-beside-output)))
 
 ;;;; Vterm refresh
 
@@ -396,8 +458,19 @@ flag because each workspace has its own panel buffers."
                    (input-buf (claude-repl--ws-get ws :input-buffer)))
                (and vterm-buf (buffer-live-p vterm-buf)
                     input-buf (buffer-live-p input-buf))))
-    (claude-repl--log ws "ensure-own-panels: re-showing panels (were-visible but now missing)")
-    (claude-repl--show-panels)))
+    (if (claude-repl--vterm-visible-p)
+        ;; Output window survived the switch but the input window was
+        ;; dropped — add only the input window so the output window is
+        ;; not duplicated.
+        (progn
+          (claude-repl--log ws "ensure-own-panels: output up, input missing — adding input only")
+          (claude-repl--show-input-beside-output))
+      (claude-repl--log ws "ensure-own-panels: re-showing panels (were-visible but now missing)")
+      (claude-repl--show-panels)))
+  ;; Independently of the were-visible flag, repair a frame that shows
+  ;; only the output window (e.g. a fullscreen Claude REPL restored with
+  ;; just its output window) by adding the input window beside it.
+  (claude-repl--ensure-input-beside-output))
 
 (defun claude-repl--on-workspace-switch (&optional ws)
   "Handle workspace switch: update all workspace states, refresh vterm, reset cursors.
@@ -1079,6 +1152,14 @@ workspace that is already hidden / never-started should still mark it
       (message "Claude is loading…"))
      (panels-visible
       (funcall close-fn))
+     ;; Output window is up but the input window was dropped (e.g. a
+     ;; fullscreen frame with only the output window).  Add the input
+     ;; window alongside the existing output window and focus it —
+     ;; don't rebuild the whole layout (which would duplicate the
+     ;; already-visible output window).
+     ((claude-repl--output-visible-input-hidden-p)
+      (claude-repl--show-input-beside-output)
+      (claude-repl--focus-input-panel))
      (t
       (claude-repl--show-hidden-panels)))))
 
