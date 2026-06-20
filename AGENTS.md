@@ -337,6 +337,16 @@ The ONLY acceptable reason to leave near-duplication in place is that the user h
 
 Example (this is the canonical reference): the one-shot creators `claude-repl-create-doom-oneshot-workspace` and `claude-repl-create-explanation-engine-oneshot-workspace` both dispatch through `claude-repl--create-pinned-oneshot-workspace`. The success-suffix constants `claude-repl--oneshot-merge-suffix` and `claude-repl--oneshot-create-pr-suffix` are both built via `claude-repl--build-oneshot-success-suffix`. Any future `claude-repl-create-<repo>-oneshot-workspace` MUST dispatch through the same helper — do not start a third copy.
 
+## Fullscreen panels — one consolidated entry point
+
+**There is a single canonical operation for showing the Claude REPL fullscreen: `claude-repl--enter-fullscreen` in `panels.el`.** It always shows BOTH panels (vterm output AND input) and saves the prior layout as the workspace's `:fullscreen-config` so `claude-repl-toggle-fullscreen` can restore it. Every place with a concept of "go fullscreen" routes through it:
+
+- `claude-repl-toggle-fullscreen` — its go-fullscreen branch calls `--enter-fullscreen` (the toggle adds the restore/no-poison logic around it).
+- `claude-repl--drain-pending-fullscreen` — the `/workspace-generation` path calls `--enter-fullscreen` directly, NOT the toggle (the toggle would read the all-Claude-buffers layout as already-fullscreen via `claude-repl--fullscreen-p` and skip, leaving the input panel unshown).
+- `claude-repl--maybe-fullscreen-on-switch` — the switch-to-workspace path reuses `claude-repl-toggle-fullscreen` (so the splitscreen layout is saved for a later `SPC w f` restore), and therefore funnels through `--enter-fullscreen` transitively.
+
+When adding any new fullscreen entry point, call `claude-repl--enter-fullscreen` — never re-implement the save-config + sweep-non-panel-windows dance, and never show only one panel.
+
 ## Comment Non-Obvious Code
 
 **ALWAYS comment any change whose reasoning isn't immediately obvious from the code itself — even if it's only slightly non-obvious.** The bar is low on purpose: if a future reader (or a future you) would have to re-derive *why* the line is shaped the way it is, leave a comment that says why. Examples that always warrant a `WHY:` comment:
