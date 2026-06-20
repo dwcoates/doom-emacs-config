@@ -931,6 +931,20 @@ The skill lives at `claude-repl-skills-src-dir'/build-skill on the host;
 the doctor uses this list to verify the host symlink points at it."
   (should (member "build-skill" claude-repl--managed-skills)))
 
+(ert-deftest claude-repl-test-managed-skills-includes-workspace ()
+  "External managed-skills list must include the collapsed `workspace' skill.
+The per-command `workspace-*' skills were folded into `/workspace', so
+the doctor verifies the single `workspace' host symlink now."
+  (should (member "workspace" claude-repl--managed-skills)))
+
+(ert-deftest claude-repl-test-managed-skills-excludes-folded-workspace-skills ()
+  "The folded per-command workspace skills must NOT be managed any more.
+They were absorbed into `/workspace'; leaving any in the managed list
+would make the doctor demand a host symlink whose impl no longer exists."
+  (dolist (name '("workspace-merge" "workspace-status"
+                  "workspace-update" "generate-workspace"))
+    (should-not (member name claude-repl--managed-skills))))
+
 ;;;; ---- unmanaged broken symlink detection ----
 
 (ert-deftest claude-repl-test-check-unmanaged-broken-link-detected ()

@@ -14,16 +14,19 @@
 #                 reference $HOME.  install.sh symlinks $HOME/.claude/
 #                 skills/<name> straight to this path — there is NO cache
 #                 fallback.  If the impl is absent, install FAILS HARD
-#                 rather than serve a stale copy.  Most impls live in the
-#                 explanation-engine repo; workspace-annotate is the lone
-#                 exception, sourced from a doom-worktree.
+#                 rather than serve a stale copy.  Every impl here lives in
+#                 the explanation-engine repo.
+#
+# NON-MAIN-WORKTREE RULE: an impl-source MUST NOT point into a non-main
+# git worktree (e.g. a transient $HOME/.config/doom-worktrees/* checkout).
+# Such a path dangles the moment the worktree is pruned.  install.sh
+# rejects any such entry hard.  The folded `/workspace-*' skills
+# (workspace-merge, workspace-status, workspace-update, generate-workspace)
+# now live inside the single `/workspace' skill and are no longer managed
+# here; `workspace-annotate' was removed for lacking a main-worktree home.
 
 CACHED_SKILLS=(
-  "workspace-annotate|$HOME/.config/doom-worktrees/copy-to-clipboard-skill/.claude/skills/workspace-annotate"
-  "workspace-merge|$HOME/workspace/ChessCom/explanation-engine/.claude/skills/workspace-merge"
-  "workspace-status|$HOME/workspace/ChessCom/explanation-engine/.claude/skills/workspace-status"
-  "workspace-update|$HOME/workspace/ChessCom/explanation-engine/.claude/skills/workspace-update"
-  "generate-workspace|$HOME/workspace/ChessCom/explanation-engine/.claude/skills/generate-workspace"
+  "workspace|$HOME/workspace/ChessCom/explanation-engine/.claude/skills/workspace"
   "emit-workspace-commands.sh|$HOME/workspace/ChessCom/explanation-engine/.claude/skills/emit-workspace-commands.sh"
   "build-skill|$HOME/workspace/ChessCom/explanation-engine/.claude/skills/build-skill"
 )
