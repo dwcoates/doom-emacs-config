@@ -830,6 +830,113 @@ which writes :inactive."
         (claude-repl--on-simple-close)
         (should (= 0 push-called))))))
 
+(ert-deftest claude-repl-test-panels-on-simple-close-exits-fullscreen-before-hide ()
+  "on-simple-close restores the pre-fullscreen layout before hiding panels.
+The restore must run BEFORE hide-panels so hide-panels deletes the panels
+from the restored splitscreen layout rather than from the full-frame one."
+  (claude-repl-test--with-clean-state
+    (let ((order '()))
+      (claude-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'set-window-configuration)
+                 (lambda (_cfg) (push 'restore order)))
+                ((symbol-function 'claude-repl--hide-panels)
+                 (lambda () (push 'hide order))))
+        (claude-repl--on-simple-close)
+        (should (equal order '(hide restore)))))))
+
+(ert-deftest claude-repl-test-panels-on-simple-close-clears-fullscreen-config ()
+  "on-simple-close clears :fullscreen-config when exiting fullscreen."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'set-window-configuration) #'ignore)
+              ((symbol-function 'claude-repl--hide-panels) #'ignore))
+      (claude-repl--on-simple-close)
+      (should-not (claude-repl--ws-get "test-ws" :fullscreen-config)))))
+
+(ert-deftest claude-repl-test-panels-on-simple-close-no-restore-without-config ()
+  "on-simple-close does NOT call set-window-configuration when not fullscreen."
+  (claude-repl-test--with-clean-state
+    (let ((restore-called 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'set-window-configuration)
+                 (lambda (_cfg) (cl-incf restore-called)))
+                ((symbol-function 'claude-repl--hide-panels) #'ignore))
+        ;; No :fullscreen-config set on test-ws.
+        (claude-repl--on-simple-close)
+        (should (= 0 restore-called))))))
+
+(ert-deftest claude-repl-test-panels-on-simple-close-fullscreen-leaves-work-window ()
+  "on-simple-close on a fullscreen ws removes panels and leaves the work window.
+End-to-end with real windows: a fullscreen layout (only the two panels)
+plus a saved splitscreen config restores to work+panels, then hides the
+panels, leaving just the work window — the `SPC o c' goes-away contract."
+  (claude-repl-test--with-clean-state
+    (let ((wconf (current-window-configuration))
+          (work-buf (generate-new-buffer "*fsclose-work*"))
+          (vterm-buf (generate-new-buffer "*claude-panel-fsclose*"))
+          (input-buf (generate-new-buffer "*claude-panel-input-fsclose*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+            (delete-other-windows)
+            (let* ((work-win (selected-window))
+                   (vterm-win (split-window work-win nil 'right))
+                   (input-win (split-window vterm-win nil 'below)))
+              (set-window-buffer work-win work-buf)
+              (set-window-buffer vterm-win vterm-buf)
+              (set-window-buffer input-win input-buf)
+              (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+              (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+              ;; Capture the splitscreen layout as the pre-fullscreen config.
+              (claude-repl--ws-put "test-ws" :fullscreen-config
+                                   (current-window-configuration))
+              ;; Enter fullscreen: delete the work window, leaving only panels.
+              (delete-window work-win)
+              (should-not (window-live-p work-win))
+              ;; SPC o c.
+              (claude-repl--on-simple-close)
+              ;; Panels are gone.
+              (should-not (get-buffer-window vterm-buf))
+              (should-not (get-buffer-window input-buf))
+              ;; The work window's buffer is back onscreen.
+              (should (get-buffer-window work-buf))
+              ;; Fullscreen config was cleared.
+              (should-not (claude-repl--ws-get "test-ws" :fullscreen-config))))
+        (set-window-configuration wconf)
+        (kill-buffer work-buf)
+        (kill-buffer vterm-buf)
+        (kill-buffer input-buf)))))
+
+;;;; ---- Tests: restore-fullscreen-config ----
+
+(ert-deftest claude-repl-test-panels-restore-fullscreen-config-restores-and-clears ()
+  "restore-fullscreen-config restores the saved config and clears the flag."
+  (claude-repl-test--with-clean-state
+    (let ((restored nil))
+      (claude-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
+      (cl-letf (((symbol-function 'set-window-configuration)
+                 (lambda (cfg) (setq restored cfg))))
+        (should (claude-repl--restore-fullscreen-config "test-ws"))
+        (should (eq restored 'saved-config))
+        (should-not (claude-repl--ws-get "test-ws" :fullscreen-config))))))
+
+(ert-deftest claude-repl-test-panels-restore-fullscreen-config-noop-without-config ()
+  "restore-fullscreen-config returns nil and does nothing with no saved config."
+  (claude-repl-test--with-clean-state
+    (let ((restore-called 0))
+      (cl-letf (((symbol-function 'set-window-configuration)
+                 (lambda (_cfg) (cl-incf restore-called))))
+        (should-not (claude-repl--restore-fullscreen-config "test-ws"))
+        (should (= 0 restore-called))))))
+
+(ert-deftest claude-repl-test-panels-restore-fullscreen-config-noop-on-nil-ws ()
+  "restore-fullscreen-config returns nil when WS is nil."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'set-window-configuration)
+               (lambda (_cfg) (error "should not restore"))))
+      (should-not (claude-repl--restore-fullscreen-config nil)))))
+
 ;;;; ---- Tests: simple-hide-and-preserve-status ----
 
 (ert-deftest claude-repl-test-panels-simple-hide-routes-through-on-simple-close ()
@@ -1671,6 +1778,19 @@ own panels fill the frame (both shown)."
         (claude-repl--ws-put "test-ws" :fullscreen-config nil)
         (claude-repl-toggle-fullscreen)
         (should (equal entered "test-ws"))))))
+
+(ert-deftest claude-repl-test-panels-toggle-fullscreen-restore-via-helper ()
+  "toggle-fullscreen's saved branch restores through restore-fullscreen-config.
+With a saved config it restores the layout and clears `:fullscreen-config'."
+  (claude-repl-test--with-clean-state
+    (let ((restored nil))
+      (claude-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'set-window-configuration)
+                 (lambda (cfg) (setq restored cfg))))
+        (claude-repl-toggle-fullscreen)
+        (should (eq restored 'saved-config))
+        (should-not (claude-repl--ws-get "test-ws" :fullscreen-config))))))
 
 ;;;; ---- Tests: ws-buffer-visible-p with live but undisplayed buffer ----
 
