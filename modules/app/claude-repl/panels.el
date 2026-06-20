@@ -421,6 +421,53 @@ current workspace or no panels are visible."
                when (and id (not (string= id sanitized)))
                collect win))))
 
+(defun claude-repl--stale-window-buffers (windows)
+  "Return the unique live buffers displayed in WINDOWS.
+Used to capture the foreign Claude panel buffers occupying the stale
+windows returned by `claude-repl--stale-panel-windows' BEFORE those
+windows are deleted, so the buffers can be detached from the current
+workspace's persp buffer list afterward.  Dead windows and nil buffers
+are dropped."
+  (delete-dups
+   (delq nil
+         (mapcar (lambda (w) (and (window-live-p w) (window-buffer w)))
+                 windows))))
+
+(defun claude-repl--detach-foreign-panel-buffers (ws buffers)
+  "Detach foreign Claude panel BUFFERS from WS's persp buffer list.
+Each live buffer in BUFFERS is removed from the current workspace's
+perspective via `claude-repl--ws-remove-buffer', so listing WS's buffers
+no longer surfaces another workspace's Claude panel.  The buffers are
+NOT killed and remain attached to their home workspace.  No-op for nil
+or dead buffers."
+  (dolist (buf buffers)
+    (when (buffer-live-p buf)
+      (claude-repl--log ws "detach-foreign-panel-buffers: removing %s from ws=%s buffer list"
+                        (buffer-name buf) ws)
+      (claude-repl--ws-remove-buffer buf))))
+
+(defun claude-repl--reclaim-frame-fullscreen (ws)
+  "Take over the frame with WS's own Claude panels in fullscreen.
+
+Called after a workspace switch purged a *different* workspace's Claude
+panel windows: shows WS's own input+output panels when they are not
+already visible, then expands them to fill the frame via
+`claude-repl--enter-fullscreen' (which deletes every non-panel window).
+
+No-op when WS has no live panel buffers to show — there is nothing to
+reclaim the frame with, so the post-purge layout is left as-is."
+  (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer))
+        (input-buf (claude-repl--ws-get ws :input-buffer)))
+    (if (not (and vterm-buf (buffer-live-p vterm-buf)
+                  input-buf (buffer-live-p input-buf)))
+        (claude-repl--log ws "reclaim-frame-fullscreen: no live panel buffers for ws=%s, skipping" ws)
+      (unless (claude-repl--panels-visible-p)
+        (claude-repl--log ws "reclaim-frame-fullscreen: showing own panels for ws=%s" ws)
+        (claude-repl--show-panels))
+      (when (claude-repl--panels-visible-p)
+        (claude-repl--log ws "reclaim-frame-fullscreen: entering fullscreen for ws=%s" ws)
+        (claude-repl--enter-fullscreen ws)))))
+
 (defun claude-repl--ensure-own-panels-on-persp-switch (ws)
   "Reconcile panel visibility with workspace ownership after a persp switch.
 
@@ -430,6 +477,15 @@ the target workspace has no saved window config (first visit) or
 when the saved config itself carried drifted panels from a prior
 save.
 
+When such foreign panels are found, also detaches their buffers from
+THIS workspace's persp buffer list (via
+`claude-repl--detach-foreign-panel-buffers') so listing this
+workspace's buffers no longer surfaces another workspace's Claude
+panel, and then takes over the frame with this workspace's own panels
+in fullscreen (via `claude-repl--reclaim-frame-fullscreen').  The
+foreign buffers are NOT killed and stay attached to their home
+workspace.
+
 After purging stale panels, restores this workspace's own panels if
 they were visible when this workspace was last deactivated
 \(`:panels-were-visible' flag set by `--before-persp-deactivate').
@@ -437,7 +493,8 @@ they were visible when this workspace was last deactivated
 Mirrors the drawer's `ensure-visible-on-persp-switch' approach:
 the drawer uses a global visibility flag; panels use a per-workspace
 flag because each workspace has its own panel buffers."
-  (let ((stale (claude-repl--stale-panel-windows)))
+  (let* ((stale (claude-repl--stale-panel-windows))
+         (foreign-bufs (claude-repl--stale-window-buffers stale)))
     (when stale
       (claude-repl--log ws "ensure-own-panels: closing %d stale panel windows: %S"
                         (length stale)
@@ -446,30 +503,40 @@ flag because each workspace has its own panel buffers."
         (when (window-live-p win)
           ;; Un-dedicate before deleting so `delete-window' doesn't error.
           (set-window-dedicated-p win nil)
-          (delete-window win)))))
-  ;; If this workspace's panels were visible before its last deactivation
-  ;; but are not visible now (persp dropped them or we just purged stale
-  ;; ones), re-show them.
-  (when (and (claude-repl--ws-get ws :panels-were-visible)
-             (not (claude-repl--panels-visible-p))
-             ;; Only restore if this ws actually has live panel buffers.
-             (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer))
-                   (input-buf (claude-repl--ws-get ws :input-buffer)))
-               (and vterm-buf (buffer-live-p vterm-buf)
-                    input-buf (buffer-live-p input-buf))))
-    (if (claude-repl--vterm-visible-p)
-        ;; Output window survived the switch but the input window was
-        ;; dropped — add only the input window so the output window is
-        ;; not duplicated.
-        (progn
-          (claude-repl--log ws "ensure-own-panels: output up, input missing — adding input only")
-          (claude-repl--show-input-beside-output))
-      (claude-repl--log ws "ensure-own-panels: re-showing panels (were-visible but now missing)")
-      (claude-repl--show-panels)))
-  ;; Independently of the were-visible flag, repair a frame that shows
-  ;; only the output window (e.g. a fullscreen Claude REPL restored with
-  ;; just its output window) by adding the input window beside it.
-  (claude-repl--ensure-input-beside-output))
+          (delete-window win)))
+      ;; Detach the foreign panel buffers from THIS workspace's persp
+      ;; buffer list AFTER their windows are gone, so listing this
+      ;; workspace's buffers no longer surfaces another workspace's
+      ;; Claude panel.  The buffers stay alive in their home workspace.
+      (claude-repl--detach-foreign-panel-buffers ws foreign-bufs))
+    ;; If this workspace's panels were visible before its last deactivation
+    ;; but are not visible now (persp dropped them or we just purged stale
+    ;; ones), re-show them.
+    (when (and (claude-repl--ws-get ws :panels-were-visible)
+               (not (claude-repl--panels-visible-p))
+               ;; Only restore if this ws actually has live panel buffers.
+               (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer))
+                     (input-buf (claude-repl--ws-get ws :input-buffer)))
+                 (and vterm-buf (buffer-live-p vterm-buf)
+                      input-buf (buffer-live-p input-buf))))
+      (if (claude-repl--vterm-visible-p)
+          ;; Output window survived the switch but the input window was
+          ;; dropped — add only the input window so the output window is
+          ;; not duplicated.
+          (progn
+            (claude-repl--log ws "ensure-own-panels: output up, input missing — adding input only")
+            (claude-repl--show-input-beside-output))
+        (claude-repl--log ws "ensure-own-panels: re-showing panels (were-visible but now missing)")
+        (claude-repl--show-panels)))
+    ;; Independently of the were-visible flag, repair a frame that shows
+    ;; only the output window (e.g. a fullscreen Claude REPL restored with
+    ;; just its output window) by adding the input window beside it.
+    (claude-repl--ensure-input-beside-output)
+    ;; When a foreign workspace's panels were just purged, take over the
+    ;; frame with THIS workspace's own panels in fullscreen — replacing
+    ;; every visible window with the input+output panels.
+    (when stale
+      (claude-repl--reclaim-frame-fullscreen ws))))
 
 (defun claude-repl--on-workspace-switch (&optional ws)
   "Handle workspace switch: update all workspace states, refresh vterm, reset cursors.
