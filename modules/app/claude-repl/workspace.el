@@ -926,6 +926,12 @@ directly or wrapping it themselves with `fboundp'."
   "Create persp WS via `persp-add-new' and tag it with PROJECT-DIR.
 Returns the new persp object, or nil when `persp-add-new' is unbound.
 
+When PROJECT-DIR is non-nil and a real persp is created, also seeds
+`:project-dir' into `claude-repl--workspaces' so the hash entry carries
+its identity key from the moment of creation — never project-dir-less.
+This is the single root that prevents a `(no repo)' drawer stub when a
+creation flow aborts before session-init would otherwise set it.
+
 When PROJECT-DIR is non-nil and the new persp is a real persp object
 \(not the `persp-not-persp' keyword sentinel), sets the persp's
 `+workspace-project' parameter to PROJECT-DIR.  This makes a later
@@ -943,9 +949,19 @@ Callers must use this function instead of calling `persp-add-new' or
 `set-persp-parameter' directly or wrapping them with `fboundp'."
   (when (fboundp 'persp-add-new)
     (let ((persp (persp-add-new ws)))
-      (when (and persp (not (keywordp persp)) project-dir
-                 (fboundp 'set-persp-parameter))
-        (set-persp-parameter '+workspace-project project-dir persp))
+      (when (and persp (not (keywordp persp)) project-dir)
+        (when (fboundp 'set-persp-parameter)
+          (set-persp-parameter '+workspace-project project-dir persp))
+        ;; Seed `:project-dir' into `claude-repl--workspaces' at the
+        ;; creation boundary so the hash entry is never project-dir-less
+        ;; from birth.  Without this, the first later `--ws-put' on this
+        ;; name (e.g. `:pending-magit' in `--finalize-worktree-workspace')
+        ;; auto-vivifies a stub WITHOUT `:project-dir'; if the creation
+        ;; flow then aborts before session-init writes `:project-dir', the
+        ;; stub persists and lands in the drawer's `(no repo)' bucket.
+        ;; Seeding here closes that window for every caller that routes
+        ;; through this creation boundary.
+        (claude-repl--ws-put ws :project-dir project-dir))
       persp)))
 
 (defun claude-repl--ws-protected-p (ws)
