@@ -2,11 +2,6 @@
 
 ;;; Code:
 
-(defcustom claude-repl-vterm-width-fraction 0.40
-  "Fraction of the work window's width allocated to the vterm panel."
-  :type 'number
-  :group 'claude-repl)
-
 (defcustom claude-repl-input-height-fraction 0.23
   "Fraction of the vterm window's height allocated to the input panel."
   :type 'number
@@ -112,30 +107,42 @@ input panel (or a warning if the input isn't displayed)."
                               :size-fix       'width
                               :delete-protect t))
 
-;; Manual window layout: vterm on the right (full height), input below vterm.
+;; Fullscreen window layout: vterm fills the frame's main area, input below it.
 (defun claude-repl--show-panels ()
-  "Display vterm and input panels to the right of the current window.
-Splits right for vterm (60% width to work window), then splits vterm bottom for input (15%).
-If a window exists above the current one, selects it first so panels
-are not split from a bottom popup (e.g. a regular vterm).
+  "Display vterm and input panels filling the frame (fullscreen).
+Saves the pre-panel window layout as WS's `:fullscreen-config' (so the
+close path can restore the work windows the panels are about to cover),
+then clears the frame's main area (deleting every non-side window via
+`claude-repl--clear-main-area-for-panels') so the panels fill the
+frame, then puts vterm in the surviving window and splits it bottom for
+input (`claude-repl-input-height-fraction').  Fullscreen is the sole
+display format — there is no splitscreen layout alongside a work window.
 If the selected window is a side window (e.g. the drawer), redirects
-to the frame's main window before splitting — side windows can't be
-split, and we must never touch the drawer."
+to the frame's main window before clearing — side windows can't be
+split, and we must never touch the drawer.
+
+The `:fullscreen-config' save is guarded so it captures the layout only
+on a genuine open (no panels visible and no config already saved): the
+many re-show paths (workspace-switch reclaim, half-shown repair) call
+through here too and must not clobber the saved work layout with a
+panels-already-up one."
   (when (claude-repl-window--side-window-p (selected-window))
     (when-let ((main (and (fboundp 'window-main-window) (window-main-window))))
       (select-window main)))
-  (when-let ((above (window-in-direction 'above)))
-    (select-window above))
+  (let ((ws (claude-repl--ws-current-name)))
+    (unless (or (claude-repl--ws-get ws :fullscreen-config)
+                (claude-repl--panels-visible-p))
+      (claude-repl--ws-put ws :fullscreen-config (current-window-configuration))))
+  (claude-repl--clear-main-area-for-panels)
   (let* ((ws (claude-repl--ws-current-name))
          (vterm-buf (claude-repl--ws-get ws :vterm-buffer))
          (input-buf (claude-repl--ws-get ws :input-buffer)))
     (claude-repl--log ws "show-panels vterm=%s input=%s"
                       (claude-repl--safe-buffer-name vterm-buf)
                       (claude-repl--safe-buffer-name input-buf))
-    (let* ((work-win (selected-window))
-           (vterm-win (split-window work-win (round (* claude-repl-vterm-width-fraction (window-total-width work-win))) 'right))
+    (let* ((vterm-win (selected-window))
            (input-win (split-window vterm-win (round (* (- claude-repl-input-height-fraction) (window-total-height vterm-win))) 'below)))
-      (claude-repl--log ws "show-panels: work-win=%s vterm-win=%s input-win=%s" work-win vterm-win input-win)
+      (claude-repl--log ws "show-panels: vterm-win=%s input-win=%s" vterm-win input-win)
       (claude-repl--refresh-vterm)
       (set-window-buffer vterm-win vterm-buf)
       (set-window-buffer input-win input-buf)
@@ -469,7 +476,7 @@ or dead buffers."
       (claude-repl--ws-remove-buffer buf))))
 
 (defun claude-repl--reclaim-frame-fullscreen (ws)
-  "Take over the frame with WS's own Claude panels in fullscreen.
+  "Take over the frame with WS's own Claude panels (fullscreen).
 
 Called after a workspace switch found the frame in a state that should be
 replaced by WS's own panels, namely either:
@@ -477,10 +484,10 @@ replaced by WS's own panels, namely either:
 - a lone Claude output window (see `claude-repl--lone-output-window')
   remained, whether or not it belonged to WS.
 
-Shows WS's own input+output panels when they are not already visible,
-then expands them to fill the frame via `claude-repl--enter-fullscreen'
-(which deletes every non-panel window, including any foreign output
-window left over from another workspace).
+Shows WS's own input+output panels via `claude-repl--show-panels',
+which clears the frame's main area (deleting every non-panel window,
+including any foreign output window left over from another workspace)
+and lays out the panels filling the frame.
 
 No-op when WS has no live panel buffers to show — there is nothing to
 reclaim the frame with, so the existing layout is left as-is."
@@ -489,12 +496,8 @@ reclaim the frame with, so the existing layout is left as-is."
     (if (not (and vterm-buf (buffer-live-p vterm-buf)
                   input-buf (buffer-live-p input-buf)))
         (claude-repl--log ws "reclaim-frame-fullscreen: no live panel buffers for ws=%s, skipping" ws)
-      (unless (claude-repl--panels-visible-p)
-        (claude-repl--log ws "reclaim-frame-fullscreen: showing own panels for ws=%s" ws)
-        (claude-repl--show-panels))
-      (when (claude-repl--panels-visible-p)
-        (claude-repl--log ws "reclaim-frame-fullscreen: entering fullscreen for ws=%s" ws)
-        (claude-repl--enter-fullscreen ws)))))
+      (claude-repl--log ws "reclaim-frame-fullscreen: showing own panels for ws=%s" ws)
+      (claude-repl--show-panels))))
 
 (defun claude-repl--ensure-own-panels-on-persp-switch (ws)
   "Reconcile panel visibility with workspace ownership after a persp switch.
@@ -627,7 +630,6 @@ pending merge auto-fire."
     (claude-repl--drain-pending-magit ws)
     (claude-repl--drain-pending-initial-buffers ws)
     (claude-repl--drain-pending-show-panels ws)
-    (claude-repl--maybe-fullscreen-on-switch ws)
     (claude-repl--maybe-autoselect-input ws)
     ;; Flip the emacs-side bit on the fully-loaded latch.  If
     ;; --on-session-start-event has also fired, this fires the
@@ -794,14 +796,13 @@ in-flight :thinking / :permission survives the close), then hides
 the panel windows.  No save-tab-index, no push-to-back, no flash —
 this is the simple-close audit point that `SPC o c' is bound to.
 
-When WS is fullscreen with a saved layout, first restores that
-pre-fullscreen splitscreen layout via
-`claude-repl--restore-fullscreen-config' so the subsequent
-`claude-repl--hide-panels' leaves the underlying work windows behind —
-otherwise deleting the panels that fill the whole frame would hit
-`delete-window's sole-ordinary-window refusal and leave one panel
-stuck onscreen.  This makes `SPC o c' in fullscreen go away exactly as
-it does from splitscreen."
+The panels fill the frame (fullscreen is the only display format), so
+first restores the pre-panel layout saved at open time via
+`claude-repl--restore-fullscreen-config' — re-establishing the work
+windows that were on screen before the panels took over — so the
+subsequent `claude-repl--hide-panels' leaves those work windows behind
+rather than hitting `delete-window's sole-ordinary-window refusal and
+stranding a panel onscreen."
   (let ((ws (or ws (claude-repl--ws-current-name))))
     (claude-repl--log ws "on-simple-close: CALLED this-command=%s last-command=%s"
                       this-command last-command)
@@ -813,10 +814,13 @@ it does from splitscreen."
     (claude-repl--hide-panels)))
 
 (defun claude-repl--on-close (&optional ws)
-  "Full close: bookkeep + hide + deprio + save tab index.
+  "Full close: bookkeep + restore pre-panel layout + hide + deprio + save tab index.
 Sets WS's `:repl-state' to `:hidden' (NOT `:inactive' like the
 simple-close path) so the workspace becomes a kill candidate for the
-next sweep when `claude-repl-hide-mode-enabled' is on.  See
+next sweep when `claude-repl-hide-mode-enabled' is on.  Restores the
+pre-panel layout via `claude-repl--restore-fullscreen-config' before
+hiding so the frame-filling panels go away cleanly (same contract as
+`claude-repl--on-simple-close').  See
 `claude-repl--ws-set-repl-state' for the `:hidden' contract.  Then
 hides panels and pushes WS to the second-to-last tab position via
 `claude-repl-workspace-push-to-back', snapshotting the tab index
@@ -836,6 +840,7 @@ hides panels but skips the bookkeeping write and the tab shuffle."
       (claude-repl--log ws "on-close ws=%s claude-state=%s -> repl-state=:hidden"
                         ws (claude-repl--ws-claude-state ws))
       (claude-repl--ws-set-repl-state ws :hidden))
+    (claude-repl--restore-fullscreen-config ws)
     (claude-repl--hide-panels)
     (when (and ws (equal ws (claude-repl--ws-current-name)))
       (claude-repl--save-tab-index ws)
@@ -1140,91 +1145,39 @@ Sets `:repl-state :active' now that panels are visible and the
 session is in use.
 
 Tab-bar bookkeeping happens FIRST (before any window manipulation) so
-the persp-names reorder is in place before the main-area clear /
-`show-panels-and-focus' trigger redisplay — otherwise the intermediate
-paint can lock the pre-restore order into the tab-bar's cache.  After
-panels are up, pulses the tab via `claude-repl-flash-tab' so the user
-can track its return to the prior slot — symmetric with the
-deprio-on-close flash.
+the persp-names reorder is in place before `show-panels-and-focus'
+triggers redisplay — otherwise the intermediate paint can lock the
+pre-restore order into the tab-bar's cache.  After panels are up,
+pulses the tab via `claude-repl-flash-tab' so the user can track its
+return to the prior slot — symmetric with the deprio-on-close flash.
 
-Main-area clear routes through `--clear-main-area-for-panels' rather
-than `delete-other-windows' so the drawer side window is preserved
-unconditionally, not just when its `no-delete-other-windows' parameter
-survived upstream."
+The frame's main area is cleared by `claude-repl--show-panels' itself
+(via `--clear-main-area-for-panels', which preserves the drawer side
+window) AFTER it has captured the pre-panel layout as
+`:fullscreen-config', so this function must NOT clear the main area
+first — doing so would destroy the work layout before it is saved."
   (let ((ws (claude-repl--ws-current-name)))
     (claude-repl--log ws "show-existing-panels")
     (unless ws (error "claude-repl--show-existing-panels: no active workspace"))
     (claude-repl--ws-set-repl-state ws :active)
     (claude-repl--restore-tab-index ws)
     (claude-repl--refresh-vterm)
-    (claude-repl--clear-main-area-for-panels)
     (claude-repl--show-panels-and-focus)
     (claude-repl--update-hide-overlay)
     (claude-repl--flash-current-tab)))
-
-(defun claude-repl--drain-pending-fullscreen (ws)
-  "Enter fullscreen for WS if it was created with `:pending-fullscreen' set.
-Set by `claude-repl--enqueue-preemptive-prompt' so a workspace
-materialized via `/workspace-generation' opens its Claude panels
-fullscreen rather than splitscreen.  Clears the flag and, when it was
-set, routes through `claude-repl--enter-fullscreen' — the single
-canonical show-fullscreen operation — which saves the just-built
-splitscreen layout as `:fullscreen-config' (so the user can restore it
-with `claude-repl-toggle-fullscreen') and shows BOTH the output and input
-panels.  No-op when the flag is nil, which is every non-generation
-panel-show (e.g. re-showing hidden panels via `SPC o c').
-
-Uses `claude-repl--enter-fullscreen' rather than
-`claude-repl-toggle-fullscreen' deliberately: the generated workspace's
-panels are split off the source workspace's already-fullscreen Claude
-panels, so the live layout has every window showing a Claude buffer.
-`claude-repl-toggle-fullscreen' would read that via
-`claude-repl--fullscreen-p' as already-fullscreen and skip, leaving the
-new workspace's input panel unshown (only the output panel visible).
-`claude-repl--enter-fullscreen' is unconditional, so it always shows both."
-  (if (claude-repl--ws-get ws :pending-fullscreen)
-      (progn
-        (claude-repl--log ws "drain-pending-fullscreen: ws=%s branch=had-pending entering fullscreen" ws)
-        (claude-repl--ws-put ws :pending-fullscreen nil)
-        (claude-repl--enter-fullscreen ws))
-    (claude-repl--log-verbose ws "drain-pending-fullscreen: ws=%s branch=no-pending no-op" ws)))
-
-(defun claude-repl--maybe-fullscreen-on-switch (ws)
-  "Enter fullscreen for WS's Claude panels when switching to WS.
-
-Reuses `claude-repl-toggle-fullscreen' — the exact command `SPC w f'
-drives through `claude-repl-fullscreen-and-focus' — so the
-splitscreen layout is saved as `:fullscreen-config' and a subsequent
-`SPC w f' restores it.  The undo is therefore inherent in the shared
-toggle rather than bolted on.
-
-Guarded so it only ever ENTERS fullscreen, never exits:
-- No-op unless WS is the live current workspace, so a background or
-  raced switch (see `claude-repl--on-workspace-switch') does not
-  fullscreen the wrong workspace via the ws-agnostic toggle.
-- No-op when the panels are not visible, so non-Claude workspaces
-  (e.g. the main workspace) are left untouched.
-- No-op when the panels are already fullscreen, so re-switching to an
-  already-fullscreen workspace does not toggle it back out."
-  (when (and (equal ws (claude-repl--ws-current-name))
-             (claude-repl--panels-visible-p)
-             (not (claude-repl--fullscreen-active-p ws)))
-    (claude-repl--log ws "maybe-fullscreen-on-switch: ws=%s entering fullscreen" ws)
-    (claude-repl-toggle-fullscreen)))
 
 (defun claude-repl--show-hidden-panels ()
   "Restore hidden panels.  `show-existing-panels' writes :repl-state :active.
 `:claude-state' is untouched; rendering follows the same rule whether
 panels are visible or hidden.
 
-After the panels are visible, `claude-repl--drain-pending-fullscreen'
-maximizes them when `:pending-fullscreen' is set (the
-`/workspace-generation' path)."
+Panels always open filling the frame (fullscreen is the sole display
+format), so there is no separate maximize step — `show-existing-panels'
+lays them out full-frame via `claude-repl--show-panels'."
   (let ((ws (claude-repl--ws-current-name)))
     (claude-repl--log ws "showing panels ws=%s claude-state=%s"
                       ws (claude-repl--ws-claude-state ws))
-    (claude-repl--show-existing-panels)
-    (claude-repl--drain-pending-fullscreen ws)))
+    (claude-repl--show-existing-panels)))
 
 (defun claude-repl--hide-and-preserve-status ()
   "Hide Claude panels with full deprio + tab-bar shuffle (the `SPC o C' path).
@@ -1481,143 +1434,22 @@ If Claude isn't running, start it (same as `claude-repl')."
       (when-let ((win (get-buffer-window (claude-repl--ws-get ws :input-buffer))))
         (select-window win))))))
 
-(defun claude-repl--delete-non-panel-windows (vterm-buf input-buf)
-  "Delete every window NOT showing VTERM-BUF or INPUT-BUF.
-Side windows (e.g. the workspace drawer) are preserved — they are
-frame-level UI elements that should survive panel-layout resets.
-Pre-consolidation this function walked `window-list' directly and
-killed the drawer on `SPC g g'; the side-window skip lives inside
-`claude-repl-window--delete-where' now.
-
-Routes through `claude-repl-window--delete-where' so drawer
-preservation is parameter-independent: the skip-side-windows default
-keeps the drawer alive even if its `no-delete-other-windows' parameter
-was stripped upstream (the same fragility `--clear-main-area-for-panels'
-exists to avoid).  An earlier revision delegated to Emacs's built-in
-`delete-other-windows' from a panel window to silence mid-iteration
-structural-delete errors via the built-in's own `condition-case', but
-that re-introduced the parameter dependency and could kill the drawer
-on `SPC w f' when the param had been lost.  The benign-error filtering
-now lives inside `--delete-where' itself, so we get both properties."
-  (claude-repl--log (claude-repl--ws-current-name)
-                    "delete-non-panel-windows: window-count=%d"
-                    (length (window-list)))
-  (claude-repl-window--delete-where
-   (lambda (win)
-     (not (memq (window-buffer win) (list vterm-buf input-buf))))))
-
-(defun claude-repl--fullscreen-p ()
-  "Return non-nil when the Claude panels currently fill the frame.
-
-Detection is layout-based rather than reliant on a saved
-`:fullscreen-config', so a frame manually reduced to only the Claude
-panels (by deleting every other window) is recognized as fullscreen
-just the same as one reached via `claude-repl-toggle-fullscreen'.
-
-A frame qualifies when both panels are visible and every non-side
-window displays a Claude panel buffer (so no ordinary work window
-remains alongside the panels)."
-  (and (claude-repl--panels-visible-p)
-       (cl-every (lambda (win)
-                   (or (claude-repl-window--side-window-p win)
-                       (claude-repl--claude-panel-buffer-p (window-buffer win))))
-                 (window-list))))
-
-(defun claude-repl--fullscreen-active-p (ws)
-  "Return non-nil when WS's Claude panels are currently fullscreen.
-
-Recognizes fullscreen from a saved `:fullscreen-config' OR from the
-live layout via `claude-repl--fullscreen-p', so a frame manually
-fullscreened (all other windows deleted by hand, no saved config) is
-detected just the same as one reached via
-`claude-repl-toggle-fullscreen'.
-
-Shared by `claude-repl-toggle-fullscreen' (which must not re-enter
-fullscreen) and `claude-repl--maybe-fullscreen-on-switch' (which must
-not toggle an already-fullscreen workspace back out)."
-  (or (claude-repl--ws-get ws :fullscreen-config)
-      (claude-repl--fullscreen-p)))
-
-(defun claude-repl--enter-fullscreen (ws)
-  "Expand WS's Claude panels to fill the frame, keeping BOTH output and input.
-
-This is the single canonical \"show fullscreen\" operation for the Claude
-REPL: every fullscreen entry point routes through it so fullscreen ALWAYS
-shows both the vterm output panel AND the input panel (never just one).
-Current callers are `claude-repl-toggle-fullscreen' (its go-fullscreen
-branch) and `claude-repl--drain-pending-fullscreen' (the
-`/workspace-generation' path).
-
-Saves the current window layout as WS's `:fullscreen-config' so
-`claude-repl-toggle-fullscreen' can restore it, then deletes every window
-NOT showing one of the two panel buffers via
-`claude-repl--delete-non-panel-windows' (which keeps both panels and the
-drawer side window).
-
-Unlike `claude-repl-toggle-fullscreen', this is unconditional: it does NOT
-consult `claude-repl--fullscreen-p', so it correctly fullscreens a freshly
-generated workspace whose panels were split off ANOTHER workspace's
-fullscreen Claude panels (the layout where every window already shows a
-Claude buffer, which `--fullscreen-p' would mistake for already-fullscreen
-and skip — leaving the new workspace's input panel unshown).
-
-Signals a `user-error' when the panels are not currently visible: both the
-vterm and input buffers must already be displayed in a window."
-  (let ((vterm-buf (claude-repl--ws-get ws :vterm-buffer))
-        (input-buf (claude-repl--ws-get ws :input-buffer)))
-    (unless (and vterm-buf input-buf
-                 (get-buffer-window vterm-buf)
-                 (get-buffer-window input-buf))
-      (user-error "Claude REPL panels are not visible"))
-    (claude-repl--ws-put ws :fullscreen-config (current-window-configuration))
-    (claude-repl--delete-non-panel-windows vterm-buf input-buf)))
-
 (defun claude-repl--restore-fullscreen-config (ws)
-  "Restore WS's saved pre-fullscreen layout, clearing `:fullscreen-config'.
+  "Restore WS's saved pre-panel layout, clearing `:fullscreen-config'.
 Returns non-nil when a restore happened, nil when WS had no saved config.
 
-Extracted so both `claude-repl-toggle-fullscreen' (its restore branch)
-and the `SPC o c' close path (`claude-repl--on-simple-close') exit
-fullscreen the same way — re-establishing the splitscreen layout that was
-live before `claude-repl--enter-fullscreen' swept it.  Only the saved-config
-case is handled: a frame manually fullscreened (no `:fullscreen-config') has
-no layout to restore to."
+`:fullscreen-config' is the window layout captured by
+`claude-repl--show-panels' the moment the frame-filling panels were
+opened (fullscreen is the sole display format).  The close paths
+\(`claude-repl--on-simple-close' for `SPC o c' and
+`claude-repl--on-close' for `SPC o C') restore it before hiding so the
+work windows the panels covered come back rather than the close
+stranding a panel onscreen.  Only the saved-config case is handled: a
+frame with no `:fullscreen-config' has no layout to restore to."
   (when-let ((saved (and ws (claude-repl--ws-get ws :fullscreen-config))))
     (set-window-configuration saved)
     (claude-repl--ws-put ws :fullscreen-config nil)
     t))
-
-(defun claude-repl-toggle-fullscreen ()
-  "Toggle fullscreen for the Claude REPL vterm and input windows.
-Saves the current window configuration per-workspace and expands the
-Claude panels to fill the frame.  Calling again restores the layout.
-Going fullscreen routes through `claude-repl--enter-fullscreen', the
-single canonical show-fullscreen operation, so both panels are shown.
-
-Fullscreen state is recognized both from a saved `:fullscreen-config'
-AND from the live layout via `claude-repl--fullscreen-p', so a frame
-that was manually fullscreened (all other windows deleted by hand) is
-not mistaken for a normal layout — toggling it neither re-enters
-fullscreen nor poisons the saved config."
-  (interactive)
-  (let* ((ws (claude-repl--ws-current-name))
-         (saved (claude-repl--ws-get ws :fullscreen-config))
-         (fullscreen (claude-repl--fullscreen-active-p ws)))
-    (claude-repl--log ws "toggle-fullscreen ws=%s currently=%s saved=%s"
-                      ws (if fullscreen "fullscreen" "normal") (if saved "yes" "no"))
-    (cond
-     ;; Already fullscreen with a saved layout — restore it.
-     (saved
-      (claude-repl--restore-fullscreen-config ws))
-     ;; Already fullscreen but manually so (no saved layout) — there is
-     ;; nothing to restore to, so don't re-enter fullscreen (which would
-     ;; otherwise save the fullscreen layout as the "normal" config).
-     (fullscreen
-      (message "Claude panels are already fullscreen (no saved layout to restore)."))
-     ;; Not fullscreen — go fullscreen if panels are visible
-     ((claude-repl--vterm-live-p)
-      (claude-repl--enter-fullscreen ws))
-     (t (message "No Claude vterm buffer for this workspace.")))))
 
 (defvar claude-repl--window-fullscreen-config nil
   "Saved window configuration for non-Claude fullscreen toggle.
@@ -1661,26 +1493,25 @@ a leaf is reached.  Returns nil if no leaf is found."
    (t (claude-repl--first-live-leaf (window-child win)))))
 
 (defun claude-repl-fullscreen-and-focus ()
-  "Toggle fullscreen for Claude panels and focus the input window.
-When in a Claude panel buffer, maximizes both Claude windows and moves
-point to the input buffer, or restores the layout.
+  "Focus the Claude input window, or maximize a non-Claude work window.
+When in a Claude panel buffer, moves point to the input buffer — the
+Claude panels already fill the frame (fullscreen is the sole display
+format), so there is nothing to maximize.
 When not in a Claude panel buffer, maximizes the current window within
 the non-side area (preserving the workspace drawer) and saves the
 layout; calling again restores it.
 When invoked from a side window (e.g. the workspace drawer), first
-moves point to the frame's main window so the fullscreen target is a
+moves point to the frame's main window so the maximize target is a
 real main-area window — see
 `claude-repl--fullscreen-leave-side-window'."
   (interactive)
   (claude-repl--fullscreen-leave-side-window)
   (if (claude-repl--claude-panel-buffer-p)
-      (progn
-        (claude-repl-toggle-fullscreen)
-        (let* ((ws (claude-repl--ws-current-name))
-               (input-buf (claude-repl--ws-get ws :input-buffer))
-               (input-win (and input-buf (get-buffer-window input-buf))))
-          (when input-win
-            (select-window input-win))))
+      (let* ((ws (claude-repl--ws-current-name))
+             (input-buf (claude-repl--ws-get ws :input-buffer))
+             (input-win (and input-buf (get-buffer-window input-buf))))
+        (when input-win
+          (select-window input-win)))
     (if claude-repl--window-fullscreen-config
         (progn
           (set-window-configuration claude-repl--window-fullscreen-config)

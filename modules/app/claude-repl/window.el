@@ -46,8 +46,7 @@
 ;; Reserved: populated in a follow-up step when callers are migrated.
 ;; The intended shape is:
 ;;
-;;   '((:vterm  :side right :buffer-key :vterm-buffer
-;;              :width-frac claude-repl-vterm-width-fraction
+;;   '((:vterm  :fill main :buffer-key :vterm-buffer
 ;;              :harden (dedicate size-fix-width  delete-protect))
 ;;     (:input  :side below :buffer-key :input-buffer
 ;;              :height-frac claude-repl-input-height-fraction

@@ -319,15 +319,15 @@ Guards against the untracked-fallback regressing the tracked path."
 ;;;; ---- Tests: +dwc/magit-status-workspace (fullscreen panel handling) ----
 
 (ert-deftest claude-repl-test-magit-status-workspace-fullscreen-closes-input-window ()
-  "When fullscreen, closes the input window so magit can fill the vterm window."
+  "When the panels are visible, closes the input window so magit can fill the vterm window."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "test-ws" :project-dir "/tmp/proj")
-    (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
     (claude-repl--ws-put "test-ws" :input-buffer 'fake-input-buf)
     (claude-repl--ws-put "test-ws" :vterm-buffer 'fake-vterm-buf)
     (let ((closed-bufs '()))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
                 ((symbol-function 'claude-repl--close-buffer-window)
                  (lambda (buf) (push buf closed-bufs)))
                 ((symbol-function 'get-buffer-window)
@@ -339,15 +339,15 @@ Guards against the untracked-fallback regressing the tracked path."
         (should (memq 'fake-input-buf closed-bufs))))))
 
 (ert-deftest claude-repl-test-magit-status-workspace-fullscreen-undedicates-vterm-window ()
-  "When fullscreen, un-dedicates the vterm window so same-window display succeeds."
+  "When the panels are visible, un-dedicates the vterm window so same-window display succeeds."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "test-ws" :project-dir "/tmp/proj")
-    (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
     (claude-repl--ws-put "test-ws" :input-buffer 'fake-input-buf)
     (claude-repl--ws-put "test-ws" :vterm-buffer 'fake-vterm-buf)
     (let ((dedicate-args nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
                 ((symbol-function 'claude-repl--close-buffer-window) #'ignore)
                 ((symbol-function 'get-buffer-window)
                  (lambda (_buf) 'fake-vterm-win))
@@ -359,15 +359,15 @@ Guards against the untracked-fallback regressing the tracked path."
         (should (equal dedicate-args '(fake-vterm-win nil)))))))
 
 (ert-deftest claude-repl-test-magit-status-workspace-fullscreen-selects-vterm-window ()
-  "When fullscreen, selects the vterm window before calling magit-status."
+  "When the panels are visible, selects the vterm window before calling magit-status."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "test-ws" :project-dir "/tmp/proj")
-    (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
     (claude-repl--ws-put "test-ws" :input-buffer 'fake-input-buf)
     (claude-repl--ws-put "test-ws" :vterm-buffer 'fake-vterm-buf)
     (let ((selected-wins '()))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
                 ((symbol-function 'claude-repl--close-buffer-window) #'ignore)
                 ((symbol-function 'get-buffer-window)
                  (lambda (_buf) 'fake-vterm-win))
@@ -379,53 +379,29 @@ Guards against the untracked-fallback regressing the tracked path."
         (should (memq 'fake-vterm-win selected-wins))))))
 
 (ert-deftest claude-repl-test-magit-status-workspace-not-fullscreen-no-panel-close ()
-  "When NOT fullscreen, does not close the input window or un-dedicate vterm."
+  "When the panels are NOT visible, does not close the input window or un-dedicate vterm."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "test-ws" :project-dir "/tmp/proj")
-    ;; :fullscreen-config left nil and layout predicate stubbed nil — not fullscreen
     (claude-repl--ws-put "test-ws" :input-buffer 'fake-input-buf)
     (let ((close-calls 0))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
-                ((symbol-function 'claude-repl--fullscreen-p) (lambda () nil))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'claude-repl--close-buffer-window)
                  (lambda (_buf) (cl-incf close-calls)))
                 ((symbol-function 'magit-status) #'ignore))
         (+dwc/magit-status-workspace)
         (should (= close-calls 0))))))
 
-(ert-deftest claude-repl-test-magit-status-workspace-manual-fullscreen-closes-input-window ()
-  "When fullscreen is detected via the live layout predicate (no saved
-`:fullscreen-config'), still closes the input window so magit can fill
-the vterm window."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "test-ws" :project-dir "/tmp/proj")
-    ;; :fullscreen-config left nil — fullscreen comes only from the layout predicate
-    (claude-repl--ws-put "test-ws" :input-buffer 'fake-input-buf)
-    (claude-repl--ws-put "test-ws" :vterm-buffer 'fake-vterm-buf)
-    (let ((closed-bufs '()))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'window-parameter) (lambda (_w _p) nil))
-                ((symbol-function 'claude-repl--fullscreen-p) (lambda () t))
-                ((symbol-function 'claude-repl--close-buffer-window)
-                 (lambda (buf) (push buf closed-bufs)))
-                ((symbol-function 'get-buffer-window)
-                 (lambda (_buf) 'fake-vterm-win))
-                ((symbol-function 'set-window-dedicated-p) #'ignore)
-                ((symbol-function 'select-window) #'ignore)
-                ((symbol-function 'magit-status) #'ignore))
-        (+dwc/magit-status-workspace)
-        (should (memq 'fake-input-buf closed-bufs))))))
-
 (ert-deftest claude-repl-test-magit-status-workspace-fullscreen-no-input-buf-no-error ()
-  "When fullscreen but no input buffer stored, does not error and skips close."
+  "When the panels are visible but no input buffer stored, does not error and skips close."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "test-ws" :project-dir "/tmp/proj")
-    (claude-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
     ;; :input-buffer and :vterm-buffer left nil
     (let ((close-calls 0))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
+                ((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
                 ((symbol-function 'claude-repl--close-buffer-window)
                  (lambda (_buf) (cl-incf close-calls)))
                 ((symbol-function 'magit-status) #'ignore))
