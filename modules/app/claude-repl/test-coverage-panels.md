@@ -83,14 +83,16 @@ Returns t only when both panels are visible.
 | Sets all three properties correctly | Yes | `configure-vterm-window` |
 
 ### `claude-repl--show-panels ()`
-Complex function: splits windows, sets buffers, configures windows.
+Complex function: clears the main area, fills the frame with the panels, sets buffers, configures windows.
 
 | Edge Case | Covered | Test |
 |-----------|---------|------|
-| Normal operation (split + display) | No | Requires full window management |
+| Fills frame, clearing work windows (fullscreen) | Yes | `show-panels-fills-frame-clearing-work-windows` |
+| Saves pre-panel layout as `:fullscreen-config` | Yes | `show-panels-saves-pre-panel-config` |
+| Does not overwrite an already-saved config | Yes | `show-panels-does-not-overwrite-saved-config` |
 | Workspace has no vterm buffer | No | |
 | Workspace has no input buffer | No | |
-| Docstring mentions correct percentages | Yes | `show-panels-docstring` |
+| Docstring describes the fullscreen layout | Yes | `show-panels-docstring` |
 | Sets no-delete-other-windows on both panels | Yes | `show-panels-sets-no-delete-other-windows` |
 
 ### `claude-repl--focus-input-panel ()`
@@ -447,21 +449,6 @@ to live in `initialize-claude-output`, `initialize-new-vterm`, and
 | Running, panels hidden -> show + focus | No | |
 | Running, panels visible -> just focus | No | |
 
-### `claude-repl--delete-non-panel-windows (vterm-buf input-buf)`
-
-| Edge Case | Covered | Test |
-|-----------|---------|------|
-| Preserves panel windows, deletes others | Yes | `delete-non-panel-windows-preserves-panels` (partial) |
-
-### `claude-repl-toggle-fullscreen ()` (interactive)
-
-| Edge Case | Covered | Test |
-|-----------|---------|------|
-| Already fullscreen -> restore | No | Requires window config |
-| Not fullscreen, panels visible -> go fullscreen | No | |
-| Not fullscreen, panels not visible -> user-error | No | |
-| No vterm buffer -> message | No | |
-
 ### `claude-repl-cycle ()` (interactive)
 
 | Edge Case | Covered | Test |
@@ -505,7 +492,7 @@ to live in `initialize-claude-output`, `initialize-new-vterm`, and
 
 ## Key Gaps
 
-1. **Multi-window operations**: Functions like `show-panels`, `focus-input-panel`, `sync-panels`, `bounce-from-vterm`, and `toggle-fullscreen` require multi-window frame setups that are difficult in batch mode.
+1. **Multi-window operations**: Functions like `show-panels`, `focus-input-panel`, `sync-panels`, and `bounce-from-vterm` require multi-window frame setups that are difficult in batch mode.
 
 2. **Vterm-dependent functions**: `vterm-redraw`, `do-refresh`, `refresh-vterm`, `refresh-vterm-window` require real vterm-mode buffers.
 
