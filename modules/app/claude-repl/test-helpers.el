@@ -292,7 +292,7 @@ advice's effect would be invisible)."
 ;; form in notifications.el skips the init-form evaluation entirely, which
 ;; is the call that would otherwise signal the FATAL load error.
 (unless (boundp 'claude-repl--notification-backend)
-  (defvar claude-repl--notification-backend (lambda (_title _msg) nil)
+  (defvar claude-repl--notification-backend (lambda (_ws _title _msg) nil)
     "Stub: no-op notification backend for test environments."))
 
 ;; Suppress timers at load time

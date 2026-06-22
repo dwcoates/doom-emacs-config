@@ -2,8 +2,8 @@
 
 ;;; Commentary:
 
-;; Tests for notifications.el -- desktop notification backend selection
-;; and dispatch.
+;; Tests for notifications.el -- desktop notification backend selection,
+;; dispatch, and the failure-surfacing spawn/sentinel layer.
 
 ;;; Code:
 
@@ -48,51 +48,50 @@
 
 ;;;; ---- Tests: terminal-notifier backend ----
 
-(ert-deftest claude-repl-test-terminal-notifier-calls-process ()
-  "terminal-notifier backend should call-process with correct arguments."
-  (let (captured-args)
-    (cl-letf (((symbol-function 'call-process)
-               (lambda (&rest args) (setq captured-args args) 0)))
-      (claude-repl--notify-backend-terminal-notifier "My Title" "My Message")
-      (should (equal captured-args
-                     '("terminal-notifier" nil 0 nil
+(ert-deftest claude-repl-test-terminal-notifier-spawns-with-args ()
+  "terminal-notifier backend should spawn the binary with -title/-message args."
+  (let (captured)
+    (cl-letf (((symbol-function 'claude-repl--notify-spawn)
+               (lambda (&rest args) (setq captured args) nil)))
+      (claude-repl--notify-backend-terminal-notifier "ws-a" "My Title" "My Message")
+      (should (equal captured
+                     '("ws-a" terminal-notifier "terminal-notifier"
                        "-title" "My Title"
                        "-message" "My Message"))))))
 
 (ert-deftest claude-repl-test-terminal-notifier-empty-strings ()
   "terminal-notifier backend should handle empty title and message."
-  (let (captured-args)
-    (cl-letf (((symbol-function 'call-process)
-               (lambda (&rest args) (setq captured-args args) 0)))
-      (claude-repl--notify-backend-terminal-notifier "" "")
-      (should (equal (nth 5 captured-args) ""))
-      (should (equal (nth 7 captured-args) "")))))
+  (let (captured)
+    (cl-letf (((symbol-function 'claude-repl--notify-spawn)
+               (lambda (&rest args) (setq captured args) nil)))
+      (claude-repl--notify-backend-terminal-notifier "ws-a" "" "")
+      ;; positions: ws backend program -title <title> -message <message>
+      (should (equal (nth 4 captured) ""))
+      (should (equal (nth 6 captured) "")))))
 
 (ert-deftest claude-repl-test-terminal-notifier-special-chars ()
   "terminal-notifier backend should pass through special characters."
-  (let (captured-args)
-    (cl-letf (((symbol-function 'call-process)
-               (lambda (&rest args) (setq captured-args args) 0)))
-      (claude-repl--notify-backend-terminal-notifier "Title \"quoted\"" "Message with\nnewline")
-      (should (equal (nth 5 captured-args) "Title \"quoted\""))
-      (should (equal (nth 7 captured-args) "Message with\nnewline")))))
+  (let (captured)
+    (cl-letf (((symbol-function 'claude-repl--notify-spawn)
+               (lambda (&rest args) (setq captured args) nil)))
+      (claude-repl--notify-backend-terminal-notifier "ws-a" "Title \"quoted\"" "Message with\nnewline")
+      (should (equal (nth 4 captured) "Title \"quoted\""))
+      (should (equal (nth 6 captured) "Message with\nnewline")))))
 
 ;;;; ---- Tests: osascript backend ----
 
-(ert-deftest claude-repl-test-osascript-calls-start-process ()
-  "osascript backend should start-process with correct arguments."
-  (let (captured-args)
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (&rest args)
-                 (setq captured-args args)
-                 nil)))
-      (claude-repl--notify-backend-osascript "My Title" "My Message")
-      (should (equal (nth 0 captured-args) "claude-notify"))
-      (should (null (nth 1 captured-args)))
-      (should (equal (nth 2 captured-args) "osascript"))
-      (should (equal (nth 3 captured-args) "-e"))
-      ;; The AppleScript command should contain the title and message
-      (let ((script (nth 4 captured-args)))
+(ert-deftest claude-repl-test-osascript-spawns-with-script ()
+  "osascript backend should spawn osascript with a -e display-notification script."
+  (let (captured)
+    (cl-letf (((symbol-function 'claude-repl--notify-spawn)
+               (lambda (&rest args) (setq captured args) nil)))
+      (claude-repl--notify-backend-osascript "ws-a" "My Title" "My Message")
+      ;; positions: ws backend program -e <script>
+      (should (equal (nth 0 captured) "ws-a"))
+      (should (eq (nth 1 captured) 'osascript))
+      (should (equal (nth 2 captured) "osascript"))
+      (should (equal (nth 3 captured) "-e"))
+      (let ((script (nth 4 captured)))
         (should (string-match-p "display notification" script))
         (should (string-match-p "My Message" script))
         (should (string-match-p "My Title" script))
@@ -100,40 +99,150 @@
 
 (ert-deftest claude-repl-test-osascript-empty-strings ()
   "osascript backend should handle empty title and message."
-  (let (captured-args)
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (&rest args) (setq captured-args args) nil)))
-      (claude-repl--notify-backend-osascript "" "")
-      (let ((script (nth 4 captured-args)))
+  (let (captured)
+    (cl-letf (((symbol-function 'claude-repl--notify-spawn)
+               (lambda (&rest args) (setq captured args) nil)))
+      (claude-repl--notify-backend-osascript "ws-a" "" "")
+      (let ((script (nth 4 captured)))
         (should (string-match-p "display notification" script))))))
 
 (ert-deftest claude-repl-test-osascript-special-chars ()
   "osascript backend should properly quote special characters in the script."
-  (let (captured-args)
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (&rest args) (setq captured-args args) nil)))
-      (claude-repl--notify-backend-osascript "Title \"quoted\"" "Line1\nLine2")
-      (let ((script (nth 4 captured-args)))
-        ;; format %S will escape the quotes properly for AppleScript
+  (let (captured)
+    (cl-letf (((symbol-function 'claude-repl--notify-spawn)
+               (lambda (&rest args) (setq captured args) nil)))
+      (claude-repl--notify-backend-osascript "ws-a" "Title \"quoted\"" "Line1\nLine2")
+      (let ((script (nth 4 captured)))
         (should (stringp script))
         (should (string-match-p "display notification" script))))))
+
+;;;; ---- Tests: claude-repl--notify-spawn ----
+
+(ert-deftest claude-repl-test-notify-spawn-captures-output-into-buffer ()
+  "spawn should pass a live capture buffer (not nil) to start-process."
+  (let (captured-buffer)
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name buffer &rest _args)
+                 (setq captured-buffer buffer)
+                 ;; Return a non-process so no real sentinel is attached.
+                 nil)))
+      (claude-repl--notify-spawn "ws-a" 'osascript "osascript" "-e" "noop")
+      (should (bufferp captured-buffer)))))
+
+(ert-deftest claude-repl-test-notify-spawn-sets-sentinel-on-process ()
+  "spawn should attach a sentinel to the spawned process."
+  (let (sentinel-set)
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (&rest _args) 'fake-proc))
+              ((symbol-function 'processp) (lambda (obj) (eq obj 'fake-proc)))
+              ((symbol-function 'set-process-sentinel)
+               (lambda (proc fn)
+                 (setq sentinel-set (and (eq proc 'fake-proc) (functionp fn))))))
+      (claude-repl--notify-spawn "ws-a" 'osascript "osascript" "-e" "noop")
+      (should sentinel-set))))
+
+(ert-deftest claude-repl-test-notify-spawn-non-process-kills-buffer ()
+  "When start-process returns a non-process, the capture buffer must be killed."
+  (let (captured-buffer)
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name buffer &rest _args)
+                 (setq captured-buffer buffer)
+                 nil)))
+      (should (null (claude-repl--notify-spawn "ws-a" 'osascript "osascript" "-e" "noop")))
+      (should-not (buffer-live-p captured-buffer)))))
+
+(ert-deftest claude-repl-test-notify-spawn-returns-process ()
+  "spawn should return the spawned process when start-process yields one."
+  (cl-letf (((symbol-function 'start-process)
+             (lambda (&rest _args) 'fake-proc))
+            ((symbol-function 'processp) (lambda (obj) (eq obj 'fake-proc)))
+            ((symbol-function 'set-process-sentinel) (lambda (&rest _) nil)))
+    (should (eq (claude-repl--notify-spawn "ws-a" 'osascript "osascript" "-e" "noop")
+                'fake-proc))))
+
+;;;; ---- Tests: claude-repl--notify-process-sentinel ----
+
+(ert-deftest claude-repl-test-sentinel-logs-ok-on-zero-exit ()
+  "Sentinel should log a gated `ok' line when the command exits zero."
+  (let ((buffer (generate-new-buffer " *sentinel-ok*"))
+        log-args)
+    (unwind-protect
+        (cl-letf (((symbol-function 'process-status) (lambda (_p) 'exit))
+                  ((symbol-function 'process-exit-status) (lambda (_p) 0))
+                  ((symbol-function 'claude-repl--log)
+                   (lambda (_ws fmt &rest args) (setq log-args (cons fmt args))))
+                  ((symbol-function 'claude-repl--do-log)
+                   (lambda (&rest _) (error "do-log must not fire on success"))))
+          (funcall (claude-repl--notify-process-sentinel "ws-a" 'osascript buffer)
+                   'proc "finished\n")
+          (should (string-match-p "notify-backend=%s ok" (car log-args)))
+          (should (equal (cdr log-args) '(osascript))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest claude-repl-test-sentinel-logs-failure-on-nonzero-exit ()
+  "Sentinel should loudly log via do-log when the command exits non-zero."
+  (let ((buffer (generate-new-buffer " *sentinel-fail*"))
+        do-log-args)
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer (insert "boom: not allowed"))
+          (cl-letf (((symbol-function 'process-status) (lambda (_p) 'exit))
+                    ((symbol-function 'process-exit-status) (lambda (_p) 1))
+                    ((symbol-function 'claude-repl--log)
+                     (lambda (&rest _) (error "log must not fire on failure")))
+                    ((symbol-function 'claude-repl--do-log)
+                     (lambda (_ws fmt args &optional _err) (setq do-log-args (cons fmt args)))))
+            (funcall (claude-repl--notify-process-sentinel "ws-a" 'osascript buffer)
+                     'proc "exited abnormally with code 1\n")
+            (should (string-match-p "FAILED" (car do-log-args)))
+            ;; args list: (backend status event output)
+            (should (eq (nth 0 (cdr do-log-args)) 'osascript))
+            (should (equal (nth 1 (cdr do-log-args)) 1))
+            (should (string-match-p "boom: not allowed" (nth 3 (cdr do-log-args))))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest claude-repl-test-sentinel-kills-buffer-on-termination ()
+  "Sentinel should kill the capture buffer once the process terminates."
+  (let ((buffer (generate-new-buffer " *sentinel-kill*")))
+    (cl-letf (((symbol-function 'process-status) (lambda (_p) 'exit))
+              ((symbol-function 'process-exit-status) (lambda (_p) 0))
+              ((symbol-function 'claude-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--do-log) (lambda (&rest _) nil)))
+      (funcall (claude-repl--notify-process-sentinel "ws-a" 'osascript buffer)
+               'proc "finished\n")
+      (should-not (buffer-live-p buffer)))))
+
+(ert-deftest claude-repl-test-sentinel-ignores-non-terminal-events ()
+  "Sentinel should do nothing for non-terminal process states (e.g. `run')."
+  (let ((buffer (generate-new-buffer " *sentinel-run*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'process-status) (lambda (_p) 'run))
+                  ((symbol-function 'claude-repl--log)
+                   (lambda (&rest _) (error "log must not fire while running")))
+                  ((symbol-function 'claude-repl--do-log)
+                   (lambda (&rest _) (error "do-log must not fire while running"))))
+          (funcall (claude-repl--notify-process-sentinel "ws-a" 'osascript buffer)
+                   'proc "run\n")
+          ;; Buffer stays live because the process has not terminated.
+          (should (buffer-live-p buffer)))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 ;;;; ---- Tests: claude-repl--notify dispatch ----
 
 (ert-deftest claude-repl-test-notify-dispatches-to-backend ()
-  "claude-repl--notify should funcall the selected backend."
+  "claude-repl--notify should funcall the selected backend with ws/title/message."
   (let (called-with)
     (cl-letf ((claude-repl--notification-backend
-               (lambda (title msg) (setq called-with (list title msg))))
+               (lambda (ws title msg) (setq called-with (list ws title msg))))
               (claude-repl-debug nil)
               ((symbol-function 'claude-repl--log) (lambda (_ws _fmt &rest _args) nil)))
-      (claude-repl--notify nil "Test Title" "Test Message")
-      (should (equal called-with '("Test Title" "Test Message"))))))
+      (claude-repl--notify "ws-a" "Test Title" "Test Message")
+      (should (equal called-with '("ws-a" "Test Title" "Test Message"))))))
 
 (ert-deftest claude-repl-test-notify-logs-when-debug-enabled ()
   "claude-repl--notify should log when debug is enabled."
   (let (log-called)
-    (cl-letf ((claude-repl--notification-backend (lambda (_t _m) nil))
+    (cl-letf ((claude-repl--notification-backend (lambda (_ws _t _m) nil))
               (claude-repl-debug t)
               ((symbol-function 'claude-repl--log)
                (lambda (_ws _fmt &rest _args) (setq log-called t))))
@@ -144,7 +253,7 @@
   "claude-repl--notify should call log before dispatching to backend."
   (let (call-order)
     (cl-letf ((claude-repl--notification-backend
-               (lambda (_t _m) (push 'backend call-order)))
+               (lambda (_ws _t _m) (push 'backend call-order)))
               (claude-repl-debug t)
               ((symbol-function 'claude-repl--log)
                (lambda (_ws _fmt &rest _args) (push 'log call-order))))
@@ -154,44 +263,41 @@
 
 (ert-deftest claude-repl-test-notify-does-not-log-when-debug-off ()
   "claude-repl--notify should not log when debug is nil."
-  (let (log-called)
-    (cl-letf ((claude-repl--notification-backend (lambda (_t _m) nil))
-              (claude-repl-debug nil)
-              ;; Use the real claude-repl--log which checks claude-repl-debug
-              )
-      ;; With debug nil, the real log function is a no-op, so we just
-      ;; verify no error is raised
-      (claude-repl--notify nil "Title" "Message"))))
+  (cl-letf ((claude-repl--notification-backend (lambda (_ws _t _m) nil))
+            (claude-repl-debug nil))
+    ;; With debug nil, the real log function is a no-op, so we just
+    ;; verify no error is raised.
+    (claude-repl--notify nil "Title" "Message")))
 
 ;;;; ---- Tests: uncovered edge cases ----
 
 (ert-deftest claude-repl-test-terminal-notifier-very-long-strings ()
   "terminal-notifier backend should handle very long title and message strings."
-  (let* (captured-args
+  (let* (captured
          (long-title (make-string 10000 ?T))
          (long-message (make-string 10000 ?M)))
-    (cl-letf (((symbol-function 'call-process)
-               (lambda (&rest args) (setq captured-args args) 0)))
-      (claude-repl--notify-backend-terminal-notifier long-title long-message)
-      (should (equal (nth 5 captured-args) long-title))
-      (should (equal (nth 7 captured-args) long-message)))))
+    (cl-letf (((symbol-function 'claude-repl--notify-spawn)
+               (lambda (&rest args) (setq captured args) nil)))
+      (claude-repl--notify-backend-terminal-notifier "ws-a" long-title long-message)
+      (should (equal (nth 4 captured) long-title))
+      (should (equal (nth 6 captured) long-message)))))
 
 (ert-deftest claude-repl-test-terminal-notifier-unicode-chars ()
   "terminal-notifier backend should pass through non-ASCII/Unicode characters."
-  (let (captured-args)
-    (cl-letf (((symbol-function 'call-process)
-               (lambda (&rest args) (setq captured-args args) 0)))
-      (claude-repl--notify-backend-terminal-notifier "Héllo Wörld 你好" "Émoji 🎉 café")
-      (should (equal (nth 5 captured-args) "Héllo Wörld 你好"))
-      (should (equal (nth 7 captured-args) "Émoji 🎉 café")))))
+  (let (captured)
+    (cl-letf (((symbol-function 'claude-repl--notify-spawn)
+               (lambda (&rest args) (setq captured args) nil)))
+      (claude-repl--notify-backend-terminal-notifier "ws-a" "Héllo Wörld 你好" "Émoji 🎉 café")
+      (should (equal (nth 4 captured) "Héllo Wörld 你好"))
+      (should (equal (nth 6 captured) "Émoji 🎉 café")))))
 
 (ert-deftest claude-repl-test-osascript-unicode-chars ()
   "osascript backend should include non-ASCII/Unicode characters in the script."
-  (let (captured-args)
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (&rest args) (setq captured-args args) nil)))
-      (claude-repl--notify-backend-osascript "Héllo 你好" "café 🎉")
-      (let ((script (nth 4 captured-args)))
+  (let (captured)
+    (cl-letf (((symbol-function 'claude-repl--notify-spawn)
+               (lambda (&rest args) (setq captured args) nil)))
+      (claude-repl--notify-backend-osascript "ws-a" "Héllo 你好" "café 🎉")
+      (let ((script (nth 4 captured)))
         (should (string-match-p "display notification" script))
         (should (string-match-p "café" script))
         (should (string-match-p "Héllo" script))))))
@@ -200,13 +306,13 @@
   "osascript backend should not error when start-process returns nil."
   (cl-letf (((symbol-function 'start-process)
              (lambda (&rest _args) nil)))
-    ;; Should complete without signaling an error
-    (claude-repl--notify-backend-osascript "Title" "Message")))
+    ;; Should complete without signaling an error (buffer cleanup path).
+    (claude-repl--notify-backend-osascript "ws-a" "Title" "Message")))
 
 (ert-deftest claude-repl-test-notify-backend-signals-error ()
   "claude-repl--notify should propagate errors from the backend function."
   (cl-letf ((claude-repl--notification-backend
-             (lambda (_title _msg) (error "Backend failed")))
+             (lambda (_ws _title _msg) (error "Backend failed")))
             (claude-repl-debug nil)
             ((symbol-function 'claude-repl--log) (lambda (_ws _fmt &rest _args) nil)))
     (should-error (claude-repl--notify nil "Title" "Message")
