@@ -1305,6 +1305,30 @@ identity-distinct string injected by `claude-repl-set-priority' from
       (fmakunbound 'persp-add-new)
       (should-not (claude-repl--ws-create "ws1" "/tmp/p")))))
 
+(ert-deftest claude-repl-test-ws-create-seeds-project-dir ()
+  "ws-create seeds :project-dir into the hash for a real persp + non-nil dir."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-add-new) (lambda (_ws) 'a-persp))
+              ((symbol-function 'set-persp-parameter) (lambda (&rest _) nil)))
+      (claude-repl--ws-create "ws1" "/tmp/p")
+      (should (equal (claude-repl--ws-get "ws1" :project-dir) "/tmp/p")))))
+
+(ert-deftest claude-repl-test-ws-create-no-seed-when-no-dir ()
+  "ws-create does not seed :project-dir when PROJECT-DIR is nil."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-add-new) (lambda (_ws) 'a-persp))
+              ((symbol-function 'set-persp-parameter) (lambda (&rest _) nil)))
+      (claude-repl--ws-create "ws1")
+      (should-not (claude-repl--ws-get "ws1" :project-dir)))))
+
+(ert-deftest claude-repl-test-ws-create-no-seed-when-keyword-sentinel ()
+  "ws-create does not seed :project-dir when persp-add-new returns a keyword."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'persp-add-new) (lambda (_ws) :nil))
+              ((symbol-function 'set-persp-parameter) (lambda (&rest _) nil)))
+      (claude-repl--ws-create "ws1" "/tmp/p")
+      (should-not (claude-repl--ws-get "ws1" :project-dir)))))
+
 ;;;; ---- Tests: --ws-protected-p ----
 
 (ert-deftest claude-repl-test-ws-protected-p-delegates-when-bound ()
