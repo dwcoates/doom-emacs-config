@@ -190,19 +190,13 @@
 
 ;;;; ---- Tests: Defcustom defaults ----
 
-(ert-deftest claude-repl-test-panels-vterm-width-fraction-default ()
-  "vterm-width-fraction defcustom defaults to 0.60."
-  (should (boundp 'claude-repl-vterm-width-fraction))
-  (should (floatp claude-repl-vterm-width-fraction))
-  (should (= (default-value 'claude-repl-vterm-width-fraction) 0.40)))
-
 ;;;; ---- Tests: Docstring accuracy (migrated) ----
 
 (ert-deftest claude-repl-test-panels-show-panels-docstring ()
-  "show-panels docstring should mention 60% and 15%."
+  "show-panels docstring should describe the fullscreen (frame-filling) layout."
   (let ((doc (documentation 'claude-repl--show-panels)))
-    (should (string-match-p "60%" doc))
-    (should (string-match-p "15%" doc))))
+    (should (string-match-p "fullscreen" doc))
+    (should (string-match-p "fill" doc))))
 
 ;;;; ---- Tests: show-input-beside-output ----
 
@@ -326,150 +320,6 @@
       (cl-letf (((symbol-function 'claude-repl--show-hidden-panels)
                  (lambda () (setq called t))))
         (claude-repl--drain-pending-show-panels "test-ws")
-        (should-not called)))))
-
-;;;; ---- Tests: drain-pending-fullscreen ----
-
-(ert-deftest claude-repl-test-panels-drain-fullscreen-when-set ()
-  "drain-pending-fullscreen enters fullscreen when :pending-fullscreen is set."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "test-ws" :pending-fullscreen t)
-    (let ((called nil))
-      (cl-letf (((symbol-function 'claude-repl--enter-fullscreen)
-                 (lambda (_ws) (setq called t))))
-        (claude-repl--drain-pending-fullscreen "test-ws")
-        (should called)))))
-
-(ert-deftest claude-repl-test-panels-drain-fullscreen-passes-ws ()
-  "drain-pending-fullscreen enters fullscreen for the WS it was given."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "test-ws" :pending-fullscreen t)
-    (let ((got nil))
-      (cl-letf (((symbol-function 'claude-repl--enter-fullscreen)
-                 (lambda (ws) (setq got ws))))
-        (claude-repl--drain-pending-fullscreen "test-ws")
-        (should (equal got "test-ws"))))))
-
-(ert-deftest claude-repl-test-panels-drain-fullscreen-not-via-toggle ()
-  "drain-pending-fullscreen does NOT route through the toggle command.
-Routing through `claude-repl-toggle-fullscreen' would no-op when the
-generated workspace's panels were split off another workspace's
-already-fullscreen panels (every window a Claude buffer), so the drain
-must call the unconditional `claude-repl--enter-fullscreen' instead."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "test-ws" :pending-fullscreen t)
-    (let ((toggle-called nil))
-      (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen)
-                 (lambda () (setq toggle-called t)))
-                ((symbol-function 'claude-repl--enter-fullscreen) #'ignore))
-        (claude-repl--drain-pending-fullscreen "test-ws")
-        (should-not toggle-called)))))
-
-(ert-deftest claude-repl-test-panels-drain-fullscreen-clears-flag ()
-  "drain-pending-fullscreen clears :pending-fullscreen after entering fullscreen."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "test-ws" :pending-fullscreen t)
-    (cl-letf (((symbol-function 'claude-repl--enter-fullscreen) #'ignore))
-      (claude-repl--drain-pending-fullscreen "test-ws")
-      (should-not (claude-repl--ws-get "test-ws" :pending-fullscreen)))))
-
-(ert-deftest claude-repl-test-panels-drain-fullscreen-when-not-set ()
-  "drain-pending-fullscreen does nothing when :pending-fullscreen is nil."
-  (claude-repl-test--with-clean-state
-    (let ((called nil))
-      (cl-letf (((symbol-function 'claude-repl--enter-fullscreen)
-                 (lambda (_ws) (setq called t))))
-        (claude-repl--drain-pending-fullscreen "test-ws")
-        (should-not called)))))
-
-(ert-deftest claude-repl-test-panels-drain-fullscreen-only-once ()
-  "drain-pending-fullscreen is one-shot: a second call does not re-enter."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "test-ws" :pending-fullscreen t)
-    (let ((count 0))
-      (cl-letf (((symbol-function 'claude-repl--enter-fullscreen)
-                 (lambda (_ws) (setq count (1+ count)))))
-        (claude-repl--drain-pending-fullscreen "test-ws")
-        (claude-repl--drain-pending-fullscreen "test-ws")
-        (should (= count 1))))))
-
-;;;; ---- Tests: fullscreen-active-p ----
-
-(ert-deftest claude-repl-test-panels-fullscreen-active-p-saved-config ()
-  "fullscreen-active-p is non-nil when :fullscreen-config is set."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "test-ws" :fullscreen-config 'some-config)
-    (cl-letf (((symbol-function 'claude-repl--fullscreen-p) (lambda () nil)))
-      (should (claude-repl--fullscreen-active-p "test-ws")))))
-
-(ert-deftest claude-repl-test-panels-fullscreen-active-p-layout ()
-  "fullscreen-active-p is non-nil when the live layout is fullscreen."
-  (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--fullscreen-p) (lambda () t)))
-      (should (claude-repl--fullscreen-active-p "test-ws")))))
-
-(ert-deftest claude-repl-test-panels-fullscreen-active-p-neither ()
-  "fullscreen-active-p is nil with no saved config and a non-fullscreen layout."
-  (claude-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'claude-repl--fullscreen-p) (lambda () nil)))
-      (should-not (claude-repl--fullscreen-active-p "test-ws")))))
-
-;;;; ---- Tests: maybe-fullscreen-on-switch ----
-
-(ert-deftest claude-repl-test-panels-maybe-fullscreen-on-switch-enters ()
-  "maybe-fullscreen-on-switch enters fullscreen for the current visible ws."
-  (claude-repl-test--with-clean-state
-    (let ((called nil))
-      (cl-letf (((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
-                ((symbol-function 'claude-repl--fullscreen-p) (lambda () nil))
-                ((symbol-function 'claude-repl-toggle-fullscreen)
-                 (lambda () (setq called t))))
-        (claude-repl--maybe-fullscreen-on-switch "test-ws")
-        (should called)))))
-
-(ert-deftest claude-repl-test-panels-maybe-fullscreen-on-switch-no-panels ()
-  "maybe-fullscreen-on-switch is a no-op when the panels are not visible."
-  (claude-repl-test--with-clean-state
-    (let ((called nil))
-      (cl-letf (((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
-                ((symbol-function 'claude-repl--fullscreen-p) (lambda () nil))
-                ((symbol-function 'claude-repl-toggle-fullscreen)
-                 (lambda () (setq called t))))
-        (claude-repl--maybe-fullscreen-on-switch "test-ws")
-        (should-not called)))))
-
-(ert-deftest claude-repl-test-panels-maybe-fullscreen-on-switch-already-saved ()
-  "maybe-fullscreen-on-switch is a no-op when :fullscreen-config is already set."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "test-ws" :fullscreen-config 'some-config)
-    (let ((called nil))
-      (cl-letf (((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
-                ((symbol-function 'claude-repl--fullscreen-p) (lambda () nil))
-                ((symbol-function 'claude-repl-toggle-fullscreen)
-                 (lambda () (setq called t))))
-        (claude-repl--maybe-fullscreen-on-switch "test-ws")
-        (should-not called)))))
-
-(ert-deftest claude-repl-test-panels-maybe-fullscreen-on-switch-already-layout ()
-  "maybe-fullscreen-on-switch is a no-op when the live layout is already fullscreen."
-  (claude-repl-test--with-clean-state
-    (let ((called nil))
-      (cl-letf (((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
-                ((symbol-function 'claude-repl--fullscreen-p) (lambda () t))
-                ((symbol-function 'claude-repl-toggle-fullscreen)
-                 (lambda () (setq called t))))
-        (claude-repl--maybe-fullscreen-on-switch "test-ws")
-        (should-not called)))))
-
-(ert-deftest claude-repl-test-panels-maybe-fullscreen-on-switch-not-current ()
-  "maybe-fullscreen-on-switch is a no-op when WS is not the current workspace."
-  (claude-repl-test--with-clean-state
-    (let ((called nil))
-      (cl-letf (((symbol-function 'claude-repl--panels-visible-p) (lambda () t))
-                ((symbol-function 'claude-repl--fullscreen-p) (lambda () nil))
-                ((symbol-function 'claude-repl-toggle-fullscreen)
-                 (lambda () (setq called t))))
-        (claude-repl--maybe-fullscreen-on-switch "other-ws")
         (should-not called)))))
 
 ;;;; ---- Tests: drain-pending-magit ----
@@ -689,6 +539,23 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
                 ((symbol-function 'claude-repl-workspace-push-to-back) #'ignore))
         (claude-repl--on-close)
         (should hide-called)))))
+
+(ert-deftest claude-repl-test-panels-on-close-restores-config-before-hide ()
+  "on-close restores the pre-panel layout before hiding panels.
+The restore must run BEFORE hide-panels so the frame-filling panels are
+removed via the restored work layout rather than stranding a panel."
+  (claude-repl-test--with-clean-state
+    (let ((order '()))
+      (claude-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'set-window-configuration)
+                 (lambda (_cfg) (push 'restore order)))
+                ((symbol-function 'claude-repl--hide-panels)
+                 (lambda () (push 'hide order)))
+                ((symbol-function 'claude-repl-workspace-push-to-back) #'ignore))
+        (claude-repl--on-close)
+        (should (equal order '(hide restore)))
+        (should-not (claude-repl--ws-get "test-ws" :fullscreen-config))))))
 
 (ert-deftest claude-repl-test-panels-on-close-with-explicit-ws ()
   "on-close accepts an explicit WS argument."
@@ -1108,19 +975,6 @@ is on."
         (claude-repl--show-hidden-panels)
         (should show-called)))))
 
-(ert-deftest claude-repl-test-panels-show-hidden-drains-fullscreen ()
-  "show-hidden-panels drains :pending-fullscreen after showing panels."
-  (claude-repl-test--with-clean-state
-    (claude-repl--ws-put "test-ws" :pending-fullscreen t)
-    (let ((fullscreen-called nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'claude-repl--show-existing-panels) #'ignore)
-                ((symbol-function 'claude-repl--enter-fullscreen)
-                 (lambda (_ws) (setq fullscreen-called t))))
-        (claude-repl--show-hidden-panels)
-        (should fullscreen-called)
-        (should-not (claude-repl--ws-get "test-ws" :pending-fullscreen))))))
-
 (ert-deftest claude-repl-test-panels-show-hidden-sets-active ()
   "show-hidden-panels (via show-existing-panels) sets :repl-state :active."
   (claude-repl-test--with-clean-state
@@ -1417,381 +1271,6 @@ whole layout (which would duplicate the already-visible output window)."
     ;; Should not error
     (claude-repl--kill-vterm-process buf)))
 
-;;;; ---- Tests: delete-non-panel-windows ----
-
-(ert-deftest claude-repl-test-panels-delete-non-panel-windows-preserves-panels ()
-  "delete-non-panel-windows does not delete windows showing panel buffers."
-  ;; In batch mode we only have one window; just verify it doesn't error
-  ;; when called with buffers that are not displayed
-  (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*fake-vterm*"
-      (claude-repl-test--with-temp-buffer "*fake-input*"
-        ;; Should not error even when buffers aren't displayed
-        (claude-repl--delete-non-panel-windows
-         (get-buffer "*fake-vterm*")
-         (get-buffer "*fake-input*"))))))
-
-(ert-deftest claude-repl-test-panels-delete-non-panel-windows-silent-on-tricky-layout ()
-  "Regression for `SPC w f' in claude-repl: when a non-panel window
-ends up as the sole main-area window mid-sweep, an earlier
-implementation logged `[claude-repl] window--delete-where: could not
-delete ...' into *Messages*.  The fixed implementation routes through
-`--delete-where' whose benign-error filter silences the structural
-refusal — verify no warning escapes."
-  (let ((wconf (current-window-configuration)))
-    (unwind-protect
-        (progn
-          (delete-other-windows)
-          (let* ((vterm-buf  (generate-new-buffer " *test-vterm*"))
-                 (input-buf  (generate-new-buffer " *test-input*"))
-                 (drawer-buf (generate-new-buffer " *test-drawer*"))
-                 (vterm-win  (selected-window))
-                 (input-win  (split-window vterm-win nil 'below))
-                 (drawer-win (display-buffer-in-side-window
-                              drawer-buf '((side . left) (slot . 0)))))
-            (set-window-buffer vterm-win vterm-buf)
-            (set-window-buffer input-win input-buf)
-            ;; Mirror production: panels and drawer carry
-            ;; `no-delete-other-windows'.  Only vterm- and input-win
-            ;; remain in the main area — the sweep targets none of them
-            ;; (both are panels), so this collapses to the trivial case
-            ;; and exercises the benign-error path of `--delete-where'
-            ;; without leaving residue from a synthetic `extra-win'.
-            (set-window-parameter vterm-win  'no-delete-other-windows t)
-            (set-window-parameter input-win  'no-delete-other-windows t)
-            (set-window-parameter drawer-win 'no-delete-other-windows t)
-            (unwind-protect
-                (let ((captured nil)
-                      (orig-message (symbol-function 'message)))
-                  (cl-letf (((symbol-function 'message)
-                             (lambda (fmt &rest args)
-                               (let ((s (apply #'format fmt args)))
-                                 (when (string-match-p "could not delete" s)
-                                   (push s captured))
-                                 (apply orig-message fmt args)))))
-                    (claude-repl--delete-non-panel-windows vterm-buf input-buf)
-                    (should-not captured)
-                    (should (window-live-p vterm-win))
-                    (should (window-live-p input-win))
-                    (should (window-live-p drawer-win))))
-              (when (window-live-p drawer-win) (delete-window drawer-win))
-              (kill-buffer vterm-buf)
-              (kill-buffer input-buf)
-              (kill-buffer drawer-buf))))
-      (set-window-configuration wconf))))
-
-(ert-deftest claude-repl-test-panels-delete-non-panel-windows-preserves-drawer-without-ndow-param ()
-  "Regression for `SPC w f' killing the drawer: drawer preservation
-must NOT depend on the drawer window carrying
-`no-delete-other-windows'.  An earlier revision routed through
-Emacs's `delete-other-windows', which protects the drawer only when
-that parameter is intact; any upstream parameter loss (a redisplay
-without the original action alist, etc.) made the drawer vulnerable.
-The parameter-independent path via `--delete-where' must survive a
-drawer with the parameter explicitly stripped."
-  (let ((wconf (current-window-configuration)))
-    (unwind-protect
-        (progn
-          (delete-other-windows)
-          (let* ((vterm-buf  (generate-new-buffer " *test-vterm*"))
-                 (input-buf  (generate-new-buffer " *test-input*"))
-                 (drawer-buf (generate-new-buffer " *test-drawer*"))
-                 (work-buf   (generate-new-buffer " *test-work*"))
-                 (work-win   (selected-window))
-                 (vterm-win  (split-window work-win nil 'right))
-                 (input-win  (split-window vterm-win nil 'below))
-                 (drawer-win (display-buffer-in-side-window
-                              drawer-buf '((side . left) (slot . 0)))))
-            (set-window-buffer work-win  work-buf)
-            (set-window-buffer vterm-win  vterm-buf)
-            (set-window-buffer input-win  input-buf)
-            ;; Panels keep their hardening, but the drawer's
-            ;; `no-delete-other-windows' is explicitly absent — the test
-            ;; would pass trivially if we left it set, and the
-            ;; regression is precisely about the parameter-stripped case.
-            (set-window-parameter vterm-win  'no-delete-other-windows t)
-            (set-window-parameter input-win  'no-delete-other-windows t)
-            (set-window-parameter drawer-win 'no-delete-other-windows nil)
-            (unwind-protect
-                (progn
-                  (claude-repl--delete-non-panel-windows vterm-buf input-buf)
-                  (should (window-live-p drawer-win))
-                  (should (window-live-p vterm-win))
-                  (should (window-live-p input-win))
-                  (should-not (window-live-p work-win)))
-              (when (window-live-p drawer-win) (delete-window drawer-win))
-              (kill-buffer vterm-buf)
-              (kill-buffer input-buf)
-              (kill-buffer drawer-buf)
-              (kill-buffer work-buf))))
-      (set-window-configuration wconf))))
-
-;;;; ---- Tests: fullscreen-p (layout-based fullscreen detection) ----
-
-(ert-deftest claude-repl-test-panels-fullscreen-p-only-panels ()
-  "fullscreen-p detects a frame reduced to only the Claude panels.
-This is the manual-fullscreen case (other windows deleted by hand,
-without `claude-repl-toggle-fullscreen' having saved a config)."
-  (claude-repl-test--with-clean-state
-    (let ((wconf (current-window-configuration))
-          (vterm-buf (generate-new-buffer "*claude-panel-fsp1*"))
-          (input-buf (generate-new-buffer "*claude-panel-input-fsp1*")))
-      (unwind-protect
-          (progn
-            (delete-other-windows)
-            (let* ((vterm-win (selected-window))
-                   (input-win (split-window vterm-win nil 'below)))
-              (set-window-buffer vterm-win vterm-buf)
-              (set-window-buffer input-win input-buf)
-              (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-              (claude-repl--ws-put "test-ws" :input-buffer input-buf)
-              (should (claude-repl--fullscreen-p))))
-        (set-window-configuration wconf)
-        (kill-buffer vterm-buf)
-        (kill-buffer input-buf)))))
-
-(ert-deftest claude-repl-test-panels-fullscreen-p-work-window-present ()
-  "fullscreen-p returns nil when an ordinary work window coexists with the panels."
-  (claude-repl-test--with-clean-state
-    (let ((wconf (current-window-configuration))
-          (vterm-buf (generate-new-buffer "*claude-panel-fsp2*"))
-          (input-buf (generate-new-buffer "*claude-panel-input-fsp2*"))
-          (work-buf  (generate-new-buffer "*fsp2-work*")))
-      (unwind-protect
-          (progn
-            (delete-other-windows)
-            (let* ((work-win (selected-window))
-                   (vterm-win (split-window work-win nil 'right))
-                   (input-win (split-window vterm-win nil 'below)))
-              (set-window-buffer work-win work-buf)
-              (set-window-buffer vterm-win vterm-buf)
-              (set-window-buffer input-win input-buf)
-              (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-              (claude-repl--ws-put "test-ws" :input-buffer input-buf)
-              (should-not (claude-repl--fullscreen-p))))
-        (set-window-configuration wconf)
-        (kill-buffer vterm-buf)
-        (kill-buffer input-buf)
-        (kill-buffer work-buf)))))
-
-(ert-deftest claude-repl-test-panels-fullscreen-p-ignores-side-window ()
-  "fullscreen-p treats side windows (e.g. the drawer) as exempt.
-A frame holding only the panels plus a side window still counts as
-fullscreen, because the drawer is not an ordinary work window."
-  (claude-repl-test--with-clean-state
-    (let ((wconf (current-window-configuration))
-          (vterm-buf  (generate-new-buffer "*claude-panel-fsp3*"))
-          (input-buf  (generate-new-buffer "*claude-panel-input-fsp3*"))
-          (drawer-buf (generate-new-buffer "*fsp3-drawer*"))
-          (drawer-win nil))
-      (unwind-protect
-          (progn
-            (delete-other-windows)
-            (let* ((vterm-win (selected-window))
-                   (input-win (split-window vterm-win nil 'below)))
-              (set-window-buffer vterm-win vterm-buf)
-              (set-window-buffer input-win input-buf)
-              (setq drawer-win (display-buffer-in-side-window
-                                drawer-buf '((side . left) (slot . 0))))
-              (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-              (claude-repl--ws-put "test-ws" :input-buffer input-buf)
-              (should (window-live-p drawer-win))
-              (should (claude-repl--fullscreen-p))))
-        (when (window-live-p drawer-win) (delete-window drawer-win))
-        (set-window-configuration wconf)
-        (kill-buffer vterm-buf)
-        (kill-buffer input-buf)
-        (kill-buffer drawer-buf)))))
-
-(ert-deftest claude-repl-test-panels-fullscreen-p-panels-not-visible ()
-  "fullscreen-p returns nil when the panels are not displayed at all."
-  (claude-repl-test--with-clean-state
-    (let ((wconf (current-window-configuration))
-          (vterm-buf (generate-new-buffer "*claude-panel-fsp4*"))
-          (input-buf (generate-new-buffer "*claude-panel-input-fsp4*"))
-          (other-buf (generate-new-buffer "*fsp4-other*")))
-      (unwind-protect
-          (progn
-            (delete-other-windows)
-            (switch-to-buffer other-buf)
-            ;; Panels exist in the workspace but are not in any window.
-            (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
-            (should-not (claude-repl--fullscreen-p)))
-        (set-window-configuration wconf)
-        (kill-buffer vterm-buf)
-        (kill-buffer input-buf)
-        (kill-buffer other-buf)))))
-
-;;;; ---- Tests: toggle-fullscreen on a manually-fullscreened frame ----
-
-(ert-deftest claude-repl-test-panels-toggle-fullscreen-manual-no-poison ()
-  "toggle-fullscreen on a manually-fullscreened frame does not poison the config.
-With no saved `:fullscreen-config', the layout-based detection still
-recognizes fullscreen, so the command must NOT save the fullscreen
-layout as the workspace's restore config and must NOT sweep the panels."
-  (claude-repl-test--with-clean-state
-    (let ((wconf (current-window-configuration))
-          (vterm-buf (generate-new-buffer "*claude-panel-fsmanual*"))
-          (input-buf (generate-new-buffer "*claude-panel-input-fsmanual*"))
-          (messages '()))
-      (unwind-protect
-          (progn
-            (delete-other-windows)
-            (let* ((vterm-win (selected-window))
-                   (input-win (split-window vterm-win nil 'below)))
-              (set-window-buffer vterm-win vterm-buf)
-              (set-window-buffer input-win input-buf)
-              (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-              (claude-repl--ws-put "test-ws" :input-buffer input-buf)
-              (should-not (claude-repl--ws-get "test-ws" :fullscreen-config))
-              (cl-letf (((symbol-function 'message)
-                         (lambda (fmt &rest args)
-                           (push (apply #'format fmt args) messages))))
-                (claude-repl-toggle-fullscreen))
-              ;; Config was NOT poisoned with the fullscreen layout.
-              (should-not (claude-repl--ws-get "test-ws" :fullscreen-config))
-              ;; A "already fullscreen" message was emitted.
-              (should (cl-some (lambda (m) (string-match-p "already fullscreen" m))
-                               messages))
-              ;; Panels survived (no destructive sweep).
-              (should (window-live-p vterm-win))
-              (should (window-live-p input-win))))
-        (set-window-configuration wconf)
-        (kill-buffer vterm-buf)
-        (kill-buffer input-buf)))))
-
-;;;; ---- Tests: enter-fullscreen (canonical show-fullscreen) ----
-
-(ert-deftest claude-repl-test-panels-enter-fullscreen-saves-config ()
-  "enter-fullscreen saves the prior layout as :fullscreen-config."
-  (claude-repl-test--with-clean-state
-    (let ((wconf (current-window-configuration))
-          (vterm-buf (generate-new-buffer "*claude-panel-fsenter*"))
-          (input-buf (generate-new-buffer "*claude-panel-input-fsenter*")))
-      (unwind-protect
-          (progn
-            (delete-other-windows)
-            (let* ((work-win (selected-window))
-                   (vterm-win (split-window work-win nil 'right))
-                   (input-win (split-window vterm-win nil 'below)))
-              (set-window-buffer vterm-win vterm-buf)
-              (set-window-buffer input-win input-buf)
-              (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-              (claude-repl--ws-put "test-ws" :input-buffer input-buf)
-              (should-not (claude-repl--ws-get "test-ws" :fullscreen-config))
-              (claude-repl--enter-fullscreen "test-ws")
-              (should (claude-repl--ws-get "test-ws" :fullscreen-config))))
-        (set-window-configuration wconf)
-        (kill-buffer vterm-buf)
-        (kill-buffer input-buf)))))
-
-(ert-deftest claude-repl-test-panels-enter-fullscreen-keeps-both-panels ()
-  "enter-fullscreen keeps BOTH the vterm output and input panels visible.
-This is the core guarantee: fullscreen must never show only one panel."
-  (claude-repl-test--with-clean-state
-    (let ((wconf (current-window-configuration))
-          (vterm-buf (generate-new-buffer "*claude-panel-fsenter2*"))
-          (input-buf (generate-new-buffer "*claude-panel-input-fsenter2*")))
-      (unwind-protect
-          (progn
-            (delete-other-windows)
-            (let* ((work-win (selected-window))
-                   (vterm-win (split-window work-win nil 'right))
-                   (input-win (split-window vterm-win nil 'below)))
-              (set-window-buffer vterm-win vterm-buf)
-              (set-window-buffer input-win input-buf)
-              (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-              (claude-repl--ws-put "test-ws" :input-buffer input-buf)
-              (claude-repl--enter-fullscreen "test-ws")
-              ;; The work window was swept...
-              (should-not (window-live-p work-win))
-              ;; ...but BOTH panels survived.
-              (should (get-buffer-window vterm-buf))
-              (should (get-buffer-window input-buf))))
-        (set-window-configuration wconf)
-        (kill-buffer vterm-buf)
-        (kill-buffer input-buf)))))
-
-(ert-deftest claude-repl-test-panels-enter-fullscreen-errors-when-not-visible ()
-  "enter-fullscreen signals a user-error when the panels are not displayed."
-  (claude-repl-test--with-clean-state
-    (let ((vterm-buf (generate-new-buffer "*claude-panel-fsenter3*"))
-          (input-buf (generate-new-buffer "*claude-panel-input-fsenter3*")))
-      (unwind-protect
-          (progn
-            ;; Buffers exist but are not shown in any window.
-            (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
-            (should-error (claude-repl--enter-fullscreen "test-ws")
-                          :type 'user-error))
-        (kill-buffer vterm-buf)
-        (kill-buffer input-buf)))))
-
-(ert-deftest claude-repl-test-panels-enter-fullscreen-unconditional ()
-  "enter-fullscreen sweeps even when every window already shows a Claude buffer.
-The generation path splits the new workspace's panels off another
-workspace's fullscreen panels, so the layout has only Claude buffers —
-which `claude-repl--fullscreen-p' reports as already-fullscreen.
-enter-fullscreen must ignore that and still sweep so the NEW workspace's
-own panels fill the frame (both shown)."
-  (claude-repl-test--with-clean-state
-    (let ((wconf (current-window-configuration))
-          (other-buf (generate-new-buffer "*claude-panel-other-ws*"))
-          (vterm-buf (generate-new-buffer "*claude-panel-fsenter4*"))
-          (input-buf (generate-new-buffer "*claude-panel-input-fsenter4*")))
-      (unwind-protect
-          (progn
-            (delete-other-windows)
-            ;; Every window shows a Claude panel buffer (the all-Claude layout).
-            (let* ((other-win (selected-window))
-                   (vterm-win (split-window other-win nil 'right))
-                   (input-win (split-window vterm-win nil 'below)))
-              (set-window-buffer other-win other-buf)
-              (set-window-buffer vterm-win vterm-buf)
-              (set-window-buffer input-win input-buf)
-              (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-              (claude-repl--ws-put "test-ws" :input-buffer input-buf)
-              (claude-repl--enter-fullscreen "test-ws")
-              ;; The other workspace's window was swept despite being a Claude buffer.
-              (should-not (window-live-p other-win))
-              ;; This workspace's own panels both survive.
-              (should (get-buffer-window vterm-buf))
-              (should (get-buffer-window input-buf))))
-        (set-window-configuration wconf)
-        (kill-buffer other-buf)
-        (kill-buffer vterm-buf)
-        (kill-buffer input-buf)))))
-
-;;;; ---- Tests: toggle-fullscreen go-fullscreen routes through enter-fullscreen ----
-
-(ert-deftest claude-repl-test-panels-toggle-go-fullscreen-via-enter ()
-  "toggle-fullscreen's go-fullscreen branch routes through enter-fullscreen."
-  (claude-repl-test--with-clean-state
-    (let ((entered nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'claude-repl--fullscreen-p) (lambda () nil))
-                ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
-                ((symbol-function 'claude-repl--enter-fullscreen)
-                 (lambda (ws) (setq entered ws))))
-        ;; No saved config and not fullscreen -> go-fullscreen branch.
-        (claude-repl--ws-put "test-ws" :fullscreen-config nil)
-        (claude-repl-toggle-fullscreen)
-        (should (equal entered "test-ws"))))))
-
-(ert-deftest claude-repl-test-panels-toggle-fullscreen-restore-via-helper ()
-  "toggle-fullscreen's saved branch restores through restore-fullscreen-config.
-With a saved config it restores the layout and clears `:fullscreen-config'."
-  (claude-repl-test--with-clean-state
-    (let ((restored nil))
-      (claude-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'set-window-configuration)
-                 (lambda (cfg) (setq restored cfg))))
-        (claude-repl-toggle-fullscreen)
-        (should (eq restored 'saved-config))
-        (should-not (claude-repl--ws-get "test-ws" :fullscreen-config))))))
-
 ;;;; ---- Tests: ws-buffer-visible-p with live but undisplayed buffer ----
 
 (ert-deftest claude-repl-test-panels-ws-buffer-visible-p-live-not-displayed ()
@@ -1961,13 +1440,14 @@ With a saved config it restores the layout and clears `:fullscreen-config'."
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
         (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
 
-(ert-deftest claude-repl-test-panels-show-panels-moves-up-from-bottom-window ()
-  "show-panels selects the window above before splitting, so panels
-are not created from a bottom popup like a regular vterm."
+(ert-deftest claude-repl-test-panels-show-panels-fills-frame-clearing-work-windows ()
+  "show-panels clears existing work windows so the panels fill the frame.
+Fullscreen is the sole display format: after show-panels the only
+non-side windows are the two Claude panels — no work window remains."
   (claude-repl-test--with-clean-state
     (let ((vterm-buf (get-buffer-create "*show-up-vterm*"))
           (input-buf (get-buffer-create "*show-up-input*"))
-          (bottom-win nil))
+          (work-buf (get-buffer-create "*show-up-work*")))
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
@@ -1975,24 +1455,26 @@ are not created from a bottom popup like a regular vterm."
             (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
             (claude-repl--ws-put "test-ws" :input-buffer input-buf)
             (delete-other-windows)
-            (let ((top-win (selected-window)))
-              ;; Create a bottom popup window and select it
-              (setq bottom-win (split-window top-win nil 'below))
-              (select-window bottom-win)
-              (should (eq (selected-window) bottom-win))
-              (claude-repl--show-panels)
-              ;; The vterm split should have come from top-win, not bottom-win.
-              ;; Verify top-win is no longer selected (it was split into work + vterm)
-              ;; and that both panel buffers are visible.
-              (should (get-buffer-window vterm-buf))
-              (should (get-buffer-window input-buf))))
+            ;; Create an extra work window alongside the starting one.
+            (let ((extra (split-window (selected-window) nil 'below)))
+              (set-window-buffer extra work-buf))
+            (claude-repl--show-panels)
+            ;; Both panels visible …
+            (should (get-buffer-window vterm-buf))
+            (should (get-buffer-window input-buf))
+            ;; … and the work window is gone (panels fill the frame).
+            (should-not (get-buffer-window work-buf))
+            (should (= 2 (length (cl-remove-if #'claude-repl-window--side-window-p
+                                               (window-list))))))
         ;; Clean up
         (delete-other-windows)
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
-        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+        (dolist (b (list vterm-buf input-buf work-buf))
+          (when (buffer-live-p b) (kill-buffer b)))))))
 
-(ert-deftest claude-repl-test-panels-show-panels-noop-when-no-window-above ()
-  "show-panels does not error when there is no window above (single window)."
+(ert-deftest claude-repl-test-panels-show-panels-saves-pre-panel-config ()
+  "show-panels saves the pre-panel window layout as :fullscreen-config.
+The close path restores it so the work windows the panels covered come
+back rather than the close stranding a panel onscreen."
   (claude-repl-test--with-clean-state
     (let ((vterm-buf (get-buffer-create "*show-noop-vterm*"))
           (input-buf (get-buffer-create "*show-noop-input*")))
@@ -2003,10 +1485,34 @@ are not created from a bottom popup like a regular vterm."
             (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
             (claude-repl--ws-put "test-ws" :input-buffer input-buf)
             (delete-other-windows)
-            ;; Single window, no window above -- should work normally
+            (should-not (claude-repl--ws-get "test-ws" :fullscreen-config))
             (claude-repl--show-panels)
+            (should (claude-repl--ws-get "test-ws" :fullscreen-config))
             (should (get-buffer-window vterm-buf))
             (should (get-buffer-window input-buf)))
+        ;; Clean up
+        (delete-other-windows)
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
+(ert-deftest claude-repl-test-panels-show-panels-does-not-overwrite-saved-config ()
+  "show-panels does NOT overwrite an already-saved :fullscreen-config.
+Re-show paths (workspace-switch reclaim, half-shown repair) call through
+show-panels too and must not clobber the saved work layout."
+  (claude-repl-test--with-clean-state
+    (let ((vterm-buf (get-buffer-create "*show-keep-vterm*"))
+          (input-buf (get-buffer-create "*show-keep-input*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
+                    ((symbol-function 'claude-repl--update-all-workspace-states-now) (lambda () nil)))
+            (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (claude-repl--ws-put "test-ws" :fullscreen-config 'preexisting)
+            (delete-other-windows)
+            (claude-repl--show-panels)
+            (should (eq 'preexisting
+                        (claude-repl--ws-get "test-ws" :fullscreen-config))))
         ;; Clean up
         (delete-other-windows)
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
@@ -3856,19 +3362,25 @@ of the redirect."
 
 ;;;; ---- Tests: fullscreen-and-focus ----
 
-(ert-deftest claude-repl-test-panels-fullscreen-and-focus-calls-toggle ()
-  "fullscreen-and-focus delegates to toggle-fullscreen when in a Claude buffer."
+(ert-deftest claude-repl-test-panels-fullscreen-and-focus-claude-branch-does-not-maximize ()
+  "fullscreen-and-focus in a Claude buffer only focuses input, never maximizes.
+The Claude panels already fill the frame (fullscreen is the sole
+display format), so the claude branch must NOT touch the non-Claude
+maximize state (`claude-repl--window-fullscreen-config') nor sweep
+windows."
   (claude-repl-test--with-clean-state
-    (let ((toggle-called nil)
+    (let ((sweep-called nil)
+          (claude-repl--window-fullscreen-config nil)
           (claude-buf (get-buffer-create "*claude-panel-abcd1234*")))
       (unwind-protect
           (progn
             (switch-to-buffer claude-buf)
-            (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen)
-                       (lambda () (setq toggle-called t)))
+            (cl-letf (((symbol-function 'claude-repl-window--delete-where)
+                       (lambda (&rest _) (setq sweep-called t) nil))
                       ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
               (claude-repl-fullscreen-and-focus)
-              (should toggle-called)))
+              (should-not sweep-called)
+              (should-not claude-repl--window-fullscreen-config)))
         (switch-to-buffer "*scratch*")
         (when (buffer-live-p claude-buf) (kill-buffer claude-buf))))))
 
@@ -3884,7 +3396,7 @@ of the redirect."
             (switch-to-buffer claude-buf)
             (setq new-win (split-window))
             (set-window-buffer new-win input-buf)
-            (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen) #'ignore)
+            (cl-letf (
                       ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
               (claude-repl-fullscreen-and-focus)
               (should (eq (window-buffer (selected-window)) input-buf))))
@@ -3907,7 +3419,7 @@ of the redirect."
             (switch-to-buffer claude-buf)
             (setq new-win (split-window))
             (set-window-buffer new-win input-buf)
-            (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen) #'ignore)
+            (cl-letf (
                       ((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                       ((symbol-function 'evil-insert-state)
                        (lambda (&rest _) (setq insert-called t))))
@@ -3928,7 +3440,7 @@ of the redirect."
           (progn
             (claude-repl--ws-put "test-ws" :input-buffer input-buf)
             (switch-to-buffer claude-buf)
-            (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen) #'ignore)
+            (cl-letf (
                       ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
               ;; Input buffer exists but is not displayed — should not error
               (claude-repl-fullscreen-and-focus)
@@ -3944,7 +3456,7 @@ of the redirect."
       (unwind-protect
           (progn
             (switch-to-buffer claude-buf)
-            (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen) #'ignore)
+            (cl-letf (
                       ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
               ;; No input buffer at all — should not error
               (claude-repl-fullscreen-and-focus)))
@@ -4146,11 +3658,11 @@ sacrificed because the drawer was the `keep' anchor."
 (ert-deftest claude-repl-test-panels-fullscreen-and-focus-from-drawer-routes-to-claude-branch ()
   "When the drawer is selected but the main window contains a Claude
 panel buffer, the side-window redirect lands on the Claude buffer and
-the function takes the Claude branch (delegates to toggle-fullscreen)."
+the function takes the Claude branch (focus input, no non-Claude maximize)."
   (claude-repl-test--with-clean-state
     (let ((vterm-buf (get-buffer-create "*claude-panel-fs-redir*"))
           (drawer-buf (get-buffer-create "*fs-redir-drawer*"))
-          (toggle-called nil))
+          (claude-repl--window-fullscreen-config nil))
       (unwind-protect
           (progn
             (switch-to-buffer vterm-buf)
@@ -4159,14 +3671,13 @@ the function takes the Claude branch (delegates to toggle-fullscreen)."
                                 drawer-buf
                                 '((side . left) (slot . 0)))))
               (select-window drawer-win)
-              (cl-letf (((symbol-function 'claude-repl-toggle-fullscreen)
-                         (lambda () (setq toggle-called t)))
-                        ((symbol-function '+workspace-current-name)
+              (cl-letf (((symbol-function '+workspace-current-name)
                          (lambda () "test-ws")))
                 (claude-repl-fullscreen-and-focus))
               ;; The redirect moved point onto the Claude panel main window,
-              ;; so the Claude branch fired.
-              (should toggle-called)
+              ;; so the Claude branch fired — the non-Claude maximize branch
+              ;; (which would save a window config) never ran.
+              (should-not claude-repl--window-fullscreen-config)
               (should (window-live-p vterm-win))))
         (dolist (buf (list drawer-buf vterm-buf))
           (when (buffer-live-p buf) (kill-buffer buf)))))))
@@ -4520,60 +4031,29 @@ was never recorded."
 (ert-deftest claude-repl-test-panels-reclaim-fullscreen-noop-no-buffers ()
   "reclaim-frame-fullscreen is a no-op when ws has no live panel buffers."
   (claude-repl-test--with-clean-state
-    (let ((show-called nil)
-          (fs-called nil))
+    (let ((show-called nil))
       (cl-letf (((symbol-function 'claude-repl--show-panels)
-                 (lambda () (setq show-called t)))
-                ((symbol-function 'claude-repl--enter-fullscreen)
-                 (lambda (_ws) (setq fs-called t))))
+                 (lambda () (setq show-called t))))
         (claude-repl--reclaim-frame-fullscreen "my-ws")
-        (should-not show-called)
-        (should-not fs-called)))))
+        (should-not show-called)))))
 
-(ert-deftest claude-repl-test-panels-reclaim-fullscreen-shows-then-enters ()
-  "reclaim-frame-fullscreen shows own panels then enters fullscreen when not visible."
-  (claude-repl-test--with-clean-state
-    (let ((visible nil)
-          (show-called nil)
-          (fs-called nil)
-          (vterm (get-buffer-create "*claude-panel-my-ws*"))
-          (input (get-buffer-create "*claude-panel-input-my-ws*")))
-      (unwind-protect
-          (progn
-            (claude-repl--ws-put "my-ws" :vterm-buffer vterm)
-            (claude-repl--ws-put "my-ws" :input-buffer input)
-            (cl-letf (((symbol-function 'claude-repl--panels-visible-p)
-                       (lambda () visible))
-                      ((symbol-function 'claude-repl--show-panels)
-                       (lambda () (setq show-called t visible t)))
-                      ((symbol-function 'claude-repl--enter-fullscreen)
-                       (lambda (_ws) (setq fs-called t))))
-              (claude-repl--reclaim-frame-fullscreen "my-ws")
-              (should show-called)
-              (should fs-called)))
-        (kill-buffer vterm)
-        (kill-buffer input)))))
-
-(ert-deftest claude-repl-test-panels-reclaim-fullscreen-skips-show-when-visible ()
-  "reclaim-frame-fullscreen does not re-show panels when already visible."
+(ert-deftest claude-repl-test-panels-reclaim-fullscreen-shows-panels ()
+  "reclaim-frame-fullscreen shows own panels via show-panels when buffers live.
+show-panels itself clears the main area and lays the panels out filling
+the frame (fullscreen is the sole display format), so reclaim no longer
+needs a separate enter-fullscreen step."
   (claude-repl-test--with-clean-state
     (let ((show-called nil)
-          (fs-called nil)
           (vterm (get-buffer-create "*claude-panel-my-ws*"))
           (input (get-buffer-create "*claude-panel-input-my-ws*")))
       (unwind-protect
           (progn
             (claude-repl--ws-put "my-ws" :vterm-buffer vterm)
             (claude-repl--ws-put "my-ws" :input-buffer input)
-            (cl-letf (((symbol-function 'claude-repl--panels-visible-p)
-                       (lambda () t))
-                      ((symbol-function 'claude-repl--show-panels)
-                       (lambda () (setq show-called t)))
-                      ((symbol-function 'claude-repl--enter-fullscreen)
-                       (lambda (_ws) (setq fs-called t))))
+            (cl-letf (((symbol-function 'claude-repl--show-panels)
+                       (lambda () (setq show-called t))))
               (claude-repl--reclaim-frame-fullscreen "my-ws")
-              (should-not show-called)
-              (should fs-called)))
+              (should show-called)))
         (kill-buffer vterm)
         (kill-buffer input)))))
 

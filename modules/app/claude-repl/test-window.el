@@ -378,52 +378,6 @@ nil) — defensive for callers passing stale buffer references."
             (should (equal deleted (list extra))))
         (kill-buffer buf)))))
 
-;;;; ---- Integration: delete-non-panel-windows regression ----
-
-(ert-deftest claude-repl-window-test-delete-non-panel-preserves-side-windows ()
-  "Regression: `claude-repl--delete-non-panel-windows' must preserve a
-side window (e.g. the workspace drawer) — pre-consolidation this
-function killed the drawer whenever the user opened magit via `SPC g g'.
-
-Mirrors the production layout: one of the two main windows shows the
-vterm panel buffer (so the call to `--delete-non-panel-windows' has
-something to keep besides the side window), the other main shows an
-unrelated buffer and must be deleted, and the side window must
-survive."
-  (claude-repl-window-test--with-temp-frame
-    (let* ((vterm-buf  (generate-new-buffer " *test-vterm*"))
-           (input-buf  (generate-new-buffer " *test-input*"))
-           (drawer-buf (generate-new-buffer " *test-drawer*"))
-           (other-buf  (generate-new-buffer " *test-other*"))
-           (vterm-win  (selected-window))
-           (other-win  (split-window vterm-win))
-           (drawer-win (display-buffer-in-side-window
-                        drawer-buf '((side . left) (slot . 0)))))
-      ;; Make `vterm-win' actually display vterm-buf — that's what the
-      ;; predicate looks for to keep it.
-      (set-window-buffer vterm-win  vterm-buf)
-      (set-window-buffer other-win  other-buf)
-      ;; Mirror the production hardening so `delete-other-windows'
-      ;; treats panels and the drawer the same way the real layout does.
-      (set-window-parameter vterm-win  'no-delete-other-windows t)
-      (set-window-parameter drawer-win 'no-delete-other-windows t)
-      (unwind-protect
-          (progn
-            (should (window-live-p drawer-win))
-            (should (window-live-p other-win))
-            (claude-repl--delete-non-panel-windows vterm-buf input-buf)
-            ;; Non-panel non-side window is gone.
-            (should-not (window-live-p other-win))
-            ;; Panel window survives (predicate didn't match it).
-            (should (window-live-p vterm-win))
-            ;; Side window (drawer) survives.
-            (should (window-live-p drawer-win)))
-        (when (window-live-p drawer-win) (delete-window drawer-win))
-        (kill-buffer vterm-buf)
-        (kill-buffer input-buf)
-        (kill-buffer drawer-buf)
-        (kill-buffer other-buf)))))
-
 ;;;; ---- Benign-undeletable-error predicate ----
 
 (ert-deftest claude-repl-window-test-benign-undeletable-main-window ()
