@@ -1092,38 +1092,55 @@ echo-area message below."
     (let* ((root (claude-repl--ws-dir ws))
            (default-directory root))
       (claude-repl--kill-stale-vterm ws)
-      (let* ((vterm-buf (claude-repl--create-buffer ws))
-             (start-info (claude-repl--build-start-cmd ws))
+      ;; Build the start command BEFORE creating the vterm buffer.
+      ;; `build-start-cmd' can make a non-local exit — most notably a
+      ;; `user-error' from `get-sandbox-image' when the sandbox image still
+      ;; needs building — so computing it first means such an abort happens
+      ;; before any buffer exists and leaves no orphan panel buffer behind.
+      (let* ((start-info (claude-repl--build-start-cmd ws))
              (cmd         (plist-get start-info :cmd))
-             (inst        (plist-get start-info :inst)))
-        (claude-repl--ws-put ws :vterm-buffer vterm-buf)
-        (setf (claude-repl-instantiation-start-cmd inst) cmd)
-        (when (plist-get start-info :fork-session-id)
-          (claude-repl--log ws "initialize-claude: clearing fork-session-id for ws=%s" ws)
-          (claude-repl--ws-put ws :fork-session-id nil))
-        (claude-repl--log-session-start ws start-info)
-        (with-current-buffer vterm-buf
-          (when (eq major-mode 'vterm-mode)
-            (error "claude-repl--initialize-claude: vterm buffer already initialized ws=%s" ws))
-          (vterm-mode)
-          (setq-local truncate-lines nil)
-          (setq-local word-wrap t)
-          (claude-repl--set-buffer-background claude-repl--vterm-background-grey)
-          (setq-local mode-line-format
-                      (claude-repl--workspace-mode-line ws))
-          (setq-local claude-repl--ready nil)
-          (claude-repl--log ws "initialize-claude: vterm=%s sending cmd len=%d"
-                            (buffer-name) (length cmd))
-          (vterm-send-string (concat claude-repl-startup-prefix cmd))
-          (vterm-send-return))
-        (claude-repl--schedule-ready-timer ws)
-        (claude-repl--initialize-input-buffer ws)
-        (claude-repl--ws-put ws :prefix-counter 0)
-        (claude-repl--enable-hide-overlay)
-        (claude-repl--ws-set-claude-state ws :init)
-        (message "Starting Claude... ws=%s ws-id=%s dir=%s cmd=%s"
-                 ws (claude-repl--workspace-id) root (or cmd "?"))
-        (claude-repl--state-save ws)))))
+             (inst        (plist-get start-info :inst))
+             (vterm-buf   (claude-repl--create-buffer ws))
+             (launched    nil))
+        ;; If anything between buffer creation and a successful launch makes a
+        ;; non-local exit, kill the orphan buffer so a failed start cannot
+        ;; leave a half-initialized zombie workspace behind.
+        (unwind-protect
+            (progn
+              (claude-repl--ws-put ws :vterm-buffer vterm-buf)
+              (setf (claude-repl-instantiation-start-cmd inst) cmd)
+              (when (plist-get start-info :fork-session-id)
+                (claude-repl--log ws "initialize-claude: clearing fork-session-id for ws=%s" ws)
+                (claude-repl--ws-put ws :fork-session-id nil))
+              (claude-repl--log-session-start ws start-info)
+              (with-current-buffer vterm-buf
+                (when (eq major-mode 'vterm-mode)
+                  (error "claude-repl--initialize-claude: vterm buffer already initialized ws=%s" ws))
+                (vterm-mode)
+                (setq-local truncate-lines nil)
+                (setq-local word-wrap t)
+                (claude-repl--set-buffer-background claude-repl--vterm-background-grey)
+                (setq-local mode-line-format
+                            (claude-repl--workspace-mode-line ws))
+                (setq-local claude-repl--ready nil)
+                (claude-repl--log ws "initialize-claude: vterm=%s sending cmd len=%d"
+                                  (buffer-name) (length cmd))
+                (vterm-send-string (concat claude-repl-startup-prefix cmd))
+                (vterm-send-return))
+              (claude-repl--schedule-ready-timer ws)
+              (claude-repl--initialize-input-buffer ws)
+              (claude-repl--ws-put ws :prefix-counter 0)
+              (claude-repl--enable-hide-overlay)
+              (claude-repl--ws-set-claude-state ws :init)
+              (message "Starting Claude... ws=%s ws-id=%s dir=%s cmd=%s"
+                       ws (claude-repl--workspace-id) root (or cmd "?"))
+              (claude-repl--state-save ws)
+              (setq launched t))
+          (unless launched
+            (claude-repl--log ws "initialize-claude: launch aborted, killing orphan buffer ws=%s" ws)
+            (when (buffer-live-p vterm-buf)
+              (claude-repl--ws-put ws :vterm-buffer nil)
+              (kill-buffer vterm-buf))))))))
 
 (defun claude-repl--clear-main-area-for-panels ()
   "Delete every non-side window other than the selected one.

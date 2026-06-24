@@ -2713,6 +2713,36 @@ from `create-buffer'.  Stubs can be overridden by wrapping BODY in another
               (should overlay-called)))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
+(ert-deftest claude-repl-test-panels-initialize-claude-build-error-creates-no-buffer ()
+  "A build-start-cmd abort (e.g. sandbox image not built) happens before any
+buffer is created, so no orphan panel buffer is left behind."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :active-env :bare-metal)
+    (let ((created nil))
+      (claude-repl-test--initialize-claude-stubs nil
+        (cl-letf (((symbol-function 'claude-repl--build-start-cmd)
+                   (lambda (_ws) (user-error "Sandbox image not built")))
+                  ((symbol-function 'claude-repl--create-buffer)
+                   (lambda (_ws &optional _s) (setq created t) nil)))
+          (should-error (claude-repl--initialize-claude) :type 'user-error)
+          (should-not created)
+          (should-not (claude-repl--ws-get "test-ws" :vterm-buffer)))))))
+
+(ert-deftest claude-repl-test-panels-initialize-claude-launch-error-kills-orphan-buffer ()
+  "A failure after the buffer is created kills the orphan buffer and clears
+:vterm-buffer, so a failed start cannot leave a zombie workspace behind."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "test-ws" :active-env :bare-metal)
+    (let ((vterm-buf (generate-new-buffer " *init-claude-orphan*")))
+      (unwind-protect
+          (claude-repl-test--initialize-claude-stubs vterm-buf
+            (cl-letf (((symbol-function 'vterm-mode)
+                       (lambda () (error "boom during launch"))))
+              (should-error (claude-repl--initialize-claude))
+              (should-not (buffer-live-p vterm-buf))
+              (should-not (claude-repl--ws-get "test-ws" :vterm-buffer))))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
 (ert-deftest claude-repl-test-panels-initialize-claude-sends-cmd-and-return ()
   "initialize-claude sends the startup cmd string and a return to the vterm buffer."
   (claude-repl-test--with-clean-state
