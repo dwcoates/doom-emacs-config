@@ -266,6 +266,32 @@ prompt-summary.el / worktree.el).  Callback still skipped, file still deleted."
            :name "test"))
         (should (equal deleted-file "/tmp/perm_123"))))))
 
+(ert-deftest claude-repl-test-process-sentinel-file-callback-error-surfaced-not-swallowed ()
+  "A throwing handler is surfaced on the log via `--do-log' and does NOT
+propagate (a hard error would kill the file-notify watcher)."
+  (claude-repl-test--with-clean-state
+    (let ((surfaced nil))
+      (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
+                 (lambda (_f) '(:dir "/some/dir" :session-id nil)))
+                ((symbol-function 'claude-repl--ws-for-dir)
+                 (lambda (_d) "ws1"))
+                ((symbol-function 'claude-repl--update-session-id-from-sentinel)
+                 #'ignore)
+                ((symbol-function 'delete-file) #'ignore)
+                ((symbol-function 'claude-repl--do-log)
+                 (lambda (_ws fmt &rest _) (setq surfaced fmt))))
+        ;; Must return normally (no error escapes the file-notify callback).
+        (should
+         (progn
+           (claude-repl--process-sentinel-file
+            "/tmp/session_start_1"
+            (list :callback (lambda (_ws _dir) (error "boom in handler"))
+                  :warning "warn %s"
+                  :name "handle-session-start"))
+           t))
+        ;; And the failure was surfaced on the log channel, not swallowed.
+        (should (string-match-p "ERRORED" surfaced))))))
+
 ;;;; ---- Tests: on-stop-event handler ----
 
 (ert-deftest claude-repl-test-on-stop-event-calls-finished-when-no-subagents ()
@@ -1028,23 +1054,28 @@ strips trailing slashes."
         (should callback-called)))))
 
 (ert-deftest claude-repl-test-process-sentinel-file-missing-callback-key ()
-  "When handler plist is missing :callback, funcall should error on nil."
+  "A handler plist missing :callback (funcall nil) surfaces the error on the
+log rather than propagating, since propagating would kill the watcher."
   (claude-repl-test--with-clean-state
-    (let ((deleted-file nil))
+    (let ((surfaced nil))
       (cl-letf (((symbol-function 'claude-repl--read-sentinel-file)
                  (lambda (_f) '(:dir "/some/dir" :session-id nil)))
                 ((symbol-function 'claude-repl--ws-for-dir)
                  (lambda (_d) "ws1"))
                 ((symbol-function 'claude-repl--update-session-id-from-sentinel)
                  #'ignore)
-                ((symbol-function 'delete-file)
-                 (lambda (f) (setq deleted-file f))))
-        ;; Missing :callback means (plist-get handler :callback) => nil
-        ;; funcall nil should signal an error
-        (should-error
-         (claude-repl--process-sentinel-file
-          "/tmp/stop_nocb"
-          '(:warning "warn %s" :name "test")))))))
+                ((symbol-function 'delete-file) #'ignore)
+                ((symbol-function 'claude-repl--do-log)
+                 (lambda (_ws fmt &rest _) (setq surfaced fmt))))
+        ;; Missing :callback => (funcall nil ...) errors, which the surfacing
+        ;; condition-case logs instead of letting escape.
+        (should
+         (progn
+           (claude-repl--process-sentinel-file
+            "/tmp/stop_nocb"
+            '(:warning "warn %s" :name "test"))
+           t))
+        (should (string-match-p "ERRORED" surfaced))))))
 
 (ert-deftest claude-repl-test-process-sentinel-file-missing-warning-key ()
   "When handler plist is missing :warning and ws is nil, message receives nil as fmt.
