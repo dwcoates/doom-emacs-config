@@ -568,6 +568,33 @@ is treated as a real permission request; see on-permission-event docstring."
                (lambda (_d) (claude-repl--path-canonical "/home/user/project"))))
       (should-not (claude-repl--ws-for-dir-fast "/home/user/project/subdir")))))
 
+(ert-deftest claude-repl-test-ws-for-dir-fast-prefers-live-over-stub ()
+  "When a stub and a real workspace share one :project-dir, the live one
+\(with :active-env, not tombstoned) is returned, regardless of which was
+registered first — the no-name `SPC TAB n' stub must not shadow the real ws."
+  (claude-repl-test--with-clean-state
+    (let ((root (claude-repl--path-canonical "/home/user/project")))
+      ;; Register the stub FIRST so the old first-match logic would pick it.
+      (claude-repl--ws-put "#1" :project-dir root)
+      (claude-repl--ws-put "real-ws" :project-dir root)
+      (claude-repl--ws-put "real-ws" :active-env :bare-metal)
+      (cl-letf (((symbol-function 'claude-repl--git-root)
+                 (lambda (_d) root)))
+        (should (equal (claude-repl--ws-for-dir-fast (concat root "/subdir"))
+                       "real-ws"))))))
+
+(ert-deftest claude-repl-test-ws-for-dir-fast-stub-only-falls-back ()
+  "When the only matching entry is a stub (no :active-env), it is still
+returned — the fallback preserves single-entry behavior so a genuine
+lookup is never dropped."
+  (claude-repl-test--with-clean-state
+    (let ((root (claude-repl--path-canonical "/home/user/project")))
+      (claude-repl--ws-put "#1" :project-dir root)
+      (cl-letf (((symbol-function 'claude-repl--git-root)
+                 (lambda (_d) root)))
+        (should (equal (claude-repl--ws-for-dir-fast (concat root "/subdir"))
+                       "#1"))))))
+
 (ert-deftest claude-repl-test-ws-for-dir-fast-empty-workspaces ()
   "ws-for-dir-fast returns nil when the workspaces hash is empty."
   (claude-repl-test--with-clean-state

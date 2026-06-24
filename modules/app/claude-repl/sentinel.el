@@ -60,9 +60,9 @@ wrong perspective."
     (claude-repl--log-verbose nil "ws-for-dir-fast: git-root=%S canonical=%S"
                               target-root canonical-target)
     (when canonical-target
-      (maphash
-       (lambda (ws _plist)
-         (unless match
+      (let ((candidates nil))
+        (maphash
+         (lambda (ws _plist)
            (let* ((proj (claude-repl--ws-get ws :project-dir))
                   (canonical-proj (when proj
                                     (claude-repl--path-canonical proj))))
@@ -73,8 +73,24 @@ wrong perspective."
                                            "YES" "no"))
              (when (and canonical-proj
                         (string= canonical-target canonical-proj))
-               (setq match ws)))))
-       claude-repl--workspaces))
+               (push ws candidates))))
+         claude-repl--workspaces)
+        ;; Multiple entries can share one :project-dir — e.g. a no-name
+        ;; `SPC TAB n' stub shadowing the real workspace.  Prefer a
+        ;; fully-initialized, non-tombstoned workspace (one that ran
+        ;; `initialize-ws-env', so it carries :active-env) over a stub;
+        ;; matching the stub makes `active-inst' throw on its missing
+        ;; :active-env.  Fall back to any match so a genuine single-entry
+        ;; lookup is unchanged.
+        (setq match (or (cl-find-if
+                         (lambda (ws)
+                           (and (claude-repl--ws-get ws :active-env)
+                                (not (claude-repl--ws-get ws :nuked-at))))
+                         candidates)
+                        (car candidates)))
+        (when (> (length candidates) 1)
+          (claude-repl--log nil "ws-for-dir-fast: %d entries share dir=%S — chose ws=%s over candidates=%S"
+                            (length candidates) canonical-target match candidates))))
     (if match
         (claude-repl--log-verbose match "ws-for-dir-fast: HIT dir=%S root=%S ws=%s"
                                   dir canonical-target match)
