@@ -6,6 +6,8 @@
 (require 'filenotify)
 (require 'profiler)
 
+(declare-function claude-repl--ws-set-claude-state "status")
+
 (define-error 'claude-repl-merge-conflict-error
   "Cherry-pick conflict left in tree (resolver declined or interactive abort)"
   'user-error)
@@ -449,6 +451,19 @@ root is recorded by `claude-repl--initialize-ws-env', not here."
     (claude-repl--log ws "register-worktree-ws ws-id=%s ws=%s" ws-id ws)
     (claude-repl--ws-put ws :worktree-p t)))
 
+(defun claude-repl--mark-start-failed (ws err)
+  "Surface a failed Claude start for WS loudly instead of letting ERR escape.
+Logs ERR, sets WS's `:claude-state' to `:start-failed' so the tab and
+drawer render the 🚫 badge (the failure stays visible after the echo-area
+message scrolls away), and echoes an actionable message.  Used by paths
+that run inside a process sentinel — e.g. `claude-repl--setup-worktree-session'
+via `claude-repl--async-git-sentinel' — where an uncaught signal would
+otherwise crash the sentinel as an opaque \"error in process sentinel\"."
+  (let ((msg (error-message-string err)))
+    (claude-repl--log ws "mark-start-failed ws=%s err=%s" ws msg)
+    (when ws (claude-repl--ws-set-claude-state ws :start-failed))
+    (message "Claude failed to start for %s — %s" ws msg)))
+
 (defun claude-repl--setup-worktree-session (ws-id path ws force-sandbox &optional no-claude)
   "Register WS as a worktree at PATH and start its Claude session.
 Passes PATH and the desired environment as hints to `initialize-claude',
@@ -467,9 +482,16 @@ created exactly as usual, minus the auto-started Claude session."
         (progn
           (claude-repl--initialize-ws-env ws path (if force-sandbox :sandbox :bare-metal))
           (claude-repl--log ws "worktree NOT starting Claude (no-claude) ws=%s" ws))
-      (claude-repl--initialize-claude ws path (if force-sandbox :sandbox :bare-metal))
-      (claude-repl--log ws "worktree pre-started Claude ws=%s cmd=%s"
-                        ws (claude-repl-instantiation-start-cmd (claude-repl--active-inst ws))))))
+      (condition-case err
+          (progn
+            (claude-repl--initialize-claude ws path (if force-sandbox :sandbox :bare-metal))
+            (claude-repl--log ws "worktree pre-started Claude ws=%s cmd=%s"
+                              ws (claude-repl-instantiation-start-cmd (claude-repl--active-inst ws))))
+        ;; Runs from `claude-repl--async-git-sentinel'; a non-local exit here
+        ;; would crash the sentinel as an opaque "error in process sentinel".
+        ;; Surface it loudly and modeline-visibly instead of letting it escape.
+        (error
+         (claude-repl--mark-start-failed ws err))))))
 
 (defun claude-repl--async-git-sentinel (proc _event)
   "Process sentinel for `claude-repl--async-git'.
