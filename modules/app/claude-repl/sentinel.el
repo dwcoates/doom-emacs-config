@@ -4,6 +4,8 @@
 
 (require 'filenotify)
 
+(declare-function claude-repl--do-log "core")
+
 ;; ---------------------------------------------------------------------------
 ;; Constants
 ;; ---------------------------------------------------------------------------
@@ -219,17 +221,33 @@ name and the directory."
       ;; reserve the user-visible warning for genuine misattribution (cwd is
       ;; inside a git repo, but the watcher couldn't match it).
       (if (claude-repl--git-root dir)
-          (message (plist-get handler :warning) dir)
+          ;; A sentinel from a real git repo that matched no workspace is a
+          ;; genuine misattribution — surface it on the log channel via
+          ;; `--do-log' (file + message), not `message' alone where it is
+          ;; lost to *Messages*.
+          (claude-repl--do-log nil (plist-get handler :warning) (list dir))
         (claude-repl--log-verbose nil
                                   "process-sentinel-file: skipping non-git cwd dir=%s file=%s"
                                   dir (file-name-nondirectory file))))
      (t
-      (claude-repl--update-session-id-from-sentinel ws session-id)
-      (claude-repl--log ws "%s: file=%s dir=%s ws=%s status=%s"
-                        (plist-get handler :name)
-                        (file-name-nondirectory file) dir ws
-                        (claude-repl--ws-get ws :claude-state))
-      (funcall (plist-get handler :callback) ws dir)))))
+      ;; Run the handler under `condition-case' so a thrown error surfaces on
+      ;; the claude-repl log (via `--do-log') instead of being swallowed into
+      ;; *Messages* by the file-notify / poll layer.  We deliberately do NOT
+      ;; rethrow: this runs from a file-notify callback, where a hard error
+      ;; would kill the sentinel watcher.  Surfacing loudly is the established
+      ;; channel for this async context.
+      (condition-case err
+          (progn
+            (claude-repl--update-session-id-from-sentinel ws session-id)
+            (claude-repl--log ws "%s: file=%s dir=%s ws=%s status=%s"
+                              (plist-get handler :name)
+                              (file-name-nondirectory file) dir ws
+                              (claude-repl--ws-get ws :claude-state))
+            (funcall (plist-get handler :callback) ws dir))
+        (error
+         (claude-repl--do-log ws "process-sentinel-file: handler=%s ERRORED file=%s dir=%s ws=%s err=%S"
+                              (list (plist-get handler :name)
+                                    (file-name-nondirectory file) dir ws err))))))))
 
 (defun claude-repl--on-permission-event (ws _dir)
   "Set :permission status on workspace WS.
