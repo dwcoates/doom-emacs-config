@@ -601,6 +601,12 @@ process has died.")
 StopFailure hook fired (turn ended on an API error, but the vterm
 session is still alive and re-promptable).")
 
+(defconst claude-repl--label-start-failed     "🚫"
+  "Bracket label shown adjacent to the numeric index when starting
+Claude failed (e.g. the sandbox Docker image is not built).  Distinct
+from `:stop-failed' (⚠, a live re-promptable session) and `:dead' (❌, a
+vterm that died) — the session never came up at all.")
+
 (defconst claude-repl--label-merge-conflict   "💥"
   "Bracket label shown adjacent to the numeric index when a workspace's
 merge was rejected by a cherry-pick conflict (real conflict markers
@@ -714,6 +720,18 @@ Distributed evenly across `claude-repl-flash-count' on/off cycles."
     (:stop-failed
      :face       claude-repl-tab-stop-failed
      :label      ,claude-repl--label-stop-failed
+     :unselected (:bg ,claude-repl--color-stop-failed-magenta
+                  :fg ,claude-repl--color-light
+                  :bracket-fg ,claude-repl--color-default-bracket
+                  :weight ,claude-repl--tab-weight)
+     :selected   (:bg ,claude-repl--color-selected-bg
+                  :fg ,claude-repl--color-dark
+                  :bracket-bg ,claude-repl--color-stop-failed-magenta
+                  :bracket-fg ,claude-repl--color-light
+                  :weight ,claude-repl--tab-weight))
+    (:start-failed
+     :face       claude-repl-tab-stop-failed
+     :label      ,claude-repl--label-start-failed
      :unselected (:bg ,claude-repl--color-stop-failed-magenta
                   :fg ,claude-repl--color-light
                   :bracket-fg ,claude-repl--color-default-bracket

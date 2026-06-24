@@ -60,6 +60,7 @@ affect the drawer's window width, which is constant (see
     (:idle           . "💤")
     (:permission     . "❓")
     (:stop-failed    . "❗")
+    (:start-failed   . "🚫")
     (:dead           . "❌")
     (:merged         . "🔀")
     (:merge-failed   . "⛔")
@@ -783,7 +784,7 @@ reason."
                  ((memq status '(:done :permission))
                   claude-repl--color-done-green)
                  ((eq status :idle)         claude-repl--color-idle-orange)
-                 ((eq status :stop-failed)
+                 ((memq status '(:stop-failed :start-failed))
                   claude-repl--color-stop-failed-magenta))))
     (if color
         `(:foreground ,color :weight bold)

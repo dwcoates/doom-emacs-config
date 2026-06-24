@@ -4805,6 +4805,39 @@ receives nil so the workspace uses bare-metal by default."
       (should init-claude-called)
       (should-not init-env-called))))
 
+(ert-deftest claude-repl-test-setup-worktree-session-init-error-does-not-escape ()
+  "An `initialize-claude' failure (e.g. sandbox image not built) is caught,
+so it cannot escape and crash the `--async-git-sentinel' that calls this."
+  (cl-letf (((symbol-function 'claude-repl--register-worktree-ws) (lambda (&rest _) nil))
+            ((symbol-function 'claude-repl--initialize-claude)
+             (lambda (&rest _) (user-error "Sandbox image not built")))
+            ((symbol-function 'claude-repl--ws-set-claude-state) (lambda (&rest _) nil))
+            ((symbol-function 'message) (lambda (&rest _) nil)))
+    ;; Returns normally rather than signaling.
+    (should (progn (claude-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil) t))))
+
+(ert-deftest claude-repl-test-setup-worktree-session-init-error-marks-start-failed ()
+  "A caught `initialize-claude' failure sets :claude-state :start-failed so
+the tab/drawer surface the failure instead of it vanishing silently."
+  (let ((recorded nil))
+    (cl-letf (((symbol-function 'claude-repl--register-worktree-ws) (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--initialize-claude)
+               (lambda (&rest _) (user-error "Sandbox image not built")))
+              ((symbol-function 'claude-repl--ws-set-claude-state)
+               (lambda (ws state) (setq recorded (cons ws state))))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (claude-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil)
+      (should (equal recorded '("ws" . :start-failed))))))
+
+(ert-deftest claude-repl-test-mark-start-failed-sets-start-failed-state ()
+  "mark-start-failed records :start-failed for the workspace."
+  (let ((recorded nil))
+    (cl-letf (((symbol-function 'claude-repl--ws-set-claude-state)
+               (lambda (ws state) (setq recorded (cons ws state))))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (claude-repl--mark-start-failed "ws" '(user-error "boom"))
+      (should (equal recorded '("ws" . :start-failed))))))
+
 (ert-deftest claude-repl-test-setup-worktree-session-no-claude-skips-boot ()
   "With NO-CLAUDE, setup hydrates env via `initialize-ws-env' and never boots Claude."
   (let ((init-claude-called nil)
