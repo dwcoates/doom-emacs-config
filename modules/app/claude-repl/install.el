@@ -88,7 +88,6 @@ of where the Doom config tree is mounted.")
 
 (defconst claude-repl--managed-skills
   '("workspace"
-    "emit-workspace-commands.sh"
     "build-skill")
   "Bare names for managed host-level skill symlinks.
 Subset of cached skills (see `CACHED_SKILLS' in
@@ -115,7 +114,8 @@ Must match the `SKILLS_SRC' default in `.claude/install.sh' (or the
 (defconst claude-repl--managed-local-skills
   '("debug-logs"
     "runtime-eval-code"
-    "workspace-close")
+    "workspace-close"
+    "emit-workspace-commands.sh")
   "Bare names for repo-local managed skills.
 Sourced from `claude-repl-local-skills-src-dir' (this repo's
 `modules/app/claude-repl/skills/').  Must match the `LOCAL_SKILLS'
