@@ -3,6 +3,22 @@
 ;;; Code:
 
 (declare-function claude-repl--ws-dir-owner "claude-repl-workspace" (dir &optional except))
+(declare-function claude-repl--mark-start-failed "claude-repl-worktree" (ws err))
+
+(defconst claude-repl--start-failure-marker "CLAUDE_REPL_START_FAILURE:"
+  "Marker a start command (e.g. `claude-sandbox') prints to its vterm when it
+cannot launch — Docker daemon down, image missing, etc.  The start command
+runs inside a vterm whose exit code claude-repl cannot observe, so
+`claude-repl--detect-start-failure' scrapes this line and the ready-timer
+routes the failure to `claude-repl--mark-start-failed'.  The text after the
+marker on its line is surfaced to the user as the failure reason.")
+
+(defconst claude-repl--start-failure-patterns
+  '(("Cannot connect to the Docker daemon" . "Docker daemon is not running — start Docker Desktop, then retry"))
+  "Alist of (SUBSTRING . REASON) for known fatal start-command output that
+lacks an explicit `claude-repl--start-failure-marker' line — e.g. Docker's
+native daemon-down error.  Lets claude-repl surface the failure even when the
+start command itself has not been taught to print the marker.")
 
 ;;;; Session readiness
 
@@ -977,13 +993,49 @@ workspace can be determined."
           (claude-repl--ws-put ws :ready-timer nil))
       (claude-repl--log ws "cancel-ready-timer: no timer to cancel for ws=%s" ws))))
 
+(defun claude-repl--detect-start-failure (ws)
+  "Return a failure reason string if WS's vterm shows a start failure, else nil.
+Prefers an explicit `claude-repl--start-failure-marker' line (returning the
+trimmed text after it); otherwise matches a known fatal substring from
+`claude-repl--start-failure-patterns'.  Returns nil when the vterm buffer is
+absent/dead or shows no failure.  This is how a start command running in a
+vterm (whose exit code claude-repl cannot observe) reports an unrecoverable
+launch failure — e.g. `claude-sandbox' when Docker is down."
+  (let ((buf (claude-repl--ws-get ws :vterm-buffer)))
+    (when (and buf (buffer-live-p buf))
+      (with-current-buffer buf
+        (save-excursion
+          (goto-char (point-max))
+          (if (search-backward claude-repl--start-failure-marker nil t)
+              (let ((reason (string-trim
+                             (buffer-substring-no-properties
+                              (+ (point) (length claude-repl--start-failure-marker))
+                              (line-end-position)))))
+                (if (string-empty-p reason)
+                    "start command reported a failure"
+                  reason))
+            (let (found)
+              (dolist (pair claude-repl--start-failure-patterns found)
+                (when (and (not found)
+                           (progn (goto-char (point-max))
+                                  (search-backward (car pair) nil t)))
+                  (setq found (cdr pair)))))))))))
+
 (defun claude-repl--ready-timer-tick (ws start-time)
   "Handle one tick of the readiness-poll timer for workspace WS.
 START-TIME is the `float-time' when polling began.  Cancels the timer and
-gives up after 30 seconds, or cancels and opens panels once Claude is ready."
-  (let ((elapsed (- (float-time) start-time)))
+gives up after 30 seconds, surfaces a start-failure marker as `:start-failed'
+the moment it appears, or cancels and opens panels once Claude is ready."
+  (let ((elapsed (- (float-time) start-time))
+        (failure (claude-repl--detect-start-failure ws)))
     (claude-repl--log-verbose ws "ready-timer-tick: ws=%s elapsed=%.1fs" ws elapsed)
     (cond
+     ;; A start command (e.g. `claude-sandbox') printed an explicit failure
+     ;; marker into the vterm — surface it loudly as `:start-failed' instead
+     ;; of silently waiting out the timeout.
+     (failure
+      (claude-repl--cancel-ready-timer ws)
+      (claude-repl--mark-start-failed ws (list 'error failure)))
      ((> elapsed claude-repl-ready-timeout-seconds)
       (claude-repl--cancel-ready-timer ws)
       (claude-repl--log ws "ready-timer: timed out for ws=%s" ws))
