@@ -1415,6 +1415,30 @@ The project-dir hint is used to locate the (absent) state file."
             (should (claude-repl-instantiation-p (claude-repl--ws-get "ws1" :bare-metal))))
         (delete-directory tmpdir t)))))
 
+(ert-deftest claude-repl-test-initialize-ws-env-refuses-dir-owned-by-other-live-ws ()
+  "initialize-ws-env refuses to register a workspace for a :project-dir that a
+DIFFERENT live workspace already owns (the duplicate-:project-dir invariant)."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-dup-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "owner" :project-dir (claude-repl--path-canonical tmpdir))
+            (should-error (claude-repl--initialize-ws-env "shadow" tmpdir) :type 'error))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest claude-repl-test-initialize-ws-env-allows-reinit-of-owning-ws ()
+  "initialize-ws-env does NOT refuse when the ws being initialized is itself
+the current owner of the dir — re-init / resurrection of the same ws is fine."
+  (claude-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-reinit-" t)))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :project-dir (claude-repl--path-canonical tmpdir))
+            (claude-repl--initialize-ws-env "ws1" tmpdir)
+            (should (equal (claude-repl--ws-get "ws1" :project-dir)
+                           (claude-repl--path-canonical tmpdir))))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest claude-repl-test-initialize-ws-env-errors-when-no-root-derivable ()
   "initialize-ws-env errors when :project-dir cannot be derived from any source."
   (claude-repl-test--with-clean-state

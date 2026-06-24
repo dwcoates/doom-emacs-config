@@ -2,6 +2,8 @@
 
 ;;; Code:
 
+(declare-function claude-repl--ws-dir-owner "claude-repl-workspace" (dir &optional except))
+
 ;;;; Session readiness
 
 (defvar-local claude-repl--ready nil
@@ -352,11 +354,18 @@ state-save.  Callers already guard on `claude-repl--claude-running-p'."
     ;; identity keys below.  A workspace being re-initialized is, by
     ;; definition, live again; leaving the tombstone in place would let
     ;; `claude-repl--ws-live-p' return nil right after a successful init.
-    (claude-repl--ws-put ws :nuked-at nil)
-    (claude-repl--ws-put ws :project-dir
-                         (if saved
-                             (claude-repl--path-canonical (plist-get saved :project-dir))
-                           root))
+    ;; Enforce one-live-workspace-per-:project-dir: refuse to register WS for
+    ;; a dir a DIFFERENT live workspace already owns.  That shadowing is what
+    ;; lets a stub (e.g. a Doom-auto-named "#N" perspective) collide with the
+    ;; real workspace in `claude-repl--ws-for-dir' and break opening it.
+    (let ((target (if saved
+                      (claude-repl--path-canonical (plist-get saved :project-dir))
+                    root)))
+      (when-let ((owner (claude-repl--ws-dir-owner target ws)))
+        (error "claude-repl--initialize-ws-env: refusing to register ws=%s for %s — live workspace %s already owns it"
+               ws target owner))
+      (claude-repl--ws-put ws :nuked-at nil)
+      (claude-repl--ws-put ws :project-dir target))
     (claude-repl--ws-put ws :active-env
                          (or (and saved (plist-get saved :active-env))
                              active-env-hint

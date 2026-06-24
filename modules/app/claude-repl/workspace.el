@@ -60,6 +60,7 @@
 (declare-function +workspace/kill "ext:persp-mode" (name))
 (declare-function persp-update-names-cache "ext:persp-mode" (cache))
 (declare-function magit-status "ext:magit" (&optional directory cache))
+(declare-function claude-repl--path-canonical "claude-repl-core" (path))
 (declare-function doom-real-buffer-list "ext:doom" (&optional buffer-list))
 (defvar persp-nil-name)
 (defvar persp-names-cache)
@@ -199,6 +200,21 @@ workspaces' — that idiom now over-includes tombstones, so route
 through this filter instead."
   (cl-remove-if-not #'claude-repl--ws-live-p
                     (hash-table-keys claude-repl--workspaces)))
+
+(defun claude-repl--ws-dir-owner (dir &optional except)
+  "Return a live workspace (other than EXCEPT) owning canonical DIR, or nil.
+Enforces the one-live-workspace-per-`:project-dir' invariant: a second
+workspace must not claim a dir a live workspace already owns, since that
+shadowing is what lets a stub (e.g. a Doom-auto-named \"#N\" perspective)
+collide with the real workspace in `claude-repl--ws-for-dir'."
+  (when dir
+    (let ((canonical (claude-repl--path-canonical dir)))
+      (cl-find-if
+       (lambda (ws)
+         (and (not (equal ws except))
+              (let ((p (claude-repl--ws-get ws :project-dir)))
+                (and p (string= canonical (claude-repl--path-canonical p))))))
+       (claude-repl--live-ws-names)))))
 
 (defun claude-repl--ws-del (ws)
   "Tombstone workspace WS instead of removing its hash entry.

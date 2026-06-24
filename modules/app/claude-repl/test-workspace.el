@@ -283,6 +283,32 @@ to avoid surfacing nuked workspaces."
   (claude-repl-test--with-clean-state
     (should-not (claude-repl--live-ws-names))))
 
+;;;; ---- Tests: --ws-dir-owner ----
+
+(ert-deftest claude-repl-test-ws-dir-owner-finds-live-owner ()
+  "ws-dir-owner returns a live workspace owning the canonical dir."
+  (claude-repl-test--with-clean-state
+    (let ((dir (claude-repl--path-canonical "/home/user/proj")))
+      (claude-repl--ws-put "owner" :project-dir dir)
+      (should (equal (claude-repl--ws-dir-owner dir) "owner")))))
+
+(ert-deftest claude-repl-test-ws-dir-owner-excludes-self ()
+  "ws-dir-owner excludes the EXCEPT workspace, so re-init of the owner finds
+no OTHER owner."
+  (claude-repl-test--with-clean-state
+    (let ((dir (claude-repl--path-canonical "/home/user/proj")))
+      (claude-repl--ws-put "owner" :project-dir dir)
+      (should-not (claude-repl--ws-dir-owner dir "owner")))))
+
+(ert-deftest claude-repl-test-ws-dir-owner-ignores-tombstoned ()
+  "ws-dir-owner ignores a tombstoned (`:nuked-at') entry owning the dir, so a
+dead shadow never counts as the owner."
+  (claude-repl-test--with-clean-state
+    (let ((dir (claude-repl--path-canonical "/home/user/proj")))
+      (claude-repl--ws-put "dead" :project-dir dir)
+      (claude-repl--ws-put "dead" :nuked-at '(1 2 3 4))
+      (should-not (claude-repl--ws-dir-owner dir)))))
+
 ;;;; ---- Tests: --ws-known-p ----
 
 (ert-deftest claude-repl-test-ws-known-p-returns-t-for-live-entry ()
