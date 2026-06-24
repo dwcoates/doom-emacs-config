@@ -7,11 +7,11 @@ description: Run a time-boxed Emacs profiling session. Starts the profiler, sche
 
 This skill orchestrates a complete profiling session against the running Emacs:
 
-1. Dispatch `workspace-profile` enable.
+1. Dispatch the profiler **start** elisp via `/runtime-eval-code` (see that skill's Profiling section for the exact snippet).
 2. `ScheduleWakeup` for the chosen wait duration.
-3. On wake, dispatch `workspace-profile` disable.
-4. Receive the `profiler-report` text via Emacs's existing return-address pipeline (no file polling, no Emacs changes).
-5. Analyze the report and present findings.
+3. On wake, dispatch the profiler **stop** elisp via `/runtime-eval-code`, which writes the report to a file and returns its path.
+4. `Read` the returned report file and analyze it.
+5. Present findings.
 
 Every step appends a JSON-lines record to a per-workspace session log so wait-duration policy can be tuned post-hoc.
 
@@ -21,29 +21,29 @@ Use `/profile` when:
 - The user describes a slow editor operation and expects a hands-off capture-and-analyze flow.
 - A debug workflow needs profiling around a fixed time window without the user manually toggling stop.
 
-Use plain `/workspace-profile` instead when:
+Use plain `/runtime-eval-code` instead when:
 
-- The user wants to start/stop manually with no automation.
-- The agent has no way to schedule a wakeup (rare; if `ScheduleWakeup` is unavailable, fall back to `/workspace-profile` and tell the user).
+- The user wants to start/stop the profiler manually with no automation (dispatch the start/stop snippets yourself).
+- The agent has no way to schedule a wakeup (rare; if `ScheduleWakeup` is unavailable, start via `/runtime-eval-code` and tell the user to ask for the stop when ready).
 
 `/debug-logs` covers a different problem (reading existing logs / recommending instrumentation). If the suspect is performance and you want fresh sampling data, use `/profile`. If the suspect is logic or state and you want history, use `/debug-logs`.
 
 ## Pairing with /runtime-eval-code to profile a specific snippet
 
-When the user wants to measure exactly one operation (not just "whatever the editor happens to do during N seconds"), `/runtime-eval-code` is the missing piece — it hands an elisp snippet to the running editor and pipes the result back as a follow-up message. The pairing rationale, snippet shapes, and response format live in `/runtime-eval-code`; do not duplicate them here. The short version:
+When the user wants to measure exactly one operation (not just "whatever the editor happens to do during N seconds"), insert the snippet under measurement between the profiler start and stop. The snippet shapes and response format live in `/runtime-eval-code`; do not duplicate them here. The short version:
 
-1. Dispatch `/workspace-profile` enable (or call `/profile` with `manual` mode if you want it to also own session logging).
+1. Dispatch the profiler **start** elisp via `/runtime-eval-code` (or call `/profile` with `manual` mode if you want it to also own session logging).
 2. Dispatch `/runtime-eval-code` with the snippet under measurement (label it via the `note` field so the session log post-mortem can identify it, e.g. `"note": "scroll-1000-lines"`).
-3. Dispatch `/workspace-profile` disable (or let `/profile`'s auto-stop fire) so the `profiler-report` round-trips back here.
+3. Dispatch the profiler **stop** elisp via `/runtime-eval-code` (or let `/profile`'s auto-stop fire) so the report file path comes back.
 
-`/runtime-eval-code` uses the same return-address pipeline this skill already relies on for the `profiler-report`. There is no new state to track — the eval response simply arrives as another follow-up user message, in addition to the profiler-report message.
+All three dispatches go through the one `/runtime-eval-code` path, so there is no separate profiler mechanism to track — the stop dispatch returns the report file path, which you then `Read`.
 
 ## Wait-duration policy
 
 Pick the wait duration `N` (seconds) using the first rule that matches:
 
 1. **Explicit user duration** wins. Forms accepted: `/profile 45s`, `/profile 3m`, `/profile manual`.
-   - `manual` mode = start only, no auto-stop; user calls `/workspace-profile` disable themselves. Skip all the wakeup/stop steps below.
+   - `manual` mode = start only, no auto-stop; the user asks for the stop later, which you dispatch via `/runtime-eval-code`. Skip all the wakeup/stop steps below.
 
 2. **Cue inference** from the user's prompt:
 
@@ -134,21 +134,23 @@ Cap `prompt_excerpt` to the first 200 characters of the user's request. Strip ne
 
 ### 3. Dispatch enable
 
-Invoke the existing `workspace-profile` skill via its `run.sh`. Do not duplicate its JSON contract here — it owns that:
+Dispatch the profiler **start** elisp through `/runtime-eval-code`'s `run.sh`:
 
 ```bash
-bash ~/.claude/skills/workspace-profile/run.sh << EOF
+bash ~/.claude/skills/runtime-eval-code/run.sh dispatch << EOF
 [
-  {"type": "profile", "enabled": true, "mode": "$mode"}
+  {"type": "eval",
+   "code": "(if (profiler-running-p) \"already running\" (progn (profiler-start '$mode) \"started $mode\"))",
+   "note": "profile start"}
 ]
 EOF
 ```
 
-(If `~/.claude/skills/workspace-profile/run.sh` is missing or fails on `uuidgen`, stop and ask the user to run `.claude/install.sh` — same failure mode as `/workspace-profile`.)
+(If `run.sh` is missing or fails on `uuidgen`, stop and ask the user to run `.claude/install.sh`.)
 
 ### 4. Branch on mode
 
-- **`manual` mode:** tell the user the profiler is running and that they should invoke `/workspace-profile` disable when ready. Do NOT schedule a wakeup. Do NOT proceed to step 5. The session log will be closed when the user manually stops, at which point you should append a `stop` event with `stopper: user-manual` and `actual_wait_s` measured from the `start` record.
+- **`manual` mode:** tell the user the profiler is running and that they should ask for the stop when ready (you then dispatch the stop elisp from step 6 via `/runtime-eval-code`). Do NOT schedule a wakeup. Do NOT proceed to step 5. The session log will be closed when the user manually stops, at which point you should append a `stop` event with `stopper: user-manual` and `actual_wait_s` measured from the `start` record.
 
 - **Timed mode (everything else):** continue to step 5.
 
@@ -164,12 +166,15 @@ Reason: "auto-stopping profiler at T+<N>s for session <session_id>".
 
 ### 6. On wake-up: dispatch disable
 
-When the resume prompt fires (recognized by `__resume__` token), do:
+When the resume prompt fires (recognized by `__resume__` token), dispatch the profiler **stop** elisp through `/runtime-eval-code`, passing `workspace` so the returned report-file path routes back to this session:
 
 ```bash
-bash ~/.claude/skills/workspace-profile/run.sh << EOF
+bash ~/.claude/skills/runtime-eval-code/run.sh dispatch << EOF
 [
-  {"type": "profile", "enabled": false, "workspace": "$ws"}
+  {"type": "eval",
+   "code": "(claude-repl--profile-stop-and-write-file)",
+   "workspace": "$ws",
+   "note": "profile stop"}
 ]
 EOF
 ```
@@ -190,13 +195,13 @@ jq -cn \
   >> "$LOG"
 ```
 
-Tell the user: "Profiler stopped after Ns. Report will arrive as a follow-up message and I'll analyze it then."
+Tell the user: "Profiler stopped after Ns. The report path will arrive as a follow-up message and I'll read and analyze it then."
 
-### 7. When the report arrives
+### 7. When the report-path arrives
 
-The Emacs return-address pipeline delivers `profiler-report` text as a user message. When that arrives:
+The stop dispatch's eval result arrives as a follow-up user message carrying the report file path returned by `claude-repl--profile-stop-and-write-file` (or nil if the profiler was not running). When that arrives:
 
-- Read it.
+- `Read` the report file at the returned path (the full untruncated calltree lives there, not in the inline eval result).
 - Identify the top 3–5 hot frames (CPU) and/or the largest allocators (mem), grouped by module/file where possible.
 - Call out anything in `modules/app/claude-repl/` specifically — that's the primary target audience.
 - Append an `outcome` record (use `null` for `user_feedback` until the user gives one):
@@ -224,8 +229,8 @@ If the user comes back before the wakeup fires and asks for more time:
 
 ## What NOT to do
 
-- Do NOT toggle the profiler yourself. Always go through `~/.claude/skills/workspace-profile/run.sh`. The Emacs side is the only legitimate toggle path.
-- Do NOT write the profiler-report to disk. The report arrives via the existing return-address pipeline; you do not need to read or polling-check a file.
+- Do NOT call `profiler-start`/`profiler-stop` through any path other than the `/runtime-eval-code` dispatches in steps 3 and 6. The editor is still the only legitimate evaluator.
+- Do NOT read the report body out of the inline eval result. The stop dispatch returns a file PATH; `Read` that file for the untruncated report.
 - Do NOT exceed the 600s hard cap. Clamp and warn instead.
 - Do NOT skip the JSONL log appends — the post-mortem policy tuning depends on them.
 - Do NOT invent `wait_source` values outside the documented set. If you add a new cue, add it to this doc first.

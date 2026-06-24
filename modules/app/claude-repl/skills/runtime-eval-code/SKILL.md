@@ -140,21 +140,23 @@ The JSON `code` field is a string, so every embedded double-quote and backslash 
 
 When in doubt, write the elisp to a temp file and `cat` it through `jq` to build the JSON object — that sidesteps escaping entirely.
 
-## Profiling workflow
+## Profiling (start / stop the editor profiler)
 
-A fully hands-off profile of a specific snippet:
+This skill is the canonical way to drive the Emacs profiler — there is no separate profiler-toggle skill. Toggle it by dispatching elisp, exactly like any other eval:
 
-1. Call `/workspace-profile` (or `/profile`) to **start** the profiler.
-2. Call `/runtime-eval-code` with the snippet you want to measure.
-3. Call `/workspace-profile` (or wait for `/profile`'s auto-stop) to **stop** and receive the `profiler-report`.
+- **Start** — dispatch this (no report exists yet, so nothing comes back to read):
+  ```elisp
+  (if (profiler-running-p) "already running" (progn (profiler-start 'cpu+mem) "started cpu+mem"))
+  ```
+  Pick the mode symbol: `'cpu`, `'mem`, or `'cpu+mem`.
 
-Three reasons to reach for this pairing over a bare `/profile`:
+- **Stop + capture** — dispatch this:
+  ```elisp
+  (claude-repl--profile-stop-and-write-file)
+  ```
+  It stops the profiler, writes the FULL expanded report to `claude-repl-profile-report-file` (`~/.claude/emacs/profiler-report.txt`), and returns that path as the eval result. Then **`Read` the returned file** for the report body — do NOT read the report out of the inline eval result, which `claude-repl-eval-output-max-chars` would clip on a large calltree. A nil result means the profiler was not running or produced no report.
 
-- **You want sampling around a specific user-invocable command** rather than whatever-happens-to-be-running. The eval snippet calls the command once (or a known number of times) so the report is dominated by that code path.
-- **You want a deterministic re-run.** A snippet sent via `/runtime-eval-code` is identical across runs; the user "scrolling for 90 seconds" is not.
-- **You need to inspect editor state before/after** the measured operation (e.g. confirm a cache was warm) — wrap your snippet with `princ` calls and they roundtrip in the `;; printed:` section of the eval response.
-
-`/profile` already wraps step 1 + step 3 — pair it with a single `/runtime-eval-code` dispatch in between for an end-to-end "measure exactly this code" run.
+To measure exactly one operation: start, dispatch the snippet under measurement (label it via `note`), then stop. The eval snippet is identical across runs (deterministic) and can wrap `princ` calls to roundtrip before/after state. For a hands-off "start, wait N, auto-stop, analyze" flow, use `/profile`, which orchestrates these same two dispatches with a scheduled auto-stop.
 
 ## Cheatsheet
 

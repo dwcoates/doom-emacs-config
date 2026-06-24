@@ -2590,28 +2590,15 @@ absent — a malformed command must not error out the whole batch."
             (claude-repl--handle-send-pgn ws pgn)))
         (message "[claude-repl] %s data received" ws))))))
 
-(defcustom claude-repl-profile-default-mode 'cpu+mem
-  "Default `profiler-start' mode for `/workspace-profile' when JSON omits `mode'.
-Must be one of `cpu', `mem', or `cpu+mem'."
-  :type '(choice (const cpu) (const mem) (const cpu+mem))
+(defcustom claude-repl-profile-report-file
+  (expand-file-name "profiler-report.txt" "~/.claude/emacs/")
+  "File the profiler report is written to by
+`claude-repl--profile-stop-and-write-file'.  The `/runtime-eval-code'-driven
+`/profile' flow reads the full report from here, sidestepping the
+eval-output truncation cap that would otherwise clip a large calltree
+returned inline."
+  :type 'file
   :group 'claude-repl)
-
-(defconst claude-repl--profile-mode-alist
-  '(("cpu"     . cpu)
-    ("mem"     . mem)
-    ("cpu+mem" . cpu+mem))
-  "Map JSON `mode' strings to `profiler-start' mode symbols.")
-
-(defun claude-repl--parse-profile-mode (mode)
-  "Parse JSON MODE string into a `profiler-start' mode symbol.
-Returns `claude-repl-profile-default-mode' when MODE is nil or empty.
-Returns nil for an unknown MODE so the caller can refuse the request."
-  (cond
-   ((or (null mode) (and (stringp mode) (string-empty-p mode)))
-    claude-repl-profile-default-mode)
-   ((stringp mode)
-    (cdr (assoc mode claude-repl--profile-mode-alist)))
-   (t nil)))
 
 (defun claude-repl--profile-report-buffers ()
   "Return the list of live buffers in `profiler-report-mode'."
@@ -2672,78 +2659,30 @@ report is only needed to forward back to the requesting Claude session."
                 parts)))
       (mapconcat #'identity (nreverse parts) "\n\n"))))
 
-(defun claude-repl--profile-format-prompt (report-text)
-  "Wrap REPORT-TEXT in a prompt for the requesting workspace's Claude.
-The fenced block delimits the report so Claude can treat it as data."
-  (concat "Profiler report below — analyze the hotspots:\n\n```\n"
-          report-text
-          "\n```"))
-
-(defun claude-repl--handle-profile-command (cmd)
-  "Handle a \"profile\" workspace command CMD.
-Toggles the Emacs profiler based on the `enabled' boolean in CMD:
-
-  - `enabled' = t   → starts the profiler via `profiler-start' if it
-                      is not already running.  Uses the JSON `mode'
-                      field (\"cpu\", \"mem\", or \"cpu+mem\") or
-                      `claude-repl-profile-default-mode' when omitted.
-  - `enabled' = nil → stops the profiler via `profiler-stop' if it is
-                      running, pops up `profiler-report', and — when
-                      the JSON carries a `workspace' field — pipes the
-                      report text back into that workspace's Claude
-                      session via `claude-repl--send'.
-
-The profiler itself is process-wide; the `workspace' field is the
-requesting agent's session, used solely to route the captured report
-back to whoever asked for it.  When `workspace' is absent the handler
-still stops and reports — it just doesn't dispatch the send.
-
-Idempotent: a start while running and a stop while idle are both no-ops
-\(logged, not errored).  An unknown `mode' string is refused with a log
-entry rather than silently falling back to the default — a malformed
-mode is a bug in the dispatch source and should surface, not paper over."
-  (let* ((enabled-raw (alist-get 'enabled cmd))
-         (enabled (and (not (eq enabled-raw :json-false)) enabled-raw))
-         (mode-raw (alist-get 'mode cmd))
-         (mode (claude-repl--parse-profile-mode mode-raw))
-         (ws (alist-get 'workspace cmd))
-         (running (profiler-running-p)))
-    (cond
-     ((and enabled (null mode))
-      (claude-repl--log nil "workspace-commands-file profile: unknown mode=%S — skipping"
-                        mode-raw)
-      (message "[claude-repl] profile: unknown mode %S — skipping" mode-raw))
-     (enabled
-      (cond
-       (running
-        (claude-repl--log nil "workspace-commands-file profile: already running, skipping start (requested mode=%s)"
-                          mode)
-        (message "[claude-repl] profile: already running, skipping start"))
-       (t
-        (claude-repl--log nil "workspace-commands-file profile: starting mode=%s" mode)
-        (profiler-start mode)
-        (message "[claude-repl] profile: started (%s)" mode))))
-     (t
-      (cond
-       ((not running)
-        (claude-repl--log nil "workspace-commands-file profile: not running, skipping stop")
-        (message "[claude-repl] profile: not running, skipping stop"))
-       (t
-        (claude-repl--log nil "workspace-commands-file profile: stopping and reporting")
-        (let ((report-text (claude-repl--profile-stop-and-collect)))
-          (cond
-           ((not (and ws (stringp ws) (not (string-empty-p ws))))
-            (claude-repl--log nil "workspace-commands-file profile: no workspace, report-len=%d not sent"
-                              (length report-text))
-            (message "[claude-repl] profile: stopped, report opened (no workspace; not sending)"))
-           ((string-empty-p report-text)
-            (claude-repl--log nil "workspace-commands-file profile: empty report, skipping send to ws=%s" ws)
-            (message "[claude-repl] profile: stopped, report empty (not sending)"))
-           (t
-            (claude-repl--log nil "workspace-commands-file profile: sending report (len=%d) to ws=%s"
-                              (length report-text) ws)
-            (claude-repl--send (claude-repl--profile-format-prompt report-text) ws)
-            (message "[claude-repl] profile: stopped, report sent to %s" ws))))))))))
+(defun claude-repl--profile-stop-and-write-file ()
+  "Stop the profiler, write its report to a file, and return that file's path.
+The report is written to `claude-repl-profile-report-file'.  Returns nil
+without writing when the profiler was not running or produced no report.
+This is the callable the `/runtime-eval-code'
+profiling prescription evaluates on stop: the returned path roundtrips
+back as the eval result, and `/profile' reads the report from the file
+untruncated (the inline eval-output cap would otherwise clip a large
+calltree)."
+  (if (not (profiler-running-p))
+      (progn
+        (claude-repl--log nil "profile-stop-and-write-file: profiler not running, nothing to write")
+        nil)
+    (let ((report-text (claude-repl--profile-stop-and-collect)))
+      (if (string-empty-p report-text)
+          (progn
+            (claude-repl--log nil "profile-stop-and-write-file: empty report, not writing")
+            nil)
+        (let ((file (expand-file-name claude-repl-profile-report-file)))
+          (make-directory (file-name-directory file) t)
+          (with-temp-file file (insert report-text))
+          (claude-repl--log nil "profile-stop-and-write-file: wrote report len=%d file=%s"
+                            (length report-text) file)
+          file)))))
 
 (defun claude-repl--resolve-merge-workspace-name (ws &optional project-dir)
   "Resolve a merge target to a registered workspace name.
@@ -3019,7 +2958,6 @@ affect another agent's commands in the same JSON array."
     ("clipboard" . (claude-repl--handle-clipboard-command  . nil))
     ("send"      . (claude-repl--handle-send-command       . nil))
     ("merge"     . (claude-repl--handle-merge-command      . nil))
-    ("profile"   . (claude-repl--handle-profile-command    . nil))
     ("eval"      . (claude-repl--handle-eval-command        . nil)))
   "Maps a workspace-command `type' string to (HANDLER . STAGGERS).
 HANDLER is the function `claude-repl--dispatch-workspace-command'
