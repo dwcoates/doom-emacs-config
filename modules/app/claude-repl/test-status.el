@@ -147,6 +147,15 @@ the tab-bar renders the badge when render-status yields
                   :label)
                  "💥")))
 
+(ert-deftest claude-repl-test-tab-palette-has-start-failed-label ()
+  "Palette has a `:start-failed' entry mapping to the 🚫 label so a
+workspace whose Claude session failed to start renders a visible badge,
+distinct from `:stop-failed' (⚠) and `:dead' (❌)."
+  (should (equal (plist-get
+                  (alist-get :start-failed claude-repl--tab-palette)
+                  :label)
+                 "🚫")))
+
 (ert-deftest claude-repl-test-tab-palette-has-merge-failed-label ()
   "Palette has a `:merge-failed' entry that maps to the ⛔ label so the
 tab-bar renders the badge when render-status yields `:merge-failed'.
