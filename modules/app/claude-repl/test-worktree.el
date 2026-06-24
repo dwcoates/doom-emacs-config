@@ -587,16 +587,6 @@ the rev-parse comparison and the checkout invocation."
           (should (= new-delay 10))
           (should (= (length handled) 1)))))))
 
-(ert-deftest claude-repl-test-dispatch-workspace-command-profile ()
-  "Profile commands route to the profile handler and do not change delay."
-  (let ((handled nil))
-    (cl-letf (((symbol-function 'claude-repl--handle-profile-command)
-               (lambda (cmd) (push cmd handled))))
-      (let ((cmd '((type . "profile") (enabled . t))))
-        (let ((new-delay (claude-repl--dispatch-workspace-command cmd 10)))
-          (should (= new-delay 10))
-          (should (= (length handled) 1)))))))
-
 (ert-deftest claude-repl-test-dispatch-workspace-command-eval ()
   "Eval commands route to the eval handler and do not change delay."
   (let ((handled nil))
@@ -606,163 +596,6 @@ the rev-parse comparison and the checkout invocation."
         (let ((new-delay (claude-repl--dispatch-workspace-command cmd 10)))
           (should (= new-delay 10))
           (should (= (length handled) 1)))))))
-
-;;;; ---- Tests: parse-profile-mode ----
-
-(ert-deftest claude-repl-test-parse-profile-mode-nil-uses-default ()
-  "Nil mode returns `claude-repl-profile-default-mode'."
-  (let ((claude-repl-profile-default-mode 'cpu+mem))
-    (should (eq (claude-repl--parse-profile-mode nil) 'cpu+mem))))
-
-(ert-deftest claude-repl-test-parse-profile-mode-empty-uses-default ()
-  "Empty-string mode returns `claude-repl-profile-default-mode'."
-  (let ((claude-repl-profile-default-mode 'cpu))
-    (should (eq (claude-repl--parse-profile-mode "") 'cpu))))
-
-(ert-deftest claude-repl-test-parse-profile-mode-cpu ()
-  "\"cpu\" maps to the `cpu' symbol."
-  (should (eq (claude-repl--parse-profile-mode "cpu") 'cpu)))
-
-(ert-deftest claude-repl-test-parse-profile-mode-mem ()
-  "\"mem\" maps to the `mem' symbol."
-  (should (eq (claude-repl--parse-profile-mode "mem") 'mem)))
-
-(ert-deftest claude-repl-test-parse-profile-mode-cpu+mem ()
-  "\"cpu+mem\" maps to the `cpu+mem' symbol."
-  (should (eq (claude-repl--parse-profile-mode "cpu+mem") 'cpu+mem)))
-
-(ert-deftest claude-repl-test-parse-profile-mode-unknown ()
-  "Unknown mode string returns nil so the handler can refuse the request."
-  (should (null (claude-repl--parse-profile-mode "gpu"))))
-
-;;;; ---- Tests: handle-profile-command ----
-
-(ert-deftest claude-repl-test-handle-profile-command-enabled-starts ()
-  "enabled=t starts the profiler with the default mode when not already running."
-  (let ((started-with :unset))
-    (cl-letf (((symbol-function 'profiler-running-p) (lambda () nil))
-              ((symbol-function 'profiler-start)
-               (lambda (mode) (setq started-with mode)))
-              ((symbol-function 'profiler-stop) (lambda () (error "should not stop")))
-              ((symbol-function 'profiler-report) (lambda () (error "should not report")))
-              (claude-repl-profile-default-mode 'cpu+mem))
-      (claude-repl--handle-profile-command '((type . "profile") (enabled . t)))
-      (should (eq started-with 'cpu+mem)))))
-
-(ert-deftest claude-repl-test-handle-profile-command-enabled-honors-mode ()
-  "enabled=t with mode=\"cpu\" starts the profiler with the `cpu' symbol."
-  (let ((started-with :unset))
-    (cl-letf (((symbol-function 'profiler-running-p) (lambda () nil))
-              ((symbol-function 'profiler-start)
-               (lambda (mode) (setq started-with mode)))
-              ((symbol-function 'profiler-stop) (lambda () (error "should not stop")))
-              ((symbol-function 'profiler-report) (lambda () (error "should not report"))))
-      (claude-repl--handle-profile-command
-       '((type . "profile") (enabled . t) (mode . "cpu")))
-      (should (eq started-with 'cpu)))))
-
-(ert-deftest claude-repl-test-handle-profile-command-enabled-noop-when-running ()
-  "enabled=t is a no-op when the profiler is already running — no start, no stop."
-  (let ((started nil))
-    (cl-letf (((symbol-function 'profiler-running-p) (lambda () t))
-              ((symbol-function 'profiler-start)
-               (lambda (_mode) (setq started t)))
-              ((symbol-function 'profiler-stop) (lambda () (error "should not stop")))
-              ((symbol-function 'profiler-report) (lambda () (error "should not report"))))
-      (claude-repl--handle-profile-command '((type . "profile") (enabled . t)))
-      (should-not started))))
-
-(ert-deftest claude-repl-test-handle-profile-command-disabled-stops-and-reports ()
-  "enabled=nil stops the profiler and pops up the report when running."
-  (let ((stopped nil) (reported nil) (sent nil))
-    (cl-letf (((symbol-function 'profiler-running-p) (lambda () t))
-              ((symbol-function 'profiler-start) (lambda (_m) (error "should not start")))
-              ((symbol-function 'profiler-stop) (lambda () (setq stopped t)))
-              ((symbol-function 'profiler-report) (lambda () (setq reported t)))
-              ((symbol-function 'claude-repl--profile-report-buffers) (lambda () nil))
-              ((symbol-function 'claude-repl--send) (lambda (&rest args) (push args sent))))
-      (claude-repl--handle-profile-command
-       '((type . "profile") (enabled . :json-false)))
-      (should stopped)
-      (should reported)
-      ;; No workspace in JSON, so no send is dispatched.
-      (should-not sent))))
-
-(ert-deftest claude-repl-test-handle-profile-command-disabled-noop-when-not-running ()
-  "enabled=nil is a no-op when the profiler is not running — no stop, no report."
-  (let ((stopped nil) (reported nil))
-    (cl-letf (((symbol-function 'profiler-running-p) (lambda () nil))
-              ((symbol-function 'profiler-start) (lambda (_m) (error "should not start")))
-              ((symbol-function 'profiler-stop) (lambda () (setq stopped t)))
-              ((symbol-function 'profiler-report) (lambda () (setq reported t))))
-      (claude-repl--handle-profile-command
-       '((type . "profile") (enabled . :json-false)))
-      (should-not stopped)
-      (should-not reported))))
-
-(ert-deftest claude-repl-test-handle-profile-command-disabled-sends-report-to-workspace ()
-  "enabled=nil with `workspace' pipes the captured report into that ws's session."
-  (let* ((fake-buf (generate-new-buffer " *test-profile-report*"))
-         (sent nil))
-    (unwind-protect
-        (progn
-          (with-current-buffer fake-buf
-            (setq major-mode 'profiler-report-mode)
-            (insert "calltree contents"))
-          (cl-letf (((symbol-function 'profiler-running-p) (lambda () t))
-                    ((symbol-function 'profiler-stop) (lambda () nil))
-                    ((symbol-function 'profiler-report) (lambda () nil))
-                    ((symbol-function 'claude-repl--profile-report-buffers)
-                     (let ((calls 0))
-                       (lambda ()
-                         (cl-incf calls)
-                         (if (= calls 1) nil (list fake-buf)))))
-                    ((symbol-function 'claude-repl--send)
-                     (lambda (prompt ws &rest _) (push (cons ws prompt) sent))))
-            (claude-repl--handle-profile-command
-             '((type . "profile") (enabled . :json-false) (workspace . "ws1"))))
-          (should (= 1 (length sent)))
-          (should (equal "ws1" (car (car sent))))
-          (should (string-match-p "calltree contents" (cdr (car sent))))
-          (should (string-match-p "Profiler report" (cdr (car sent)))))
-      (when (buffer-live-p fake-buf) (kill-buffer fake-buf)))))
-
-(ert-deftest claude-repl-test-handle-profile-command-disabled-empty-report-no-send ()
-  "enabled=nil with empty captured report does not dispatch a send."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'profiler-running-p) (lambda () t))
-              ((symbol-function 'profiler-stop) (lambda () nil))
-              ((symbol-function 'profiler-report) (lambda () nil))
-              ((symbol-function 'claude-repl--profile-report-buffers) (lambda () nil))
-              ((symbol-function 'claude-repl--send)
-               (lambda (&rest args) (push args sent))))
-      (claude-repl--handle-profile-command
-       '((type . "profile") (enabled . :json-false) (workspace . "ws1")))
-      (should-not sent))))
-
-(ert-deftest claude-repl-test-handle-profile-command-disabled-empty-workspace-no-send ()
-  "enabled=nil with empty-string `workspace' does not dispatch a send."
-  (let* ((fake-buf (generate-new-buffer " *test-profile-report-2*"))
-         (sent nil))
-    (unwind-protect
-        (progn
-          (with-current-buffer fake-buf
-            (setq major-mode 'profiler-report-mode)
-            (insert "contents"))
-          (cl-letf (((symbol-function 'profiler-running-p) (lambda () t))
-                    ((symbol-function 'profiler-stop) (lambda () nil))
-                    ((symbol-function 'profiler-report) (lambda () nil))
-                    ((symbol-function 'claude-repl--profile-report-buffers)
-                     (let ((calls 0))
-                       (lambda ()
-                         (cl-incf calls)
-                         (if (= calls 1) nil (list fake-buf)))))
-                    ((symbol-function 'claude-repl--send)
-                     (lambda (&rest args) (push args sent))))
-            (claude-repl--handle-profile-command
-             '((type . "profile") (enabled . :json-false) (workspace . ""))))
-          (should-not sent))
-      (when (buffer-live-p fake-buf) (kill-buffer fake-buf)))))
 
 ;;;; ---- Tests: profile-stop-and-collect ----
 
@@ -886,25 +719,35 @@ reflects the post-expansion content rather than the default collapsed view."
               (should (string-match-p "collapsed EXPANDED" text)))))
       (when (buffer-live-p new-buf) (kill-buffer new-buf)))))
 
-;;;; ---- Tests: profile-format-prompt ----
+;;;; ---- Tests: profile-stop-and-write-file ----
 
-(ert-deftest claude-repl-test-profile-format-prompt-wraps-in-fenced-block ()
-  "Format prompt wraps the report text in a fenced code block with a preamble."
-  (let ((formatted (claude-repl--profile-format-prompt "abc")))
-    (should (string-match-p "Profiler report" formatted))
-    (should (string-match-p "```\nabc\n```" formatted))))
+(ert-deftest claude-repl-test-profile-stop-and-write-file-writes-and-returns-path ()
+  "stop-and-write-file writes the collected report to the file and returns its path."
+  (let ((tmp (make-temp-file "claude-repl-profile-test" nil ".txt")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'profiler-running-p) (lambda () t))
+                  ((symbol-function 'claude-repl--profile-stop-and-collect)
+                   (lambda () "calltree contents"))
+                  (claude-repl-profile-report-file tmp))
+          (let ((path (claude-repl--profile-stop-and-write-file)))
+            (should (equal path (expand-file-name tmp)))
+            (should (string-match-p
+                     "calltree contents"
+                     (with-temp-buffer (insert-file-contents tmp) (buffer-string))))))
+      (when (file-exists-p tmp) (delete-file tmp)))))
 
-(ert-deftest claude-repl-test-handle-profile-command-unknown-mode-refuses-start ()
-  "An unknown `mode' string refuses the start — profiler-start is NOT called."
-  (let ((started nil))
-    (cl-letf (((symbol-function 'profiler-running-p) (lambda () nil))
-              ((symbol-function 'profiler-start)
-               (lambda (_m) (setq started t)))
-              ((symbol-function 'profiler-stop) (lambda () (error "should not stop")))
-              ((symbol-function 'profiler-report) (lambda () (error "should not report"))))
-      (claude-repl--handle-profile-command
-       '((type . "profile") (enabled . t) (mode . "gpu")))
-      (should-not started))))
+(ert-deftest claude-repl-test-profile-stop-and-write-file-nil-when-not-running ()
+  "stop-and-write-file returns nil and never collects when the profiler is not running."
+  (cl-letf (((symbol-function 'profiler-running-p) (lambda () nil))
+            ((symbol-function 'claude-repl--profile-stop-and-collect)
+             (lambda () (error "should not collect when not running"))))
+    (should-not (claude-repl--profile-stop-and-write-file))))
+
+(ert-deftest claude-repl-test-profile-stop-and-write-file-nil-on-empty-report ()
+  "stop-and-write-file returns nil without writing when the collected report is empty."
+  (cl-letf (((symbol-function 'profiler-running-p) (lambda () t))
+            ((symbol-function 'claude-repl--profile-stop-and-collect) (lambda () "")))
+    (should-not (claude-repl--profile-stop-and-write-file))))
 
 ;;;; ---- Tests: handle-clipboard-command ----
 

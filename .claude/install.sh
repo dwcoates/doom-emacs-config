@@ -95,7 +95,6 @@ LOCAL_SKILLS=(
   "profile"
   "runtime-eval-code"
   "workspace-close"
-  "workspace-profile"
 )
 
 # Manifest declaring each cached workspace-* skill as "name|canonical-impl".
