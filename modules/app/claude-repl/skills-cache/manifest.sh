@@ -27,6 +27,5 @@
 
 CACHED_SKILLS=(
   "workspace|$HOME/workspace/ChessCom/explanation-engine/.claude/skills/workspace"
-  "emit-workspace-commands.sh|$HOME/workspace/ChessCom/explanation-engine/.claude/skills/emit-workspace-commands.sh"
   "build-skill|$HOME/workspace/ChessCom/explanation-engine/.claude/skills/build-skill"
 )

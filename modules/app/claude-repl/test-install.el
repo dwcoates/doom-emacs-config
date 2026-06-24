@@ -852,6 +852,30 @@ Regression guard so the file is not silently moved or deleted —
 the JSON contract that the editor's `\"eval\"' handler dispatches against."
   (should (member "runtime-eval-code" claude-repl--managed-local-skills)))
 
+(ert-deftest claude-repl-test-managed-local-skills-includes-emit-workspace-commands ()
+  "Repo-local skills list must include `emit-workspace-commands.sh' (regression guard).
+explanation-engine folded the original into `workspace/run.sh --emit-commands'
+(python3-dependent, absent from the doom-sandbox image), so the doom repo
+now owns the trivial uuidgen-only emitter as a repo-local skill."
+  (should (member "emit-workspace-commands.sh" claude-repl--managed-local-skills)))
+
+(ert-deftest claude-repl-test-managed-skills-excludes-emit-workspace-commands ()
+  "External managed-skills list must NOT include `emit-workspace-commands.sh'.
+It moved to the repo-local list, so leaving it here would re-introduce the
+dangling explanation-engine canonical-impl path that broke install."
+  (should-not (member "emit-workspace-commands.sh" claude-repl--managed-skills)))
+
+(ert-deftest claude-repl-test-emit-workspace-commands-skill-file-exists ()
+  "The checked-in repo-local emit-workspace-commands.sh must exist and be executable.
+Regression guard so the dispatch emitter the skill run.sh wrappers exec
+is not silently moved or deleted."
+  (let ((emit (expand-file-name
+               "emit-workspace-commands.sh"
+               (or claude-repl-local-skills-src-dir
+                   (error "claude-repl-local-skills-src-dir is unset")))))
+    (should (file-exists-p emit))
+    (should (file-executable-p emit))))
+
 (ert-deftest claude-repl-test-runtime-eval-code-skill-file-exists ()
   "The checked-in runtime-eval-code SKILL.md must exist with required frontmatter.
 Regression guard so the file is not silently moved or deleted —
