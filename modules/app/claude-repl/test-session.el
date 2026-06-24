@@ -1344,6 +1344,66 @@ they want to see the result; hide-mode is overridden."
         (claude-repl--ready-timer-tick "ws1" (- (float-time) 31.0))
         (should cancelled)))))
 
+(ert-deftest claude-repl-test-detect-start-failure-finds-marker ()
+  "detect-start-failure returns the reason text following the marker in the vterm."
+  (claude-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *test-start-fail*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (insert "some output\nCLAUDE_REPL_START_FAILURE: Docker daemon is not running\n"))
+            (claude-repl--ws-put "ws1" :vterm-buffer buf)
+            (should (equal (claude-repl--detect-start-failure "ws1")
+                           "Docker daemon is not running")))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-detect-start-failure-matches-native-docker-error ()
+  "detect-start-failure recognizes Docker's native daemon-down error even with
+no explicit marker, so a sandbox start failure surfaces before the script is
+taught to print the marker."
+  (claude-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *test-docker-down*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (insert "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n"))
+            (claude-repl--ws-put "ws1" :vterm-buffer buf)
+            (should (string-match-p "Docker daemon is not running"
+                                    (claude-repl--detect-start-failure "ws1"))))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-detect-start-failure-nil-without-marker ()
+  "detect-start-failure returns nil when the vterm shows no failure marker."
+  (claude-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *test-no-fail*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf (insert "normal claude output\n"))
+            (claude-repl--ws-put "ws1" :vterm-buffer buf)
+            (should-not (claude-repl--detect-start-failure "ws1")))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-test-ready-timer-tick-marks-start-failed-on-marker ()
+  "A start-failure marker in the vterm makes ready-timer-tick cancel the timer
+and route to mark-start-failed with the scraped reason, before any timeout."
+  (claude-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *test-tick-fail*"))
+          (cancelled nil)
+          (failed nil))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf
+              (insert "CLAUDE_REPL_START_FAILURE: Docker daemon is not running\n"))
+            (claude-repl--ws-put "ws1" :vterm-buffer buf)
+            (cl-letf (((symbol-function 'claude-repl--cancel-ready-timer)
+                       (lambda (_ws) (setq cancelled t)))
+                      ((symbol-function 'claude-repl--mark-start-failed)
+                       (lambda (_ws err) (setq failed (error-message-string err)))))
+              (claude-repl--ready-timer-tick "ws1" (float-time))
+              (should cancelled)
+              (should (equal failed "Docker daemon is not running"))))
+        (kill-buffer buf)))))
+
 (ert-deftest claude-repl-test-ready-timer-tick-still-starting ()
   "ready-timer-tick should do nothing when session is still starting."
   (claude-repl-test--with-clean-state
