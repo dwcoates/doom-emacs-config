@@ -8,3 +8,4 @@
 .projectile
 **/.DS_Store
 .agents-sandbox/mounts
+.agents-sandbox/sandbox.log
