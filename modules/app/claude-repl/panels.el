@@ -475,6 +475,46 @@ or dead buffers."
                         (buffer-name buf) ws)
       (claude-repl--ws-remove-buffer buf))))
 
+(defun claude-repl--safe-delete-window (win &optional fallback)
+  "Delete WIN, or swap its buffer to FALLBACK when WIN cannot be deleted.
+`delete-window' signals \"Attempt to delete sole window\" on a frame's
+only deletable ordinary window (and would close the frame itself when
+`window-deletable-p' reports `frame').  Unhandled inside the
+`--on-workspace-switch' timer, that error aborts the rest of the switch
+handler before `--reclaim-frame-fullscreen' runs, stranding the
+previously selected workspace's lone Claude output window on screen with
+no input panel — the exact new-workspace bug this guards.  When
+`window-deletable-p' does not report WIN as a deletable ordinary window
+\(value `t'), this swaps WIN's buffer to FALLBACK (default
+`doom-fallback-buffer') instead, so a stale foreign buffer is never left
+displayed and the caller proceeds to reclaim the frame.  Un-dedicates
+WIN and strips `no-delete-other-windows' first so a dedicated panel
+window can be torn down.  No-op on a dead WIN.  Signals when WIN is
+undeletable and no live fallback buffer exists, rather than silently
+leaving the stale window in place."
+  (when (window-live-p win)
+    (set-window-parameter win 'no-delete-other-windows nil)
+    (set-window-dedicated-p win nil)
+    (if (eq (window-deletable-p win) t)
+        (progn
+          (claude-repl--log (claude-repl--ws-current-name)
+                            "safe-delete-window: deleting win=%s buf=%s"
+                            win (claude-repl--safe-buffer-name (window-buffer win)))
+          (delete-window win))
+      (let ((fb (or fallback
+                    (and (fboundp 'doom-fallback-buffer) (doom-fallback-buffer)))))
+        (claude-repl--log (claude-repl--ws-current-name)
+                          "safe-delete-window: win=%s undeletable (deletable-p=%S) — swapping buf=%s to fallback=%s"
+                          win (window-deletable-p win)
+                          (claude-repl--safe-buffer-name (window-buffer win))
+                          (claude-repl--safe-buffer-name fb))
+        (if (and fb (buffer-live-p fb))
+            (set-window-buffer win fb)
+          ;; No fallback buffer to neutralize the stale window with: fail
+          ;; loudly rather than silently leave a foreign Claude buffer
+          ;; displayed in the new workspace's frame.
+          (error "claude-repl--safe-delete-window: no fallback buffer to neutralize undeletable window %s" win))))))
+
 (defun claude-repl--reclaim-frame-fullscreen (ws)
   "Take over the frame with WS's own Claude panels (fullscreen).
 
@@ -536,15 +576,21 @@ flag because each workspace has its own panel buffers."
          ;; Captured BEFORE any repair below adds an input window beside a
          ;; lone output (which would make it no longer "lone").
          (lone-output (claude-repl--lone-output-window)))
+    (claude-repl--log ws "ensure-own-panels: ws=%s stale=%d lone-output=%s panels-visible=%s windows=%d"
+                      ws (length stale) (and lone-output t)
+                      (claude-repl--panels-visible-p) (length (window-list)))
     (when stale
       (claude-repl--log ws "ensure-own-panels: closing %d stale panel windows: %S"
                         (length stale)
                         (mapcar (lambda (w) (buffer-name (window-buffer w))) stale))
       (dolist (win stale)
-        (when (window-live-p win)
-          ;; Un-dedicate before deleting so `delete-window' doesn't error.
-          (set-window-dedicated-p win nil)
-          (delete-window win)))
+        ;; Sole-window-safe deletion: a stale window that is the frame's
+        ;; only window cannot be `delete-window'-ed (it signals "Attempt to
+        ;; delete sole window").  Left unguarded that error aborts this
+        ;; timer-driven handler before the `--reclaim-frame-fullscreen' below
+        ;; runs, leaving the previously selected workspace's lone output
+        ;; window stranded with no input panel — the new-workspace bug.
+        (claude-repl--safe-delete-window win))
       ;; Detach the foreign panel buffers from THIS workspace's persp
       ;; buffer list AFTER their windows are gone, so listing this
       ;; workspace's buffers no longer surfaces another workspace's
@@ -580,6 +626,8 @@ flag because each workspace has its own panel buffers."
     ;; reclaim call covers both, so a foreign lone output (which is BOTH
     ;; stale and lone) is reclaimed exactly once.
     (when (or stale lone-output)
+      (claude-repl--log ws "ensure-own-panels: reclaiming frame stale=%s lone-output=%s"
+                        (and stale t) (and lone-output t))
       (claude-repl--reclaim-frame-fullscreen ws))))
 
 (defun claude-repl--on-workspace-switch (&optional ws)
