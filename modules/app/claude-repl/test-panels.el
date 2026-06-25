@@ -3885,18 +3885,55 @@ otherwise signal `Cannot split side window' and leave panels half-shown."
 ;;;; ---- Tests: ensure-own-panels-on-persp-switch ----
 
 (ert-deftest claude-repl-test-panels-ensure-own-closes-stale-windows ()
-  "ensure-own-panels-on-persp-switch closes stale panel windows."
+  "ensure-own-panels-on-persp-switch deletes a deletable stale panel window."
   (claude-repl-test--with-clean-state
     (let ((deleted nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                 ((symbol-function 'claude-repl--stale-panel-windows)
                  (lambda () (list (selected-window))))
+                ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
                 ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+                ;; Deletable window — safe-delete-window must call delete-window.
+                ((symbol-function 'window-deletable-p) (lambda (_w) t))
                 ((symbol-function 'delete-window)
                  (lambda (w) (push w deleted)))
                 ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil)))
         (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
         (should (= (length deleted) 1))))))
+
+(ert-deftest claude-repl-test-panels-ensure-own-neutralizes-sole-stale-window ()
+  "ensure-own-panels-on-persp-switch swaps an undeletable sole stale window to
+the fallback buffer instead of erroring, then still reclaims the frame."
+  (claude-repl-test--with-clean-state
+    (let ((deleted nil)
+          (swapped nil)
+          (reclaimed nil)
+          (fallback (get-buffer-create "*claude-test-fallback*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                    ((symbol-function 'claude-repl--stale-panel-windows)
+                     (lambda () (list (selected-window))))
+                    ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
+                    ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+                    ;; Sole window — delete-window would signal; safe-delete must
+                    ;; swap to fallback rather than delete.
+                    ((symbol-function 'window-deletable-p) (lambda (_w) nil))
+                    ((symbol-function 'doom-fallback-buffer) (lambda () fallback))
+                    ((symbol-function 'delete-window)
+                     (lambda (w) (push w deleted)))
+                    ((symbol-function 'set-window-buffer)
+                     (lambda (_w b) (push b swapped)))
+                    ((symbol-function 'claude-repl--panels-visible-p) (lambda () nil))
+                    ((symbol-function 'claude-repl--reclaim-frame-fullscreen)
+                     (lambda (_ws) (setq reclaimed t))))
+            (claude-repl--ensure-own-panels-on-persp-switch "my-ws")
+            ;; The sole window is neutralized to fallback, not deleted ...
+            (should-not deleted)
+            (should (equal swapped (list fallback)))
+            ;; ... and the handler still reaches the reclaim step (the
+            ;; regression guard: a sole-window delete error must not abort it).
+            (should reclaimed))
+        (kill-buffer fallback)))))
 
 (ert-deftest claude-repl-test-panels-ensure-own-restores-when-panels-were-visible ()
   "ensure-own-panels-on-persp-switch re-shows panels when :panels-were-visible is set."
@@ -4055,6 +4092,88 @@ was never recorded."
                  (lambda (b) (push b removed))))
         (claude-repl--detach-foreign-panel-buffers "my-ws" (list dead))
         (should-not removed)))))
+
+;;;; ---- Tests: safe-delete-window ----
+
+(ert-deftest claude-repl-test-panels-safe-delete-window-deletes-deletable ()
+  "safe-delete-window calls delete-window for a deletable ordinary window."
+  (claude-repl-test--with-clean-state
+    (let ((deleted nil)
+          (swapped nil))
+      (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
+                ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
+                ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+                ((symbol-function 'window-deletable-p) (lambda (_w) t))
+                ((symbol-function 'window-buffer) (lambda (_w) nil))
+                ((symbol-function 'delete-window) (lambda (w) (push w deleted)))
+                ((symbol-function 'set-window-buffer) (lambda (_w b) (push b swapped))))
+        (claude-repl--safe-delete-window 'win)
+        (should (equal deleted (list 'win)))
+        (should-not swapped)))))
+
+(ert-deftest claude-repl-test-panels-safe-delete-window-swaps-sole-to-fallback ()
+  "safe-delete-window swaps an undeletable sole window to the fallback buffer."
+  (claude-repl-test--with-clean-state
+    (let ((deleted nil)
+          (swapped nil)
+          (fallback (get-buffer-create "*claude-test-fallback*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
+                    ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
+                    ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+                    ((symbol-function 'window-deletable-p) (lambda (_w) nil))
+                    ((symbol-function 'window-buffer) (lambda (_w) nil))
+                    ((symbol-function 'doom-fallback-buffer) (lambda () fallback))
+                    ((symbol-function 'delete-window) (lambda (w) (push w deleted)))
+                    ((symbol-function 'set-window-buffer) (lambda (_w b) (push b swapped))))
+            (claude-repl--safe-delete-window 'win)
+            (should-not deleted)
+            (should (equal swapped (list fallback))))
+        (kill-buffer fallback)))))
+
+(ert-deftest claude-repl-test-panels-safe-delete-window-honors-explicit-fallback ()
+  "safe-delete-window swaps to the explicitly passed FALLBACK over the default."
+  (claude-repl-test--with-clean-state
+    (let ((swapped nil)
+          (explicit (get-buffer-create "*claude-test-explicit*"))
+          (default (get-buffer-create "*claude-test-default*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
+                    ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
+                    ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+                    ((symbol-function 'window-deletable-p) (lambda (_w) nil))
+                    ((symbol-function 'window-buffer) (lambda (_w) nil))
+                    ((symbol-function 'doom-fallback-buffer) (lambda () default))
+                    ((symbol-function 'set-window-buffer) (lambda (_w b) (push b swapped))))
+            (claude-repl--safe-delete-window 'win explicit)
+            (should (equal swapped (list explicit))))
+        (kill-buffer explicit)
+        (kill-buffer default)))))
+
+(ert-deftest claude-repl-test-panels-safe-delete-window-errors-without-fallback ()
+  "safe-delete-window signals when a window is undeletable and no fallback exists."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
+              ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
+              ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+              ((symbol-function 'window-deletable-p) (lambda (_w) nil))
+              ((symbol-function 'window-buffer) (lambda (_w) nil))
+              ;; No fallback buffer available — must fail loudly, not no-op.
+              ((symbol-function 'doom-fallback-buffer) (lambda () nil))
+              ((symbol-function 'set-window-buffer) (lambda (_w _b) nil)))
+      (should-error (claude-repl--safe-delete-window 'win)))))
+
+(ert-deftest claude-repl-test-panels-safe-delete-window-noop-dead-window ()
+  "safe-delete-window is a no-op on a dead window."
+  (claude-repl-test--with-clean-state
+    (let ((touched nil))
+      (cl-letf (((symbol-function 'window-live-p) (lambda (_w) nil))
+                ((symbol-function 'set-window-dedicated-p)
+                 (lambda (_w _v) (setq touched t)))
+                ((symbol-function 'delete-window) (lambda (_w) (setq touched t)))
+                ((symbol-function 'set-window-buffer) (lambda (_w _b) (setq touched t))))
+        (claude-repl--safe-delete-window 'dead)
+        (should-not touched)))))
 
 ;;;; ---- Tests: reclaim-frame-fullscreen ----
 
