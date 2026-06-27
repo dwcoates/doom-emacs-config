@@ -271,6 +271,7 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (claude-repl--load-module "magit")
 (claude-repl--load-module "emoji")
 (claude-repl--load-module "prevent-select")
+(claude-repl--load-module "close-panels-on-open")
 (claude-repl--load-module "caffeinate")
 
 (if claude-repl--load-errors
