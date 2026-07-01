@@ -540,6 +540,37 @@
         (claude-repl--set-buffer-background 30)))
     (should-not (equal hex-a hex-b))))
 
+;;;; ---- Tests: apply-vterm-font-scale ----
+
+(ert-deftest claude-repl-test-vterm-font-scale-default-greater-than-one ()
+  "`claude-repl-vterm-font-scale' should default to an enlarging value."
+  (should (> claude-repl-vterm-font-scale 1.0)))
+
+(ert-deftest claude-repl-test-apply-vterm-font-scale-remaps-default-height ()
+  "apply-vterm-font-scale should remap the default face height by the scale."
+  (claude-repl-test--with-temp-buffer " *test-font-scale*"
+    (let ((remapped nil)
+          (claude-repl-vterm-font-scale 1.4))
+      (cl-letf (((symbol-function 'face-remap-add-relative)
+                 (lambda (face &rest props)
+                   (push (list face props) remapped))))
+        (claude-repl--apply-vterm-font-scale)
+        (should (= (length remapped) 1))
+        (let ((entry (car remapped)))
+          (should (eq (car entry) 'default))
+          (should (= (plist-get (cadr entry) :height) 1.4)))))))
+
+(ert-deftest claude-repl-test-apply-vterm-font-scale-noop-at-one ()
+  "apply-vterm-font-scale should be a no-op when the scale is exactly 1.0."
+  (claude-repl-test--with-temp-buffer " *test-font-scale-noop*"
+    (let ((remapped nil)
+          (claude-repl-vterm-font-scale 1.0))
+      (cl-letf (((symbol-function 'face-remap-add-relative)
+                 (lambda (face &rest props)
+                   (push (list face props) remapped))))
+        (claude-repl--apply-vterm-font-scale)
+        (should (null remapped))))))
+
 ;;;; ---- Tests: default-background-request-p ----
 
 (ert-deftest claude-repl-test-default-bg-request-index-neg1-no-props ()
