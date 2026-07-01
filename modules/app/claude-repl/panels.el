@@ -1168,6 +1168,7 @@ echo-area message below."
                 (setq-local truncate-lines nil)
                 (setq-local word-wrap t)
                 (claude-repl--set-buffer-background claude-repl--vterm-background-grey)
+                (claude-repl--apply-vterm-font-scale)
                 (setq-local mode-line-format
                             (claude-repl--workspace-mode-line ws))
                 (setq-local claude-repl--ready nil)

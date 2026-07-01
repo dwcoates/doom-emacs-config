@@ -145,6 +145,22 @@ Shared between `claude-repl--vterm-color-advice' and buffer setup code.")
     (face-remap-add-relative 'default :background hex)
     (face-remap-add-relative 'fringe :background hex)))
 
+(defcustom claude-repl-vterm-font-scale 1.2
+  "Font size multiplier for Claude output (vterm) buffers.
+A number relative to the default face height, where 1.0 leaves the font
+unchanged and larger values enlarge it.  Applied buffer-locally via
+`face-remap-add-relative' on the `default' face when the vterm buffer is
+initialized."
+  :type 'number
+  :group 'claude-repl)
+
+(defun claude-repl--apply-vterm-font-scale ()
+  "Scale the `default' face height in the current buffer.
+Multiplies the default face height by `claude-repl-vterm-font-scale' via
+`face-remap-add-relative'.  A no-op when the scale is exactly 1.0."
+  (unless (= claude-repl-vterm-font-scale 1.0)
+    (face-remap-add-relative 'default :height claude-repl-vterm-font-scale)))
+
 ;; Override vterm--get-color so claude vterm buffers get a black background.
 ;; Solaire-mode advises this function and face-background ignores buffer-local
 ;; remaps, so we hardcode black for claude buffers' default background case.
