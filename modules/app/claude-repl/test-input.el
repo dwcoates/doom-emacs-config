@@ -380,6 +380,40 @@ mandating a hard failure (assertion/throw/panic) when an invariant is violated."
            "NEVER add defensive code, a fallback value, or default behavior"
            claude-repl-command-prefix)))
 
+(ert-deftest claude-repl-test-command-prefix-forbids-backgrounding-without-necessity ()
+  "The metaprompt must forbid backgrounding a process unless concurrent commands
+run in the same invocation, or backgrounding is strictly necessary."
+  (should (string-match-p
+           "Never background a process unless I am immediately running concurrent commands in the same invocation, unless strictly necessary"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-requires-foreground-alongside-background ()
+  "The metaprompt must state the corollary that a backgrounded process requires a
+foregrounded process alongside it, since backgrounding all processes is never necessary."
+  (should (string-match-p
+           "whenever a backgrounded process exists, a foregrounded process must exist alongside it"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "never necessary to background ALL processes"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-keeps-main-process-foregrounded ()
+  "The metaprompt must state the user always wants the main process's output visible
+at a glance and never wants the main process backgrounded."
+  (should (string-match-p
+           "main process's output visible at a glance"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "never wants the main process backgrounded"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-streams-equal-backgrounded-results-concurrently ()
+  "The metaprompt must state that multiple equally significant concurrent backgrounded
+processes have their results streamed back concurrently."
+  (should (string-match-p
+           "equally significant backgrounded processes run at once, their results are streamed back concurrently"
+           claude-repl-command-prefix)))
+
 (ert-deftest claude-repl-test-command-prefix-mandates-entire-response-is-tree ()
   "`claude-repl-command-prefix' must mandate that the entire response itself be a single TLDR tree."
   (should (stringp claude-repl-command-prefix))
