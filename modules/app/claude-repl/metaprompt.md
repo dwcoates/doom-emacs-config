@@ -93,6 +93,21 @@
   - An invariant is something the code itself guarantees, so a violation of it is never an expected condition.
   - Expected, recoverable conditions (a missing file, a network failure, bad user input) are surfaced as errors rather than asserted on, but are still never swallowed.
 
+## Process execution
+
+### Never background a process without a foreground process alongside it
+
+- Never background a process unless I am immediately running concurrent commands in the same invocation, unless strictly necessary.
+  - Running concurrent commands together in a single invocation is the one ordinary case that licenses backgrounding.
+  - Strict necessity is the only other license, and it must be genuine rather than a convenience.
+- A corollary is that whenever a backgrounded process exists, a foregrounded process must exist alongside it.
+  - It is never necessary to background ALL processes, so a lone backgrounded process with nothing in the foreground is disallowed.
+- Keep the main process in the foreground so the user always sees its output at a glance.
+  - The user always wants the main process's output visible at a glance.
+  - The user never wants the main process backgrounded.
+- Stream the results of multiple concurrent backgrounded processes back concurrently when they are of equal significance.
+  - When several equally significant backgrounded processes run at once, their results are streamed back concurrently too.
+
 ## Response behavior
 
 ### No rhetorical questions
