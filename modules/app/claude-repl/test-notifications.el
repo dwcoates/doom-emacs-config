@@ -13,12 +13,12 @@
 
 ;;;; ---- Tests: notification backend selection ----
 
-(ert-deftest claude-repl-test-select-backend-prefers-osascript-when-both-available ()
-  "When both osascript and terminal-notifier are available, prefer osascript."
+(ert-deftest claude-repl-test-select-backend-prefers-terminal-notifier-when-both-available ()
+  "When both are available, prefer terminal-notifier (it supports click actions)."
   (cl-letf (((symbol-function 'executable-find)
              (lambda (_cmd) "/usr/bin/found")))
     (should (eq (claude-repl--select-notification-backend)
-                #'claude-repl--notify-backend-osascript))))
+                #'claude-repl--notify-backend-terminal-notifier))))
 
 (ert-deftest claude-repl-test-select-backend-uses-osascript-when-only-osascript ()
   "When only osascript is available, select osascript."
@@ -27,12 +27,19 @@
     (should (eq (claude-repl--select-notification-backend)
                 #'claude-repl--notify-backend-osascript))))
 
-(ert-deftest claude-repl-test-select-backend-falls-back-to-terminal-notifier ()
-  "When osascript is NOT available but terminal-notifier is, use terminal-notifier."
+(ert-deftest claude-repl-test-select-backend-uses-terminal-notifier-when-only-terminal-notifier ()
+  "When only terminal-notifier is available, select terminal-notifier."
   (cl-letf (((symbol-function 'executable-find)
              (lambda (cmd) (when (equal cmd "terminal-notifier") "/usr/local/bin/terminal-notifier"))))
     (should (eq (claude-repl--select-notification-backend)
                 #'claude-repl--notify-backend-terminal-notifier))))
+
+(ert-deftest claude-repl-test-select-backend-falls-back-to-osascript ()
+  "When terminal-notifier is NOT available but osascript is, fall back to osascript."
+  (cl-letf (((symbol-function 'executable-find)
+             (lambda (cmd) (when (equal cmd "osascript") "/usr/bin/osascript"))))
+    (should (eq (claude-repl--select-notification-backend)
+                #'claude-repl--notify-backend-osascript))))
 
 (ert-deftest claude-repl-test-select-backend-errors-when-none-available ()
   "When neither terminal-notifier nor osascript is available, signal an error."
@@ -49,15 +56,37 @@
 ;;;; ---- Tests: terminal-notifier backend ----
 
 (ert-deftest claude-repl-test-terminal-notifier-spawns-with-args ()
-  "terminal-notifier backend should spawn the binary with -title/-message args."
+  "terminal-notifier backend should spawn with -title/-message/-sound and a click -execute."
   (let (captured)
     (cl-letf (((symbol-function 'claude-repl--notify-spawn)
-               (lambda (&rest args) (setq captured args) nil)))
+               (lambda (&rest args) (setq captured args) nil))
+              ((symbol-function 'claude-repl--ensure-server) #'ignore))
       (claude-repl--notify-backend-terminal-notifier "ws-a" "My Title" "My Message")
       (should (equal captured
-                     '("ws-a" terminal-notifier "terminal-notifier"
-                       "-title" "My Title"
-                       "-message" "My Message"))))))
+                     (list "ws-a" 'terminal-notifier "terminal-notifier"
+                           "-title" "My Title"
+                           "-message" "My Message"
+                           "-sound" claude-repl-notification-sound
+                           "-execute" (claude-repl--notification-click-command "ws-a")))))))
+
+(ert-deftest claude-repl-test-terminal-notifier-nil-ws-omits-execute ()
+  "With a nil WS the terminal-notifier backend must not add a -execute action."
+  (let (captured)
+    (cl-letf (((symbol-function 'claude-repl--notify-spawn)
+               (lambda (&rest args) (setq captured args) nil))
+              ((symbol-function 'claude-repl--ensure-server)
+               (lambda () (error "ensure-server must not run for a non-clickable notification"))))
+      (claude-repl--notify-backend-terminal-notifier nil "T" "M")
+      (should-not (member "-execute" captured)))))
+
+(ert-deftest claude-repl-test-terminal-notifier-ensures-server-when-clickable ()
+  "The terminal-notifier backend must ensure the Emacs server for a clickable WS."
+  (let (ensured)
+    (cl-letf (((symbol-function 'claude-repl--notify-spawn) (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--ensure-server)
+               (lambda () (setq ensured t))))
+      (claude-repl--notify-backend-terminal-notifier "ws-a" "T" "M")
+      (should ensured))))
 
 (ert-deftest claude-repl-test-terminal-notifier-empty-strings ()
   "terminal-notifier backend should handle empty title and message."
@@ -317,6 +346,105 @@
             ((symbol-function 'claude-repl--log) (lambda (_ws _fmt &rest _args) nil)))
     (should-error (claude-repl--notify nil "Title" "Message")
                   :type 'error)))
+
+;;;; ---- Tests: claude-repl--notification-click-command ----
+
+(ert-deftest claude-repl-test-click-command-nil-ws-returns-nil ()
+  "A nil WS produces no click command (notification stays non-clickable)."
+  (should (null (claude-repl--notification-click-command nil))))
+
+(ert-deftest claude-repl-test-click-command-empty-ws-returns-nil ()
+  "An empty-string WS produces no click command."
+  (should (null (claude-repl--notification-click-command ""))))
+
+(ert-deftest claude-repl-test-click-command-invokes-emacsclient-eval ()
+  "The click command should run emacsclient --eval on the configured binary."
+  (let ((claude-repl-emacsclient-executable "/opt/emacs/bin/emacsclient"))
+    (let ((cmd (claude-repl--notification-click-command "ws-a")))
+      (should (string-match-p "/opt/emacs/bin/emacsclient" cmd))
+      (should (string-match-p "--eval" cmd)))))
+
+(ert-deftest claude-repl-test-click-command-embeds-activate-form-with-ws ()
+  "The click command should eval `claude-repl--notification-activate' with WS."
+  (let ((cmd (claude-repl--notification-click-command "DWC/foo")))
+    (should (string-match-p "claude-repl--notification-activate" cmd))
+    (should (string-match-p "DWC/foo" cmd))))
+
+(ert-deftest claude-repl-test-click-command-shell-quotes-executable-with-spaces ()
+  "An emacsclient path with spaces must be shell-quoted in the click command."
+  (let ((claude-repl-emacsclient-executable "/Applications/Emacs.app/a b/emacsclient"))
+    (let ((cmd (claude-repl--notification-click-command "ws-a")))
+      ;; The raw space-containing path must be wrapped so the shell sees one arg.
+      (should (string-match-p (regexp-quote (shell-quote-argument
+                                             claude-repl-emacsclient-executable))
+                              cmd)))))
+
+;;;; ---- Tests: claude-repl--notification-activate ----
+
+(ert-deftest claude-repl-test-activate-jumps-to-workspace ()
+  "Activate should jump to the given workspace."
+  (let (jumped)
+    (cl-letf (((symbol-function 'claude-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl-jump-to-workspace)
+               (lambda (ws &optional _no-flash) (setq jumped ws)))
+              ((symbol-function 'select-frame-set-input-focus) (lambda (&rest _) nil))
+              ((symbol-function 'selected-frame) (lambda () 'frame)))
+      (claude-repl--notification-activate "ws-a")
+      (should (equal jumped "ws-a")))))
+
+(ert-deftest claude-repl-test-activate-focuses-selected-frame ()
+  "Activate should focus the selected frame so Emacs comes forward."
+  (let (focused)
+    (cl-letf (((symbol-function 'claude-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl-jump-to-workspace) (lambda (&rest _) nil))
+              ((symbol-function 'selected-frame) (lambda () 'the-frame))
+              ((symbol-function 'select-frame-set-input-focus)
+               (lambda (frame) (setq focused frame))))
+      (claude-repl--notification-activate "ws-a")
+      (should (eq focused 'the-frame)))))
+
+(ert-deftest claude-repl-test-activate-nil-ws-focuses-without-jump ()
+  "Activate with a nil WS should focus Emacs but not attempt a jump."
+  (let ((jumped nil) (focused nil))
+    (cl-letf (((symbol-function 'claude-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl-jump-to-workspace)
+               (lambda (&rest _) (setq jumped t)))
+              ((symbol-function 'selected-frame) (lambda () 'frame))
+              ((symbol-function 'select-frame-set-input-focus)
+               (lambda (&rest _) (setq focused t))))
+      (claude-repl--notification-activate nil)
+      (should-not jumped)
+      (should focused))))
+
+;;;; ---- Tests: claude-repl--ensure-server ----
+
+(ert-deftest claude-repl-test-ensure-server-starts-when-not-running ()
+  "ensure-server should start the server when none is running."
+  (let (started)
+    (cl-letf (((symbol-function 'require) (lambda (&rest _) t))
+              ((symbol-function 'server-running-p) (lambda () nil))
+              ((symbol-function 'server-start) (lambda (&rest _) (setq started t))))
+      (let ((noninteractive nil))
+        (claude-repl--ensure-server))
+      (should started))))
+
+(ert-deftest claude-repl-test-ensure-server-noop-when-already-running ()
+  "ensure-server should not start a second server when one already runs."
+  (cl-letf (((symbol-function 'require) (lambda (&rest _) t))
+            ((symbol-function 'server-running-p) (lambda () t))
+            ((symbol-function 'server-start)
+             (lambda (&rest _) (error "server-start must not run when already running"))))
+    (let ((noninteractive nil))
+      (claude-repl--ensure-server))))
+
+(ert-deftest claude-repl-test-ensure-server-noop-in-batch ()
+  "ensure-server should be a no-op under `noninteractive' (batch/ERT)."
+  (cl-letf (((symbol-function 'require)
+             (lambda (&rest _) (error "require must not run in batch")))
+            ((symbol-function 'server-start)
+             (lambda (&rest _) (error "server-start must not run in batch"))))
+    (let ((noninteractive t))
+      (claude-repl--ensure-server))))
 
 (provide 'test-notifications)
 
