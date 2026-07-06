@@ -3601,22 +3601,66 @@ the resolver's stdout/stderr + exit code."
   "Legacy callers (no TARGET-WS argument) get the old behavior: the
 temp buffer is killed after the process completes, so we don't leak
 anonymous \" *claude-auto-resolve*\" buffers."
-  (let ((claude-repl-auto-resolve-conflicts-program "true")
-        (claude-repl-auto-resolve-conflicts-model "test-model")
-        (claude-repl-auto-resolve-conflicts-extra-args nil)
-        (claude-repl-auto-resolve-conflicts-timeout 5)
-        (pre-count (length (cl-remove-if-not
-                            (lambda (b) (string-prefix-p " *claude-auto-resolve*"
-                                                         (buffer-name b)))
-                            (buffer-list)))))
+  (let* ((claude-repl-auto-resolve-conflicts-program "true")
+         (claude-repl-auto-resolve-conflicts-model "test-model")
+         (claude-repl-auto-resolve-conflicts-extra-args nil)
+         (claude-repl-auto-resolve-conflicts-timeout 5)
+         (anon-p (lambda (b)
+                   (string-prefix-p " *claude-auto-resolve*" (buffer-name b))))
+         ;; Snapshot the exact anon buffers alive BEFORE the call and assert
+         ;; only on the anon buffers this invocation NEWLY leaves alive
+         ;; (set difference), never a global count.  A global pre/post count
+         ;; is racy: `claude-repl--invoke-auto-resolve-claude' busy-waits via
+         ;; `accept-process-output', which services pending sentinels/timers
+         ;; from OTHER tests' lingering resolver processes.  If such a
+         ;; callback kills a pre-existing anon buffer mid-wait, a count
+         ;; comparison sees post=pre-1 and fails spuriously.  The set
+         ;; difference inspects only buffers created during this call, so
+         ;; unrelated concurrent kills can no longer perturb it.
+         (before (cl-remove-if-not anon-p (buffer-list))))
     (let ((result (claude-repl--invoke-auto-resolve-claude
                    default-directory "prompt-body")))
       (should (equal result 0))
-      (let ((post-count (length (cl-remove-if-not
-                                 (lambda (b) (string-prefix-p " *claude-auto-resolve*"
-                                                              (buffer-name b)))
-                                 (buffer-list)))))
-        (should (= pre-count post-count))))))
+      (let ((leaked (cl-remove-if
+                     (lambda (b) (memq b before))
+                     (cl-remove-if-not anon-p (buffer-list)))))
+        (should (null leaked))))))
+
+(ert-deftest claude-repl-test-invoke-auto-resolve-claude-no-leak-despite-concurrent-anon-kill ()
+  "Regression for the intermittent buffer-accounting flake: the legacy
+\(no TARGET-WS) path must not leak its OWN anonymous temp buffer even
+when an UNRELATED anon buffer is killed during the process wait —
+exactly what a lingering resolver sentinel from another test does when
+serviced by this call's `accept-process-output' busy-wait.  Asserting
+on the set of anon buffers newly left alive (rather than a global
+count) makes the invariant hold regardless of that concurrent churn;
+the old global-count assertion would have seen post=pre-1 here and
+failed."
+  (let* ((claude-repl-auto-resolve-conflicts-program "true")
+         (claude-repl-auto-resolve-conflicts-model "test-model")
+         (claude-repl-auto-resolve-conflicts-extra-args nil)
+         (claude-repl-auto-resolve-conflicts-timeout 5)
+         (anon-p (lambda (b)
+                   (string-prefix-p " *claude-auto-resolve*" (buffer-name b))))
+         ;; A pre-existing anon buffer standing in for one leaked by another
+         ;; test; captured into BEFORE so it is not itself counted as a leak.
+         (decoy (generate-new-buffer " *claude-auto-resolve*"))
+         (before (cl-remove-if-not anon-p (buffer-list))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'claude-repl--wait-for-process-exit)
+                   (lambda (&rest _)
+                     ;; Simulate the concurrent kill that a sibling test's
+                     ;; lingering sentinel would perform mid-wait.
+                     (when (buffer-live-p decoy) (kill-buffer decoy))
+                     0)))
+          (let ((result (claude-repl--invoke-auto-resolve-claude
+                         default-directory "prompt-body")))
+            (should (equal result 0))
+            (let ((leaked (cl-remove-if
+                           (lambda (b) (memq b before))
+                           (cl-remove-if-not anon-p (buffer-list)))))
+              (should (null leaked)))))
+      (when (buffer-live-p decoy) (kill-buffer decoy)))))
 
 (ert-deftest claude-repl-test-invoke-auto-resolve-claude-erases-prior-output ()
   "A second resolver invocation overwrites the prior buffer's content
