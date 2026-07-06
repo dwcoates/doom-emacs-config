@@ -546,6 +546,10 @@
   "`claude-repl-vterm-font-scale' should default to an enlarging value."
   (should (> claude-repl-vterm-font-scale 1.0)))
 
+(ert-deftest claude-repl-test-vterm-font-scale-default-value ()
+  "`claude-repl-vterm-font-scale' should default to the enlarged 1.35 scale."
+  (should (= claude-repl-vterm-font-scale 1.35)))
+
 (ert-deftest claude-repl-test-apply-vterm-font-scale-remaps-default-height ()
   "apply-vterm-font-scale should remap the default face height by the scale."
   (claude-repl-test--with-temp-buffer " *test-font-scale*"

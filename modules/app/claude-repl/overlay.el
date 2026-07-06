@@ -145,7 +145,7 @@ Shared between `claude-repl--vterm-color-advice' and buffer setup code.")
     (face-remap-add-relative 'default :background hex)
     (face-remap-add-relative 'fringe :background hex)))
 
-(defcustom claude-repl-vterm-font-scale 1.2
+(defcustom claude-repl-vterm-font-scale 1.35
   "Font size multiplier for Claude output (vterm) buffers.
 A number relative to the default face height, where 1.0 leaves the font
 unchanged and larger values enlarge it.  Applied buffer-locally via
