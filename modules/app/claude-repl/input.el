@@ -580,10 +580,12 @@ user-typed Enter inside the vterm buffer would take.  Distinct from
 writes a raw `\\C-m'/`\\C-j' byte directly to the PTY via
 `process-send-string'.
 
-Used for the empty-input bare-RET branch of `claude-repl--send', where
-the keystroke needs to be framed as a real keyboard event for Claude's
-TUI to register it — the direct-PTY-write path lands the byte at the
-PTY but does not always produce a visible action in Ink-based TUIs.
+Used for the empty-input bare-RET branch of `claude-repl--send' AND
+for the submission Return of the bracketed-paste pipeline (via
+`claude-repl--bracketed-send-return'), where the keystroke needs to be
+framed as a real keyboard event for Claude's TUI to register it — the
+direct-PTY-write path lands the byte at the PTY but does not always
+produce a visible action in Ink-based TUIs.
 
 When `vterm--term' is nil — meaning `vterm-send-key' would silently
 no-op — logs a WARNING instead, making this common silent-failure mode
@@ -646,8 +648,24 @@ When ON-SETTLE is non-nil, call it after the finalize is complete."
 (defun claude-repl--bracketed-send-return (vterm-buf &optional on-settle)
   "Send Return to VTERM-BUF and schedule a finalize step.
 Used as the first deferred action in the bracketed paste pipeline.
-ON-SETTLE, if non-nil, is forwarded to `claude-repl--bracketed-finalize'."
-  (claude-repl--vterm-send-return-logged "bracketed-send-return")
+ON-SETTLE, if non-nil, is forwarded to `claude-repl--bracketed-finalize'.
+
+Routes the SUBMISSION Return through libvterm's keyboard handler via
+`claude-repl--vterm-send-return-key-logged' (`vterm-send-key
+\"<return>\"') rather than the raw `process-send-string' path of
+`claude-repl--vterm-send-return-logged'.  This is the return that
+actually submits a non-empty prompt, and Claude's Ink-based TUI does
+not always register a raw `\\C-m'/`\\C-j' byte as an Enter keystroke —
+the same intermittent-RET failure fixed for the empty-buffer bare-RET
+branch in commit 190622a7.  A preceding `vterm-send-string' was assumed
+to \"prime\" the raw return into working, but that assumption did not
+hold: pressing RET on a non-empty input buffer sometimes failed to
+submit.  The libvterm keyboard path mirrors a user-typed Enter and
+registers reliably.  The secondary Return in
+`claude-repl--bracketed-finalize' stays on the raw best-effort path so
+this fix does not turn the pipeline's double-nudge into a guaranteed
+double-submit."
+  (claude-repl--vterm-send-return-key-logged "bracketed-send-return")
   (claude-repl--vterm-deferred-action
    vterm-buf claude-repl-bracketed-finalize-delay
    (if on-settle
@@ -678,13 +696,14 @@ to avoid terminal truncation."
 (defun claude-repl--send-input-to-vterm (vterm-buf input &optional on-settle)
   "Send INPUT string to VTERM-BUF using bracketed paste mode.
 Always uses bracketed paste to ensure proper separation between the
-character stream (delivered through libvterm's keyboard handler via
-`vterm--update') and the submission Return (delivered via
-`process-send-string').  In direct mode these two I/O paths can
-race — the Return byte may arrive at the PTY before libvterm has
-flushed all keyboard output, causing the submission to be lost.
-When ON-SETTLE is non-nil, it is called once the send is fully
-committed (after all deferred actions complete).
+character stream and the submission Return, both delivered through
+libvterm's keyboard handler via `vterm--update' — the character stream
+by `vterm-send-string' and the submission Return by `vterm-send-key
+\"<return>\"' (see `claude-repl--bracketed-send-return').  A deferred
+delay sequences the Return after the paste so the two do not race.
+The secondary finalize Return remains on the raw `process-send-string'
+best-effort path.  When ON-SETTLE is non-nil, it is called once the
+send is fully committed (after all deferred actions complete).
 
 This is the lowest-level funnel for every string send (full sends,
 predefined prompts, backoff retries, slash-mode pastes), so it owns
