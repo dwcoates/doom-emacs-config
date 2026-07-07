@@ -3276,21 +3276,43 @@ The dead-buffer check happens inside `run-deferred-action' at callback time."
 ;;; bracketed-send-return: sends return + schedules finalize
 
 (ert-deftest claude-repl-test-bracketed-send-return ()
-  "`claude-repl--bracketed-send-return' sends return and schedules finalize via deferred action."
-  (let ((return-called nil)
-        (deferred-args nil))
-    (claude-repl-test--with-temp-buffer "*test-bracketed-return*"
-      (setq-local vterm--term 'fake-term)
-      (cl-letf (((symbol-function 'vterm-send-return)
-                 (lambda () (setq return-called t)))
-                ((symbol-function 'claude-repl--vterm-deferred-action)
-                 (lambda (&rest args) (setq deferred-args args))))
-        (claude-repl--bracketed-send-return (current-buffer))
-        (should return-called)
-        ;; Deferred action should be scheduled with the buffer and 0.05 delay
-        (should deferred-args)
-        (should (eq (car deferred-args) (current-buffer)))
-        (should (= (cadr deferred-args) 0.05))))))
+  "`claude-repl--bracketed-send-return' sends return and schedules finalize via deferred action.
+The submission return goes through the libvterm keyboard handler
+\(`vterm-send-key \"<return>\"'), not the raw `process-send-string'
+path — see the regression note below."
+  (claude-repl-test--with-clean-state
+    (let ((key-arg nil)
+          (deferred-args nil))
+      (claude-repl-test--with-temp-buffer "*test-bracketed-return*"
+        (setq-local vterm--term 'fake-term)
+        (cl-letf (((symbol-function 'vterm-send-key)
+                   (lambda (key &rest _) (setq key-arg key)))
+                  ((symbol-function 'claude-repl--vterm-deferred-action)
+                   (lambda (&rest args) (setq deferred-args args))))
+          (claude-repl--bracketed-send-return (current-buffer))
+          (should (equal key-arg "<return>"))
+          ;; Deferred action should be scheduled with the buffer and 0.05 delay
+          (should deferred-args)
+          (should (eq (car deferred-args) (current-buffer)))
+          (should (= (cadr deferred-args) 0.05)))))))
+
+(ert-deftest claude-repl-test-bracketed-send-return-avoids-raw-pty-write ()
+  "`claude-repl--bracketed-send-return' never submits via raw `vterm-send-return'.
+Regression guard for the intermittent-RET bug: Claude's Ink TUI does
+not always register a raw `\\C-m'/`\\C-j' byte as an Enter keystroke, so
+the non-empty-input submission return must route through libvterm's
+keyboard handler (`vterm-send-key') — mirroring the empty-buffer
+bare-RET fix in commit 190622a7."
+  (claude-repl-test--with-clean-state
+    (let ((raw-called nil))
+      (claude-repl-test--with-temp-buffer "*test-bracketed-return-noraw*"
+        (setq-local vterm--term 'fake-term)
+        (cl-letf (((symbol-function 'vterm-send-key) #'ignore)
+                  ((symbol-function 'vterm-send-return)
+                   (lambda () (setq raw-called t)))
+                  ((symbol-function 'claude-repl--vterm-deferred-action) #'ignore))
+          (claude-repl--bracketed-send-return (current-buffer))
+          (should-not raw-called))))))
 
 ;;; exit-slash-mode: already disabled (idempotent)
 
