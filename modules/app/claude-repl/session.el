@@ -67,6 +67,17 @@ been judged worse than essentially-empty input."
                  (string :tag "Custom system prompt"))
   :group 'claude-repl)
 
+(defcustom claude-repl-interactive-model "opus"
+  "Model alias passed to `--model' for interactive Claude sessions.
+When non-nil, passed to the Claude CLI as `--model <model>' so every
+interactive workspace uses this model.  When nil, no `--model' flag is
+added and Claude uses its configured default.  Does NOT affect headless
+`claude -p' invocations such as workspace generation or prompt summaries
+— those have their own model variables."
+  :type '(choice (const :tag "Use Claude's default" nil)
+                 (string :tag "Model alias"))
+  :group 'claude-repl)
+
 (defcustom claude-repl-notify-debounce-seconds 2.0
   "Minimum seconds between desktop notifications for the same workspace."
   :type 'number
@@ -440,12 +451,16 @@ should resume its most recent session via `--continue'.  FORK-SESSION-ID
 is a session UUID to fork from (used when a new worktree/env needs to
 carry a conversation across from another env — the target env has no
 local history yet, so `--continue' won't find anything).  PERM-FLAG is
-the permission flag string or nil.  Also appends a `--system-prompt'
-flag when `claude-repl-system-prompt' is non-nil.  Returns a trimmed
-flags string."
+the permission flag string or nil.  Also appends a `--model' flag when
+`claude-repl-interactive-model' is non-nil and a `--system-prompt' flag
+when `claude-repl-system-prompt' is non-nil.  Returns a trimmed flags
+string."
   (let ((flags (string-trim
                 (mapconcat #'identity
                            (delq nil (list
+                                      ;; Pin the model for every interactive session.
+                                      (when claude-repl-interactive-model
+                                        (format "--model %s" claude-repl-interactive-model))
                                       ;; Fork from another session (cross-env/worktree seed).
                                       (when fork-session-id
                                         (format "--resume %s --fork-session" fork-session-id))
