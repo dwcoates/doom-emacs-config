@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>claude-repl</title>
+  </head>
+  <body>
+    <header id="topbar">
+      <span id="conn-status">connecting…</span>
+      <span id="spinner" class="spinner">●</span>
+      <span id="usage-chip"></span>
+      <select id="mode-select" title="permission mode">
+        <option value="default">default</option>
+        <option value="acceptEdits">acceptEdits</option>
+        <option value="bypassPermissions">bypassPermissions</option>
+        <option value="plan">plan</option>
+      </select>
+      <button id="interrupt-btn" title="interrupt the current turn">stop</button>
+    </header>
+    <main id="feed"></main>
+    <footer id="composer">
+      <textarea id="composer-input" rows="3" placeholder="Message Claude… (Enter to send, Shift+Enter for newline)"></textarea>
+      <button id="send-btn">send</button>
+    </footer>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
