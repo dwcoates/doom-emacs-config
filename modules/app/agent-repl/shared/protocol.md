@@ -119,7 +119,8 @@ interface PermissionDecisionCmd {
 #### `interrupt`
 
 Abort the in-flight assistant turn. Maps to the SDK `query.interrupt()`
-method.
+method. The aborted turn still terminates with a `result` event, whose
+`subtype` is `"aborted"`.
 
 ```ts
 interface InterruptCmd {
@@ -169,6 +170,24 @@ interface ReadyEvt {
   shim_version: string;               // semver of the shim build
   sdk_version: string;                // @anthropic-ai/claude-agent-sdk version
   permission_mode: PermissionMode;    // initial mode
+}
+```
+
+#### `ack`
+
+Success acknowledgement for a command that has no richer response event
+of its own (`set-permission-mode`, `shutdown`). Commands whose effect is
+observable through a dedicated event stream (`user-message` → stream
+events, `permission-decision` → the unblocked turn) do not produce an
+`ack`. In particular, the daemon emits the Layer-2
+`permission-mode-changed` frame only after receiving the `ack` for the
+corresponding `set-permission-mode` command.
+
+```ts
+interface AckEvt {
+  type: "ack";
+  session_id: SessionId;
+  request_id: RequestId;              // matches the acknowledged command
 }
 ```
 
@@ -235,7 +254,11 @@ interface ResultEvt {
   type: "result";
   session_id: SessionId;
   uuid: string;
-  subtype: "success" | "error_max_turns" | "error_during_execution";
+  subtype:
+    | "success"
+    | "error_max_turns"
+    | "error_during_execution"
+    | "aborted";                      // turn ended by an `interrupt` command
   duration_ms: number;
   duration_api_ms: number;
   num_turns: number;
@@ -309,6 +332,25 @@ interface ErrorEvt {
 }
 ```
 
+#### `closed`
+
+Terminal event on the shim's stdout: the SDK query has ended and the
+shim is about to exit. Emitted for clean shutdowns and abnormal query
+termination alike. The daemon's process supervisor keys off this event
+(plus the eventual process exit code) rather than inferring lifecycle
+from `result` events, which are per-turn and absent when the query dies
+while idle. No further frames follow a `closed`.
+
+```ts
+interface ClosedEvt {
+  type: "closed";
+  session_id: SessionId;
+  request_id?: RequestId;             // present iff caused by a `shutdown` command
+  exit_code: number;                  // code the shim process will exit with
+  reason: "shutdown" | "sdk_end" | "fatal_error";
+}
+```
+
 ---
 
 ## Layer 2 — Go daemon → webapp (WebSocket NDJSON)
@@ -317,10 +359,10 @@ The daemon exposes a per-session WebSocket endpoint (e.g.
 `/sessions/{id}/stream`). Frames are NDJSON-encoded WebSocket text
 messages — one JSON object per frame, never split across frames. The
 direction is bi-directional but webapp→daemon traffic is limited to
-acknowledgements and UI-originated commands (`user-message`,
-`permission-decision`, `interrupt`, `set-permission-mode`) which
-re-use the Layer-1 command shapes verbatim, so this section enumerates
-only **daemon → webapp** frames.
+UI-originated commands (`user-message`, `permission-decision`,
+`interrupt`, `set-permission-mode`) which re-use the Layer-1 command
+shapes verbatim, plus the `replay-request` frame (§2.10), so this
+section otherwise enumerates only **daemon → webapp** frames.
 
 Every frame carries a `seq` (monotonic, per-session) so the SPA store
 can detect drops and request a snapshot replay.
@@ -363,7 +405,11 @@ End-of-turn marker. Drives the SPA "spinner off" + usage chip.
 ```ts
 interface ResultFrame extends WsEnvelope {
   type: "result";
-  subtype: "success" | "error_max_turns" | "error_during_execution";
+  subtype:
+    | "success"
+    | "error_max_turns"
+    | "error_during_execution"
+    | "aborted";                      // turn ended by an interrupt
   duration_ms: number;
   duration_api_ms: number;
   num_turns: number;
@@ -417,10 +463,32 @@ interface ErrorFrame extends WsEnvelope {
 }
 ```
 
-### 2.3 Assistant text — streaming
+### 2.3 User turns
+
+#### `user-turn`
+
+Daemon broadcast of an accepted `user-message` command so every
+connected tab (including the submitter) renders the turn from the same
+authoritative frame, mirroring how `permission-resolved` converges tabs.
+
+```ts
+interface UserTurnFrame extends WsEnvelope {
+  type: "user-turn";
+  request_id: RequestId;              // matches the originating user-message
+  content: ContentBlock[];            // normalized: string shorthand expanded
+}
+```
+
+### 2.4 Assistant text — streaming
 
 The daemon accumulates `stream-event` deltas into logical "text blocks"
 and emits the following frames for the SPA's `TextStream` component.
+
+**Block-closure invariant**: every `*-start` frame in §2.4–2.6 is
+eventually followed by its matching closing frame (`text-end`,
+`thinking-end`, `tool-use-input-end`) before the turn's `result` frame
+— including turns that end via interrupt or error. The SPA never has to
+garbage-collect dangling open blocks.
 
 #### `text-start`
 
@@ -455,7 +523,7 @@ interface TextEndFrame extends WsEnvelope {
 }
 ```
 
-### 2.4 Thinking blocks
+### 2.5 Thinking blocks
 
 Streamed similarly to text but rendered as a collapsible section by
 the `Thinking` component.
@@ -481,7 +549,7 @@ interface ThinkingEndFrame extends WsEnvelope {
 }
 ```
 
-### 2.5 Tool-use cards
+### 2.6 Tool-use cards
 
 The daemon emits one `tool-use-start` per tool invocation, optional
 `tool-use-input-delta` frames as the SDK streams `input_json_delta`s,
@@ -564,7 +632,7 @@ interface ToolUseProgressFrame extends WsEnvelope {
 }
 ```
 
-### 2.6 Permission prompts
+### 2.7 Permission prompts
 
 Emitted whenever the shim raises a `permission-request`. The SPA mounts
 a `PermissionPrompt` modal/card keyed by `request_id`.
@@ -588,19 +656,22 @@ interface PermissionRequestFrame extends WsEnvelope {
 
 #### `permission-resolved`
 
-Echoes the resolution so all connected SPA tabs converge.
+Echoes the resolution so all connected SPA tabs converge. A `"cancel"`
+decision means no user decision was made: the pending request was
+invalidated by an interrupt, shim death, or session shutdown, and the
+SPA must dismiss the stale prompt.
 
 ```ts
 interface PermissionResolvedFrame extends WsEnvelope {
   type: "permission-resolved";
   request_id: RequestId;
-  decision: "allow" | "deny";
-  message?: string;                   // for deny
+  decision: "allow" | "deny" | "cancel";
+  message?: string;                   // for deny/cancel
   updated_input?: unknown;            // for allow w/ edits
 }
 ```
 
-### 2.7 Usage / model chip
+### 2.8 Usage / model chip
 
 #### `usage`
 
@@ -629,15 +700,38 @@ interface PermissionModeChangedFrame extends WsEnvelope {
 }
 ```
 
-### 2.8 System / slash-command frames
+### 2.9 System / slash-command frames
+
+Layer-1 `system` events with subtype `tool_use_progress` are NOT
+forwarded here; the daemon maps them to the dedicated
+`tool-use-progress` frame (§2.6) instead.
 
 ```ts
 interface SystemFrame extends WsEnvelope {
   type: "system";
-  subtype: "init" | "slash_command" | "tool_use_progress";
+  subtype: "init" | "slash_command";
   data: unknown;                      // pass-through from Layer-1 SystemEvt.data
 }
 ```
+
+### 2.10 Resume / replay
+
+The one webapp→daemon frame that is not a shared Layer-1 command shape.
+When the SPA detects a gap in `seq` it requests a replay:
+
+```ts
+interface ReplayRequestFrame {
+  type: "replay-request";
+  from_seq: number;                   // first seq the SPA is missing
+}
+```
+
+- The daemon re-sends its retained frames with `seq >= from_seq`, in
+  order, preserving their original `seq` and `ts` values.
+- If `from_seq` has already been evicted from the retention window, the
+  daemon instead sends a fresh `hello` whose `resume_from_seq` names the
+  earliest retained frame, and the SPA rebuilds its store from that
+  point (discarding local state older than the gap).
 
 ---
 
@@ -649,9 +743,9 @@ interface SystemFrame extends WsEnvelope {
 - Each layer carries a version string at handshake (`shim_version` /
   `daemon_version`); breaking changes bump the minor version and are
   gated behind a capability list negotiated at handshake (future work).
-- `seq` (Layer 2 only) lets the SPA detect drops and request a
-  snapshot resume; the daemon retains the last N frames per session
-  for replay.
+- `seq` (Layer 2 only) lets the SPA detect drops and request a replay
+  via `replay-request` (§2.10); the daemon retains the last N frames
+  per session for this.
 
 ## Non-goals
 
@@ -714,8 +808,19 @@ shape. The daemon ultimately needs the decomposed forms.
 
 The shim does not yet handle `set-permission-mode`.
 
-**7. `closed` event with `exitCode`**
+**7. `closed` event field shapes**
 
-The shim emits a `closed` event (not in this spec) with an `exitCode` field
-when the query terminates. This is useful for the daemon's process supervisor;
-consider formalising it in the spec or folding the information into `result`.
+The shim already emits a `closed` event when the query terminates; the spec
+now formalises it as `ClosedEvt` (§1.2). The shim's `exitCode` (camelCase)
+must become `exit_code`, and the `session_id`, `reason`, and optional
+`request_id` fields must be added.
+
+**8. Missing `ack` event**
+
+The shim does not yet emit the `ack` event (§1.2) confirming
+`set-permission-mode` / `shutdown` commands.
+
+**9. Missing `aborted` result subtype**
+
+The shim passes through only the SDK's native result subtypes; it must map
+an interrupted turn's result to `subtype: "aborted"` per this spec.
