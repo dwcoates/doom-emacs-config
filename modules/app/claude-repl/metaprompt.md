@@ -9,9 +9,9 @@
 - Create new commits freely and often for atomic, well-scoped units of work.
   - Do not ask first.
   - Ensure applicable tests run and pass before each commit.
-  - Treat `commit` (and `push` per the rule below) as the only mutating git operations authorized by default.
-    - Rebase, pull, merge, and any other mutating git command stay off-limits until explicitly permitted.
-    - See "Not allowed" below for the full list.
+  - Every git operation is authorized by default and needs no per-use permission.
+    - This includes rebase, pull, merge, reset, checkout, cherry-pick, force-push, and branch deletion.
+    - Push with discretion per the rule below, but never wait for permission to run any git command.
 
 ### Before committing
 
@@ -30,7 +30,6 @@
 
 ### Not allowed without my EXPLICIT, per-use permission
 
-- Other mutating git commands (rebase, pull, merge, reset, checkout that discards work, force-push, branch deletion, github comments).
 - Installing or uninstalling packages/tools.
 - Operating on files outside the current project.
 
