@@ -291,6 +291,27 @@ interface PermissionRequestEvt {
 }
 ```
 
+#### `tool-result`
+
+Tool results surface from the SDK as user-role messages carrying
+`tool_result` content blocks; Layer 2's `tool-use-result` frame (§2.6)
+needs them, so the shim decomposes each such block into one
+`tool-result` event. (Added after the original event set as a
+forward-compatible extension — older receivers ignore it per the
+unknown-`type` rule.)
+
+```ts
+interface ToolResultEvt {
+  type: "tool-result";
+  session_id: SessionId;
+  uuid: string;
+  parent_tool_use_id?: ToolUseId;
+  tool_use_id: ToolUseId;
+  is_error: boolean;
+  content: string | Array<{ type: "text"; text: string }>;
+}
+```
+
 #### `system`
 
 System frames from the SDK (`SDKSystemMessage`) carrying init/compact/
@@ -758,69 +779,20 @@ interface ReplayRequestFrame {
 
 ---
 
-## Current shim scaffold implementation notes
+## Implementation notes
 
-> **Status**: `shim/src/protocol.ts` was written before this document landed.
-> The spec above is authoritative; the shim needs to be updated to align.
-> This section tracks the deltas so nothing is lost.
+> **Status**: the shim (`shim/src/`) was rewritten from scratch against
+> this spec and conforms to §1 in full, including the `tool-result`
+> extension event. The earlier pre-spec scaffold (and the nine
+> divergences this section used to track) is gone.
 
-### Divergences to resolve
-
-The shim (`shim/src/protocol.ts` as of the scaffold) differs from this spec
-in the following ways. Each is a TODO before the shim is connected to the Go
-daemon.
-
-**1. Discriminant field: `kind` vs `type`**
-
-The shim uses `kind` as its frame discriminant; this spec uses `type`.
-The shim's `decodeLine()` and all union types must be updated to use `type`.
-
-**2. Correlation: `seq` counter vs `request_id`**
-
-The shim stamps every outbound frame with a monotonic `seq` counter and uses
-a separate `requestId` (camelCase) field for permission correlation.
-This spec uses `request_id` (snake_case) on commands and events as the
-correlation key, with no per-frame `seq` on Layer 1.
-The shim's `SeqCounter`, per-frame `seq`, and `requestId` field should be
-replaced with `request_id` per this spec; `seq` is only used on the Layer 2
-WebSocket envelope.
-
-**3. Permission-decision payload: `result` vs `decision`**
-
-The shim's `PermissionDecisionCommand` wraps the SDK `PermissionResult`
-directly under a `result` key.
-This spec uses a `decision` key with an inline `behavior`/`message` shape.
-
-**4. Ready event fields**
-
-The shim's `ReadyEvent` emits only `{ type, seq, version }`.
-This spec's `ReadyEvt` requires `session_id`, `shim_version`, `sdk_version`,
-and `permission_mode`.
-
-**5. SDK message passthrough: `sdk-message` vs typed events**
-
-The shim emits a single `sdk-message` event carrying the raw `SDKMessage`
-union. This spec decomposes that into `stream-event`, `assistant-message`,
-`result`, `permission-request`, `system`, and `error` — each with a defined
-shape. The daemon ultimately needs the decomposed forms.
-
-**6. Missing `set-permission-mode` command**
-
-The shim does not yet handle `set-permission-mode`.
-
-**7. `closed` event field shapes**
-
-The shim already emits a `closed` event when the query terminates; the spec
-now formalises it as `ClosedEvt` (§1.2). The shim's `exitCode` (camelCase)
-must become `exit_code`, and the `session_id`, `reason`, and optional
-`request_id` fields must be added.
-
-**8. Missing `ack` event**
-
-The shim does not yet emit the `ack` event (§1.2) confirming
-`set-permission-mode` / `shutdown` commands.
-
-**9. Missing `aborted` result subtype**
-
-The shim passes through only the SDK's native result subtypes; it must map
-an interrupted turn's result to `subtype: "aborted"` per this spec.
+- The shim maps SDK result subtypes outside the Layer-1 enum
+  (`error_max_budget_usd`, …) to `error_during_execution`; `success`
+  and `error_max_turns` pass through, and an interrupted turn becomes
+  `aborted`.
+- SDK message types with no Layer-1 representation (`auth_status`,
+  system `status` / `hook_response`, …) are dropped by the shim rather
+  than forwarded.
+- Loss of the shim's stdin (daemon death) is treated as an implicit
+  `shutdown`: the input stream is drained and `closed` is emitted with
+  `reason: "shutdown"` and no `request_id`.
