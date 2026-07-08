@@ -242,6 +242,13 @@ Default is near-black."
   "Face for the pending-prompt count in expanded detail view."
   :group 'claude-repl)
 
+(defface claude-repl-drawer-detail-merged-in
+  '((t :foreground "spring green"))
+  "Face for a merged-in workspace name in expanded detail view.
+Each entry lists a workspace whose commits were successfully merged
+into this workspace (see `:merged-in-workspaces')."
+  :group 'claude-repl)
+
 ;;;; Mode -------------------------------------------------------------------
 
 (defvar claude-repl-drawer-mode-map
@@ -1074,6 +1081,7 @@ updates as ages cross the s/m/h boundaries (`--format-event-age')."
                   (claude-repl--ws-get ws :priority)
                   (claude-repl--ws-get ws :last-prompt-summary)
                   (claude-repl--ws-get ws :group-key)
+                  (claude-repl--ws-get ws :merged-in-workspaces)
                   (claude-repl-drawer--marked-p ws)
                   (claude-repl-drawer--expanded-p ws))
             ws-sig))
@@ -1687,7 +1695,8 @@ invokes git.  Caller is `--render-workspace-expanded'."
          (last-commit-time (claude-repl--ws-get ws :detail-last-commit-time))
          (dirty-count  (claude-repl--ws-get ws :detail-dirty-count))
          (last-prompt-time (claude-repl--ws-get ws :last-prompt-time))
-         (pending-count (length (claude-repl--ws-get ws :pending-prompts))))
+         (pending-count (length (claude-repl--ws-get ws :pending-prompts)))
+         (merged-in    (claude-repl--ws-get ws :merged-in-workspaces)))
     (cl-flet ((line (label value face)
                 (insert detail-prefix
                         (propertize (concat label " ") 'face 'shadow)
@@ -1722,7 +1731,13 @@ invokes git.  Caller is `--render-workspace-expanded'."
               'claude-repl-drawer-detail-last-prompt))
       (when (and pending-count (> pending-count 0))
         (line "pending:" (format "%d prompt(s)" pending-count)
-              'claude-repl-drawer-detail-pending)))))
+              'claude-repl-drawer-detail-pending))
+      ;; List every workspace whose commits were successfully merged
+      ;; into WS.  One "merged in:" line per workspace so the list stays
+      ;; scannable in the narrow drawer regardless of length.
+      (dolist (merged-ws merged-in)
+        (line "merged in:" merged-ws
+              'claude-repl-drawer-detail-merged-in)))))
 
 (defvar claude-repl-drawer--display-action
   `((display-buffer-in-side-window)
