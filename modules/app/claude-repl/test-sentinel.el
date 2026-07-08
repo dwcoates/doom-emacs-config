@@ -423,6 +423,27 @@ so a subsequent successful turn isn't gated on a stale counter."
     (should-not (claude-repl--ws-stop-received-p "ws1"))
     (should (zerop (claude-repl--ws-pending-subagents "ws1")))))
 
+(ert-deftest claude-repl-test-on-stop-failure-event-arms-no-retry-timer ()
+  "on-stop-failure-event does NOT schedule any automatic retry timer.
+The auto `try again' retry was removed because StopFailure is not
+guaranteed to fire only on genuine API errors."
+  (claude-repl-test--with-clean-state
+    (let ((timer-armed nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (&rest _args) (setq timer-armed t) nil)))
+        (claude-repl--on-stop-failure-event "ws1" "/some/dir"))
+      (should-not timer-armed))))
+
+(ert-deftest claude-repl-test-on-stop-failure-event-sends-no-auto-input ()
+  "on-stop-failure-event does NOT auto-send any prompt to the vterm.
+Recovery from a stop-failure is left entirely to the user."
+  (claude-repl-test--with-clean-state
+    (let ((input-sent nil))
+      (cl-letf (((symbol-function 'claude-repl--send-input-to-vterm)
+                 (lambda (&rest _args) (setq input-sent t))))
+        (claude-repl--on-stop-failure-event "ws1" "/some/dir"))
+      (should-not input-sent))))
+
 ;;;; ---- Tests: dispatch-alist routes new prefixes ----
 
 (ert-deftest claude-repl-test-sentinel-dispatches-subagent-start ()

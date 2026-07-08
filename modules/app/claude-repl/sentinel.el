@@ -348,13 +348,18 @@ Sets `:claude-state' to `:stop-failed' (visually distinct from `:dead'
 since the vterm session is still alive and re-promptable) and clears
 the Stop / SubagentStop tracking so a subsequent successful turn isn't
 gated on a stale pending-subagent counter from this aborted turn.
-Schedules an exponential-backoff `try again' retry via
-`claude-repl--backoff-retry-schedule' so transient API failures
-self-recover without user intervention."
+
+No automatic `try again' retry is fired: the StopFailure hook is not
+guaranteed to fire only on genuine API errors (server-returned error
+codes) — it also fires on non-error turn endings such as context
+compaction — and Claude Code exposes no payload field that lets us
+reliably distinguish the two.  Auto-re-prompting on those false
+positives double-prompts and interferes with the session, so the
+failure is surfaced (the ⚠ `:stop-failed' tab plus the log entry) and
+recovery is left to the user."
   (claude-repl--log ws "on-stop-failure-event: ws=%s dir=%S" ws dir)
   (claude-repl--ws-clear-stop-tracking ws)
-  (claude-repl--ws-set-claude-state ws :stop-failed)
-  (claude-repl--backoff-retry-schedule ws))
+  (claude-repl--ws-set-claude-state ws :stop-failed))
 
 (defun claude-repl--on-prompt-submit-event (ws _dir)
   "Mark workspace WS as thinking after a prompt submission."
