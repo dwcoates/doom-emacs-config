@@ -250,6 +250,12 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 ### Per-bullet constraints
 
 - One sentence per bullet, at every depth of the tree.
+- The text on each bullet MUST be as brief as possible, using the fewest words that still carry the point.
+  - Brevity of the bullet text is king, so trim every word not essential to the point.
+  - This brevity targets the LENGTH of each line, not the NUMBER of branches in the tree.
+    - Shortening a bullet MUST never mean dropping a branch, since the branch count stays the same.
+    - Any detail trimmed from a bullet is pushed into a subbullet rather than deleting the branch.
+  - Keep each line short enough to read at a glance without horizontal scanning.
 - TLDR bullets MUST never contain emdashes or semicolons under any circumstances.
   - Each is a sign that additional information should instead be pushed into a (recursively-nested) subbullet of the bullet.
   - This is NOT a call to limit sentence content, but instead a call the structure with subbullets over emdashes/semicolons
