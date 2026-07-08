@@ -580,9 +580,10 @@ user-typed Enter inside the vterm buffer would take.  Distinct from
 writes a raw `\\C-m'/`\\C-j' byte directly to the PTY via
 `process-send-string'.
 
-Used for the empty-input bare-RET branch of `claude-repl--send' AND
-for the submission Return of the bracketed-paste pipeline (via
-`claude-repl--bracketed-send-return'), where the keystroke needs to be
+Used for the empty-input bare-RET branch of `claude-repl--send', the
+submission Return of the bracketed-paste pipeline (via
+`claude-repl--bracketed-send-return'), AND the slash-mode submission
+Return (`claude-repl--slash-return'), where the keystroke needs to be
 framed as a real keyboard event for Claude's TUI to register it — the
 direct-PTY-write path lands the byte at the PTY but does not always
 produce a visible action in Ink-based TUIs.
@@ -739,7 +740,7 @@ without each entry point having to remember to call it:
 - `claude-repl--slash-vterm-send' (passthrough char forwards)
 - `claude-repl--vterm-send-return-key-logged' (bare-RET key path)
 - `claude-repl-send-char' (single-char + return sends)
-- `claude-repl--slash-return' (raw return finalizing slash mode)
+- `claude-repl--slash-return' (submission return finalizing slash mode)
 
 Deliberately NOT flipped: navigation/edit forwards (arrow keys,
 backspace, C-v paste-without-submit) and interrupts (Ctrl-C, Escape)
@@ -1166,13 +1167,22 @@ which already reflects backspace pops) so direct-send `/clear' fires
 the same posthooks as a buffered-and-sent `/clear'.  Posthooks run
 before `claude-repl--exit-slash-mode' clears the stack.
 
+The no-pasted submission Return routes through libvterm's keyboard
+handler via `claude-repl--vterm-send-return-key-logged' (`vterm-send-key
+\"<return>\"'), NOT the raw `vterm-send-return' byte write — Claude's
+Ink-based TUI does not always register a raw `\\C-m'/`\\C-j' byte as an
+Enter keystroke, so slash commands typed char-by-char sometimes failed
+to submit on RET.  Same intermittent-RET failure fixed for the
+empty-buffer bare-RET branch (commit 190622a7) and the bracketed-paste
+submission Return (`claude-repl--bracketed-send-return').
+
 Transitions `:permission' → `:thinking' when return is actually sent —
 see `claude-repl--note-permission-answered-by-send' for rationale.
-The raw `vterm-send-return' write below makes the no-pasted branch a
-lowest-level send in its own right, so the flip stays here (covering
-the case where `:permission' arrives only after the slash chars were
-already forwarded); the pasted branch additionally inherits the flip
-from `claude-repl--send-input-to-vterm', which is idempotent."
+The explicit flip below stays as coverage for the case where
+`:permission' arrives only after the slash chars were already
+forwarded; both branches additionally inherit an idempotent flip from
+their send primitives (`claude-repl--vterm-send-return-key-logged' and
+`claude-repl--send-input-to-vterm' respectively)."
   (interactive)
   (claude-repl--log (claude-repl--ws-current-name) "slash-return: exiting slash mode")
   (claude-repl--slash-maybe-inject-source-ws)
@@ -1191,7 +1201,7 @@ from `claude-repl--send-input-to-vterm', which is idempotent."
                 (claude-repl--send-input-to-vterm vterm-buf pasted)
                 (with-current-buffer input-buf (erase-buffer)))
             (with-current-buffer vterm-buf
-              (vterm-send-return)))
+              (claude-repl--vterm-send-return-key-logged "slash-return")))
           (claude-repl--note-permission-answered-by-send ws))
       (claude-repl--slash-no-vterm-error "return" nil))
     (claude-repl--run-send-posthooks ws cmd))
