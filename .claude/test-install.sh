@@ -22,7 +22,7 @@ pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); shift; if [ $# -gt 0 ]; then printf '%s\n' "$@" | sed 's/^/        /'; fi; }
 
 # Local skills install.sh expects to find under modules/app/claude-repl/skills/.
-LOCAL_SKILL_NAMES=( debug-logs profile runtime-eval-code workspace-close workspace-profile )
+LOCAL_SKILL_NAMES=( debug-logs profile runtime-eval-code workspace-close emit-workspace-commands.sh )
 
 # Build a synthetic repo containing a fresh copy of install.sh, the
 # pre-commit hook, a manifest with one cached skill 'foo' whose impl is
