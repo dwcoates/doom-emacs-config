@@ -120,6 +120,66 @@ cancel, an early scroll would unfreeze mid-burst."
           (should (eq (buffer-local-value 'claude-repl--vterm-freeze-timer buf)
                       'timer-2)))))))
 
+(ert-deftest claude-repl-test-vterm-freeze-bump-persist-sets-flag ()
+  "With PERSIST non-nil, `claude-repl--vterm-freeze-bump' must still set
+the buffer-local `claude-repl--vterm-frozen' flag — the freeze is active,
+it is merely untimed."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-vterm-persist-flag*"
+      (let ((buf (current-buffer)))
+        (cl-letf (((symbol-function 'run-with-timer)
+                   (lambda (&rest _) 'fake-timer)))
+          (claude-repl--vterm-freeze-bump buf t)
+          (should (buffer-local-value 'claude-repl--vterm-frozen buf)))))))
+
+(ert-deftest claude-repl-test-vterm-freeze-bump-persist-arms-no-timer ()
+  "With PERSIST non-nil, `claude-repl--vterm-freeze-bump' must NOT arm an
+unfreeze timer — the freeze holds indefinitely on an UP scroll."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-vterm-persist-notimer*"
+      (let ((buf (current-buffer))
+            (scheduled nil))
+        (cl-letf (((symbol-function 'run-with-timer)
+                   (lambda (&rest _) (setq scheduled t) 'fake-timer)))
+          (claude-repl--vterm-freeze-bump buf t)
+          (should-not scheduled))))))
+
+(ert-deftest claude-repl-test-vterm-freeze-bump-persist-nils-timer-slot ()
+  "With PERSIST non-nil, `claude-repl--vterm-freeze-bump' must leave the
+buffer-local timer slot nil so no stale handle lingers for the untimed
+freeze."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-vterm-persist-slot*"
+      (let ((buf (current-buffer)))
+        (cl-letf (((symbol-function 'run-with-timer)
+                   (lambda (&rest _) 'fake-timer)))
+          (claude-repl--vterm-freeze-bump buf t)
+          (should-not (buffer-local-value 'claude-repl--vterm-freeze-timer buf)))))))
+
+(ert-deftest claude-repl-test-vterm-freeze-bump-persist-cancels-previous-timer ()
+  "A PERSIST bump (UP scroll) following a timed bump (DOWN scroll) must
+cancel the previously-scheduled timer so the pending unfreeze cannot
+fire and yank the display while the user reads history."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-vterm-persist-cancel*"
+      (let ((buf (current-buffer))
+            (cancelled nil)
+            (next-timer 0))
+        (cl-letf (((symbol-function 'run-with-timer)
+                   (lambda (&rest _)
+                     (cl-incf next-timer)
+                     (intern (format "timer-%d" next-timer))))
+                  ((symbol-function 'cancel-timer)
+                   (lambda (timer) (push timer cancelled)))
+                  ((symbol-function 'timerp)
+                   (lambda (obj) (and obj (symbolp obj)
+                                       (string-prefix-p "timer-"
+                                                        (symbol-name obj))))))
+          (claude-repl--vterm-freeze-bump buf)      ; DOWN: arms timer-1
+          (claude-repl--vterm-freeze-bump buf t)    ; UP: must cancel timer-1
+          (should (equal cancelled '(timer-1)))
+          (should-not (buffer-local-value 'claude-repl--vterm-freeze-timer buf)))))))
+
 (ert-deftest claude-repl-test-vterm-freeze-bump-dead-buffer-noop ()
   "`claude-repl--vterm-freeze-bump' must be a no-op on a dead buffer —
 no timer scheduled, no error."
@@ -220,7 +280,7 @@ user is still pressing scroll keys."
                     ((symbol-function 'set-window-start) (lambda (&rest _) nil))
                     ((symbol-function 'set-window-point) (lambda (&rest _) nil))
                     ((symbol-function 'claude-repl--vterm-freeze-bump)
-                     (lambda (buf) (setq bumped-with buf))))
+                     (lambda (buf &optional _persist) (setq bumped-with buf))))
             (claude-repl--scroll-vterm-output -5)
             (should (eq bumped-with vterm-buf)))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
@@ -237,6 +297,48 @@ there is no live vterm buffer for the current workspace — the
                  (lambda (_buf) (setq bumped t))))
         (claude-repl--scroll-vterm-output -5)
         (should-not bumped)))))
+
+(ert-deftest claude-repl-test-scroll-up-freeze-persists ()
+  "An UP scroll (negative LINES) must call `claude-repl--vterm-freeze-bump'
+with PERSIST non-nil so the freeze holds indefinitely."
+  (claude-repl-test--with-clean-state
+    (let ((vterm-buf (get-buffer-create " *test-scroll-up-persist*"))
+          (persist-arg 'unset))
+      (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name)
+                     (lambda () "test-ws"))
+                    ((symbol-function 'get-buffer-window)
+                     (lambda (&rest _) (selected-window)))
+                    ((symbol-function 'window-start) (lambda (&rest _) 1))
+                    ((symbol-function 'set-window-start) (lambda (&rest _) nil))
+                    ((symbol-function 'set-window-point) (lambda (&rest _) nil))
+                    ((symbol-function 'claude-repl--vterm-freeze-bump)
+                     (lambda (_buf &optional persist) (setq persist-arg persist))))
+            (claude-repl--scroll-vterm-output -5)
+            (should persist-arg))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
+(ert-deftest claude-repl-test-scroll-down-freeze-times-out ()
+  "A DOWN scroll (positive LINES) must call `claude-repl--vterm-freeze-bump'
+with PERSIST nil so the timed freeze lapses and auto-scroll resumes."
+  (claude-repl-test--with-clean-state
+    (let ((vterm-buf (get-buffer-create " *test-scroll-down-timed*"))
+          (persist-arg 'unset))
+      (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name)
+                     (lambda () "test-ws"))
+                    ((symbol-function 'get-buffer-window)
+                     (lambda (&rest _) (selected-window)))
+                    ((symbol-function 'window-start) (lambda (&rest _) 1))
+                    ((symbol-function 'set-window-start) (lambda (&rest _) nil))
+                    ((symbol-function 'set-window-point) (lambda (&rest _) nil))
+                    ((symbol-function 'claude-repl--vterm-freeze-bump)
+                     (lambda (_buf &optional persist) (setq persist-arg persist))))
+            (claude-repl--scroll-vterm-output 5)
+            (should-not persist-arg))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
 ;;;; ---- Tests: advice install/uninstall round-trip ----
 
