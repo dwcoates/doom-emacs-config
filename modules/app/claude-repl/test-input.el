@@ -356,18 +356,15 @@ that used to live in `claude-repl--autonomous-prompt-prefix'."
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-houses-mutating-git-restriction ()
-  "The metaprompt is the new home of the 'no other mutating git commands'
-directive that used to live in `claude-repl--autonomous-prompt-prefix'.
-Asserts both the commit-context recap (line 3) and the NOT ALLOWED list."
-  ;; Commit-context recap names commit as the authorized mutating op.
+  "The metaprompt authorizes all git operations by default and names the
+specific ops included: rebase, pull, merge, etc."
+  ;; The blanket authorization statement is present.
   (should (string-match-p
-           "only mutating git operations authorized by default"
+           "Every git operation is authorized by default"
            claude-repl-command-prefix))
-  ;; NOT ALLOWED list enumerates the restricted operations.
-  (dolist (op '("rebase" "pull" "merge"))
-    (should (string-match-p
-             (concat "other mutating git commands.*" op)
-             claude-repl-command-prefix))))
+  ;; The enumerated operations that are explicitly included are all listed.
+  (dolist (op '("rebase" "pull" "merge" "reset" "checkout" "cherry-pick"))
+    (should (string-match-p op claude-repl-command-prefix))))
 
 (ert-deftest claude-repl-test-command-prefix-houses-fail-hard-invariants-directive ()
   "The metaprompt must forbid defensive code or default behavior for invariants,
@@ -784,6 +781,24 @@ processes have their results streamed back concurrently."
   "The metaprompt must state the guiding principle: keep bullets short not by simplifying content but by recursively subbulleting along english grammatical structure."
   (should (string-match-p
            "keep each bullet short not by simplifying content but by subbulleting along english grammatical structure, recursively"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-bullet-text-brevity ()
+  "The metaprompt must require each bullet's text to be as brief as possible."
+  (should (string-match-p
+           "The text on each bullet MUST be as brief as possible"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "Brevity of the bullet text is king"
+           claude-repl-command-prefix)))
+
+(ert-deftest claude-repl-test-command-prefix-bullet-brevity-not-branch-count ()
+  "The metaprompt's bullet-brevity rule must target line length, not branch count."
+  (should (string-match-p
+           "This brevity targets the LENGTH of each line, not the NUMBER of branches"
+           claude-repl-command-prefix))
+  (should (string-match-p
+           "Shortening a bullet MUST never mean dropping a branch"
            claude-repl-command-prefix)))
 
 (ert-deftest claude-repl-test-command-prefix-tldr-header-changes-annotation ()
