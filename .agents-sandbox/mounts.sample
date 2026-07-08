@@ -1,7 +1,7 @@
 {
   "defaults": [
     {
-      "source": "~/workspace",
+      "source": "~",
       "target": "/home/claude/workspace",
       "type": "bind",
       "readonly": false
