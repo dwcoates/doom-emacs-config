@@ -4118,6 +4118,11 @@ off so the user resolves in magit directly."
               (claude-repl--ws-put target-ws :merge-completed-at
                                    (float-time))
               (claude-repl--ws-put target-ws :merge-failed nil)
+              ;; Record TARGET-WS on the receiving workspace's
+              ;; merged-in list so the drawer's expanded detail can
+              ;; list every workspace merged into it.  PROJECT-ROOT is
+              ;; the cherry-pick destination worktree (parent or master).
+              (claude-repl--record-merged-in-workspace project-root target-ws)
               (when (fboundp 'claude-repl--events-record)
                 (claude-repl--events-record target-ws :merge))
               ;; Flip the repl-state so the 🔀 badge survives the
@@ -4868,6 +4873,27 @@ that subsequently registers at the same canonical path."
                        (setq result ws)))))
                claude-repl--workspaces)
       result)))
+
+(defun claude-repl--record-merged-in-workspace (target-dir merged-ws)
+  "Record MERGED-WS as successfully merged into the workspace at TARGET-DIR.
+Resolves the receiving workspace by canonical `:project-dir' match
+\(`claude-repl--ws-name-for-dir') and appends MERGED-WS to that
+workspace's `:merged-in-workspaces' list, which the drawer surfaces in
+its expanded detail view.  Insertion order is preserved and duplicates
+are skipped so repeated merges of the same source are recorded once.
+No-op when TARGET-DIR is nil, maps to no live workspace, or names the
+receiver itself (a merge is never recorded as merged into itself).
+
+`:merged-in-workspaces' is intentionally NOT a runtime key, so the
+record survives the receiving workspace being tombstoned — the fact
+that a merge landed is historical, not session state."
+  (when-let ((receiver (and target-dir
+                            (claude-repl--ws-name-for-dir target-dir))))
+    (unless (equal receiver merged-ws)
+      (let ((existing (claude-repl--ws-get receiver :merged-in-workspaces)))
+        (unless (member merged-ws existing)
+          (claude-repl--ws-put receiver :merged-in-workspaces
+                               (append existing (list merged-ws))))))))
 
 (defcustom claude-repl-merge-resolve-max-depth 16
   "Cycle defense for `claude-repl--resolve-merge-into-source-target'.

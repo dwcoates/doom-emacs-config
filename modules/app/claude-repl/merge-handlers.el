@@ -360,6 +360,10 @@ Runs on the main thread (UI ops: close-workspace + magit refresh)."
   (claude-repl--ws-put ws :merge-completed t)
   (claude-repl--ws-put ws :merge-completed-at (float-time))
   (claude-repl--ws-put ws :merge-failed nil)
+  ;; Record WS on the receiving (main/master) workspace's merged-in
+  ;; list so the drawer's expanded detail lists it.  MAIN-DIR is the
+  ;; main worktree the trunk work landed on; nil when git was skipped.
+  (claude-repl--record-merged-in-workspace main-dir ws)
   (claude-repl--ws-put ws :merge-target-name
                        (or (and main-dir
                                 (claude-repl--git-branch-of-dir main-dir))
