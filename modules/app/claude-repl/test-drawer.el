@@ -2293,6 +2293,69 @@ the selected window has no `window-side' parameter."
             (should (eq (selected-window) sel-before))))
       (set-window-configuration wconf))))
 
+(ert-deftest claude-repl-drawer-test-display-action-marks-no-other-window ()
+  "The drawer display-action marks its window `no-other-window' t so
+buffer-display machinery never repurposes the dedicated side window.
+Regression guard for the magit RET-on-commit failure: `no-other-window'
+nil let `+magit--display-buffer-in-direction' pick the drawer and error
+in `switch-to-buffer'."
+  (let ((params (alist-get 'window-parameters
+                           claude-repl-drawer--display-action)))
+    (should (eq (alist-get 'no-other-window params) t))))
+
+(ert-deftest claude-repl-drawer-test-no-other-window-side-window-skipped-by-direction ()
+  "A left side window carrying `no-other-window' is invisible to
+`window-in-direction'.  This is the exact condition that makes magit's
+`+magit--display-buffer-in-direction' fallback split the main window
+instead of trying (and failing) to `switch-to-buffer' in the dedicated
+drawer."
+  (let ((wconf (current-window-configuration)))
+    (unwind-protect
+        (progn
+          (delete-other-windows)
+          (let* ((main-buf (generate-new-buffer " *test-main*"))
+                 (main-win (selected-window))
+                 (side-buf (generate-new-buffer " *test-side*"))
+                 (side-win (display-buffer-in-side-window
+                            side-buf '((side . left) (slot . 0)
+                                       (window-parameters
+                                        (no-other-window . t))))))
+            (set-window-buffer main-win main-buf)
+            (unwind-protect
+                (with-selected-window main-win
+                  ;; No window to the right; the drawer to the left is
+                  ;; skipped because of `no-other-window'.
+                  (should-not (window-in-direction 'right))
+                  (should-not (window-in-direction 'left)))
+              (when (window-live-p side-win) (delete-window side-win))
+              (when (buffer-live-p main-buf) (kill-buffer main-buf))
+              (when (buffer-live-p side-buf) (kill-buffer side-buf)))))
+      (set-window-configuration wconf))))
+
+(ert-deftest claude-repl-drawer-test-no-other-window-nil-side-window-found-by-direction ()
+  "Control: a left side window WITHOUT `no-other-window' IS returned by
+`window-in-direction' — the pre-fix condition under which magit's
+direction handler selected the drawer and failed."
+  (let ((wconf (current-window-configuration)))
+    (unwind-protect
+        (progn
+          (delete-other-windows)
+          (let* ((main-buf (generate-new-buffer " *test-main*"))
+                 (main-win (selected-window))
+                 (side-buf (generate-new-buffer " *test-side*"))
+                 (side-win (display-buffer-in-side-window
+                            side-buf '((side . left) (slot . 0)
+                                       (window-parameters
+                                        (no-other-window . nil))))))
+            (set-window-buffer main-win main-buf)
+            (unwind-protect
+                (with-selected-window main-win
+                  (should (eq (window-in-direction 'left) side-win)))
+              (when (window-live-p side-win) (delete-window side-win))
+              (when (buffer-live-p main-buf) (kill-buffer main-buf))
+              (when (buffer-live-p side-buf) (kill-buffer side-buf)))))
+      (set-window-configuration wconf))))
+
 (ert-deftest claude-repl-drawer-test-leave-side-window-helper-selects-main ()
   "`claude-repl-drawer--leave-side-window-before-switch' moves the
 selection to the frame's main window when invoked from a side window."
