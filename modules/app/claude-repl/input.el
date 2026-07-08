@@ -590,8 +590,9 @@ the fallthrough converts it to `vterm_keyboard_unichar' with codepoint
 
 Used for the empty-input bare-RET branch of `claude-repl--send', the
 submission Return of the bracketed-paste pipeline (via
-`claude-repl--bracketed-send-return'), AND the slash-mode submission
-Return (`claude-repl--slash-return').
+`claude-repl--bracketed-send-return'), the slash-mode submission
+Return (`claude-repl--slash-return'), AND the trailing Enter of
+single-char sends (`claude-repl-send-char').
 
 When `vterm--term' is nil — meaning `vterm-send-key' would silently
 no-op — logs a WARNING instead, making this common silent-failure mode
@@ -965,11 +966,16 @@ can recall it via the history keys."
 
 (defun claude-repl-send-char (char)
   "Send a single character to Claude.
+The trailing Enter goes through the shared
+`claude-repl--vterm-send-return-key-logged' primitive (`vterm-send-key
+\"\\C-m\"', libvterm's keyboard path) so every Enter sender shares one
+delivery pipeline, logging, and `vterm--term' guard.
+
 Transitions `:permission' → `:thinking' after sending — see
 `claude-repl--note-permission-answered-by-send' for rationale.  The
-raw `vterm-send-string' + `vterm-send-return' writes below make this
-function itself a lowest-level send primitive, so it carries its own
-flip."
+raw `vterm-send-string' write below still makes this function a
+lowest-level send primitive, so it carries its own flip (the return
+primitive's inherited flip only fires when the return is delivered)."
   (let ((ws (claude-repl--ws-current-name)))
     (claude-repl--log ws "send-char: char=%s" char)
     (if-let ((vterm-buf (claude-repl--current-ws-live-vterm)))
@@ -977,7 +983,7 @@ flip."
           (claude-repl--log ws "send-char: sending %s + <return> to vterm=%s" char (buffer-name vterm-buf))
           (with-current-buffer vterm-buf
             (vterm-send-string char)
-            (vterm-send-return))
+            (claude-repl--vterm-send-return-key-logged "send-char"))
           (claude-repl--note-permission-answered-by-send ws))
       (message "[claude-repl] no live Claude session — '%s' not sent" char)
       (claude-repl--log ws "send-char: no live vterm, skipping char=%s" char))))

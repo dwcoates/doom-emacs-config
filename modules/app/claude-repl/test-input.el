@@ -60,7 +60,10 @@
 ;;;; ---- Tests: Send functions (migrated) ----
 
 (ert-deftest claude-repl-test-send-char-calls-vterm ()
-  "`claude-repl-send-char' should call `vterm-send-string' with the char, then `vterm-send-return'."
+  "`claude-repl-send-char' calls `vterm-send-string' with the char, then the shared Enter primitive.
+The trailing Enter must route through
+`claude-repl--vterm-send-return-key-logged' so single-char sends share
+the same delivery pipeline as every other Enter sender."
   (claude-repl-test--with-clean-state
     (let ((calls nil))
       (claude-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
@@ -69,11 +72,11 @@
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                   ((symbol-function 'vterm-send-string)
                    (lambda (s &rest _) (push (list 'send-string s) calls)))
-                  ((symbol-function 'vterm-send-return)
-                   (lambda () (push '(send-return) calls))))
+                  ((symbol-function 'claude-repl--vterm-send-return-key-logged)
+                   (lambda (label) (push (list 'send-return-key label) calls))))
           (claude-repl-send-char "y")
           (should (member '(send-string "y") (reverse calls)))
-          (should (member '(send-return) (reverse calls))))))))
+          (should (member '(send-return-key "send-char") (reverse calls))))))))
 
 (ert-deftest claude-repl-test-scroll-down-sends-down ()
   "`claude-repl-scroll-down' calls `vterm-send-down' in the vterm buffer."
