@@ -2088,11 +2088,10 @@ There's no terminal to receive the keystroke."
 ;;;; ---- Tests: vterm-send-return-key-logged ----
 
 (ert-deftest claude-repl-test-vterm-send-return-key-logged-routes-via-libvterm ()
-  "`claude-repl--vterm-send-return-key-logged' sends \"<return>\" via `vterm-send-key' when vterm--term is alive.
-Regression guard: the empty-input bare-RET branch must go through
-libvterm's keyboard handler (vterm--update) rather than the raw
-process-send-string path used by `vterm-send-return', so Claude's Ink
-TUI registers the keystroke as a real Enter event."
+  "`claude-repl--vterm-send-return-key-logged' sends `\\C-m' via `vterm-send-key'.
+Regression guard: the Enter keystroke must go through libvterm's
+keyboard handler (vterm--update) on the SAME path as the arrow-key
+forwards, and the key argument must be the raw CR character."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-temp-buffer "*test-return-key-logged*"
       (setq-local vterm--term 'fake-term)
@@ -2100,7 +2099,24 @@ TUI registers the keystroke as a real Enter event."
         (cl-letf (((symbol-function 'vterm-send-key)
                    (lambda (key &rest _) (setq key-arg key))))
           (claude-repl--vterm-send-return-key-logged "test-label")
-          (should (equal key-arg "<return>")))))))
+          (should (equal key-arg "\C-m")))))))
+
+(ert-deftest claude-repl-test-vterm-send-return-key-logged-never-sends-return-key-name ()
+  "`claude-repl--vterm-send-return-key-logged' must NOT pass \"<return>\" to `vterm-send-key'.
+vterm-module.c's `term_process_key' does not recognize \"<return>\" as
+a key name, and unrecognized names longer than 4 bytes are silently
+dropped by its UTF-8 fallthrough guard — so `vterm-send-key
+\"<return>\"' is a no-op that looks like a successful send.  This is
+the exact bug that made RET on an empty input buffer do nothing while
+arrow keys (recognized names) worked."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*test-return-key-logged-name*"
+      (setq-local vterm--term 'fake-term)
+      (let ((key-arg nil))
+        (cl-letf (((symbol-function 'vterm-send-key)
+                   (lambda (key &rest _) (setq key-arg key))))
+          (claude-repl--vterm-send-return-key-logged "test-label")
+          (should-not (equal key-arg "<return>")))))))
 
 (ert-deftest claude-repl-test-vterm-send-return-key-logged-nil-term ()
   "`claude-repl--vterm-send-return-key-logged' does NOT send when vterm--term is nil.
@@ -3305,7 +3321,7 @@ The dead-buffer check happens inside `run-deferred-action' at callback time."
 (ert-deftest claude-repl-test-bracketed-send-return ()
   "`claude-repl--bracketed-send-return' sends return and schedules finalize via deferred action.
 The submission return goes through the libvterm keyboard handler
-\(`vterm-send-key \"<return>\"'), not the raw `process-send-string'
+\(`vterm-send-key \"\\C-m\"'), not the raw `process-send-string'
 path — see the regression note below."
   (claude-repl-test--with-clean-state
     (let ((key-arg nil)
@@ -3317,7 +3333,7 @@ path — see the regression note below."
                   ((symbol-function 'claude-repl--vterm-deferred-action)
                    (lambda (&rest args) (setq deferred-args args))))
           (claude-repl--bracketed-send-return (current-buffer))
-          (should (equal key-arg "<return>"))
+          (should (equal key-arg "\C-m"))
           ;; Deferred action should be scheduled with the buffer and 0.05 delay
           (should deferred-args)
           (should (eq (car deferred-args) (current-buffer)))
