@@ -457,6 +457,83 @@ overlay.  Tests the workspace-anchored restoration path."
         (let ((text (buffer-substring-no-properties (point-min) (point-max))))
           (should-not (string-match-p "merged into:" text)))))))
 
+(ert-deftest claude-repl-drawer-test-expanded-detail-lists-merged-in-workspaces ()
+  "An expanded entry lists every workspace on its `:merged-in-workspaces'."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "parent"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :merged-in-workspaces '("child-a" "child-b"))
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
+      (claude-repl-drawer-test--with-buffer
+        (claude-repl-drawer--ensure-expanded-set)
+        (puthash "parent" t claude-repl-drawer--expanded-set)
+        (claude-repl-drawer--render)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          (should (string-match-p "merged in:" text))
+          (should (string-match-p "child-a" text))
+          (should (string-match-p "child-b" text)))))))
+
+(ert-deftest claude-repl-drawer-test-merged-in-value-has-face ()
+  "Each merged-in workspace value carries `claude-repl-drawer-detail-merged-in'."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "parent"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :merged-in-workspaces '("child-a"))
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
+      (claude-repl-drawer-test--with-buffer
+        (claude-repl-drawer--ensure-expanded-set)
+        (puthash "parent" t claude-repl-drawer--expanded-set)
+        (claude-repl-drawer--render)
+        (let* ((all (buffer-substring-no-properties (point-min) (point-max)))
+               (pos (string-match (regexp-quote "child-a") all))
+               (f (and pos (get-text-property (1+ pos) 'face))))
+          (should (memq 'claude-repl-drawer-detail-merged-in
+                        (if (listp f) f (list f)))))))))
+
+(ert-deftest claude-repl-drawer-test-expanded-detail-omits-merged-in-when-empty ()
+  "An expanded entry with no `:merged-in-workspaces' omits the merged-in line."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "parent"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :detail-branch "feature/x")
+    (cl-letf (((symbol-function 'claude-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
+      (claude-repl-drawer-test--with-buffer
+        (claude-repl-drawer--ensure-expanded-set)
+        (puthash "parent" t claude-repl-drawer--expanded-set)
+        (claude-repl-drawer--render)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          (should-not (string-match-p "merged in:" text)))))))
+
+(ert-deftest claude-repl-drawer-test-merged-in-in-render-signature ()
+  "`--render-signature' changes when `:merged-in-workspaces' changes."
+  (claude-repl-test--with-clean-state
+    (claude-repl-drawer-test--register "parent"
+                                       :priority "p1"
+                                       :project-dir "/tmp/")
+    (claude-repl-drawer-test--with-buffer
+      (let ((sig-before (claude-repl-drawer--render-signature)))
+        (claude-repl--ws-put "parent" :merged-in-workspaces '("child-a"))
+        (should-not (equal sig-before
+                           (claude-repl-drawer--render-signature)))))))
+
 (ert-deftest claude-repl-drawer-test-format-duration ()
   "`--format-duration' produces short human-readable strings."
   (should (equal (claude-repl-drawer--format-duration 30)   "30s ago"))

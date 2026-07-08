@@ -432,6 +432,55 @@ the rev-parse comparison and the checkout invocation."
     (claude-repl--enqueue-preemptive-prompt "ws1" "")
     (should (null (claude-repl--ws-get "ws1" :pending-show-panels)))))
 
+;;;; ---- Tests: record-merged-in-workspace ----
+
+(ert-deftest claude-repl-test-record-merged-in-appends-name ()
+  "Records the merged workspace on the receiver's `:merged-in-workspaces'."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (claude-repl--record-merged-in-workspace "/tmp/parent/" "child")
+    (should (equal (claude-repl--ws-get "parent" :merged-in-workspaces)
+                   '("child")))))
+
+(ert-deftest claude-repl-test-record-merged-in-preserves-order ()
+  "Successive records append in insertion order."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (claude-repl--record-merged-in-workspace "/tmp/parent/" "child-a")
+    (claude-repl--record-merged-in-workspace "/tmp/parent/" "child-b")
+    (should (equal (claude-repl--ws-get "parent" :merged-in-workspaces)
+                   '("child-a" "child-b")))))
+
+(ert-deftest claude-repl-test-record-merged-in-dedups ()
+  "Recording the same merged workspace twice stores it once."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (claude-repl--record-merged-in-workspace "/tmp/parent/" "child")
+    (claude-repl--record-merged-in-workspace "/tmp/parent/" "child")
+    (should (equal (claude-repl--ws-get "parent" :merged-in-workspaces)
+                   '("child")))))
+
+(ert-deftest claude-repl-test-record-merged-in-nil-dir-noop ()
+  "A nil target-dir records nothing."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (claude-repl--record-merged-in-workspace nil "child")
+    (should (null (claude-repl--ws-get "parent" :merged-in-workspaces)))))
+
+(ert-deftest claude-repl-test-record-merged-in-unknown-dir-noop ()
+  "A target-dir with no owning workspace records nothing."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (claude-repl--record-merged-in-workspace "/tmp/nonesuch/" "child")
+    (should (null (claude-repl--ws-get "parent" :merged-in-workspaces)))))
+
+(ert-deftest claude-repl-test-record-merged-in-skips-self ()
+  "A workspace is never recorded as merged into itself."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (claude-repl--record-merged-in-workspace "/tmp/parent/" "parent")
+    (should (null (claude-repl--ws-get "parent" :merged-in-workspaces)))))
+
 ;;;; ---- Tests: dispatch-prompt-command ----
 
 (ert-deftest claude-repl-test-dispatch-prompt-enqueues-when-no-buffer ()
