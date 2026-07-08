@@ -1746,8 +1746,26 @@ invokes git.  Caller is `--render-workspace-expanded'."
     (window-width . ,#'claude-repl-drawer--window-width)
     (window-parameters
      (no-delete-other-windows . t)
-     (no-other-window . nil)))
-  "Display action for the drawer buffer.")
+     (no-other-window . t)))
+  "Display action for the drawer buffer.
+
+`no-other-window' is t so the drawer is invisible to `other-window',
+`window-in-direction', and every `display-buffer' action that reuses
+\"some other window\".  This matches the drawer's keyboard-inaccessible
+design (mouse-click only; see the bounce hook) AND — critically — keeps
+buffer-display machinery from ever repurposing the dedicated drawer.
+
+The concrete bug this closes: Doom's `+magit--display-buffer-fn' routes
+diff/revision buffers (e.g. RET on a commit in `magit-status') through
+`+magit--display-buffer-in-direction'.  With no window in the primary
+direction (the drawer sits to the *left* of the main window, so a
+rightward split has nothing there), that handler falls back to the
+window in the *opposite* direction — which was the drawer — then calls
+`switch-to-buffer' in it.  The drawer is a dedicated side window, so
+`switch-to-buffer' signals \"Cannot switch buffers in a dedicated
+window\" and the diff never opens.  With `no-other-window' t,
+`window-in-direction' skips the drawer, the handler splits the main
+window instead, and the diff opens normally.")
 
 (defun claude-repl-drawer--window-width (window)
   "Return the constant drawer width in columns for WINDOW.
@@ -1875,8 +1893,9 @@ Split out so the public entry point can wrap the body in
     (when win
       ;; Drawer hardening recipe: dedicated (no display-buffer repurpose);
       ;; fringes 0/0 to suppress the wrap-continuation arrow.
-      ;; `no-delete-other-windows' is set declaratively via the
-      ;; display-action's `window-parameters', so it isn't repeated here.
+      ;; `no-delete-other-windows' and `no-other-window' are set
+      ;; declaratively via the display-action's `window-parameters', so
+      ;; they aren't repeated here.
       (claude-repl-window--harden win :dedicate t :fringes 0)
       (claude-repl-drawer--apply-width win))
     (setq claude-repl-drawer--global-visible-p t)
