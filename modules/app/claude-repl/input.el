@@ -712,7 +712,7 @@ best-effort path.  When ON-SETTLE is non-nil, it is called once the
 send is fully committed (after all deferred actions complete).
 
 This is the lowest-level funnel for every string send (full sends,
-predefined prompts, backoff retries, slash-mode pastes), so it owns
+predefined prompts, slash-mode pastes), so it owns
 the `:permission' -> `:thinking' flip for all of them — see
 `claude-repl--note-permission-answered-by-send'."
   (claude-repl--log-verbose (claude-repl--ws-current-name) "send-input-to-vterm len=%d"
@@ -721,13 +721,9 @@ the `:permission' -> `:thinking' flip for all of them — see
   (claude-repl--note-permission-answered-for-vterm vterm-buf))
 
 (defun claude-repl--mark-ws-thinking (ws)
-  "Mark workspace WS as thinking: set claude-state.
-Also cancels any pending backoff-retry timer for WS — once Claude
-is actively thinking (whether due to a user prompt or a retry fire),
-a previously-armed retry would be stale or duplicative."
+  "Mark workspace WS as thinking: set claude-state."
   (claude-repl--log ws "mark-ws-thinking ws=%s" ws)
-  (claude-repl--ws-set-claude-state ws :thinking)
-  (claude-repl--backoff-retry-cancel-timer ws))
+  (claude-repl--ws-set-claude-state ws :thinking))
 
 (defun claude-repl--note-permission-answered-by-send (ws)
   "Flip WS from `:permission' to `:thinking' after a send, if applicable.

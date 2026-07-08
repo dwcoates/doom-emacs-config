@@ -3975,7 +3975,7 @@ End-to-end over the dominant permission-answer path:
 (ert-deftest claude-repl-test-send-input-to-vterm-resolves-ws-from-buffer-owner ()
   "`claude-repl--send-input-to-vterm' flips the OWNER workspace, not the current one.
 A programmatic send can target a vterm whose workspace is not the
-selected one (deferred drains, backoff retries); the owner pin on the
+selected one (e.g. deferred drains); the owner pin on the
 buffer is the source of truth."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-temp-buffer "*claude-panel-sitv-owner*"

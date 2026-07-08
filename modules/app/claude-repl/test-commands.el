@@ -1702,15 +1702,13 @@ focus or flip a hidden buffer's evil state."
             (progn
               (claude-repl--ws-put "test-ws" :vterm-buffer fake-vterm-buf)
               ;; NOTE: do NOT stub `claude-repl--ws-get' here.  A blanket
-              ;; stub that returns `fake-vterm-buf' for every key collides
-              ;; with the post-f2560b6 interrupt path, which calls
-              ;; `--mark-claude-done' → `--backoff-retry-reset' →
-              ;; `(claude-repl--ws-get ws :backoff-retry-count)' and then
-              ;; `(> prev 0)' — comparing a buffer against an int errors
-              ;; with wrong-type-argument number-or-marker-p.  The real
-              ;; `--ws-get' reads the value `--ws-put' just stored for
-              ;; `:vterm-buffer' and returns nil for unknown keys, which
-              ;; is exactly what the interrupt path expects.
+              ;; stub that returns `fake-vterm-buf' for every key would
+              ;; hand the interrupt path (via `--mark-claude-done') a
+              ;; buffer where it expects other value types, risking
+              ;; wrong-type errors.  The real `--ws-get' reads the value
+              ;; `--ws-put' just stored for `:vterm-buffer' and returns
+              ;; nil for unknown keys, which is exactly what the interrupt
+              ;; path expects.
               (cl-letf (((symbol-function 'claude-repl--vterm-live-p)
                          (lambda () t))
                         ((symbol-function '+workspace-current-name)
