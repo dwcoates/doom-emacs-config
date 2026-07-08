@@ -334,80 +334,134 @@ wrapper to an error-on-call lambda."
 
 (ert-deftest claude-repl-test-compute-claude-flags-continue ()
   "compute-claude-flags should emit --continue when session-id is set and no fork."
-  (let ((claude-repl-system-prompt nil))
+  (let ((claude-repl-system-prompt nil)
+        (claude-repl-interactive-model nil))
     (should (equal (claude-repl--compute-claude-flags "abc123" nil nil)
                    "--continue"))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-no-continue-without-session-id ()
   "compute-claude-flags should not emit --continue when session-id is nil."
-  (let ((claude-repl-system-prompt nil))
+  (let ((claude-repl-system-prompt nil)
+        (claude-repl-interactive-model nil))
     (should (equal (claude-repl--compute-claude-flags nil nil nil) ""))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-fork ()
   "compute-claude-flags should emit --resume <id> --fork-session for forks."
-  (let ((claude-repl-system-prompt nil))
+  (let ((claude-repl-system-prompt nil)
+        (claude-repl-interactive-model nil))
     (should (equal (claude-repl--compute-claude-flags "current" "fork-id" nil)
                    "--resume fork-id --fork-session"))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-fork-ignores-session ()
   "compute-claude-flags with fork should not also emit --continue for session-id."
   (let* ((claude-repl-system-prompt nil)
+         (claude-repl-interactive-model nil)
          (result (claude-repl--compute-claude-flags "current" "fork-id" nil)))
     (should (string-match-p "--resume fork-id --fork-session" result))
     (should-not (string-match-p "--continue" result))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-perm-flag ()
   "compute-claude-flags should include permission flag when provided."
-  (let ((claude-repl-system-prompt nil))
+  (let ((claude-repl-system-prompt nil)
+        (claude-repl-interactive-model nil))
     (should (equal (claude-repl--compute-claude-flags nil nil "--permission-mode auto")
                    "--permission-mode auto"))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-all-nil ()
   "compute-claude-flags should return empty string when all args are nil."
-  (let ((claude-repl-system-prompt nil))
+  (let ((claude-repl-system-prompt nil)
+        (claude-repl-interactive-model nil))
     (should (equal (claude-repl--compute-claude-flags nil nil nil) ""))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-continue-plus-perm ()
   "compute-claude-flags should combine --continue and perm flag."
-  (let ((claude-repl-system-prompt nil))
+  (let ((claude-repl-system-prompt nil)
+        (claude-repl-interactive-model nil))
     (should (equal (claude-repl--compute-claude-flags "sess1" nil "--dangerously-skip-permissions")
                    "--continue --dangerously-skip-permissions"))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-system-prompt-period ()
   "compute-claude-flags should emit --system-prompt \".\" with literal quotes."
-  (let ((claude-repl-system-prompt "."))
+  (let ((claude-repl-system-prompt ".")
+        (claude-repl-interactive-model nil))
     (should (equal (claude-repl--compute-claude-flags nil nil nil)
                    "--system-prompt \".\""))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-system-prompt-nil ()
   "compute-claude-flags should omit --system-prompt entirely when var is nil."
-  (let ((claude-repl-system-prompt nil))
+  (let ((claude-repl-system-prompt nil)
+        (claude-repl-interactive-model nil))
     (let ((result (claude-repl--compute-claude-flags nil nil nil)))
       (should-not (string-match-p "--system-prompt" result)))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-system-prompt-shell-quoted ()
   "compute-claude-flags should wrap the system prompt in literal double quotes."
-  (let ((claude-repl-system-prompt "be nice"))
+  (let ((claude-repl-system-prompt "be nice")
+        (claude-repl-interactive-model nil))
     (should (equal (claude-repl--compute-claude-flags nil nil nil)
                    "--system-prompt \"be nice\""))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-system-prompt-escapes-dquote ()
   "compute-claude-flags should backslash-escape embedded double quotes."
-  (let ((claude-repl-system-prompt "say \"hi\""))
+  (let ((claude-repl-system-prompt "say \"hi\"")
+        (claude-repl-interactive-model nil))
     (should (equal (claude-repl--compute-claude-flags nil nil nil)
                    "--system-prompt \"say \\\"hi\\\"\""))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-system-prompt-escapes-dollar ()
   "compute-claude-flags should backslash-escape $ to prevent expansion."
-  (let ((claude-repl-system-prompt "$HOME"))
+  (let ((claude-repl-system-prompt "$HOME")
+        (claude-repl-interactive-model nil))
     (should (equal (claude-repl--compute-claude-flags nil nil nil)
                    "--system-prompt \"\\$HOME\""))))
 
 (ert-deftest claude-repl-test-compute-claude-flags-system-prompt-combines-with-continue ()
   "compute-claude-flags should append --system-prompt after --continue and perm flag."
-  (let ((claude-repl-system-prompt "."))
+  (let ((claude-repl-system-prompt ".")
+        (claude-repl-interactive-model nil))
     (should (equal (claude-repl--compute-claude-flags "sess1" nil "--dangerously-skip-permissions")
                    "--continue --dangerously-skip-permissions --system-prompt \".\""))))
+
+(ert-deftest claude-repl-test-compute-claude-flags-model-default-opus ()
+  "compute-claude-flags should emit --model opus with the default interactive model."
+  (let ((claude-repl-system-prompt nil)
+        (claude-repl-interactive-model "opus"))
+    (should (equal (claude-repl--compute-claude-flags nil nil nil)
+                   "--model opus"))))
+
+(ert-deftest claude-repl-test-compute-claude-flags-model-nil-omits-flag ()
+  "compute-claude-flags should omit --model entirely when interactive model is nil."
+  (let ((claude-repl-system-prompt nil)
+        (claude-repl-interactive-model nil))
+    (should-not (string-match-p "--model" (claude-repl--compute-claude-flags nil nil nil)))))
+
+(ert-deftest claude-repl-test-compute-claude-flags-model-precedes-continue ()
+  "compute-claude-flags should emit --model before --continue."
+  (let ((claude-repl-system-prompt nil)
+        (claude-repl-interactive-model "opus"))
+    (let ((result (claude-repl--compute-claude-flags "sess1" nil nil)))
+      (should (equal result "--model opus --continue")))))
+
+(ert-deftest claude-repl-test-compute-claude-flags-model-precedes-fork ()
+  "compute-claude-flags should emit --model before --resume/--fork-session."
+  (let ((claude-repl-system-prompt nil)
+        (claude-repl-interactive-model "opus"))
+    (let ((result (claude-repl--compute-claude-flags "current" "fork-id" nil)))
+      (should (equal result "--model opus --resume fork-id --fork-session")))))
+
+(ert-deftest claude-repl-test-compute-claude-flags-model-with-all-flags ()
+  "compute-claude-flags should include --model opus first in full flag combination."
+  (let ((claude-repl-system-prompt ".")
+        (claude-repl-interactive-model "opus"))
+    (should (equal (claude-repl--compute-claude-flags "sess1" nil "--dangerously-skip-permissions")
+                   "--model opus --continue --dangerously-skip-permissions --system-prompt \".\""))))
+
+(ert-deftest claude-repl-test-compute-claude-flags-model-custom-value ()
+  "compute-claude-flags should emit --model with a custom model alias."
+  (let ((claude-repl-system-prompt nil)
+        (claude-repl-interactive-model "sonnet"))
+    (should (equal (claude-repl--compute-claude-flags nil nil nil)
+                   "--model sonnet"))))
 
 (ert-deftest claude-repl-test-compute-perm-flag-sandboxed ()
   "compute-perm-flag should return nil when sandboxed."
@@ -1878,7 +1932,8 @@ restart (the lazy-start path applies its defaults instead)."
 (ert-deftest claude-repl-test-build-start-cmd-bare-metal-no-session ()
   "build-start-cmd for bare-metal with no session should produce claude --dangerously-skip-permissions."
   (claude-repl-test--with-clean-state
-    (let ((claude-repl-system-prompt nil))
+    (let ((claude-repl-system-prompt nil)
+          (claude-repl-interactive-model nil))
       (claude-repl--ws-put "ws1" :active-env :bare-metal)
       (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
       (claude-repl--ws-put "ws1" :worktree-p nil)
@@ -1892,7 +1947,8 @@ restart (the lazy-start path applies its defaults instead)."
 (ert-deftest claude-repl-test-build-start-cmd-bare-metal-includes-system-prompt-default ()
   "build-start-cmd for bare-metal with default `claude-repl-system-prompt' includes --system-prompt \".\"."
   (claude-repl-test--with-clean-state
-    (let ((claude-repl-system-prompt "."))
+    (let ((claude-repl-system-prompt ".")
+          (claude-repl-interactive-model nil))
       (claude-repl--ws-put "ws1" :active-env :bare-metal)
       (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
       (claude-repl--ws-put "ws1" :worktree-p nil)
