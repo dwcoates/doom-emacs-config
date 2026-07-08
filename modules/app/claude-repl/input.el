@@ -572,21 +572,26 @@ WARNING instead, making this common silent-failure mode visible."
                       label (if (boundp 'vterm--term) "nil" "unbound"))))
 
 (defun claude-repl--vterm-send-return-key-logged (label)
-  "Send the `<return>' key through libvterm, logging the attempt under LABEL.
-Routes through `vterm-send-key', which calls `vterm--update' so the
-keystroke takes libvterm's keyboard event path — the same path a
-user-typed Enter inside the vterm buffer would take.  Distinct from
-`claude-repl--vterm-send-return-logged', which bypasses libvterm and
-writes a raw `\\C-m'/`\\C-j' byte directly to the PTY via
-`process-send-string'.
+  "Send Enter through libvterm's keyboard path, logging the attempt under LABEL.
+Sends the raw CR character (`\\C-m') via `vterm-send-key', which calls
+`vterm--update' — the SAME keyboard event path the arrow-key forwards
+\(`claude-repl--send-vterm-key') take, so Enter and arrow navigation
+share one delivery pipeline and cannot reorder around each other.
+
+CRITICAL: the key MUST be the raw `\\C-m' character, NOT the string
+\"<return>\".  vterm-module.c's `term_process_key' recognizes only a
+fixed list of named keys (\"<up>\", \"<down>\", \"<tab>\",
+\"<backspace>\", …) — \"<return>\" is NOT among them, and unrecognized
+names longer than 4 bytes are SILENTLY DROPPED by the UTF-8 fallthrough
+guard.  A `vterm-send-key \"<return>\"' call therefore no-ops while
+looking exactly like a successful send.  `\\C-m' is a single byte, so
+the fallthrough converts it to `vterm_keyboard_unichar' with codepoint
+13, which pushes `\\r' to the PTY — the byte a terminal Enter produces.
 
 Used for the empty-input bare-RET branch of `claude-repl--send', the
 submission Return of the bracketed-paste pipeline (via
 `claude-repl--bracketed-send-return'), AND the slash-mode submission
-Return (`claude-repl--slash-return'), where the keystroke needs to be
-framed as a real keyboard event for Claude's TUI to register it — the
-direct-PTY-write path lands the byte at the PTY but does not always
-produce a visible action in Ink-based TUIs.
+Return (`claude-repl--slash-return').
 
 When `vterm--term' is nil — meaning `vterm-send-key' would silently
 no-op — logs a WARNING instead, making this common silent-failure mode
@@ -598,8 +603,8 @@ is, like every other send, the only available answer signal) — and
 deliberately NOT on the warning branch, where nothing reached Claude."
   (if (bound-and-true-p vterm--term)
       (progn
-        (claude-repl--log (claude-repl--ws-current-name) "%s: return key delivered via libvterm" label)
-        (vterm-send-key "<return>")
+        (claude-repl--log (claude-repl--ws-current-name) "%s: return key (C-m) delivered via libvterm" label)
+        (vterm-send-key "\C-m")
         (claude-repl--note-permission-answered-for-vterm))
     (claude-repl--log (claude-repl--ws-current-name) "%s: WARNING — vterm--term is %s, return-key NOT delivered"
                       label (if (boundp 'vterm--term) "nil" "unbound"))))
@@ -651,20 +656,19 @@ When ON-SETTLE is non-nil, call it after the finalize is complete."
 Used as the first deferred action in the bracketed paste pipeline.
 ON-SETTLE, if non-nil, is forwarded to `claude-repl--bracketed-finalize'.
 
-Routes the SUBMISSION Return through libvterm's keyboard handler via
-`claude-repl--vterm-send-return-key-logged' (`vterm-send-key
-\"<return>\"') rather than the raw `process-send-string' path of
-`claude-repl--vterm-send-return-logged'.  This is the return that
-actually submits a non-empty prompt, and Claude's Ink-based TUI does
-not always register a raw `\\C-m'/`\\C-j' byte as an Enter keystroke —
-the same intermittent-RET failure fixed for the empty-buffer bare-RET
-branch in commit 190622a7.  A preceding `vterm-send-string' was assumed
-to \"prime\" the raw return into working, but that assumption did not
-hold: pressing RET on a non-empty input buffer sometimes failed to
-submit.  The libvterm keyboard path mirrors a user-typed Enter and
-registers reliably.  The secondary Return in
+Routes the SUBMISSION Return through
+`claude-repl--vterm-send-return-key-logged' (`vterm-send-key \"\\C-m\"',
+libvterm's keyboard path) rather than the raw `process-send-string'
+path of `claude-repl--vterm-send-return-logged', so the submission
+shares one delivery pipeline with every other Enter send.  NOTE: an
+earlier revision passed \"<return>\" as the key name, which
+vterm-module.c does not recognize and silently drops — during that
+window the bracketed pipeline only submitted because the finalize
+step's raw Return fired 50ms later; see
+`claude-repl--vterm-send-return-key-logged' for the full trap
+description.  The secondary Return in
 `claude-repl--bracketed-finalize' stays on the raw best-effort path so
-this fix does not turn the pipeline's double-nudge into a guaranteed
+the pipeline's double-nudge does not become a guaranteed
 double-submit."
   (claude-repl--vterm-send-return-key-logged "bracketed-send-return")
   (claude-repl--vterm-deferred-action
@@ -700,7 +704,7 @@ Always uses bracketed paste to ensure proper separation between the
 character stream and the submission Return, both delivered through
 libvterm's keyboard handler via `vterm--update' — the character stream
 by `vterm-send-string' and the submission Return by `vterm-send-key
-\"<return>\"' (see `claude-repl--bracketed-send-return').  A deferred
+\"\\C-m\"' (see `claude-repl--bracketed-send-return').  A deferred
 delay sequences the Return after the paste so the two do not race.
 The secondary finalize Return remains on the raw `process-send-string'
 best-effort path.  When ON-SETTLE is non-nil, it is called once the
@@ -1167,14 +1171,14 @@ which already reflects backspace pops) so direct-send `/clear' fires
 the same posthooks as a buffered-and-sent `/clear'.  Posthooks run
 before `claude-repl--exit-slash-mode' clears the stack.
 
-The no-pasted submission Return routes through libvterm's keyboard
-handler via `claude-repl--vterm-send-return-key-logged' (`vterm-send-key
-\"<return>\"'), NOT the raw `vterm-send-return' byte write — Claude's
-Ink-based TUI does not always register a raw `\\C-m'/`\\C-j' byte as an
-Enter keystroke, so slash commands typed char-by-char sometimes failed
-to submit on RET.  Same intermittent-RET failure fixed for the
-empty-buffer bare-RET branch (commit 190622a7) and the bracketed-paste
-submission Return (`claude-repl--bracketed-send-return').
+The no-pasted submission Return routes through
+`claude-repl--vterm-send-return-key-logged' (`vterm-send-key \"\\C-m\"',
+libvterm's keyboard path) so slash submission shares the same delivery
+pipeline — and the same logging and `vterm--term' guard — as the
+empty-buffer bare-RET branch and the bracketed-paste submission Return
+\(`claude-repl--bracketed-send-return').  The wire bytes are equivalent
+to the raw `vterm-send-return' this branch previously used; the routing
+is for uniformity, not because the raw path was at fault here.
 
 Transitions `:permission' → `:thinking' when return is actually sent —
 see `claude-repl--note-permission-answered-by-send' for rationale.
