@@ -13,9 +13,21 @@
 ;;
 ;; This is wired into `claude-repl--scroll-vterm-output' (see
 ;; `input.el') so that pressing `S-<up>' / `S-<down>' or `C-S-j' /
-;; `C-S-k' freezes the Claude vterm for `claude-repl-vterm-freeze-duration'
-;; seconds.  Each additional scroll keypress re-arms the timer, so the
-;; freeze extends as the user continues scrolling.  After the timer
+;; `C-S-k' freezes the Claude vterm.  The direction of the last scroll
+;; determines whether the freeze is timed:
+;;
+;;   * Scrolling DOWN (toward newer output) arms an unfreeze timer for
+;;     `claude-repl-vterm-freeze-duration' seconds.  The user is heading
+;;     back toward the live prompt, so the freeze should lapse and let
+;;     auto-scroll-to-bottom resume shortly.
+;;
+;;   * Scrolling UP (toward older output) freezes indefinitely with NO
+;;     timer.  The user is reading back through history and must not be
+;;     yanked to the bottom by incoming output until they scroll DOWN
+;;     again — a subsequent DOWN scroll re-arms the timed freeze.
+;;
+;; Each additional scroll keypress re-evaluates this, so the freeze
+;; extends as the user continues scrolling.  After a (timed) freeze
 ;; fires the buffer is force-redrawn to reflect any output that arrived
 ;; during the freeze.
 
@@ -82,24 +94,29 @@ the freeze gets flushed into the visible buffer."
                  (fboundp 'vterm--invalidate))
         (vterm--invalidate)))))
 
-(defun claude-repl--vterm-freeze-bump (buf)
+(defun claude-repl--vterm-freeze-bump (buf &optional persist)
   "Freeze BUF's vterm display and (re)arm its unfreeze timer.
-Sets the buffer-local `claude-repl--vterm-frozen' flag, cancels any
-pending unfreeze timer, and schedules a fresh one
-`claude-repl-vterm-freeze-duration' seconds out.  A no-op when BUF is
-dead."
+Sets the buffer-local `claude-repl--vterm-frozen' flag and cancels any
+pending unfreeze timer.  When PERSIST is nil (the default, used for
+DOWN scrolls) a fresh unfreeze timer is scheduled
+`claude-repl-vterm-freeze-duration' seconds out.  When PERSIST is
+non-nil (used for UP scrolls) NO timer is armed, so the freeze holds
+indefinitely until a later DOWN scroll re-arms a timed freeze.  A no-op
+when BUF is dead."
   (when (buffer-live-p buf)
     (with-current-buffer buf
       (setq claude-repl--vterm-frozen t)
       (when (timerp claude-repl--vterm-freeze-timer)
         (cancel-timer claude-repl--vterm-freeze-timer))
       (setq claude-repl--vterm-freeze-timer
-            (run-with-timer claude-repl-vterm-freeze-duration nil
-                            #'claude-repl--vterm-unfreeze buf))
+            (unless persist
+              (run-with-timer claude-repl-vterm-freeze-duration nil
+                              #'claude-repl--vterm-unfreeze buf)))
       (when (fboundp 'claude-repl--log)
         (claude-repl--log (claude-repl--ws-current-name)
-                          "vterm-freeze-bump: buf=%s duration=%.2f"
-                          (buffer-name) claude-repl-vterm-freeze-duration)))))
+                          "vterm-freeze-bump: buf=%s duration=%.2f persist=%s"
+                          (buffer-name) claude-repl-vterm-freeze-duration
+                          (if persist "t" "nil"))))))
 
 ;; Install advice at load time.  The advice is harmless for non-Claude
 ;; vterm buffers because `claude-repl--vterm-frozen' defaults to nil
