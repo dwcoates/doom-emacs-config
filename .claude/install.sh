@@ -95,6 +95,7 @@ LOCAL_SKILLS=(
   "profile"
   "runtime-eval-code"
   "workspace-close"
+  "workspace-open"
   "emit-workspace-commands.sh"
 )
 
