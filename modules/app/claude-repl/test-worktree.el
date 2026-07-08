@@ -646,6 +646,16 @@ the rev-parse comparison and the checkout invocation."
           (should (= new-delay 10))
           (should (= (length handled) 1)))))))
 
+(ert-deftest claude-repl-test-dispatch-workspace-command-open ()
+  "Open commands route to the open handler and do not change delay."
+  (let ((handled nil))
+    (cl-letf (((symbol-function 'claude-repl--handle-open-command)
+               (lambda (cmd) (push cmd handled))))
+      (let ((cmd '((type . "open") (workspace . "ws1"))))
+        (let ((new-delay (claude-repl--dispatch-workspace-command cmd 10)))
+          (should (= new-delay 10))
+          (should (= (length handled) 1)))))))
+
 ;;;; ---- Tests: profile-stop-and-collect ----
 
 (ert-deftest claude-repl-test-profile-stop-and-collect-returns-new-buffer-text ()
@@ -1186,6 +1196,112 @@ chance to release sockets before its vterm dies."
        '((type . "close") (workspace . "feature-one")))
       (funcall teardown-fn)
       (should (equal received "feature-one")))))
+
+;;;; ---- Tests: handle-open-command ----
+
+(ert-deftest claude-repl-test-handle-open-command-missing-name-skips ()
+  "A missing/empty workspace name skips establish without erroring."
+  (let ((established nil))
+    (cl-letf (((symbol-function 'claude-repl--establish-workspace)
+               (lambda (&rest _) (setq established t))))
+      (claude-repl--handle-open-command '((type . "open")))
+      (should-not established))))
+
+(ert-deftest claude-repl-test-handle-open-command-unresolvable-dir-skips ()
+  "When no on-disk dir resolves, establish is not called."
+  (let ((established nil))
+    (cl-letf (((symbol-function 'claude-repl--resolve-open-workspace-dir)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--establish-workspace)
+               (lambda (&rest _) (setq established t))))
+      (claude-repl--handle-open-command
+       '((type . "open") (workspace . "DWC/foo")))
+      (should-not established))))
+
+(ert-deftest claude-repl-test-handle-open-command-establishes-with-bare-name-and-dir ()
+  "A resolved dir triggers establish-workspace with the bare name and dir."
+  (let ((received :unset))
+    (cl-letf (((symbol-function 'claude-repl--resolve-open-workspace-dir)
+               (lambda (&rest _) "/tmp/repo-worktrees/foo"))
+              ((symbol-function 'claude-repl--establish-workspace)
+               (lambda (ws dir) (setq received (list ws dir)))))
+      (claude-repl--handle-open-command
+       '((type . "open") (workspace . "DWC/foo")))
+      (should (equal received '("foo" "/tmp/repo-worktrees/foo"))))))
+
+(ert-deftest claude-repl-test-handle-open-command-passes-git-root-to-resolver ()
+  "CMD's `git_root' is forwarded to the dir resolver."
+  (let ((received-root :unset))
+    (cl-letf (((symbol-function 'claude-repl--resolve-open-workspace-dir)
+               (lambda (_name git-root) (setq received-root git-root) nil))
+              ((symbol-function 'claude-repl--establish-workspace)
+               (lambda (&rest _) nil)))
+      (claude-repl--handle-open-command
+       '((type . "open") (workspace . "DWC/foo") (git_root . "/repo")))
+      (should (equal received-root "/repo")))))
+
+;;;; ---- Tests: resolve-open-workspace-dir ----
+
+(ert-deftest claude-repl-test-resolve-open-workspace-dir-prefers-registry ()
+  "A live registry `:project-dir' wins and is returned verbatim."
+  (claude-repl-test--with-clean-state
+    (let ((dir (make-temp-file "claude-open-reg" t)))
+      (unwind-protect
+          (progn
+            (puthash "foo" (list :project-dir dir) claude-repl--workspaces)
+            (should (equal (claude-repl--resolve-open-workspace-dir "DWC/foo" nil)
+                           dir)))
+        (delete-directory dir t)))))
+
+(ert-deftest claude-repl-test-resolve-open-workspace-dir-uses-git-root-candidate ()
+  "With no registry entry, an existing candidate worktree dir resolves."
+  (claude-repl-test--with-clean-state
+    (let* ((base (make-temp-file "claude-open-base" t))
+           (repo (expand-file-name "repo" base))
+           (wt (expand-file-name "foo" (expand-file-name "repo-worktrees" base))))
+      (unwind-protect
+          (progn
+            (make-directory (expand-file-name ".git" repo) t)
+            (make-directory wt t)
+            (should (equal (claude-repl--path-canonical
+                            (claude-repl--resolve-open-workspace-dir "DWC/foo" repo))
+                           (claude-repl--path-canonical wt))))
+        (delete-directory base t)))))
+
+(ert-deftest claude-repl-test-resolve-open-workspace-dir-nil-when-worktree-gone ()
+  "No registry entry and a non-existent candidate dir resolves to nil.
+Models a workspace whose worktree was removed by `finish'."
+  (claude-repl-test--with-clean-state
+    (let* ((base (make-temp-file "claude-open-gone" t))
+           (repo (expand-file-name "repo" base)))
+      (unwind-protect
+          (progn
+            (make-directory (expand-file-name ".git" repo) t)
+            (should (null (claude-repl--resolve-open-workspace-dir "DWC/foo" repo))))
+        (delete-directory base t)))))
+
+(ert-deftest claude-repl-test-resolve-open-workspace-dir-nil-git-root-no-registry ()
+  "With nil git-root and no registry entry, resolution is nil."
+  (claude-repl-test--with-clean-state
+    (should (null (claude-repl--resolve-open-workspace-dir "DWC/foo" nil)))))
+
+(ert-deftest claude-repl-test-resolve-open-workspace-dir-stale-registry-falls-through ()
+  "A registry `:project-dir' that no longer exists falls through to git-root."
+  (claude-repl-test--with-clean-state
+    (let* ((base (make-temp-file "claude-open-stale" t))
+           (repo (expand-file-name "repo" base))
+           (wt (expand-file-name "foo" (expand-file-name "repo-worktrees" base))))
+      (unwind-protect
+          (progn
+            (make-directory (expand-file-name ".git" repo) t)
+            (make-directory wt t)
+            (puthash "foo"
+                     (list :project-dir (expand-file-name "gone" base))
+                     claude-repl--workspaces)
+            (should (equal (claude-repl--path-canonical
+                            (claude-repl--resolve-open-workspace-dir "DWC/foo" repo))
+                           (claude-repl--path-canonical wt))))
+        (delete-directory base t)))))
 
 ;;;; ---- Tests: gns-sockets-close-then ----
 

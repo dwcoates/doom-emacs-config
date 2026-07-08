@@ -2473,6 +2473,82 @@ sockets before the vterm process is killed."
     (claude-repl--gns-sockets-close-then
      ws (lambda () (claude-repl--close-workspace ws)))))
 
+(defun claude-repl--resolve-open-workspace-dir (name git-root)
+  "Resolve the on-disk project directory for workspace NAME.
+
+Used by `claude-repl--handle-open-command' to reopen a workspace that
+was previously closed or nuked.  Neither close nor nuke removes the
+git worktree or its per-project state.el from disk (only `finish'
+does), so the directory a reopen targets is expected to still exist.
+
+Resolution order:
+
+  1. A surviving `claude-repl--workspaces' entry's `:project-dir' (when
+     it still names an existing directory) — covers a workspace whose
+     hashmap entry outlived its editor teardown (e.g. a merge-completed
+     `preserve-entry' close).
+  2. GIT-ROOT combined with NAME's deterministic worktree path
+     (`claude-repl--candidate-worktree-path'), when that directory
+     exists on disk — covers the common case where the entry was
+     dropped but the git worktree remains.
+
+Returns the resolved directory string, or nil when neither branch
+resolves to a live directory (typically because the worktree was
+already removed by `finish').  NAME may be a full branch name
+\(\"DWC/foo\") or bare (\"foo\"); GIT-ROOT may be nil, in which case
+only branch 1 is attempted."
+  (let* ((bare (claude-repl--bare-workspace-name name))
+         (registered (claude-repl--ws-get bare :project-dir)))
+    (cond
+     ((and (stringp registered) (file-directory-p registered))
+      registered)
+     ((and (stringp git-root) (not (string-empty-p git-root)))
+      (let ((path (claude-repl--candidate-worktree-path
+                   (expand-file-name git-root) name)))
+        (and (file-directory-p path) path)))
+     (t nil))))
+
+(defun claude-repl--handle-open-command (cmd)
+  "Handle an \"open\" workspace command CMD.
+
+Re-establishes the editor UI for an EXISTING workspace that was
+previously closed or nuked — its git worktree and per-project state.el
+remain on disk, but its Doom perspective and Claude session were torn
+down.  Resolves CMD's `workspace' name to an on-disk directory via
+`claude-repl--resolve-open-workspace-dir' (preferring a surviving
+registry entry, then CMD's optional `git_root' plus the deterministic
+worktree path), then calls `claude-repl--establish-workspace', which
+recreates the perspective, rehydrates persisted display state, and
+resumes the Claude session from the saved session id.
+
+Skips with a loud message (never a silent fallback) when `workspace'
+is missing/empty/non-string, or when no on-disk directory resolves for
+it — the latter usually means the worktree was fully removed by
+`finish', so there is nothing to reopen.  Skill-invoked from
+`/workspace open'."
+  (let ((name (alist-get 'workspace cmd))
+        (git-root (alist-get 'git_root cmd)))
+    (cond
+     ((or (not (stringp name)) (string-empty-p name))
+      (claude-repl--log nil "workspace-commands-file open: SKIPPED (missing/empty/non-string workspace=%S)" name)
+      (message "[claude-repl] ERROR: cannot open workspace — `workspace' is required and must be a non-empty string (got %S)"
+               name))
+     (t
+      (let* ((bare (claude-repl--bare-workspace-name name))
+             (dir (claude-repl--resolve-open-workspace-dir name git-root)))
+        (cond
+         ((null dir)
+          (claude-repl--log bare
+                            "workspace-commands-file open: SKIPPED ws=%s — no on-disk directory resolved (git-root=%s)"
+                            bare (or git-root "nil"))
+          (message "[claude-repl] ERROR: cannot open workspace '%s' — no on-disk worktree found (was it finished/removed?)"
+                   name))
+         (t
+          (claude-repl--log bare
+                            "workspace-commands-file open: ws=%s dir=%s — re-establishing"
+                            bare dir)
+          (claude-repl--establish-workspace bare dir))))))))
+
 (defun claude-repl--handle-clipboard-command (cmd)
   "Handle a \"clipboard\" workspace command CMD.
 Stores the `text' field on workspace WS at `:clipboard'.  The OS
@@ -2955,6 +3031,7 @@ affect another agent's commands in the same JSON array."
     ("prompt"    . (claude-repl--handle-prompt-command     . nil))
     ("finish"    . (claude-repl--handle-finish-command     . nil))
     ("close"     . (claude-repl--handle-close-command      . nil))
+    ("open"      . (claude-repl--handle-open-command       . nil))
     ("clipboard" . (claude-repl--handle-clipboard-command  . nil))
     ("send"      . (claude-repl--handle-send-command       . nil))
     ("merge"     . (claude-repl--handle-merge-command      . nil))
