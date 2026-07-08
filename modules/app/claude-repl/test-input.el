@@ -2297,13 +2297,40 @@ must not accumulate phantom entries that trap the user in slash mode."
           (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
-                    ((symbol-function 'vterm-send-return)
-                     (lambda () (setq return-called t))))
+                    ((symbol-function 'claude-repl--vterm-send-return-key-logged)
+                     (lambda (_label) (setq return-called t))))
             (with-current-buffer " *test-slash-return*"
               (claude-repl--slash-return)
               (should return-called)
               (should (null claude-repl--slash-stack))
               (should-not claude-slash-input-mode))))))))
+
+(ert-deftest claude-repl-test-slash-return-routes-submission-via-libvterm ()
+  "Slash-return's no-pasted submission never uses raw `vterm-send-return'.
+The raw `process-send-string' byte write is not reliably registered as
+an Enter keystroke by Claude's Ink TUI, so slash commands typed
+char-by-char intermittently failed to submit on RET.  The submission
+must route through `claude-repl--vterm-send-return-key-logged'
+\(libvterm keyboard path) — the same fix as the empty-buffer bare-RET
+branch and the bracketed-paste submission Return."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-slash-return-libvterm*"
+      (setq-local claude-repl--slash-stack '("c" "/"))
+      (claude-slash-input-mode 1)
+      (let ((key-logged-label nil)
+            (raw-return-called nil))
+        (claude-repl-test--with-temp-buffer "*claude-panel-slash-libvterm-vterm*"
+          (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
+                    ((symbol-function 'claude-repl--vterm-send-return-key-logged)
+                     (lambda (label) (setq key-logged-label label)))
+                    ((symbol-function 'vterm-send-return)
+                     (lambda () (setq raw-return-called t))))
+            (with-current-buffer " *test-slash-return-libvterm*"
+              (claude-repl--slash-return)
+              (should (equal key-logged-label "slash-return"))
+              (should-not raw-return-called))))))))
 
 (ert-deftest claude-repl-test-slash-return-runs-posthooks-on-accumulated-input ()
   "`slash-return' runs posthooks against the reconstructed slash command.
@@ -2319,7 +2346,7 @@ fires the same posthooks as a buffered-and-sent `/clear'."
         (claude-repl-test--with-temp-buffer "*claude-panel-slash-posthook-vterm*"
           (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                    ((symbol-function 'vterm-send-return) #'ignore)
+                    ((symbol-function 'claude-repl--vterm-send-return-key-logged) #'ignore)
                     ((symbol-function 'claude-repl--run-send-posthooks)
                      (lambda (ws raw) (setq posthook-args (list ws raw)))))
             (with-current-buffer " *test-slash-return-posthooks*"
@@ -2338,7 +2365,7 @@ fires posthooks, the /clear posthook marks :done."
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (claude-repl--ws-set-claude-state "test-ws" :idle)
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                  ((symbol-function 'vterm-send-return) #'ignore))
+                  ((symbol-function 'claude-repl--vterm-send-return-key-logged) #'ignore))
           (with-current-buffer " *test-slash-return-clear-done*"
             (claude-repl--slash-return)
             (should (eq (claude-repl--ws-get "test-ws" :claude-state) :done))))))))
@@ -2356,7 +2383,7 @@ then truncated to `/c' fires no /clear hook."
         (claude-repl-test--with-temp-buffer "*claude-panel-slash-bs-vterm*"
           (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                    ((symbol-function 'vterm-send-return) #'ignore)
+                    ((symbol-function 'claude-repl--vterm-send-return-key-logged) #'ignore)
                     ((symbol-function 'claude-repl--run-send-posthooks)
                      (lambda (ws raw) (setq posthook-args (list ws raw)))))
             (with-current-buffer " *test-slash-bs-posthooks*"
@@ -2383,8 +2410,8 @@ already-forwarded direct-insert chars on Claude's prompt line."
                     ((symbol-function 'claude-repl--send-input-to-vterm)
                      (lambda (buf input &optional _on-settle)
                        (setq send-args (list buf input))))
-                    ((symbol-function 'vterm-send-return)
-                     (lambda () (setq return-called t))))
+                    ((symbol-function 'claude-repl--vterm-send-return-key-logged)
+                     (lambda (_label) (setq return-called t))))
             (with-current-buffer " *test-slash-return-paste*"
               (claude-repl--slash-return)
               (should send-args)
@@ -2410,8 +2437,8 @@ Preserves the pre-existing behavior for the typical direct-send path
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                     ((symbol-function 'claude-repl--send-input-to-vterm)
                      (lambda (&rest _) (setq send-called t)))
-                    ((symbol-function 'vterm-send-return)
-                     (lambda () (setq return-called t))))
+                    ((symbol-function 'claude-repl--vterm-send-return-key-logged)
+                     (lambda (_label) (setq return-called t))))
             (with-current-buffer " *test-slash-return-empty*"
               (claude-repl--slash-return)
               (should return-called)
@@ -2436,7 +2463,7 @@ buffer-string, not a trimmed view."
                     ((symbol-function 'claude-repl--send-input-to-vterm)
                      (lambda (buf input &optional _on-settle)
                        (setq send-args (list buf input))))
-                    ((symbol-function 'vterm-send-return) #'ignore))
+                    ((symbol-function 'claude-repl--vterm-send-return-key-logged) #'ignore))
             (with-current-buffer " *test-slash-return-ws*"
               (claude-repl--slash-return)
               (should (equal (nth 1 send-args) "   ")))))))))
@@ -3680,8 +3707,8 @@ and surfaces a user-visible error."
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                     ((symbol-function 'vterm-send-string)
                      (lambda (str &rest _) (push str sent-strings)))
-                    ((symbol-function 'vterm-send-return)
-                     (lambda () (setq return-called t))))
+                    ((symbol-function 'claude-repl--vterm-send-return-key-logged)
+                     (lambda (_label) (setq return-called t))))
             (with-current-buffer " *test-slash-inject*"
               (claude-repl--slash-return)
               (should return-called)
@@ -3703,8 +3730,8 @@ and surfaces a user-visible error."
                     ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                     ((symbol-function 'vterm-send-string)
                      (lambda (str &rest _) (push str sent-strings)))
-                    ((symbol-function 'vterm-send-return)
-                     (lambda () (setq return-called t))))
+                    ((symbol-function 'claude-repl--vterm-send-return-key-logged)
+                     (lambda (_label) (setq return-called t))))
             (with-current-buffer " *test-slash-no-inject*"
               (claude-repl--slash-return)
               (should return-called)
