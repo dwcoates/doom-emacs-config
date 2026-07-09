@@ -6,6 +6,7 @@
  * Behavior per user turn:
  * - text starting with "!tool <command>" → one Bash tool round guarded by
  *   a `canUseTool` permission request, then a closing text block.
+ * - "!md" → a streamed markdown showcase reply (webapp render demo).
  * - anything else → a streamed text block echoing the input.
  * Every turn ends with a `result` message.
  */
@@ -22,6 +23,32 @@ export interface FakeQueryOpts {
   sessionId: string;
   newUuid: () => string;
 }
+
+/** Canned reply for the "!md" turn — exercises every markdown construct. */
+export const MARKDOWN_SHOWCASE = [
+  "# Markdown showcase",
+  "",
+  "Rendered by the webapp's **markdown engine** — *streamed* over the wire like any other turn.",
+  "",
+  "## What works",
+  "",
+  "- **Bold**, *italic*, and `inline code`",
+  "- [Links](https://example.com) with safe schemes only",
+  "- Ordered lists too:",
+  "",
+  "1. first",
+  "2. second",
+  "",
+  "> Blockquotes for the philosophical bits.",
+  "",
+  "```go",
+  'func main() { fmt.Println("fenced code, escaped & highlighted-ish") }',
+  "```",
+  "",
+  "---",
+  "",
+  "That is the whole demo.",
+].join("\n");
 
 export function createFakeQuery(
   prompt: AsyncIterable<SdkUserMessageLike>,
@@ -71,7 +98,10 @@ export function createFakeQuery(
   };
 
   const runTextTurn = (messageId: string, text: string): void => {
-    const reply = `echo: ${text} [mode=${permissionMode}]`;
+    const reply =
+      text.trim() === "!md"
+        ? MARKDOWN_SHOWCASE
+        : `echo: ${text} [mode=${permissionMode}]`;
     emitStream({
       type: "message_start",
       message: { id: messageId, role: "assistant", model: "fake-model", usage },
