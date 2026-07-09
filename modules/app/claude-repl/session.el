@@ -604,10 +604,13 @@ Segments, in order:
      resolvable merge target.  The green/yellow coloring is the sole
      signal that the segment denotes the parent/merge-target
      relationship — there is no textual prefix.
-  2. `:eval' segment that renders the last-prompt summary (see
+  2. `:eval' segment that renders the Claude model serving the active
+     session (see `claude-repl--model-segment'), reading from the
+     project's session jsonl under `~/.claude/projects/'.
+  3. `:eval' segment that renders the last-prompt summary (see
      `claude-repl--prompt-summary-segment') and recomputes on every
      mode-line redisplay.
-  3. `:eval' segment that renders Claude's own aiTitle for the active
+  4. `:eval' segment that renders Claude's own aiTitle for the active
      session (see `claude-repl--ai-title-segment'), reading from the
      project's session jsonl under `~/.claude/projects/'.
 
@@ -625,6 +628,7 @@ is not reactive to later state changes."
            (yellow (concat (propertize green 'face '(:foreground "green" :weight bold))
                            (propertize yellow 'face '(:foreground "yellow" :weight bold))))
            (t (propertize green 'face '(:foreground "green" :weight bold))))
+          '(:eval (claude-repl--model-segment))
           '(:eval (claude-repl--prompt-summary-segment))
           '(:eval (claude-repl--ai-title-segment)))))
 
