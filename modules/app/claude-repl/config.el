@@ -259,6 +259,7 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (claude-repl--load-module "prompt-summary")
 (claude-repl--load-module "ai-title")
 (claude-repl--load-module "model")
+(claude-repl--load-module "context")
 (claude-repl--load-module "window")
 (claude-repl--load-module "sibling-popup")
 (claude-repl--load-module "panels")
