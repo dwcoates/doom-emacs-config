@@ -360,6 +360,26 @@ wrapper to an error-on-call lambda."
     (should (string-match-p "--resume fork-id --fork-session" result))
     (should-not (string-match-p "--continue" result))))
 
+(ert-deftest claude-repl-test-compute-claude-flags-model-arg-overrides-default ()
+  "An explicit MODEL arg is emitted as `--model <model>' over the global default."
+  (let ((claude-repl-system-prompt nil)
+        (claude-repl-interactive-model "opus"))
+    (should (equal (claude-repl--compute-claude-flags nil nil nil "sonnet")
+                   "--model sonnet"))))
+
+(ert-deftest claude-repl-test-compute-claude-flags-model-falls-back-to-interactive-model ()
+  "When MODEL is nil, `claude-repl-interactive-model' supplies the model."
+  (let ((claude-repl-system-prompt nil)
+        (claude-repl-interactive-model "opus"))
+    (should (equal (claude-repl--compute-claude-flags nil nil nil nil)
+                   "--model opus"))))
+
+(ert-deftest claude-repl-test-compute-claude-flags-model-nil-both-emits-no-model ()
+  "When both MODEL and `claude-repl-interactive-model' are nil, no `--model' flag."
+  (let ((claude-repl-system-prompt nil)
+        (claude-repl-interactive-model nil))
+    (should (equal (claude-repl--compute-claude-flags nil nil nil nil) ""))))
+
 (ert-deftest claude-repl-test-compute-claude-flags-perm-flag ()
   "compute-claude-flags should include permission flag when provided."
   (let ((claude-repl-system-prompt nil)
@@ -1944,6 +1964,36 @@ restart (the lazy-start path applies its defaults instead)."
         (let ((result (claude-repl--build-start-cmd "ws1")))
           (should (equal (plist-get result :cmd) "claude --dangerously-skip-permissions"))
           (should-not (plist-get result :sandboxed-p)))))))
+
+(ert-deftest claude-repl-test-build-start-cmd-uses-ws-model ()
+  "build-start-cmd emits `--model <ws :model>' when the workspace has one."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-system-prompt nil)
+          (claude-repl-interactive-model "opus"))
+      (claude-repl--ws-put "ws1" :active-env :bare-metal)
+      (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
+      (claude-repl--ws-put "ws1" :worktree-p nil)
+      (claude-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
+      (claude-repl--ws-put "ws1" :model "sonnet")
+      (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
+                 (lambda (_ws) nil)))
+        (let ((result (claude-repl--build-start-cmd "ws1")))
+          (should (string-match-p "--model sonnet" (plist-get result :cmd)))
+          (should-not (string-match-p "--model opus" (plist-get result :cmd))))))))
+
+(ert-deftest claude-repl-test-build-start-cmd-defaults-model-to-interactive-model ()
+  "build-start-cmd falls back to `claude-repl-interactive-model' when ws has no :model."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-system-prompt nil)
+          (claude-repl-interactive-model "opus"))
+      (claude-repl--ws-put "ws1" :active-env :bare-metal)
+      (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
+      (claude-repl--ws-put "ws1" :worktree-p nil)
+      (claude-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
+      (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
+                 (lambda (_ws) nil)))
+        (let ((result (claude-repl--build-start-cmd "ws1")))
+          (should (string-match-p "--model opus" (plist-get result :cmd))))))))
 
 (ert-deftest claude-repl-test-build-start-cmd-bare-metal-includes-system-prompt-default ()
   "build-start-cmd for bare-metal with default `claude-repl-system-prompt' includes --system-prompt \".\"."

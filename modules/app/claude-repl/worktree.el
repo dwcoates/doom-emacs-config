@@ -1107,7 +1107,7 @@ not resolve to a known workspace, or that workspace has no priority."
 
 (defun claude-repl--finalize-worktree-workspace (path dirname preemptive-prompt
                                                        priority fork-session-id force-sandbox
-                                                       callback &optional source-dir no-claude)
+                                                       callback &optional source-dir no-claude model)
   "Finalize a new worktree workspace at PATH with directory name DIRNAME.
 Registers the project with projectile, creates a Doom workspace, applies
 optional PREEMPTIVE-PROMPT, PRIORITY, FORK-SESSION-ID, and SOURCE-DIR
@@ -1140,9 +1140,15 @@ should jump to the new ws) are not silently undone.
 NO-CLAUDE, when non-nil, is forwarded to
 `claude-repl--setup-worktree-session' so the worktree is registered
 without booting a Claude session — the `SPC TAB n/N'
-empty-preemptive-prompt path."
-  (claude-repl--log dirname "finalize-worktree-workspace: path=%s dirname=%s priority=%s fork-session-id=%s force-sandbox=%s source-dir=%s"
-                    path dirname priority fork-session-id force-sandbox (or source-dir "nil"))
+empty-preemptive-prompt path.
+
+MODEL, when non-nil, is the per-workspace Claude model alias (from the
+workspace-generation JSON's `model' field); stored under `:model' so
+`claude-repl--build-start-cmd' passes it as `--model' when booting the
+session.  When nil, the session falls back to
+`claude-repl-interactive-model' (default \"opus\")."
+  (claude-repl--log dirname "finalize-worktree-workspace: path=%s dirname=%s priority=%s fork-session-id=%s force-sandbox=%s source-dir=%s model=%s"
+                    path dirname priority fork-session-id force-sandbox (or source-dir "nil") (or model "nil"))
   (claude-repl--with-preserved-focus
     (claude-repl--register-projectile-project path dirname)
     (let* ((canonical (claude-repl--path-canonical path))
@@ -1172,7 +1178,8 @@ empty-preemptive-prompt path."
       (claude-repl--apply-workspace-properties ws
         :priority effective-priority
         :fork-session-id fork-session-id
-        :source-ws-dir source-dir)
+        :source-ws-dir source-dir
+        :model model)
       ;; Cache branch names at construction time so --merge-base-ancestor-args
       ;; can skip the per-tick synchronous rev-parse calls on the warm path.
       (let ((branch (claude-repl--git-string-quiet "-C" path "rev-parse" "--abbrev-ref" "HEAD")))
@@ -1197,20 +1204,21 @@ empty-preemptive-prompt path."
 
 (defun claude-repl--worktree-add-callback (path dirname preemptive-prompt
                                                priority fork-session-id force-sandbox
-                                               callback source-dir no-claude ok output)
+                                               callback source-dir no-claude model ok output)
   "Handle the result of an async git-worktree-add operation.
 OK and OUTPUT are the success flag and git output.  The remaining arguments
 describe the workspace being created and are forwarded to
 `claude-repl--finalize-worktree-workspace' (including SOURCE-DIR, the
-project-dir of the workspace this worktree was created from, and
-NO-CLAUDE, which suppresses booting Claude for the new worktree)."
+project-dir of the workspace this worktree was created from, NO-CLAUDE,
+which suppresses booting Claude for the new worktree, and MODEL, the
+per-workspace Claude model alias)."
   (claude-repl--log dirname "worktree git result: %s" output)
   (if ok
       (progn
         (claude-repl--log dirname "worktree-add-callback: ok=t path=%s dirname=%s" path dirname)
         (claude-repl--finalize-worktree-workspace
          path dirname preemptive-prompt
-         priority fork-session-id force-sandbox callback source-dir no-claude))
+         priority fork-session-id force-sandbox callback source-dir no-claude model))
     (claude-repl--log dirname "worktree-add-callback: ok=nil (git worktree add failed) path=%s" path)
     (message "git worktree add failed: %s" output)))
 
@@ -1218,7 +1226,7 @@ NO-CLAUDE, which suppresses booting Claude for the new worktree)."
                                               fork-session-id
                                               dirname preemptive-prompt
                                               priority force-sandbox callback
-                                              &optional source-dir no-claude)
+                                              &optional source-dir no-claude model)
   "Run `git worktree add' asynchronously for a new worktree.
 Creates the worktree at PATH on BRANCH-NAME off BASE-COMMIT in GIT-ROOT.
 On success, also creates the companion start tag at BASE-COMMIT (see
@@ -1228,7 +1236,9 @@ When the git command finishes, `claude-repl--worktree-add-callback'
 finalizes the workspace.  SOURCE-DIR is the project-dir of the workspace
 this worktree was created from; threaded through to be persisted as
 `:source-ws-dir' on the new workspace.  NO-CLAUDE, when non-nil, is
-forwarded so the new worktree is registered without booting Claude."
+forwarded so the new worktree is registered without booting Claude.
+MODEL, when non-nil, is the per-workspace Claude model alias forwarded
+so the booted session runs under `--model MODEL'."
   (let* ((add-args (list "worktree" "add" "-b" branch-name path base-commit))
          (after-add (lambda (ok output)
                       (when ok
@@ -1237,7 +1247,7 @@ forwarded so the new worktree is registered without booting Claude."
                       (claude-repl--worktree-add-callback
                        path dirname preemptive-prompt
                        priority fork-session-id force-sandbox callback source-dir
-                       no-claude ok output))))
+                       no-claude model ok output))))
     (claude-repl--log dirname "worktree async git add: %S" add-args)
     (claude-repl--async-git "worktree-add" git-root add-args after-add)))
 
@@ -1283,7 +1293,7 @@ report the new path as an existing project."
       (claude-repl--log name "ERROR: start tag '%s' already exists — cannot create worktree" start-tag)
       (user-error "Start tag '%s' already exists — delete it first or choose a different name" start-tag))))
 
-(defun claude-repl--do-create-worktree-workspace (name &optional force-sandbox fork-session-id preemptive-prompt callback priority base-commit git-root source-dir no-claude)
+(defun claude-repl--do-create-worktree-workspace (name &optional force-sandbox fork-session-id preemptive-prompt callback priority base-commit git-root source-dir no-claude model)
   "Create a git worktree and Doom workspace for NAME.
 Git fetch and worktree-add run asynchronously so Emacs is not blocked.
 When everything is ready, CALLBACK (if non-nil) is called with (PATH DIRNAME).
@@ -1314,7 +1324,12 @@ command-receipt, not at timer-fire.
 
 SOURCE-DIR is the project-dir of the workspace this worktree was created
 from; persisted as `:source-ws-dir' on the new workspace so
-`SPC TAB M' can route the merge back to its source."
+`SPC TAB M' can route the merge back to its source.
+
+MODEL, when non-nil, is the per-workspace Claude model alias threaded
+through to `claude-repl--finalize-worktree-workspace' and stored under
+`:model' so the booted session runs under `--model MODEL' (defaulting to
+`claude-repl-interactive-model' when nil)."
   (let* ((base-commit (or base-commit (if fork-session-id "HEAD" claude-repl-worktree-default-base)))
          (git-root (or git-root (claude-repl--resolve-current-git-root)))
          (paths (claude-repl--resolve-worktree-paths git-root name))
@@ -1333,7 +1348,7 @@ from; persisted as `:source-ws-dir' on the new workspace so
                                    fork-session-id
                                    dirname preemptive-prompt
                                    priority force-sandbox callback source-dir
-                                   no-claude)))
+                                   no-claude model)))
       (message "Creating worktree '%s' from %s..." dirname base-commit)
       (cond
        (fork-session-id
@@ -2104,7 +2119,7 @@ silently degrade to the default base when forking was explicitly requested."
         (error "Cannot fork from workspace '%s': no active session ID (workspace unknown or session not started)" fork-from))
       sid)))
 
-(defun claude-repl--create-worktree-from-command (git-root name prompt priority &optional fork-session-id base-commit force-sandbox)
+(defun claude-repl--create-worktree-from-command (git-root name prompt priority &optional fork-session-id base-commit force-sandbox model)
   "Timer callback: create a worktree workspace for NAME with PROMPT and PRIORITY.
 GIT-ROOT is the repository captured at enqueue time (in
 `claude-repl--handle-create-command'); it is threaded through so the
@@ -2116,6 +2131,8 @@ BASE-COMMIT, when non-nil, overrides the default base ref (which is
 \"HEAD\" for forks and `claude-repl-worktree-default-base' otherwise).
 When FORCE-SANDBOX is non-nil, the new workspace's Claude session is
 launched inside the Docker sandbox rather than bare-metal.
+MODEL, when non-nil, is the per-workspace Claude model alias forwarded so
+the booted session runs under `--model MODEL'.
 
 The new workspace's `:source-ws-dir' is derived from BASE-COMMIT:
 - When BASE-COMMIT equals `claude-repl-master-branch-name', the parent
@@ -2133,11 +2150,11 @@ The new workspace's `:source-ws-dir' is derived from BASE-COMMIT:
          (if (and base-commit (equal base-commit claude-repl-master-branch-name))
              (claude-repl--master-worktree-path git-root)
            git-root)))
-    (claude-repl--log name "create-worktree-from-command: name=%s git-root=%s priority=%s fork-session-id=%s base-commit=%s source-dir=%s force-sandbox=%s"
+    (claude-repl--log name "create-worktree-from-command: name=%s git-root=%s priority=%s fork-session-id=%s base-commit=%s source-dir=%s force-sandbox=%s model=%s"
                       name git-root priority fork-session-id (or base-commit "nil") (or source-dir "nil")
-                      (if force-sandbox "t" "nil"))
+                      (if force-sandbox "t" "nil") (or model "nil"))
     (claude-repl--do-create-worktree-workspace
-     name force-sandbox fork-session-id prompt nil priority base-commit git-root source-dir)))
+     name force-sandbox fork-session-id prompt nil priority base-commit git-root source-dir nil model)))
 
 (defcustom claude-repl-worktree-stagger-seconds 5
   "Seconds between staggered worktree creation timers.
@@ -2287,7 +2304,12 @@ such payloads when the model has no slug material to work with.
 CMD may contain an optional \"base_commit\" field naming the git ref the
 new branch is created from (e.g. \"HEAD\", \"master\").  When absent or
 empty, the default applies (HEAD for forks,
-`claude-repl-worktree-default-base' otherwise)."
+`claude-repl-worktree-default-base' otherwise).
+
+CMD may contain an optional \"model\" field naming the Claude model alias
+(e.g. \"opus\", \"sonnet\", \"haiku\") the new workspace's initial Claude
+session is launched under via `--model'.  When absent or empty, the
+session falls back to `claude-repl-interactive-model' (default \"opus\")."
   (let* ((name (alist-get 'name cmd))
          (prompt (alist-get 'prompt cmd nil))
          (priority (alist-get 'priority cmd nil))
@@ -2298,6 +2320,10 @@ empty, the default applies (HEAD for forks,
          (base-commit (and (stringp cmd-base-commit)
                            (not (string-empty-p cmd-base-commit))
                            cmd-base-commit))
+         (cmd-model (alist-get 'model cmd nil))
+         (model (and (stringp cmd-model)
+                     (not (string-empty-p cmd-model))
+                     cmd-model))
          (nil-name (claude-repl--ws-nil-name))
          (bare-name (and (stringp name)
                          (not (string-empty-p name))
@@ -2351,12 +2377,12 @@ empty, the default applies (HEAD for forks,
         (when effective-name
           (claude-repl--reserve-workspace-name effective-name)
           (claude-repl--log effective-name
-                            "workspace-commands-file create: %s (delay %.1fs, requested=%s) priority=%s fork-session-id=%s git-root=%s base-commit=%s force-sandbox=%s"
+                            "workspace-commands-file create: %s (delay %.1fs, requested=%s) priority=%s fork-session-id=%s git-root=%s base-commit=%s force-sandbox=%s model=%s"
                             effective-name delay name priority fork-session-id git-root (or base-commit "nil")
-                            (if force-sandbox "t" "nil"))
+                            (if force-sandbox "t" "nil") (or model "nil"))
           (run-with-timer delay nil
                           #'claude-repl--create-worktree-from-command
-                          git-root effective-name prompt priority fork-session-id base-commit force-sandbox)))))))
+                          git-root effective-name prompt priority fork-session-id base-commit force-sandbox model)))))))
 
 (defun claude-repl--handle-prompt-command (cmd)
   "Handle a \"prompt\" workspace command CMD."

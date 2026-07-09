@@ -1993,6 +1993,55 @@ silently return a colliding name."
       ;; Args are (git-root name prompt priority fork-session-id base-commit)
       (should (equal "DWC/clean" (nth 1 scheduled-args))))))
 
+(ert-deftest claude-repl-test-handle-create-command-forwards-model-from-json ()
+  "A `model' field in the create JSON is scheduled as the 8th timer arg."
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+        (claude-repl--workspace-names-in-flight (make-hash-table :test 'equal))
+        (claude-repl-worktree-start-tag-prefix nil)
+        (scheduled-args nil))
+    (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'run-with-timer)
+               (lambda (_delay _repeat _fn &rest args)
+                 (setq scheduled-args args))))
+      (claude-repl--handle-create-command
+       `((type . "create") (name . "DWC/mdl") (git_root . "/tmp/repo") (model . "sonnet"))
+       0)
+      ;; Args are (git-root name prompt priority fork-session-id base-commit force-sandbox model)
+      (should (equal "sonnet" (nth 7 scheduled-args))))))
+
+(ert-deftest claude-repl-test-handle-create-command-model-nil-when-absent ()
+  "When the create JSON omits `model', the scheduled model arg is nil."
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+        (claude-repl--workspace-names-in-flight (make-hash-table :test 'equal))
+        (claude-repl-worktree-start-tag-prefix nil)
+        (scheduled-args nil))
+    (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'run-with-timer)
+               (lambda (_delay _repeat _fn &rest args)
+                 (setq scheduled-args args))))
+      (claude-repl--handle-create-command
+       `((type . "create") (name . "DWC/nomdl") (git_root . "/tmp/repo"))
+       0)
+      (should (null (nth 7 scheduled-args))))))
+
+(ert-deftest claude-repl-test-handle-create-command-model-nil-when-empty-string ()
+  "An empty-string `model' field is normalized to nil (falls back to default)."
+  (let ((claude-repl--workspaces (make-hash-table :test 'equal))
+        (claude-repl--workspace-names-in-flight (make-hash-table :test 'equal))
+        (claude-repl-worktree-start-tag-prefix nil)
+        (scheduled-args nil))
+    (cl-letf (((symbol-function 'claude-repl--workspace-name-collides-p)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'run-with-timer)
+               (lambda (_delay _repeat _fn &rest args)
+                 (setq scheduled-args args))))
+      (claude-repl--handle-create-command
+       `((type . "create") (name . "DWC/emptymdl") (git_root . "/tmp/repo") (model . ""))
+       0)
+      (should (null (nth 7 scheduled-args))))))
+
 (ert-deftest claude-repl-test-handle-create-command-disambiguates-collision ()
   "When the desired name collides (existing branch), the timer is scheduled with a suffixed name."
   (let ((claude-repl--workspaces (make-hash-table :test 'equal))
@@ -2066,28 +2115,38 @@ silently return a colliding name."
     (cl-letf (((symbol-function 'claude-repl--finalize-worktree-workspace)
                (lambda (&rest _args) (setq finalized t))))
       (claude-repl--worktree-add-callback
-       "/tmp/path" "dirname" nil nil nil nil nil nil nil nil "git error output")
+       "/tmp/path" "dirname" nil nil nil nil nil nil nil nil nil "git error output")
       (should-not finalized))))
 
 (ert-deftest claude-repl-test-worktree-add-callback-success ()
   "When git worktree add succeeds, finalize is called."
   (let ((finalized nil))
     (cl-letf (((symbol-function 'claude-repl--finalize-worktree-workspace)
-               (lambda (path dirname prompt priority fork-id bare-metal _cb &optional source-dir no-claude)
-                 (setq finalized (list path dirname prompt priority fork-id bare-metal source-dir no-claude)))))
+               (lambda (path dirname prompt priority fork-id bare-metal _cb &optional source-dir no-claude model)
+                 (setq finalized (list path dirname prompt priority fork-id bare-metal source-dir no-claude model)))))
       (claude-repl--worktree-add-callback
-       "/tmp/path" "dirname" "prompt" 5 "fork-123" nil nil "/src/dir" nil t "ok")
-      (should (equal finalized '("/tmp/path" "dirname" "prompt" 5 "fork-123" nil "/src/dir" nil))))))
+       "/tmp/path" "dirname" "prompt" 5 "fork-123" nil nil "/src/dir" nil "sonnet" t "ok")
+      (should (equal finalized '("/tmp/path" "dirname" "prompt" 5 "fork-123" nil "/src/dir" nil "sonnet"))))))
 
 (ert-deftest claude-repl-test-worktree-add-callback-forwards-no-claude ()
   "NO-CLAUDE is forwarded to `claude-repl--finalize-worktree-workspace'."
   (let ((captured :unset))
     (cl-letf (((symbol-function 'claude-repl--finalize-worktree-workspace)
-               (lambda (_path _dirname _prompt _priority _fork _bm _cb &optional _src no-claude)
+               (lambda (_path _dirname _prompt _priority _fork _bm _cb &optional _src no-claude _model)
                  (setq captured no-claude))))
       (claude-repl--worktree-add-callback
-       "/tmp/path" "dirname" nil nil nil nil nil "/src/dir" t t "ok")
+       "/tmp/path" "dirname" nil nil nil nil nil "/src/dir" t nil t "ok")
       (should (eq captured t)))))
+
+(ert-deftest claude-repl-test-worktree-add-callback-forwards-model ()
+  "MODEL is forwarded to `claude-repl--finalize-worktree-workspace'."
+  (let ((captured :unset))
+    (cl-letf (((symbol-function 'claude-repl--finalize-worktree-workspace)
+               (lambda (_path _dirname _prompt _priority _fork _bm _cb &optional _src _no-claude model)
+                 (setq captured model))))
+      (claude-repl--worktree-add-callback
+       "/tmp/path" "dirname" nil nil nil nil nil "/src/dir" nil "haiku" t "ok")
+      (should (equal captured "haiku")))))
 
 ;;;; ---- Tests: worktree-fetch-callback ----
 
@@ -4767,7 +4826,7 @@ JSON, so it eagerly resolves at entry-point time."
   (claude-repl-test--with-clean-state
     (let ((captured-source-dir :unset))
       (cl-letf (((symbol-function 'claude-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base &optional _git-root source-dir)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base &optional _git-root source-dir _no-claude _model)
                    (setq captured-source-dir source-dir))))
         (claude-repl--create-worktree-from-command "/tmp/cmd-repo/" "name" "prompt" 5)
         (should (equal captured-source-dir "/tmp/cmd-repo/"))))))
@@ -4782,6 +4841,29 @@ JSON, so it eagerly resolves at entry-point time."
                    (setq captured-force-sandbox force-sandbox))))
         (claude-repl--create-worktree-from-command "/tmp/repo/" "name" "prompt" 5 nil nil t)
         (should captured-force-sandbox)))))
+
+(ert-deftest claude-repl-test-create-worktree-from-command-forwards-model ()
+  "MODEL flows through to `claude-repl--do-create-worktree-workspace' as the
+11th positional arg."
+  (claude-repl-test--with-clean-state
+    (let ((captured-model :unset))
+      (cl-letf (((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _fs _fork _prompt _cb _priority _base _git _src _no-claude &optional model)
+                   (setq captured-model model))))
+        (claude-repl--create-worktree-from-command
+         "/tmp/repo/" "name" "prompt" 5 nil nil nil "opus")
+        (should (equal captured-model "opus"))))))
+
+(ert-deftest claude-repl-test-create-worktree-from-command-passes-nil-model-when-absent ()
+  "When MODEL is not supplied, `claude-repl--do-create-worktree-workspace'
+receives nil so the session uses the interactive-model default."
+  (claude-repl-test--with-clean-state
+    (let ((captured-model :unset))
+      (cl-letf (((symbol-function 'claude-repl--do-create-worktree-workspace)
+                 (lambda (_name _fs _fork _prompt _cb _priority _base _git _src _no-claude &optional model)
+                   (setq captured-model model))))
+        (claude-repl--create-worktree-from-command "/tmp/repo/" "name" "prompt" 5)
+        (should (null captured-model))))))
 
 (ert-deftest claude-repl-test-create-worktree-from-command-passes-nil-force-sandbox-when-absent ()
   "When FORCE-SANDBOX is not supplied, `claude-repl--do-create-worktree-workspace'
@@ -4822,6 +4904,34 @@ receives nil so the workspace uses bare-metal by default."
       (claude-repl--finalize-worktree-workspace
        "/tmp/new-wt" "new-ws" nil nil nil nil nil nil)
       (should (null (claude-repl--ws-get "new-ws" :source-ws-dir))))))
+
+(ert-deftest claude-repl-test-finalize-worktree-workspace-stores-model ()
+  "Finalize persists :model on the new workspace's plist."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+               (lambda (&rest _) nil))
+              ((symbol-function '+workspace-new) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--setup-worktree-session)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) "")))
+      (claude-repl--finalize-worktree-workspace
+       "/tmp/new-wt" "new-ws" nil nil nil nil nil nil nil "sonnet")
+      (should (equal (claude-repl--ws-get "new-ws" :model) "sonnet")))))
+
+(ert-deftest claude-repl-test-finalize-worktree-workspace-omits-model-when-nil ()
+  "When model is nil, :model is not stored (apply-workspace-properties skips nil)."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--register-projectile-project)
+               (lambda (&rest _) nil))
+              ((symbol-function '+workspace-new) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--setup-worktree-session)
+               (lambda (&rest _) nil))
+              ((symbol-function 'claude-repl--path-canonical) #'identity)
+              ((symbol-function 'claude-repl--git-string-quiet) (lambda (&rest _) "")))
+      (claude-repl--finalize-worktree-workspace
+       "/tmp/new-wt" "new-ws" nil nil nil nil nil nil nil nil)
+      (should (null (claude-repl--ws-get "new-ws" :model))))))
 
 (ert-deftest claude-repl-test-finalize-worktree-workspace-forwards-no-claude ()
   "Finalize forwards NO-CLAUDE to `claude-repl--setup-worktree-session'."
@@ -5790,7 +5900,7 @@ nests it under a parent that shares no commits with it."
                    (setq master-lookup-root root)
                    "/tmp/master/"))
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir &rest _)
                    (setq captured-source-dir source-dir))))
         (claude-repl--create-worktree-from-command
          "/tmp/calling-ws/" "name" "prompt" 5 nil "master")
@@ -5809,7 +5919,7 @@ correct outcome since `SPC TAB N' branches off master, not the caller."
       (cl-letf (((symbol-function 'claude-repl--master-worktree-path)
                  (lambda (_root) nil))
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir &rest _)
                    (setq captured-source-dir source-dir))))
         (claude-repl--create-worktree-from-command
          "/tmp/calling-ws/" "name" "prompt" 5 nil "master")
@@ -5827,7 +5937,7 @@ the calling workspace, captured as GIT-ROOT at enqueue time."
                    (setq master-path-called t)
                    "/tmp/master/"))
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir &rest _)
                    (setq captured-source-dir source-dir))))
         (claude-repl--create-worktree-from-command
          "/tmp/calling-ws/" "name" "prompt" 5 nil "HEAD")
@@ -5846,7 +5956,7 @@ the master special case only kicks in for an explicit `master' value."
                    (setq master-path-called t)
                    "/tmp/master/"))
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir &rest _)
                    (setq captured-source-dir source-dir))))
         (claude-repl--create-worktree-from-command
          "/tmp/calling-ws/" "name" "prompt" 5 nil nil)
@@ -5867,7 +5977,7 @@ default path so the parent is the originating workspace."
                    (setq master-path-called t)
                    "/tmp/master/"))
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir &rest _)
                    (setq captured-source-dir source-dir))))
         (claude-repl--create-worktree-from-command
          "/tmp/calling-ws/" "name" "prompt" 5 nil "origin/master")
@@ -5887,7 +5997,7 @@ triggers the master-worktree lookup."
                    (setq master-path-called t)
                    "/tmp/trunk/"))
                 ((symbol-function 'claude-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir &rest _)
                    (setq captured-source-dir source-dir))))
         (claude-repl--create-worktree-from-command
          "/tmp/calling-ws/" "name" "prompt" 5 nil "trunk")
