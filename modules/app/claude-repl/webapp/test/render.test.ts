@@ -36,6 +36,36 @@ describe("renderItem", () => {
     expect(renderItem(item)).toContain("cursor");
   });
 
+  it("renders text blocks through the markdown engine", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "# Hi\n**bold** and `code`",
+      done: true,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("<h1>Hi</h1>");
+    expect(html).toContain("<strong>bold</strong>");
+    expect(html).toContain("<code>code</code>");
+  });
+
+  it("escapes raw HTML in markdown text blocks", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "<img src=x onerror=alert(1)>",
+      done: true,
+    };
+    // Act + Assert
+    expect(renderItem(item)).not.toContain("<img");
+  });
+
   it("renders a finished text block without a cursor", () => {
     // Arrange
     const item: ConversationItem = {
