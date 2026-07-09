@@ -40,6 +40,16 @@ RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" \
     ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt && \
     go version
 
+# Headless Chromium (Playwright) for driving/screenshotting the
+# claude-repl webapp inside the sandbox. Installed as root so
+# --with-deps can apt-install the required shared libraries; the
+# browser lives in a world-readable shared path so the claude user
+# can use it.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN npm install -g playwright@1.61.1 && \
+    playwright install --with-deps chromium-headless-shell && \
+    chmod -R a+rX /opt/ms-playwright
+
 RUN useradd -m -u 1000 -s /bin/bash claude
 RUN git config --global --add safe.directory '*' && \
     git config --system --add safe.directory '*'
