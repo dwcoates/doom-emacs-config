@@ -51,33 +51,6 @@ all others use `claude-repl-personal-permission-flag'."
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-multi-repo-root-env "MULTI_REPO_ROOT"
-  "Name of the environment variable naming the multi-repo root directory.
-Workspaces whose project directory lies under the value of this
-environment variable use `claude-repl-multi-repo-config-dir' as the
-Claude CLI's CLAUDE_CONFIG_DIR, selecting the account logged in there.
-All other workspaces use `claude-repl-default-config-dir'."
-  :type 'string
-  :group 'claude-repl)
-
-(defcustom claude-repl-multi-repo-config-dir "~/.claude-chesscom"
-  "CLAUDE_CONFIG_DIR for workspaces under the multi-repo root.
-Points at the config directory holding the credentials of the account
-used for repositories under `claude-repl-multi-repo-root-env' (the
-dodge@chess.com account).  Run `claude login' once with this directory
-exported as CLAUDE_CONFIG_DIR to populate its credentials."
-  :type 'directory
-  :group 'claude-repl)
-
-(defcustom claude-repl-default-config-dir nil
-  "CLAUDE_CONFIG_DIR for workspaces outside the multi-repo root.
-When nil, no CLAUDE_CONFIG_DIR is set and the Claude CLI uses its
-default ~/.claude, i.e. the dodge.w.coates@gmail.com account.  When a
-string, that directory is used explicitly."
-  :type '(choice (const :tag "Use Claude's default (~/.claude)" nil)
-                 (directory :tag "Explicit config dir"))
-  :group 'claude-repl)
-
 (defcustom claude-repl-startup-prefix "clear && "
   "Shell command prefix prepended before the Claude command at startup."
   :type 'string
@@ -534,45 +507,14 @@ personal repos use --dangerously-skip-permissions."
                         flag)
       flag)))
 
-(defun claude-repl--compute-config-dir (project-dir)
-  "Return the CLAUDE_CONFIG_DIR to use for PROJECT-DIR, or nil.
-When PROJECT-DIR lies under the directory named by the
-`claude-repl-multi-repo-root-env' environment variable, returns the
-expanded `claude-repl-multi-repo-config-dir' (the dodge@chess.com
-account).  Otherwise returns the expanded `claude-repl-default-config-dir',
-or nil when that is nil so the CLI falls back to its default ~/.claude
-(the dodge.w.coates@gmail.com account).  Signals an error when
-PROJECT-DIR is nil, since account selection cannot be resolved without
-it."
-  (unless project-dir
-    (error "claude-repl--compute-config-dir: project-dir is nil — cannot determine account"))
-  (let* ((root (getenv claude-repl-multi-repo-root-env))
-         (under-multi-repo
-          (and root
-               (> (length root) 0)
-               (string-prefix-p (file-name-as-directory (expand-file-name root))
-                                (file-name-as-directory (expand-file-name project-dir)))))
-         (dir (if under-multi-repo
-                  claude-repl-multi-repo-config-dir
-                claude-repl-default-config-dir)))
-    (claude-repl--log nil "compute-config-dir: project-dir=%s root=%s branch=%s dir=%s"
-                      project-dir root
-                      (if under-multi-repo "multi-repo" "default") dir)
-    (and dir (expand-file-name dir))))
-
-(defun claude-repl--assemble-cmd (sandbox-config sandboxed-p claude-flags &optional config-dir)
+(defun claude-repl--assemble-cmd (sandbox-config sandboxed-p claude-flags)
   "Assemble the final shell command string.
 SANDBOX-CONFIG is the sandbox plist (may be nil), SANDBOXED-P indicates
-Docker mode, and CLAUDE-FLAGS is the pre-built flags string.  CONFIG-DIR,
-when non-nil, is prepended as a `CLAUDE_CONFIG_DIR=...' environment
-assignment so the launched Claude uses that account's credentials."
-  (let* ((base (if sandboxed-p
-                   (concat (plist-get sandbox-config :script) " " claude-flags)
-                 (concat "claude " claude-flags)))
-         (env-prefix (if config-dir
-                         (format "CLAUDE_CONFIG_DIR=%s " (shell-quote-argument config-dir))
-                       ""))
-         (cmd (string-trim (concat env-prefix base))))
+Docker mode, and CLAUDE-FLAGS is the pre-built flags string."
+  (let ((cmd (string-trim
+              (if sandboxed-p
+                  (concat (plist-get sandbox-config :script) " " claude-flags)
+                (concat "claude " claude-flags)))))
     (claude-repl--log nil "assemble-cmd: cmd=%s" cmd)
     cmd))
 
@@ -594,10 +536,9 @@ with everything the caller needs for logging and mode-line setup."
                             (plist-get sandbox-config :image)))
          (sandboxed-p (and worktree-p docker-image))
          (perm-flag (claude-repl--compute-perm-flag sandboxed-p project-dir))
-         (config-dir (claude-repl--compute-config-dir project-dir))
          (model (claude-repl--ws-get ws :model))
          (claude-flags (claude-repl--compute-claude-flags session-id fork-session-id perm-flag model))
-         (cmd (claude-repl--assemble-cmd sandbox-config sandboxed-p claude-flags config-dir)))
+         (cmd (claude-repl--assemble-cmd sandbox-config sandboxed-p claude-flags)))
     (list :cmd cmd
           :sandboxed-p sandboxed-p
           :docker-image docker-image
