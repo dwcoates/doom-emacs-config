@@ -521,6 +521,55 @@ wrapper to an error-on-call lambda."
   "assemble-cmd with empty flags should produce clean command."
   (should (equal (claude-repl--assemble-cmd nil nil "") "claude")))
 
+(ert-deftest claude-repl-test-assemble-cmd-config-dir ()
+  "assemble-cmd prepends CLAUDE_CONFIG_DIR when config-dir is given."
+  (should (equal (claude-repl--assemble-cmd nil nil "--resume abc" "/home/u/.claude-cc")
+                 "CLAUDE_CONFIG_DIR=/home/u/.claude-cc claude --resume abc")))
+
+(ert-deftest claude-repl-test-assemble-cmd-config-dir-sandboxed ()
+  "assemble-cmd prepends CLAUDE_CONFIG_DIR before the sandbox script."
+  (let ((config (list :script "/usr/bin/claude-sandbox" :image "img")))
+    (should (equal (claude-repl--assemble-cmd config t "--resume abc" "/cc")
+                   "CLAUDE_CONFIG_DIR=/cc /usr/bin/claude-sandbox --resume abc"))))
+
+;;;; ---- Tests: claude-repl--compute-config-dir ----
+
+(ert-deftest claude-repl-test-compute-config-dir-under-multi-repo ()
+  "compute-config-dir returns the multi-repo config dir for projects under the root."
+  (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment)))
+    (should (equal (claude-repl--compute-config-dir "/home/user/multi/repoA/proj")
+                   (expand-file-name claude-repl-multi-repo-config-dir)))))
+
+(ert-deftest claude-repl-test-compute-config-dir-outside-nil-default ()
+  "compute-config-dir returns nil outside the root when default-config-dir is nil."
+  (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment))
+        (claude-repl-default-config-dir nil))
+    (should-not (claude-repl--compute-config-dir "/home/user/other/proj"))))
+
+(ert-deftest claude-repl-test-compute-config-dir-outside-explicit-default ()
+  "compute-config-dir returns the expanded explicit default dir outside the root."
+  (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment))
+        (claude-repl-default-config-dir "~/.claude-personal"))
+    (should (equal (claude-repl--compute-config-dir "/home/user/other/proj")
+                   (expand-file-name "~/.claude-personal")))))
+
+(ert-deftest claude-repl-test-compute-config-dir-env-unset ()
+  "compute-config-dir falls back to the default when the root env var is unset."
+  (let ((process-environment (copy-sequence process-environment))
+        (claude-repl-default-config-dir nil))
+    (setenv "MULTI_REPO_ROOT" nil)
+    (should-not (claude-repl--compute-config-dir "/home/user/multi/proj"))))
+
+(ert-deftest claude-repl-test-compute-config-dir-env-empty ()
+  "compute-config-dir treats an empty root env var as no multi-repo root."
+  (let ((process-environment (cons "MULTI_REPO_ROOT=" process-environment))
+        (claude-repl-default-config-dir nil))
+    (should-not (claude-repl--compute-config-dir "/home/user/multi/proj"))))
+
+(ert-deftest claude-repl-test-compute-config-dir-nil-dir ()
+  "compute-config-dir with nil project-dir should signal an error."
+  (should-error (claude-repl--compute-config-dir nil) :type 'error))
+
 ;;;; ---- Tests: Workspace mode-line ----
 
 (ert-deftest claude-repl-test-workspace-mode-line-with-parent-no-merge ()
