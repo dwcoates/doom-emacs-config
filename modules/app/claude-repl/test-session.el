@@ -530,15 +530,16 @@ wrapper to an error-on-call lambda."
         (should (equal (car result) ""))))))
 
 (ert-deftest claude-repl-test-workspace-mode-line-keeps-prompt-summary-segment ()
-  "Mode-line list has 3 elements; the prompt-summary :eval segment is
-preserved in the middle position, with the ai-title :eval segment
-trailing it."
+  "Mode-line list has 4 elements; the model :eval segment leads the
+:eval group, the prompt-summary :eval segment follows it, and the
+ai-title :eval segment trails."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
       (let ((result (claude-repl--workspace-mode-line "ws")))
-        (should (= (length result) 3))
-        (should (equal (nth 1 result) '(:eval (claude-repl--prompt-summary-segment))))
-        (should (equal (nth 2 result) '(:eval (claude-repl--ai-title-segment))))))))
+        (should (= (length result) 4))
+        (should (equal (nth 1 result) '(:eval (claude-repl--model-segment))))
+        (should (equal (nth 2 result) '(:eval (claude-repl--prompt-summary-segment))))
+        (should (equal (nth 3 result) '(:eval (claude-repl--ai-title-segment))))))))
 
 (ert-deftest claude-repl-test-workspace-mode-line-strips-trailing-slash ()
   "A trailing slash on :source-ws-dir does not leak into the parent name."
