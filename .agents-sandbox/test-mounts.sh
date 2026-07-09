@@ -89,41 +89,41 @@ else:
   fi
 }
 
-# --- workspace mount is present in defaults ---
+# --- home mount is present in defaults ---
 test_workspace_mount_present() {
   local result
   result="$(python3 -c "
 import json, sys
 d = json.load(open(sys.argv[1]))
 found = any(
-    e.get('source') == '~/workspace' and e.get('target') == '/home/claude/workspace'
+    e.get('source') == '~' and e.get('target') == '/home/claude/workspace'
     for e in d['defaults']
 )
 print('ok' if found else 'fail')
 " "$SAMPLE" 2>/dev/null)"
   if [ "$result" = "ok" ]; then
-    pass "~/workspace mount is present in defaults"
+    pass "~ mount is present in defaults"
   else
-    fail "~/workspace mount is present in defaults"
+    fail "~ mount is present in defaults"
   fi
 }
 
-# --- workspace mount is read+write ---
+# --- home mount is read+write ---
 test_workspace_mount_is_rw() {
   local result
   result="$(python3 -c "
 import json, sys
 d = json.load(open(sys.argv[1]))
 for e in d['defaults']:
-    if e.get('source') == '~/workspace':
+    if e.get('source') == '~':
         print('ok' if e.get('readonly') is False else 'fail')
         sys.exit(0)
 print('not-found')
 " "$SAMPLE" 2>/dev/null)"
   if [ "$result" = "ok" ]; then
-    pass "workspace mount is read+write (readonly: false)"
+    pass "home mount is read+write (readonly: false)"
   else
-    fail "workspace mount is read+write" "readonly is not false"
+    fail "home mount is read+write" "readonly is not false"
   fi
 }
 
@@ -134,15 +134,15 @@ test_workspace_mount_type_is_bind() {
 import json, sys
 d = json.load(open(sys.argv[1]))
 for e in d['defaults']:
-    if e.get('source') == '~/workspace':
+    if e.get('source') == '~':
         print('ok' if e.get('type') == 'bind' else 'fail')
         sys.exit(0)
 print('not-found')
 " "$SAMPLE" 2>/dev/null)"
   if [ "$result" = "ok" ]; then
-    pass "workspace mount type is 'bind'"
+    pass "home mount type is 'bind'"
   else
-    fail "workspace mount type" "expected 'bind'"
+    fail "home mount type" "expected 'bind'"
   fi
 }
 
