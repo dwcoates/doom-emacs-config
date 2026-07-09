@@ -141,11 +141,22 @@ so a quick transit through the tab does not silently strip the green
 ;; !! `claude-repl--update-all-workspace-states'.                      !!
 ;; !!                                                                  !!
 ;; !! The tab-bar will NOT repaint unless the string it displays       !!
-;; !! actually changes between ticks.  Toggling a trailing space on    !!
-;; !! every poll cycle forces the tab-bar to detect a "new" string     !!
-;; !! and re-render, giving us real-time visual updates.  Without      !!
-;; !! this, state-color changes (thinking → done, etc.) are invisible  !!
+;; !! actually changes between ticks.  Toggling the cache-buster       !!
+;; !! suffix (`claude-repl--tabline-cache-buster') on every poll       !!
+;; !! cycle forces the tab-bar to detect a "new" string and            !!
+;; !! re-render, giving us real-time visual updates.  Without this,    !!
+;; !! state-color changes (thinking → done, etc.) are invisible        !!
 ;; !! until the user manually triggers a redisplay.                    !!
+;; !!                                                                  !!
+;; !! The suffix MUST be zero-width and non-visible: it used to be a   !!
+;; !! plain trailing space, and that one-column width tick could push  !!
+;; !! the tabline across a row-wrap threshold, changing the tab-bar    !!
+;; !! height and (on macOS) resizing the NSWindow every second — the   !!
+;; !! trigger edge of the redisplay livelock described in              !!
+;; !! `claude-repl-workspace-tabline-formatted'.  The cache only       !!
+;; !! compares string CONTENTS (`equal' ignores text properties), so   !!
+;; !! an `invisible'-propertized space busts it without any visible    !!
+;; !! or width effect.                                                 !!
 ;; !!                                                                  !!
 ;; !! The toggle is read on TWO rendering paths:                       !!
 ;; !!  - `claude-repl--tabline-advice' (override of `+workspace--      !!
@@ -170,15 +181,31 @@ so a quick transit through the tab does not silently strip the green
 ;; !! It is the mechanism that makes tab-bar updates work.             !!
 ;; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 (defvar claude-repl--tabline-space-toggle nil
-  "Non-nil means append an extra trailing space to the tabline string.
+  "Non-nil means append the zero-width cache-buster to the tabline string.
 Flipped on every poll cycle by `claude-repl--update-all-workspace-states'
-\(via `claude-repl--force-tab-bar-redraw').  Read by
-`claude-repl--tabline-advice' AND by
-`claude-repl-workspace-tabline-formatted' /
+\(via `claude-repl--force-tab-bar-redraw').  Read (through
+`claude-repl--tabline-cache-buster') by `claude-repl--tabline-advice'
+AND by `claude-repl-workspace-tabline-formatted' /
 `claude-repl-current-workspace-name-segment' (the functions installed
 into `tab-bar-format') so both rendering paths produce an alternating
 string that forces the tab-bar to repaint.  DO NOT REMOVE — see
 comment above.")
+
+(defun claude-repl--tabline-cache-buster ()
+  "Return the toggled zero-width suffix that defeats the tab-bar string cache.
+Returns an `invisible'-propertized single space when
+`claude-repl--tabline-space-toggle' is non-nil, else the empty string.
+The tab-bar's repaint gate compares string contents (`equal' ignores
+text properties), so the suffix must alternate the string's characters
+between ticks — but it must never change the rendered width, because a
+width tick can move the tabline across a row-wrap threshold and set
+off the tab-bar-height/frame-resize oscillation that livelocks
+redisplay (see `claude-repl-workspace-tabline-formatted').  DO NOT
+replace this with a bare \" \" — see the block comment above
+`claude-repl--tabline-space-toggle'."
+  (if claude-repl--tabline-space-toggle
+      (propertize " " 'invisible t)
+    ""))
 
 (defvar claude-repl-hide-mode-enabled nil
   "Non-nil means persp-kill `:hidden' workspaces on workspace switch.
@@ -856,9 +883,11 @@ Tab-bar rendering caches by string equality, and `equal' on propertized
 strings ignores text properties — so changes that only differ in face
 \(e.g. a `:flashing' toggle\) won't trigger a repaint via
 `force-mode-line-update' alone.  This helper flips the load-bearing
-`claude-repl--tabline-space-toggle' so the next tabline render produces
-a different string, then drives the tab-bar update primitives.  See the
-block comment above the toggle's defvar for the rationale."
+`claude-repl--tabline-space-toggle' so the next tabline render appends
+a different cache-buster suffix (`claude-repl--tabline-cache-buster')
+and produces a different string, then drives the tab-bar update
+primitives.  See the block comment above the toggle's defvar for the
+rationale."
   (setq claude-repl--tabline-space-toggle (not claude-repl--tabline-space-toggle))
   (when (fboundp 'tab-bar-tabs-set)
     (tab-bar-tabs-set (tab-bar-tabs)))
@@ -1073,7 +1102,7 @@ Each element is the propertized output of `claude-repl--render-tab-entry'
 for the corresponding workspace, 1-indexed.  Used by both
 `claude-repl--tabline-advice' (which mapconcats with a space separator)
 and `claude-repl-workspace-tabline-formatted' (which packs entries
-into lines so wrapping happens between entries, not mid-name).
+into a single row, eliding overflow behind \"+N\" badges).
 
 No hide-project-dirs filtering happens here: that mode hides matching
 workspaces at the persp layer (they are killed and leave
@@ -1091,38 +1120,72 @@ own notion of which workspaces it owns, not persp-mode's raw cache."
              for i from 1
              collect (claude-repl--render-tab-entry name current-name i))))
 
-(defun claude-repl--pack-tabline-entries (entries width)
-  "Greedily pack ENTRIES into lines no wider than WIDTH columns.
+(defun claude-repl--tabline-single-row (entries current-pos width)
+  "Pack ENTRIES into ONE row no wider than WIDTH columns.
 
 ENTRIES is a list of rendered tab-entry strings (see
-`claude-repl--tabline-rendered-entries').  Returns a list of line
-strings, where adjacent entries on the same line are joined with a
-single space.  A single entry wider than WIDTH still occupies its own
-line — packing never breaks an entry mid-string.
+`claude-repl--tabline-rendered-entries').  Returns a single line
+string (never containing a newline), with adjacent entries joined by
+a single space.  When all entries fit, all are shown.  Otherwise a
+contiguous window of entries around CURRENT-POS (0-based index of the
+current workspace; nil falls back to 0) is shown — the current entry
+is ALWAYS included — and the elided neighbors are summarized by
+\"+N \" / \" +N\" overflow badges on the corresponding side.
 
-The result is suitable for `claude-repl--join-tabline-rows' so the
-tab-bar wraps only at entry boundaries.  WIDTH is treated as a
-character count (`length' of propertized strings), which is approximate
-for entries containing display-property images but close enough that
-wrap points remain at entry boundaries."
+The row must never wrap: a multi-row tab-bar changes the tab-bar's
+pixel height as workspaces come and go, and on macOS a tab-bar height
+change resizes the NSWindow; when that resize is clipped (e.g. by the
+screen edge) the requested and realized frame sizes never agree and
+redisplay livelocks at 100% CPU retrying the resize
+\(`ns_change_tab_bar_height' -> `adjust_frame_size' in src/).
+
+WIDTH is treated as a character count (`length' of propertized
+strings), which is approximate for entries containing
+display-property images but stable across renders, so the fit
+decision cannot oscillate."
   (if (null entries)
-      (list "")
-    (let ((lines '())
-          (current nil)
-          (current-w 0))
-      (dolist (e entries)
-        (let ((ew (length e)))
-          (cond
-           ((null current)
-            (setq current e current-w ew))
-           ((> (+ current-w 1 ew) width)
-            (push current lines)
-            (setq current e current-w ew))
-           (t
-            (setq current (concat current " " e)
-                  current-w (+ current-w 1 ew))))))
-      (when current (push current lines))
-      (nreverse lines))))
+      ""
+    (let* ((n (length entries))
+           (widths (mapcar #'length entries))
+           (total (+ (apply #'+ widths) (1- n))))
+      (if (<= total width)
+          (mapconcat #'identity entries " ")
+        ;; Overflow: window around the current entry, badges reserved
+        ;; conservatively on both sides so the result can never exceed
+        ;; WIDTH regardless of which side ends up elided.
+        (let* ((cur (min (max (or current-pos 0) 0) (1- n)))
+               (badge-w (+ 2 (length (number-to-string n)))) ; "+N " / " +N"
+               (budget (max 1 (- width (* 2 badge-w))))
+               (lo cur)
+               (hi cur)
+               (used (nth cur widths)))
+          (catch 'full
+            (while (or (> lo 0) (< hi (1- n)))
+              (let ((grew nil))
+                (when (< hi (1- n))
+                  (let ((w (nth (1+ hi) widths)))
+                    (when (<= (+ used 1 w) budget)
+                      (cl-incf hi)
+                      (cl-incf used (1+ w))
+                      (setq grew t))))
+                (when (> lo 0)
+                  (let ((w (nth (1- lo) widths)))
+                    (when (<= (+ used 1 w) budget)
+                      (cl-decf lo)
+                      (cl-incf used (1+ w))
+                      (setq grew t))))
+                (unless grew (throw 'full nil)))))
+          (let ((row (concat
+                      (if (> lo 0) (format "+%d " lo) "")
+                      (mapconcat #'identity (seq-subseq entries lo (1+ hi)) " ")
+                      (if (< hi (1- n)) (format " +%d" (- n 1 hi)) ""))))
+            ;; Degenerate guard: at pathologically narrow widths even
+            ;; the always-included current entry plus badges may exceed
+            ;; WIDTH; hard-truncate rather than ever letting the row
+            ;; wrap.
+            (if (> (length row) width)
+                (substring row 0 width)
+              row)))))))
 
 (defun claude-repl--join-tabline-rows (lines)
   "Join LINES (pre-centered tab-bar rows) with row separators.
@@ -1144,7 +1207,7 @@ Callers must size each row so the trailing unfaced space lands within
 the frame's visible columns (col < `frame-width').  `+doom-dashboard
 --center' only left-pads, so a row of length `frame-width' has its
 appended space at column `frame-width' — offscreen — and the last
-visible glyph is still the faced one.  Pack and center to
+visible glyph is still the faced one.  Size and center rows to
 `(1- (frame-width))' to leave room for the terminator."
   (if (null lines)
       ""
@@ -1171,9 +1234,9 @@ therefore the tab-bar) naturally."
                               current-name claude-repl-hide-mode-enabled states)
     (concat
      (mapconcat #'identity entries " ")
-     ;; Trailing space toggle — DO NOT REMOVE.  See the block comment
+     ;; Cache-buster toggle — DO NOT REMOVE.  See the block comment
      ;; above `claude-repl--tabline-space-toggle' for why this exists.
-     (if claude-repl--tabline-space-toggle " " ""))))
+     (claude-repl--tabline-cache-buster))))
 
 (advice-add '+workspace--tabline :override #'claude-repl--tabline-advice)
 
@@ -1188,33 +1251,37 @@ therefore the tab-bar) naturally."
 ;; rationale.
 
 (defun claude-repl-workspace-tabline-formatted ()
-  "Format workspace list for tab-bar display.
-Packs entries into lines no wider than `(1- (frame-width))' so the
-tab-bar wraps only between entries (never mid-name) AND so the
-unfaced terminator that `claude-repl--join-tabline-rows' appends to
-each row lands within the visible columns (col < `frame-width').
-Centers each packed line to the same reserved width so left-only
-padding from `+doom-dashboard--center' doesn't push the row back to
-the right edge.  Joins via `claude-repl--join-tabline-rows' so the
-per-row face extension does not paint the rightmost tab's background
-to the right edge.  Appends a toggled trailing space tied to
-`claude-repl--tabline-space-toggle' so the left-aligned tab-bar
-segment's string content actually changes across refresh ticks (the
-alternating-space trick — see the block comment above the toggle's
-defvar).  Without the toggle, face-only status transitions
+  "Format workspace list for tab-bar display as a SINGLE row.
+Renders one row no wider than `(1- (frame-width))' via
+`claude-repl--tabline-single-row', which keeps the current workspace
+visible and elides overflow behind \"+N\" badges.  The single-row cap
+is load-bearing, not cosmetic: a row-count change alters the tab-bar
+pixel height, and on macOS `ns_change_tab_bar_height' resizes the
+NSWindow — when that resize is clipped by the screen edge, redisplay
+retries it forever and Emacs livelocks at 100% CPU (see the
+single-row helper's docstring).
+
+The `(1- (frame-width))' cap also keeps the unfaced terminator that
+`claude-repl--join-tabline-rows' appends within the visible columns
+\(col < `frame-width'), and the row is centered so left-only padding
+from `+doom-dashboard--center' doesn't push it to the right edge.
+Appends the zero-width cache-buster
+\(`claude-repl--tabline-cache-buster') so the segment's string content
+actually changes across refresh ticks without changing its rendered
+width.  Without the cache-buster, face-only status transitions
 \(e.g. :thinking -> :done) stay invisible until a workspace switch."
   (let* ((width (frame-width))
          (line-width (max 1 (1- width)))
-         (entries (claude-repl--tabline-rendered-entries))
-         (lines (claude-repl--pack-tabline-entries entries line-width))
-         (centered-lines (mapcar (lambda (line)
-                                   (if (fboundp '+doom-dashboard--center)
-                                       (+doom-dashboard--center line-width line)
-                                     line))
-                                 lines))
-         (joined (claude-repl--join-tabline-rows centered-lines)))
-    (concat joined
-            (if claude-repl--tabline-space-toggle " " ""))))
+         (names (claude-repl--ws-list-names))
+         (entries (claude-repl--tabline-rendered-entries names))
+         (current (claude-repl--ws-current-name))
+         (cur-pos (and current (cl-position current names :test #'equal)))
+         (row (claude-repl--tabline-single-row entries cur-pos line-width))
+         (centered (if (fboundp '+doom-dashboard--center)
+                       (+doom-dashboard--center line-width row)
+                     row))
+         (joined (claude-repl--join-tabline-rows (list centered))))
+    (concat joined (claude-repl--tabline-cache-buster))))
 
 (defun claude-repl-current-workspace-name-segment ()
   "Return current workspace name as an invisible tab-bar segment.
@@ -1243,6 +1310,16 @@ so its only purpose is the cache-busting role."
          tab-bar-show t
          tab-bar-new-button-show nil
          tab-bar-close-button-show nil)
+   ;; A tab-bar height change must NEVER imply an NSWindow resize.  On
+   ;; macOS the implied resize can be clipped by the screen edge, so the
+   ;; requested and realized frame sizes disagree and redisplay retries
+   ;; the resize on every cycle — a 100%-CPU livelock
+   ;; (`ns_change_tab_bar_height' -> `adjust_frame_size' ->
+   ;; `ns_set_window_size').  Absorb height changes into the text area
+   ;; instead.  Belt-and-suspenders with the single-row cap in
+   ;; `claude-repl-workspace-tabline-formatted'.
+   (unless (eq frame-inhibit-implied-resize t)
+     (cl-pushnew 'tab-bar-lines frame-inhibit-implied-resize))
    (tab-bar-mode 1)))
 
 (defun claude-repl-toggle-hide-mode ()
