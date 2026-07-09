@@ -1072,4 +1072,89 @@ That case is already covered by `claude-repl--check-skill-links'."
       (let ((issues (claude-repl--doctor-issues)))
         (should (test-install--doctor-find issues "Unmanaged broken symlink"))))))
 
+;;;; ---- Tests: alt-account config-dir provisioning ----
+
+(defun test-install--all-hooks-registered-p (settings-file)
+  "Return non-nil when every managed hook is registered in SETTINGS-FILE."
+  (let* ((json (claude-repl--read-settings-alist (expand-file-name settings-file)))
+         (hooks (cdr (assq 'hooks json))))
+    (cl-every (lambda (pair)
+                (claude-repl--event-has-command-p hooks (car pair) (cdr pair)))
+              claude-repl--managed-hooks)))
+
+(ert-deftest claude-repl-test-config-dirs-to-provision-excludes-default ()
+  "config-dirs-to-provision excludes the default ~/.claude."
+  (let ((claude-repl-multi-repo-config-dir "~/.claude-chesscom")
+        (claude-repl-default-config-dir nil))
+    (should-not (member (file-name-as-directory (expand-file-name "~/.claude"))
+                        (claude-repl--config-dirs-to-provision)))))
+
+(ert-deftest claude-repl-test-config-dirs-to-provision-includes-multi-repo ()
+  "config-dirs-to-provision includes the multi-repo config dir."
+  (let ((claude-repl-multi-repo-config-dir "~/.claude-chesscom")
+        (claude-repl-default-config-dir nil))
+    (should (member (file-name-as-directory (expand-file-name "~/.claude-chesscom"))
+                    (claude-repl--config-dirs-to-provision)))))
+
+(ert-deftest claude-repl-test-provision-registers-into-each-config-dir ()
+  "provision-config-dirs registers the managed hooks into every selected dir's settings.json."
+  (let* ((root (make-temp-file "claude-provision-" t))
+         (multi (expand-file-name "chesscom" root))
+         (other (expand-file-name "personal" root)))
+    (unwind-protect
+        (let ((claude-repl-multi-repo-config-dir multi)
+              (claude-repl-default-config-dir other))
+          (claude-repl--provision-config-dirs)
+          (should (test-install--all-hooks-registered-p
+                   (expand-file-name "settings.json" multi)))
+          (should (test-install--all-hooks-registered-p
+                   (expand-file-name "settings.json" other))))
+      (delete-directory root t))))
+
+(ert-deftest claude-repl-test-register-hooks-idempotent ()
+  "register-hooks-in-settings is a no-op on a second run (returns nil, no double-register)."
+  (let* ((dir (make-temp-file "claude-register-" t))
+         (settings (expand-file-name "settings.json" dir)))
+    (unwind-protect
+        (progn
+          (should (claude-repl--register-hooks-in-settings settings))
+          (should-not (claude-repl--register-hooks-in-settings settings)))
+      (delete-directory dir t))))
+
+(ert-deftest claude-repl-test-register-hooks-preserves-foreign ()
+  "register-hooks-in-settings preserves foreign top-level keys."
+  (let* ((dir (make-temp-file "claude-register-" t))
+         (settings (expand-file-name "settings.json" dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file settings (insert "{\"model\":\"opus\"}"))
+          (claude-repl--register-hooks-in-settings settings)
+          (let ((json (claude-repl--read-settings-alist settings)))
+            (should (equal (cdr (assq 'model json)) "opus"))
+            (should (cdr (assq 'hooks json)))))
+      (delete-directory dir t))))
+
+(ert-deftest claude-repl-test-register-hooks-notification-matcher ()
+  "register-hooks-in-settings writes the permission_prompt matcher for Notification."
+  (let* ((dir (make-temp-file "claude-register-" t))
+         (settings (expand-file-name "settings.json" dir)))
+    (unwind-protect
+        (progn
+          (claude-repl--register-hooks-in-settings settings)
+          (let* ((json (claude-repl--read-settings-alist settings))
+                 (entries (cdr (assq 'Notification (cdr (assq 'hooks json))))))
+            (should (seq-some (lambda (e) (equal (cdr (assq 'matcher e)) "permission_prompt"))
+                              entries))))
+      (delete-directory dir t))))
+
+(ert-deftest claude-repl-test-register-hooks-malformed-signals ()
+  "register-hooks-in-settings signals on malformed existing JSON (never silently resets)."
+  (let* ((dir (make-temp-file "claude-register-" t))
+         (settings (expand-file-name "settings.json" dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file settings (insert "{not json"))
+          (should-error (claude-repl--register-hooks-in-settings settings)))
+      (delete-directory dir t))))
+
 ;;; test-install.el ends here
