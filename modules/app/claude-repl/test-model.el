@@ -198,6 +198,30 @@ beyond the scan window are not visible."
                (lambda (_p) nil)))
       (should-not (claude-repl--model-for-ws "ws1")))))
 
+(ert-deftest claude-repl-test-model-for-ws-reads-from-config-dir-projects ()
+  "model-for-ws reads the jsonl under the resolved <config-dir>/projects for a multi-repo workspace."
+  (claude-repl-test--with-clean-state
+    (let* ((cfg (make-temp-file "claude-cfg-" t))
+           (root (make-temp-file "multi-root-" t))
+           (project-dir (expand-file-name "proj" root))
+           (encoded (claude-repl--ai-title-encode-cwd project-dir))
+           (jsonl (expand-file-name "sid-1.jsonl"
+                                    (expand-file-name encoded
+                                                      (expand-file-name "projects" cfg))))
+           (process-environment (cons (concat "MULTI_REPO_ROOT=" root) process-environment))
+           (claude-repl-multi-repo-config-dir cfg))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "ws1" :project-dir project-dir)
+            (claude-repl-test--seed-file
+             jsonl
+             "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-4-8\"}}\n")
+            (cl-letf (((symbol-function 'claude-repl--ai-title-ws-session-id)
+                       (lambda (_ws) "sid-1")))
+              (should (equal (claude-repl--model-for-ws "ws1") "claude-opus-4-8"))))
+        (delete-directory cfg t)
+        (delete-directory root t)))))
+
 ;;;; ---- Tests: segment ----
 
 (ert-deftest claude-repl-test-model-segment-empty-without-owning-ws ()
