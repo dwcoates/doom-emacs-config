@@ -26,6 +26,10 @@
 
 (require 'json)
 
+;; Defined in session.el (loaded before this file).  Declared so
+;; byte-compilation doesn't warn about an unknown function.
+(declare-function claude-repl--compute-config-dir "session" (project-dir))
+
 ;;;; Defcustoms
 
 (defcustom claude-repl-ai-title-enabled t
@@ -66,10 +70,30 @@ has started."
     (let ((inst (claude-repl--active-inst ws)))
       (and inst (claude-repl-instantiation-session-id inst)))))
 
+(defun claude-repl--ai-title-projects-dir-for-ws (ws)
+  "Return the Claude projects root for WS honoring its CLAUDE_CONFIG_DIR.
+Resolves the per-account config dir via `claude-repl--compute-config-dir'
+on WS's `:project-dir', so an alt-account workspace (e.g. one under the
+multi-repo root, whose CLI writes transcripts to
+`~/.claude-chesscom/projects/') reads `<config-dir>/projects' rather than
+the default.  Falls back to `claude-repl-ai-title-projects-dir' (the
+default ~/.claude/projects) when WS has no `:project-dir' or when
+`claude-repl--compute-config-dir' selects the default account (returns
+nil)."
+  (let ((project-dir (claude-repl--ws-get ws :project-dir)))
+    (if (not project-dir)
+        claude-repl-ai-title-projects-dir
+      (let ((config-dir (claude-repl--compute-config-dir project-dir)))
+        (if config-dir
+            (expand-file-name "projects" config-dir)
+          claude-repl-ai-title-projects-dir)))))
+
 (defun claude-repl--ai-title-jsonl-path (ws)
   "Return the absolute path to WS's session jsonl, or nil if unavailable.
 Returns nil when WS has no project-dir, no session id, or the projects
-root doesn't exist on disk — never raises."
+root doesn't exist on disk — never raises.  The projects root is resolved
+per-workspace via `claude-repl--ai-title-projects-dir-for-ws' so it
+follows WS's CLAUDE_CONFIG_DIR."
   (let* ((project-dir (claude-repl--ws-get ws :project-dir))
          (session-id (claude-repl--ai-title-ws-session-id ws))
          (encoded (claude-repl--ai-title-encode-cwd project-dir)))
@@ -78,7 +102,7 @@ root doesn't exist on disk — never raises."
                (not (string-empty-p session-id)))
       (expand-file-name (concat session-id ".jsonl")
                         (expand-file-name encoded
-                                          claude-repl-ai-title-projects-dir)))))
+                                          (claude-repl--ai-title-projects-dir-for-ws ws))))))
 
 ;;;; File reading
 
