@@ -63,6 +63,15 @@ which is the 60s-idle nudge on \"needs your attention\"), so it's kept
 as a fallback — the elisp callback's `:thinking' gate makes redundant
 arrivals a no-op.")
 
+(defconst claude-repl--managed-hook-matchers
+  '((Notification . "permission_prompt"))
+  "Alist (EVENT-SYMBOL . MATCHER) for managed hooks needing a matcher.
+Mirrors the MATCHER field of the `HOOKS' array in `install.sh' so the
+registrations `claude-repl--provision-config-dirs' writes into alt
+CLAUDE_CONFIG_DIRs are byte-for-byte the same shape install.sh writes
+into `~/.claude/settings.json'.  Only `Notification' carries one (its
+`permission_prompt' matcher); every other managed hook is unmatched.")
+
 (defconst claude-repl--install-script
   (let ((module-dir (file-name-directory (or load-file-name
                                               (buffer-file-name)))))
@@ -303,6 +312,133 @@ corrupts window-layout assertions in the test suite."
 
 ;; The actual call happens at the bottom of this file, after
 ;; `claude-repl--doctor-issues' and its helpers are defined.
+
+;;;; ---- Alt-account config-dir provisioning ------------------------------
+;;
+;; The per-account launch logic in session.el
+;; (`claude-repl--compute-config-dir') can select a CLAUDE_CONFIG_DIR other
+;; than the default ~/.claude — at minimum `claude-repl-multi-repo-config-dir'
+;; (~/.claude-chesscom).  The readiness handshake depends on the managed
+;; hooks (SessionStart et al.) being registered in whichever account's
+;; settings.json launches the workspace, so each alt dir must carry the
+;; SAME registration array install.sh writes into ~/.claude.
+;;
+;; The hook SCRIPTS stay in ~/.claude/hooks/: the registered command paths
+;; are the literal "~/.claude/hooks/*.sh" (Claude Code expands `~' to HOME
+;; regardless of CLAUDE_CONFIG_DIR), so every account funnels its
+;; notifications through the same account-independent
+;; ~/.claude/workspace-notifications/ dir the sentinel watches.  Only the
+;; registration ARRAY is replicated per account, never the scripts nor the
+;; notification dir.
+
+;; Forward declarations: these defcustoms live in session.el, which loads
+;; AFTER this file.  Declared here so byte-compilation doesn't warn about
+;; free variables; they are always bound by the time the functions below
+;; run (session.el load-time trigger or workspace launch).
+(defvar claude-repl-multi-repo-config-dir)
+(defvar claude-repl-default-config-dir)
+
+(defun claude-repl--config-dirs-to-provision ()
+  "Return the absolute alt CLAUDE_CONFIG_DIRs needing managed-hook registration.
+Derived from the per-account defcustoms in session.el
+\(`claude-repl-multi-repo-config-dir' and `claude-repl-default-config-dir').
+The default ~/.claude is EXCLUDED — install.sh owns it, and it is the
+account-independent notification funnel that must not be rewritten here.
+Duplicates and the default dir are removed; order is stable."
+  (let ((default-claude (file-name-as-directory (expand-file-name "~/.claude")))
+        (dirs '()))
+    (dolist (raw (list (and (boundp 'claude-repl-multi-repo-config-dir)
+                            claude-repl-multi-repo-config-dir)
+                       (and (boundp 'claude-repl-default-config-dir)
+                            claude-repl-default-config-dir)))
+      (when (and (stringp raw) (> (length raw) 0))
+        (let ((abs (file-name-as-directory (expand-file-name raw))))
+          (unless (or (equal abs default-claude) (member abs dirs))
+            (push abs dirs)))))
+    (nreverse dirs)))
+
+(defun claude-repl--managed-hook-entry (cmd matcher)
+  "Build a settings.json hook-array entry registering CMD, with optional MATCHER.
+Shape mirrors install.sh: `((matcher . MATCHER) (hooks . (((type . \"command\")
+\(command . CMD)))))', with the `matcher' pair omitted when MATCHER is nil."
+  (append (and matcher (list (cons 'matcher matcher)))
+          (list (cons 'hooks
+                      (list (list (cons 'type "command")
+                                  (cons 'command cmd)))))))
+
+(defun claude-repl--alist-append (alist key value)
+  "Return ALIST with VALUE appended to the list under KEY.
+When KEY is present, VALUE is appended to its existing list in place and
+the original ALIST head is returned.  When KEY is absent, a new
+\(KEY . (VALUE)) cell is appended and the (possibly new) head is returned."
+  (let ((cell (assq key alist)))
+    (if cell
+        (progn (setcdr cell (append (cdr cell) (list value))) alist)
+      (append alist (list (cons key (list value)))))))
+
+(defun claude-repl--alist-put (alist key value)
+  "Return ALIST with KEY mapped to VALUE.
+Updates the existing cell in place when KEY is present, otherwise appends
+a new cell and returns the (possibly new) head."
+  (let ((cell (assq key alist)))
+    (if cell
+        (progn (setcdr cell value) alist)
+      (append alist (list (cons key value))))))
+
+(defun claude-repl--read-settings-alist (path)
+  "Parse the settings.json at PATH into an alist, or nil when PATH is absent.
+Arrays are read as lists and objects as alists so the result is easy to
+mutate and re-encode.  Signals (never swallows) when PATH exists but is
+not valid JSON — a malformed settings file is a loud failure, not a
+silent reset."
+  (when (file-exists-p path)
+    (let ((json-object-type 'alist)
+          (json-array-type 'list)
+          (json-key-type 'symbol))
+      (json-read-file path))))
+
+(defun claude-repl--register-hooks-in-settings (settings-file)
+  "Ensure every managed hook is registered in SETTINGS-FILE.
+Reads SETTINGS-FILE (or starts from an empty object when absent), appends
+any managed hook whose command path is not already present under its
+event, and writes the result back (pretty-printed).  Idempotent: foreign
+entries and already-present managed entries are preserved, so a no-change
+run rewrites nothing.  Creates the parent directory when needed.  Returns
+non-nil when a write occurred, nil when already complete.  Signals on
+malformed existing JSON (never silently resets)."
+  (let* ((path (expand-file-name settings-file))
+         (json (claude-repl--read-settings-alist path))
+         (hooks (cdr (assq 'hooks json)))
+         (changed nil))
+    (dolist (pair claude-repl--managed-hooks)
+      (let ((event (car pair))
+            (cmd (cdr pair)))
+        (unless (claude-repl--event-has-command-p hooks event cmd)
+          (let ((matcher (cdr (assq event claude-repl--managed-hook-matchers))))
+            (setq hooks (claude-repl--alist-append
+                         hooks event
+                         (claude-repl--managed-hook-entry cmd matcher)))
+            (setq changed t)))))
+    (when changed
+      (setq json (claude-repl--alist-put json 'hooks hooks))
+      (make-directory (file-name-directory path) t)
+      (with-temp-file path
+        (insert (json-encode json))
+        (json-pretty-print-buffer))
+      (claude-repl--log nil "register-hooks-in-settings: wrote %s" path))
+    changed))
+
+(defun claude-repl--provision-config-dirs ()
+  "Register the managed hooks into every alt CLAUDE_CONFIG_DIR's settings.json.
+Iterates `claude-repl--config-dirs-to-provision' and registers the
+managed hooks into `<dir>/settings.json' for each.  The default ~/.claude
+is intentionally NOT touched here (install.sh owns it).  Signals loudly
+on the first dir that fails (malformed JSON, unwritable path) rather than
+swallowing — callers wanting startup robustness wrap this in their own
+`condition-case' + log (see session.el's load-time trigger)."
+  (dolist (dir (claude-repl--config-dirs-to-provision))
+    (claude-repl--register-hooks-in-settings
+     (expand-file-name "settings.json" dir))))
 
 ;;;; ---- Doctor support ---------------------------------------------------
 
