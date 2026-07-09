@@ -4,6 +4,7 @@
  * PermissionPrompt. The feed renderer reuses one element per item key
  * so streaming updates do not rebuild the whole list.
  */
+import { renderMarkdown } from "./markdown.js";
 import {
   CompactBoundaryItem,
   ConversationItem,
@@ -55,7 +56,7 @@ function UserTurn(item: UserTurnItem): string {
 
 function TextStream(item: TextItem): string {
   const cursor = item.done ? "" : `<span class="cursor">▍</span>`;
-  return `<div class="bubble assistant"><pre>${escapeHtml(item.text)}${cursor}</pre></div>`;
+  return `<div class="bubble assistant md">${renderMarkdown(item.text)}${cursor}</div>`;
 }
 
 function Thinking(item: ThinkingItem): string {
