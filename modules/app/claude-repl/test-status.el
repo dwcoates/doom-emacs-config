@@ -1229,6 +1229,30 @@ when on.  So toggle-off must not end with two trailing unfaced spaces."
         (let ((result (claude-repl--tabline-advice '("ws1"))))
           (should (string-suffix-p " " result)))))))
 
+(ert-deftest claude-repl-test-tabline-cache-buster-is-invisible ()
+  "The toggled cache-buster is a single `invisible'-propertized space.
+It must change the string's CONTENTS (the repaint cache compares with
+`equal', which ignores text properties) while contributing zero
+rendered width — a visible-width tick can push the tabline across a
+row-wrap threshold and set off the tab-bar-height/frame-resize
+livelock."
+  (let ((claude-repl--tabline-space-toggle t))
+    (let ((buster (claude-repl--tabline-cache-buster)))
+      (should (equal buster " "))
+      (should (get-text-property 0 'invisible buster))))
+  (let ((claude-repl--tabline-space-toggle nil))
+    (should (equal (claude-repl--tabline-cache-buster) ""))))
+
+(ert-deftest claude-repl-test-tabline-advice-suffix-carries-invisible-property ()
+  "The toggled trailing space on the advice path is invisible, not a
+visible-width character."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl--tabline-space-toggle t))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function '+workspace-list-names) (lambda () '("ws1"))))
+        (let ((result (claude-repl--tabline-advice '("ws1"))))
+          (should (get-text-property (1- (length result)) 'invisible result)))))))
+
 (ert-deftest claude-repl-test-tabline-space-toggle-alternates ()
   "Consecutive tabline-advice calls with opposite toggle values produce different strings."
   (claude-repl-test--with-clean-state
@@ -1325,7 +1349,49 @@ whitespace from the unfaced terminators in `claude-repl--render-tab' and
              (claude-repl--tabline-space-toggle t)
              (on (claude-repl-workspace-tabline-formatted)))
         (should (string-suffix-p " " on))
-        (should (string-suffix-p (concat off " ") on))))))
+        (should (string-suffix-p (concat off " ") on))
+        ;; The extra space is the zero-width cache-buster, not a
+        ;; visible-width tick that could re-wrap the row.
+        (should (get-text-property (1- (length on)) 'invisible on))))))
+
+(defmacro claude-repl-test--with-eight-registered-workspaces (&rest body)
+  "Run BODY with ws-one..ws-eight registered and ws-five current.
+Registers each workspace via `claude-repl--ws-put' AND lists it in
+`persp-names-cache' so `claude-repl--ws-list-names' (which intersects
+the two) actually returns them, unlike a bare `+workspace-list-names'
+mock."
+  `(let ((names '("ws-one" "ws-two" "ws-three" "ws-four"
+                  "ws-five" "ws-six" "ws-seven" "ws-eight")))
+     (dolist (n names)
+       (claude-repl--ws-put n :project-dir (concat "/tmp/" n)))
+     (let ((persp-names-cache names))
+       (cl-letf (((symbol-function '+workspace-current-name)
+                  (lambda () "ws-five")))
+         ,@body))))
+
+(ert-deftest claude-repl-test-workspace-tabline-formatted-single-row-no-newline ()
+  "The formatted tab-bar segment is ALWAYS a single row.
+A row-count change alters the tab-bar pixel height; on macOS
+`ns_change_tab_bar_height' then resizes the NSWindow, and a clipped
+resize livelocks redisplay at 100% CPU.  Many workspaces at a narrow
+frame width must therefore elide, never wrap."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-eight-registered-workspaces
+     (cl-letf (((symbol-function 'frame-width) (lambda () 24)))
+       (dolist (claude-repl--tabline-space-toggle '(nil t))
+         (let ((result (claude-repl-workspace-tabline-formatted)))
+           (should (stringp result))
+           (should-not (string-search "\n" result))))))))
+
+(ert-deftest claude-repl-test-workspace-tabline-formatted-overflow-shows-current ()
+  "When workspaces overflow the single row, the current one stays visible."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-eight-registered-workspaces
+     (cl-letf (((symbol-function 'frame-width) (lambda () 40)))
+       (let ((claude-repl--tabline-space-toggle nil))
+         (should (string-search "ws-five"
+                                (substring-no-properties
+                                 (claude-repl-workspace-tabline-formatted)))))))))
 
 ;;;; ---- Tests: current-workspace-name-segment (extracted from +dwc/) ----
 
@@ -2463,42 +2529,55 @@ states — only `:hidden' is filtered."
         (should-not claude-repl-hide-mode-enabled)
         (should (= redraw-called 2))))))
 
-;;;; ---- Tests: tabline entry packing (wrap between entries) ----
+;;;; ---- Tests: tabline single-row packing (livelock guard) ----
 
-(ert-deftest claude-repl-test-pack-tabline-entries-empty ()
-  "Empty entry list packs to a single empty line."
-  (should (equal (claude-repl--pack-tabline-entries nil 80) '(""))))
+(ert-deftest claude-repl-test-tabline-single-row-empty ()
+  "Empty entry list renders to an empty row."
+  (should (equal (claude-repl--tabline-single-row nil 0 80) "")))
 
-(ert-deftest claude-repl-test-pack-tabline-entries-single-fits ()
-  "A single entry within WIDTH stays on one line."
-  (should (equal (claude-repl--pack-tabline-entries '("abc") 80) '("abc"))))
+(ert-deftest claude-repl-test-tabline-single-row-all-fit ()
+  "Entries that fit join with single-space separators, no badges."
+  (should (equal (claude-repl--tabline-single-row '("abc" "def" "ghi") 0 80)
+                 "abc def ghi")))
 
-(ert-deftest claude-repl-test-pack-tabline-entries-multiple-fit ()
-  "Multiple entries that fit join with single-space separators on one line."
-  (should (equal (claude-repl--pack-tabline-entries '("abc" "def" "ghi") 80)
-                 '("abc def ghi"))))
+(ert-deftest claude-repl-test-tabline-single-row-never-contains-newline ()
+  "The single row NEVER wraps — a row-count change alters the tab-bar
+height, and on macOS the implied NSWindow resize can livelock redisplay.
+This is the core invariant of the single-row design."
+  (dolist (width '(1 4 10 20 40))
+    (let ((row (claude-repl--tabline-single-row
+                '("aaaa" "bbbb" "cccc" "dddd" "eeee" "ffff") 2 width)))
+      (should-not (string-search "\n" row)))))
 
-(ert-deftest claude-repl-test-pack-tabline-entries-wraps-between ()
-  "Entries that exceed WIDTH wrap to a new line at the entry boundary."
-  ;; "aaaa bbbb" = 9 chars; width 8 forces "bbbb" to wrap.
-  (should (equal (claude-repl--pack-tabline-entries '("aaaa" "bbbb") 8)
-                 '("aaaa" "bbbb"))))
+(ert-deftest claude-repl-test-tabline-single-row-overflow-keeps-current ()
+  "When entries overflow, the current entry is always in the row."
+  (let ((entries '("aaaa" "bbbb" "cccc" "dddd" "eeee")))
+    (dotimes (cur 5)
+      (let ((row (claude-repl--tabline-single-row entries cur 12)))
+        (should (string-search (nth cur entries) row))))))
 
-(ert-deftest claude-repl-test-pack-tabline-entries-greedy-fill ()
-  "Packing is greedy: fills each line before wrapping."
-  ;; "aa bb" = 5; "aa bb cc" = 8; width 6 → "aa bb", then "cc".
-  (should (equal (claude-repl--pack-tabline-entries '("aa" "bb" "cc") 6)
-                 '("aa bb" "cc"))))
+(ert-deftest claude-repl-test-tabline-single-row-overflow-badges ()
+  "Elided neighbors are summarized by +N badges on the matching side."
+  ;; budget = 20 - 2*(2 + 1) = 14; window around index 2 ("cccc"):
+  ;; grows right to "dddd" (9), left to "bbbb" (14), then no more fits.
+  (let ((row (claude-repl--tabline-single-row
+              '("aaaa" "bbbb" "cccc" "dddd" "eeee") 2 20)))
+    (should (equal row "+1 bbbb cccc dddd +1"))))
 
-(ert-deftest claude-repl-test-pack-tabline-entries-oversize-entry-own-line ()
-  "A single entry wider than WIDTH still occupies its own line, never split."
-  (should (equal (claude-repl--pack-tabline-entries '("xxxxxxxxxx") 4)
-                 '("xxxxxxxxxx"))))
+(ert-deftest claude-repl-test-tabline-single-row-overflow-fits-width ()
+  "An overflowing row (window + badges) never exceeds WIDTH columns."
+  (let ((entries '("aaaa" "bbbb" "cccc" "dddd" "eeee" "ffff" "gggg")))
+    (dolist (width '(8 12 16 20 24))
+      (dotimes (cur 7)
+        (let ((row (claude-repl--tabline-single-row entries cur width)))
+          (should (<= (length row) width)))))))
 
-(ert-deftest claude-repl-test-pack-tabline-entries-oversize-entry-with-neighbors ()
-  "An oversize entry sits alone; smaller entries pack around it."
-  (should (equal (claude-repl--pack-tabline-entries '("a" "xxxxxxxxxx" "b") 4)
-                 '("a" "xxxxxxxxxx" "b"))))
+(ert-deftest claude-repl-test-tabline-single-row-nil-current-pos ()
+  "A nil CURRENT-POS falls back to windowing around the first entry."
+  (let ((row (claude-repl--tabline-single-row
+              '("aaaa" "bbbb" "cccc" "dddd" "eeee") nil 12)))
+    (should (string-search "aaaa" row))
+    (should-not (string-prefix-p "+" row))))
 
 (ert-deftest claude-repl-test-tabline-rendered-entries-count ()
   "rendered-entries returns one element per workspace name."
@@ -2680,24 +2759,22 @@ paint the rightmost entry's background to the right edge."
 
 ;;;; ---- Tests: pack-width / center-width reserve room for terminator ----
 
-(ert-deftest claude-repl-test-pack-tabline-entries-reserve-room-for-terminator ()
-  "Callers must pack to `(- frame-width 1)' (not `frame-width') so the
-unfaced terminator appended by `claude-repl--join-tabline-rows' lands
+(ert-deftest claude-repl-test-tabline-single-row-reserve-room-for-terminator ()
+  "Callers must size the row to `(- frame-width 1)' (not `frame-width') so
+the unfaced terminator appended by `claude-repl--join-tabline-rows' lands
 within the visible columns (0..frame-width-1) after centering.
 
-This test pins the contract: packing to W must never return a line
+This test pins the contract: a row built for width W must never be
 wider than W chars.  Combined with center-target = W, this guarantees
-the centered+terminated row source is `<= W + 1` chars total, where
-the terminator at col W is offscreen — but with the caller now passing
-`(1- frame-width)' as W, the terminator lands at col `<= frame-width -
-1' (visible)."
-  ;; Packing to N never returns lines wider than N (already true).
+the centered+terminated row source is `<= W + 1` chars total — with
+the caller passing `(1- frame-width)' as W, the terminator lands at
+col `<= frame-width - 1' (visible)."
   (dolist (n '(5 10 20))
     (let ((entries (mapcar #'number-to-string (number-sequence 1 n))))
-      (dolist (lines (list (claude-repl--pack-tabline-entries entries 4)
-                           (claude-repl--pack-tabline-entries entries 8)))
-        (dolist (line lines)
-          (should (<= (length line) (max 4 8))))))))
+      (dolist (w '(4 8))
+        (dotimes (cur n)
+          (should (<= (length (claude-repl--tabline-single-row entries cur w))
+                      w)))))))
 
 ;;;; ---- Tests: +workspace--message-body override (suppress tabline flash) ----
 
