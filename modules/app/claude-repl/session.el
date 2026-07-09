@@ -444,23 +444,27 @@ needs building, optionally kicking off the build first."
 
 ;;;; Command building
 
-(defun claude-repl--compute-claude-flags (session-id fork-session-id perm-flag)
+(defun claude-repl--compute-claude-flags (session-id fork-session-id perm-flag &optional model)
   "Build the CLI flags string for the Claude command.
 SESSION-ID, when non-nil, signals this env has run Claude before and we
 should resume its most recent session via `--continue'.  FORK-SESSION-ID
 is a session UUID to fork from (used when a new worktree/env needs to
 carry a conversation across from another env — the target env has no
 local history yet, so `--continue' won't find anything).  PERM-FLAG is
-the permission flag string or nil.  Also appends a `--model' flag when
-`claude-repl-interactive-model' is non-nil and a `--system-prompt' flag
-when `claude-repl-system-prompt' is non-nil.  Returns a trimmed flags
-string."
-  (let ((flags (string-trim
+the permission flag string or nil.  MODEL, when non-nil, is a per-workspace
+model alias (sourced from the workspace-generation JSON's `model' field via
+the `:model' workspace property) that overrides the global default; when
+nil, `claude-repl-interactive-model' supplies the model (which itself
+defaults to \"opus\").  A `--model' flag is appended whenever the resolved
+model is non-nil, and a `--system-prompt' flag when `claude-repl-system-prompt'
+is non-nil.  Returns a trimmed flags string."
+  (let* ((effective-model (or model claude-repl-interactive-model))
+         (flags (string-trim
                 (mapconcat #'identity
                            (delq nil (list
                                       ;; Pin the model for every interactive session.
-                                      (when claude-repl-interactive-model
-                                        (format "--model %s" claude-repl-interactive-model))
+                                      (when effective-model
+                                        (format "--model %s" effective-model))
                                       ;; Fork from another session (cross-env/worktree seed).
                                       (when fork-session-id
                                         (format "--resume %s --fork-session" fork-session-id))
@@ -532,7 +536,8 @@ with everything the caller needs for logging and mode-line setup."
                             (plist-get sandbox-config :image)))
          (sandboxed-p (and worktree-p docker-image))
          (perm-flag (claude-repl--compute-perm-flag sandboxed-p project-dir))
-         (claude-flags (claude-repl--compute-claude-flags session-id fork-session-id perm-flag))
+         (model (claude-repl--ws-get ws :model))
+         (claude-flags (claude-repl--compute-claude-flags session-id fork-session-id perm-flag model))
          (cmd (claude-repl--assemble-cmd sandbox-config sandboxed-p claude-flags)))
     (list :cmd cmd
           :sandboxed-p sandboxed-p
