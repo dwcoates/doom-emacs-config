@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createFakeQuery } from "../src/fake-query.js";
+import { MARKDOWN_SHOWCASE, createFakeQuery } from "../src/fake-query.js";
 import { AsyncQueue } from "../src/input-queue.js";
 import {
   CanUseToolLike,
@@ -111,6 +111,18 @@ describe("createFakeQuery", () => {
       is_error: true,
       content: expect.stringContaining("not today"),
     });
+  });
+
+  it("replies with the markdown showcase on !md", async () => {
+    // Arrange
+    const h = makeFake();
+    // Act
+    h.input.push(userMsg("!md"));
+    h.input.end();
+    const msgs = await h.collect();
+    // Assert
+    const result = msgs.find((m) => m.type === "result")!;
+    expect(result.result).toBe(MARKDOWN_SHOWCASE);
   });
 
   it("reflects setPermissionMode in subsequent echoes", async () => {
