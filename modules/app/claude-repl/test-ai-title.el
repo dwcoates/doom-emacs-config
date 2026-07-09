@@ -63,6 +63,46 @@
                (lambda (_ws) "")))
       (should-not (claude-repl--ai-title-jsonl-path "ws1")))))
 
+;;;; ---- Tests: projects-dir CLAUDE_CONFIG_DIR resolution ----
+
+(ert-deftest claude-repl-test-ai-title-projects-dir-under-multi-repo ()
+  "projects-dir-for-ws resolves to <multi-repo-config-dir>/projects under the root."
+  (claude-repl-test--with-clean-state
+    (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment))
+          (claude-repl-multi-repo-config-dir "~/.claude-chesscom"))
+      (claude-repl--ws-put "ws1" :project-dir "/home/user/multi/repoA/proj")
+      (should (equal (claude-repl--ai-title-projects-dir-for-ws "ws1")
+                     (expand-file-name "projects"
+                                       (expand-file-name "~/.claude-chesscom")))))))
+
+(ert-deftest claude-repl-test-ai-title-projects-dir-outside-multi-repo ()
+  "projects-dir-for-ws falls back to the default projects dir outside the root."
+  (claude-repl-test--with-clean-state
+    (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment))
+          (claude-repl-default-config-dir nil)
+          (claude-repl-ai-title-projects-dir "/tmp/projects-default"))
+      (claude-repl--ws-put "ws1" :project-dir "/home/user/other/proj")
+      (should (equal (claude-repl--ai-title-projects-dir-for-ws "ws1")
+                     "/tmp/projects-default")))))
+
+(ert-deftest claude-repl-test-ai-title-projects-dir-no-project-dir ()
+  "projects-dir-for-ws falls back to the default when WS has no :project-dir."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-ai-title-projects-dir "/tmp/projects-default"))
+      (should (equal (claude-repl--ai-title-projects-dir-for-ws "ws1")
+                     "/tmp/projects-default")))))
+
+(ert-deftest claude-repl-test-ai-title-jsonl-path-follows-config-dir ()
+  "jsonl-path builds under the resolved alt projects dir for a multi-repo workspace."
+  (claude-repl-test--with-clean-state
+    (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment))
+          (claude-repl-multi-repo-config-dir "/cc"))
+      (claude-repl--ws-put "ws1" :project-dir "/home/user/multi/proj")
+      (cl-letf (((symbol-function 'claude-repl--ai-title-ws-session-id)
+                 (lambda (_ws) "sid-xyz")))
+        (should (equal (claude-repl--ai-title-jsonl-path "ws1")
+                       "/cc/projects/-home-user-multi-proj/sid-xyz.jsonl"))))))
+
 ;;;; ---- Tests: ws-session-id tolerates missing instantiation ----
 
 (ert-deftest claude-repl-test-ai-title-ws-session-id-returns-nil-when-no-inst ()
