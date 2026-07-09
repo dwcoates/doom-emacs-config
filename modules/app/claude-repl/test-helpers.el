@@ -274,6 +274,21 @@ advice's effect would be invisible)."
     nil)
   (advice-add 'file-notify-add-watch :override #'file-notify-add-watch--test-stub))
 
+;; `string-search' is an Emacs 28.1 built-in; the batch Emacs used to run
+;; the suite may be older (e.g. 27.1), where several test-status.el tabline
+;; assertions call it and would otherwise abort with `void-function
+;; string-search'.  Polyfill it with the same literal, case-sensitive
+;; semantics (index of the first NEEDLE occurrence in HAYSTACK at or after
+;; START, or nil) so the assertions actually run.  Guarded by `fboundp' so
+;; the native builtin always wins on Emacs 28+.
+(require 'cl-lib)
+(unless (fboundp 'string-search)
+  (defun string-search (needle haystack &optional start)
+    "Polyfill for Emacs 28+ `string-search'.
+Return the index of the first occurrence of NEEDLE in HAYSTACK, searching
+from START (default 0), or nil when NEEDLE does not occur."
+    (cl-search needle haystack :start2 (or start 0))))
+
 ;; In batch mode, Emacs uses a tiny terminal frame (typically 9 rows x 10 cols).
 ;; Tests that create real windows (split-window, display-buffer-in-side-window)
 ;; fail when window-min-height / window-min-width enforce larger minimum sizes
