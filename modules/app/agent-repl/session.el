@@ -611,11 +611,40 @@ agent-repl ALWAYS launches plain `claude' — it never shells out to
     (agent-repl--log nil "assemble-cmd: cmd=%s" cmd)
     cmd))
 
+(defun agent-repl--claude-start-cmd (opts)
+  "Build the interactive `claude' start command from OPTS.
+This is the `claude' backend's START-CMD-FN (see `agent-repl-backend').
+OPTS is a plist carrying `:session-id', `:fork-session-id',
+`:project-dir' and `:model' (any may be nil except `:project-dir').
+Returns the full shell command string, wrapping the perm-flag,
+config-dir and flag-assembly helpers.  The claude backend always
+launches plain `claude', never `claude-sandbox', so the command is
+never sandboxed and no Docker image is resolved."
+  (let* ((session-id      (plist-get opts :session-id))
+         (fork-session-id (plist-get opts :fork-session-id))
+         (project-dir     (plist-get opts :project-dir))
+         (model           (plist-get opts :model))
+         ;; The EFFECTIVE model drives the permission flag: Haiku
+         ;; sessions can't use `--permission-mode auto', so resolve the
+         ;; interactive-model fallback here (mirroring what
+         ;; `--compute-claude-flags' resolves for the --model flag).
+         (effective-model (or model agent-repl-interactive-model))
+         (perm-flag   (agent-repl--compute-perm-flag nil project-dir effective-model))
+         (config-dir  (agent-repl--compute-config-dir project-dir))
+         (claude-flags (agent-repl--compute-claude-flags
+                        session-id fork-session-id perm-flag model)))
+    (agent-repl--assemble-cmd claude-flags config-dir)))
+
 (defun agent-repl--build-start-cmd (ws)
   "Build the shell command string to start the agent for workspace WS.
 Returns a plist (:cmd CMD :sandboxed-p BOOL :docker-image IMAGE
 :session-id ID :fork-session-id ID :worktree-p BOOL :active-env ENV :inst INST)
-with everything the caller needs for logging and mode-line setup."
+with everything the caller needs for logging and mode-line setup.
+
+The CLI-specific command assembly is delegated to WS's resolved
+backend (see `agent-repl--ws-backend' and `agent-repl-backend'); this
+function owns only the backend-agnostic plumbing (instantiation
+lookup, session-id resolution, mode-line metadata)."
   (agent-repl--log ws "build-start-cmd: ws=%s" ws)
   (let* ((inst (agent-repl--active-inst ws))
          ;; FIXME we have to ensure that every time we start the agent process for any reason, we have sentinel watching for a session-id update. we can't eb always blindly reading session-id from a file, because chance
@@ -625,15 +654,12 @@ with everything the caller needs for logging and mode-line setup."
          (active-env (agent-repl--ws-get ws :active-env))
          (fork-session-id (agent-repl--ws-get ws :fork-session-id))
          (model (agent-repl--ws-get ws :model))
-         ;; Effective model drives the permission flag: Haiku sessions can't
-         ;; use `--permission-mode auto', so resolve the fallback here too.
-         (effective-model (or model agent-repl-interactive-model))
-         ;; agent-repl always launches plain `claude', never claude-sandbox,
-         ;; so no Docker image is resolved and the command is never sandboxed.
-         (perm-flag (agent-repl--compute-perm-flag nil project-dir effective-model))
-         (config-dir (agent-repl--compute-config-dir project-dir))
-         (claude-flags (agent-repl--compute-claude-flags session-id fork-session-id perm-flag model))
-         (cmd (agent-repl--assemble-cmd claude-flags config-dir)))
+         (backend (agent-repl--ws-backend ws))
+         (cmd (funcall (agent-repl-backend-start-cmd-fn backend)
+                       (list :session-id session-id
+                             :fork-session-id fork-session-id
+                             :project-dir project-dir
+                             :model model))))
     (list :cmd cmd
           :sandboxed-p nil
           :docker-image nil
