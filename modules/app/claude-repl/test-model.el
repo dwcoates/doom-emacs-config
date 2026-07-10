@@ -222,6 +222,34 @@ beyond the scan window are not visible."
         (delete-directory cfg t)
         (delete-directory root t)))))
 
+;;;; ---- Tests: persist-value ----
+
+(ert-deftest claude-repl-test-model-persist-value-prefers-config-dir-model ()
+  "persist-value returns the config-dir session model, overriding the
+generation `:model' — the workspace was generated with opus but switched
+to fable mid-session, so fable is what gets persisted."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--model-for-ws)
+               (lambda (_ws) "claude-fable-5")))
+      (claude-repl--ws-put "ws1" :model "opus")
+      (should (equal (claude-repl--model-persist-value "ws1") "claude-fable-5")))))
+
+(ert-deftest claude-repl-test-model-persist-value-falls-back-to-generation-model ()
+  "persist-value falls back to the generation `:model' when no config-dir
+model is available yet (session has produced no assistant turn)."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--model-for-ws)
+               (lambda (_ws) nil)))
+      (claude-repl--ws-put "ws1" :model "opus")
+      (should (equal (claude-repl--model-persist-value "ws1") "opus")))))
+
+(ert-deftest claude-repl-test-model-persist-value-nil-when-no-source ()
+  "persist-value returns nil when neither the config dir nor `:model' yields a model."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--model-for-ws)
+               (lambda (_ws) nil)))
+      (should-not (claude-repl--model-persist-value "ws1")))))
+
 ;;;; ---- Tests: segment ----
 
 (ert-deftest claude-repl-test-model-segment-empty-without-owning-ws ()

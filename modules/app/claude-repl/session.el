@@ -236,10 +236,11 @@ Returns (:needs-build t :install-script PATH) if the image is not built yet."
   "Apply persisted display/metadata state from SAVED plist onto workspace WS.
 SAVED is a parsed state-file plist (or nil).  Hydrates the
 non-env-struct keys that drive the tabline badge and drawer glyphs:
-`:priority', `:source-ws-dir', `:last-prompt-time', `:repl-state',
-`:saved-tab-index', `:fork-session-id', `:last-prompt-summary',
-`:last-prompt-summary-at', `:worktree-p', and the `:merge-completed' /
-`:merge-failed' / `:merge-completed-at' bookkeeping.
+`:priority', `:source-ws-dir', `:model', `:last-prompt-time',
+`:repl-state', `:saved-tab-index', `:fork-session-id',
+`:last-prompt-summary', `:last-prompt-summary-at', `:worktree-p', and
+the `:merge-completed' / `:merge-failed' / `:merge-completed-at'
+bookkeeping.
 
 Shared by `claude-repl--initialize-ws-env' (the Claude-start path) and
 `claude-repl--load-display-state' (the `SPC p p' / workspace-creation
@@ -247,8 +248,8 @@ path) so the set of persisted display keys is defined in exactly one
 place.  Performs no disk I/O — callers supply the already-parsed SAVED
 plist.  Idempotent.
 
-`:priority', `:source-ws-dir', and `:last-prompt-time' prefer the
-SAVED value but fall back to whatever is already on WS's plist (e.g.
+`:priority', `:source-ws-dir', `:model', and `:last-prompt-time' prefer
+the SAVED value but fall back to whatever is already on WS's plist (e.g.
 `claude-repl-set-priority' run before any state-save happened); the
 remaining keys are written only when SAVED carries them."
   ;; Priority: prefer the saved value, fall back to whatever is already in
@@ -263,6 +264,17 @@ remaining keys are written only when SAVED carries them."
   (claude-repl--ws-put ws :source-ws-dir
                        (or (and saved (plist-get saved :source-ws-dir))
                            (claude-repl--ws-get ws :source-ws-dir)))
+  ;; Model: prefer the saved value (the session's current model, captured
+  ;; from the workspace's Claude config dir at the last state-save so a
+  ;; mid-session `/model' switch — e.g. `opus' to `fable' — survives
+  ;; restart), falling back to whatever is already in the plist (the
+  ;; workspace-generation model, set by `--finalize-worktree-workspace'
+  ;; before any state-save happened).  `claude-repl--build-start-cmd'
+  ;; reads `:model' to pass `--model' when booting, so restoring it here
+  ;; re-launches the session under the same model.
+  (claude-repl--ws-put ws :model
+                       (or (and saved (plist-get saved :model))
+                           (claude-repl--ws-get ws :model)))
   ;; Last-prompt-time: prefer saved value, fall back to whatever is
   ;; already in the plist.  Used by the drawer's detail view to show
   ;; "duration since last user message"; survives Emacs restarts so
@@ -480,11 +492,13 @@ should resume its most recent session via `--continue'.  FORK-SESSION-ID
 is a session UUID to fork from (used when a new worktree/env needs to
 carry a conversation across from another env — the target env has no
 local history yet, so `--continue' won't find anything).  PERM-FLAG is
-the permission flag string or nil.  MODEL, when non-nil, is a per-workspace
-model alias (sourced from the workspace-generation JSON's `model' field via
-the `:model' workspace property) that overrides the global default; when
-nil, `claude-repl-interactive-model' supplies the model (which itself
-defaults to \"opus\").  A `--model' flag is appended whenever the resolved
+the permission flag string or nil.  MODEL, when non-nil, is the
+per-workspace model from the `:model' workspace property — either the
+workspace-generation JSON's `model' alias or, once a session has run, the
+current model captured from the config dir and persisted across restarts
+\(see `claude-repl--model-persist-value') — and overrides the global
+default; when nil, `claude-repl-interactive-model' supplies the model
+\(which itself defaults to \"opus\").  A `--model' flag is appended whenever the resolved
 model is non-nil, and a `--system-prompt' flag when `claude-repl-system-prompt'
 is non-nil.  Returns a trimmed flags string."
   (let* ((effective-model (or model claude-repl-interactive-model))

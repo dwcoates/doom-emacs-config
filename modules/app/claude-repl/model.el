@@ -146,6 +146,22 @@ model is available."
         (claude-repl--ws-put ws :model-cache (list path mtime model))
         model)))))
 
+;;;; Persisted model resolution
+
+(defun claude-repl--model-persist-value (ws)
+  "Return the model id to persist for WS as its session's current model.
+Inspects WS's configured Claude config dir via `claude-repl--model-for-ws',
+which reads the most recent main-chain assistant model from the
+workspace's own session jsonl under `<config-dir>/projects/...', so a
+mid-session `/model' switch (e.g. `opus' to `fable') is captured.  Falls
+back to WS's `:model' plist value (the workspace-generation model) when
+the session has produced no assistant turn yet, and to nil when neither
+source yields a model.  Callers persist the result via
+`claude-repl--state-save' so a later restore re-launches the session
+under the same model."
+  (or (claude-repl--model-for-ws ws)
+      (claude-repl--ws-get ws :model)))
+
 ;;;; Mode-line segment
 
 (defun claude-repl--model-segment ()
