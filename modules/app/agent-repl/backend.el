@@ -43,11 +43,25 @@ called with (MODEL EXTRA-ARGS), it returns the process command list
 (the prompt is delivered on stdin by the caller).  Optional — a
 backend with no headless mode leaves it nil, and
 `agent-repl--backend-headless-cmd' errors if such a backend is asked
-for a headless command."
+for a headless command.
+
+The transcript slots feed the mode-line session segments (title /
+model / context).  Each is optional: a nil slot means the backend
+lacks that capability and the corresponding segment renders empty.
+TRANSCRIPT-PATH-FN: (WS) -> absolute path of WS's live session
+transcript, or nil when unresolvable (no session yet, file missing).
+TRANSCRIPT-TITLE-FN: (PATH) -> most recent conversation title, or nil.
+TRANSCRIPT-MODEL-FN: (PATH) -> most recent raw model id, or nil.
+TRANSCRIPT-CONTEXT-FN: (PATH) -> most recent context-token total, or
+nil."
   name
   binary
   start-cmd-fn
-  headless-cmd-fn)
+  headless-cmd-fn
+  transcript-path-fn
+  transcript-title-fn
+  transcript-model-fn
+  transcript-context-fn)
 
 ;;;; ---- Registry -----------------------------------------------------------
 
@@ -114,6 +128,45 @@ not a condition to paper over."
              (agent-repl-backend-name backend)))
     (funcall fn model extra-args)))
 
+;;;; ---- Transcript access (mode-line session segments) ----------------------
+
+;; Defined in ai-title.el (loaded after this file; resolved at call time).
+(declare-function agent-repl--ai-title-mtime "ai-title" (path))
+
+(defun agent-repl--ws-transcript-path (ws)
+  "Return the absolute path of WS's live session transcript, or nil.
+Resolves WS's backend and delegates to its TRANSCRIPT-PATH-FN.  Returns
+nil when the backend has no transcript support or the path cannot be
+resolved (no session yet, file missing)."
+  (let ((fn (agent-repl-backend-transcript-path-fn (agent-repl--ws-backend ws))))
+    (and fn (funcall fn ws))))
+
+(defun agent-repl--transcript-cached (ws cache-key slot-accessor)
+  "Return a transcript-derived value for WS via an (mtime-keyed) cache.
+SLOT-ACCESSOR is the backend-struct accessor for the reader slot (e.g.
+`agent-repl-backend-transcript-model-fn'); the resolved reader is
+called with the transcript path and its result cached on WS's plist
+under CACHE-KEY as (PATH MTIME VALUE).  Returns nil (without caching)
+when WS's backend lacks the capability, the path is unresolvable, or
+the file has no mtime."
+  (let* ((backend (agent-repl--ws-backend ws))
+         (read-fn (funcall slot-accessor backend))
+         (path (agent-repl--ws-transcript-path ws))
+         (mtime (and path (agent-repl--ai-title-mtime path)))
+         (cache (agent-repl--ws-get ws cache-key)))
+    (cond
+     ((null read-fn) nil)
+     ((null path) nil)
+     ((null mtime) nil)
+     ((and (consp cache)
+           (equal (nth 0 cache) path)
+           (equal (nth 1 cache) mtime))
+      (nth 2 cache))
+     (t
+      (let ((value (funcall read-fn path)))
+        (agent-repl--ws-put ws cache-key (list path mtime value))
+        value)))))
+
 ;;;; ---- Claude backend -----------------------------------------------------
 
 ;; Implementation functions live in session.el; symbols resolve at call
@@ -124,7 +177,13 @@ not a condition to paper over."
   :name 'claude
   :binary "claude"
   :start-cmd-fn #'agent-repl--claude-start-cmd
-  :headless-cmd-fn #'agent-repl--claude-headless-cmd))
+  :headless-cmd-fn #'agent-repl--claude-headless-cmd
+  ;; Transcript readers live in ai-title.el / model.el / context.el
+  ;; (the mode-line segment files, which predate the backend seam).
+  :transcript-path-fn #'agent-repl--ai-title-jsonl-path
+  :transcript-title-fn #'agent-repl--ai-title-read-from-jsonl
+  :transcript-model-fn #'agent-repl--model-read-from-jsonl
+  :transcript-context-fn #'agent-repl--context-read-from-jsonl))
 
 (provide 'agent-repl-backend)
 ;;; backend.el ends here

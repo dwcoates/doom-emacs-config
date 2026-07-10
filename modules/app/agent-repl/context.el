@@ -124,27 +124,12 @@ when no assistant usage is present in the scanned tail."
 
 (defun agent-repl--context-for-ws (ws)
   "Return the context-token total for WS, using a per-workspace mtime cache.
-Cache shape (stored in WS's plist under `:context-cache'):
-  (PATH MTIME USED)
-If the current resolved (path, mtime) matches the cache, returns the
-cached USED without re-reading.  Otherwise re-scans and refreshes the
-cache.  Reuses `ai-title.el's path/mtime resolvers since all mode-line
-session segments read the identical per-workspace jsonl.  Returns nil
-when no usage is available."
-  (let* ((path (agent-repl--ai-title-jsonl-path ws))
-         (mtime (agent-repl--ai-title-mtime path))
-         (cache (agent-repl--ws-get ws :context-cache)))
-    (cond
-     ((null path) nil)
-     ((null mtime) nil)
-     ((and (consp cache)
-           (equal (nth 0 cache) path)
-           (equal (nth 1 cache) mtime))
-      (nth 2 cache))
-     (t
-      (let ((used (agent-repl--context-read-from-jsonl path)))
-        (agent-repl--ws-put ws :context-cache (list path mtime used))
-        used)))))
+Delegates to `agent-repl--transcript-cached' with the `:context-cache'
+key and WS's backend TRANSCRIPT-CONTEXT-FN reader (this file's
+`agent-repl--context-read-from-jsonl' for the claude backend).  Returns
+nil when no usage is available."
+  (agent-repl--transcript-cached
+   ws :context-cache #'agent-repl-backend-transcript-context-fn))
 
 ;;;; Formatting
 

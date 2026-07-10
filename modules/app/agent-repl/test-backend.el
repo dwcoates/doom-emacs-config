@@ -189,6 +189,106 @@ chain produced."
   "The built-in claude backend carries a headless-cmd-fn."
   (should (agent-repl-backend-headless-cmd-fn (agent-repl-backend-get 'claude))))
 
+;;;; ---- Tests: transcript seam ----
+
+(defun agent-repl-test--transcript-backend (&rest overrides)
+  "Register a `tr' backend whose transcript slots come from OVERRIDES.
+OVERRIDES is a plist of slot keywords accepted by
+`agent-repl-backend-create'."
+  (agent-repl-register-backend
+   (apply #'agent-repl-backend-create
+          :name 'tr :binary "tr" :start-cmd-fn #'ignore overrides)))
+
+(ert-deftest agent-repl-test-backend-ws-transcript-path-delegates ()
+  "`agent-repl--ws-transcript-path' calls the backend's path fn with WS."
+  (agent-repl-test--with-backends
+    (agent-repl-test--with-clean-state
+      (agent-repl-test--transcript-backend
+       :transcript-path-fn (lambda (ws) (format "/x/%s.jsonl" ws)))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
+      (agent-repl--ws-put "ws1" :backend 'tr)
+      (should (equal (agent-repl--ws-transcript-path "ws1") "/x/ws1.jsonl")))))
+
+(ert-deftest agent-repl-test-backend-ws-transcript-path-nil-slot ()
+  "A backend without transcript support yields a nil transcript path."
+  (agent-repl-test--with-backends
+    (agent-repl-test--with-clean-state
+      (agent-repl-test--transcript-backend)
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
+      (agent-repl--ws-put "ws1" :backend 'tr)
+      (should-not (agent-repl--ws-transcript-path "ws1")))))
+
+(ert-deftest agent-repl-test-backend-transcript-cached-nil-reader ()
+  "`agent-repl--transcript-cached' returns nil when the reader slot is nil."
+  (agent-repl-test--with-backends
+    (agent-repl-test--with-clean-state
+      (agent-repl-test--transcript-backend
+       :transcript-path-fn (lambda (_ws) "/x/t.jsonl"))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
+      (agent-repl--ws-put "ws1" :backend 'tr)
+      (cl-letf (((symbol-function 'agent-repl--ai-title-mtime)
+                 (lambda (_p) 1.0)))
+        (should-not (agent-repl--transcript-cached
+                     "ws1" :tr-cache
+                     #'agent-repl-backend-transcript-title-fn))))))
+
+(ert-deftest agent-repl-test-backend-transcript-cached-caches-by-mtime ()
+  "A second lookup with unchanged (path, mtime) does not re-invoke the reader."
+  (agent-repl-test--with-backends
+    (agent-repl-test--with-clean-state
+      (let ((reads 0))
+        (agent-repl-test--transcript-backend
+         :transcript-path-fn (lambda (_ws) "/x/t.jsonl")
+         :transcript-title-fn (lambda (_p) (cl-incf reads) "T"))
+        (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
+        (agent-repl--ws-put "ws1" :backend 'tr)
+        (cl-letf (((symbol-function 'agent-repl--ai-title-mtime)
+                   (lambda (_p) 1.0)))
+          (should (equal (agent-repl--transcript-cached
+                          "ws1" :tr-cache
+                          #'agent-repl-backend-transcript-title-fn)
+                         "T"))
+          (should (equal (agent-repl--transcript-cached
+                          "ws1" :tr-cache
+                          #'agent-repl-backend-transcript-title-fn)
+                         "T"))
+          (should (= reads 1)))))))
+
+(ert-deftest agent-repl-test-backend-transcript-cached-rereads-on-mtime-change ()
+  "An advanced mtime invalidates the cache and re-invokes the reader."
+  (agent-repl-test--with-backends
+    (agent-repl-test--with-clean-state
+      (let ((reads 0) (mtime 1.0))
+        (agent-repl-test--transcript-backend
+         :transcript-path-fn (lambda (_ws) "/x/t.jsonl")
+         :transcript-title-fn (lambda (_p) (cl-incf reads) (format "T%d" reads)))
+        (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
+        (agent-repl--ws-put "ws1" :backend 'tr)
+        (cl-letf (((symbol-function 'agent-repl--ai-title-mtime)
+                   (lambda (_p) mtime)))
+          (should (equal (agent-repl--transcript-cached
+                          "ws1" :tr-cache
+                          #'agent-repl-backend-transcript-title-fn)
+                         "T1"))
+          (setq mtime 2.0)
+          (should (equal (agent-repl--transcript-cached
+                          "ws1" :tr-cache
+                          #'agent-repl-backend-transcript-title-fn)
+                         "T2"))
+          (should (= reads 2)))))))
+
+(ert-deftest agent-repl-test-backend-claude-transcript-slots ()
+  "The claude backend wires all four transcript slots to the segment fns."
+  (let ((b (agent-repl-backend-get 'claude)))
+    (should (eq (agent-repl-backend-transcript-path-fn b)
+                #'agent-repl--ai-title-jsonl-path))
+    (should (eq (agent-repl-backend-transcript-title-fn b)
+                #'agent-repl--ai-title-read-from-jsonl))
+    (should (eq (agent-repl-backend-transcript-model-fn b)
+                #'agent-repl--model-read-from-jsonl))
+    (should (eq (agent-repl-backend-transcript-context-fn b)
+                #'agent-repl--context-read-from-jsonl))))
+
 ;;;; ---- Tests: build-start-cmd delegation ----
 
 (ert-deftest agent-repl-test-backend-build-start-cmd-uses-ws-backend ()
