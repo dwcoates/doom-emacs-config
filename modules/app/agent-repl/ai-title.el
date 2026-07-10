@@ -155,26 +155,14 @@ advances and we re-scan."
     (float-time (file-attribute-modification-time (file-attributes path)))))
 
 (defun agent-repl--ai-title-for-ws (ws)
-  "Return the aiTitle for WS, using a per-workspace mtime cache.
-Cache shape (stored in WS's plist under `:ai-title-cache'):
-  (PATH MTIME TITLE)
-If the current resolved (path, mtime) matches the cache, returns the
-cached TITLE without re-reading.  Otherwise re-scans and refreshes the
-cache.  Returns nil when no title is available."
-  (let* ((path (agent-repl--ai-title-jsonl-path ws))
-         (mtime (agent-repl--ai-title-mtime path))
-         (cache (agent-repl--ws-get ws :ai-title-cache)))
-    (cond
-     ((null path) nil)
-     ((null mtime) nil)
-     ((and (consp cache)
-           (equal (nth 0 cache) path)
-           (equal (nth 1 cache) mtime))
-      (nth 2 cache))
-     (t
-      (let ((title (agent-repl--ai-title-read-from-jsonl path)))
-        (agent-repl--ws-put ws :ai-title-cache (list path mtime title))
-        title)))))
+  "Return the conversation title for WS, using a per-workspace mtime cache.
+Delegates to `agent-repl--transcript-cached' with the `:ai-title-cache'
+key and WS's backend TRANSCRIPT-TITLE-FN reader (this file's
+`agent-repl--ai-title-read-from-jsonl' for the claude backend).
+Returns nil when no title is available or WS's backend has no
+conversation-title capability."
+  (agent-repl--transcript-cached
+   ws :ai-title-cache #'agent-repl-backend-transcript-title-fn))
 
 ;;;; Mode-line segment
 

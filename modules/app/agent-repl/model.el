@@ -124,27 +124,12 @@ when no assistant entry is present in the scanned tail."
 
 (defun agent-repl--model-for-ws (ws)
   "Return the raw model id for WS, using a per-workspace mtime cache.
-Cache shape (stored in WS's plist under `:model-cache'):
-  (PATH MTIME MODEL)
-If the current resolved (path, mtime) matches the cache, returns the
-cached MODEL without re-reading.  Otherwise re-scans and refreshes the
-cache.  Reuses `ai-title.el's path/mtime resolvers since both segments
-read the identical per-workspace session jsonl.  Returns nil when no
-model is available."
-  (let* ((path (agent-repl--ai-title-jsonl-path ws))
-         (mtime (agent-repl--ai-title-mtime path))
-         (cache (agent-repl--ws-get ws :model-cache)))
-    (cond
-     ((null path) nil)
-     ((null mtime) nil)
-     ((and (consp cache)
-           (equal (nth 0 cache) path)
-           (equal (nth 1 cache) mtime))
-      (nth 2 cache))
-     (t
-      (let ((model (agent-repl--model-read-from-jsonl path)))
-        (agent-repl--ws-put ws :model-cache (list path mtime model))
-        model)))))
+Delegates to `agent-repl--transcript-cached' with the `:model-cache'
+key and WS's backend TRANSCRIPT-MODEL-FN reader (this file's
+`agent-repl--model-read-from-jsonl' for the claude backend).  Returns
+nil when no model is available."
+  (agent-repl--transcript-cached
+   ws :model-cache #'agent-repl-backend-transcript-model-fn))
 
 ;;;; Persisted model resolution
 
