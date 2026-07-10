@@ -1246,10 +1246,21 @@ Pre-selecting a non-side main-area window sidesteps that path entirely
 — the sweep+put happens with a normal anchor and the destination's
 saved panels come back intact.
 
+Selects the first live non-side window from `window-list'.  An earlier
+version selected `window-main-window', but that returns an INTERNAL
+\(non-live) window whenever the main area is split into two or more
+windows, and handing a non-live window to `select-window' signals
+`wrong-type-argument window-live-p' — the RET-in-drawer crash this
+guards against.  `window-list' yields only live windows, so filtering
+out the side windows leaves a live main-area leaf that serves as the
+same non-side anchor the sweep needs.
+
 No-op when the selected window is not a side window."
   (when (window-parameter (selected-window) 'window-side)
-    (when-let ((main (and (fboundp 'window-main-window) (window-main-window))))
-      (select-window main))))
+    (when-let ((target (seq-find (lambda (win)
+                                   (not (window-parameter win 'window-side)))
+                                 (window-list nil 'no-minibuf))))
+      (select-window target))))
 
 (defun claude-repl-drawer--reactivate-merged (ws)
   "Reactivate a MERGED workspace WS so it becomes a usable persp again.
