@@ -13,14 +13,16 @@
 ;; whose input-side counters describe the tokens that were in context
 ;; when that turn was served:
 ;;   input_tokens + cache_creation_input_tokens + cache_read_input_tokens
-;; We surface the most recent such total as a percentage of
-;; `claude-repl-context-window-tokens' (200k by default), matching the
-;; "context used" figure Claude Code itself displays.  `output_tokens'
-;; is deliberately excluded: it is the freshly-generated response, not
-;; part of the context that turn consumed.
+;; We surface the most recent such total as a raw token count, rendered
+;; with comma thousands separators (e.g. `tokens 53,179').  We do not
+;; divide by a context-window size: the effective window depends on the
+;; model and whether a long-context (1M) mode is active, and that figure
+;; is not recorded anywhere in the session data, so any percentage would
+;; rest on a brittle assumption.  `output_tokens' is deliberately
+;; excluded: it is the freshly-generated response, not part of the
+;; context that turn consumed.
 ;;
-;; Mode-line layout (left-to-right): parent label → model → context →
-;; prompt-summary → ai-title.
+;; Mode-line layout (left-to-right): parent label → model → tokens.
 ;;
 ;; Reading the jsonl on every mode-line redraw would re-stat and
 ;; re-scan a multi-MB file; we cache (mtime, path, used) on the
@@ -50,26 +52,6 @@
 for the most recent assistant usage.  Each entry's usage object is short,
 so the tail of the file is enough; reading the whole file on every
 mode-line refresh would be wasteful for large transcripts."
-  :type 'integer
-  :group 'claude-repl)
-
-(defcustom claude-repl-context-window-tokens 200000
-  "Size of the model's context window in tokens, used as the denominator
-for the utilization percentage.  Defaults to the 200k window Claude
-Code assumes for Opus/Sonnet; set higher when running a long-context
-(e.g. 1M) session so the percentage stays meaningful."
-  :type 'integer
-  :group 'claude-repl)
-
-(defcustom claude-repl-context-warn-percent 70
-  "Utilization percentage at or above which the segment paints in its
-warning color instead of its normal color."
-  :type 'integer
-  :group 'claude-repl)
-
-(defcustom claude-repl-context-critical-percent 90
-  "Utilization percentage at or above which the segment paints in its
-critical color."
   :type 'integer
   :group 'claude-repl)
 
@@ -164,56 +146,40 @@ when no usage is available."
         (claude-repl--ws-put ws :context-cache (list path mtime used))
         used)))))
 
-;;;; Percentage + formatting
+;;;; Formatting
 
-(defun claude-repl--context-percent (used)
-  "Return the integer utilization percentage for USED tokens, or nil.
-Computes `round(100 * USED / claude-repl-context-window-tokens)', clamped
-to the inclusive range 0..100 so a mis-sized window can never render a
-nonsensical meter.  Returns nil for nil USED or a non-positive window."
-  (when (and (numberp used)
-             (numberp claude-repl-context-window-tokens)
-             (> claude-repl-context-window-tokens 0))
-    (max 0 (min 100 (round (* 100.0 used) claude-repl-context-window-tokens)))))
+(defun claude-repl--context-commafy (n)
+  "Return non-negative integer N as a string with comma thousands separators.
+E.g. 53179 → \"53,179\" and 1000000 → \"1,000,000\"."
+  (let ((s (number-to-string n)))
+    (while (string-match "\\([0-9]+\\)\\([0-9]\\{3\\}\\)" s)
+      (setq s (replace-match "\\1,\\2" nil nil s)))
+    s))
 
-(defun claude-repl--context-face-for-percent (percent)
-  "Return the mode-line face plist for utilization PERCENT.
-Green below `claude-repl-context-warn-percent', gold from the warn
-threshold up to `claude-repl-context-critical-percent', and tomato at or
-above the critical threshold."
-  (cond
-   ((>= percent claude-repl-context-critical-percent)
-    '(:foreground "tomato" :weight bold))
-   ((>= percent claude-repl-context-warn-percent)
-    '(:foreground "goldenrod" :weight normal))
-   (t
-    '(:foreground "medium sea green" :weight normal))))
-
-(defun claude-repl--context-format (percent)
-  "Return the display string for utilization PERCENT, e.g. `ctx 27%'."
-  (format "ctx %d%%" percent))
+(defun claude-repl--context-format (used)
+  "Return the display string for USED context tokens, e.g. `tokens 53,179'."
+  (format "tokens %s" (claude-repl--context-commafy used)))
 
 ;;;; Mode-line segment
 
 (defun claude-repl--context-segment ()
-  "Return a propertized string for the mode-line's context segment.
+  "Return a propertized string for the mode-line's context-tokens segment.
 Reads `claude-repl--owning-workspace' from the current buffer (set on
-every claude-owned vterm buffer) and pulls the workspace's context
-utilization.  Returns the empty string when disabled, the workspace is
+every claude-owned vterm buffer) and pulls the workspace's used context
+token count.  Returns the empty string when disabled, the workspace is
 unknown, or no usage is yet available."
   (if (not claude-repl-context-enabled)
       ""
     (let ((ws (claude-repl--buffer-owner (current-buffer))))
       (if (not ws)
           ""
-        (let ((percent (claude-repl--context-percent
-                        (claude-repl--context-for-ws ws))))
-          (if (null percent)
+        (let ((used (claude-repl--context-for-ws ws)))
+          (if (not (numberp used))
               ""
             (concat "  "
-                    (propertize (claude-repl--context-format percent)
-                                'face (claude-repl--context-face-for-percent
-                                       percent)))))))))
+                    (propertize (claude-repl--context-format used)
+                                'face '(:foreground "medium sea green"
+                                        :weight normal)))))))))
 
 ;;;; Mode-line attachment
 
