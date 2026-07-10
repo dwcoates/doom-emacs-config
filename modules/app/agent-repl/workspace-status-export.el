@@ -72,7 +72,12 @@ serialize as JSON `null' instead of `{}'."
         (git      (agent-repl--ws-keyword-to-string
                    (agent-repl--ws-get ws :git-clean)))
         (acked    (if (agent-repl--ws-get ws :done-acked) t json-false)))
-    `(("agent_state"        . ,(agent-repl--json-null-if-nil claude))
+    `(("agent_state"         . ,(agent-repl--json-null-if-nil claude))
+      ;; Legacy duplicate of agent_state from before the claude-repl ->
+      ;; agent-repl rename: external consumers (workspace-status skills
+      ;; living OUTSIDE this repo) still read claude_state, so keep
+      ;; emitting it until they migrate.
+      ("claude_state"        . ,(agent-repl--json-null-if-nil claude))
       ("repl_state"          . ,(agent-repl--json-null-if-nil repl))
       ("project_dir"         . ,(agent-repl--json-null-if-nil proj))
       ("source_ws_dir"       . ,(agent-repl--json-null-if-nil src))

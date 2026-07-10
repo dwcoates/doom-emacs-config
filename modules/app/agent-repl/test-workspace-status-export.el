@@ -61,6 +61,23 @@
       (should (equal (cdr (assoc "git_clean" entry)) "dirty"))
       (should (eq    (cdr (assoc "done_acked" entry)) t)))))
 
+(ert-deftest agent-repl-test-workspace-status-entry-legacy-claude-state-key ()
+  "The entry also carries the legacy claude_state key, equal to agent_state.
+External (out-of-repo) consumers of workspace-status.json still read
+claude_state, so the writer emits both until they migrate."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    (let ((entry (agent-repl--workspace-status-entry "ws1")))
+      (should (equal (cdr (assoc "claude_state" entry))
+                     (cdr (assoc "agent_state" entry)))))))
+
+(ert-deftest agent-repl-test-workspace-status-entry-legacy-key-null-when-absent ()
+  "The legacy claude_state key serializes as json-null for an unseen ws."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir nil)
+    (let ((entry (agent-repl--workspace-status-entry "ws1")))
+      (should (eq (cdr (assoc "claude_state" entry)) json-null)))))
+
 (ert-deftest agent-repl-test-workspace-status-entry-empty-ws ()
   "An unseen workspace surfaces `json-null' for every absent field and
 `json-false' for done-acked."
