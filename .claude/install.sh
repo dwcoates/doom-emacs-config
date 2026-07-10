@@ -42,7 +42,10 @@ SKILLS_DIR="$HOME/.claude/skills"
 _canonpath() {
   local raw="$1"
   if [ -d "$raw" ]; then
-    ( cd "$raw" && pwd )
+    # -P resolves symlinks to the PHYSICAL path so comparisons against
+    # `git worktree list --porcelain` output (which git emits in physical
+    # form, e.g. /private/var/... on macOS rather than /var/...) match.
+    ( cd "$raw" && pwd -P )
   else
     echo "$raw"
   fi
@@ -75,7 +78,11 @@ fi
 # Used to FORBID linking a skill to a transient-worktree path: such links
 # dangle once the worktree is pruned, so we fail hard instead.
 _impl_in_nonmain_worktree() {
-  local impl="$1" root
+  # Canonicalize IMPL to its physical form: the worktree roots from git are
+  # physical, so a symlinked IMPL spelling (e.g. /var/... vs /private/var/...
+  # on macOS) would otherwise slip past the prefix match.
+  local impl root
+  impl="$(_canonpath "$(dirname "$1")")/$(basename "$1")"
   while IFS= read -r root; do
     [ -n "$root" ] || continue
     case "$impl/" in
