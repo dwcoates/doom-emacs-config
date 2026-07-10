@@ -46,8 +46,10 @@ all others use `claude-repl-personal-permission-flag'."
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-personal-permission-flag "--dangerously-skip-permissions"
-  "Permission flag for personal projects not matching `claude-repl-managed-project-pattern'."
+(defcustom claude-repl-personal-permission-flag "--permission-mode auto"
+  "Permission flag for personal projects not matching `claude-repl-managed-project-pattern'.
+Defaults to --permission-mode auto so generated workspaces never run
+under --dangerously-skip-permissions."
   :type 'string
   :group 'claude-repl)
 
@@ -517,8 +519,9 @@ is non-nil.  Returns a trimmed flags string."
 (defun claude-repl--compute-perm-flag (sandboxed-p project-dir)
   "Return the permission flag string for the Claude CLI, or nil.
 SANDBOXED-P means Docker handles permissions.  Otherwise, PROJECT-DIR
-determines the flag: ChessCom repos use --permission-mode auto,
-personal repos use --dangerously-skip-permissions."
+determines the flag: ChessCom repos use `claude-repl-managed-permission-flag',
+all others use `claude-repl-personal-permission-flag'.  Both default to
+--permission-mode auto."
   (if sandboxed-p
       (progn
         (claude-repl--log nil "compute-perm-flag: sandboxed — no perm flag")

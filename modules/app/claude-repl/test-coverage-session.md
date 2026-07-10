@@ -128,7 +128,7 @@ Orchestrator that combines workspace state lookup with `resolve-sandbox-config` 
 Integration function assembling all parts of the start command.
 
 **Edge cases:**
-1. Bare-metal workspace with no session -- should produce `claude --dangerously-skip-permissions`
+1. Bare-metal workspace with no session -- should produce `claude --permission-mode auto`
 2. Worktree sandbox with session -- should use sandbox script + --resume
 3. Fork session ID set -- should include --fork-session and clear fork-session-id
 4. Sandbox config needs-build -- docker-image should be nil, sandboxed-p false
