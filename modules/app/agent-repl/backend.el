@@ -141,6 +141,19 @@ resolved (no session yet, file missing)."
   (let ((fn (agent-repl-backend-transcript-path-fn (agent-repl--ws-backend ws))))
     (and fn (funcall fn ws))))
 
+(defun agent-repl--transcript-read-tail (path scan-bytes)
+  "Return the trailing SCAN-BYTES bytes of PATH as a string, or nil.
+Reading only the tail keeps per-redraw transcript scans cheap on
+multi-MB files.  Returns nil for a nil PATH, an unreadable file, or an
+empty file — the segment readers all treat that as \"no value yet\"."
+  (when (and path (file-readable-p path))
+    (let* ((size (or (file-attribute-size (file-attributes path)) 0))
+           (start (max 0 (- size scan-bytes))))
+      (when (> size 0)
+        (with-temp-buffer
+          (insert-file-contents path nil start size)
+          (buffer-string))))))
+
 (defun agent-repl--transcript-cached (ws cache-key slot-accessor)
   "Return a transcript-derived value for WS via an (mtime-keyed) cache.
 SLOT-ACCESSOR is the backend-struct accessor for the reader slot (e.g.

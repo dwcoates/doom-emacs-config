@@ -133,17 +133,13 @@ have a non-string `aiTitle' value."
 
 (defun agent-repl--ai-title-read-from-jsonl (path)
   "Return the most recent aiTitle string from PATH, or nil.
-Reads only the trailing `agent-repl-ai-title-scan-bytes' so this stays
-cheap on large transcripts.  Returns nil on missing/unreadable file or
-when no ai-title entry is present in the scanned tail."
-  (when (and path (file-readable-p path))
-    (let* ((size (or (file-attribute-size (file-attributes path)) 0))
-           (cap agent-repl-ai-title-scan-bytes)
-           (start (max 0 (- size cap))))
-      (when (> size 0)
-        (with-temp-buffer
-          (insert-file-contents path nil start size)
-          (agent-repl--ai-title-extract-from-tail (buffer-string)))))))
+Reads only the trailing `agent-repl-ai-title-scan-bytes' (via
+`agent-repl--transcript-read-tail') so this stays cheap on large
+transcripts.  Returns nil on missing/unreadable file or when no
+ai-title entry is present in the scanned tail."
+  (let ((tail (agent-repl--transcript-read-tail
+               path agent-repl-ai-title-scan-bytes)))
+    (and tail (agent-repl--ai-title-extract-from-tail tail))))
 
 ;;;; Cached lookup
 
