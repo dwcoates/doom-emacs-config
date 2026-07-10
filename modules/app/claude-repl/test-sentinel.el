@@ -1788,15 +1788,22 @@ This is the stall fix: a swallowed duplicate must not block loader advance."
   "Absolute path to the checked-in permission-notify.sh script.")
 
 (defun claude-repl-test--run-permission-hook (json-input)
-  "Run permission-notify.sh under an isolated HOME and return the result plist.
-Returns (:exit CODE :sentinel-exists BOOL :sentinel-content STRING)."
+  "Run permission-notify.sh under an isolated state dir and return the result plist.
+Returns (:exit CODE :sentinel-exists BOOL :sentinel-content STRING).
+The hook resolves its sentinel dir from `CLAUDE_REPL_STATE_DIR' (which
+`test-helpers.el' points at a shared session temp dir), so this helper
+rebinds that variable locally at a throwaway path — per the guidance in
+that fixture — and checks the sentinel there."
   (let* ((tmp-home (make-temp-file "claude-repl-permission-hook-" t))
+         (state-dir (expand-file-name ".claude-emacs" tmp-home))
          (script claude-repl-test--permission-hook-path)
          (sentinel (expand-file-name
-                    ".claude/workspace-notifications/permission_prompt"
-                    tmp-home))
-         (process-environment (cons (format "HOME=%s" tmp-home)
-                                    process-environment))
+                    "workspace-notifications/permission_prompt"
+                    state-dir))
+         (process-environment (append
+                               (list (format "HOME=%s" tmp-home)
+                                     (format "CLAUDE_REPL_STATE_DIR=%s" state-dir))
+                               process-environment))
          (default-directory tmp-home)
          (exit (with-temp-buffer
                  (insert json-input)
