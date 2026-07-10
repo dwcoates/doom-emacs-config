@@ -1120,72 +1120,152 @@ own notion of which workspaces it owns, not persp-mode's raw cache."
              for i from 1
              collect (claude-repl--render-tab-entry name current-name i))))
 
-(defun claude-repl--tabline-single-row (entries current-pos width)
-  "Pack ENTRIES into ONE row no wider than WIDTH columns.
+(defconst claude-repl--tabline-row-count 2
+  "Number of rows the workspace tab-bar ALWAYS renders.
+Fixed (never varies with workspace count), so the tab-bar's pixel
+height is constant.  A height change resizes the NSWindow on macOS,
+and a clipped resize livelocks redisplay at 100% CPU
+\(`ns_change_tab_bar_height' -> `adjust_frame_size' in src/); pinning
+the row count sidesteps that entirely.  Entries beyond what the fixed
+rows hold are elided behind `+N' overflow badges rather than wrapping
+to a third row (see `claude-repl--tabline-rows').")
+
+(defun claude-repl--pack-first-fit (widths caps)
+  "Greedily first-fit WIDTHS into rows sized by CAPS.
+WIDTHS is a list of entry column-widths in display order.  CAPS is a
+list of each row's maximum column budget; its length is the row count.
+Entries are placed left to right: each is appended to the current row
+when it (plus a one-column separator after the first entry already on
+that row) still fits that row's CAPS budget, otherwise the next row is
+started.  Returns a list of per-row entry COUNTS (same length as CAPS)
+when every entry is placed, or nil when the entries do not all fit in
+`(length CAPS)' rows."
+  (let* ((nrows (length caps))
+         (counts (make-list nrows 0))
+         (row 0)
+         (used 0)
+         (rest widths)
+         (ok t))
+    (while (and ok rest)
+      (let* ((w (car rest))
+             (sep (if (> (nth row counts) 0) 1 0)))
+        (cond
+         ((<= (+ used sep w) (nth row caps))
+          (setf (nth row counts) (1+ (nth row counts)))
+          (setq used (+ used sep w)
+                rest (cdr rest)))
+         ((< row (1- nrows))
+          (setq row (1+ row) used 0))
+         (t (setq ok nil)))))
+    (and ok counts)))
+
+(defun claude-repl--tabline-overflow-caps (width max-rows badge-w)
+  "Return per-row column budgets for an overflowing MAX-ROWS tab-bar.
+Reserves a `+N' overflow badge worth of columns (BADGE-W) at the start
+of the first row and the end of the last row, so the leading/trailing
+badges never push a row past WIDTH; interior rows keep the full WIDTH.
+With a single row both badges share it."
+  (if (= max-rows 1)
+      (list (max 1 (- width (* 2 badge-w))))
+    (let ((edge (max 1 (- width badge-w))))
+      (append (list edge)
+              (make-list (- max-rows 2) width)
+              (list edge)))))
+
+(defun claude-repl--tabline-render-rows (entries counts lead trail width)
+  "Render ENTRIES into rows per COUNTS, with LEAD/TRAIL badge strings.
+COUNTS is a per-row entry count (see `claude-repl--pack-first-fit').
+Each row joins its slice of ENTRIES with single spaces; LEAD is
+prepended to the first row and TRAIL appended to the last row.  Every
+row is hard-truncated to WIDTH columns as a final guard, so a
+pathologically narrow frame can never make a row wrap.  Returns a list
+of `(length COUNTS)' strings, none containing a newline."
+  (let ((idx 0)
+        (nrows (length counts))
+        (rows nil))
+    (dotimes (r nrows)
+      (let* ((k (nth r counts))
+             (slice (seq-subseq entries idx (+ idx k)))
+             (row (mapconcat #'identity slice " ")))
+        (setq idx (+ idx k))
+        (when (= r 0)
+          (setq row (concat lead row)))
+        (when (= r (1- nrows))
+          (setq row (concat row trail)))
+        (when (> (length row) width)
+          (setq row (substring row 0 width)))
+        (push row rows)))
+    (nreverse rows)))
+
+(defun claude-repl--tabline-rows (entries current-pos width max-rows)
+  "Pack ENTRIES into EXACTLY MAX-ROWS rows, each no wider than WIDTH.
 
 ENTRIES is a list of rendered tab-entry strings (see
-`claude-repl--tabline-rendered-entries').  Returns a single line
-string (never containing a newline), with adjacent entries joined by
-a single space.  When all entries fit, all are shown.  Otherwise a
-contiguous window of entries around CURRENT-POS (0-based index of the
-current workspace; nil falls back to 0) is shown — the current entry
-is ALWAYS included — and the elided neighbors are summarized by
-\"+N \" / \" +N\" overflow badges on the corresponding side.
+`claude-repl--tabline-rendered-entries').  Returns a list of MAX-ROWS
+strings, adjacent entries joined by a single space within a row and no
+string ever containing a newline.  Unused trailing rows are the empty
+string, so the row COUNT is fixed at MAX-ROWS regardless of how many
+entries there are.
 
-The row must never wrap: a multi-row tab-bar changes the tab-bar's
-pixel height as workspaces come and go, and on macOS a tab-bar height
-change resizes the NSWindow; when that resize is clipped (e.g. by the
-screen edge) the requested and realized frame sizes never agree and
-redisplay livelocks at 100% CPU retrying the resize
-\(`ns_change_tab_bar_height' -> `adjust_frame_size' in src/).
+When all ENTRIES fit within MAX-ROWS full-width rows they are all
+shown with no badges.  Otherwise a contiguous window of entries around
+CURRENT-POS (0-based index of the current workspace; nil falls back to
+0) is shown — the current entry is ALWAYS included — and the elided
+entries before/after the window are summarized by a leading \"+N \"
+badge on the first row and a trailing \" +N\" badge on the last row.
+
+The row count must be FIXED, never varying with the entry count: a
+change in row count alters the tab-bar's pixel height, and on macOS a
+tab-bar height change resizes the NSWindow; when that resize is clipped
+\(e.g. by the screen edge) the requested and realized frame sizes never
+agree and redisplay livelocks at 100% CPU retrying the resize
+\(`ns_change_tab_bar_height' -> `adjust_frame_size' in src/).  Elision
+behind badges, not wrapping to a further row, absorbs any overflow.
 
 WIDTH is treated as a character count (`length' of propertized
-strings), which is approximate for entries containing
-display-property images but stable across renders, so the fit
-decision cannot oscillate."
-  (if (null entries)
-      ""
-    (let* ((n (length entries))
-           (widths (mapcar #'length entries))
-           (total (+ (apply #'+ widths) (1- n))))
-      (if (<= total width)
-          (mapconcat #'identity entries " ")
-        ;; Overflow: window around the current entry, badges reserved
-        ;; conservatively on both sides so the result can never exceed
-        ;; WIDTH regardless of which side ends up elided.
-        (let* ((cur (min (max (or current-pos 0) 0) (1- n)))
-               (badge-w (+ 2 (length (number-to-string n)))) ; "+N " / " +N"
-               (budget (max 1 (- width (* 2 badge-w))))
-               (lo cur)
-               (hi cur)
-               (used (nth cur widths)))
-          (catch 'full
-            (while (or (> lo 0) (< hi (1- n)))
-              (let ((grew nil))
-                (when (< hi (1- n))
-                  (let ((w (nth (1+ hi) widths)))
-                    (when (<= (+ used 1 w) budget)
-                      (cl-incf hi)
-                      (cl-incf used (1+ w))
-                      (setq grew t))))
-                (when (> lo 0)
-                  (let ((w (nth (1- lo) widths)))
-                    (when (<= (+ used 1 w) budget)
-                      (cl-decf lo)
-                      (cl-incf used (1+ w))
-                      (setq grew t))))
-                (unless grew (throw 'full nil)))))
-          (let ((row (concat
-                      (if (> lo 0) (format "+%d " lo) "")
-                      (mapconcat #'identity (seq-subseq entries lo (1+ hi)) " ")
-                      (if (< hi (1- n)) (format " +%d" (- n 1 hi)) ""))))
-            ;; Degenerate guard: at pathologically narrow widths even
-            ;; the always-included current entry plus badges may exceed
-            ;; WIDTH; hard-truncate rather than ever letting the row
-            ;; wrap.
-            (if (> (length row) width)
-                (substring row 0 width)
-              row)))))))
+strings), which is approximate for entries containing display-property
+images but stable across renders, so the fit decision cannot
+oscillate."
+  (let ((n (length entries)))
+    (if (= n 0)
+        (make-list max-rows "")
+      (let* ((widths (mapcar #'length entries))
+             ;; Do all entries fit MAX-ROWS full-width rows?  If so, no
+             ;; badges and no windowing are needed.
+             (full (claude-repl--pack-first-fit
+                    widths (make-list max-rows width))))
+        (if full
+            (claude-repl--tabline-render-rows entries full "" "" width)
+          ;; Overflow: grow a window around the current entry, packing
+          ;; it into MAX-ROWS rows with badge columns reserved
+          ;; conservatively on the first and last rows.
+          (let* ((cur (min (max (or current-pos 0) 0) (1- n)))
+                 (badge-w (+ 2 (length (number-to-string n)))) ; "+N " / " +N"
+                 (caps (claude-repl--tabline-overflow-caps width max-rows badge-w))
+                 (lo cur)
+                 (hi cur))
+            (catch 'full
+              (while (or (> lo 0) (< hi (1- n)))
+                (let ((grew nil))
+                  (when (and (< hi (1- n))
+                             (claude-repl--pack-first-fit
+                              (seq-subseq widths lo (+ hi 2)) caps))
+                    (setq hi (1+ hi) grew t))
+                  (when (and (> lo 0)
+                             (claude-repl--pack-first-fit
+                              (seq-subseq widths (1- lo) (1+ hi)) caps))
+                    (setq lo (1- lo) grew t))
+                  (unless grew (throw 'full nil)))))
+            (let* ((window (seq-subseq entries lo (1+ hi)))
+                   (win-widths (seq-subseq widths lo (1+ hi)))
+                   (counts (or (claude-repl--pack-first-fit win-widths caps)
+                               ;; Degenerate: the lone current entry is
+                               ;; wider than a row's budget; still show
+                               ;; it (truncated by the render guard).
+                               (cons 1 (make-list (1- max-rows) 0))))
+                   (lead (if (> lo 0) (format "+%d " lo) ""))
+                   (trail (if (< hi (1- n)) (format " +%d" (- n 1 hi)) "")))
+              (claude-repl--tabline-render-rows window counts lead trail width))))))))
 
 (defun claude-repl--join-tabline-rows (lines)
   "Join LINES (pre-centered tab-bar rows) with row separators.
@@ -1251,19 +1331,20 @@ therefore the tab-bar) naturally."
 ;; rationale.
 
 (defun claude-repl-workspace-tabline-formatted ()
-  "Format workspace list for tab-bar display as a SINGLE row.
-Renders one row no wider than `(1- (frame-width))' via
-`claude-repl--tabline-single-row', which keeps the current workspace
-visible and elides overflow behind \"+N\" badges.  The single-row cap
-is load-bearing, not cosmetic: a row-count change alters the tab-bar
-pixel height, and on macOS `ns_change_tab_bar_height' resizes the
-NSWindow — when that resize is clipped by the screen edge, redisplay
-retries it forever and Emacs livelocks at 100% CPU (see the
-single-row helper's docstring).
+  "Format workspace list for tab-bar display as EXACTLY TWO rows.
+Renders `claude-repl--tabline-row-count' rows, each no wider than
+`(1- (frame-width))', via `claude-repl--tabline-rows', which keeps the
+current workspace visible and elides overflow behind \"+N\" badges.
+The row count is FIXED even when the tabs need only one row (the
+second row renders blank): a row-count change alters the tab-bar pixel
+height, and on macOS `ns_change_tab_bar_height' resizes the NSWindow —
+when that resize is clipped by the screen edge, redisplay retries it
+forever and Emacs livelocks at 100% CPU (see
+`claude-repl--tabline-rows').  Pinning the row count sidesteps that.
 
 The `(1- (frame-width))' cap also keeps the unfaced terminator that
 `claude-repl--join-tabline-rows' appends within the visible columns
-\(col < `frame-width'), and the row is centered so left-only padding
+\(col < `frame-width'), and each row is centered so left-only padding
 from `+doom-dashboard--center' doesn't push it to the right edge.
 Appends the zero-width cache-buster
 \(`claude-repl--tabline-cache-buster') so the segment's string content
@@ -1276,11 +1357,14 @@ width.  Without the cache-buster, face-only status transitions
          (entries (claude-repl--tabline-rendered-entries names))
          (current (claude-repl--ws-current-name))
          (cur-pos (and current (cl-position current names :test #'equal)))
-         (row (claude-repl--tabline-single-row entries cur-pos line-width))
-         (centered (if (fboundp '+doom-dashboard--center)
-                       (+doom-dashboard--center line-width row)
-                     row))
-         (joined (claude-repl--join-tabline-rows (list centered))))
+         (rows (claude-repl--tabline-rows entries cur-pos line-width
+                                          claude-repl--tabline-row-count))
+         (centered (mapcar (lambda (row)
+                             (if (fboundp '+doom-dashboard--center)
+                                 (+doom-dashboard--center line-width row)
+                               row))
+                           rows))
+         (joined (claude-repl--join-tabline-rows centered)))
     (concat joined (claude-repl--tabline-cache-buster))))
 
 (defun claude-repl-current-workspace-name-segment ()
@@ -1316,7 +1400,7 @@ so its only purpose is the cache-busting role."
    ;; the resize on every cycle — a 100%-CPU livelock
    ;; (`ns_change_tab_bar_height' -> `adjust_frame_size' ->
    ;; `ns_set_window_size').  Absorb height changes into the text area
-   ;; instead.  Belt-and-suspenders with the single-row cap in
+   ;; instead.  Belt-and-suspenders with the fixed row count in
    ;; `claude-repl-workspace-tabline-formatted'.
    (unless (eq frame-inhibit-implied-resize t)
      (cl-pushnew 'tab-bar-lines frame-inhibit-implied-resize))
