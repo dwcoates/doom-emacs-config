@@ -1241,6 +1241,47 @@ is the sole observer here."
                        #'claude-repl--enter-insert-mode ws))
       (claude-repl--log ws "interrupt: vterm not live, skipping"))))
 
+(defun claude-repl--claude-process-pid (ws)
+  "Return the PID of the `claude' process running in WS's vterm, or nil.
+`claude' runs as a direct child of the workspace vterm's shell, so this
+finds the child PID (of the vterm process's shell PID) whose command
+name matches \"claude\".  A pure query over `list-system-processes' /
+`process-attributes' with no side effects; returns nil when the vterm is
+dead or no matching child exists."
+  (let* ((buf (claude-repl--ws-get ws :vterm-buffer))
+         (proc (and (buffer-live-p buf) (get-buffer-process buf)))
+         (shell-pid (and proc (process-id proc))))
+    (when shell-pid
+      (seq-find
+       (lambda (pid)
+         (let ((attrs (process-attributes pid)))
+           (and (eq (alist-get 'ppid attrs) shell-pid)
+                (let ((comm (alist-get 'comm attrs)))
+                  (and comm (string-match-p "claude" comm))))))
+       (list-system-processes)))))
+
+(defun claude-repl-kill-claude-process (&optional ws)
+  "Kill ONLY the `claude' process in WS's vterm, leaving panels and buffers intact.
+Unlike `claude-repl-kill' (which tears down the session's windows and
+buffers via `claude-repl--kill-session'), this sends SIGTERM to the
+`claude' CLI child of the workspace vterm's shell.  The vterm, input
+buffer, drawer entry, and perspective all survive, so the process can be
+restarted manually (e.g. `claude-repl-restart' or `SPC o c') without
+disturbing the layout — useful for debugging or working around a wedged
+session.  Defaults to the current workspace; signals a `user-error' when
+no active workspace or no live `claude' process is found."
+  (interactive)
+  (let ((ws (or ws (claude-repl--ws-current-name))))
+    (unless ws (user-error "claude-repl-kill-claude-process: no active workspace"))
+    (let ((pid (claude-repl--claude-process-pid ws)))
+      (if (not pid)
+          (progn
+            (claude-repl--log ws "kill-claude-process: no claude child process for ws=%s" ws)
+            (user-error "claude-repl: no live claude process found for %s" ws))
+        (claude-repl--log ws "kill-claude-process: SIGTERM pid=%s ws=%s" pid ws)
+        (claude-repl--signal-process pid 'TERM)
+        (message "claude-repl: killed claude (pid %s) in %s — panels left intact" pid ws)))))
+
 (defun claude-repl-update-pr ()
   "Ask Claude to update the PR description for the current branch."
   (interactive)
