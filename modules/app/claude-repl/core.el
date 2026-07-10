@@ -551,6 +551,13 @@ mock this function via `cl-letf' rather than invoke real `docker'
 \(see AGENTS.md \"No External Processes or External State in Tests\")."
   (apply #'call-process "docker" nil nil nil args)) ;; ALLOW-EXTERNAL-BOUNDARY
 
+(defun claude-repl--signal-process (pid sig)
+  "Send signal SIG to process PID (an external-state mutation).
+This IS the external-boundary wrapper for `signal-process': tests must
+mock this function via `cl-letf' rather than signal a real OS process
+\(see AGENTS.md \"No External Processes or External State in Tests\")."
+  (signal-process pid sig)) ;; ALLOW-EXTERNAL-BOUNDARY
+
 (defun claude-repl--make-process-git (name args sentinel)
   "Async git via `make-process'.
 NAME is the process name (a string); ARGS is the git subcommand
@@ -612,6 +619,7 @@ introducing a sibling raw `make-process' site."
     claude-repl--docker-exit-code
     claude-repl--make-process-git
     claude-repl--async-gh
+    claude-repl--signal-process
     claude-repl--cee-agent-reinstall-and-bounce-exit-code)
   "Symbols of every function that wraps an external process or external-state mutation.
 Each MUST be mocked by tests that reach it via production code.  The

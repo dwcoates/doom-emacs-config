@@ -808,6 +808,7 @@ global drawer-mirror bindings win in vterm buffers."
       :desc "Claude REPL (simple)" "o c" #'claude-repl-simple
       :desc "Claude REPL (deprio)" "o C" #'claude-repl
       :desc "Kill Claude" "o C-c" #'claude-repl-kill
+      :desc "Kill claude process (keep panels)" "o k" #'claude-repl-kill-claude-process
       :desc "Claude input" "o v" #'claude-repl-focus-input
       :desc "Claude interrupt" "o x" #'claude-repl-interrupt
       :desc "Copy file reference" "o r" #'claude-repl-copy-reference
