@@ -101,7 +101,7 @@ override is unset."
 (ert-deftest agent-repl-config-test-early-recovery/empty-in-flight-is-noop ()
   "Empty `:in-flight-merges' in the snapshot is a no-op — no helper
 calls, no rewrite."
-  (let ((snap (make-temp-file "claude-snap-"))
+  (let ((snap (make-temp-file "agent-snap-"))
         (head-calls 0)
         (abort-calls 0))
     (agent-repl-test--with-snapshot-fixture snap
@@ -136,7 +136,7 @@ calls, no rewrite."
   "An in-flight entry whose target-dir has a live CHERRY_PICK_HEAD must
 trigger abort, then enqueue the source ws onto :merge-queue at the
 back with :halt-until-human nil."
-  (let ((snap (make-temp-file "claude-snap-"))
+  (let ((snap (make-temp-file "agent-snap-"))
         (abort-called-with nil))
     (agent-repl-test--with-snapshot-fixture snap
         '(:workspaces (("ws-a" :project-dir "/tmp/a"))
@@ -161,7 +161,7 @@ back with :halt-until-human nil."
 (ert-deftest agent-repl-config-test-early-recovery/carries-target-dir-onto-reenqueued-entry ()
   "A recovered orphan re-enqueues with `:target-dir' set to the in-flight
 target dir so the merge rejoins its own per-target+repo bucket."
-  (let ((snap (make-temp-file "claude-snap-")))
+  (let ((snap (make-temp-file "agent-snap-")))
     (agent-repl-test--with-snapshot-fixture snap
         '(:workspaces (("ws-a" :project-dir "/tmp/a"))
           :merge-queue nil
@@ -182,7 +182,7 @@ target dir so the merge rejoins its own per-target+repo bucket."
   "Entry whose target-dir has NO CHERRY_PICK_HEAD must NOT trigger an
 abort (would error on bare `cherry-pick --abort') — only clears the
 bookkeeping entry from :in-flight-merges."
-  (let ((snap (make-temp-file "claude-snap-"))
+  (let ((snap (make-temp-file "agent-snap-"))
         (abort-called 0))
     (agent-repl-test--with-snapshot-fixture snap
         '(:workspaces (("ws-a" :project-dir "/tmp/a"))
@@ -205,7 +205,7 @@ bookkeeping entry from :in-flight-merges."
 (ert-deftest agent-repl-config-test-early-recovery/skips-malformed-entries ()
   "Entries missing :source-ws or :target-dir are skipped — recovery
 must not even probe for CHERRY_PICK_HEAD against a partial entry."
-  (let ((snap (make-temp-file "claude-snap-"))
+  (let ((snap (make-temp-file "agent-snap-"))
         (head-calls 0)
         (abort-calls 0))
     (agent-repl-test--with-snapshot-fixture snap

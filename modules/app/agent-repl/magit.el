@@ -264,10 +264,10 @@ from a magit-diff/log buffer does not disturb panels."
   :group 'agent-repl)
 
 (defun agent-repl--magit-hide-panels-before-action (&rest _)
-  "Hide Claude REPL panels before a magit-status RET action opens a new buffer.
+  "Hide Agent REPL panels before a magit-status RET action opens a new buffer.
 No-op unless the caller's buffer is in `magit-status-mode' and both
 panels are currently visible.  Routes through `agent-repl--hide-panels'
-so `:repl-state'/`:claude-state' are left untouched — the panels simply
+so `:repl-state'/`:agent-state' are left untouched — the panels simply
 become hidden, matching the behavior of other non-user-initiated close
 paths (see `agent-repl--on-close' for the user-initiated path that
 transitions `:repl-state' to :inactive)."

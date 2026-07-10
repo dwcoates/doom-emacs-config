@@ -72,7 +72,7 @@ recognized repo or the repo has no configured default."
 (defcustom agent-repl-state-git-tick-modulus 5
   "Per-workspace git refreshes fire once every N timer ticks.
 The 1Hz `agent-repl--update-all-workspace-states' timer drives both
-the cheap state-machine work (claude-running-p, update-ws-state,
+the cheap state-machine work (agent-running-p, update-ws-state,
 mark-dead-vterm) and the expensive git work
 \(`agent-repl--async-refresh-git-status' and
 `agent-repl--async-refresh-branch-merged').  Cheap work runs every
@@ -269,11 +269,11 @@ every recognized priority."
 ;; --- Two-axis state model (analysis #8) ---
 ;;
 ;; Workspace state is split into two orthogonal plist keys:
-;;   :claude-state — Claude-owned lifecycle.  Values: nil | :init |
+;;   :agent-state — Agent-owned lifecycle.  Values: nil | :init |
 ;;                   :idle | :thinking | :done | :permission.
 ;;                   Written primarily by hook sentinels; narrow
 ;;                   Emacs-side exceptions at lifecycle boundaries
-;;                   (initialize-claude writes :init; kill clears).
+;;                   (initialize-agent writes :init; kill clears).
 ;;   :repl-state   — Emacs-owned session-lifecycle flag.  Values:
 ;;                     nil       — workspace registered, no Claude
 ;;                                 session has ever been attached.
@@ -284,25 +284,25 @@ every recognized priority."
 ;;                   other values are bookkeeping only.
 
 (defun agent-repl--ws-state (ws)
-  "Return the current :claude-state keyword for workspace WS, or nil.
-Compat shim: equivalent to `agent-repl--ws-claude-state', retained for
+  "Return the current :agent-state keyword for workspace WS, or nil.
+Compat shim: equivalent to `agent-repl--ws-agent-state', retained for
 test callers that have not yet migrated."
-  (agent-repl--ws-get ws :claude-state))
+  (agent-repl--ws-get ws :agent-state))
 
-(defun agent-repl--ws-claude-state (ws)
-  "Return the current :claude-state keyword for workspace WS, or nil."
-  (agent-repl--ws-get ws :claude-state))
+(defun agent-repl--ws-agent-state (ws)
+  "Return the current :agent-state keyword for workspace WS, or nil."
+  (agent-repl--ws-get ws :agent-state))
 
 (defun agent-repl--ws-repl-state (ws)
   "Return the current :repl-state keyword for workspace WS, or nil."
   (agent-repl--ws-get ws :repl-state))
 
-(defun agent-repl--ws-set-claude-state (ws state)
-  "Set workspace WS's :claude-state to STATE.
+(defun agent-repl--ws-set-agent-state (ws state)
+  "Set workspace WS's :agent-state to STATE.
 STATE is one of: nil, :init, :idle, :thinking, :done, :permission."
-  (unless ws (error "agent-repl--ws-set-claude-state: ws is nil"))
-  (agent-repl--log ws "claude-state %s -> %s" ws state)
-  (agent-repl--ws-put ws :claude-state state)
+  (unless ws (error "agent-repl--ws-set-agent-state: ws is nil"))
+  (agent-repl--log ws "agent-state %s -> %s" ws state)
+  (agent-repl--ws-put ws :agent-state state)
   (force-mode-line-update t)
   (agent-repl--memory-state-save ws))
 
@@ -329,7 +329,7 @@ STATE is one of:
   :dead      — vterm process gone
 
 The orthogonal `:done-acked' boolean tracks whether the user has seen
-the current `:claude-state :done' result.  It used to be the
+the current `:agent-state :done' result.  It used to be the
 `:repl-state :viewed' value but was lifted out — viewing isn't a
 lifecycle phase, it's an acknowledgment flag that overlays :done.
 
@@ -348,18 +348,18 @@ needed there."
     (agent-repl--state-save ws))
   (agent-repl--memory-state-save ws))
 
-(defun agent-repl--ws-claude-state-clear-if (ws state)
-  "Clear WS's :claude-state when it currently equals STATE.
+(defun agent-repl--ws-agent-state-clear-if (ws state)
+  "Clear WS's :agent-state when it currently equals STATE.
 Compare-and-clear: no-op if the current value is not STATE."
-  (unless ws (error "agent-repl--ws-claude-state-clear-if: ws is nil"))
-  (if (eq (agent-repl--ws-get ws :claude-state) state)
+  (unless ws (error "agent-repl--ws-agent-state-clear-if: ws is nil"))
+  (if (eq (agent-repl--ws-get ws :agent-state) state)
       (progn
-        (agent-repl--log ws "claude-state-clear-if %s %s -> nil" ws state)
-        (agent-repl--ws-put ws :claude-state nil)
+        (agent-repl--log ws "agent-state-clear-if %s %s -> nil" ws state)
+        (agent-repl--ws-put ws :agent-state nil)
         (force-mode-line-update t))
     (agent-repl--log-verbose ws
-                              "claude-state-clear-if ws=%s state=%s no-op (current=%s)"
-                              ws state (agent-repl--ws-get ws :claude-state))))
+                              "agent-state-clear-if ws=%s state=%s no-op (current=%s)"
+                              ws state (agent-repl--ws-get ws :agent-state))))
 
 ;; --- Stop / SubagentStop coordination ---
 ;;
@@ -379,7 +379,7 @@ Compare-and-clear: no-op if the current value is not STATE."
 ;; The transition to :done happens when both conditions are true:
 ;; Stop has fired AND the counter is zero.  Whichever event resolves
 ;; that conjunction (Stop arriving last, or the final SubagentStop
-;; arriving last) triggers `agent-repl--handle-claude-finished'.
+;; arriving last) triggers `agent-repl--handle-agent-finished'.
 ;;
 ;; Empirical hook asymmetry (verified 2026-05-05):
 ;;
@@ -474,10 +474,10 @@ turn starts from a clean slate.  Resets `:stop-received' to nil and
 
 (defun agent-repl--ws-set (ws state)
   "Set workspace WS to STATE.
-Thin wrapper around `agent-repl--ws-set-claude-state' preserved for
+Thin wrapper around `agent-repl--ws-set-agent-state' preserved for
 callers that have not yet migrated to the typed setter.
 STATE is one of: :thinking, :done, :permission, :inactive."
-  (agent-repl--ws-set-claude-state ws state))
+  (agent-repl--ws-set-agent-state ws state))
 
 (defun agent-repl--ws-dir (ws)
   "Return the project root directory for workspace WS.
@@ -576,22 +576,22 @@ A no-op if a check is already in progress for WS."
 ;; --- Named color / style constants --- ;;
 
 (defconst agent-repl--color-init-blue        "#3366cc"
-  "Blue used for the :init claude-state tab background.")
+  "Blue used for the :init agent-state tab background.")
 
 (defconst agent-repl--color-thinking-red     "#cc3333"
-  "Red used for the :thinking claude-state tab background.")
+  "Red used for the :thinking agent-state tab background.")
 
 (defconst agent-repl--color-done-green       "#1a7a1a"
   "Dark green used for :done and :permission tab backgrounds.")
 
 (defconst agent-repl--color-idle-orange      "#d97706"
-  "Orange used for the :idle claude-state tab background.
+  "Orange used for the :idle agent-state tab background.
 :idle means \"session alive, awaiting prompt or decayed from :done\" — an
 explicit palette entry (not a fallback) so idle workspaces are
 visually distinct from states that have no palette mapping.")
 
 (defconst agent-repl--color-stop-failed-magenta "#8b1f8b"
-  "Magenta used for the :stop-failed claude-state tab background.
+  "Magenta used for the :stop-failed agent-state tab background.
 :stop-failed means the StopFailure hook fired — Claude's turn ended
 due to an API error (rate limit, auth failure, billing, etc.).  The
 vterm session is still alive and re-promptable; :dead (the plain ❌
@@ -661,7 +661,7 @@ merge does not look like a dead vterm at a glance.")
 (defconst agent-repl--color-flash-bg         "#3b82f6"
   "Saturated blue used for the transient flash face — see `agent-repl-flash-tab'.
 Distinct from `agent-repl--color-init-blue' so a flash is not confused
-with the :init claude-state at a glance.")
+with the :init agent-state at a glance.")
 
 (defcustom agent-repl-flash-count 2
   "Number of on/off cycles when `agent-repl-flash-tab' pulses a tab."
@@ -778,7 +778,7 @@ Distributed evenly across `agent-repl-flash-count' on/off cycles."
      :label      ,agent-repl--label-merged))
   "Per-state tab-appearance palette.
 Each entry fully describes both selected and unselected looks for a
-claude-state keyword via nested `:unselected' and `:selected' plists.
+agent-state keyword via nested `:unselected' and `:selected' plists.
 `:repl-state :inactive' does not contribute to color (it is bookkeeping
 only).")
 
@@ -797,7 +797,7 @@ Pulls bracket-bg/bracket-fg/weight from STATE's palette row (per
 SELECTED) and leaves :bg/:fg unspecified so the separator and name
 region inherit defaults.  Used for workspaces whose Claude panels
 have been dismissed: the bracket retains the state's color so the
-workspace's claude-state stays visible while the rest of the tab
+workspace's agent-state stays visible while the rest of the tab
 falls back to the default appearance."
   (let* ((full (agent-repl--tab-spec state selected))
          (bracket-bg (or (plist-get full :bracket-bg)
@@ -1006,9 +1006,9 @@ render-state is non-nil AND no Claude panel is present in WS's
 live-or-saved window layout, returns nil regardless of state — this
 suppresses full-tab coloring (state-colored name and label badges
 like ❓/❌/⚠) for workspaces whose panels the user has dismissed.
-`:claude-state' is preserved on the plist so the original color
+`:agent-state' is preserved on the plist so the original color
 reappears the next time the user reopens panels.  The nil-state
-shortcut avoids calling `agent-repl--ws-claude-open-p' on
+shortcut avoids calling `agent-repl--ws-agent-open-p' on
 workspaces that have no state to suppress in the first place.
 
 UI-boundary tolerance: the tab-bar iterates `persp-names-cache',
@@ -1026,7 +1026,7 @@ should color the [N] bracket alone?\" is answered by
 the bracket keeps its color when panels are closed."
   (when (agent-repl--ws-known-p ws)
     (let ((state (agent-repl--ws-render-status ws)))
-      (if (and state (not (agent-repl--ws-claude-open-p ws)))
+      (if (and state (not (agent-repl--ws-agent-open-p ws)))
           nil
         state))))
 
@@ -1049,7 +1049,7 @@ tab position.  The display state (from `agent-repl--ws-display-state')
 drives the name face.  The appearance spec is resolved via
 `agent-repl--tab-spec' when display-state is non-nil; when display-state
 is nil but `agent-repl--ws-bracket-state' returns a state (i.e., panels
-dismissed for a workspace that still has claude-state), the spec is
+dismissed for a workspace that still has agent-state), the spec is
 built via `agent-repl--tab-spec-bracket-only' so only the [N] bracket
 keeps the state's color.  The bracket label is driven by bracket-state
 when display-state is suppressed, so palette `:label' glyphs (❓ for
@@ -1455,7 +1455,7 @@ notification while dropping the leading workspace list."
 ;;; Claude panel visibility ---------------------------------------------------
 
 ;; Walk saved window-configuration tree to find claude buffers.
-(defun agent-repl--wconf-has-claude-p (wconf)
+(defun agent-repl--wconf-has-agent-p (wconf)
   "Return non-nil if WCONF (a `window-state-get' tree) contains a claude vterm buffer.
 Excludes input buffers: presence of only the input panel in a saved
 config (e.g. from a placeholder layout) should not count as claude open."
@@ -1465,40 +1465,40 @@ config (e.g. from a placeholder layout) should not count as claude open."
                (string-match-p agent-repl--vterm-buffer-re (car buf-entry))
                (not (string-match-p agent-repl--input-buffer-re (car buf-entry))))
           t
-        (cl-some #'agent-repl--wconf-has-claude-p
+        (cl-some #'agent-repl--wconf-has-agent-p
                  (cl-remove-if-not #'proper-list-p wconf))))))
 
-(defun agent-repl--visible-claude-buffer-p (buf)
+(defun agent-repl--visible-agent-buffer-p (buf)
   "Return non-nil if BUF is a live, visible Claude buffer."
   (and (buffer-live-p buf)
-       (agent-repl--claude-buffer-p buf)
+       (agent-repl--agent-buffer-p buf)
        (get-buffer-window buf)))
 
-(defun agent-repl--claude-visible-in-current-ws-p ()
+(defun agent-repl--agent-visible-in-current-ws-p ()
   "Return non-nil if a claude buffer is visible in the current workspace."
-  (cl-some #'agent-repl--visible-claude-buffer-p
+  (cl-some #'agent-repl--visible-agent-buffer-p
            (buffer-list)))
 
-(defun agent-repl--claude-in-saved-wconf-p (ws-name)
+(defun agent-repl--agent-in-saved-wconf-p (ws-name)
   "Return non-nil if background workspace WS-NAME has a claude buffer in its saved config."
   (let* ((persp (agent-repl--ws-resolve-persp ws-name))
          (wconf (agent-repl--ws-window-conf persp)))
-    (agent-repl--wconf-has-claude-p wconf)))
+    (agent-repl--wconf-has-agent-p wconf)))
 
-(defun agent-repl--ws-claude-open-p (ws-name)
+(defun agent-repl--ws-agent-open-p (ws-name)
   "Return non-nil if workspace WS-NAME has a claude buffer in its window layout.
 For the current workspace, checks live windows.
 For background workspaces, inspects the saved persp window configuration."
   (if (equal ws-name (agent-repl--ws-current-name))
-      (agent-repl--claude-visible-in-current-ws-p)
-    (agent-repl--claude-in-saved-wconf-p ws-name)))
+      (agent-repl--agent-visible-in-current-ws-p)
+    (agent-repl--agent-in-saved-wconf-p ws-name)))
 
 ;;; State machine ------------------------------------------------------------
 
 (defun agent-repl--update-ws-state (ws)
-  "Decay WS's claude-state from :done to :idle when conditions are met.
+  "Decay WS's agent-state from :done to :idle when conditions are met.
 
-This is the sole transition the timer drives on the claude-state axis.
+This is the sole transition the timer drives on the agent-state axis.
 Every other transition is sentinel-owned (see the hook handlers in
 `sentinel.el').  When Claude finishes a turn the Stop hook writes
 `:done'; if the worktree is clean AND the user has been focused on
@@ -1521,7 +1521,7 @@ State table:
   :done + clean + !acked                  → unchanged (wait for user to view)
   :done + dirty                           → unchanged (wait for stage/commit)
   anything else                           → unchanged (sentinel-owned or terminal)"
-  (let* ((state (agent-repl--ws-claude-state ws))
+  (let* ((state (agent-repl--ws-agent-state ws))
          (acked (agent-repl--ws-get ws :done-acked))
          (acked-at (agent-repl--ws-get ws :done-acked-at))
          (git-status (agent-repl--ws-get ws :git-clean))
@@ -1532,7 +1532,7 @@ State table:
       (agent-repl--log-verbose ws "update-ws-state ws=%s state=%s git-clean not yet populated, skipping" ws state))
      ((and (eq state :done) (eq git-status 'clean) acked dwell-elapsed)
       (agent-repl--log ws "update-ws-state ws=%s :done->:idle (clean, acked, dwell=%.2fs)" ws dwell)
-      (agent-repl--ws-set-claude-state ws :idle)
+      (agent-repl--ws-set-agent-state ws :idle)
       (agent-repl--ws-put ws :done-acked nil)
       (agent-repl--ws-put ws :done-acked-at nil))
      (t
@@ -1584,14 +1584,14 @@ caller is told to proceed."
 
 (defun agent-repl--update-one-workspace-state (ws do-git-p)
   "Run the per-workspace state-update body for WS.
-The cheap parts (`agent-repl--claude-running-p',
+The cheap parts (`agent-repl--agent-running-p',
 `agent-repl--update-ws-state', `agent-repl--mark-dead-vterm') run
 every tick so transitions like `:done' -> `:idle' stay snappy.
 DO-GIT-P gates the expensive git refreshes
 \(`agent-repl--async-refresh-git-status' and
 `agent-repl--async-refresh-branch-merged') so they fire only on the
 mod-N tick selected by `agent-repl-state-git-tick-modulus'."
-  (if (agent-repl--claude-running-p ws)
+  (if (agent-repl--agent-running-p ws)
       (progn
         (agent-repl--update-ws-state ws)
         (when do-git-p
@@ -1750,7 +1750,7 @@ the in-flight slot."
 
 (defun agent-repl--mark-dead-vterm (ws)
   "Record that WS's vterm process is no longer running.
-Sets `:repl-state :dead' and clears `:claude-state'.  This is a
+Sets `:repl-state :dead' and clears `:agent-state'.  This is a
 documented lifecycle-cleanup exception to the sentinel-only writer
 rule: no hook will ever fire again for a dead process, so Emacs is
 the only observer that can reset state.
@@ -1766,18 +1766,18 @@ No-op in four cases:
   :dead).  Without this guard, the next poll would re-classify the
   workspace as plain `:dead' and the MERGED-section semantics would
   be lost.
-- `:claude-state' is `:init' — Claude is starting, the vterm process
+- `:agent-state' is `:init' — Claude is starting, the vterm process
   may not have reached running state yet, and observing no process
   does not mean dead.  The session-start hook will transition away
   from `:init' shortly; until then the timer leaves things alone."
   (unless (or (eq (agent-repl--ws-repl-state ws) :dead)
               (eq (agent-repl--ws-repl-state ws) :merged)
               (eq (agent-repl--ws-repl-state ws) :merge-failed)
-              (eq (agent-repl--ws-claude-state ws) :init))
-    (agent-repl--log ws "mark-dead-vterm: ws=%s claude-state=%s -> :dead"
-                      ws (agent-repl--ws-claude-state ws))
+              (eq (agent-repl--ws-agent-state ws) :init))
+    (agent-repl--log ws "mark-dead-vterm: ws=%s agent-state=%s -> :dead"
+                      ws (agent-repl--ws-agent-state ws))
     (agent-repl--ws-put ws :repl-state :dead)
-    (agent-repl--ws-put ws :claude-state nil)
+    (agent-repl--ws-put ws :agent-state nil)
     (force-mode-line-update t)))
 
 ;;; Frame focus handler -------------------------------------------------------

@@ -7,7 +7,7 @@
   :type 'number
   :group 'agent-repl)
 
-(defcustom agent-repl-loading-placeholder-name " *claude-loading*"
+(defcustom agent-repl-loading-placeholder-name " *agent-loading*"
   "Buffer name for the loading placeholder shown while Claude starts."
   :type 'string
   :group 'agent-repl)
@@ -121,9 +121,9 @@ live input buffer here keeps that reassignment from ever failing.
 
 Resolution order, loud rather than silent about a missing buffer:
 - the recorded `:input-buffer' when it is still live;
-- else the canonically-named `*claude-panel-input-WS*' buffer when a
+- else the canonically-named `*agent-panel-input-WS*' buffer when a
   live one already exists (re-adopting it without re-running
-  `claude-input-mode', which would trip its already-initialized guard);
+  `agent-repl-input-mode', which would trip its already-initialized guard);
 - else a fresh buffer via `agent-repl--initialize-input-buffer'."
   (or (let ((buf (agent-repl--ws-get ws :input-buffer)))
         (and (buffer-live-p buf) buf))
@@ -488,7 +488,7 @@ workspace, whether or not it belongs to the current one — when that
 window is the only non-side window in the frame.  Returns nil otherwise.
 
 This is the \"lone output\" state: the frame shows just a Claude output
-window (e.g. a fullscreen Claude REPL whose saved layout restored only
+window (e.g. a fullscreen Agent REPL whose saved layout restored only
 its output window, or another workspace's leftover output window) with
 no input panel beside it.  Because the output window is the only
 non-side window, the absence of a visible input panel is implied.
@@ -499,7 +499,7 @@ output+input panels in fullscreen (via
 `agent-repl--reclaim-frame-fullscreen')."
   (let ((non-side (cl-remove-if #'agent-repl-window--side-window-p (window-list))))
     (when (and (= (length non-side) 1)
-               (agent-repl--claude-buffer-p (window-buffer (car non-side))))
+               (agent-repl--agent-buffer-p (window-buffer (car non-side))))
       (car non-side))))
 
 (defun agent-repl--detach-foreign-panel-buffers (ws buffers)
@@ -656,7 +656,7 @@ flag because each workspace has its own panel buffers."
         (agent-repl--log ws "ensure-own-panels: re-showing panels (were-visible but now missing)")
         (agent-repl--show-panels)))
     ;; Independently of the were-visible flag, repair a frame that shows
-    ;; only the output window (e.g. a fullscreen Claude REPL restored with
+    ;; only the output window (e.g. a fullscreen Agent REPL restored with
     ;; just its output window) by adding the input window beside it.
     (agent-repl--ensure-input-beside-output)
     ;; Take over the frame with THIS workspace's own panels in fullscreen —
@@ -681,7 +681,7 @@ to, even if another switch raced ahead before the timer fired.
 Also opens panels for workspaces that were created with a preemptive
 prompt, and auto-selects the input window if visible.
 
-If the newly-active workspace has `:claude-state :done', stamps
+If the newly-active workspace has `:agent-state :done', stamps
 `:done-acked' to t and `:done-acked-at' to the current time so the
 decay timer can clear :done → :idle once
 `agent-repl-done-idle-delay' seconds of continuous focus have
@@ -704,7 +704,7 @@ pending merge auto-fire."
     ;; Must run BEFORE refresh-vterm / autoselect so they see the correct
     ;; panel windows.
     (agent-repl--ensure-own-panels-on-persp-switch ws)
-    (when (eq (agent-repl--ws-claude-state ws) :done)
+    (when (eq (agent-repl--ws-agent-state ws) :done)
       (agent-repl--ws-put ws :done-acked t)
       (agent-repl--ws-put ws :done-acked-at (float-time)))
     (agent-repl--maybe-sweep-hidden-on-switch ws)
@@ -722,7 +722,7 @@ pending merge auto-fire."
     ;; Flip the emacs-side bit on the fully-loaded latch.  If
     ;; --on-session-start-event has also fired, this fires the
     ;; ws-fully-loaded hook; otherwise we just record the bit and wait
-    ;; for claude-ready.  Guarded on ws non-nil so the nil-ws fallback
+    ;; for agent-ready.  Guarded on ws non-nil so the nil-ws fallback
     ;; (test envs, persp init) doesn't poison the hash table.
     (when ws
       (agent-repl--latch-and-maybe-fire-loaded ws :ws-loaded))))
@@ -730,9 +730,9 @@ pending merge auto-fire."
 ;; Save window state for current workspace before switching away,
 ;; so update-all-workspace-states can inspect the saved config.
 
-(defun agent-repl--non-claude-panel-window-p (w)
+(defun agent-repl--non-agent-panel-window-p (w)
   "Return non-nil if window W does not display a Claude panel buffer."
-  (not (agent-repl--claude-panel-buffer-p (window-buffer w))))
+  (not (agent-repl--agent-panel-buffer-p (window-buffer w))))
 
 (defun agent-repl--save-target-window-p (w)
   "Return non-nil when W is a safe selected-window for persp save.
@@ -745,9 +745,9 @@ windows, and the minibuffer."
        (not (window-minibuffer-p w))
        (not (window-parameter w 'window-side))
        (not (window-dedicated-p w))
-       (not (agent-repl--claude-panel-buffer-p (window-buffer w)))))
+       (not (agent-repl--agent-panel-buffer-p (window-buffer w)))))
 
-(defun agent-repl--redirect-from-claude-before-save ()
+(defun agent-repl--redirect-from-agent-before-save ()
   "Select a redirect-safe window before persp saves window state.
 
 Redirects when the selected window is unsuitable as a future
@@ -759,9 +759,9 @@ side/dedicated/panel window, Doom's `+workspace/kill' fallback
 instead splits a new window showing the doom splash buffer.
 
 Picks the first window that satisfies `agent-repl--save-target-window-p'.
-No-op when no safe target exists (fullscreen-claude or drawer-only)."
+No-op when no safe target exists (fullscreen-agent or drawer-only)."
   (let ((sel (selected-window)))
-    (when (or (agent-repl--claude-panel-buffer-p (window-buffer sel))
+    (when (or (agent-repl--agent-panel-buffer-p (window-buffer sel))
               (window-parameter sel 'window-side)
               (window-dedicated-p sel))
       (when-let ((target (cl-find-if
@@ -771,12 +771,12 @@ No-op when no safe target exists (fullscreen-claude or drawer-only)."
 
 (defun agent-repl--clear-done-ack-on-switch-away (ws)
   "Reset WS's :done focus-dwell tracking when switching away.
-If WS is in `:claude-state :done' and the decay has not yet fired,
+If WS is in `:agent-state :done' and the decay has not yet fired,
 clear `:done-acked' and `:done-acked-at' so the dwell countdown
 restarts on the next return.  This makes the
 `agent-repl-done-idle-delay' check count only continuous focus
 periods — a quick transit (< delay) leaves the workspace green."
-  (when (and ws (eq (agent-repl--ws-claude-state ws) :done))
+  (when (and ws (eq (agent-repl--ws-agent-state ws) :done))
     (agent-repl--log ws "clear-done-ack-on-switch-away ws=%s" ws)
     (agent-repl--ws-put ws :done-acked nil)
     (agent-repl--ws-put ws :done-acked-at nil)))
@@ -797,7 +797,7 @@ events (kill, switch, add) are traceable."
     ;; Record whether panels are visible BEFORE redirecting/saving so
     ;; the activated hook can restore them if persp-mode drops them.
     (agent-repl--ws-put ws :panels-were-visible (agent-repl--panels-visible-p))
-    (agent-repl--redirect-from-claude-before-save)
+    (agent-repl--redirect-from-agent-before-save)
     (condition-case err
         (agent-repl--ws-frame-save-state)
       (error (message "[agent-repl] WARNING: persp-frame-save-state failed: %S" err)
@@ -925,7 +925,7 @@ so the dedicated vterm window is un-dedicated before the buffer swap."
 
 (defun agent-repl--on-simple-close (&optional ws)
   "Bookkeep + hide panels; do NOT touch tab-bar order.
-Sets `:repl-state :inactive' on WS (`:claude-state' untouched so an
+Sets `:repl-state :inactive' on WS (`:agent-state' untouched so an
 in-flight :thinking / :permission survives the close), then hides
 the panel windows.  No save-tab-index, no push-to-back, no flash —
 this is the simple-close audit point that `SPC o c' is bound to.
@@ -947,8 +947,8 @@ rather than stranding the output window."
     (agent-repl--log ws "on-simple-close: CALLED this-command=%s last-command=%s"
                       this-command last-command)
     (when ws
-      (agent-repl--log ws "on-simple-close ws=%s claude-state=%s -> repl-state=:inactive"
-                        ws (agent-repl--ws-claude-state ws))
+      (agent-repl--log ws "on-simple-close ws=%s agent-state=%s -> repl-state=:inactive"
+                        ws (agent-repl--ws-agent-state ws))
       (agent-repl--ws-set-repl-state ws :inactive))
     (if (agent-repl--restore-fullscreen-config ws)
         (agent-repl--hide-panels)
@@ -978,8 +978,8 @@ hides panels but skips the bookkeeping write and the tab shuffle."
     (agent-repl--log ws "on-close: CALLED this-command=%s last-command=%s"
                       this-command last-command)
     (when ws
-      (agent-repl--log ws "on-close ws=%s claude-state=%s -> repl-state=:hidden"
-                        ws (agent-repl--ws-claude-state ws))
+      (agent-repl--log ws "on-close ws=%s agent-state=%s -> repl-state=:hidden"
+                        ws (agent-repl--ws-agent-state ws))
       (agent-repl--ws-set-repl-state ws :hidden))
     (agent-repl--restore-fullscreen-config ws)
     (agent-repl--hide-panels)
@@ -1012,17 +1012,17 @@ Input-buffer check comes first since `agent-repl--vterm-buffer-re' is a
 superset that also matches input-buffer names."
   (cond
    ((string-match-p agent-repl--input-buffer-re name)
-    (substring name (length "*claude-panel-input-") (- (length name) (length "*"))))
+    (substring name (length "*agent-panel-input-") (- (length name) (length "*"))))
    ((string-match-p agent-repl--vterm-buffer-re name)
-    (substring name (length "*claude-panel-") (- (length name) (length "*"))))))
+    (substring name (length "*agent-panel-") (- (length name) (length "*"))))))
 
 (defun agent-repl--partner-buffer-name (name id)
   "Return the partner buffer name for Claude panel NAME with identifier ID.
 For a vterm buffer, the partner is the input buffer, and vice versa.
 Checks input-re first since vterm-re is a superset that also matches inputs."
   (if (string-match-p agent-repl--input-buffer-re name)
-      (format "*claude-panel-%s*" id)
-    (format "*claude-panel-input-%s*" id)))
+      (format "*agent-panel-%s*" id)
+    (format "*agent-panel-input-%s*" id)))
 
 (defun agent-repl--orphaned-panel-p (name)
   "Return non-nil if NAME is a Claude panel buffer whose partner is not visible.
@@ -1077,7 +1077,7 @@ the last visible line — replaces the bare `set-window-point' tail with
 single redisplay rather than animating a scroll from the saved
 `window-start' down to the cursor."
   (let ((buf (window-buffer win)))
-    (when (and buf (buffer-live-p buf) (agent-repl--claude-buffer-p buf))
+    (when (and buf (buffer-live-p buf) (agent-repl--agent-buffer-p buf))
       (agent-repl--log-verbose (agent-repl--ws-current-name) "refresh-vterm-window: win=%s buf=%s" win (buffer-name buf))
       (with-current-buffer buf
         (when (and (eq major-mode 'vterm-mode)
@@ -1143,11 +1143,11 @@ scroll or copy works.  When no input window is currently displayed
 \(e.g. panels are hidden), emits a warning via `message' rather than
 leaving point stranded silently.
 
-Predicate is buffer-identity (`agent-repl--claude-buffer-p' — vterm-only,
+Predicate is buffer-identity (`agent-repl--agent-buffer-p' — vterm-only,
 excludes input buffers) rather than the `no-other-window' parameter, so
 this bounce alone is sufficient to keep keyboard nav out of vterm."
   (let ((win (selected-window)))
-    (if (and (agent-repl--claude-buffer-p (window-buffer win))
+    (if (and (agent-repl--agent-buffer-p (window-buffer win))
              (not (mouse-event-p last-input-event)))
         (let* ((ws (agent-repl--ws-current-name))
                (input-buf (and ws (agent-repl--ws-get ws :input-buffer)))
@@ -1159,7 +1159,7 @@ this bounce alone is sufficient to keep keyboard nav out of vterm."
             (message "[agent-repl] keyboard navigation landed in Claude vterm but input panel isn't visible — stuck here until you click out or reopen panels")
             (agent-repl--log (agent-repl--ws-current-name) "bounce-from-vterm: no input-win to bounce to (warned)")))
       (agent-repl--log-verbose (agent-repl--ws-current-name) "bounce-from-vterm: skipped vterm-buffer=%s mouse=%s"
-                                (if (agent-repl--claude-buffer-p (window-buffer win)) "yes" "no")
+                                (if (agent-repl--agent-buffer-p (window-buffer win)) "yes" "no")
                                 (if (mouse-event-p last-input-event) "yes" "no")))))
 
 (add-hook 'window-selection-change-functions #'agent-repl--bounce-from-vterm)
@@ -1167,15 +1167,15 @@ this bounce alone is sufficient to keep keyboard nav out of vterm."
 ;;;; Buffer creation
 
 (defun agent-repl--initialize-input-buffer (ws)
-  "Create the Claude input buffer for workspace WS and enable claude-input-mode.
-Errors if the buffer is already initialized (already in `claude-input-mode')."
+  "Create the Claude input buffer for workspace WS and enable agent-repl-input-mode.
+Errors if the buffer is already initialized (already in `agent-repl-input-mode')."
   (agent-repl--log ws "initialize-input-buffer")
   (let ((input-buf (agent-repl--create-buffer ws "-input")))
     (agent-repl--ws-put ws :input-buffer input-buf)
     (with-current-buffer input-buf
-      (when (eq major-mode 'claude-input-mode)
+      (when (eq major-mode 'agent-repl-input-mode)
         (error "agent-repl--initialize-input-buffer: already initialized ws=%s" ws))
-      (claude-input-mode)
+      (agent-repl-input-mode)
       (agent-repl--history-restore ws))))
 
 (defun agent-repl--kill-stale-vterm (&optional ws)
@@ -1205,30 +1205,30 @@ The placeholder is swapped for the real vterm buffer once Claude is ready."
     (agent-repl--show-panels-and-focus)
     (agent-repl--ws-put ws :vterm-buffer real-vterm)))
 
-(defun agent-repl--initialize-claude (&optional ws project-dir-hint active-env-hint)
+(defun agent-repl--initialize-agent (&optional ws project-dir-hint active-env-hint)
   "Initialize a Claude session for WS.
 Calls `initialize-ws-env' with PROJECT-DIR-HINT and ACTIVE-ENV-HINT
 (creation paths — worktree setup or new-workspace — pass known values
 here; regular `SPC o c' passes nil and lets the helper derive from
 the state file or the current buffer's git-root).  Then creates the
 output vterm buffer, launches the Claude CLI inside it, creates the
-input buffer, enables the hide-overlay, marks `:claude-state' as
+input buffer, enables the hide-overlay, marks `:agent-state' as
 `:init', and announces the startup.  Errors if Claude is already
 running for WS.
 
-Writes `:claude-state :init' immediately after launching the vterm
+Writes `:agent-state :init' immediately after launching the vterm
 process (documented lifecycle exception to the sentinel-only-writes
 rule — no hook fires between process launch and session-start, so
 Emacs is the only observer of \"Claude process exists, not ready yet\").
 Panels are deliberately NOT opened here — `on-session-start-event'
-opens them once `:claude-state' transitions from `:init' to `:idle'.
+opens them once `:agent-state' transitions from `:init' to `:idle'.
 During that window the user sees the blue `:init' tab and the
 echo-area message below."
   (let ((ws (or ws (agent-repl--ws-current-name))))
-    (unless ws (error "agent-repl--initialize-claude: no active workspace"))
-    (when (agent-repl--claude-running-p ws)
-      (error "agent-repl--initialize-claude: already running ws=%s" ws))
-    (agent-repl--log ws "initialize-claude: starting new session for ws=%s" ws)
+    (unless ws (error "agent-repl--initialize-agent: no active workspace"))
+    (when (agent-repl--agent-running-p ws)
+      (error "agent-repl--initialize-agent: already running ws=%s" ws))
+    (agent-repl--log ws "initialize-agent: starting new session for ws=%s" ws)
     (agent-repl--initialize-ws-env ws project-dir-hint active-env-hint)
     (let* ((root (agent-repl--ws-dir ws))
            (default-directory root))
@@ -1251,12 +1251,12 @@ echo-area message below."
               (agent-repl--ws-put ws :vterm-buffer vterm-buf)
               (setf (agent-repl-instantiation-start-cmd inst) cmd)
               (when (plist-get start-info :fork-session-id)
-                (agent-repl--log ws "initialize-claude: clearing fork-session-id for ws=%s" ws)
+                (agent-repl--log ws "initialize-agent: clearing fork-session-id for ws=%s" ws)
                 (agent-repl--ws-put ws :fork-session-id nil))
               (agent-repl--log-session-start ws start-info)
               (with-current-buffer vterm-buf
                 (when (eq major-mode 'vterm-mode)
-                  (error "agent-repl--initialize-claude: vterm buffer already initialized ws=%s" ws))
+                  (error "agent-repl--initialize-agent: vterm buffer already initialized ws=%s" ws))
                 (vterm-mode)
                 (setq-local truncate-lines nil)
                 (setq-local word-wrap t)
@@ -1265,7 +1265,7 @@ echo-area message below."
                 (setq-local mode-line-format
                             (agent-repl--workspace-mode-line ws))
                 (setq-local agent-repl--ready nil)
-                (agent-repl--log ws "initialize-claude: vterm=%s sending cmd len=%d"
+                (agent-repl--log ws "initialize-agent: vterm=%s sending cmd len=%d"
                                   (buffer-name) (length cmd))
                 (vterm-send-string (concat agent-repl-startup-prefix cmd))
                 (vterm-send-return))
@@ -1273,13 +1273,13 @@ echo-area message below."
               (agent-repl--initialize-input-buffer ws)
               (agent-repl--ws-put ws :prefix-counter 0)
               (agent-repl--enable-hide-overlay)
-              (agent-repl--ws-set-claude-state ws :init)
+              (agent-repl--ws-set-agent-state ws :init)
               (message "Starting Claude... ws=%s ws-id=%s dir=%s cmd=%s"
                        ws (agent-repl--workspace-id) root (or cmd "?"))
               (agent-repl--state-save ws)
               (setq launched t))
           (unless launched
-            (agent-repl--log ws "initialize-claude: launch aborted, killing orphan buffer ws=%s" ws)
+            (agent-repl--log ws "initialize-agent: launch aborted, killing orphan buffer ws=%s" ws)
             (when (buffer-live-p vterm-buf)
               (agent-repl--ws-put ws :vterm-buffer nil)
               (kill-buffer vterm-buf))))))))
@@ -1327,15 +1327,15 @@ first — doing so would destroy the work layout before it is saved."
 
 (defun agent-repl--show-hidden-panels ()
   "Restore hidden panels.  `show-existing-panels' writes :repl-state :active.
-`:claude-state' is untouched; rendering follows the same rule whether
+`:agent-state' is untouched; rendering follows the same rule whether
 panels are visible or hidden.
 
 Panels always open filling the frame (fullscreen is the sole display
 format), so there is no separate maximize step — `show-existing-panels'
 lays them out full-frame via `agent-repl--show-panels'."
   (let ((ws (agent-repl--ws-current-name)))
-    (agent-repl--log ws "showing panels ws=%s claude-state=%s"
-                      ws (agent-repl--ws-claude-state ws))
+    (agent-repl--log ws "showing panels ws=%s agent-state=%s"
+                      ws (agent-repl--ws-agent-state ws))
     (agent-repl--show-existing-panels)))
 
 (defun agent-repl--hide-and-preserve-status ()
@@ -1371,7 +1371,7 @@ at all).  This is the `SPC o C' contract: pressing it again on a
 workspace that is already hidden / never-started should still mark it
 `:hidden' and push it to the back, not re-show or launch Claude."
   (let* ((ws (agent-repl--ws-current-name))
-         (vterm-running (agent-repl--claude-running-p))
+         (vterm-running (agent-repl--agent-running-p))
          (session-starting (agent-repl--session-starting-p))
          (panels-visible (agent-repl--panels-visible-p))
          (selection (when (use-region-p)
@@ -1382,11 +1382,11 @@ workspace that is already hidden / never-started should still mark it
     (cond
      (selection
       (deactivate-mark)
-      (agent-repl--send-to-claude selection))
+      (agent-repl--send-to-agent selection))
      (always-close
       (funcall close-fn))
      ((not vterm-running)
-      (agent-repl--initialize-claude))
+      (agent-repl--initialize-agent))
      (session-starting
       (message "Claude is loading…"))
      (panels-visible
@@ -1403,7 +1403,7 @@ workspace that is already hidden / never-started should still mark it
       (agent-repl--show-hidden-panels)))))
 
 (defun agent-repl ()
-  "Hide Claude REPL panels and deprio the workspace.
+  "Hide Agent REPL panels and deprio the workspace.
 If text is selected: send it directly to Claude (orthogonal to hide).
 Otherwise: mark the workspace `:repl-state :hidden', hide both panels
 \(no-op if already hidden), and push the workspace tab to the back.
@@ -1415,7 +1415,7 @@ Bound to `SPC o C'.  See `agent-repl-simple' for the no-tab-bar variant."
   (agent-repl--toggle #'agent-repl--hide-and-preserve-status :always-close t))
 
 (defun agent-repl-simple ()
-  "Toggle Claude REPL panels with a plain close (no tab-bar update).
+  "Toggle Agent REPL panels with a plain close (no tab-bar update).
 Same dispatch as `agent-repl' except the close branch only hides the
 panels and sets `:repl-state :inactive' — no save-tab-index, no
 push-to-back, no flash.  Bound to `SPC o c'."
@@ -1544,17 +1544,17 @@ would wipe that workspace's running session."
 ;;;; User commands
 
 (defun agent-repl-kill ()
-  "Kill Claude REPL buffers and windows for the current workspace."
+  "Kill Agent REPL buffers and windows for the current workspace."
   (interactive)
   (let ((ws (agent-repl--ws-current-name)))
     (agent-repl--log ws "kill")
     (unless ws (error "agent-repl-kill: no active workspace"))
     ;; Lifecycle-reset: kill destroys the session, so both state axes are
     ;; reset to nil.  (Documented exception to "sentinel-only writes
-    ;; claude-state" — see analysis/12.)  :repl-state nil means "no panels
+    ;; agent-state" — see analysis/12.)  :repl-state nil means "no panels
     ;; and no particular inactive/dead designation"; the workspace returns
-    ;; to a pristine no-Claude state awaiting the next initialize-claude.
-    (agent-repl--ws-put ws :claude-state nil)
+    ;; to a pristine no-agent state awaiting the next initialize-agent.
+    (agent-repl--ws-put ws :agent-state nil)
     (agent-repl--ws-put ws :repl-state nil)
     (force-mode-line-update t)
     (agent-repl--kill-session ws)))
@@ -1569,7 +1569,7 @@ signals ready."
   (let ((ws (agent-repl--ws-current-name)))
     (agent-repl--log ws "restart")
     (agent-repl-kill)
-    (agent-repl--initialize-claude ws)))
+    (agent-repl--initialize-agent ws)))
 
 (defun agent-repl-focus-input ()
   "Focus the Claude input buffer, or return to previous window if already there.
@@ -1582,8 +1582,8 @@ If Claude isn't running, start it (same as `agent-repl')."
       (agent-repl--log ws "focus-input branch=jump-back")
       (evil-window-left 1))
      ;; Not running — start fresh
-     ((not (agent-repl--claude-running-p))
-      (agent-repl--log ws "focus-input branch=initialize-claude")
+     ((not (agent-repl--agent-running-p))
+      (agent-repl--log ws "focus-input branch=initialize-agent")
       (agent-repl))
      ;; Running but panels hidden — show them
      (t
@@ -1611,8 +1611,8 @@ frame with no `:fullscreen-config' has no layout to restore to."
     t))
 
 (defvar agent-repl--window-fullscreen-config nil
-  "Saved window configuration for non-Claude fullscreen toggle.
-Set when `agent-repl-fullscreen-and-focus' maximizes a non-Claude window,
+  "Saved window configuration for non-agent fullscreen toggle.
+Set when `agent-repl-fullscreen-and-focus' maximizes a non-agent window,
 cleared on restore.")
 
 (defun agent-repl--fullscreen-leave-side-window ()
@@ -1620,7 +1620,7 @@ cleared on restore.")
 
 When `agent-repl-fullscreen-and-focus' is invoked from inside a side
 window (e.g. the workspace drawer), `selected-window' is the side
-window itself.  The non-Claude branch would then treat the drawer as
+window itself.  The non-agent branch would then treat the drawer as
 the window to KEEP and sweep every main-area window — leaving the
 user's actual work window (or Claude panels) destroyed and only the
 drawer alongside an arbitrary survivor from `delete-window's benign
@@ -1652,7 +1652,7 @@ a leaf is reached.  Returns nil if no leaf is found."
    (t (agent-repl--first-live-leaf (window-child win)))))
 
 (defun agent-repl-fullscreen-and-focus ()
-  "Focus the Claude input window, or maximize a non-Claude work window.
+  "Focus the Claude input window, or maximize a non-agent work window.
 When in a Claude panel buffer, moves point to the input buffer — the
 Claude panels already fill the frame (fullscreen is the sole display
 format), so there is nothing to maximize.
@@ -1665,7 +1665,7 @@ real main-area window — see
 `agent-repl--fullscreen-leave-side-window'."
   (interactive)
   (agent-repl--fullscreen-leave-side-window)
-  (if (agent-repl--claude-panel-buffer-p)
+  (if (agent-repl--agent-panel-buffer-p)
       (let* ((ws (agent-repl--ws-current-name))
              (input-buf (agent-repl--ws-get ws :input-buffer))
              (input-win (and input-buf (get-buffer-window input-buf))))
@@ -1741,5 +1741,5 @@ independently.  Requires a worktree workspace with a captured session ID."
     (message "Switching to %s (resuming session %s...)"
              (if (eq new-env :sandbox) "Docker sandbox" "bare-metal")
              (substring session-id 0 agent-repl-session-id-display-length))
-    (agent-repl--initialize-claude ws)
+    (agent-repl--initialize-agent ws)
     (agent-repl--show-panels-and-focus)))

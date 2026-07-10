@@ -66,7 +66,7 @@ The trailing Enter must route through
 the same delivery pipeline as every other Enter sender."
   (agent-repl-test--with-clean-state
     (let ((calls nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -82,7 +82,7 @@ the same delivery pipeline as every other Enter sender."
   "`agent-repl-scroll-down' calls `vterm-send-down' in the vterm buffer."
   (agent-repl-test--with-clean-state
     (let ((down-called nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -95,7 +95,7 @@ the same delivery pipeline as every other Enter sender."
   "`agent-repl-scroll-up' calls `vterm-send-up'."
   (agent-repl-test--with-clean-state
     (let ((up-called nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -108,7 +108,7 @@ the same delivery pipeline as every other Enter sender."
   "`agent-repl-interrupt' calls `vterm-send-key' with \"<escape>\" twice."
   (agent-repl-test--with-clean-state
     (let ((escape-count 0))
-      (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -123,7 +123,7 @@ the same delivery pipeline as every other Enter sender."
   "`agent-repl-cycle' calls `vterm-send-key' with \"<backtab>\"."
   (agent-repl-test--with-clean-state
     (let ((backtab-called nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -140,7 +140,7 @@ the same delivery pipeline as every other Enter sender."
     (let ((send-string-args nil)
           (return-called nil)
           (timer-args nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
@@ -163,7 +163,7 @@ the same delivery pipeline as every other Enter sender."
     (let ((send-string-args nil)
           (return-called nil)
           (timer-args nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
@@ -227,7 +227,7 @@ the same delivery pipeline as every other Enter sender."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-queue-deferred-1*"
       (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
-      (agent-repl--ws-put "ws1" :claude-state :thinking)
+      (agent-repl--ws-put "ws1" :agent-state :thinking)
       (insert "queued one")
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--history-save) #'ignore))
@@ -240,7 +240,7 @@ the same delivery pipeline as every other Enter sender."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-queue-deferred-2*"
       (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
-      (agent-repl--ws-put "ws1" :claude-state :thinking)
+      (agent-repl--ws-put "ws1" :agent-state :thinking)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--history-save) #'ignore))
         (insert "first")
@@ -257,7 +257,7 @@ the same delivery pipeline as every other Enter sender."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-queue-deferred-3*"
       (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
-      (agent-repl--ws-put "ws1" :claude-state :thinking)
+      (agent-repl--ws-put "ws1" :agent-state :thinking)
       (insert "clear me")
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--history-save) #'ignore))
@@ -269,7 +269,7 @@ the same delivery pipeline as every other Enter sender."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-queue-deferred-4*"
       (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
-      (agent-repl--ws-put "ws1" :claude-state :thinking)
+      (agent-repl--ws-put "ws1" :agent-state :thinking)
       (agent-repl--ws-put "ws1" :deferred-prompts nil)
       ;; Buffer is empty
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
@@ -286,7 +286,7 @@ the same delivery pipeline as every other Enter sender."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-queue-deferred-5*"
       (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
-      (agent-repl--ws-put "ws1" :claude-state :idle)
+      (agent-repl--ws-put "ws1" :agent-state :idle)
       (insert "fire now")
       (let ((sent nil))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
@@ -303,7 +303,7 @@ the same delivery pipeline as every other Enter sender."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-queue-deferred-6*"
       (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
-      (agent-repl--ws-put "ws1" :claude-state :thinking)
+      (agent-repl--ws-put "ws1" :agent-state :thinking)
       (insert "wait for it")
       (let ((sent nil))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
@@ -321,7 +321,7 @@ the same delivery pipeline as every other Enter sender."
   "agent-repl-paste-to-vterm should call vterm-send-key with C-v args."
   (agent-repl-test--with-clean-state
     (let ((send-key-args nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -1306,7 +1306,7 @@ appear as subbullets of the \"is pre-existing\" claim."
 (ert-deftest agent-repl-test-pin-owning-workspace-sets-local ()
   "Pin should set `agent-repl--owning-workspace' as a buffer-local."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-pin-test*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-pin-test*"
       (agent-repl--pin-owning-workspace (current-buffer) "my-ws")
       (should (equal agent-repl--owning-workspace "my-ws")))))
 
@@ -1384,7 +1384,7 @@ appear as subbullets of the \"is pre-existing\" claim."
     (let ((send-string-args nil)
           (return-called nil)
           (timer-args nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-threshold*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-threshold*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
@@ -1404,7 +1404,7 @@ appear as subbullets of the \"is pre-existing\" claim."
     (let ((send-string-args nil)
           (return-called nil)
           (timer-args nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-empty*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-empty*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
@@ -1424,7 +1424,7 @@ appear as subbullets of the \"is pre-existing\" claim."
     (let ((send-string-args nil)
           (return-called nil)
           (timer-args nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-newline*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-newline*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
@@ -1443,7 +1443,7 @@ appear as subbullets of the \"is pre-existing\" claim."
     (let ((send-string-args nil)
           (return-called nil)
           (timer-args nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-trailing-nl*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-trailing-nl*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
@@ -1462,7 +1462,7 @@ appear as subbullets of the \"is pre-existing\" claim."
     (let ((send-string-args nil)
           (return-called nil)
           (timer-args nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-no-nl*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-no-nl*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-string-args (cons s args))))
                   ((symbol-function 'vterm-send-return)
@@ -1563,25 +1563,25 @@ mirroring the first send of a freshly-initialized workspace."
     (should (= (agent-repl--ws-get "ws1" :prefix-counter) 0))))
 
 (ert-deftest agent-repl-test-posthook-mark-done-sets-done ()
-  "`agent-repl--posthook-mark-done' sets :claude-state :done for WS."
+  "`agent-repl--posthook-mark-done' sets :agent-state :done for WS."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :idle)
+    (agent-repl--ws-set-agent-state "ws1" :idle)
     (agent-repl--posthook-mark-done "ws1" "/clear")
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :done))))
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :done))))
 
 (ert-deftest agent-repl-test-run-send-posthooks-clear-marks-done ()
-  "`/clear' through the posthook runner marks :claude-state :done."
+  "`/clear' through the posthook runner marks :agent-state :done."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :idle)
+    (agent-repl--ws-set-agent-state "ws1" :idle)
     (agent-repl--run-send-posthooks "ws1" "/clear")
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :done))))
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :done))))
 
 ;;;; ---- Tests: do-send ----
 
 (ert-deftest agent-repl-test-do-send-increments-counter ()
   "`agent-repl--do-send' increments the prefix counter."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-do-send*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-do-send*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (agent-repl--ws-put "ws1" :prefix-counter 5)
       (cl-letf (((symbol-function 'agent-repl--send-input-to-vterm) #'ignore)
@@ -1589,23 +1589,23 @@ mirroring the first send of a freshly-initialized workspace."
         (agent-repl--do-send "ws1" "input" "raw"))
       (should (= (agent-repl--ws-get "ws1" :prefix-counter) 6)))))
 
-(ert-deftest agent-repl-test-do-send-does-not-touch-claude-state ()
-  "`agent-repl--do-send' must not write :claude-state.
+(ert-deftest agent-repl-test-do-send-does-not-touch-agent-state ()
+  "`agent-repl--do-send' must not write :agent-state.
 The :thinking transition belongs to the prompt_submit Claude Code hook
 (via `on-prompt-submit-event').  Emacs-side do-send only sends bytes."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-do-send-think*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-do-send-think*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (cl-letf (((symbol-function 'agent-repl--send-input-to-vterm) #'ignore)
                 ((symbol-function 'agent-repl--run-send-posthooks) #'ignore))
         (agent-repl--do-send "ws1" "input" "raw"))
-      (should-not (agent-repl--ws-claude-state "ws1"))
+      (should-not (agent-repl--ws-agent-state "ws1"))
       (should-not (agent-repl--ws-get "ws1" :status)))))
 
 (ert-deftest agent-repl-test-do-send-pins-owning-workspace ()
   "`agent-repl--do-send' pins the owning workspace on the vterm buffer."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-do-send-pin*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-do-send-pin*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (cl-letf (((symbol-function 'agent-repl--send-input-to-vterm) #'ignore)
                 ((symbol-function 'agent-repl--run-send-posthooks) #'ignore))
@@ -1616,7 +1616,7 @@ The :thinking transition belongs to the prompt_submit Claude Code hook
   "`agent-repl--do-send' passes raw input to posthooks."
   (agent-repl-test--with-clean-state
     (let ((posthook-args nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-do-send-hook*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-do-send-hook*"
         (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function 'agent-repl--send-input-to-vterm) #'ignore)
                   ((symbol-function 'agent-repl--run-send-posthooks)
@@ -1627,7 +1627,7 @@ The :thinking transition belongs to the prompt_submit Claude Code hook
 (ert-deftest agent-repl-test-do-send-records-last-prompt-time ()
   "`agent-repl--do-send' stamps :last-prompt-time with the current float-time."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-do-send-time*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-do-send-time*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (cl-letf (((symbol-function 'agent-repl--send-input-to-vterm) #'ignore)
                 ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
@@ -1645,7 +1645,7 @@ routes through libvterm's key translation and can dispatch SIGINT instead
 of the literal ETX keystroke Claude needs to clear its input line."
   (agent-repl-test--with-clean-state
     (let ((sent-bytes nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-discard-test*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-discard-test*"
         (setq-local vterm--process 'fake-proc)
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (agent-repl-test--with-temp-buffer " *test-input-discard*"
@@ -1662,7 +1662,7 @@ where the user pressed C-c C-c expecting a full reset."
   (agent-repl-test--with-clean-state
     (let ((sent-bytes nil)
           (evil-called nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-discard-vterm*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-discard-vterm*"
         (setq-local vterm--process 'fake-proc)
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (agent-repl-test--with-temp-buffer " *test-input-nonempty*"
@@ -1688,7 +1688,7 @@ Previously `string-blank-p' treated whitespace-only as empty and skipped
   (agent-repl-test--with-clean-state
     (let ((sent-bytes nil)
           (evil-called nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-discard-ws*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-discard-ws*"
         (setq-local vterm--process 'fake-proc)
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (agent-repl-test--with-temp-buffer " *test-input-whitespace*"
@@ -1714,18 +1714,18 @@ must follow so subsequent keystrokes don't continue forwarding and the
 next slash-return doesn't see stale accumulated input."
   (agent-repl-test--with-clean-state
     (let ((sent-bytes nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-discard-slash*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-discard-slash*"
         (setq-local vterm--process 'fake-proc)
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (agent-repl-test--with-temp-buffer " *test-input-slash-active*"
           (setq-local agent-repl--slash-stack '("r" "a" "e" "l" "c" "/"))
-          (claude-slash-input-mode 1)
+          (agent-repl-slash-input-mode 1)
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'process-send-string)
                      (lambda (proc bytes) (push (cons proc bytes) sent-bytes))))
             (agent-repl-discard-or-send-interrupt)
             (should (null agent-repl--slash-stack))
-            (should-not claude-slash-input-mode)
+            (should-not agent-repl-slash-input-mode)
             (should (equal sent-bytes '((fake-proc . "\C-c"))))))))))
 
 (ert-deftest agent-repl-test-discard-or-send-interrupt-thinking-nonempty-suppresses-ctrl-c ()
@@ -1736,10 +1736,10 @@ draft without interrupting Claude's in-flight response."
   (agent-repl-test--with-clean-state
     (let ((sent-bytes nil)
           (evil-called nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-thinking-nonempty*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-thinking-nonempty*"
         (setq-local vterm--process 'fake-proc)
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-        (agent-repl--ws-set-claude-state "test-ws" :thinking)
+        (agent-repl--ws-set-agent-state "test-ws" :thinking)
         (agent-repl-test--with-temp-buffer " *test-input-thinking-nonempty*"
           (setq-local agent-repl--input-history nil)
           (setq-local agent-repl--history-index 0)
@@ -1762,10 +1762,10 @@ sends raw Ctrl-C to vterm — the suppression only applies when there is
 local content to discard."
   (agent-repl-test--with-clean-state
     (let ((sent-bytes nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-thinking-empty*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-thinking-empty*"
         (setq-local vterm--process 'fake-proc)
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-        (agent-repl--ws-set-claude-state "test-ws" :thinking)
+        (agent-repl--ws-set-agent-state "test-ws" :thinking)
         (agent-repl-test--with-temp-buffer " *test-input-thinking-empty*"
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'process-send-string)
@@ -1779,10 +1779,10 @@ C-c C-c sends raw Ctrl-C AND clears the buffer — the historical full-reset
 behavior is preserved outside the :thinking state."
   (agent-repl-test--with-clean-state
     (let ((sent-bytes nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-idle-nonempty*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-idle-nonempty*"
         (setq-local vterm--process 'fake-proc)
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-        (agent-repl--ws-set-claude-state "test-ws" :idle)
+        (agent-repl--ws-set-agent-state "test-ws" :idle)
         (agent-repl-test--with-temp-buffer " *test-input-idle-nonempty*"
           (setq-local agent-repl--input-history nil)
           (setq-local agent-repl--history-index 0)
@@ -1803,7 +1803,7 @@ behavior is preserved outside the :thinking state."
   "`agent-repl--send-vterm-key' forwards the given key to vterm."
   (agent-repl-test--with-clean-state
     (let ((sent-key nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-key-test*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-key-test*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -1816,7 +1816,7 @@ behavior is preserved outside the :thinking state."
   "`agent-repl--send-up-arrow' sends <up> to vterm."
   (agent-repl-test--with-clean-state
     (let ((sent-key nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-up-test*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-up-test*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -1829,7 +1829,7 @@ behavior is preserved outside the :thinking state."
   "`agent-repl--send-down-arrow' sends <down> to vterm."
   (agent-repl-test--with-clean-state
     (let ((sent-key nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-down-test*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-down-test*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -1855,7 +1855,7 @@ behavior is preserved outside the :thinking state."
         (setq-local agent-repl--history-navigating nil)
         (insert "from buffer")
         (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
-        (agent-repl-test--with-temp-buffer "*claude-panel-send-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-send-vterm*"
           (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'agent-repl--send-input-to-vterm)
@@ -1878,7 +1878,7 @@ behavior is preserved outside the :thinking state."
         (setq-local agent-repl--history-navigating nil)
         (insert "original content")
         (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
-        (agent-repl-test--with-temp-buffer "*claude-panel-send-prompt-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-send-prompt-vterm*"
           (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'agent-repl--send-input-to-vterm)
@@ -1897,7 +1897,7 @@ Regression guard: empty input must not dispatch a metaprompt-only send via
 `agent-repl--do-send'.  Bare-RET forwarding is covered by a separate test."
   (agent-repl-test--with-clean-state
     (let ((do-send-called nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-noop-vterm*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-noop-vterm*"
         (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
         ;; No input buffer registered
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
@@ -1916,7 +1916,7 @@ send whenever the prefix counter aligned with the period."
       (agent-repl-test--with-temp-buffer " *test-send-empty-input*"
         ;; Input buffer registered, but contains "".
         (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
-        (agent-repl-test--with-temp-buffer "*claude-panel-empty-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-empty-vterm*"
           (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'agent-repl--do-send)
@@ -1932,7 +1932,7 @@ send whenever the prefix counter aligned with the period."
       (agent-repl-test--with-temp-buffer " *test-send-whitespace-input*"
         (insert "  \n\t  \n")
         (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
-        (agent-repl-test--with-temp-buffer "*claude-panel-whitespace-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-whitespace-vterm*"
           (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'agent-repl--do-send)
@@ -1945,7 +1945,7 @@ send whenever the prefix counter aligned with the period."
   "`agent-repl--send' skips the full-send pipeline when an empty PROMPT is passed explicitly."
   (agent-repl-test--with-clean-state
     (let ((do-send-called nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-empty-prompt-vterm*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-empty-prompt-vterm*"
         (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'agent-repl--do-send)
@@ -1964,7 +1964,7 @@ permission prompts, menus, and confirmations."
     (let ((ret-buf nil))
       (agent-repl-test--with-temp-buffer " *test-send-bare-ret-empty-input*"
         (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
-        (agent-repl-test--with-temp-buffer "*claude-panel-bare-ret-empty-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-bare-ret-empty-vterm*"
           (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'agent-repl--vterm-send-return-key-logged)
@@ -1979,7 +1979,7 @@ permission prompts, menus, and confirmations."
       (agent-repl-test--with-temp-buffer " *test-send-bare-ret-whitespace-input*"
         (insert "  \n\t  \n")
         (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
-        (agent-repl-test--with-temp-buffer "*claude-panel-bare-ret-whitespace-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-bare-ret-whitespace-vterm*"
           (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'agent-repl--vterm-send-return-key-logged)
@@ -1991,7 +1991,7 @@ permission prompts, menus, and confirmations."
   "`agent-repl--send' forwards a bare RET to vterm when an empty PROMPT is passed explicitly."
   (agent-repl-test--with-clean-state
     (let ((ret-call-count 0))
-      (agent-repl-test--with-temp-buffer "*claude-panel-bare-ret-empty-prompt-vterm*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-bare-ret-empty-prompt-vterm*"
         (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'agent-repl--vterm-send-return-key-logged)
@@ -2007,7 +2007,7 @@ Prompt is nil and no input buffer means raw is nil and the empty-input branch
 should still forward RET so the keystroke reaches Claude."
   (agent-repl-test--with-clean-state
     (let ((ret-buf nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-bare-ret-nil-raw-vterm*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-bare-ret-nil-raw-vterm*"
         (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'agent-repl--vterm-send-return-key-logged)
@@ -2025,9 +2025,9 @@ buffer-locally so the delivered branch is taken."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-send-bare-ret-perm-input*"
       (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
-      (agent-repl-test--with-temp-buffer "*claude-panel-bare-ret-perm-vterm*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-bare-ret-perm-vterm*"
         (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-        (agent-repl--ws-set-claude-state "ws1" :permission)
+        (agent-repl--ws-set-agent-state "ws1" :permission)
         (setq-local vterm--term t)
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'vterm-send-key) #'ignore))
@@ -2041,9 +2041,9 @@ other states (e.g. :idle) must be left untouched on a bare RET."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-send-bare-ret-idle-input*"
       (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
-      (agent-repl-test--with-temp-buffer "*claude-panel-bare-ret-idle-vterm*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-bare-ret-idle-vterm*"
         (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-        (agent-repl--ws-set-claude-state "ws1" :idle)
+        (agent-repl--ws-set-agent-state "ws1" :idle)
         (setq-local vterm--term t)
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'vterm-send-key) #'ignore))
@@ -2068,7 +2068,7 @@ There's no terminal to receive the keystroke."
   "`agent-repl--send' does NOT forward RET when the vterm buffer is dead."
   (agent-repl-test--with-clean-state
     (let ((ret-called nil)
-          (dead-vterm (generate-new-buffer "*claude-panel-bare-ret-dead-vterm*")))
+          (dead-vterm (generate-new-buffer "*agent-panel-bare-ret-dead-vterm*")))
       (agent-repl--ws-put "ws1" :vterm-buffer dead-vterm)
       (kill-buffer dead-vterm)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
@@ -2169,7 +2169,7 @@ accidentally being wired back to the byte-write path."
   "`agent-repl--send-input-direct' sends string then return then refreshes."
   (agent-repl-test--with-clean-state
     (let ((calls nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-direct-test*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-direct-test*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest _) (push (list 'string s) calls)))
                   ((symbol-function 'vterm-send-return)
@@ -2184,7 +2184,7 @@ accidentally being wired back to the byte-write path."
   "`agent-repl--send-input-bracketed' calls vterm-send-string with t paste flag."
   (agent-repl-test--with-clean-state
     (let ((send-args nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-bracketed-test*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-bracketed-test*"
         (cl-letf (((symbol-function 'vterm-send-string)
                    (lambda (s &rest args) (setq send-args (cons s args))))
                   ((symbol-function 'run-at-time)
@@ -2197,7 +2197,7 @@ accidentally being wired back to the byte-write path."
   "`agent-repl--send-input-direct' calls on-settle callback immediately."
   (agent-repl-test--with-clean-state
     (let ((settled nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-direct-settle*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-direct-settle*"
         (cl-letf (((symbol-function 'vterm-send-string) #'ignore)
                   ((symbol-function 'vterm-send-return) #'ignore)
                   ((symbol-function 'agent-repl--refresh-vterm) #'ignore))
@@ -2208,7 +2208,7 @@ accidentally being wired back to the byte-write path."
 (ert-deftest agent-repl-test-send-input-direct-nil-on-settle ()
   "`agent-repl--send-input-direct' works fine without on-settle."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-direct-nosettle*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-direct-nosettle*"
       (cl-letf (((symbol-function 'vterm-send-string) #'ignore)
                 ((symbol-function 'vterm-send-return) #'ignore)
                 ((symbol-function 'agent-repl--refresh-vterm) #'ignore))
@@ -2218,7 +2218,7 @@ accidentally being wired back to the byte-write path."
   "`agent-repl--send-input-bracketed' threads on-settle to deferred pipeline."
   (agent-repl-test--with-clean-state
     (let ((timer-action nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-bracketed-settle*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-bracketed-settle*"
         (cl-letf (((symbol-function 'vterm-send-string) #'ignore)
                   ((symbol-function 'run-at-time)
                    (lambda (_delay _repeat fn &rest _args)
@@ -2254,7 +2254,7 @@ accidentally being wired back to the byte-write path."
     (agent-repl-test--with-temp-buffer " *test-slash-push*"
       (setq-local agent-repl--slash-stack nil)
       (let ((sent nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-slash-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-slash-vterm*"
           (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -2291,7 +2291,7 @@ must not accumulate phantom entries that trap the user in slash mode."
     (agent-repl-test--with-temp-buffer " *test-slash-bs*"
       (setq-local agent-repl--slash-stack '("b" "a" "/"))
       (let ((backspace-count 0))
-        (agent-repl-test--with-temp-buffer "*claude-panel-slash-bs-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-slash-bs-vterm*"
           (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -2309,8 +2309,8 @@ must not accumulate phantom entries that trap the user in slash mode."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-slash-exit*"
       (setq-local agent-repl--slash-stack '("/"))
-      (claude-slash-input-mode 1)
-      (agent-repl-test--with-temp-buffer "*claude-panel-slash-exit-vterm*"
+      (agent-repl-slash-input-mode 1)
+      (agent-repl-test--with-temp-buffer "*agent-panel-slash-exit-vterm*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -2318,16 +2318,16 @@ must not accumulate phantom entries that trap the user in slash mode."
           (with-current-buffer " *test-slash-exit*"
             (agent-repl--slash-backspace)
             (should (null agent-repl--slash-stack))
-            (should-not claude-slash-input-mode)))))))
+            (should-not agent-repl-slash-input-mode)))))))
 
 (ert-deftest agent-repl-test-slash-return-exits-mode ()
   "Slash return should send return to vterm and exit slash mode."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-slash-return*"
       (setq-local agent-repl--slash-stack '("r" "a" "e" "l" "c" "/"))
-      (claude-slash-input-mode 1)
+      (agent-repl-slash-input-mode 1)
       (let ((return-called nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-slash-return-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-slash-return-vterm*"
           (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -2337,7 +2337,7 @@ must not accumulate phantom entries that trap the user in slash mode."
               (agent-repl--slash-return)
               (should return-called)
               (should (null agent-repl--slash-stack))
-              (should-not claude-slash-input-mode))))))))
+              (should-not agent-repl-slash-input-mode))))))))
 
 (ert-deftest agent-repl-test-slash-return-routes-submission-via-libvterm ()
   "Slash-return's no-pasted submission never uses raw `vterm-send-return'.
@@ -2350,10 +2350,10 @@ branch and the bracketed-paste submission Return."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-slash-return-libvterm*"
       (setq-local agent-repl--slash-stack '("c" "/"))
-      (claude-slash-input-mode 1)
+      (agent-repl-slash-input-mode 1)
       (let ((key-logged-label nil)
             (raw-return-called nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-slash-libvterm-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-slash-libvterm-vterm*"
           (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -2375,9 +2375,9 @@ fires the same posthooks as a buffered-and-sent `/clear'."
     (agent-repl-test--with-temp-buffer " *test-slash-return-posthooks*"
       ;; Stack stores reversed pushes: typed "/clear" → ("r" "a" "e" "l" "c" "/")
       (setq-local agent-repl--slash-stack '("r" "a" "e" "l" "c" "/"))
-      (claude-slash-input-mode 1)
+      (agent-repl-slash-input-mode 1)
       (let ((posthook-args nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-slash-posthook-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-slash-posthook-vterm*"
           (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--vterm-send-return-key-logged) #'ignore)
@@ -2388,21 +2388,21 @@ fires the same posthooks as a buffered-and-sent `/clear'."
               (should (equal posthook-args '("test-ws" "/clear"))))))))))
 
 (ert-deftest agent-repl-test-slash-return-clear-marks-done ()
-  "Direct send `/clear' via slash-return marks claude-state :done.
+  "Direct send `/clear' via slash-return marks agent-state :done.
 Covers the end-to-end path: slash-stack accumulated, RET in slash mode
 fires posthooks, the /clear posthook marks :done."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-slash-return-clear-done*"
       (setq-local agent-repl--slash-stack '("r" "a" "e" "l" "c" "/"))
-      (claude-slash-input-mode 1)
-      (agent-repl-test--with-temp-buffer "*claude-panel-slash-clear-done-vterm*"
+      (agent-repl-slash-input-mode 1)
+      (agent-repl-test--with-temp-buffer "*agent-panel-slash-clear-done-vterm*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-        (agent-repl--ws-set-claude-state "test-ws" :idle)
+        (agent-repl--ws-set-agent-state "test-ws" :idle)
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-send-return-key-logged) #'ignore))
           (with-current-buffer " *test-slash-return-clear-done*"
             (agent-repl--slash-return)
-            (should (eq (agent-repl--ws-get "test-ws" :claude-state) :done))))))))
+            (should (eq (agent-repl--ws-get "test-ws" :agent-state) :done))))))))
 
 (ert-deftest agent-repl-test-slash-return-backspaced-input-runs-posthooks-on-remaining ()
   "After backspaces, slash-return's posthooks see only the remaining stack.
@@ -2412,9 +2412,9 @@ then truncated to `/c' fires no /clear hook."
     (agent-repl-test--with-temp-buffer " *test-slash-bs-posthooks*"
       ;; Stack reflects user typing "/c" (after backspaces) — top is "c", bottom is "/"
       (setq-local agent-repl--slash-stack '("c" "/"))
-      (claude-slash-input-mode 1)
+      (agent-repl-slash-input-mode 1)
       (let ((posthook-args nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-slash-bs-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-slash-bs-vterm*"
           (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--vterm-send-return-key-logged) #'ignore)
@@ -2432,12 +2432,12 @@ already-forwarded direct-insert chars on Claude's prompt line."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-slash-return-paste*"
       (setq-local agent-repl--slash-stack '("c" "/"))
-      (claude-slash-input-mode 1)
+      (agent-repl-slash-input-mode 1)
       (insert "pasted-content")
       (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
       (let ((send-args nil)
             (return-called nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-slash-paste-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-slash-paste-vterm*"
           (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -2452,7 +2452,7 @@ already-forwarded direct-insert chars on Claude's prompt line."
               (should (equal (nth 1 send-args) "pasted-content"))
               (should-not return-called)
               (should (zerop (buffer-size)))
-              (should-not claude-slash-input-mode))))))))
+              (should-not agent-repl-slash-input-mode))))))))
 
 (ert-deftest agent-repl-test-slash-return-empty-buffer-sends-bare-return ()
   "When input buffer is empty, slash-return sends only RET (no bracketed paste).
@@ -2461,11 +2461,11 @@ Preserves the pre-existing behavior for the typical direct-send path
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-slash-return-empty*"
       (setq-local agent-repl--slash-stack '("c" "/"))
-      (claude-slash-input-mode 1)
+      (agent-repl-slash-input-mode 1)
       (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
       (let ((send-called nil)
             (return-called nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-slash-empty-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-slash-empty-vterm*"
           (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -2486,11 +2486,11 @@ buffer-string, not a trimmed view."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-slash-return-ws*"
       (setq-local agent-repl--slash-stack '("c" "/"))
-      (claude-slash-input-mode 1)
+      (agent-repl-slash-input-mode 1)
       (insert "   ")
       (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
       (let ((send-args nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-slash-ws-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-slash-ws-vterm*"
           (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -2506,10 +2506,10 @@ buffer-string, not a trimmed view."
   "`agent-repl--exit-slash-mode' clears stack and disables the minor mode."
   (agent-repl-test--with-temp-buffer " *test-exit-slash*"
     (setq-local agent-repl--slash-stack '("a" "b"))
-    (claude-slash-input-mode 1)
+    (agent-repl-slash-input-mode 1)
     (agent-repl--exit-slash-mode)
     (should (null agent-repl--slash-stack))
-    (should-not claude-slash-input-mode)))
+    (should-not agent-repl-slash-input-mode)))
 
 (ert-deftest agent-repl-test-slash-tab-sends-tab ()
   "`agent-repl--slash-tab' sends a tab character and pushes to stack."
@@ -2517,7 +2517,7 @@ buffer-string, not a trimmed view."
     (agent-repl-test--with-temp-buffer " *test-slash-tab*"
       (setq-local agent-repl--slash-stack '("/"))
       (let ((sent nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-slash-tab-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-slash-tab-vterm*"
           (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -2536,7 +2536,7 @@ buffer-string, not a trimmed view."
     (agent-repl-test--with-temp-buffer " *test-passthrough-empty*"
       (setq-local agent-repl--slash-stack nil)
       (let ((sent nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-pt-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-pt-vterm*"
           (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -2544,7 +2544,7 @@ buffer-string, not a trimmed view."
                      (lambda (s &rest _) (setq sent s))))
             (with-current-buffer " *test-passthrough-empty*"
               (agent-repl--passthrough-start "/")
-              (should claude-slash-input-mode)
+              (should agent-repl-slash-input-mode)
               (should (equal agent-repl--slash-stack '("/")))
               (should (equal sent "/")))))))))
 
@@ -2555,7 +2555,7 @@ buffer-string, not a trimmed view."
     (cl-letf (((symbol-function 'self-insert-command)
                (lambda (_n &optional _ch) (insert "/"))))
       (agent-repl--passthrough-start "/")
-      (should-not (bound-and-true-p claude-slash-input-mode))
+      (should-not (bound-and-true-p agent-repl-slash-input-mode))
       (should (string-match-p "/" (buffer-string))))))
 
 ;;;; ---- Tests: deferred action helpers ----
@@ -2590,7 +2590,7 @@ buffer-string, not a trimmed view."
 (ert-deftest agent-repl-test-slash-intercept-backspace-in-slash-mode ()
   "In slash mode, intercept should redirect to slash-backspace."
   (agent-repl-test--with-temp-buffer " *test-intercept-slash*"
-    (setq-local claude-slash-input-mode t)
+    (setq-local agent-repl-slash-input-mode t)
     (let ((this-command 'evil-delete-backward-char-and-join))
       (agent-repl--slash-intercept-backspace)
       (should (eq this-command #'agent-repl--slash-backspace)))))
@@ -2599,10 +2599,10 @@ buffer-string, not a trimmed view."
   "Outside slash mode with empty buffer, should forward backspace to vterm."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-intercept-empty*"
-      (setq-local claude-slash-input-mode nil)
+      (setq-local agent-repl-slash-input-mode nil)
       (let ((this-command 'delete-backward-char)
             (sent-key nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-intercept-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-intercept-vterm*"
           (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -2615,7 +2615,7 @@ buffer-string, not a trimmed view."
 (ert-deftest agent-repl-test-slash-intercept-backspace-nonempty-noop ()
   "Outside slash mode with non-empty buffer, backspace intercept should be a no-op."
   (agent-repl-test--with-temp-buffer " *test-intercept-nonempty*"
-    (setq-local claude-slash-input-mode nil)
+    (setq-local agent-repl-slash-input-mode nil)
     (insert "text")
     (let ((this-command 'delete-backward-char))
       (agent-repl--slash-intercept-backspace)
@@ -2625,7 +2625,7 @@ buffer-string, not a trimmed view."
 (ert-deftest agent-repl-test-slash-intercept-ignores-non-backspace ()
   "Intercept should ignore commands not in the backspace list."
   (agent-repl-test--with-temp-buffer " *test-intercept-other*"
-    (setq-local claude-slash-input-mode t)
+    (setq-local agent-repl-slash-input-mode t)
     (let ((this-command 'self-insert-command))
       (agent-repl--slash-intercept-backspace)
       ;; Should remain unchanged since self-insert-command is not in the list
@@ -2639,11 +2639,11 @@ buffer-string, not a trimmed view."
   "Whitespace-only buffer has buffer-size > 0, so backspace should NOT forward to vterm."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-intercept-ws*"
-      (setq-local claude-slash-input-mode nil)
+      (setq-local agent-repl-slash-input-mode nil)
       (insert "   ")
       (let ((this-command 'delete-backward-char)
             (sent-key nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-intercept-ws-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-intercept-ws-vterm*"
           (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -2656,13 +2656,13 @@ buffer-string, not a trimmed view."
               ;; Command should remain unchanged
               (should (eq this-command 'delete-backward-char)))))))))
 
-;;; claude-input-mode: mode setup
+;;; agent-repl-input-mode: mode setup
 
-(ert-deftest agent-repl-test-claude-input-mode-setup ()
-  "`claude-input-mode' sets header-line, visual-line-mode, and installs hooks."
+(ert-deftest agent-repl-test-agent-repl-input-mode-setup ()
+  "`agent-repl-input-mode' sets header-line, visual-line-mode, and installs hooks."
   (agent-repl-test--with-temp-buffer " *test-input-mode*"
     (cl-letf (((symbol-function 'agent-repl--set-buffer-background) #'ignore))
-      (claude-input-mode))
+      (agent-repl-input-mode))
     ;; Header line should be set
     (should (stringp header-line-format))
     ;; Match on "send" rather than a specific keybinding glyph (e.g. "RET")
@@ -2676,16 +2676,16 @@ buffer-string, not a trimmed view."
     ;; after-change-functions should include history-on-change
     (should (memq #'agent-repl--history-on-change after-change-functions))))
 
-;;; claude-input-mode: visual-line evil integration
+;;; agent-repl-input-mode: visual-line evil integration
 
-(ert-deftest agent-repl-test-claude-input-mode-respects-visual-line-mode ()
-  "`claude-input-mode' sets `evil-respect-visual-line-mode' buffer-locally to t.
+(ert-deftest agent-repl-test-agent-repl-input-mode-respects-visual-line-mode ()
+  "`agent-repl-input-mode' sets `evil-respect-visual-line-mode' buffer-locally to t.
 This is the runtime flag that makes Evil's line-based operators (yy, dd,
 cc, Y, D, C) operate on screen lines rather than logical lines, which is
 what users expect when composing wrapping prose in the input buffer."
   (agent-repl-test--with-temp-buffer " *test-input-mode-vline-var*"
     (cl-letf (((symbol-function 'agent-repl--set-buffer-background) #'ignore))
-      (claude-input-mode))
+      (agent-repl-input-mode))
     (should (local-variable-p 'evil-respect-visual-line-mode))
     (should (eq evil-respect-visual-line-mode t))))
 
@@ -2763,13 +2763,13 @@ counterpart to the rebound `k'."
     (setq-local agent-repl--history-index 0)
     (setq-local agent-repl--history-navigating nil)
     (setq-local agent-repl--slash-stack '("c" "l" "/"))
-    (claude-slash-input-mode 1)
+    (agent-repl-slash-input-mode 1)
     (insert "text")
     (cl-letf (((symbol-function 'evil-insert-state) #'ignore)
               ((symbol-function 'agent-repl--history-save) #'ignore))
       (agent-repl-discard-input)
       ;; Slash mode should be exited
-      (should-not claude-slash-input-mode)
+      (should-not agent-repl-slash-input-mode)
       (should (null agent-repl--slash-stack))
       ;; Buffer should be cleared
       (should (equal (buffer-string) "")))))
@@ -2797,7 +2797,7 @@ counterpart to the rebound `k'."
 (ert-deftest agent-repl-test-send-vterm-key-dead-vterm-noop ()
   "`agent-repl--send-vterm-key' should be a no-op when vterm buffer is dead."
   (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*claude-panel-dead-key*"))
+    (let ((buf (get-buffer-create "*agent-panel-dead-key*"))
           (sent nil))
       (agent-repl--ws-put "test-ws" :vterm-buffer buf)
       (kill-buffer buf)
@@ -2812,7 +2812,7 @@ counterpart to the rebound `k'."
 (ert-deftest agent-repl-test-scroll-down-dead-vterm-noop ()
   "`agent-repl-scroll-down' should be a no-op when vterm buffer is dead."
   (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*claude-panel-dead-scroll-down*"))
+    (let ((buf (get-buffer-create "*agent-panel-dead-scroll-down*"))
           (called nil))
       (agent-repl--ws-put "test-ws" :vterm-buffer buf)
       (kill-buffer buf)
@@ -2827,7 +2827,7 @@ counterpart to the rebound `k'."
 (ert-deftest agent-repl-test-scroll-up-dead-vterm-noop ()
   "`agent-repl-scroll-up' should be a no-op when vterm buffer is dead."
   (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*claude-panel-dead-scroll-up*"))
+    (let ((buf (get-buffer-create "*agent-panel-dead-scroll-up*"))
           (called nil))
       (agent-repl--ws-put "test-ws" :vterm-buffer buf)
       (kill-buffer buf)
@@ -2845,7 +2845,7 @@ counterpart to the rebound `k'."
 from the previous start, computed in the vterm buffer."
   (agent-repl-test--with-clean-state
     (let ((set-start-args nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-scroll-output*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-scroll-output*"
         ;; Seed the buffer with enough content to make forward-line meaningful.
         (insert (mapconcat (lambda (i) (format "line %d" i))
                            (number-sequence 1 50) "\n"))
@@ -2878,7 +2878,7 @@ from the previous start, computed in the vterm buffer."
   "`agent-repl--scroll-vterm-output' is a no-op when vterm has no visible window."
   (agent-repl-test--with-clean-state
     (let ((set-start-called nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-scroll-nowin*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-scroll-nowin*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -2900,7 +2900,7 @@ vterm window with the new start position, so redisplay does not snap
 `window-start' back to keep vterm's bottom-anchored point visible."
   (agent-repl-test--with-clean-state
     (let ((set-point-args nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-scroll-point*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-scroll-point*"
         (insert (mapconcat (lambda (i) (format "line %d" i))
                            (number-sequence 1 50) "\n"))
         (goto-char (point-min))
@@ -2935,7 +2935,7 @@ vterm window.  The fix replaces a `with-selected-window' approach with
 direct `set-window-start' so no selection-change hook fires."
   (agent-repl-test--with-clean-state
     (let ((selected nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-scroll-noselect*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-scroll-noselect*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -2978,33 +2978,33 @@ so the vterm window scrolls forward toward newer output."
 ;;; / S-<down> are the dedicated scroll keys in the input buffer.
 
 (ert-deftest agent-repl-test-input-map-does-not-shadow-csn ()
-  "`claude-input-mode-map' must not bind `C-S-n' so the global drawer-nav
+  "`agent-repl-input-mode-map' must not bind `C-S-n' so the global drawer-nav
 binding falls through.  Asserts the local key is unbound in the map."
-  (should-not (lookup-key claude-input-mode-map (kbd "C-S-n"))))
+  (should-not (lookup-key agent-repl-input-mode-map (kbd "C-S-n"))))
 
 (ert-deftest agent-repl-test-input-map-does-not-shadow-csp ()
-  "`claude-input-mode-map' must not bind `C-S-p' so the global drawer-nav
+  "`agent-repl-input-mode-map' must not bind `C-S-p' so the global drawer-nav
 binding falls through.  Asserts the local key is unbound in the map."
-  (should-not (lookup-key claude-input-mode-map (kbd "C-S-p"))))
+  (should-not (lookup-key agent-repl-input-mode-map (kbd "C-S-p"))))
 
 (ert-deftest agent-repl-test-input-map-does-not-shadow-csj ()
-  "`claude-input-mode-map' must not bind `C-S-j' so the global
+  "`agent-repl-input-mode-map' must not bind `C-S-j' so the global
 scroll-output binding falls through everywhere, including in the
 Claude input buffer."
-  (should-not (lookup-key claude-input-mode-map (kbd "C-S-j"))))
+  (should-not (lookup-key agent-repl-input-mode-map (kbd "C-S-j"))))
 
 (ert-deftest agent-repl-test-input-map-does-not-shadow-csk ()
-  "`claude-input-mode-map' must not bind `C-S-k' so the global
+  "`agent-repl-input-mode-map' must not bind `C-S-k' so the global
 scroll-output binding falls through everywhere, including in the
 Claude input buffer."
-  (should-not (lookup-key claude-input-mode-map (kbd "C-S-k"))))
+  (should-not (lookup-key agent-repl-input-mode-map (kbd "C-S-k"))))
 
 ;;; send-char with dead vterm buffer
 
 (ert-deftest agent-repl-test-send-char-dead-vterm-noop ()
   "`agent-repl-send-char' should be a no-op when vterm buffer is dead."
   (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*claude-panel-dead-sendchar*"))
+    (let ((buf (get-buffer-create "*agent-panel-dead-sendchar*"))
           (sent nil))
       (agent-repl--ws-put "test-ws" :vterm-buffer buf)
       (kill-buffer buf)
@@ -3067,7 +3067,7 @@ Claude input buffer."
     (agent-repl-test--with-temp-buffer " *test-digit-empty*"
       (setq-local agent-repl--slash-stack nil)
       (let ((sent nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-digit-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-digit-vterm*"
           (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -3077,7 +3077,7 @@ Claude input buffer."
               (let ((last-command-event ?5))
                 (agent-repl--insert-digit-or-passthrough)
                 ;; Should have entered slash mode
-                (should claude-slash-input-mode)
+                (should agent-repl-slash-input-mode)
                 ;; Should have sent "5" to vterm
                 (should (equal sent "5"))
                 ;; Stack should contain "5"
@@ -3095,7 +3095,7 @@ Claude input buffer."
         (let ((last-command-event ?7))
           (agent-repl--insert-digit-or-passthrough)
           (should inserted)
-          (should-not (bound-and-true-p claude-slash-input-mode)))))))
+          (should-not (bound-and-true-p agent-repl-slash-input-mode)))))))
 
 ;;; skip-metaprompt-p: leading whitespace
 
@@ -3179,7 +3179,7 @@ Claude input buffer."
 (ert-deftest agent-repl-test-do-send-dead-vterm ()
   "`agent-repl--do-send' should still increment counter etc. even with a dead vterm buffer."
   (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*claude-panel-dead-do-send*")))
+    (let ((buf (get-buffer-create "*agent-panel-dead-do-send*")))
       (agent-repl--ws-put "ws1" :vterm-buffer buf)
       (agent-repl--ws-put "ws1" :prefix-counter 5)
       (kill-buffer buf)
@@ -3202,7 +3202,7 @@ Claude input buffer."
         (setq-local agent-repl--history-navigating nil)
         (insert "hello")
         (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
-        (agent-repl-test--with-temp-buffer "*claude-panel-send-force-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-send-force-vterm*"
           (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                     ((symbol-function 'agent-repl--prepare-input)
@@ -3220,7 +3220,7 @@ Claude input buffer."
   "`agent-repl--send' does not call do-send when vterm buffer is dead."
   (agent-repl-test--with-clean-state
     (let ((do-send-called nil)
-          (buf (get-buffer-create "*claude-panel-send-dead-vterm*")))
+          (buf (get-buffer-create "*agent-panel-send-dead-vterm*")))
       (agent-repl--ws-put "ws1" :vterm-buffer buf)
       (agent-repl-test--with-temp-buffer " *test-send-dead-input*"
         (insert "hello")
@@ -3382,11 +3382,11 @@ bare-RET fix in commit 190622a7."
   (agent-repl-test--with-temp-buffer " *test-exit-slash-idem*"
     (setq-local agent-repl--slash-stack nil)
     ;; Mode is already off
-    (should-not claude-slash-input-mode)
+    (should-not agent-repl-slash-input-mode)
     ;; Should not error
     (agent-repl--exit-slash-mode)
     (should (null agent-repl--slash-stack))
-    (should-not claude-slash-input-mode)))
+    (should-not agent-repl-slash-input-mode)))
 
 ;;; slash-vterm-send: dead vterm fails loudly (never silently)
 
@@ -3395,7 +3395,7 @@ bare-RET fix in commit 190622a7."
 when the workspace's recorded vterm buffer is dead.
 Per AGENTS.md \"No Silent Fallbacks\": no silent no-op."
   (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*claude-panel-dead-slash-vterm*"))
+    (let ((buf (get-buffer-create "*agent-panel-dead-slash-vterm*"))
           (sent nil)
           (msg-called nil))
       (agent-repl--ws-put "test-ws" :vterm-buffer buf)
@@ -3416,7 +3416,7 @@ Per AGENTS.md \"No Silent Fallbacks\": no silent no-op."
     (agent-repl-test--with-temp-buffer " *test-slash-fwd-char*"
       (setq-local agent-repl--slash-stack '("/"))
       (let ((sent nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-fwd-char-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-fwd-char-vterm*"
           (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -3435,8 +3435,8 @@ Per AGENTS.md \"No Silent Fallbacks\": no silent no-op."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-slash-bs-empty*"
       (setq-local agent-repl--slash-stack nil)
-      (claude-slash-input-mode 1)
-      (agent-repl-test--with-temp-buffer "*claude-panel-slash-bs-empty-vterm*"
+      (agent-repl-slash-input-mode 1)
+      (agent-repl-test--with-temp-buffer "*agent-panel-slash-bs-empty-vterm*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -3445,7 +3445,7 @@ Per AGENTS.md \"No Silent Fallbacks\": no silent no-op."
             (agent-repl--slash-backspace)
             ;; Stack was already empty; pop returns nil; mode exits
             (should (null agent-repl--slash-stack))
-            (should-not claude-slash-input-mode)))))))
+            (should-not agent-repl-slash-input-mode)))))))
 
 ;;; slash-start: thin wrapper over passthrough-start with "/"
 
@@ -3555,7 +3555,7 @@ mode and must insert CHAR as a regular self-insert so user input isn't lost."
           (with-current-buffer " *test-pt-no-vterm*"
             (let ((last-command-event ?/))
               (agent-repl--passthrough-start "/"))
-            (should-not claude-slash-input-mode)
+            (should-not agent-repl-slash-input-mode)
             (should (null agent-repl--slash-stack))
             (should (equal (buffer-string) "/"))
             (should msg-called)))))))
@@ -3566,7 +3566,7 @@ insert the keystroke into the input buffer (never silently dropped)."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-fwd-no-vterm*"
       (setq-local agent-repl--slash-stack '("/"))
-      (claude-slash-input-mode 1)
+      (agent-repl-slash-input-mode 1)
       (let ((msg-called nil))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'message) (lambda (&rest _) (setq msg-called t)))
@@ -3575,7 +3575,7 @@ insert the keystroke into the input buffer (never silently dropped)."
           (with-current-buffer " *test-fwd-no-vterm*"
             (let ((last-command-event ?x))
               (agent-repl--slash-forward-char))
-            (should-not claude-slash-input-mode)
+            (should-not agent-repl-slash-input-mode)
             (should (null agent-repl--slash-stack))
             (should (equal (buffer-string) "x"))
             (should msg-called)))))))
@@ -3586,7 +3586,7 @@ not pop a phantom entry from the stack."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-bs-no-vterm*"
       (setq-local agent-repl--slash-stack '("a" "/"))
-      (claude-slash-input-mode 1)
+      (agent-repl-slash-input-mode 1)
       (let ((msg-called nil))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'message) (lambda (&rest _) (setq msg-called t)))
@@ -3594,7 +3594,7 @@ not pop a phantom entry from the stack."
                    (lambda (&rest _) (error "MUST NOT forward when vterm missing"))))
           (with-current-buffer " *test-bs-no-vterm*"
             (agent-repl--slash-backspace)
-            (should-not claude-slash-input-mode)
+            (should-not agent-repl-slash-input-mode)
             (should (null agent-repl--slash-stack))
             (should msg-called)))))))
 
@@ -3603,7 +3603,7 @@ not pop a phantom entry from the stack."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-ret-no-vterm*"
       (setq-local agent-repl--slash-stack '("a" "/"))
-      (claude-slash-input-mode 1)
+      (agent-repl-slash-input-mode 1)
       (let ((msg-called nil))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'message) (lambda (&rest _) (setq msg-called t)))
@@ -3611,7 +3611,7 @@ not pop a phantom entry from the stack."
                    (lambda (&rest _) (error "MUST NOT forward when vterm missing"))))
           (with-current-buffer " *test-ret-no-vterm*"
             (agent-repl--slash-return)
-            (should-not claude-slash-input-mode)
+            (should-not agent-repl-slash-input-mode)
             (should (null agent-repl--slash-stack))
             (should msg-called)))))))
 
@@ -3620,14 +3620,14 @@ not pop a phantom entry from the stack."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-slash-quit*"
       (setq-local agent-repl--slash-stack '("a" "b" "/"))
-      (claude-slash-input-mode 1)
+      (agent-repl-slash-input-mode 1)
       (cl-letf (((symbol-function 'vterm-send-string)
                  (lambda (&rest _) (error "slash-quit must not send")))
                 ((symbol-function 'vterm-send-key)
                  (lambda (&rest _) (error "slash-quit must not send"))))
         (with-current-buffer " *test-slash-quit*"
           (agent-repl--slash-quit)
-          (should-not claude-slash-input-mode)
+          (should-not agent-repl-slash-input-mode)
           (should (null agent-repl--slash-stack)))))))
 
 ;;;; ---- Tests: evil-escape inhibit + insert-state-exit hook (jk flutter fix) ----
@@ -3638,16 +3638,16 @@ Without this, Doom's default `jk' escape sequence (150ms delay) causes
 every `j' keystroke in slash mode to flutter before reaching vterm."
   (agent-repl-test--with-temp-buffer " *test-slash-inhibit*"
     (setq-local evil-escape-inhibit nil)
-    (claude-slash-input-mode 1)
+    (agent-repl-slash-input-mode 1)
     (should (eq evil-escape-inhibit t))
     (should (local-variable-p 'evil-escape-inhibit))))
 
 (ert-deftest agent-repl-test-slash-mode-disable-clears-evil-escape-inhibit ()
   "Deactivating slash mode must clear the buffer-local `evil-escape-inhibit'."
   (agent-repl-test--with-temp-buffer " *test-slash-uninhibit*"
-    (claude-slash-input-mode 1)
+    (agent-repl-slash-input-mode 1)
     (should (local-variable-p 'evil-escape-inhibit))
-    (claude-slash-input-mode -1)
+    (agent-repl-slash-input-mode -1)
     (should-not (local-variable-p 'evil-escape-inhibit))))
 
 (ert-deftest agent-repl-test-slash-on-insert-state-exit-exits-slash ()
@@ -3655,20 +3655,20 @@ every `j' keystroke in slash mode to flutter before reaching vterm."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-slash-esc*"
       (setq-local agent-repl--slash-stack '("a" "/"))
-      (claude-slash-input-mode 1)
+      (agent-repl-slash-input-mode 1)
       (with-current-buffer " *test-slash-esc*"
         (agent-repl--slash-on-insert-state-exit)
-        (should-not claude-slash-input-mode)
+        (should-not agent-repl-slash-input-mode)
         (should (null agent-repl--slash-stack))))))
 
 (ert-deftest agent-repl-test-slash-on-insert-state-exit-noop-when-not-in-slash ()
   "The insert-state-exit hook must be a no-op when slash mode is NOT active."
   (agent-repl-test--with-temp-buffer " *test-slash-esc-noop*"
     ;; Do not enable slash mode.
-    (should-not claude-slash-input-mode)
+    (should-not agent-repl-slash-input-mode)
     ;; Should not error or do anything.
     (agent-repl--slash-on-insert-state-exit)
-    (should-not claude-slash-input-mode)))
+    (should-not agent-repl-slash-input-mode)))
 
 ;;;; ---- Tests: raw-ETX helper (no-silent-fallback on no vterm) ----
 
@@ -3731,10 +3731,10 @@ and surfaces a user-visible error."
     (agent-repl-test--with-temp-buffer " *test-slash-inject*"
       (setq-local agent-repl--slash-stack
                   (nreverse (mapcar #'string (string-to-list "/workspace-generation"))))
-      (claude-slash-input-mode 1)
+      (agent-repl-slash-input-mode 1)
       (let ((sent-strings nil)
             (return-called nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-slash-inject-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-slash-inject-vterm*"
           (agent-repl--ws-put "my-ws" :vterm-buffer (current-buffer))
           (agent-repl--ws-put "my-ws" :project-dir "/test/project")
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
@@ -3755,10 +3755,10 @@ and surfaces a user-visible error."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-slash-no-inject*"
       (setq-local agent-repl--slash-stack '("r" "a" "e" "l" "c" "/"))
-      (claude-slash-input-mode 1)
+      (agent-repl-slash-input-mode 1)
       (let ((sent-strings nil)
             (return-called nil))
-        (agent-repl-test--with-temp-buffer "*claude-panel-slash-no-inject-vterm*"
+        (agent-repl-test--with-temp-buffer "*agent-panel-slash-no-inject-vterm*"
           (agent-repl--ws-put "my-ws" :vterm-buffer (current-buffer))
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                     ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
@@ -3779,16 +3779,16 @@ and surfaces a user-visible error."
   "`agent-repl--note-permission-answered-by-send' flips :permission -> :thinking.
 This is the centralized helper every send path delegates to."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :permission)
+    (agent-repl--ws-set-agent-state "ws1" :permission)
     (agent-repl--note-permission-answered-by-send "ws1")
-    (should (eq (agent-repl--ws-claude-state "ws1") :thinking))))
+    (should (eq (agent-repl--ws-agent-state "ws1") :thinking))))
 
 (ert-deftest agent-repl-test-note-permission-answered-leaves-non-permission-unchanged ()
   "`agent-repl--note-permission-answered-by-send' leaves a non-:permission state alone."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :idle)
+    (agent-repl--ws-set-agent-state "ws1" :idle)
     (agent-repl--note-permission-answered-by-send "ws1")
-    (should (eq (agent-repl--ws-claude-state "ws1") :idle))))
+    (should (eq (agent-repl--ws-agent-state "ws1") :idle))))
 
 (ert-deftest agent-repl-test-do-send-transitions-permission-to-thinking ()
   "`agent-repl--do-send' transitions :permission -> :thinking after sending.
@@ -3799,37 +3799,37 @@ only the bracketed transport beneath it is stubbed.  do-send pins the
 owning workspace on the vterm buffer before sending, which is what the
 primitive resolves the workspace from."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-do-send-perm*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-do-send-perm*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-      (agent-repl--ws-set-claude-state "ws1" :permission)
+      (agent-repl--ws-set-agent-state "ws1" :permission)
       (cl-letf (((symbol-function 'agent-repl--send-input-bracketed) #'ignore)
                 ((symbol-function 'agent-repl--run-send-posthooks) #'ignore))
         (agent-repl--do-send "ws1" "y" "y"))
-      (should (eq (agent-repl--ws-claude-state "ws1") :thinking)))))
+      (should (eq (agent-repl--ws-agent-state "ws1") :thinking)))))
 
 (ert-deftest agent-repl-test-do-send-does-not-touch-non-permission-state ()
   "`agent-repl--do-send' only transitions :permission, not other states."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-do-send-think2*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-do-send-think2*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-      (agent-repl--ws-set-claude-state "ws1" :thinking)
+      (agent-repl--ws-set-agent-state "ws1" :thinking)
       (cl-letf (((symbol-function 'agent-repl--send-input-bracketed) #'ignore)
                 ((symbol-function 'agent-repl--run-send-posthooks) #'ignore))
         (agent-repl--do-send "ws1" "input" "raw"))
-      (should (eq (agent-repl--ws-claude-state "ws1") :thinking)))))
+      (should (eq (agent-repl--ws-agent-state "ws1") :thinking)))))
 
 (ert-deftest agent-repl-test-send-char-transitions-permission-to-thinking ()
   "`agent-repl-send-char' transitions :permission -> :thinking after sending."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-sendchar-perm*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-sendchar-perm*"
       (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-      (agent-repl--ws-set-claude-state "test-ws" :permission)
+      (agent-repl--ws-set-agent-state "test-ws" :permission)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
                 ((symbol-function 'vterm-send-string) #'ignore)
                 ((symbol-function 'vterm-send-return) #'ignore))
         (agent-repl-send-char "y"))
-      (should (eq (agent-repl--ws-claude-state "test-ws") :thinking)))))
+      (should (eq (agent-repl--ws-agent-state "test-ws") :thinking)))))
 
 (ert-deftest agent-repl-test-send-char-forces-thinking-from-idle ()
   "`agent-repl-send-char' drives ANY prior state to :thinking, not just :permission.
@@ -3837,26 +3837,26 @@ A single-char send (y/n, digit) is `not directly sent' input Claude
 acts on, but it never fires the UserPromptSubmit hook — so the send
 itself must mark :thinking even when the prior state is :idle."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-sendchar-idle*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-sendchar-idle*"
       (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-      (agent-repl--ws-set-claude-state "test-ws" :idle)
+      (agent-repl--ws-set-agent-state "test-ws" :idle)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
                 ((symbol-function 'vterm-send-string) #'ignore)
                 ((symbol-function 'vterm-send-return) #'ignore))
         (agent-repl-send-char "y"))
-      (should (eq (agent-repl--ws-claude-state "test-ws") :thinking)))))
+      (should (eq (agent-repl--ws-agent-state "test-ws") :thinking)))))
 
 (ert-deftest agent-repl-test-send-char-no-vterm-keeps-permission ()
   "`agent-repl-send-char' does not transition when no vterm exists.
 The char was never sent, so the permission prompt is still active."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :vterm-buffer nil)
-    (agent-repl--ws-set-claude-state "test-ws" :permission)
+    (agent-repl--ws-set-agent-state "test-ws" :permission)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'agent-repl--vterm-live-p) (lambda () nil)))
       (agent-repl-send-char "y"))
-    (should (eq (agent-repl--ws-claude-state "test-ws") :permission))))
+    (should (eq (agent-repl--ws-agent-state "test-ws") :permission))))
 
 (ert-deftest agent-repl-test-slash-return-transitions-permission-to-thinking ()
   "`agent-repl--slash-return' transitions :permission -> :thinking after sending.
@@ -3867,17 +3867,17 @@ tab stuck at green-❓."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-slash-return-perm*"
       (setq-local agent-repl--slash-stack '("1"))
-      (claude-slash-input-mode 1)
-      (agent-repl-test--with-temp-buffer "*claude-panel-slash-return-perm-vterm*"
+      (agent-repl-slash-input-mode 1)
+      (agent-repl-test--with-temp-buffer "*agent-panel-slash-return-perm-vterm*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-        (agent-repl--ws-set-claude-state "test-ws" :permission)
+        (agent-repl--ws-set-agent-state "test-ws" :permission)
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
                   ((symbol-function 'vterm-send-return) #'ignore)
                   ((symbol-function 'agent-repl--run-send-posthooks) #'ignore))
           (with-current-buffer " *test-slash-return-perm*"
             (agent-repl--slash-return))))
-      (should (eq (agent-repl--ws-claude-state "test-ws") :thinking)))))
+      (should (eq (agent-repl--ws-agent-state "test-ws") :thinking)))))
 
 (ert-deftest agent-repl-test-slash-return-forces-thinking-from-idle ()
   "`agent-repl--slash-return' drives ANY prior state to :thinking, not just :permission.
@@ -3887,17 +3887,17 @@ marks :thinking even when the prior state is :idle."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-slash-return-idle*"
       (setq-local agent-repl--slash-stack '("/" "m" "o" "d" "e" "l"))
-      (claude-slash-input-mode 1)
-      (agent-repl-test--with-temp-buffer "*claude-panel-slash-return-idle-vterm*"
+      (agent-repl-slash-input-mode 1)
+      (agent-repl-test--with-temp-buffer "*agent-panel-slash-return-idle-vterm*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-        (agent-repl--ws-set-claude-state "test-ws" :idle)
+        (agent-repl--ws-set-agent-state "test-ws" :idle)
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
                   ((symbol-function 'vterm-send-return) #'ignore)
                   ((symbol-function 'agent-repl--run-send-posthooks) #'ignore))
           (with-current-buffer " *test-slash-return-idle*"
             (agent-repl--slash-return))))
-      (should (eq (agent-repl--ws-claude-state "test-ws") :thinking)))))
+      (should (eq (agent-repl--ws-agent-state "test-ws") :thinking)))))
 
 (ert-deftest agent-repl-test-slash-return-no-vterm-keeps-permission ()
   "`agent-repl--slash-return' does not transition when no vterm exists.
@@ -3905,15 +3905,15 @@ The return was never sent, so the permission prompt is still active."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-slash-return-no-vterm*"
       (setq-local agent-repl--slash-stack '("1"))
-      (claude-slash-input-mode 1)
+      (agent-repl-slash-input-mode 1)
       (agent-repl--ws-put "test-ws" :vterm-buffer nil)
-      (agent-repl--ws-set-claude-state "test-ws" :permission)
+      (agent-repl--ws-set-agent-state "test-ws" :permission)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--current-ws-live-vterm) (lambda () nil))
                 ((symbol-function 'agent-repl--run-send-posthooks) #'ignore))
         (with-current-buffer " *test-slash-return-no-vterm*"
           (agent-repl--slash-return)))
-      (should (eq (agent-repl--ws-claude-state "test-ws") :permission)))))
+      (should (eq (agent-repl--ws-agent-state "test-ws") :permission)))))
 
 ;;;; ---- Tests: lowest-level send primitives own the :permission flip ----
 
@@ -3923,13 +3923,13 @@ A bare digit answering a permission prompt enters passthrough mode and is
 committed by Claude's dialog IMMEDIATELY — no RET ever follows — so the
 char forward itself is the only observable answer signal."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-slash-send-perm*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-slash-send-perm*"
       (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-      (agent-repl--ws-set-claude-state "test-ws" :permission)
+      (agent-repl--ws-set-agent-state "test-ws" :permission)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'vterm-send-string) #'ignore))
         (should (agent-repl--slash-vterm-send "1")))
-      (should (eq (agent-repl--ws-claude-state "test-ws") :thinking)))))
+      (should (eq (agent-repl--ws-agent-state "test-ws") :thinking)))))
 
 (ert-deftest agent-repl-test-slash-vterm-send-forces-thinking-from-non-permission ()
   "`agent-repl--slash-vterm-send' drives ANY prior state to :thinking on a forward.
@@ -3937,24 +3937,24 @@ A slash/digit forward is `not directly sent' input Claude acts on but
 that never fires the UserPromptSubmit hook, so the forward itself marks
 :thinking even when the prior state is :done."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-slash-send-done*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-slash-send-done*"
       (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-      (agent-repl--ws-set-claude-state "test-ws" :done)
+      (agent-repl--ws-set-agent-state "test-ws" :done)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'vterm-send-string) #'ignore))
         (should (agent-repl--slash-vterm-send "/")))
-      (should (eq (agent-repl--ws-claude-state "test-ws") :thinking)))))
+      (should (eq (agent-repl--ws-agent-state "test-ws") :thinking)))))
 
 (ert-deftest agent-repl-test-slash-vterm-send-no-vterm-keeps-permission ()
   "`agent-repl--slash-vterm-send' does not transition when no live vterm exists.
 The char was never forwarded, so the permission prompt is still active."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :vterm-buffer nil)
-    (agent-repl--ws-set-claude-state "test-ws" :permission)
+    (agent-repl--ws-set-agent-state "test-ws" :permission)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'message) (lambda (&rest _) nil)))
       (should-not (agent-repl--slash-vterm-send "1")))
-    (should (eq (agent-repl--ws-claude-state "test-ws") :permission))))
+    (should (eq (agent-repl--ws-agent-state "test-ws") :permission))))
 
 (ert-deftest agent-repl-test-passthrough-digit-flips-permission-to-thinking ()
   "Typing a digit into an empty input buffer flips :permission -> :thinking.
@@ -3962,24 +3962,24 @@ End-to-end over the dominant permission-answer path:
 `agent-repl--passthrough-start' -> slash mode -> char forward."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-passthrough-digit-input*"
-      (agent-repl-test--with-temp-buffer "*claude-panel-passthrough-digit-vterm*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-passthrough-digit-vterm*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-        (agent-repl--ws-set-claude-state "test-ws" :permission)
+        (agent-repl--ws-set-agent-state "test-ws" :permission)
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'vterm-send-string) #'ignore))
           (with-current-buffer " *test-passthrough-digit-input*"
             (agent-repl--passthrough-start "1")))
-        (should (eq (agent-repl--ws-claude-state "test-ws") :thinking))))))
+        (should (eq (agent-repl--ws-agent-state "test-ws") :thinking))))))
 
 (ert-deftest agent-repl-test-send-input-to-vterm-flips-permission-to-thinking ()
   "`agent-repl--send-input-to-vterm' flips :permission -> :thinking after dispatch."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-sitv-perm*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-sitv-perm*"
       (setq-local agent-repl--owning-workspace "wsA")
-      (agent-repl--ws-set-claude-state "wsA" :permission)
+      (agent-repl--ws-set-agent-state "wsA" :permission)
       (cl-letf (((symbol-function 'agent-repl--send-input-bracketed) #'ignore))
         (agent-repl--send-input-to-vterm (current-buffer) "hello"))
-      (should (eq (agent-repl--ws-claude-state "wsA") :thinking)))))
+      (should (eq (agent-repl--ws-agent-state "wsA") :thinking)))))
 
 (ert-deftest agent-repl-test-send-input-to-vterm-resolves-ws-from-buffer-owner ()
   "`agent-repl--send-input-to-vterm' flips the OWNER workspace, not the current one.
@@ -3987,76 +3987,76 @@ A programmatic send can target a vterm whose workspace is not the
 selected one (e.g. deferred drains); the owner pin on the
 buffer is the source of truth."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-sitv-owner*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-sitv-owner*"
       (setq-local agent-repl--owning-workspace "wsA")
-      (agent-repl--ws-set-claude-state "wsA" :permission)
-      (agent-repl--ws-set-claude-state "wsB" :permission)
+      (agent-repl--ws-set-agent-state "wsA" :permission)
+      (agent-repl--ws-set-agent-state "wsB" :permission)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wsB"))
                 ((symbol-function 'agent-repl--send-input-bracketed) #'ignore))
         (agent-repl--send-input-to-vterm (current-buffer) "hello"))
-      (should (eq (agent-repl--ws-claude-state "wsA") :thinking))
-      (should (eq (agent-repl--ws-claude-state "wsB") :permission)))))
+      (should (eq (agent-repl--ws-agent-state "wsA") :thinking))
+      (should (eq (agent-repl--ws-agent-state "wsB") :permission)))))
 
 (ert-deftest agent-repl-test-send-input-direct-flips-permission-to-thinking ()
   "`agent-repl--send-input-direct' flips :permission -> :thinking after sending."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-sid-perm*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-sid-perm*"
       (setq-local agent-repl--owning-workspace "wsA")
-      (agent-repl--ws-set-claude-state "wsA" :permission)
+      (agent-repl--ws-set-agent-state "wsA" :permission)
       (cl-letf (((symbol-function 'vterm-send-string) #'ignore)
                 ((symbol-function 'vterm-send-return) #'ignore)
                 ((symbol-function 'agent-repl--refresh-vterm) #'ignore))
         (agent-repl--send-input-direct (current-buffer) "y"))
-      (should (eq (agent-repl--ws-claude-state "wsA") :thinking)))))
+      (should (eq (agent-repl--ws-agent-state "wsA") :thinking)))))
 
 (ert-deftest agent-repl-test-return-key-logged-flips-permission-when-delivered ()
   "`agent-repl--vterm-send-return-key-logged' flips :permission when delivered.
 With `vterm--term' set, the return reaches libvterm and the flip fires."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-rkl-perm*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-rkl-perm*"
       (setq-local agent-repl--owning-workspace "wsA")
       (setq-local vterm--term t)
-      (agent-repl--ws-set-claude-state "wsA" :permission)
+      (agent-repl--ws-set-agent-state "wsA" :permission)
       (cl-letf (((symbol-function 'vterm-send-key) #'ignore))
         (agent-repl--vterm-send-return-key-logged "test-label"))
-      (should (eq (agent-repl--ws-claude-state "wsA") :thinking)))))
+      (should (eq (agent-repl--ws-agent-state "wsA") :thinking)))))
 
 (ert-deftest agent-repl-test-return-key-logged-no-flip-when-term-nil ()
   "`agent-repl--vterm-send-return-key-logged' does NOT flip when vterm--term is nil.
 The return was never delivered (warning branch), so the permission
 prompt is still active and :permission must persist."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-rkl-nil*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-rkl-nil*"
       (setq-local agent-repl--owning-workspace "wsA")
-      (agent-repl--ws-set-claude-state "wsA" :permission)
+      (agent-repl--ws-set-agent-state "wsA" :permission)
       (agent-repl--vterm-send-return-key-logged "test-label")
-      (should (eq (agent-repl--ws-claude-state "wsA") :permission)))))
+      (should (eq (agent-repl--ws-agent-state "wsA") :permission)))))
 
 (ert-deftest agent-repl-test-note-permission-answered-for-vterm-falls-back-to-current-ws ()
   "`agent-repl--note-permission-answered-for-vterm' falls back to the current ws.
 When the buffer carries no owner pin, the current workspace is flipped."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-npafv-fallback*"
-      (agent-repl--ws-set-claude-state "ws1" :permission)
+    (agent-repl-test--with-temp-buffer "*agent-panel-npafv-fallback*"
+      (agent-repl--ws-set-agent-state "ws1" :permission)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
         (agent-repl--note-permission-answered-for-vterm (current-buffer)))
-      (should (eq (agent-repl--ws-claude-state "ws1") :thinking)))))
+      (should (eq (agent-repl--ws-agent-state "ws1") :thinking)))))
 
 ;;;; ---- Tests: non-direct sends force :thinking (mark-send-thinking) ----
 
 (ert-deftest agent-repl-test-mark-send-thinking-forces-thinking-from-idle ()
   "`agent-repl--mark-send-thinking' drives a non-:permission state to :thinking."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :idle)
+    (agent-repl--ws-set-agent-state "ws1" :idle)
     (agent-repl--mark-send-thinking "ws1")
-    (should (eq (agent-repl--ws-claude-state "ws1") :thinking))))
+    (should (eq (agent-repl--ws-agent-state "ws1") :thinking))))
 
 (ert-deftest agent-repl-test-mark-send-thinking-forces-thinking-from-done ()
   "`agent-repl--mark-send-thinking' drives a :done state to :thinking."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :done)
+    (agent-repl--ws-set-agent-state "ws1" :done)
     (agent-repl--mark-send-thinking "ws1")
-    (should (eq (agent-repl--ws-claude-state "ws1") :thinking))))
+    (should (eq (agent-repl--ws-agent-state "ws1") :thinking))))
 
 (ert-deftest agent-repl-test-mark-send-thinking-nil-ws-is-noop ()
   "`agent-repl--mark-send-thinking' is a no-op when WS is nil (no error)."
@@ -4066,24 +4066,24 @@ When the buffer carries no owner pin, the current workspace is flipped."
 (ert-deftest agent-repl-test-mark-send-thinking-for-vterm-resolves-owner ()
   "`agent-repl--mark-send-thinking-for-vterm' marks the buffer OWNER, not current ws."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-mstfv-owner*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-mstfv-owner*"
       (setq-local agent-repl--owning-workspace "wsA")
-      (agent-repl--ws-set-claude-state "wsA" :idle)
-      (agent-repl--ws-set-claude-state "wsB" :idle)
+      (agent-repl--ws-set-agent-state "wsA" :idle)
+      (agent-repl--ws-set-agent-state "wsB" :idle)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wsB")))
         (agent-repl--mark-send-thinking-for-vterm (current-buffer)))
-      (should (eq (agent-repl--ws-claude-state "wsA") :thinking))
-      (should (eq (agent-repl--ws-claude-state "wsB") :idle)))))
+      (should (eq (agent-repl--ws-agent-state "wsA") :thinking))
+      (should (eq (agent-repl--ws-agent-state "wsB") :idle)))))
 
 (ert-deftest agent-repl-test-mark-send-thinking-for-vterm-falls-back-to-current-ws ()
   "`agent-repl--mark-send-thinking-for-vterm' falls back to the current ws.
 When the buffer carries no owner pin, the current workspace is marked."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-mstfv-fallback*"
-      (agent-repl--ws-set-claude-state "ws1" :idle)
+    (agent-repl-test--with-temp-buffer "*agent-panel-mstfv-fallback*"
+      (agent-repl--ws-set-agent-state "ws1" :idle)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
         (agent-repl--mark-send-thinking-for-vterm (current-buffer)))
-      (should (eq (agent-repl--ws-claude-state "ws1") :thinking)))))
+      (should (eq (agent-repl--ws-agent-state "ws1") :thinking)))))
 
 (ert-deftest agent-repl-test-passthrough-digit-forces-thinking-from-idle ()
   "Typing a digit into an empty input buffer forces :thinking from :idle too.
@@ -4092,14 +4092,14 @@ forward: the digit is `not directly sent' input, so it marks :thinking
 regardless of the prior state."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-passthrough-digit-idle-input*"
-      (agent-repl-test--with-temp-buffer "*claude-panel-passthrough-digit-idle-vterm*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-passthrough-digit-idle-vterm*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-        (agent-repl--ws-set-claude-state "test-ws" :idle)
+        (agent-repl--ws-set-agent-state "test-ws" :idle)
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'vterm-send-string) #'ignore))
           (with-current-buffer " *test-passthrough-digit-idle-input*"
             (agent-repl--passthrough-start "1")))
-        (should (eq (agent-repl--ws-claude-state "test-ws") :thinking))))))
+        (should (eq (agent-repl--ws-agent-state "test-ws") :thinking))))))
 
 (provide 'test-input)
 

@@ -167,7 +167,7 @@ under the same model."
 (defun agent-repl--model-segment ()
   "Return a propertized string for the mode-line's model segment.
 Reads `agent-repl--owning-workspace' from the current buffer (set on
-every claude-owned vterm buffer) and pulls the workspace's model.
+every agent-owned vterm buffer) and pulls the workspace's model.
 Returns the empty string when disabled, the workspace is unknown, or no
 model is yet available."
   (if (not agent-repl-model-enabled)

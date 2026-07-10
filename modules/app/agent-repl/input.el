@@ -109,7 +109,7 @@ Used by `agent-repl--send-input-to-vterm' for large inputs."
 ;; Instructions bar face
 (defface agent-repl-header-line
   '((t :background "white" :foreground "black" :weight bold))
-  "Face for the Claude Input header line.")
+  "Face for the Agent Input header line.")
 
 ;;; Backspace and basic editing
 
@@ -126,7 +126,7 @@ In slash mode: redirects to `agent-repl--slash-backspace' via `this-command'.
 Outside slash mode: forwards backspace to vterm when the buffer is empty.
 Runs as a buffer-local `pre-command-hook'."
   (when (memq this-command agent-repl--backspace-commands)
-    (if claude-slash-input-mode
+    (if agent-repl-slash-input-mode
         (progn
           (agent-repl--log-verbose (agent-repl--ws-current-name) "slash-intercept-backspace: slash-mode branch this-command=%s" this-command)
           (setq this-command #'agent-repl--slash-backspace))
@@ -147,8 +147,8 @@ Runs as a buffer-local `pre-command-hook'."
   :group 'agent-repl)
 
 ;; Input mode
-(define-derived-mode claude-input-mode fundamental-mode "Claude Input"
-  "Major mode for Claude REPL input buffer."
+(define-derived-mode agent-repl-input-mode fundamental-mode "Agent Input"
+  "Major mode for Agent REPL input buffer."
   (setq-local header-line-format
               (concat "C-c C-c: clear+save | C-c C-k: interrupt | (cmd) <up>/<down>: history | C-r: search history | (ins) <slash>/<digit>/<up>/<down>: direct send"))
   (face-remap-add-relative 'header-line 'agent-repl-header-line)
@@ -170,7 +170,7 @@ Runs as a buffer-local `pre-command-hook'."
   "Save current input to history, clear the buffer, and enter insert state."
   (interactive)
   (agent-repl--log (agent-repl--ws-current-name) "discard-input")
-  (when claude-slash-input-mode
+  (when agent-repl-slash-input-mode
     (agent-repl--exit-slash-mode))
   (agent-repl--history-push)
   (agent-repl--history-reset)
@@ -219,17 +219,17 @@ stale accumulated input."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
          (local-nonempty (not (zerop (buffer-size))))
-         (thinking-p (eq (agent-repl--ws-claude-state ws) :thinking))
+         (thinking-p (eq (agent-repl--ws-agent-state ws) :thinking))
          (skip-ctrl-c (and thinking-p local-nonempty)))
     (agent-repl--log ws "discard-or-send-interrupt: clearing Claude prompt + local buffer (local-empty=%s slash-active=%s thinking=%s skip-ctrl-c=%s)"
                       (not local-nonempty)
-                      (bound-and-true-p claude-slash-input-mode)
+                      (bound-and-true-p agent-repl-slash-input-mode)
                       thinking-p
                       skip-ctrl-c)
     (cond
      (local-nonempty
       (agent-repl-discard-input))
-     ((bound-and-true-p claude-slash-input-mode)
+     ((bound-and-true-p agent-repl-slash-input-mode)
       (agent-repl--exit-slash-mode)))
     (unless skip-ctrl-c
       (agent-repl--vterm-send-raw-ctrl-c))))
@@ -363,7 +363,7 @@ input window and disturbs redisplay.  Going through `set-window-start'
 (agent-repl--define-send-char-command "n")
 
 ;;; Keybindings
-(map! :map claude-input-mode-map
+(map! :map agent-repl-input-mode-map
       :ni "RET"       #'agent-repl--send
       :ni "S-RET"     #'newline
       :i  "/"         #'agent-repl--slash-start
@@ -413,7 +413,7 @@ Extracts the base digit from `last-command-event' (e.g. C-S-3 -> \"3\")."
     (agent-repl-send-char digit)))
 
 (dotimes (i 10)
-  (define-key claude-input-mode-map (kbd (format "C-S-%s" i))
+  (define-key agent-repl-input-mode-map (kbd (format "C-S-%s" i))
     #'agent-repl--input-send-digit-char))
 
 ;; 0-9 in insert mode: if the buffer is empty, enter pass-through mode and
@@ -427,12 +427,12 @@ Otherwise insert the digit normally.  The digit is determined from
   (agent-repl--passthrough-start (string last-command-event)))
 
 (dotimes (i 10)
-  (evil-define-key 'insert claude-input-mode-map (kbd (number-to-string i))
+  (evil-define-key 'insert agent-repl-input-mode-map (kbd (number-to-string i))
     #'agent-repl--insert-digit-or-passthrough))
 
 ;; Visual-line motion bindings for the Claude input buffer.
 ;;
-;; `visual-line-mode' is always on in `claude-input-mode' (the user is
+;; `visual-line-mode' is always on in `agent-repl-input-mode' (the user is
 ;; composing free-form prose that wraps), and `evil-respect-visual-line-mode'
 ;; is flipped on buffer-locally in the mode body so that line-based operators
 ;; (yy, dd, cc, Y, D, C) operate on screen lines.  Those operators read the
@@ -478,14 +478,14 @@ Otherwise insert the digit normally.  The digit is determined from
     (visual  "g$" evil-end-of-line)
     ;; `V' selects by screen line so it composes with the rest of the family.
     (normal  "V"  evil-visual-screen-line))
-  "Visual-line evil bindings installed in `claude-input-mode-map'.
+  "Visual-line evil bindings installed in `agent-repl-input-mode-map'.
 Each entry is `(STATE KEY-STRING COMMAND)'.  Applied via `evil-define-key'
 just below.  Declared as data so tests can assert the intended binding set
 even though `evil-define-key' is a no-op stub in the test harness.")
 
 (dolist (binding agent-repl--visual-line-bindings)
   (cl-destructuring-bind (state key cmd) binding
-    (evil-define-key state claude-input-mode-map (kbd key) cmd)))
+    (evil-define-key state agent-repl-input-mode-map (kbd key) cmd)))
 
 ;;; Input preparation and metaprompt
 
@@ -516,7 +516,7 @@ FUNCTION is called with (WS RAW) where WS is the workspace name and RAW is the i
 (defun agent-repl--posthook-reset-prefix-counter (ws _raw)
   "Reset the metaprompt prefix counter for workspace WS.
 Resets to 0 — the same value a freshly-initialized workspace starts at
-\(see `agent-repl--initialize-claude') — so the first send after a
+\(see `agent-repl--initialize-agent') — so the first send after a
 `/clear' re-injects the metaprompt.  A `/clear' wipes Claude's context,
 including the previously-prepended guidelines, so the next prompt must
 re-establish them exactly as the first prompt of a new session does.
@@ -525,11 +525,11 @@ leaving Claude without guidelines in the interim."
   (agent-repl--ws-put ws :prefix-counter 0))
 
 (defun agent-repl--posthook-mark-done (ws _raw)
-  "Mark workspace WS's claude-state as :done.
+  "Mark workspace WS's agent-state as :done.
 Used by the /clear posthook: clearing Claude's context ends the current
 work cycle, so the tab should immediately reflect \"finished\" rather
 than linger on whatever state preceded the clear."
-  (agent-repl--mark-claude-done ws))
+  (agent-repl--mark-agent-done ws))
 
 (defun agent-repl--run-send-posthooks (ws raw)
   "Run posthooks matching RAW input for workspace WS."
@@ -722,9 +722,9 @@ the `:permission' -> `:thinking' flip for all of them — see
   (agent-repl--note-permission-answered-for-vterm vterm-buf))
 
 (defun agent-repl--mark-ws-thinking (ws)
-  "Mark workspace WS as thinking: set claude-state."
+  "Mark workspace WS as thinking: set agent-state."
   (agent-repl--log ws "mark-ws-thinking ws=%s" ws)
-  (agent-repl--ws-set-claude-state ws :thinking))
+  (agent-repl--ws-set-agent-state ws :thinking))
 
 (defun agent-repl--send-owner-ws (&optional vterm-buf)
   "Resolve the workspace name that owns VTERM-BUF, or the current workspace.
@@ -793,7 +793,7 @@ backspace, C-v paste-without-submit) and interrupts (Ctrl-C, Escape)
 
 Only the `:permission' state is touched — any other state is left
 untouched so a normal send does not spuriously force `:thinking'."
-  (when (eq (agent-repl--ws-claude-state ws) :permission)
+  (when (eq (agent-repl--ws-agent-state ws) :permission)
     (agent-repl--mark-ws-thinking ws)))
 
 (defun agent-repl--note-permission-answered-for-vterm (&optional vterm-buf)
@@ -830,7 +830,7 @@ and runs posthooks with RAW (the undecorated text).
 ON-SETTLE, if non-nil, is forwarded to `agent-repl--send-input-to-vterm'
 and called once the send is fully committed.
 
-Does NOT write `:claude-state :thinking' — that transition is the
+Does NOT write `:agent-state :thinking' — that transition is the
 exclusive province of the `prompt_submit' Claude Code hook (routed
 through `on-prompt-submit-event').  The brief gap between RET and the
 red tab reflects that the hook is the source of truth for Claude's
@@ -1041,7 +1041,7 @@ than in the return primitive (whose inherited flip stays the narrower
 Each element is the string that was sent (the leading \"/\" is the first entry).
 Popped on backspace; when empty the mode exits.")
 
-(define-minor-mode claude-slash-input-mode
+(define-minor-mode agent-repl-slash-input-mode
   "Minor mode that transparently forwards keystrokes to Claude vterm.
 Active when the user begins input with /. The input buffer stays empty;
 all characters are sent directly to vterm.
@@ -1052,7 +1052,7 @@ the `jk' key sequence and a 150ms delay, which otherwise causes every
 before being forwarded to vterm)."
   :lighter " /…"
   :keymap (make-sparse-keymap)
-  (if claude-slash-input-mode
+  (if agent-repl-slash-input-mode
       (setq-local evil-escape-inhibit t)
     (kill-local-variable 'evil-escape-inhibit)))
 
@@ -1060,19 +1060,19 @@ before being forwarded to vterm)."
   "Exit slash mode when evil leaves insert state (e.g. on ESC).
 Installed on `evil-insert-state-exit-hook'.  Runs in every buffer that
 leaves insert state, but only acts when the buffer-local
-`claude-slash-input-mode' is active — so it's effectively scoped to the
+`agent-repl-slash-input-mode' is active — so it's effectively scoped to the
 Claude input buffer."
-  (when claude-slash-input-mode
+  (when agent-repl-slash-input-mode
     (agent-repl--log (agent-repl--ws-current-name) "slash-on-insert-state-exit: exiting slash mode (evil left insert state)")
     (agent-repl--slash-quit)))
 
 (add-hook 'evil-insert-state-exit-hook #'agent-repl--slash-on-insert-state-exit)
 
 (defun agent-repl--exit-slash-mode ()
-  "Clear the slash stack and disable `claude-slash-input-mode'."
+  "Clear the slash stack and disable `agent-repl-slash-input-mode'."
   (agent-repl--log (agent-repl--ws-current-name) "exit-slash-mode: stack-depth=%d" (length agent-repl--slash-stack))
   (setq agent-repl--slash-stack nil)
-  (claude-slash-input-mode -1))
+  (agent-repl-slash-input-mode -1))
 
 (defun agent-repl--slash-no-vterm-error (what payload)
   "Log + user-visible error that WHAT couldn't reach vterm (with PAYLOAD).
@@ -1300,7 +1300,7 @@ Per AGENTS.md: no silent fallback, no dropped user input."
     (self-insert-command 1 (string-to-char char)))
    (t
     (agent-repl--log (agent-repl--ws-current-name) "passthrough-start: entering slash mode char=%S" char)
-    (claude-slash-input-mode 1)
+    (agent-repl-slash-input-mode 1)
     ;; Race guard: vterm could die between the check above and the send.
     ;; Undo mode entry + insert the char so we never end up in slash mode
     ;; with an empty stack and no way to exit via the normal paths.
@@ -1315,7 +1315,7 @@ Per AGENTS.md: no silent fallback, no dropped user input."
   (agent-repl--log (agent-repl--ws-current-name) "slash-start: buffer-size=%d" (buffer-size))
   (agent-repl--passthrough-start "/"))
 
-(map! :map claude-slash-input-mode-map
+(map! :map agent-repl-slash-input-mode-map
       [remap self-insert-command]                #'agent-repl--slash-forward-char
       [remap indent-for-tab-command]             #'agent-repl--slash-tab
       [remap evil-delete-backward-char-and-join] #'agent-repl--slash-backspace

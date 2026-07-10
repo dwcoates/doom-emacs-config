@@ -3,7 +3,7 @@
 ;;; Commentary:
 
 ;; Persists each workspace's full `agent-repl--workspaces' plist to
-;; `<root>/.claude/emacs/memory-state.el' whenever its `:claude-state'
+;; `<root>/.claude/emacs/memory-state.el' whenever its `:agent-state'
 ;; or `:repl-state' changes.  Mirrors what `SPC j h p'
 ;; (`agent-repl-debug/dump-workspace') would show interactively, so an
 ;; out-of-process reader (the debug-logs skill) can inspect live

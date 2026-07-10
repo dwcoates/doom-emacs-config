@@ -125,31 +125,31 @@ handle before BODY and restores afterwards."
 (ert-deftest agent-repl-test-caffeinate-any-active-p-thinking ()
   "One workspace in :thinking → active."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :thinking)
+    (agent-repl--ws-put "ws1" :agent-state :thinking)
     (should (agent-repl--caffeinate-any-active-p))))
 
 (ert-deftest agent-repl-test-caffeinate-any-active-p-only-done ()
   "All workspaces in :done → not active."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :done)
-    (agent-repl--ws-put "ws2" :claude-state :idle)
+    (agent-repl--ws-put "ws1" :agent-state :done)
+    (agent-repl--ws-put "ws2" :agent-state :idle)
     (should-not (agent-repl--caffeinate-any-active-p))))
 
 (ert-deftest agent-repl-test-caffeinate-any-active-p-mixed ()
   "Mixed states with at least one :thinking → active."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :done)
-    (agent-repl--ws-put "ws2" :claude-state :thinking)
-    (agent-repl--ws-put "ws3" :claude-state :idle)
+    (agent-repl--ws-put "ws1" :agent-state :done)
+    (agent-repl--ws-put "ws2" :agent-state :thinking)
+    (agent-repl--ws-put "ws3" :agent-state :idle)
     (should (agent-repl--caffeinate-any-active-p))))
 
 (ert-deftest agent-repl-test-caffeinate-any-active-p-respects-active-states-custom ()
   "Customizing `agent-repl-caffeinate-active-states' shifts the predicate."
   (agent-repl-test--with-clean-state
     (let ((agent-repl-caffeinate-active-states '(:permission)))
-      (agent-repl--ws-put "ws1" :claude-state :thinking)
+      (agent-repl--ws-put "ws1" :agent-state :thinking)
       (should-not (agent-repl--caffeinate-any-active-p))
-      (agent-repl--ws-put "ws1" :claude-state :permission)
+      (agent-repl--ws-put "ws1" :agent-state :permission)
       (should (agent-repl--caffeinate-any-active-p)))))
 
 ;;;; ---- Tests: --caffeinate-any-merging-p -----------------------------------
@@ -208,21 +208,21 @@ exclusion principle as `:permission'."
 This is the workspace-merge race the module exists to cover: Claude has
 landed at `:done' but the sentinel-driven cherry-pick is still in flight."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :done)
+    (agent-repl--ws-put "ws1" :agent-state :done)
     (agent-repl--ws-put "ws1" :merging t)
     (should (agent-repl--caffeinate-any-active-p))))
 
 (ert-deftest agent-repl-test-caffeinate-any-active-p-merge-queued-only ()
   "Workspace `:done' but `:repl-state :merge-queued' → active via merging branch."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :done)
+    (agent-repl--ws-put "ws1" :agent-state :done)
     (agent-repl--ws-put "ws1" :repl-state :merge-queued)
     (should (agent-repl--caffeinate-any-active-p))))
 
 (ert-deftest agent-repl-test-caffeinate-any-active-p-both-resolved ()
   "Workspace `:done' AND `:merge-completed t' (and no in-flight) → not active."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :done)
+    (agent-repl--ws-put "ws1" :agent-state :done)
     (agent-repl--ws-put "ws1" :merge-completed t)
     (agent-repl--ws-put "ws1" :repl-state :merged)
     (should-not (agent-repl--caffeinate-any-active-p))))
@@ -268,7 +268,7 @@ landed at `:done' but the sentinel-driven cherry-pick is still in flight."
   "Refresh spawns caffeinate when a workspace is :thinking."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-fake-caffeinate
-      (agent-repl--ws-put "ws1" :claude-state :thinking)
+      (agent-repl--ws-put "ws1" :agent-state :thinking)
       (agent-repl--caffeinate-refresh)
       (should (agent-repl--caffeinate-running-p))
       (should (= 1 (length agent-repl-test--fake-spawn-log))))))
@@ -277,10 +277,10 @@ landed at `:done' but the sentinel-driven cherry-pick is still in flight."
   "Refresh stops caffeinate once every workspace leaves an active state."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-fake-caffeinate
-      (agent-repl--ws-put "ws1" :claude-state :thinking)
+      (agent-repl--ws-put "ws1" :agent-state :thinking)
       (agent-repl--caffeinate-refresh)
       (should (agent-repl--caffeinate-running-p))
-      (agent-repl--ws-put "ws1" :claude-state :done)
+      (agent-repl--ws-put "ws1" :agent-state :done)
       (agent-repl--caffeinate-refresh)
       (should-not (agent-repl--caffeinate-running-p)))))
 
@@ -288,11 +288,11 @@ landed at `:done' but the sentinel-driven cherry-pick is still in flight."
   "Refresh keeps caffeinate alive while ANY workspace is still :thinking."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-fake-caffeinate
-      (agent-repl--ws-put "ws1" :claude-state :thinking)
-      (agent-repl--ws-put "ws2" :claude-state :thinking)
+      (agent-repl--ws-put "ws1" :agent-state :thinking)
+      (agent-repl--ws-put "ws2" :agent-state :thinking)
       (agent-repl--caffeinate-refresh)
       (should (agent-repl--caffeinate-running-p))
-      (agent-repl--ws-put "ws1" :claude-state :done)
+      (agent-repl--ws-put "ws1" :agent-state :done)
       (agent-repl--caffeinate-refresh)
       (should (agent-repl--caffeinate-running-p))
       (should (= 1 (length agent-repl-test--fake-spawn-log))))))
@@ -302,7 +302,7 @@ landed at `:done' but the sentinel-driven cherry-pick is still in flight."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-fake-caffeinate
       (let ((system-type 'gnu/linux))
-        (agent-repl--ws-put "ws1" :claude-state :thinking)
+        (agent-repl--ws-put "ws1" :agent-state :thinking)
         (agent-repl--caffeinate-refresh)
         (should-not (agent-repl--caffeinate-running-p))
         (should-not agent-repl-test--fake-spawn-log)))))
@@ -312,33 +312,33 @@ landed at `:done' but the sentinel-driven cherry-pick is still in flight."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-fake-caffeinate
       (let ((agent-repl-caffeinate-enabled nil))
-        (agent-repl--ws-put "ws1" :claude-state :thinking)
+        (agent-repl--ws-put "ws1" :agent-state :thinking)
         (agent-repl--caffeinate-refresh)
         (should-not (agent-repl--caffeinate-running-p))))))
 
-;;;; ---- Tests: advice integration with --ws-set-claude-state ----------------
+;;;; ---- Tests: advice integration with --ws-set-agent-state ----------------
 
-(ert-deftest agent-repl-test-caffeinate-advice-on-set-claude-state-start ()
+(ert-deftest agent-repl-test-caffeinate-advice-on-set-agent-state-start ()
   "Setting :thinking through the typed setter triggers a caffeinate spawn."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-fake-caffeinate
-      (agent-repl--ws-set-claude-state "ws1" :thinking)
+      (agent-repl--ws-set-agent-state "ws1" :thinking)
       (should (agent-repl--caffeinate-running-p)))))
 
-(ert-deftest agent-repl-test-caffeinate-advice-on-set-claude-state-stop ()
+(ert-deftest agent-repl-test-caffeinate-advice-on-set-agent-state-stop ()
   "Setting :done through the typed setter after :thinking kills caffeinate."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-fake-caffeinate
-      (agent-repl--ws-set-claude-state "ws1" :thinking)
+      (agent-repl--ws-set-agent-state "ws1" :thinking)
       (should (agent-repl--caffeinate-running-p))
-      (agent-repl--ws-set-claude-state "ws1" :done)
+      (agent-repl--ws-set-agent-state "ws1" :done)
       (should-not (agent-repl--caffeinate-running-p)))))
 
 (ert-deftest agent-repl-test-caffeinate-advice-on-ws-del-orphan-cleanup ()
   "Nuking a still-:thinking workspace stops caffeinate via the --ws-del advice."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-fake-caffeinate
-      (agent-repl--ws-set-claude-state "ws1" :thinking)
+      (agent-repl--ws-set-agent-state "ws1" :thinking)
       (should (agent-repl--caffeinate-running-p))
       (agent-repl--ws-del "ws1")
       (should-not (agent-repl--caffeinate-running-p)))))
@@ -375,10 +375,10 @@ the sentinel-driven cherry-pick is still in flight, so the editor must
 stay awake to finish the merge."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-fake-caffeinate
-      (agent-repl--ws-set-claude-state "ws1" :thinking)
+      (agent-repl--ws-set-agent-state "ws1" :thinking)
       (agent-repl--ws-put "ws1" :merging t)
       (should (agent-repl--caffeinate-running-p))
-      (agent-repl--ws-set-claude-state "ws1" :done)
+      (agent-repl--ws-set-agent-state "ws1" :done)
       (should (agent-repl--caffeinate-running-p))
       ;; Only once the merge actually completes do we release caffeinate.
       (agent-repl--ws-put "ws1" :merging nil)

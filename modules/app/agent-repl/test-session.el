@@ -15,7 +15,7 @@
 ;;;; ---- Migrated tests ----
 
 (ert-deftest agent-repl-test-finished-from-hook-hidden-sets-done ()
-  "handle-claude-finished sets claude-state :done when vterm buffer is not visible."
+  "handle-agent-finished sets agent-state :done when vterm buffer is not visible."
   (agent-repl-test--with-clean-state
     (let ((done-set nil)
           (fake-buf (generate-new-buffer " *test-hook-hidden*")))
@@ -27,15 +27,15 @@
                       ((symbol-function 'agent-repl--do-refresh) #'ignore)
                       ((symbol-function 'agent-repl--update-hide-overlay) #'ignore)
                       ((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
-                      ((symbol-function 'agent-repl--ws-set-claude-state)
+                      ((symbol-function 'agent-repl--ws-set-agent-state)
                        (lambda (ws state)
                          (when (eq state :done) (setq done-set ws)))))
-              (agent-repl--handle-claude-finished "ws1")
+              (agent-repl--handle-agent-finished "ws1")
               (should (equal done-set "ws1"))))
         (kill-buffer fake-buf)))))
 
 (ert-deftest agent-repl-test-finished-from-hook-visible-also-sets-done ()
-  "handle-claude-finished sets :done regardless of vterm visibility.
+  "handle-agent-finished sets :done regardless of vterm visibility.
 Visibility is no longer a gate; the renderer decides the display via
 the composed-state rule with :repl-state."
   (agent-repl-test--with-clean-state
@@ -50,10 +50,10 @@ the composed-state rule with :repl-state."
                       ((symbol-function 'agent-repl--update-hide-overlay) #'ignore)
                       ((symbol-function 'agent-repl--fix-vterm-scroll) #'ignore)
                       ((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
-                      ((symbol-function 'agent-repl--ws-set-claude-state)
+                      ((symbol-function 'agent-repl--ws-set-agent-state)
                        (lambda (ws state)
                          (when (eq state :done) (setq done-set ws)))))
-              (agent-repl--handle-claude-finished "ws1")
+              (agent-repl--handle-agent-finished "ws1")
               (should (equal done-set "ws1"))))
         (kill-buffer fake-buf)))))
 
@@ -88,23 +88,23 @@ the composed-state rule with :repl-state."
         (should (= notify-count 0))))))
 
 (ert-deftest agent-repl-test-finished-from-hook-nil-vterm-sets-done ()
-  "handle-claude-finished still sets :done when vterm-buf is nil.
+  "handle-agent-finished still sets :done when vterm-buf is nil.
 The Stop signal's intent is \"Claude finished\" — unrelated to whether
 the vterm buffer is still around.  Refresh-vterm-after-finish is guarded
 by vterm-buf presence; the :done write is not."
   (agent-repl-test--with-clean-state
     (let ((done-set nil))
-      ;; Register ws1 (required by handle-claude-finished guard) but
+      ;; Register ws1 (required by handle-agent-finished guard) but
       ;; do NOT set :vterm-buffer.
       (agent-repl--ws-put "ws1" :project-dir "/tmp/fake")
       (cl-letf (((symbol-function 'agent-repl--do-refresh) #'ignore)
                 ((symbol-function 'agent-repl--update-hide-overlay) #'ignore)
                 ((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
                 ((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--ws-set-claude-state)
+                ((symbol-function 'agent-repl--ws-set-agent-state)
                  (lambda (ws state)
                    (when (eq state :done) (setq done-set ws)))))
-        (agent-repl--handle-claude-finished "ws1")
+        (agent-repl--handle-agent-finished "ws1")
         (should (equal done-set "ws1"))))))
 
 ;;;; ---- Tests: Deferred prompt drain ----
@@ -112,7 +112,7 @@ by vterm-buf presence; the :done write is not."
 (ert-deftest agent-repl-test-drain-deferred-empty-queue-noop ()
   "`agent-repl--drain-deferred-prompts' on an empty queue does nothing."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :done)
+    (agent-repl--ws-put "ws1" :agent-state :done)
     (agent-repl--ws-put "ws1" :deferred-prompts nil)
     (let ((sent nil))
       (cl-letf (((symbol-function 'agent-repl--send)
@@ -123,7 +123,7 @@ by vterm-buf presence; the :done write is not."
 (ert-deftest agent-repl-test-drain-deferred-pops-and-sends-when-done ()
   "Drain pops the head and sends it via `agent-repl--send' when state is `:done'."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :done)
+    (agent-repl--ws-put "ws1" :agent-state :done)
     (agent-repl--ws-put "ws1" :deferred-prompts '("alpha" "beta" "gamma"))
     (let ((sent nil))
       (cl-letf (((symbol-function 'agent-repl--send)
@@ -136,7 +136,7 @@ by vterm-buf presence; the :done write is not."
 (ert-deftest agent-repl-test-drain-deferred-pops-and-sends-when-idle ()
   "Drain also fires when state is `:idle' (decayed from `:done')."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :idle)
+    (agent-repl--ws-put "ws1" :agent-state :idle)
     (agent-repl--ws-put "ws1" :deferred-prompts '("only-one"))
     (let ((sent nil))
       (cl-letf (((symbol-function 'agent-repl--send)
@@ -148,7 +148,7 @@ by vterm-buf presence; the :done write is not."
 (ert-deftest agent-repl-test-drain-deferred-skipped-when-thinking ()
   "Drain does NOT pop or send when state is `:thinking', even with a non-empty queue."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :thinking)
+    (agent-repl--ws-put "ws1" :agent-state :thinking)
     (agent-repl--ws-put "ws1" :deferred-prompts '("hold-me"))
     (let ((sent nil))
       (cl-letf (((symbol-function 'agent-repl--send)
@@ -161,7 +161,7 @@ by vterm-buf presence; the :done write is not."
 (ert-deftest agent-repl-test-drain-deferred-skipped-when-permission ()
   "Drain does NOT fire while Claude is at a `:permission' prompt."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :permission)
+    (agent-repl--ws-put "ws1" :agent-state :permission)
     (agent-repl--ws-put "ws1" :deferred-prompts '("hold-me"))
     (let ((sent nil))
       (cl-letf (((symbol-function 'agent-repl--send)
@@ -174,7 +174,7 @@ by vterm-buf presence; the :done write is not."
 (ert-deftest agent-repl-test-drain-deferred-skipped-when-init ()
   "Drain does NOT fire while Claude is still initializing (`:init')."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :init)
+    (agent-repl--ws-put "ws1" :agent-state :init)
     (agent-repl--ws-put "ws1" :deferred-prompts '("hold-me"))
     (let ((sent nil))
       (cl-letf (((symbol-function 'agent-repl--send)
@@ -182,8 +182,8 @@ by vterm-buf presence; the :done write is not."
         (agent-repl--drain-deferred-prompts "ws1")
         (should (null sent))))))
 
-(ert-deftest agent-repl-test-handle-claude-finished-drains-deferred ()
-  "`agent-repl--handle-claude-finished' drains the deferred queue at the end."
+(ert-deftest agent-repl-test-handle-agent-finished-drains-deferred ()
+  "`agent-repl--handle-agent-finished' drains the deferred queue at the end."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/fake")
     (agent-repl--ws-put "ws1" :deferred-prompts '("first-deferred" "second"))
@@ -195,15 +195,15 @@ by vterm-buf presence; the :done write is not."
                 ((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--send)
                  (lambda (prompt ws &rest _) (setq sent (list prompt ws)))))
-        ;; handle-claude-finished marks state :done first, then drains.
-        (agent-repl--handle-claude-finished "ws1")
+        ;; handle-agent-finished marks state :done first, then drains.
+        (agent-repl--handle-agent-finished "ws1")
         (should (equal sent '("first-deferred" "ws1")))
         ;; One drained, one remains for the next turn.
         (should (equal (agent-repl--ws-get "ws1" :deferred-prompts)
                        '("second")))))))
 
-(ert-deftest agent-repl-test-handle-claude-finished-no-deferred-noop ()
-  "`handle-claude-finished' with an empty deferred queue does not call `--send'."
+(ert-deftest agent-repl-test-handle-agent-finished-no-deferred-noop ()
+  "`handle-agent-finished' with an empty deferred queue does not call `--send'."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/fake")
     (agent-repl--ws-put "ws1" :deferred-prompts nil)
@@ -215,7 +215,7 @@ by vterm-buf presence; the :done write is not."
                 ((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--send)
                  (lambda (&rest args) (push args sent))))
-        (agent-repl--handle-claude-finished "ws1")
+        (agent-repl--handle-agent-finished "ws1")
         (should (null sent))))))
 
 ;;;; ---- Tests: Sandbox configuration ----
@@ -803,54 +803,54 @@ shown is the master worktree's, not the recorded parent's."
 
 ;;;; ---- Tests: Session completion handling ----
 
-(ert-deftest agent-repl-test-mark-claude-done-sets-done ()
-  "mark-claude-done sets :claude-state :done unconditionally."
+(ert-deftest agent-repl-test-mark-agent-done-sets-done ()
+  "mark-agent-done sets :agent-state :done unconditionally."
   (agent-repl-test--with-clean-state
     (let ((done-set nil))
-      (cl-letf (((symbol-function 'agent-repl--ws-set-claude-state)
+      (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)
                  (lambda (ws state)
                    (when (eq state :done) (setq done-set ws)))))
-        (agent-repl--mark-claude-done "ws1")
+        (agent-repl--mark-agent-done "ws1")
         (should (equal done-set "ws1"))))))
 
-(ert-deftest agent-repl-test-mark-claude-done-regardless-of-visibility ()
-  "mark-claude-done no longer branches on vterm visibility.
+(ert-deftest agent-repl-test-mark-agent-done-regardless-of-visibility ()
+  "mark-agent-done no longer branches on vterm visibility.
 The previous mark-done-if-hidden used the vterm window as a \"user is
 already looking\" gate. Post-axis-split that gate is the renderer's job."
   (agent-repl-test--with-clean-state
     (let ((done-set nil))
-      ;; Any hypothetical visibility — mark-claude-done does not read it.
+      ;; Any hypothetical visibility — mark-agent-done does not read it.
       (cl-letf (((symbol-function 'get-buffer-window)
                  (lambda (&rest _) 'some-window))
-                ((symbol-function 'agent-repl--ws-set-claude-state)
+                ((symbol-function 'agent-repl--ws-set-agent-state)
                  (lambda (ws state)
                    (when (eq state :done) (setq done-set ws)))))
-        (agent-repl--mark-claude-done "ws1")
+        (agent-repl--mark-agent-done "ws1")
         (should (equal done-set "ws1"))))))
 
-(ert-deftest agent-repl-test-mark-claude-done-current-ws-acks ()
-  "mark-claude-done sets :done-acked t when the workspace is current
+(ert-deftest agent-repl-test-mark-agent-done-current-ws-acks ()
+  "mark-agent-done sets :done-acked t when the workspace is current
 (user is actively looking when :done arrives)."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'agent-repl--current-ws-p)
                (lambda (_ws) t)))
-      (agent-repl--mark-claude-done "ws1")
+      (agent-repl--mark-agent-done "ws1")
       (should (eq (agent-repl--ws-get "ws1" :done-acked) t)))))
 
-(ert-deftest agent-repl-test-mark-claude-done-current-ws-stamps-acked-at ()
-  "mark-claude-done stamps :done-acked-at with current time when the
+(ert-deftest agent-repl-test-mark-agent-done-current-ws-stamps-acked-at ()
+  "mark-agent-done stamps :done-acked-at with current time when the
 workspace is current, so the focus-dwell countdown can start."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'agent-repl--current-ws-p)
                (lambda (_ws) t)))
       (let ((before (float-time)))
-        (agent-repl--mark-claude-done "ws1")
+        (agent-repl--mark-agent-done "ws1")
         (let ((stamp (agent-repl--ws-get "ws1" :done-acked-at)))
           (should (numberp stamp))
           (should (>= stamp before)))))))
 
-(ert-deftest agent-repl-test-mark-claude-done-non-current-ws-clears-ack ()
-  "mark-claude-done clears :done-acked to nil for non-current workspaces
+(ert-deftest agent-repl-test-mark-agent-done-non-current-ws-clears-ack ()
+  "mark-agent-done clears :done-acked to nil for non-current workspaces
 so a fresh :done starts unacknowledged regardless of any leftover ack
 from a prior cycle."
   (agent-repl-test--with-clean-state
@@ -858,18 +858,18 @@ from a prior cycle."
     (agent-repl--ws-put "ws1" :done-acked t)
     (cl-letf (((symbol-function 'agent-repl--current-ws-p)
                (lambda (_ws) nil)))
-      (agent-repl--mark-claude-done "ws1")
+      (agent-repl--mark-agent-done "ws1")
       (should (null (agent-repl--ws-get "ws1" :done-acked))))))
 
-(ert-deftest agent-repl-test-mark-claude-done-non-current-ws-clears-acked-at ()
-  "mark-claude-done clears :done-acked-at for non-current workspaces so
+(ert-deftest agent-repl-test-mark-agent-done-non-current-ws-clears-acked-at ()
+  "mark-agent-done clears :done-acked-at for non-current workspaces so
 a stale focus timestamp from a prior cycle does not bleed into the
 new :done lifecycle."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :done-acked-at (float-time))
     (cl-letf (((symbol-function 'agent-repl--current-ws-p)
                (lambda (_ws) nil)))
-      (agent-repl--mark-claude-done "ws1")
+      (agent-repl--mark-agent-done "ws1")
       (should (null (agent-repl--ws-get "ws1" :done-acked-at))))))
 
 (ert-deftest agent-repl-test-refresh-vterm-after-finish-live ()
@@ -902,8 +902,8 @@ new :done lifecycle."
       (agent-repl--refresh-vterm-after-finish fake-buf)
       (should-not refreshed))))
 
-(ert-deftest agent-repl-test-handle-claude-finished-notifies-other-ws ()
-  "handle-claude-finished should message when WS is not the current workspace."
+(ert-deftest agent-repl-test-handle-agent-finished-notifies-other-ws ()
+  "handle-agent-finished should message when WS is not the current workspace."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/fake")
     (let ((messaged nil))
@@ -913,11 +913,11 @@ new :done lifecycle."
                  (lambda (fmt &rest args)
                    (when (string-match-p "Claude finished" fmt)
                      (setq messaged t)))))
-        (agent-repl--handle-claude-finished "ws1")
+        (agent-repl--handle-agent-finished "ws1")
         (should messaged)))))
 
-(ert-deftest agent-repl-test-handle-claude-finished-no-message-current-ws ()
-  "handle-claude-finished should NOT message when WS is the current workspace."
+(ert-deftest agent-repl-test-handle-agent-finished-no-message-current-ws ()
+  "handle-agent-finished should NOT message when WS is the current workspace."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/fake")
     (let ((messaged nil))
@@ -927,14 +927,14 @@ new :done lifecycle."
                  (lambda (fmt &rest args)
                    (when (string-match-p "Claude finished" fmt)
                      (setq messaged t)))))
-        (agent-repl--handle-claude-finished "ws1")
+        (agent-repl--handle-agent-finished "ws1")
         (should-not messaged)))))
 
-(ert-deftest agent-repl-test-handle-claude-finished-errors-on-unregistered-ws ()
-  "handle-claude-finished errors hard when WS is not registered — guards
+(ert-deftest agent-repl-test-handle-agent-finished-errors-on-unregistered-ws ()
+  "handle-agent-finished errors hard when WS is not registered — guards
 against stop events arriving after kill."
   (agent-repl-test--with-clean-state
-    (should-error (agent-repl--handle-claude-finished "not-a-ws"))))
+    (should-error (agent-repl--handle-agent-finished "not-a-ws"))))
 
 ;;;; ---- Tests: refresh-magit-status ----
 
@@ -942,7 +942,7 @@ against stop events arriving after kill."
   "refresh-magit-status calls magit-refresh on a magit-status buffer whose
 default-directory matches the workspace's :project-dir."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "claude-magit-" t))
+    (let ((tmpdir (make-temp-file "agent-magit-" t))
           (buf (generate-new-buffer " *test-magit-match*"))
           (refreshed 0))
       (unwind-protect
@@ -962,8 +962,8 @@ default-directory matches the workspace's :project-dir."
   "refresh-magit-status does not refresh a magit-status buffer whose
 default-directory points at a different repo."
   (agent-repl-test--with-clean-state
-    (let ((ws-dir (make-temp-file "claude-magit-ws-" t))
-          (other-dir (make-temp-file "claude-magit-other-" t))
+    (let ((ws-dir (make-temp-file "agent-magit-ws-" t))
+          (other-dir (make-temp-file "agent-magit-other-" t))
           (buf (generate-new-buffer " *test-magit-other*"))
           (refreshed 0))
       (unwind-protect
@@ -984,7 +984,7 @@ default-directory points at a different repo."
   "refresh-magit-status does not refresh a non-magit buffer even when
 default-directory matches the workspace."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "claude-magit-" t))
+    (let ((tmpdir (make-temp-file "agent-magit-" t))
           (buf (generate-new-buffer " *test-non-magit*"))
           (refreshed 0))
       (unwind-protect
@@ -1003,7 +1003,7 @@ default-directory matches the workspace."
 (ert-deftest agent-repl-test-refresh-magit-status-no-buffer-is-noop ()
   "refresh-magit-status is a no-op when no magit-status buffer exists for WS."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "claude-magit-" t))
+    (let ((tmpdir (make-temp-file "agent-magit-" t))
           (refreshed 0))
       (unwind-protect
           (progn
@@ -1023,8 +1023,8 @@ default-directory matches the workspace."
         (agent-repl--refresh-magit-status "ws1")
         (should (= refreshed 0))))))
 
-(ert-deftest agent-repl-test-handle-claude-finished-refreshes-magit ()
-  "handle-claude-finished calls refresh-magit-status as part of the done policy."
+(ert-deftest agent-repl-test-handle-agent-finished-refreshes-magit ()
+  "handle-agent-finished calls refresh-magit-status as part of the done policy."
   (agent-repl-test--with-clean-state
     (let ((refresh-ws nil))
       (agent-repl--ws-put "ws1" :vterm-buffer nil)
@@ -1032,7 +1032,7 @@ default-directory matches the workspace."
                 ((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
                 ((symbol-function 'agent-repl--refresh-magit-status)
                  (lambda (ws) (setq refresh-ws ws))))
-        (agent-repl--handle-claude-finished "ws1")
+        (agent-repl--handle-agent-finished "ws1")
         (should (equal refresh-ws "ws1"))))))
 
 ;;;; ---- Tests: refresh-magit-status-for-dir ----
@@ -1041,7 +1041,7 @@ default-directory matches the workspace."
   "refresh-magit-status-for-dir refreshes a magit-status buffer whose
 default-directory matches DIR — directory-keyed, no workspace needed."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "claude-magit-dir-" t))
+    (let ((tmpdir (make-temp-file "agent-magit-dir-" t))
           (buf (generate-new-buffer " *test-magit-dir-match*"))
           (refreshed 0))
       (unwind-protect
@@ -1060,8 +1060,8 @@ default-directory matches DIR — directory-keyed, no workspace needed."
   "refresh-magit-status-for-dir does not refresh buffers whose default-directory
 points at a different repo than the supplied DIR."
   (agent-repl-test--with-clean-state
-    (let ((target-dir (make-temp-file "claude-magit-dir-target-" t))
-          (other-dir (make-temp-file "claude-magit-dir-other-" t))
+    (let ((target-dir (make-temp-file "agent-magit-dir-target-" t))
+          (other-dir (make-temp-file "agent-magit-dir-other-" t))
           (buf (generate-new-buffer " *test-magit-dir-other*"))
           (refreshed 0))
       (unwind-protect
@@ -1081,7 +1081,7 @@ points at a different repo than the supplied DIR."
   "refresh-magit-status-for-dir does not refresh a non-magit buffer even when
 its default-directory matches the supplied DIR."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "claude-magit-dir-nonmagit-" t))
+    (let ((tmpdir (make-temp-file "agent-magit-dir-nonmagit-" t))
           (buf (generate-new-buffer " *test-non-magit-dir*"))
           (refreshed 0))
       (unwind-protect
@@ -1111,7 +1111,7 @@ callers that pass a missing target directory (e.g. unresolved master worktree)."
 default-directory matches DIR — covers the post-merge case where a worktree
 may have more than one stale magit-status buffer open."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "claude-magit-dir-multi-" t))
+    (let ((tmpdir (make-temp-file "agent-magit-dir-multi-" t))
           (buf1 (generate-new-buffer " *test-magit-dir-multi-1*"))
           (buf2 (generate-new-buffer " *test-magit-dir-multi-2*"))
           (refreshed 0))
@@ -1136,7 +1136,7 @@ may have more than one stale magit-status buffer open."
 WS's :project-dir — guards against the wrapper drifting from the
 directory-keyed primitive."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "claude-magit-delegate-" t))
+    (let ((tmpdir (make-temp-file "agent-magit-delegate-" t))
           (forwarded-dir nil)
           (forwarded-ws nil))
       (unwind-protect
@@ -1253,7 +1253,7 @@ TIMER-SLOT is a cons cell; the most recent scheduled thunk is stored at
             (agent-repl--deliver-pending-prompts fake-buf '("a" "b") "ws1")
             (should (equal (car sent) '("a")))
             ;; Simulate `prompt_submit' arrival between paste and verify.
-            (agent-repl--ws-put "ws1" :claude-state :thinking)
+            (agent-repl--ws-put "ws1" :agent-state :thinking)
             (funcall (car timer-slot))
             (should (equal (reverse (car sent)) '("a" "b"))))
         (kill-buffer fake-buf)))))
@@ -1269,7 +1269,7 @@ TIMER-SLOT is a cons cell; the most recent scheduled thunk is stored at
             (agent-repl--deliver-pending-prompts fake-buf '("a") "ws1")
             (should (equal (car sent) '("a")))
             ;; State remains :idle — Claude never saw the paste.
-            (agent-repl--ws-put "ws1" :claude-state :idle)
+            (agent-repl--ws-put "ws1" :agent-state :idle)
             (funcall (car timer-slot))
             ;; Same prompt resent.
             (should (equal (car sent) '("a" "a"))))
@@ -1285,7 +1285,7 @@ without sending again."
           (agent-repl-prompt-delivery-max-retries 2))
       (unwind-protect
           (agent-repl-test--with-deliver-mocks sent timer-slot
-            (agent-repl--ws-put "ws1" :claude-state :idle)
+            (agent-repl--ws-put "ws1" :agent-state :idle)
             (agent-repl--deliver-pending-prompts fake-buf '("a") "ws1")
             ;; First send + 2 retries = 3 total.
             (funcall (car timer-slot))   ; retry 1
@@ -1305,7 +1305,7 @@ without sending again."
         (should (equal (car sent) '("a")))
         ;; Kill the buffer before verify fires.
         (kill-buffer fake-buf)
-        (agent-repl--ws-put "ws1" :claude-state :thinking)
+        (agent-repl--ws-put "ws1" :agent-state :thinking)
         (funcall (car timer-slot))
         ;; "b" was never sent — vterm-buf is dead.
         (should (equal (car sent) '("a")))))))
@@ -1320,27 +1320,27 @@ without sending again."
 (ert-deftest agent-repl-test-prompt-acknowledged-p-states ()
   "prompt-acknowledged-p recognizes thinking/permission/done as ack'd."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :thinking)
+    (agent-repl--ws-put "ws1" :agent-state :thinking)
     (should (agent-repl--prompt-acknowledged-p "ws1"))
-    (agent-repl--ws-put "ws1" :claude-state :permission)
+    (agent-repl--ws-put "ws1" :agent-state :permission)
     (should (agent-repl--prompt-acknowledged-p "ws1"))
-    (agent-repl--ws-put "ws1" :claude-state :done)
+    (agent-repl--ws-put "ws1" :agent-state :done)
     (should (agent-repl--prompt-acknowledged-p "ws1"))))
 
 (ert-deftest agent-repl-test-prompt-acknowledged-p-idle-not-acked ()
   "prompt-acknowledged-p returns nil for :idle (the race state)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :idle)
+    (agent-repl--ws-put "ws1" :agent-state :idle)
     (should-not (agent-repl--prompt-acknowledged-p "ws1"))))
 
 (ert-deftest agent-repl-test-prompt-acknowledged-p-init-not-acked ()
   "prompt-acknowledged-p returns nil for :init (pre-ready)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :init)
+    (agent-repl--ws-put "ws1" :agent-state :init)
     (should-not (agent-repl--prompt-acknowledged-p "ws1"))))
 
 (ert-deftest agent-repl-test-prompt-acknowledged-p-nil-not-acked ()
-  "prompt-acknowledged-p returns nil when :claude-state is nil."
+  "prompt-acknowledged-p returns nil when :agent-state is nil."
   (agent-repl-test--with-clean-state
     (should-not (agent-repl--prompt-acknowledged-p "ws1"))))
 
@@ -2287,31 +2287,31 @@ restart (the lazy-start path applies its defaults instead)."
     (should (string-match-p "worktree=yes" msg-yes))
     (should (string-match-p "worktree=no" msg-no))))
 
-;;;; ---- Tests: claude-running-p ----
+;;;; ---- Tests: agent-running-p ----
 
-(ert-deftest agent-repl-test-claude-running-p-explicit-ws ()
-  "claude-running-p with explicit ws should delegate to vterm-process-alive-p."
+(ert-deftest agent-repl-test-agent-running-p-explicit-ws ()
+  "agent-running-p with explicit ws should delegate to vterm-process-alive-p."
   (agent-repl-test--with-clean-state
     (let ((checked-ws nil))
       (cl-letf (((symbol-function 'agent-repl--vterm-process-alive-p)
                  (lambda (ws) (setq checked-ws ws) t)))
-        (should (agent-repl--claude-running-p "my-ws"))
+        (should (agent-repl--agent-running-p "my-ws"))
         (should (equal checked-ws "my-ws"))))))
 
-(ert-deftest agent-repl-test-claude-running-p-nil-ws-uses-current ()
-  "claude-running-p with nil ws should fall back to +workspace-current-name."
+(ert-deftest agent-repl-test-agent-running-p-nil-ws-uses-current ()
+  "agent-running-p with nil ws should fall back to +workspace-current-name."
   (agent-repl-test--with-clean-state
     (let ((checked-ws nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
                 ((symbol-function 'agent-repl--vterm-process-alive-p)
                  (lambda (ws) (setq checked-ws ws) nil)))
-        (should-not (agent-repl--claude-running-p))
+        (should-not (agent-repl--agent-running-p))
         (should (equal checked-ws "current-ws"))))))
 
 ;;;; ---- Tests: session edge cases (status transitions .md) ----
 
-(ert-deftest agent-repl-test-handle-claude-finished-second-notify-debounced ()
-  "Two calls to handle-claude-finished within 2s should only produce one notification."
+(ert-deftest agent-repl-test-handle-agent-finished-second-notify-debounced ()
+  "Two calls to handle-agent-finished within 2s should only produce one notification."
   (agent-repl-test--with-clean-state
     (let ((notify-count 0))
       (cl-letf (((symbol-function 'agent-repl--notify)
@@ -2326,15 +2326,15 @@ restart (the lazy-start path applies its defaults instead)."
                 ((symbol-function '+workspace-current-name) (lambda () "other-ws"))
                 ((symbol-function 'agent-repl--current-ws-p) (lambda (_ws) nil)))
         ;; Create a hidden vterm buffer for ws1
-        (let ((vterm-buf (generate-new-buffer "*claude-panel-testfinish*")))
+        (let ((vterm-buf (generate-new-buffer "*agent-panel-testfinish*")))
           (unwind-protect
               (progn
                 (agent-repl--ws-put "ws1" :vterm-buffer vterm-buf)
                 ;; First call — should notify
-                (agent-repl--handle-claude-finished "ws1")
+                (agent-repl--handle-agent-finished "ws1")
                 (should (= notify-count 1))
                 ;; Second call within 2s window — should be debounced
-                (agent-repl--handle-claude-finished "ws1")
+                (agent-repl--handle-agent-finished "ws1")
                 (should (= notify-count 1)))
             (when (buffer-live-p vterm-buf)
               (kill-buffer vterm-buf))))))))

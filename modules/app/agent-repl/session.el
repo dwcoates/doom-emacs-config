@@ -86,7 +86,7 @@ string, that directory is used explicitly."
   :group 'agent-repl)
 
 (defcustom agent-repl-system-prompt "."
-  "Custom system prompt for the main Claude REPL launched via `SPC o c'.
+  "Custom system prompt for the main Agent REPL launched via `SPC o c'.
 When non-nil, passed to the Claude CLI as `--system-prompt <prompt>',
 which fully replaces the default system prompt.  When nil, no
 `--system-prompt' flag is added and Claude uses its default system
@@ -124,7 +124,7 @@ added and Claude uses its configured default.  Does NOT affect headless
 
 (defcustom agent-repl-prompt-delivery-verify-seconds 4.0
   "Seconds to wait after a preemptive prompt before verifying delivery.
-A preemptive prompt is considered acknowledged when `:claude-state'
+A preemptive prompt is considered acknowledged when `:agent-state'
 transitions away from `:idle' (the `UserPromptSubmit' hook fires and
 `--on-prompt-submit-event' flips state to `:thinking').  When the state
 is still `:idle' after this window, the bracketed paste is assumed to
@@ -135,7 +135,7 @@ have raced Claude's TUI input-area paint and is resent — see
 
 (defcustom agent-repl-prompt-delivery-max-retries 2
   "Maximum resend attempts when a preemptive prompt is not acknowledged.
-A preemptive prompt is considered acknowledged when `:claude-state'
+A preemptive prompt is considered acknowledged when `:agent-state'
 moves away from `:idle' within `agent-repl-prompt-delivery-verify-seconds'.
 If the state is still `:idle' after the verify window, the prompt is
 resent.  After this many resends have all failed to elicit a state
@@ -302,8 +302,8 @@ remaining keys are written only when SAVED carries them."
     (agent-repl--ws-put ws :saved-tab-index idx))
   ;; Fork session ID: a worktree-fork ws whose claude session was never
   ;; actually started before quit needs the fork pointer to survive so
-  ;; the next `--initialize-claude' can launch with `--resume FORK
-  ;; --fork-session'.  Cleared by `--initialize-claude' once consumed.
+  ;; the next `--initialize-agent' can launch with `--resume FORK
+  ;; --fork-session'.  Cleared by `--initialize-agent' once consumed.
   (when-let ((fork (and saved (plist-get saved :fork-session-id))))
     (agent-repl--ws-put ws :fork-session-id fork))
   ;; Last prompt summary: the tabline / mode-line uses this to render a
@@ -397,7 +397,7 @@ workspace (a prior partial init is overwritten).
 
 Must not be called while WS has a live Claude session — instantiation
 structs would be clobbered with any session-id mutations since the last
-state-save.  Callers already guard on `agent-repl--claude-running-p'."
+state-save.  Callers already guard on `agent-repl--agent-running-p'."
   (let* ((root-candidate (or project-dir-hint
                              (agent-repl--ws-get ws :project-dir)
                              (agent-repl--git-root default-directory)))
@@ -752,13 +752,13 @@ and title-change paths fire for the same turn completion."
              (or (null last) (> (- now last) agent-repl-notify-debounce-seconds)))
         (progn
           (agent-repl--ws-put ws :last-notify-time now)
-          (run-at-time agent-repl-notify-delay nil #'agent-repl--notify ws "Claude REPL"
-                       (format "%s: Claude ready" ws)))
+          (run-at-time agent-repl-notify-delay nil #'agent-repl--notify ws "Agent REPL"
+                       (format "%s: Agent ready" ws)))
       (when (and last (<= (- now last) agent-repl-notify-debounce-seconds))
         (agent-repl--log ws "maybe-notify-finished: debounce-hit ws=%s elapsed=%.2f" ws (- now last))))))
 
-(defun agent-repl--mark-claude-done (ws)
-  "Mark WS's claude-state as :done.
+(defun agent-repl--mark-agent-done (ws)
+  "Mark WS's agent-state as :done.
 Unconditional: called on every Stop hook.  Also manages the
 `:done-acked' acknowledgment flag and `:done-acked-at' focus-start
 timestamp (orthogonal to `:repl-state'):
@@ -771,8 +771,8 @@ timestamp (orthogonal to `:repl-state'):
     unacknowledged (regardless of any leftover ack from a prior
     cycle); `on-workspace-switch' sets them when the user next
     selects the workspace."
-  (agent-repl--log ws "mark-claude-done ws=%s" ws)
-  (agent-repl--ws-set-claude-state ws :done)
+  (agent-repl--log ws "mark-agent-done ws=%s" ws)
+  (agent-repl--ws-set-agent-state ws :done)
   (let ((current (agent-repl--current-ws-p ws)))
     (agent-repl--ws-put ws :done-acked current)
     (agent-repl--ws-put ws :done-acked-at (and current (float-time)))))
@@ -817,29 +817,29 @@ falls back to the bare directory."
 No-op when WS has no :project-dir or no matching buffer exists.
 
 Thin wrapper over `agent-repl--refresh-magit-status-for-dir' so the
-WS-keyed call sites (e.g. `--handle-claude-finished') and
+WS-keyed call sites (e.g. `--handle-agent-finished') and
 directory-keyed call sites (e.g. the post-merge refresh in
 `--workspace-merge-do', which has the target directory but not a
 target workspace) share the same buffer-matching logic."
   (agent-repl--refresh-magit-status-for-dir
    (agent-repl--ws-get ws :project-dir) ws))
 
-(defun agent-repl--handle-claude-finished (ws)
+(defun agent-repl--handle-agent-finished (ws)
   "Handle Claude finishing in WS.
 Errors hard if WS is not registered in `agent-repl--workspaces' — a
 stop event arriving for an unknown workspace indicates a race (e.g.
 sentinel firing after kill cleared state) that we surface rather than
-silently absorb.  Otherwise: marks claude-state as :done, refreshes the
+silently absorb.  Otherwise: marks agent-state as :done, refreshes the
 vterm display if the buffer is still live, refreshes any open
 magit-status buffer for the workspace's repo, notifies the user if the
 frame is unfocused, emits a finished-in-workspace message when the
 current workspace is different, and drains any deferred-prompt queue
 \(see `agent-repl--drain-deferred-prompts')."
   (unless (gethash ws agent-repl--workspaces)
-    (error "agent-repl--handle-claude-finished: ws=%S not registered in agent-repl--workspaces" ws))
+    (error "agent-repl--handle-agent-finished: ws=%S not registered in agent-repl--workspaces" ws))
   (let ((vterm-buf (agent-repl--ws-get ws :vterm-buffer)))
-    (agent-repl--log ws "handle-claude-finished ws=%s" ws)
-    (agent-repl--mark-claude-done ws)
+    (agent-repl--log ws "handle-agent-finished ws=%s" ws)
+    (agent-repl--mark-agent-done ws)
     (when vterm-buf
       (agent-repl--refresh-vterm-after-finish vterm-buf))
     (agent-repl--refresh-magit-status ws)
@@ -860,11 +860,11 @@ current workspace is different, and drains any deferred-prompt queue
 ;; finished turn.  The queue is arbitrarily long.
 
 (defun agent-repl--deferred-drain-eligible-p (ws)
-  "Return non-nil if WS's claude-state permits a deferred-queue drain.
+  "Return non-nil if WS's agent-state permits a deferred-queue drain.
 Drains are only permitted from `:done' or `:idle' — sending mid-turn
 would defeat the whole point of the deferral.  Returns nil for any
 other state (or nil)."
-  (memq (agent-repl--ws-claude-state ws) '(:done :idle)))
+  (memq (agent-repl--ws-agent-state ws) '(:done :idle)))
 
 (defun agent-repl--pop-deferred-prompt (ws)
   "Pop and return the head of WS's `:deferred-prompts' queue, or nil.
@@ -881,7 +881,7 @@ queue depth so drains are easy to trace."
 
 (defun agent-repl--drain-deferred-prompts (ws)
   "Send the next deferred prompt for WS if the state and queue allow.
-Called from `agent-repl--handle-claude-finished' (`:thinking → :done'
+Called from `agent-repl--handle-agent-finished' (`:thinking → :done'
 turn boundary) and from `agent-repl-queue-deferred-prompt' (so a
 prompt enqueued while WS is already `:done'/`:idle' fires immediately).
 
@@ -896,7 +896,7 @@ over Claude's native paste-while-thinking buffering."
     (agent-repl--log-verbose ws "drain-deferred-prompts: ws=%s queue empty" ws))
    ((not (agent-repl--deferred-drain-eligible-p ws))
     (agent-repl--log ws "drain-deferred-prompts: ws=%s skipped — state=%s not :done/:idle"
-                      ws (agent-repl--ws-claude-state ws)))
+                      ws (agent-repl--ws-agent-state ws)))
    (t
     (let ((prompt (agent-repl--pop-deferred-prompt ws)))
       (agent-repl--log ws "drain-deferred-prompts: ws=%s sending head len=%d remaining=%d"
@@ -926,13 +926,13 @@ not pass `--continue'."
 ;;;; Readiness and pending prompt handling
 
 (defun agent-repl--prompt-acknowledged-p (ws)
-  "Return non-nil when WS's `:claude-state' indicates Claude received a prompt.
+  "Return non-nil when WS's `:agent-state' indicates Claude received a prompt.
 Acknowledged states are `:thinking' (the `UserPromptSubmit' hook flipped
 state via `--on-prompt-submit-event'), `:permission' (Claude paused to
 ask for permission), or `:done' (a fast turn already finished).
 Returns nil for `:idle' / `:init' / nil — i.e. when the prompt does
 not appear to have reached Claude."
-  (memq (agent-repl--ws-claude-state ws)
+  (memq (agent-repl--ws-agent-state ws)
         '(:thinking :permission :done)))
 
 (defun agent-repl--deliver-pending-prompts (vterm-buf pending ws &optional retries)
@@ -966,7 +966,7 @@ the head of PENDING; nil/0 on the first attempt."
 (defun agent-repl--maybe-retry-or-continue (vterm-buf pending ws retries)
   "Verify the current preemptive prompt was acknowledged; retry or continue.
 Called by a timer scheduled in `agent-repl--deliver-pending-prompts'
-after the send's `on-settle' fires.  Inspects `:claude-state' on WS
+after the send's `on-settle' fires.  Inspects `:agent-state' on WS
 via `agent-repl--prompt-acknowledged-p':
 
 - Acknowledged: drain the next pending prompt (if any) with a fresh
@@ -1020,7 +1020,7 @@ so the terminal has time to settle."
 
 (defun agent-repl--loading-placeholder-visible-p ()
   "Return non-nil if the loading placeholder buffer is displayed in a window."
-  (when-let ((ph (get-buffer " *claude-loading*")))
+  (when-let ((ph (get-buffer " *agent-loading*")))
     (get-buffer-window ph)))
 
 (defun agent-repl--show-panels-or-defer (ws)
@@ -1075,12 +1075,12 @@ honor it here by skipping the panel-open call)."
     (agent-repl--log-verbose ws "vterm-process-alive-p: ws=%s alive=%s" ws (if result "yes" "no"))
     result))
 
-(defun agent-repl--claude-running-p (&optional ws)
+(defun agent-repl--agent-running-p (&optional ws)
   "Return t if Claude vterm buffer for WS exists with a live process.
 WS defaults to the current workspace name.  Signals an error if no
 workspace can be determined."
   (let ((ws (or ws (agent-repl--ws-current-name))))
-    (unless ws (error "agent-repl--claude-running-p: no workspace specified and no current workspace"))
+    (unless ws (error "agent-repl--agent-running-p: no workspace specified and no current workspace"))
     (agent-repl--vterm-process-alive-p ws)))
 
 (defun agent-repl--session-starting-p (&optional ws)

@@ -491,7 +491,7 @@ shell out to the real binary."
 ;; isolation still uses the `--with-clean-state' rebinding below.
 (when (boundp 'agent-repl-events-file)
   (setq agent-repl-events-file
-        (expand-file-name (format "claude-events-test-%d.el" (emacs-pid))
+        (expand-file-name (format "agent-events-test-%d.el" (emacs-pid))
                           temporary-file-directory)))
 
 ;;;; ---- Test utilities ----
@@ -510,11 +510,11 @@ user's real snapshot during ERT runs."
          (agent-repl--hide-overlay-refcount 0)
          (agent-repl-debug nil)
          (agent-repl-workspace-snapshot-file
-          (expand-file-name (format "claude-snap-%s" (random)) temporary-file-directory))
+          (expand-file-name (format "agent-snap-%s" (random)) temporary-file-directory))
          (agent-repl--snapshot-archived-this-run nil)
          (agent-repl--restored-workspaces nil)
          (agent-repl-events-file
-          (expand-file-name (format "claude-events-%s.el" (random)) temporary-file-directory))
+          (expand-file-name (format "agent-events-%s.el" (random)) temporary-file-directory))
          (agent-repl--events-cache nil)
          (agent-repl--events-cache-loaded t)
          ;; Reset workspace-state update timer state so each test starts
