@@ -478,12 +478,89 @@ environments without notification tools (terminal-notifier or osascript)."
       (error
        (should (string-match-p "\\[claude-repl\\] something" (error-message-string err)))))))
 
+;;;; ---- Tests: state-dir / state-file ----
+
+(ert-deftest claude-repl-test-state-dir-uses-env-override ()
+  "state-dir honors the CLAUDE_REPL_STATE_DIR override when set."
+  (let ((process-environment (cons "CLAUDE_REPL_STATE_DIR=/tmp/statetest" process-environment)))
+    (should (equal (claude-repl--global-state-dir)
+                   (file-name-as-directory (expand-file-name "/tmp/statetest"))))))
+
+(ert-deftest claude-repl-test-state-dir-falls-back-to-claude-emacs ()
+  "state-dir falls back to ~/.claude-emacs/ when the override is unset."
+  ;; A bare \"CLAUDE_REPL_STATE_DIR\" entry (no =) makes getenv return nil.
+  (let ((process-environment (cons "CLAUDE_REPL_STATE_DIR" process-environment)))
+    (should (equal (claude-repl--global-state-dir)
+                   (file-name-as-directory (expand-file-name "~/.claude-emacs"))))))
+
+(ert-deftest claude-repl-test-state-file-joins-under-state-dir ()
+  "state-file returns RELATIVE joined under state-dir."
+  (let ((process-environment (cons "CLAUDE_REPL_STATE_DIR=/tmp/statetest" process-environment)))
+    (should (equal (claude-repl--global-state-file "x.el")
+                   (expand-file-name "/tmp/statetest/x.el")))))
+
+(ert-deftest claude-repl-test-state-file-empty-relative-yields-state-dir ()
+  "An empty RELATIVE yields the state dir itself (used by the flatten migration)."
+  (let ((process-environment (cons "CLAUDE_REPL_STATE_DIR=/tmp/statetest" process-environment)))
+    (should (equal (claude-repl--global-state-file "")
+                   (expand-file-name "/tmp/statetest")))))
+
+;;;; ---- Tests: legacy-state migration ----
+
+(ert-deftest claude-repl-test-migrate-moves-legacy-when-new-absent ()
+  "Migration moves a legacy dir to its new location when new is absent."
+  (let* ((tmp (make-temp-file "migtest-" t))
+         (legacy (expand-file-name "legacy" tmp))
+         (process-environment (cons (format "CLAUDE_REPL_STATE_DIR=%s" (expand-file-name "state" tmp))
+                                    process-environment))
+         (claude-repl--legacy-state-migrations (list (cons legacy "emacs"))))
+    (unwind-protect
+        (progn
+          (make-directory legacy t)
+          (with-temp-file (expand-file-name "f.el" legacy) (insert "data"))
+          (claude-repl--migrate-legacy-state)
+          (should-not (file-exists-p legacy))
+          (should (file-exists-p (claude-repl--global-state-file "emacs/f.el"))))
+      (delete-directory tmp t))))
+
+(ert-deftest claude-repl-test-migrate-skips-when-new-exists ()
+  "Migration never overwrites an existing new-location path."
+  (let* ((tmp (make-temp-file "migtest2-" t))
+         (legacy (expand-file-name "legacy" tmp))
+         (process-environment (cons (format "CLAUDE_REPL_STATE_DIR=%s" (expand-file-name "state" tmp))
+                                    process-environment))
+         (claude-repl--legacy-state-migrations (list (cons legacy "emacs"))))
+    (unwind-protect
+        (progn
+          (make-directory legacy t)
+          (with-temp-file (expand-file-name "old.el" legacy) (insert "old"))
+          (make-directory (claude-repl--global-state-file "emacs") t)
+          (with-temp-file (claude-repl--global-state-file "emacs/new.el") (insert "new"))
+          (claude-repl--migrate-legacy-state)
+          (should (file-exists-p (expand-file-name "old.el" legacy)))
+          (should-not (file-exists-p (claude-repl--global-state-file "emacs/old.el")))
+          (should (file-exists-p (claude-repl--global-state-file "emacs/new.el"))))
+      (delete-directory tmp t))))
+
+(ert-deftest claude-repl-test-migrate-noop-when-legacy-absent ()
+  "Migration is a no-op when the legacy path does not exist."
+  (let* ((tmp (make-temp-file "migtest3-" t))
+         (legacy (expand-file-name "nonexistent" tmp))
+         (process-environment (cons (format "CLAUDE_REPL_STATE_DIR=%s" (expand-file-name "state" tmp))
+                                    process-environment))
+         (claude-repl--legacy-state-migrations (list (cons legacy "emacs"))))
+    (unwind-protect
+        (progn
+          (claude-repl--migrate-legacy-state)
+          (should-not (file-exists-p (claude-repl--global-state-file "emacs"))))
+      (delete-directory tmp t))))
+
 ;;;; ---- Tests: log-to-file ----
 
-(ert-deftest claude-repl-test-logfile-path-returns-fixed-path ()
-  "`claude-repl--logfile-path' should return ~/.claude/emacs/doom-claude-repl.log."
+(ert-deftest claude-repl-test-logfile-path-returns-state-dir-path ()
+  "`claude-repl--logfile-path' should return the log under the state dir."
   (should (equal (claude-repl--logfile-path)
-                 (expand-file-name "~/.claude/emacs/doom-claude-repl.log"))))
+                 (claude-repl--global-state-file "doom-claude-repl.log"))))
 
 (ert-deftest claude-repl-test-logfile-path-honors-defcustom ()
   "`claude-repl--logfile-path' should expand `claude-repl-log-file-name'."
