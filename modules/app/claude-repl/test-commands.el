@@ -6806,6 +6806,46 @@ primitive), so only the bracketed transport beneath it is stubbed."
         (claude-repl--send-to-claude "do the thing"))
       (should (eq (claude-repl--ws-claude-state "ws1") :idle)))))
 
+;;;; ---- claude-repl-kill-claude-process ----
+
+(ert-deftest claude-repl-cmd-test-kill-claude-process/signals-term ()
+  "kill-claude-process sends SIGTERM to the found claude pid via the boundary wrapper."
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'claude-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'claude-repl--claude-process-pid) (lambda (_ws) 4242))
+              ((symbol-function 'claude-repl--signal-process)
+               (lambda (pid sig) (setq sent (cons pid sig)))))
+      (claude-repl-kill-claude-process)
+      (should (equal sent '(4242 . TERM))))))
+
+(ert-deftest claude-repl-cmd-test-kill-claude-process/no-process-errors ()
+  "kill-claude-process signals user-error and signals nothing when no claude process is found."
+  (let ((called nil))
+    (cl-letf (((symbol-function 'claude-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'claude-repl--claude-process-pid) (lambda (_ws) nil))
+              ((symbol-function 'claude-repl--signal-process)
+               (lambda (&rest _) (setq called t))))
+      (should-error (claude-repl-kill-claude-process) :type 'user-error)
+      (should-not called))))
+
+(ert-deftest claude-repl-cmd-test-claude-process-pid/finds-claude-child ()
+  "claude-process-pid returns the vterm shell's child whose comm matches claude, not a sibling."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create " *test-vterm-kill*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'get-buffer-process) (lambda (_b) 'fake-proc))
+                    ((symbol-function 'process-id) (lambda (p) (when (eq p 'fake-proc) 100)))
+                    ((symbol-function 'list-system-processes) (lambda () '(100 200 300)))
+                    ((symbol-function 'process-attributes)
+                     (lambda (pid)
+                       (pcase pid
+                         (100 '((comm . "zsh")    (ppid . 1)))
+                         (200 '((comm . "node")   (ppid . 100)))
+                         (300 '((comm . "claude") (ppid . 100)))))))
+            (claude-repl--ws-put "ws1" :vterm-buffer buf)
+            (should (equal (claude-repl--claude-process-pid "ws1") 300)))
+        (kill-buffer buf)))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here
