@@ -506,6 +506,76 @@ wrapper to an error-on-call lambda."
   (should (equal (claude-repl--compute-perm-flag nil "/tmp/ChessCom/test")
                  "--permission-mode auto")))
 
+;;;; ---- Tests: claude-repl--model-haiku-p ----
+
+(ert-deftest claude-repl-test-model-haiku-p-nil ()
+  "model-haiku-p returns nil for a nil model."
+  (should-not (claude-repl--model-haiku-p nil)))
+
+(ert-deftest claude-repl-test-model-haiku-p-empty ()
+  "model-haiku-p returns nil for an empty-string model."
+  (should-not (claude-repl--model-haiku-p "")))
+
+(ert-deftest claude-repl-test-model-haiku-p-bare-haiku ()
+  "model-haiku-p returns non-nil for the bare `haiku' alias."
+  (should (claude-repl--model-haiku-p "haiku")))
+
+(ert-deftest claude-repl-test-model-haiku-p-versioned ()
+  "model-haiku-p returns non-nil for a versioned `haiku-4-5' alias."
+  (should (claude-repl--model-haiku-p "haiku-4-5")))
+
+(ert-deftest claude-repl-test-model-haiku-p-vendor-prefixed ()
+  "model-haiku-p returns non-nil for a vendor-prefixed `claude-haiku-4-5' id."
+  (should (claude-repl--model-haiku-p "claude-haiku-4-5")))
+
+(ert-deftest claude-repl-test-model-haiku-p-case-insensitive ()
+  "model-haiku-p matches case-insensitively (`Haiku')."
+  (should (claude-repl--model-haiku-p "Haiku")))
+
+(ert-deftest claude-repl-test-model-haiku-p-opus ()
+  "model-haiku-p returns nil for `opus'."
+  (should-not (claude-repl--model-haiku-p "opus")))
+
+(ert-deftest claude-repl-test-model-haiku-p-sonnet ()
+  "model-haiku-p returns nil for `sonnet'."
+  (should-not (claude-repl--model-haiku-p "sonnet")))
+
+;;;; ---- Tests: claude-repl--compute-perm-flag model gating ----
+
+(ert-deftest claude-repl-test-compute-perm-flag-haiku-personal-downgrades ()
+  "compute-perm-flag downgrades a personal repo to skip-permissions for haiku."
+  (should (equal (claude-repl--compute-perm-flag nil "/home/user/personal/project" "haiku")
+                 "--dangerously-skip-permissions")))
+
+(ert-deftest claude-repl-test-compute-perm-flag-haiku-chesscom-downgrades ()
+  "compute-perm-flag downgrades a ChessCom repo to skip-permissions for haiku."
+  (should (equal (claude-repl--compute-perm-flag nil "/home/user/ChessCom/project" "haiku")
+                 "--dangerously-skip-permissions")))
+
+(ert-deftest claude-repl-test-compute-perm-flag-haiku-versioned-downgrades ()
+  "compute-perm-flag downgrades for a versioned haiku alias."
+  (should (equal (claude-repl--compute-perm-flag nil "/home/user/personal/project" "haiku-4-5")
+                 "--dangerously-skip-permissions")))
+
+(ert-deftest claude-repl-test-compute-perm-flag-opus-keeps-auto ()
+  "compute-perm-flag keeps --permission-mode auto for a non-haiku (opus) model."
+  (should (equal (claude-repl--compute-perm-flag nil "/home/user/personal/project" "opus")
+                 "--permission-mode auto")))
+
+(ert-deftest claude-repl-test-compute-perm-flag-sonnet-keeps-auto ()
+  "compute-perm-flag keeps --permission-mode auto for a non-haiku (sonnet) model."
+  (should (equal (claude-repl--compute-perm-flag nil "/home/user/ChessCom/project" "sonnet")
+                 "--permission-mode auto")))
+
+(ert-deftest claude-repl-test-compute-perm-flag-nil-model-keeps-auto ()
+  "compute-perm-flag keeps --permission-mode auto when model is nil."
+  (should (equal (claude-repl--compute-perm-flag nil "/home/user/personal/project" nil)
+                 "--permission-mode auto")))
+
+(ert-deftest claude-repl-test-compute-perm-flag-haiku-sandboxed-still-nil ()
+  "compute-perm-flag returns nil when sandboxed even for a haiku model."
+  (should-not (claude-repl--compute-perm-flag t "/home/user/personal/project" "haiku")))
+
 (ert-deftest claude-repl-test-assemble-cmd-bare-metal ()
   "assemble-cmd should produce a plain `claude' command."
   (should (equal (claude-repl--assemble-cmd "--resume abc")
@@ -2037,6 +2107,52 @@ restart (the lazy-start path applies its defaults instead)."
                  (lambda (_ws) nil)))
         (let ((result (claude-repl--build-start-cmd "ws1")))
           (should (string-match-p "--model opus" (plist-get result :cmd))))))))
+
+(ert-deftest claude-repl-test-build-start-cmd-ws-haiku-model-skips-permissions ()
+  "build-start-cmd downgrades to --dangerously-skip-permissions when ws :model is haiku."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-system-prompt nil)
+          (claude-repl-interactive-model "opus"))
+      (claude-repl--ws-put "ws1" :active-env :bare-metal)
+      (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
+      (claude-repl--ws-put "ws1" :worktree-p nil)
+      (claude-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
+      (claude-repl--ws-put "ws1" :model "haiku")
+      (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
+                 (lambda (_ws) nil)))
+        (let ((result (claude-repl--build-start-cmd "ws1")))
+          (should (string-match-p "--dangerously-skip-permissions" (plist-get result :cmd)))
+          (should-not (string-match-p "--permission-mode auto" (plist-get result :cmd))))))))
+
+(ert-deftest claude-repl-test-build-start-cmd-interactive-haiku-skips-permissions ()
+  "build-start-cmd downgrades to --dangerously-skip-permissions when the interactive model is haiku and ws has no :model."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-system-prompt nil)
+          (claude-repl-interactive-model "haiku"))
+      (claude-repl--ws-put "ws1" :active-env :bare-metal)
+      (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
+      (claude-repl--ws-put "ws1" :worktree-p nil)
+      (claude-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
+      (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
+                 (lambda (_ws) nil)))
+        (let ((result (claude-repl--build-start-cmd "ws1")))
+          (should (string-match-p "--dangerously-skip-permissions" (plist-get result :cmd)))
+          (should-not (string-match-p "--permission-mode auto" (plist-get result :cmd))))))))
+
+(ert-deftest claude-repl-test-build-start-cmd-opus-keeps-permission-mode-auto ()
+  "build-start-cmd keeps --permission-mode auto when the interactive model is opus."
+  (claude-repl-test--with-clean-state
+    (let ((claude-repl-system-prompt nil)
+          (claude-repl-interactive-model "opus"))
+      (claude-repl--ws-put "ws1" :active-env :bare-metal)
+      (claude-repl--ws-put "ws1" :bare-metal (make-claude-repl-instantiation))
+      (claude-repl--ws-put "ws1" :worktree-p nil)
+      (claude-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
+      (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
+                 (lambda (_ws) nil)))
+        (let ((result (claude-repl--build-start-cmd "ws1")))
+          (should (string-match-p "--permission-mode auto" (plist-get result :cmd)))
+          (should-not (string-match-p "--dangerously-skip-permissions" (plist-get result :cmd))))))))
 
 (ert-deftest claude-repl-test-build-start-cmd-bare-metal-includes-system-prompt-default ()
   "build-start-cmd for bare-metal with default `claude-repl-system-prompt' includes --system-prompt \".\"."
