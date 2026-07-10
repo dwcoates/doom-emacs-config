@@ -12,7 +12,7 @@
 # actually waiting.
 #
 # We just write a sentinel file unconditionally and let elisp gate
-# the state transition on the current :claude-state (see
+# the state transition on the current :agent-state (see
 # `agent-repl--on-permission-event' in sentinel.el).  No hookSpecificOutput
 # is emitted, so the hook is purely informational — Claude Code's normal
 # permission flow continues.

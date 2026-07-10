@@ -85,7 +85,7 @@ in WS's workspace plist."
   "`--panel-buffer :drawer' returns the drawer buffer (frame-scoped
 singleton, WS arg ignored).  Returns nil when the drawer buffer has
 not been created."
-  (let ((agent-repl-drawer-buffer-name "*claude-test-drawer*"))
+  (let ((agent-repl-drawer-buffer-name "*agent-test-drawer*"))
     (let ((buf (get-buffer-create agent-repl-drawer-buffer-name)))
       (unwind-protect
           (progn

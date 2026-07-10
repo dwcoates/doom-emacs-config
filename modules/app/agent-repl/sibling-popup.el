@@ -13,7 +13,7 @@
 ;;
 ;; `agent-repl-sibling-popup-display-fn' is a `display-buffer' action
 ;; that, when claude panels are visible, instead splits BELOW the
-;; leftmost non-side, non-claude-panel "work" window.  The new popup
+;; leftmost non-side, non-agent-panel "work" window.  The new popup
 ;; window inherits the work window's column width, so it stops on the
 ;; right edge of the work area rather than spanning under claude.  When
 ;; claude panels are NOT visible, it falls back to the standard Doom
@@ -31,7 +31,7 @@
 (defun agent-repl-sibling-popup--target-window (&optional frame)
   "Return the work window to split below for a sibling bottom popup.
 
-Returns the leftmost live, non-side, non-claude-panel window on FRAME
+Returns the leftmost live, non-side, non-agent-panel window on FRAME
 \(defaults to the selected frame\) when the claude vterm panel is
 visible — that is the work column whose width the popup should match.
 
@@ -49,9 +49,9 @@ that the default frame-wide bottom popup behavior should apply."
           (let* ((buf (window-buffer win))
                  (x (car (window-edges win nil nil t)))
                  (is-side (agent-repl-window--side-window-p win))
-                 (is-claude (or (eq buf vterm-buf)
+                 (is-agent (or (eq buf vterm-buf)
                                 (and input-buf (eq buf input-buf)))))
-            (when (and (not is-side) (not is-claude) (< x best-x))
+            (when (and (not is-side) (not is-agent) (< x best-x))
               (setq best win
                     best-x x))))
         best))))
@@ -89,7 +89,7 @@ when the popup module is loaded; otherwise uses the plain
   "`display-buffer' action that respects claude panels for bottom popups.
 
 When the claude vterm panel is visible, splits BELOW the leftmost
-work (non-side, non-claude-panel) window and displays BUFFER there;
+work (non-side, non-agent-panel) window and displays BUFFER there;
 the popup width matches the work column, leaving claude panels
 untouched.  When claude panels are absent, defers to the Doom
 stacked-side-window action so the default frame-wide bottom-popup

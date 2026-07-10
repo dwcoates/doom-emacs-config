@@ -235,8 +235,8 @@ is stale and must be re-resolved on next read."
 (ert-deftest agent-repl-test-rename-update-buffers-renames-vterm-and-input ()
   "Vterm and input buffers are renamed to the new ws's panel names."
   (agent-repl-test--with-clean-state
-    (let ((vbuf (get-buffer-create "*claude-panel-old*"))
-          (ibuf (get-buffer-create "*claude-panel-input-old*")))
+    (let ((vbuf (get-buffer-create "*agent-panel-old*"))
+          (ibuf (get-buffer-create "*agent-panel-input-old*")))
       (unwind-protect
           (progn
             (puthash "new" (list :vterm-buffer vbuf
@@ -244,15 +244,15 @@ is stale and must be re-resolved on next read."
                                  :project-dir "/tmp/new")
                      agent-repl--workspaces)
             (agent-repl--rename-update-buffers "old" "new" "/tmp/new")
-            (should (string= (buffer-name vbuf) "*claude-panel-new*"))
-            (should (string= (buffer-name ibuf) "*claude-panel-input-new*")))
+            (should (string= (buffer-name vbuf) "*agent-panel-new*"))
+            (should (string= (buffer-name ibuf) "*agent-panel-input-new*")))
         (when (buffer-live-p vbuf) (kill-buffer vbuf))
         (when (buffer-live-p ibuf) (kill-buffer ibuf))))))
 
 (ert-deftest agent-repl-test-rename-update-buffers-rewrites-owning-workspace ()
   "Buffer-local `agent-repl--owning-workspace' is repointed to the new ws."
   (agent-repl-test--with-clean-state
-    (let ((vbuf (get-buffer-create "*claude-panel-old*")))
+    (let ((vbuf (get-buffer-create "*agent-panel-old*")))
       (unwind-protect
           (progn
             (with-current-buffer vbuf
@@ -268,7 +268,7 @@ is stale and must be re-resolved on next read."
 (ert-deftest agent-repl-test-rename-update-buffers-updates-default-directory ()
   "Vterm buffer's `default-directory' is repointed to the new path."
   (agent-repl-test--with-clean-state
-    (let ((vbuf (get-buffer-create "*claude-panel-old*")))
+    (let ((vbuf (get-buffer-create "*agent-panel-old*")))
       (unwind-protect
           (progn
             (puthash "new" (list :vterm-buffer vbuf

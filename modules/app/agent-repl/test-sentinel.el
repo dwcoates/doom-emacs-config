@@ -298,7 +298,7 @@ propagate (a hard error would kill the file-notify watcher)."
   "on-stop-event with no pending subagents finalizes immediately."
   (agent-repl-test--with-clean-state
     (let ((finished-ws nil))
-      (cl-letf (((symbol-function 'agent-repl--handle-claude-finished)
+      (cl-letf (((symbol-function 'agent-repl--handle-agent-finished)
                  (lambda (ws) (setq finished-ws ws))))
         (agent-repl--on-stop-event "ws1" "/some/dir")
         (should (equal finished-ws "ws1"))))))
@@ -308,7 +308,7 @@ propagate (a hard error would kill the file-notify watcher)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-incf-pending-subagents "ws1")
     (let ((finished-called nil))
-      (cl-letf (((symbol-function 'agent-repl--handle-claude-finished)
+      (cl-letf (((symbol-function 'agent-repl--handle-agent-finished)
                  (lambda (_ws) (setq finished-called t))))
         (agent-repl--on-stop-event "ws1" "/some/dir")
         (should-not finished-called)
@@ -317,7 +317,7 @@ propagate (a hard error would kill the file-notify watcher)."
 (ert-deftest agent-repl-test-on-stop-event-sets-stop-received ()
   "on-stop-event always records that Stop fired (independent of finalization)."
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--handle-claude-finished) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--handle-agent-finished) #'ignore))
       (agent-repl--on-stop-event "ws1" "/some/dir")
       ;; After a successful finalize, clear-stop-tracking resets it.
       ;; This confirms set-stop-received fired before clear ran.
@@ -327,7 +327,7 @@ propagate (a hard error would kill the file-notify watcher)."
   "on-stop-event clears tracking after successful finalize so the next
 turn starts from a clean slate."
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--handle-claude-finished) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--handle-agent-finished) #'ignore))
       (agent-repl--on-stop-event "ws1" "/some/dir")
       (should-not (agent-repl--ws-stop-received-p "ws1"))
       (should (zerop (agent-repl--ws-pending-subagents "ws1"))))))
@@ -340,7 +340,7 @@ turn starts from a clean slate."
                  (lambda (_f) '(:dir "/unknown/dir" :session-id nil)))
                 ((symbol-function 'agent-repl--ws-for-dir)
                  (lambda (_d) nil))
-                ((symbol-function 'agent-repl--handle-claude-finished)
+                ((symbol-function 'agent-repl--handle-agent-finished)
                  (lambda (_ws) (setq finished-called t)))
                 ((symbol-function 'delete-file) #'ignore))
         (agent-repl--process-sentinel-file
@@ -373,7 +373,7 @@ turn starts from a clean slate."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-incf-pending-subagents "ws1")
     (let ((finished-called nil))
-      (cl-letf (((symbol-function 'agent-repl--handle-claude-finished)
+      (cl-letf (((symbol-function 'agent-repl--handle-agent-finished)
                  (lambda (_ws) (setq finished-called t))))
         (agent-repl--on-subagent-stop-event "ws1" "/some/dir")
         (should-not finished-called)))))
@@ -384,7 +384,7 @@ turn starts from a clean slate."
     (agent-repl--ws-incf-pending-subagents "ws1")
     (agent-repl--ws-set-stop-received "ws1" t)
     (let ((finished-ws nil))
-      (cl-letf (((symbol-function 'agent-repl--handle-claude-finished)
+      (cl-letf (((symbol-function 'agent-repl--handle-agent-finished)
                  (lambda (ws) (setq finished-ws ws))))
         (agent-repl--on-subagent-stop-event "ws1" "/some/dir")
         (should (equal finished-ws "ws1"))))))
@@ -396,7 +396,7 @@ turn starts from a clean slate."
     (agent-repl--ws-incf-pending-subagents "ws1")
     (agent-repl--ws-set-stop-received "ws1" t)
     (let ((finished-called nil))
-      (cl-letf (((symbol-function 'agent-repl--handle-claude-finished)
+      (cl-letf (((symbol-function 'agent-repl--handle-agent-finished)
                  (lambda (_ws) (setq finished-called t))))
         (agent-repl--on-subagent-stop-event "ws1" "/some/dir")
         (should-not finished-called)
@@ -407,10 +407,10 @@ turn starts from a clean slate."
 ;;;; ---- Tests: on-stop-failure-event handler ----
 
 (ert-deftest agent-repl-test-on-stop-failure-event-sets-stop-failed ()
-  "on-stop-failure-event writes :claude-state :stop-failed."
+  "on-stop-failure-event writes :agent-state :stop-failed."
   (agent-repl-test--with-clean-state
     (agent-repl--on-stop-failure-event "ws1" "/some/dir")
-    (should (eq :stop-failed (agent-repl--ws-claude-state "ws1")))))
+    (should (eq :stop-failed (agent-repl--ws-agent-state "ws1")))))
 
 (ert-deftest agent-repl-test-on-stop-failure-event-clears-stop-tracking ()
   "on-stop-failure-event clears any in-flight Stop / SubagentStop bookkeeping
@@ -506,13 +506,13 @@ first.  This test pins that ordering."
 ;;;; ---- Tests: on-permission-event handler ----
 
 (ert-deftest agent-repl-test-on-permission-event-sets-permission-from-thinking ()
-  "on-permission-event should call ws-set-claude-state with :permission when state is :thinking.
+  "on-permission-event should call ws-set-agent-state with :permission when state is :thinking.
 Mid-turn (:thinking) is the only state where a permission_prompt notification
 is treated as a real permission request; see on-permission-event docstring."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :thinking)
     (let ((set-args nil))
-      (cl-letf (((symbol-function 'agent-repl--ws-set-claude-state)
+      (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)
                  (lambda (ws state) (setq set-args (list ws state)))))
         (agent-repl--on-permission-event "ws1" "/some/dir")
         (should (equal set-args '("ws1" :permission)))))))
@@ -873,7 +873,7 @@ lookup is never dropped."
 ;;;; ---- Tests: end-to-end dispatch through process-sentinel-file ----
 
 (ert-deftest agent-repl-test-end-to-end-permission-dispatch ()
-  "Full dispatch: permission_prompt file -> on-permission-event -> ws-set-claude-state :permission.
+  "Full dispatch: permission_prompt file -> on-permission-event -> ws-set-agent-state :permission.
 ws-get is mocked to return :thinking so the elisp state-gate in
 on-permission-event treats the notification as a real permission prompt."
   (agent-repl-test--with-clean-state
@@ -884,7 +884,7 @@ on-permission-event treats the notification as a real permission prompt."
                  (lambda (_d) "test-ws"))
                 ((symbol-function 'agent-repl--update-session-id-from-sentinel)
                  #'ignore)
-                ((symbol-function 'agent-repl--ws-set-claude-state)
+                ((symbol-function 'agent-repl--ws-set-agent-state)
                  (lambda (ws state) (setq set-args (list ws state))))
                 ((symbol-function 'agent-repl--ws-get)
                  (lambda (_ws _key) :thinking))
@@ -904,7 +904,7 @@ single Stop fire."
                  (lambda (_d) "test-ws"))
                 ((symbol-function 'agent-repl--update-session-id-from-sentinel)
                  #'ignore)
-                ((symbol-function 'agent-repl--handle-claude-finished)
+                ((symbol-function 'agent-repl--handle-agent-finished)
                  (lambda (ws) (setq finished ws)))
                 ((symbol-function 'delete-file) #'ignore))
         (agent-repl--dispatch-sentinel-file "/dir/stop_123")
@@ -1161,11 +1161,11 @@ We do that by stubbing ws-get to return :thinking unconditionally."
 (ert-deftest agent-repl-test-on-permission-event-already-permission-no-op ()
   "on-permission-event should NOT re-set state when ws is already :permission.
 A duplicate or stale Notification arriving while we're still in :permission
-must not call ws-set-claude-state — the gate accepts only :thinking."
+must not call ws-set-agent-state — the gate accepts only :thinking."
   (agent-repl-test--with-clean-state
     (let ((set-called nil))
       (agent-repl--ws-set "ws1" :permission)
-      (cl-letf (((symbol-function 'agent-repl--ws-set-claude-state)
+      (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)
                  (lambda (_ws _state) (setq set-called t))))
         (agent-repl--on-permission-event "ws1" "/some/dir")
         (should-not set-called)))))
@@ -1176,7 +1176,7 @@ This is the regression guard for phantom ❓ appearing after the user is done."
   (agent-repl-test--with-clean-state
     (let ((set-called nil))
       (agent-repl--ws-set "ws1" :idle)
-      (cl-letf (((symbol-function 'agent-repl--ws-set-claude-state)
+      (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)
                  (lambda (_ws _state) (setq set-called t))))
         (agent-repl--on-permission-event "ws1" "/some/dir")
         (should-not set-called)
@@ -1187,7 +1187,7 @@ This is the regression guard for phantom ❓ appearing after the user is done."
   (agent-repl-test--with-clean-state
     (let ((set-called nil))
       (agent-repl--ws-set "ws1" :done)
-      (cl-letf (((symbol-function 'agent-repl--ws-set-claude-state)
+      (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)
                  (lambda (_ws _state) (setq set-called t))))
         (agent-repl--on-permission-event "ws1" "/some/dir")
         (should-not set-called)
@@ -1198,7 +1198,7 @@ This is the regression guard for phantom ❓ appearing after the user is done."
   (agent-repl-test--with-clean-state
     (let ((set-called nil))
       (agent-repl--ws-set "ws1" :init)
-      (cl-letf (((symbol-function 'agent-repl--ws-set-claude-state)
+      (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)
                  (lambda (_ws _state) (setq set-called t))))
         (agent-repl--on-permission-event "ws1" "/some/dir")
         (should-not set-called)
@@ -1208,7 +1208,7 @@ This is the regression guard for phantom ❓ appearing after the user is done."
   "on-permission-event must no-op when state is nil (workspace has no claude session)."
   (agent-repl-test--with-clean-state
     (let ((set-called nil))
-      (cl-letf (((symbol-function 'agent-repl--ws-set-claude-state)
+      (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)
                  (lambda (_ws _state) (setq set-called t))))
         (agent-repl--on-permission-event "ws1" "/some/dir")
         (should-not set-called)))))
@@ -1216,9 +1216,9 @@ This is the regression guard for phantom ❓ appearing after the user is done."
 ;;;; ---- Tests: on-stop-event uncovered edge cases ----
 
 (ert-deftest agent-repl-test-on-stop-event-handle-finished-error ()
-  "on-stop-event should propagate error from handle-claude-finished."
+  "on-stop-event should propagate error from handle-agent-finished."
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--handle-claude-finished)
+    (cl-letf (((symbol-function 'agent-repl--handle-agent-finished)
                (lambda (_ws) (error "finished handler boom"))))
       (should-error (agent-repl--on-stop-event "ws1" "/some/dir")))))
 
@@ -1350,11 +1350,11 @@ This is the regression guard for phantom ❓ appearing after the user is done."
 ;;;; ---- Tests: sentinel event edge cases (status transitions .md) ----
 
 (ert-deftest agent-repl-test-on-stop-event-delegates-regardless-of-state ()
-  "Stop event delegates to handle-finished regardless of the current claude-state."
+  "Stop event delegates to handle-finished regardless of the current agent-state."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :permission)
     (let ((finished-called nil))
-      (cl-letf (((symbol-function 'agent-repl--handle-claude-finished)
+      (cl-letf (((symbol-function 'agent-repl--handle-agent-finished)
                  (lambda (ws) (setq finished-called ws))))
         (agent-repl--on-stop-event "ws1" "/some/dir")
         (should (equal finished-called "ws1"))))))
@@ -1598,13 +1598,13 @@ but its :vterm-buffer slot is nil — a structural inconsistency that
 must surface, not be silently swallowed."
   (agent-repl-test--with-clean-state
     (let ((messages '())
-          (claude-state-written nil))
+          (agent-state-written nil))
       (cl-letf (((symbol-function 'message)
                  (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
-                ((symbol-function 'agent-repl--ws-set-claude-state)
-                 (lambda (&rest _) (setq claude-state-written t))))
+                ((symbol-function 'agent-repl--ws-set-agent-state)
+                 (lambda (&rest _) (setq agent-state-written t))))
         (agent-repl--on-session-start-event "ws1" "/some/dir")
-        (should-not claude-state-written)
+        (should-not agent-state-written)
         (should (cl-some (lambda (m)
                            (and (string-match-p "\\[agent-repl\\] ERROR" m)
                                 (string-match-p "session_start" m)
@@ -1617,15 +1617,15 @@ must surface, not be silently swallowed."
   (agent-repl-test--with-clean-state
     (let ((fake-buf (generate-new-buffer " *test-session-start-dead*"))
           (messages '())
-          (claude-state-written nil))
+          (agent-state-written nil))
       (agent-repl--ws-put "ws1" :vterm-buffer fake-buf)
       (kill-buffer fake-buf)
       (cl-letf (((symbol-function 'message)
                  (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
-                ((symbol-function 'agent-repl--ws-set-claude-state)
-                 (lambda (&rest _) (setq claude-state-written t))))
+                ((symbol-function 'agent-repl--ws-set-agent-state)
+                 (lambda (&rest _) (setq agent-state-written t))))
         (agent-repl--on-session-start-event "ws1" "/some/dir")
-        (should-not claude-state-written)
+        (should-not agent-state-written)
         (should (cl-some (lambda (m)
                            (and (string-match-p "\\[agent-repl\\] ERROR" m)
                                 (string-match-p "session_start" m)
@@ -1634,9 +1634,9 @@ must surface, not be silently swallowed."
                          messages))))))
 
 (ert-deftest agent-repl-test-on-session-start-event-sets-idle ()
-  "on-session-start-event writes :claude-state :idle (transition from :init)."
+  "on-session-start-event writes :agent-state :idle (transition from :init)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :init)
+    (agent-repl--ws-set-agent-state "ws1" :init)
     (let ((fake-buf (generate-new-buffer " *test-session-start-idle*")))
       (unwind-protect
           (progn
@@ -1644,27 +1644,27 @@ must surface, not be silently swallowed."
             (cl-letf (((symbol-function 'agent-repl--cancel-ready-timer) #'ignore)
                       ((symbol-function 'agent-repl--open-panels-after-ready) #'ignore))
               (agent-repl--on-session-start-event "ws1" "/some/dir")
-              (should (eq (agent-repl--ws-claude-state "ws1") :idle))))
+              (should (eq (agent-repl--ws-agent-state "ws1") :idle))))
         (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
 
 ;;;; ---- Tests: ws-fully-loaded latch ----
 
-(ert-deftest agent-repl-test-latch-claude-ready-alone-does-not-fire ()
-  "Latch flip of `:claude-ready' alone does not fire ws-fully-loaded.
+(ert-deftest agent-repl-test-latch-agent-ready-alone-does-not-fire ()
+  "Latch flip of `:agent-ready' alone does not fire ws-fully-loaded.
 The hook requires BOTH bits set; setting only one is a no-op fire-wise."
   (agent-repl-test--with-clean-state
     (let ((fires 0))
       (let ((agent-repl-ws-fully-loaded-functions
              (list (lambda (&rest _) (cl-incf fires)))))
-        (agent-repl--latch-and-maybe-fire-loaded "ws1" :claude-ready)
+        (agent-repl--latch-and-maybe-fire-loaded "ws1" :agent-ready)
         (should (= fires 0))
         ;; Latch bit set, but `:ws-loaded' still nil.
-        (should (eq (agent-repl--ws-get "ws1" :claude-ready) t))
+        (should (eq (agent-repl--ws-get "ws1" :agent-ready) t))
         (should (eq (agent-repl--ws-get "ws1" :ws-loaded) nil))))))
 
 (ert-deftest agent-repl-test-latch-ws-loaded-alone-does-not-fire ()
   "Latch flip of `:ws-loaded' alone does not fire ws-fully-loaded.
-Symmetric to the `:claude-ready'-alone case."
+Symmetric to the `:agent-ready'-alone case."
   (agent-repl-test--with-clean-state
     (let ((fires 0))
       (let ((agent-repl-ws-fully-loaded-functions
@@ -1672,30 +1672,30 @@ Symmetric to the `:claude-ready'-alone case."
         (agent-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded)
         (should (= fires 0))
         (should (eq (agent-repl--ws-get "ws1" :ws-loaded) t))
-        (should (eq (agent-repl--ws-get "ws1" :claude-ready) nil))))))
+        (should (eq (agent-repl--ws-get "ws1" :agent-ready) nil))))))
 
 (ert-deftest agent-repl-test-latch-claude-then-ws-fires ()
   "Latch fires once when both bits are set, regardless of order.
-Setting `:claude-ready' first then `:ws-loaded' triggers the hook."
+Setting `:agent-ready' first then `:ws-loaded' triggers the hook."
   (agent-repl-test--with-clean-state
     (let ((fired-with nil))
       (let ((agent-repl-ws-fully-loaded-functions
              (list (lambda (ws marker) (push (cons ws marker) fired-with)))))
-        (agent-repl--latch-and-maybe-fire-loaded "ws1" :claude-ready)
+        (agent-repl--latch-and-maybe-fire-loaded "ws1" :agent-ready)
         (should (null fired-with))
         (agent-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded)
         (should (equal fired-with '(("ws1" . nil))))))))
 
 (ert-deftest agent-repl-test-latch-ws-then-claude-fires ()
   "Latch fires once when both bits are set, regardless of order.
-Setting `:ws-loaded' first then `:claude-ready' also triggers the hook."
+Setting `:ws-loaded' first then `:agent-ready' also triggers the hook."
   (agent-repl-test--with-clean-state
     (let ((fired-with nil))
       (let ((agent-repl-ws-fully-loaded-functions
              (list (lambda (ws marker) (push (cons ws marker) fired-with)))))
         (agent-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded)
         (should (null fired-with))
-        (agent-repl--latch-and-maybe-fire-loaded "ws1" :claude-ready)
+        (agent-repl--latch-and-maybe-fire-loaded "ws1" :agent-ready)
         (should (equal fired-with '(("ws1" . nil))))))))
 
 (ert-deftest agent-repl-test-latch-clears-bits-after-fire ()
@@ -1704,9 +1704,9 @@ so a subsequent load cycle (e.g. agent-repl-restart) starts fresh."
   (agent-repl-test--with-clean-state
     (let ((agent-repl-ws-fully-loaded-functions
            (list (lambda (&rest _) nil))))
-      (agent-repl--latch-and-maybe-fire-loaded "ws1" :claude-ready)
+      (agent-repl--latch-and-maybe-fire-loaded "ws1" :agent-ready)
       (agent-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded)
-      (should (eq (agent-repl--ws-get "ws1" :claude-ready) nil))
+      (should (eq (agent-repl--ws-get "ws1" :agent-ready) nil))
       (should (eq (agent-repl--ws-get "ws1" :ws-loaded) nil)))))
 
 (ert-deftest agent-repl-test-latch-passes-marker-through ()
@@ -1716,8 +1716,8 @@ watchdog path to signal `:timed-out'."
     (let ((received-marker 'unset))
       (let ((agent-repl-ws-fully-loaded-functions
              (list (lambda (_ws marker) (setq received-marker marker)))))
-        ;; Pre-set :claude-ready so the :ws-loaded flip triggers fire.
-        (agent-repl--ws-put "ws1" :claude-ready t)
+        ;; Pre-set :agent-ready so the :ws-loaded flip triggers fire.
+        (agent-repl--ws-put "ws1" :agent-ready t)
         (agent-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded :timed-out)
         (should (eq received-marker :timed-out))))))
 
@@ -1728,12 +1728,12 @@ watchdog path to signal `:timed-out'."
       (let ((agent-repl-ws-fully-loaded-functions
              (list (lambda (&rest _) (error "boom"))
                    (lambda (&rest _) (setq second-called t)))))
-        (agent-repl--ws-put "ws1" :claude-ready t)
+        (agent-repl--ws-put "ws1" :agent-ready t)
         (agent-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded)
         (should second-called)))))
 
-(ert-deftest agent-repl-test-on-session-start-event-flips-claude-ready ()
-  "on-session-start-event flips the `:claude-ready' latch bit on the ws plist."
+(ert-deftest agent-repl-test-on-session-start-event-flips-agent-ready ()
+  "on-session-start-event flips the `:agent-ready' latch bit on the ws plist."
   (agent-repl-test--with-clean-state
     (let ((fake-buf (generate-new-buffer " *test-session-start-latch*")))
       (unwind-protect
@@ -1743,12 +1743,12 @@ watchdog path to signal `:timed-out'."
                       ((symbol-function 'agent-repl--open-panels-after-ready) #'ignore))
               (agent-repl--on-session-start-event "ws1" "/some/dir")
               ;; :ws-loaded is nil, so the latch shouldn't have fired+cleared yet.
-              (should (eq (agent-repl--ws-get "ws1" :claude-ready) t))))
+              (should (eq (agent-repl--ws-get "ws1" :agent-ready) t))))
         (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
 
 (ert-deftest agent-repl-test-on-session-start-event-duplicate-still-fires-hooks ()
   "Even when `agent-repl--ready' is already t (duplicate session_start),
-both `after-ready-functions' and the `:claude-ready' latch flip still fire.
+both `after-ready-functions' and the `:agent-ready' latch flip still fire.
 This is the stall fix: a swallowed duplicate must not block loader advance."
   (agent-repl-test--with-clean-state
     (let ((fake-buf (generate-new-buffer " *test-session-start-dup*"))
@@ -1765,7 +1765,7 @@ This is the stall fix: a swallowed duplicate must not block loader advance."
                 ;; Hook fired despite duplicate.
                 (should (= after-ready-fires 1))
                 ;; Latch bit set despite duplicate.
-                (should (eq (agent-repl--ws-get "ws1" :claude-ready) t)))))
+                (should (eq (agent-repl--ws-get "ws1" :agent-ready) t)))))
         (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
 
 ;;;; ---- Tests: permission-notify.sh sentinel writing ----
@@ -1845,7 +1845,7 @@ that fixture — and checks the sentinel there."
 Claude Code uses that wording for some real permission prompts, so the
 hook no longer filters on .message; discrimination between real prompts
 and 60s-idle nudges happens elisp-side in
-`agent-repl--on-permission-event' by gating on `:claude-state'."
+`agent-repl--on-permission-event' by gating on `:agent-state'."
   (let* ((input "{\"cwd\":\"/d\",\"session_id\":\"s\",\"message\":\"Claude Code needs your attention\",\"notification_type\":\"permission_prompt\"}")
          (result (agent-repl-test--run-permission-hook input)))
     (should (= 0 (plist-get result :exit)))

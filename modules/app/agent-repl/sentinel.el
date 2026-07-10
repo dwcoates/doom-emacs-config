@@ -261,7 +261,7 @@ name and the directory."
             (agent-repl--log ws "%s: file=%s dir=%s ws=%s status=%s"
                               (plist-get handler :name)
                               (file-name-nondirectory file) dir ws
-                              (agent-repl--ws-get ws :claude-state))
+                              (agent-repl--ws-get ws :agent-state))
             (funcall (plist-get handler :callback) ws dir))
         (error
          (agent-repl--do-log ws "process-sentinel-file: handler=%s ERRORED file=%s dir=%s ws=%s err=%S"
@@ -293,30 +293,30 @@ The Notification hook fires for both real permission prompts and the
 60s-idle \"Claude Code needs your attention\" nudge under the same
 notification_type=permission_prompt.  We can't distinguish them by
 message text alone (Claude Code uses the attention wording for some
-real permission prompts too), so we gate on `:claude-state' instead:
+real permission prompts too), so we gate on `:agent-state' instead:
 mid-turn (`:thinking') means Claude is actively working and a
 notification at this point is a real permission prompt; any other
 state (`:idle' / `:done' / `:permission' / `:init' / nil) means the
 turn is settled or already attention-flagged, so the notification is
 either a stale idle nudge or a duplicate, and we leave state alone."
-  (let ((before (agent-repl--ws-get ws :claude-state)))
+  (let ((before (agent-repl--ws-get ws :agent-state)))
     (agent-repl--log-verbose ws "on-permission-event: ws=%s status-BEFORE=%s" ws before)
     (cond
      ((eq before :thinking)
-      (agent-repl--ws-set-claude-state ws :permission)
-      (agent-repl--log-verbose ws "on-permission-event: ws=%s status-AFTER=%s" ws (agent-repl--ws-get ws :claude-state)))
+      (agent-repl--ws-set-agent-state ws :permission)
+      (agent-repl--log-verbose ws "on-permission-event: ws=%s status-AFTER=%s" ws (agent-repl--ws-get ws :agent-state)))
      (t
       (agent-repl--log ws "on-permission-event: ws=%s ignoring notification (state=%s, not :thinking)" ws before)))))
 
 (defun agent-repl--maybe-finalize-stop (ws)
   "If WS is fully stopped (Stop fired AND no pending subagents), finalize it.
 Drives the `:thinking → :done' transition via
-`agent-repl--handle-claude-finished' and clears the Stop / SubagentStop
+`agent-repl--handle-agent-finished' and clears the Stop / SubagentStop
 tracking so the next turn starts fresh.  No-op when not fully stopped."
   (when (agent-repl--fully-stopped-p ws)
     (agent-repl--log ws "maybe-finalize-stop: ws=%s fully stopped, finalizing" ws)
     (agent-repl--ws-clear-stop-tracking ws)
-    (agent-repl--handle-claude-finished ws)))
+    (agent-repl--handle-agent-finished ws)))
 
 (defun agent-repl--on-stop-event (ws dir)
   "Handle a Stop event for workspace WS with directory DIR.
@@ -347,7 +347,7 @@ the turn."
 
 (defun agent-repl--on-stop-failure-event (ws dir)
   "Handle a StopFailure event for workspace WS with directory DIR.
-Sets `:claude-state' to `:stop-failed' (visually distinct from `:dead'
+Sets `:agent-state' to `:stop-failed' (visually distinct from `:dead'
 since the vterm session is still alive and re-promptable) and clears
 the Stop / SubagentStop tracking so a subsequent successful turn isn't
 gated on a stale pending-subagent counter from this aborted turn.
@@ -362,19 +362,19 @@ failure is surfaced (the ⚠ `:stop-failed' tab plus the log entry) and
 recovery is left to the user."
   (agent-repl--log ws "on-stop-failure-event: ws=%s dir=%S" ws dir)
   (agent-repl--ws-clear-stop-tracking ws)
-  (agent-repl--ws-set-claude-state ws :stop-failed))
+  (agent-repl--ws-set-agent-state ws :stop-failed))
 
 (defun agent-repl--on-prompt-submit-event (ws _dir)
   "Mark workspace WS as thinking after a prompt submission."
-  (let ((before (agent-repl--ws-get ws :claude-state)))
+  (let ((before (agent-repl--ws-get ws :agent-state)))
     (agent-repl--log-verbose ws "on-prompt-submit-event: ws=%s status-BEFORE=%s" ws before)
     (agent-repl--mark-ws-thinking ws)
-    (agent-repl--log-verbose ws "on-prompt-submit-event: ws=%s status-AFTER=%s" ws (agent-repl--ws-get ws :claude-state))))
+    (agent-repl--log-verbose ws "on-prompt-submit-event: ws=%s status-AFTER=%s" ws (agent-repl--ws-get ws :agent-state))))
 
 (defun agent-repl--on-session-start-event (ws _dir)
   "Handle a session_start event for workspace WS.
 When WS has a live vterm buffer, this is Claude becoming ready:
-transitions `:claude-state' from `:init' to `:idle', sets
+transitions `:agent-state' from `:init' to `:idle', sets
 `agent-repl--ready' on the vterm buffer, cancels the ready timer,
 and opens panels (via `open-panels-after-ready').
 
@@ -404,7 +404,7 @@ waiting on them are never stalled by a swallowed duplicate."
      (t
       (unless (buffer-local-value 'agent-repl--ready vterm-buf)
         (agent-repl--log ws "on-session-start-event: marking ready ws=%s" ws)
-        (agent-repl--ws-set-claude-state ws :idle)
+        (agent-repl--ws-set-agent-state ws :idle)
         (with-current-buffer vterm-buf
           (setq agent-repl--ready t))
         (agent-repl--cancel-ready-timer ws)
@@ -420,10 +420,10 @@ waiting on them are never stalled by a swallowed duplicate."
                                                fn err)))
                           nil)
                         ws)
-      ;; Flip the claude-side bit on the fully-loaded latch.  If
+      ;; Flip the agent-side bit on the fully-loaded latch.  If
       ;; --on-workspace-switch has also fired, this fires the ws-fully-loaded
       ;; hook; otherwise we just record the bit and wait for switch settle.
-      (agent-repl--latch-and-maybe-fire-loaded ws :claude-ready)))))
+      (agent-repl--latch-and-maybe-fire-loaded ws :agent-ready)))))
 
 (defvar agent-repl-after-ready-functions nil
   "Hook run when a `session_start' event is observed for a workspace.
@@ -434,7 +434,7 @@ Unlike `agent-repl-ws-fully-loaded-functions', this hook is the
 NARROW signal — it fires on every observed `session_start' event,
 including duplicates that arrive after `agent-repl--ready' is
 already t.  Use this only when you specifically need the
-claude-side ready event; prefer `agent-repl-ws-fully-loaded-functions'
+agent-side ready event; prefer `agent-repl-ws-fully-loaded-functions'
 for anything that needs the workspace to also be settled on the
 Emacs side.
 
@@ -442,9 +442,9 @@ Handlers run via `run-hook-wrapped' wrapped in `condition-case', so a
 broken handler cannot prevent later handlers from completing.")
 
 (defvar agent-repl-ws-fully-loaded-functions nil
-  "Hook run when a Claude REPL workspace is fully loaded.
+  "Hook run when a Agent REPL workspace is fully loaded.
 A workspace is fully loaded when BOTH:
-  1. `--on-session-start-event' has fired (`:claude-ready' bit set),
+  1. `--on-session-start-event' has fired (`:agent-ready' bit set),
   2. `--on-workspace-switch' has completed (`:ws-loaded' bit set).
 
 Each handler is called with two arguments: (WS &optional MARKER).
@@ -475,7 +475,7 @@ implicitly resets the latch bits.")
 
 (defun agent-repl--latch-and-maybe-fire-loaded (ws key &optional marker)
   "Set KEY to t on WS's plist; fire `ws-fully-loaded-functions' if both bits set.
-KEY is `:claude-ready' or `:ws-loaded'.  When both bits are now t,
+KEY is `:agent-ready' or `:ws-loaded'.  When both bits are now t,
 clears them and runs `agent-repl-ws-fully-loaded-functions' with
 WS (and MARKER, when non-nil — typically `:timed-out' from the
 watchdog path).  Both bits are explicitly cleared after firing so a
@@ -483,9 +483,9 @@ later kill-and-relaunch cycle starts clean (kill clears the whole
 plist; explicit clear here covers the case where the ws keeps
 running but its load cycle has logically ended)."
   (agent-repl--ws-put ws key t)
-  (when (and (agent-repl--ws-get ws :claude-ready)
+  (when (and (agent-repl--ws-get ws :agent-ready)
              (agent-repl--ws-get ws :ws-loaded))
-    (agent-repl--ws-put ws :claude-ready nil)
+    (agent-repl--ws-put ws :agent-ready nil)
     (agent-repl--ws-put ws :ws-loaded nil)
     (agent-repl--log ws "ws-fully-loaded: ws=%s marker=%s" ws (or marker "nil"))
     (run-hook-wrapped 'agent-repl-ws-fully-loaded-functions

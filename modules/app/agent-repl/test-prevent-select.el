@@ -38,22 +38,22 @@ inside BODY."
 ;;;; ---- Skip predicate ----
 
 (ert-deftest agent-repl-prevent-select-test-skip-vterm-panel ()
-  "Predicate returns non-nil for the *claude-panel-WS* vterm buffer."
+  "Predicate returns non-nil for the *agent-panel-WS* vterm buffer."
   (agent-repl-prevent-select-test--with-buffers
-      ((buf "*claude-panel-myws*"))
-    (should (agent-repl--prev-buffer-skip-claude-panel nil buf nil))))
+      ((buf "*agent-panel-myws*"))
+    (should (agent-repl--prev-buffer-skip-agent-panel nil buf nil))))
 
 (ert-deftest agent-repl-prevent-select-test-skip-input-panel ()
-  "Predicate returns non-nil for the *claude-panel-input-WS* input buffer."
+  "Predicate returns non-nil for the *agent-panel-input-WS* input buffer."
   (agent-repl-prevent-select-test--with-buffers
-      ((buf "*claude-panel-input-myws*"))
-    (should (agent-repl--prev-buffer-skip-claude-panel nil buf nil))))
+      ((buf "*agent-panel-input-myws*"))
+    (should (agent-repl--prev-buffer-skip-agent-panel nil buf nil))))
 
 (ert-deftest agent-repl-prevent-select-test-do-not-skip-ordinary-buffer ()
   "Predicate returns nil for an ordinary user buffer."
   (agent-repl-prevent-select-test--with-buffers
       ((buf "*scratch-test-ordinary*"))
-    (should-not (agent-repl--prev-buffer-skip-claude-panel nil buf nil))))
+    (should-not (agent-repl--prev-buffer-skip-agent-panel nil buf nil))))
 
 (ert-deftest agent-repl-prevent-select-test-do-not-skip-utility-buffer ()
   "Predicate returns nil for a non-panel agent-repl utility buffer.
@@ -61,32 +61,32 @@ The skip rule is scoped to panel buffers — utility scratch buffers
 like *agent-repl-dump* should still be reachable via cycling."
   (agent-repl-prevent-select-test--with-buffers
       ((buf "*agent-repl-dump*"))
-    (should-not (agent-repl--prev-buffer-skip-claude-panel nil buf nil))))
+    (should-not (agent-repl--prev-buffer-skip-agent-panel nil buf nil))))
 
 (ert-deftest agent-repl-prevent-select-test-dead-buffer-not-skipped ()
   "Predicate returns nil for a killed buffer — guards against acting on
 a dead reference if Emacs ever hands one to the skip function."
-  (let ((buf (get-buffer-create "*claude-panel-dead*")))
+  (let ((buf (get-buffer-create "*agent-panel-dead*")))
     (kill-buffer buf)
-    (should-not (agent-repl--prev-buffer-skip-claude-panel nil buf nil))))
+    (should-not (agent-repl--prev-buffer-skip-agent-panel nil buf nil))))
 
 ;;;; ---- Variable installation ----
 
 (ert-deftest agent-repl-prevent-select-test-installed-on-skip-var ()
   "Loading the module installs the predicate on `switch-to-prev-buffer-skip'."
   (should (eq switch-to-prev-buffer-skip
-              #'agent-repl--prev-buffer-skip-claude-panel)))
+              #'agent-repl--prev-buffer-skip-agent-panel)))
 
 ;;;; ---- Integration with switch-to-prev-buffer / kill-buffer ----
 
-(ert-deftest agent-repl-prevent-select-test-kill-buffer-skips-claude-panel ()
-  "Killing the buffer shown in a window picks a non-Claude replacement.
+(ert-deftest agent-repl-prevent-select-test-kill-buffer-skips-agent-panel ()
+  "Killing the buffer shown in a window picks a non-agent replacement.
 Seeds the window's prev-buffer history with a panel buffer above a
 plain buffer, kills the current buffer, and asserts the window did not
 land on the panel."
   (agent-repl-prevent-select-test--with-buffers
       ((victim "*prevent-select-victim*")
-       (panel  "*claude-panel-skipme*")
+       (panel  "*agent-panel-skipme*")
        (plain  "*prevent-select-plain*"))
     (let ((wconf (current-window-configuration)))
       (unwind-protect
@@ -99,11 +99,11 @@ land on the panel."
             (should-not (eq (window-buffer (selected-window)) panel)))
         (set-window-configuration wconf)))))
 
-(ert-deftest agent-repl-prevent-select-test-previous-buffer-skips-claude-panel ()
+(ert-deftest agent-repl-prevent-select-test-previous-buffer-skips-agent-panel ()
   "`previous-buffer' walks past a panel buffer in the window history."
   (agent-repl-prevent-select-test--with-buffers
       ((plain "*prevent-select-prev-plain*")
-       (panel "*claude-panel-prev-skipme*")
+       (panel "*agent-panel-prev-skipme*")
        (curr  "*prevent-select-prev-curr*"))
     (let ((wconf (current-window-configuration)))
       (unwind-protect

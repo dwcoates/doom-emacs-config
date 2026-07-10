@@ -118,7 +118,7 @@ when BUF is dead."
                           (buffer-name) agent-repl-vterm-freeze-duration
                           (if persist "t" "nil"))))))
 
-;; Install advice at load time.  The advice is harmless for non-Claude
+;; Install advice at load time.  The advice is harmless for non-agent
 ;; vterm buffers because `agent-repl--vterm-frozen' defaults to nil
 ;; everywhere; only buffers Claude actively freezes are affected.
 (agent-repl--enable-vterm-freeze-advice)

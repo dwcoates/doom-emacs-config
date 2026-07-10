@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 
-;; Tests for the Claude-model mode-line segment: raw-id prettifying,
+;; Tests for the Agent-model mode-line segment: raw-id prettifying,
 ;; jsonl tail scanning for the most recent main-chain assistant model,
 ;; mtime-keyed cache, segment formatting, and mode-line attachment.
 
@@ -39,7 +39,7 @@
   (should (equal (agent-repl--model-prettify "claude-experimental-x")
                  "experimental-x")))
 
-(ert-deftest agent-repl-test-model-prettify-no-claude-prefix ()
+(ert-deftest agent-repl-test-model-prettify-no-agent-prefix ()
   "An id lacking the `claude-' prefix is used as-is (still family-matched)."
   (should (equal (agent-repl--model-prettify "opus-4-8") "Opus 4.8")))
 
@@ -176,10 +176,10 @@ beyond the scan window are not visible."
                 ((symbol-function 'agent-repl--model-read-from-jsonl)
                  (lambda (_p)
                    (setq read-count (1+ read-count))
-                   (format "claude-model-%d" read-count))))
-        (should (equal (agent-repl--model-for-ws "ws1") "claude-model-1"))
+                   (format "agent-model-%d" read-count))))
+        (should (equal (agent-repl--model-for-ws "ws1") "agent-model-1"))
         (setq mtime 99999.0)
-        (should (equal (agent-repl--model-for-ws "ws1") "claude-model-2"))
+        (should (equal (agent-repl--model-for-ws "ws1") "agent-model-2"))
         (should (= read-count 2))))))
 
 (ert-deftest agent-repl-test-model-for-ws-nil-when-no-path ()
@@ -201,7 +201,7 @@ beyond the scan window are not visible."
 (ert-deftest agent-repl-test-model-for-ws-reads-from-config-dir-projects ()
   "model-for-ws reads the jsonl under the resolved <config-dir>/projects for a multi-repo workspace."
   (agent-repl-test--with-clean-state
-    (let* ((cfg (make-temp-file "claude-cfg-" t))
+    (let* ((cfg (make-temp-file "agent-cfg-" t))
            (root (make-temp-file "multi-root-" t))
            (project-dir (expand-file-name "proj" root))
            (encoded (agent-repl--ai-title-encode-cwd project-dir))
@@ -292,7 +292,7 @@ model is available yet (session has produced no assistant turn)."
 (ert-deftest agent-repl-test-model-attach-to-mode-line-appends-when-missing ()
   "attach-to-mode-line appends the :eval segment when not already present."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-model-attach-missing*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-model-attach-missing*"
       (setq-local mode-line-format (list "BAR"))
       (agent-repl--model-attach-to-mode-line (current-buffer))
       (should (= (length mode-line-format) 2))
@@ -302,7 +302,7 @@ model is available yet (session has produced no assistant turn)."
 (ert-deftest agent-repl-test-model-attach-to-mode-line-idempotent ()
   "attach-to-mode-line does not double-append when called twice."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-model-attach-idempotent*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-model-attach-idempotent*"
       (setq-local mode-line-format
                   (list "BAR" agent-repl--model-mode-line-spec))
       (agent-repl--model-attach-to-mode-line (current-buffer))
@@ -312,7 +312,7 @@ model is available yet (session has produced no assistant turn)."
 (ert-deftest agent-repl-test-model-attach-to-mode-line-skips-non-list ()
   "attach-to-mode-line leaves string mode-line-formats alone."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-model-attach-string*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-model-attach-string*"
       (setq-local mode-line-format "literal-string")
       (agent-repl--model-attach-to-mode-line (current-buffer))
       (should (equal mode-line-format "literal-string")))))
@@ -320,24 +320,24 @@ model is available yet (session has produced no assistant turn)."
 (ert-deftest agent-repl-test-model-attach-all-walks-workspaces ()
   "attach-all attaches the segment to every live workspace vterm buffer."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-model-attach-all-1*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-model-attach-all-1*"
       (setq-local mode-line-format (list "A"))
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-      (agent-repl-test--with-temp-buffer "*claude-panel-model-attach-all-2*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-model-attach-all-2*"
         (setq-local mode-line-format (list "B"))
         (agent-repl--ws-put "ws2" :vterm-buffer (current-buffer))
         (agent-repl-model-attach-all)
-        (with-current-buffer "*claude-panel-model-attach-all-1*"
+        (with-current-buffer "*agent-panel-model-attach-all-1*"
           (should (member agent-repl--model-mode-line-spec
                           mode-line-format)))
-        (with-current-buffer "*claude-panel-model-attach-all-2*"
+        (with-current-buffer "*agent-panel-model-attach-all-2*"
           (should (member agent-repl--model-mode-line-spec
                           mode-line-format)))))))
 
 (ert-deftest agent-repl-test-model-attach-all-skips-dead-buffer ()
   "attach-all tolerates dead vterm buffers without signalling."
   (agent-repl-test--with-clean-state
-    (let ((dead-buf (generate-new-buffer "*claude-panel-model-dead*")))
+    (let ((dead-buf (generate-new-buffer "*agent-panel-model-dead*")))
       (kill-buffer dead-buf)
       (agent-repl--ws-put "ws-dead" :vterm-buffer dead-buf)
       ;; Should not signal.

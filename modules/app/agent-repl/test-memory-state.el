@@ -6,7 +6,7 @@
 ;; (`<root>/.claude/emacs/memory-state.el').  Covers path resolution,
 ;; value formatting (buffers/processes/timers/structs/scalars), render
 ;; assembly, file write/round-trip, and the integration hook from
-;; `agent-repl--ws-set-claude-state' / `agent-repl--ws-set-repl-state'.
+;; `agent-repl--ws-set-agent-state' / `agent-repl--ws-set-repl-state'.
 ;;
 ;; Run with:
 ;;   emacs -batch -Q -l ert -l test-memory-state.el -f ert-run-tests-batch-and-exit
@@ -121,11 +121,11 @@ Emacs nulls out `buffer-name' for killed buffers, so the contract is
 (ert-deftest agent-repl-test-memory-state-render-preserves-keys ()
   "Every key in the input plist appears in the rendered plist."
   (let ((out (agent-repl--memory-state-render
-              "ws1" '(:claude-state :thinking :priority "p1" :pending-prompts (a b)))))
-    (should (plist-member out :claude-state))
+              "ws1" '(:agent-state :thinking :priority "p1" :pending-prompts (a b)))))
+    (should (plist-member out :agent-state))
     (should (plist-member out :priority))
     (should (plist-member out :pending-prompts))
-    (should (eq (plist-get out :claude-state) :thinking))
+    (should (eq (plist-get out :agent-state) :thinking))
     (should (equal (plist-get out :priority) "p1"))
     (should (equal (plist-get out :pending-prompts) '(a b)))))
 
@@ -154,7 +154,7 @@ Emacs nulls out `buffer-name' for killed buffers, so the contract is
   "Written sexp is `read'-able and equals the input plist."
   (agent-repl-test--with-temp-root root
     (let* ((file (agent-repl--memory-state-file root))
-           (data '(:ws "w" :written-at "t" :claude-state :thinking :priority "p1")))
+           (data '(:ws "w" :written-at "t" :agent-state :thinking :priority "p1")))
       (agent-repl--memory-state-write-file file data)
       (with-temp-buffer
         (insert-file-contents file)
@@ -187,7 +187,7 @@ Emacs nulls out `buffer-name' for killed buffers, so the contract is
 (ert-deftest agent-repl-test-memory-state-save-no-project-dir-no-op ()
   "Save skips when :project-dir is unset."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "stub-ws" :claude-state :idle)
+    (agent-repl--ws-put "stub-ws" :agent-state :idle)
     ;; no :project-dir → save should bail silently
     (agent-repl--memory-state-save "stub-ws")
     ;; Nothing to assert besides absence of error; no file path exists.
@@ -198,7 +198,7 @@ Emacs nulls out `buffer-name' for killed buffers, so the contract is
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-root root
       (agent-repl--ws-put "ws1" :project-dir root)
-      (agent-repl--ws-put "ws1" :claude-state :thinking)
+      (agent-repl--ws-put "ws1" :agent-state :thinking)
       (agent-repl--memory-state-save "ws1")
       (let ((file (agent-repl--memory-state-file root)))
         (should (file-exists-p file))
@@ -206,7 +206,7 @@ Emacs nulls out `buffer-name' for killed buffers, so the contract is
           (insert-file-contents file)
           (let ((data (read (current-buffer))))
             (should (equal (plist-get data :ws) "ws1"))
-            (should (eq (plist-get data :claude-state) :thinking))
+            (should (eq (plist-get data :agent-state) :thinking))
             (should (equal (plist-get data :project-dir) root))))))))
 
 (ert-deftest agent-repl-test-memory-state-save-overwrites ()
@@ -214,15 +214,15 @@ Emacs nulls out `buffer-name' for killed buffers, so the contract is
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-root root
       (agent-repl--ws-put "ws1" :project-dir root)
-      (agent-repl--ws-put "ws1" :claude-state :thinking)
+      (agent-repl--ws-put "ws1" :agent-state :thinking)
       (agent-repl--memory-state-save "ws1")
-      (agent-repl--ws-put "ws1" :claude-state :done)
+      (agent-repl--ws-put "ws1" :agent-state :done)
       (agent-repl--memory-state-save "ws1")
       (let ((file (agent-repl--memory-state-file root)))
         (with-temp-buffer
           (insert-file-contents file)
           (let ((data (read (current-buffer))))
-            (should (eq (plist-get data :claude-state) :done))))))))
+            (should (eq (plist-get data :agent-state) :done))))))))
 
 (ert-deftest agent-repl-test-memory-state-save-renders-buffer-value ()
   "Saved file contains the readable buffer string, not a `#<…>' literal that breaks `read'."
@@ -233,7 +233,7 @@ Emacs nulls out `buffer-name' for killed buffers, so the contract is
             (progn
               (agent-repl--ws-put "ws1" :project-dir root)
               (agent-repl--ws-put "ws1" :vterm-buffer buf)
-              (agent-repl--ws-put "ws1" :claude-state :idle)
+              (agent-repl--ws-put "ws1" :agent-state :idle)
               (agent-repl--memory-state-save "ws1")
               (let ((file (agent-repl--memory-state-file root)))
                 (with-temp-buffer
@@ -246,18 +246,18 @@ Emacs nulls out `buffer-name' for killed buffers, so the contract is
 
 ;;;; ---- Tests: integration with state setters ----
 
-(ert-deftest agent-repl-test-memory-state-claude-state-setter-writes-file ()
-  "`--ws-set-claude-state' triggers a memory-state save."
+(ert-deftest agent-repl-test-memory-state-agent-state-setter-writes-file ()
+  "`--ws-set-agent-state' triggers a memory-state save."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-root root
       (agent-repl--ws-put "ws1" :project-dir root)
-      (agent-repl--ws-set-claude-state "ws1" :thinking)
+      (agent-repl--ws-set-agent-state "ws1" :thinking)
       (let ((file (agent-repl--memory-state-file root)))
         (should (file-exists-p file))
         (with-temp-buffer
           (insert-file-contents file)
           (let ((data (read (current-buffer))))
-            (should (eq (plist-get data :claude-state) :thinking))))))))
+            (should (eq (plist-get data :agent-state) :thinking))))))))
 
 (ert-deftest agent-repl-test-memory-state-repl-state-setter-writes-file ()
   "`--ws-set-repl-state' triggers a memory-state save."

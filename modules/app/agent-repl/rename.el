@@ -216,7 +216,7 @@ to the new identity."
         (with-current-buffer ibuf
           (setq default-directory new-dir)
           (setq-local agent-repl--owning-workspace new-ws))))
-    ;; Also catch any other claude-panel-* buffers that claim OLD-WS as
+    ;; Also catch any other agent-panel-* buffers that claim OLD-WS as
     ;; owner but weren't tracked in the plist (legacy/stale entries).
     (dolist (buf (buffer-list))
       (when (and (buffer-live-p buf)

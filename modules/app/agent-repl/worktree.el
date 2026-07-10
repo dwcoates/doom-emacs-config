@@ -6,7 +6,7 @@
 (require 'filenotify)
 (require 'profiler)
 
-(declare-function agent-repl--ws-set-claude-state "status")
+(declare-function agent-repl--ws-set-agent-state "status")
 
 (define-error 'agent-repl-merge-conflict-error
   "Cherry-pick conflict left in tree (resolver declined or interactive abort)"
@@ -440,7 +440,7 @@ Captures `(agent-repl--ws-current-name)', `(selected-window)', and
 via an `unwind-protect' even when BODY signals.
 
 Used to wrap workspace-creation side effects (e.g. `+workspace-new',
-`--initialize-claude', `magit-status') so any internal focus change
+`--initialize-agent', `magit-status') so any internal focus change
 those produce stays invisible to the user — the new workspace
 materializes in the background and the caller's perspective stays
 selected.  Restoration delegates to `agent-repl--restore-focus' so
@@ -494,7 +494,7 @@ root is recorded by `agent-repl--initialize-ws-env', not here."
 
 (defun agent-repl--mark-start-failed (ws err)
   "Surface a failed Claude start for WS loudly instead of letting ERR escape.
-Logs ERR, sets WS's `:claude-state' to `:start-failed' so the tab and
+Logs ERR, sets WS's `:agent-state' to `:start-failed' so the tab and
 drawer render the 🚫 badge (the failure stays visible after the echo-area
 message scrolls away), and echoes an actionable message.  Used by paths
 that run inside a process sentinel — e.g. `agent-repl--setup-worktree-session'
@@ -502,30 +502,30 @@ via `agent-repl--async-git-sentinel' — where an uncaught signal would
 otherwise crash the sentinel as an opaque \"error in process sentinel\"."
   (let ((msg (error-message-string err)))
     (agent-repl--log ws "mark-start-failed ws=%s err=%s" ws msg)
-    (when ws (agent-repl--ws-set-claude-state ws :start-failed))
+    (when ws (agent-repl--ws-set-agent-state ws :start-failed))
     (message "Claude failed to start for %s — %s" ws msg)))
 
-(defun agent-repl--setup-worktree-session (ws-id path ws force-sandbox &optional no-claude)
+(defun agent-repl--setup-worktree-session (ws-id path ws force-sandbox &optional no-agent)
   "Register WS as a worktree at PATH and start its Claude session.
-Passes PATH and the desired environment as hints to `initialize-claude',
+Passes PATH and the desired environment as hints to `initialize-agent',
 which threads them into `initialize-ws-env' (the sole writer of
 `:project-dir', `:active-env', and per-env instantiation structs).
 
-When NO-CLAUDE is non-nil, the worktree is still registered as a
+When NO-AGENT is non-nil, the worktree is still registered as a
 worktree workspace but Claude is NOT booted: only the env state is
-hydrated via `initialize-ws-env' (the same hints `initialize-claude'
+hydrated via `initialize-ws-env' (the same hints `initialize-agent'
 would have threaded through), mirroring `agent-repl--new-workspace'.
 This is the `SPC TAB n/N' empty-preemptive-prompt path — a worktree
 created exactly as usual, minus the auto-started Claude session."
   (agent-repl--register-worktree-ws ws-id ws)
   (let ((default-directory (file-name-as-directory path)))
-    (if no-claude
+    (if no-agent
         (progn
           (agent-repl--initialize-ws-env ws path (if force-sandbox :sandbox :bare-metal))
-          (agent-repl--log ws "worktree NOT starting Claude (no-claude) ws=%s" ws))
+          (agent-repl--log ws "worktree NOT starting Claude (no-agent) ws=%s" ws))
       (condition-case err
           (progn
-            (agent-repl--initialize-claude ws path (if force-sandbox :sandbox :bare-metal))
+            (agent-repl--initialize-agent ws path (if force-sandbox :sandbox :bare-metal))
             (agent-repl--log ws "worktree pre-started Claude ws=%s cmd=%s"
                               ws (agent-repl-instantiation-start-cmd (agent-repl--active-inst ws))))
         ;; Runs from `agent-repl--async-git-sentinel'; a non-local exit here
@@ -771,7 +771,7 @@ Defaults to 600s (10min); set to nil to disable the backstop."
 
 (defun agent-repl--oneshot-clear-flavor-on-failure (flavor reason)
   "Clear FLAVOR's `:generating' state and discard any queued amended prompts.
-REASON is a short keyword/string for the log line (`:claude-p-failed',
+REASON is a short keyword/string for the log line (`:agent-p-failed',
 `:backstop-timeout', etc.).
 
 Called from the workspace-generation sentinel's failure branch (eager
@@ -942,13 +942,13 @@ for a tighter scope."
   :group 'agent-repl)
 
 (defcustom agent-repl-workspace-generation-stdout-log-cap 1000
-  "Maximum chars of headless-claude stdout to include in the sentinel log line.
+  "Maximum chars of headless-agent stdout to include in the sentinel log line.
 Beyond this cap the log records `...[truncated]'.  Set to nil for no cap."
   :type '(choice (const :tag "Unlimited" nil) integer)
   :group 'agent-repl)
 
 (defcustom agent-repl-workspace-generation-prompt-log-cap 4096
-  "Maximum chars of the headless-claude prompt body to include in the spawn log line.
+  "Maximum chars of the headless-agent prompt body to include in the spawn log line.
 Beyond this cap the log records `...[truncated]'.  Set to nil for no cap."
   :type '(choice (const :tag "Unlimited" nil) integer)
   :group 'agent-repl)
@@ -1048,7 +1048,7 @@ On non-zero/non-numeric STATUS:
       (message "[agent-repl] workspace-generation[%s] failed (status=%s); see *Messages* / agent-repl log"
                gen-id status)
       (when-let ((flavor (agent-repl--oneshot-flavor-for-git-root git-root)))
-        (agent-repl--oneshot-clear-flavor-on-failure flavor :claude-p-failed)))))
+        (agent-repl--oneshot-clear-flavor-on-failure flavor :agent-p-failed)))))
 
 (defun agent-repl--workspace-generation-sentinel (out-buf gen-id &optional git-root)
   "Build a sentinel for the workspace-generation process.
@@ -1086,7 +1086,7 @@ function returns immediately and the workspace materializes
 asynchronously."
   (let* ((gen-id (agent-repl--workspace-generation-id))
          (out-buf (generate-new-buffer
-                   (format " *claude-workspace-generation-%s*" gen-id)))
+                   (format " *agent-workspace-generation-%s*" gen-id)))
          (cmd (append (list agent-repl-workspace-generation-program
                             "-p" "--model" agent-repl-workspace-generation-model)
                       agent-repl-workspace-generation-extra-args))
@@ -1106,10 +1106,10 @@ asynchronously."
         ;; (SessionStart / UserPromptSubmit / Stop) fire with a cwd that
         ;; doesn't resolve to any registered workspace.  Otherwise the
         ;; sentinel watcher attributes them to the calling workspace and
-        ;; flips :claude-state to :done.
+        ;; flips :agent-state to :done.
         (let* ((default-directory temporary-file-directory)
                (proc (make-process
-                      :name (format "claude-workspace-generation-%s" gen-id)
+                      :name (format "agent-workspace-generation-%s" gen-id)
                       :buffer out-buf
                       :command cmd
                       :connection-type 'pipe
@@ -1148,7 +1148,7 @@ not resolve to a known workspace, or that workspace has no priority."
 
 (defun agent-repl--finalize-worktree-workspace (path dirname preemptive-prompt
                                                        priority fork-session-id force-sandbox
-                                                       callback &optional source-dir no-claude model)
+                                                       callback &optional source-dir no-agent model)
   "Finalize a new worktree workspace at PATH with directory name DIRNAME.
 Registers the project with projectile, creates a Doom workspace, applies
 optional PREEMPTIVE-PROMPT, PRIORITY, FORK-SESSION-ID, and SOURCE-DIR
@@ -1171,14 +1171,14 @@ perspective rather than the caller's.
 The entire setup runs inside `agent-repl--with-preserved-focus' so
 any internal perspective / window / buffer change made while
 materializing the new workspace (e.g. by `+workspace-new',
-`--initialize-claude', or any persp-mode hook fired along the way)
+`--initialize-agent', or any persp-mode hook fired along the way)
 stays invisible to the user — the caller's workspace and window
 remain selected when finalize returns.  CALLBACK, when provided,
 runs OUTSIDE the focus-preservation wrapper so callers that
 deliberately want to switch (e.g. interactive worktree creation that
 should jump to the new ws) are not silently undone.
 
-NO-CLAUDE, when non-nil, is forwarded to
+NO-AGENT, when non-nil, is forwarded to
 `agent-repl--setup-worktree-session' so the worktree is registered
 without booting a Claude session — the `SPC TAB n/N'
 empty-preemptive-prompt path.
@@ -1231,7 +1231,7 @@ session.  When nil, the session falls back to
           (when (and parent-branch (not (string-empty-p parent-branch)) (not (string-prefix-p "fatal" parent-branch)))
             (agent-repl--ws-put ws :parent-branch-name parent-branch))))
       (agent-repl--reorder-workspace-by-priority ws)
-      (agent-repl--setup-worktree-session ws-id path ws force-sandbox no-claude)
+      (agent-repl--setup-worktree-session ws-id path ws force-sandbox no-agent)
       (when (fboundp 'agent-repl--events-record)
         (agent-repl--events-record ws :create))
       (message "Worktree '%s' ready." dirname)))
@@ -1245,12 +1245,12 @@ session.  When nil, the session falls back to
 
 (defun agent-repl--worktree-add-callback (path dirname preemptive-prompt
                                                priority fork-session-id force-sandbox
-                                               callback source-dir no-claude model ok output)
+                                               callback source-dir no-agent model ok output)
   "Handle the result of an async git-worktree-add operation.
 OK and OUTPUT are the success flag and git output.  The remaining arguments
 describe the workspace being created and are forwarded to
 `agent-repl--finalize-worktree-workspace' (including SOURCE-DIR, the
-project-dir of the workspace this worktree was created from, NO-CLAUDE,
+project-dir of the workspace this worktree was created from, NO-AGENT,
 which suppresses booting Claude for the new worktree, and MODEL, the
 per-workspace Claude model alias)."
   (agent-repl--log dirname "worktree git result: %s" output)
@@ -1259,7 +1259,7 @@ per-workspace Claude model alias)."
         (agent-repl--log dirname "worktree-add-callback: ok=t path=%s dirname=%s" path dirname)
         (agent-repl--finalize-worktree-workspace
          path dirname preemptive-prompt
-         priority fork-session-id force-sandbox callback source-dir no-claude model))
+         priority fork-session-id force-sandbox callback source-dir no-agent model))
     (agent-repl--log dirname "worktree-add-callback: ok=nil (git worktree add failed) path=%s" path)
     (message "git worktree add failed: %s" output)))
 
@@ -1267,7 +1267,7 @@ per-workspace Claude model alias)."
                                               fork-session-id
                                               dirname preemptive-prompt
                                               priority force-sandbox callback
-                                              &optional source-dir no-claude model)
+                                              &optional source-dir no-agent model)
   "Run `git worktree add' asynchronously for a new worktree.
 Creates the worktree at PATH on BRANCH-NAME off BASE-COMMIT in GIT-ROOT.
 On success, also creates the companion start tag at BASE-COMMIT (see
@@ -1276,7 +1276,7 @@ remain stable as the upstream base branch advances.
 When the git command finishes, `agent-repl--worktree-add-callback'
 finalizes the workspace.  SOURCE-DIR is the project-dir of the workspace
 this worktree was created from; threaded through to be persisted as
-`:source-ws-dir' on the new workspace.  NO-CLAUDE, when non-nil, is
+`:source-ws-dir' on the new workspace.  NO-AGENT, when non-nil, is
 forwarded so the new worktree is registered without booting Claude.
 MODEL, when non-nil, is the per-workspace Claude model alias forwarded
 so the booted session runs under `--model MODEL'."
@@ -1288,7 +1288,7 @@ so the booted session runs under `--model MODEL'."
                       (agent-repl--worktree-add-callback
                        path dirname preemptive-prompt
                        priority fork-session-id force-sandbox callback source-dir
-                       no-claude model ok output))))
+                       no-agent model ok output))))
     (agent-repl--log dirname "worktree async git add: %S" add-args)
     (agent-repl--async-git "worktree-add" git-root add-args after-add)))
 
@@ -1334,12 +1334,12 @@ report the new path as an existing project."
       (agent-repl--log name "ERROR: start tag '%s' already exists — cannot create worktree" start-tag)
       (user-error "Start tag '%s' already exists — delete it first or choose a different name" start-tag))))
 
-(defun agent-repl--do-create-worktree-workspace (name &optional force-sandbox fork-session-id preemptive-prompt callback priority base-commit git-root source-dir no-claude model)
+(defun agent-repl--do-create-worktree-workspace (name &optional force-sandbox fork-session-id preemptive-prompt callback priority base-commit git-root source-dir no-agent model)
   "Create a git worktree and Doom workspace for NAME.
 Git fetch and worktree-add run asynchronously so Emacs is not blocked.
 When everything is ready, CALLBACK (if non-nil) is called with (PATH DIRNAME).
 
-NO-CLAUDE, when non-nil, creates the worktree exactly as usual but does
+NO-AGENT, when non-nil, creates the worktree exactly as usual but does
 NOT boot a Claude session for it (only the env state is hydrated).  This
 backs the `SPC TAB n/N' empty-preemptive-prompt path, where the user
 names a plain worktree workspace and Claude is started later on demand.
@@ -1389,7 +1389,7 @@ through to `agent-repl--finalize-worktree-workspace' and stored under
                                    fork-session-id
                                    dirname preemptive-prompt
                                    priority force-sandbox callback source-dir
-                                   no-claude model)))
+                                   no-agent model)))
       (message "Creating worktree '%s' from %s..." dirname base-commit)
       (cond
        (fork-session-id
@@ -1490,7 +1490,7 @@ whitespace-only), name generation is skipped and a second minibuffer
 prompts for the workspace name directly; the worktree is then created
 exactly as the non-empty path would (same async git-worktree-add, same
 finalize), with two differences only: no preemptive prompt is enqueued
-and Claude is NOT auto-booted (NO-CLAUDE is passed to
+and Claude is NOT auto-booted (NO-AGENT is passed to
 `agent-repl--do-create-worktree-workspace').  Focus switches to the new
 worktree.  A non-empty prompt drives the full async name-generation
 worktree-workspace flow described above.
@@ -1534,7 +1534,7 @@ the JSON file lands and the file-watcher dispatches it."
         ;; No preemptive prompt: skip name-generation, prompt for the
         ;; workspace name directly, and create the worktree exactly as the
         ;; non-empty path would — only without a preemptive prompt and
-        ;; without auto-booting Claude (NO-CLAUDE). Focus switches to it.
+        ;; without auto-booting Claude (NO-AGENT). Focus switches to it.
         (let ((name (string-trim (read-string "Workspace name: "))))
           (when (string-empty-p name)
             (user-error "Workspace name is required"))
@@ -1969,8 +1969,8 @@ entry for the target), so the halt/sibling semantics apply per target.
 
 Marks WS with `:repl-state :merge-queued' so the drawer surfaces the
 entry under MERGING with the queued-state badge, and clears
-`:claude-state' for the same reason `--mark-merge-failed' does (state
-glyph precedence reads `:repl-state' first, but a stale claude-state
+`:agent-state' for the same reason `--mark-merge-failed' does (state
+glyph precedence reads `:repl-state' first, but a stale agent-state
 would still color the name)."
   (let* ((target-head (agent-repl--current-head-sha target-dir))
          (entry (list :source-ws ws
@@ -1986,7 +1986,7 @@ would still color the name)."
       (setq agent-repl--merge-queue
             (cons entry agent-repl--merge-queue)))
     (agent-repl--ws-put ws :repl-state :merge-queued)
-    (agent-repl--ws-put ws :claude-state nil)
+    (agent-repl--ws-put ws :agent-state nil)
     (agent-repl--log ws
                       "reenqueue-merge-on-failure: ws=%s conflict-rejection=%s target-head=%s position=%s queue-len=%d"
                       ws (if conflict-rejection "t" "nil")
@@ -2021,7 +2021,7 @@ Steps:
      Generic failures intentionally do NOT drain — the halted front entry
      blocks the queue until a human kicks it.
 
-UI recovery (reopen + claude-send) is intentionally NOT done here: it is
+UI recovery (reopen + agent-send) is intentionally NOT done here: it is
 async-dispatch-specific and stays in `agent-repl--workspace-merge-async'."
   (let ((conflict-rejection (eq (car err) 'agent-repl-merge-conflict-error))
         (target-dir (agent-repl--ws-get ws :resolved-target-dir)))
@@ -2062,7 +2062,7 @@ Flow:
        - Failure (`agent-repl-merge-conflict-error' or generic
          `error'): centralized failure handling runs on the worker
          thread (queue mutation + cherry-pick abort are non-UI ops
-         and safe) and UI ops (reopen, claude-send) are deferred to
+         and safe) and UI ops (reopen, agent-send) are deferred to
          the main thread.  Specifically:
            a. `--abort-cherry-pick-if-in-flight' on the resolved
               target dir (no-op if CHERRY_PICK_HEAD absent).
@@ -2462,7 +2462,7 @@ killed by close or merge."
 
 (defcustom agent-repl-gns-sockets-close-timeout 30
   "Maximum seconds to wait for :done/:idle after sending the close prompt.
-After this elapses, teardown proceeds regardless of `:claude-state' —
+After this elapses, teardown proceeds regardless of `:agent-state' —
 a hung session must not stall close indefinitely."
   :type 'number
   :group 'agent-repl)
@@ -2483,11 +2483,11 @@ Read by `agent-repl--gns-sockets-close-poll' between state checks."
   :group 'agent-repl)
 
 (defun agent-repl--gns-sockets-close-poll (ws teardown-fn started-at)
-  "Poll WS's `:claude-state' for :done/:idle, then call TEARDOWN-FN.
+  "Poll WS's `:agent-state' for :done/:idle, then call TEARDOWN-FN.
 Falls back to immediate invocation after
 `agent-repl-gns-sockets-close-timeout' seconds.  STARTED-AT is the
 `float-time' at which the wait began."
-  (let ((state (agent-repl--ws-claude-state ws))
+  (let ((state (agent-repl--ws-agent-state ws))
         (elapsed (- (float-time) started-at)))
     (cond
      ((memq state '(:done :idle))
@@ -2511,7 +2511,7 @@ TEARDOWN-FN is a zero-arg thunk that performs the actual teardown
 \(persp kill, vterm kill, etc).  When WS has no live ready vterm,
 TEARDOWN-FN runs immediately — there is no Claude session to drain.
 Otherwise the prompt is sent and a poll loop waits for
-`:claude-state' to become `:done' or `:idle' before running
+`:agent-state' to become `:done' or `:idle' before running
 TEARDOWN-FN, with `agent-repl-gns-sockets-close-timeout' as a hard
 fallback so a hung session cannot stall close indefinitely.
 
@@ -3736,7 +3736,7 @@ AppKit code on macOS)."
 
 ;;;; ---- High-level spawn + wait + extract + log ----
 ;;
-;; `agent-repl--invoke-auto-resolve-claude' and
+;; `agent-repl--invoke-auto-resolve-agent' and
 ;; `agent-repl--invoke-auto-resolve-verify' share the same shape:
 ;; spawn a process, wait for it (via the thread-aware helper above),
 ;; extract its captured stdout/stderr from a buffer, log the result,
@@ -3824,7 +3824,7 @@ Keyword args:
         (unless keep-buffer
           (when (buffer-live-p out-buf) (kill-buffer out-buf)))))))
 
-(defun agent-repl--invoke-auto-resolve-claude (root prompt &optional target-ws)
+(defun agent-repl--invoke-auto-resolve-agent (root prompt &optional target-ws)
   "Synchronously invoke the auto-resolution `claude -p' in repo at ROOT.
 PROMPT is appended as the final positional argument to `claude -p' —
 that is how the non-interactive API consumes the user prompt.  Returns
@@ -3874,11 +3874,11 @@ without spawning an actual `claude' process."
                             (insert (format "# root: %s\n" root))
                             (insert (format "# cmd: %S\n\n" cmd))))
                         buf)
-                    (generate-new-buffer " *claude-auto-resolve*")))
+                    (generate-new-buffer " *agent-auto-resolve*")))
          (default-directory (file-name-as-directory root)))
     (agent-repl--spawn-and-wait
      cmd out-buf
-     :process-name "claude-auto-resolve"
+     :process-name "agent-auto-resolve"
      :timeout agent-repl-auto-resolve-conflicts-timeout
      :log-tag "auto-resolve"
      :log-ws target-ws
@@ -3940,11 +3940,11 @@ the merge) can be diagnosed from the persistent logfile alone.
 
 Factored out as its own function so tests can stub the subprocess
 without spawning the project's real test runner."
-  (let ((out-buf (generate-new-buffer " *claude-auto-resolve-verify*"))
+  (let ((out-buf (generate-new-buffer " *agent-auto-resolve-verify*"))
         (default-directory (file-name-as-directory root)))
     (agent-repl--spawn-and-wait
      command out-buf
-     :process-name "claude-auto-resolve-verify"
+     :process-name "agent-auto-resolve-verify"
      :timeout agent-repl-auto-resolve-verify-timeout
      :log-tag "auto-resolve-verify"
      :log-ws nil)))
@@ -4023,10 +4023,10 @@ the caller to run `git cherry-pick --continue'."
         (agent-repl--log target-ws
                           "auto-resolve: target-ws=%s commit=%s files=%S — invoking claude -p"
                           target-ws conflicting-commit files)
-        (let ((result (agent-repl--invoke-auto-resolve-claude
+        (let ((result (agent-repl--invoke-auto-resolve-agent
                        root prompt target-ws)))
           (agent-repl--log target-ws
-                            "auto-resolve: target-ws=%s claude-p result=%S"
+                            "auto-resolve: target-ws=%s agent-p result=%S"
                             target-ws result)
           (cond
            ((eq result 'timeout)
@@ -4103,7 +4103,7 @@ succeeded; a tag-write failure shouldn't undo that."
 
 (defun agent-repl--mark-merge-failed (target-ws err)
   "Mark TARGET-WS as dead because its merge attempt failed with ERR.
-Sets `:repl-state :dead' and clears `:claude-state' — the same state
+Sets `:repl-state :dead' and clears `:agent-state' — the same state
 shape used by vterm-death detection — so the drawer surfaces the ❌
 badge.  Also marks `:merge-completed' nil so the workspace cannot land
 in the MERGED bucket on the strength of a partial earlier success, and
@@ -4123,7 +4123,7 @@ died / generic failure)."
                     target-ws err)
   (agent-repl--ws-put target-ws :merging nil)
   (agent-repl--ws-put target-ws :merge-completed nil)
-  (agent-repl--ws-put target-ws :claude-state nil)
+  (agent-repl--ws-put target-ws :agent-state nil)
   (agent-repl--ws-put target-ws :repl-state :dead))
 
 (defun agent-repl--mark-merge-conflict (target-ws err)
@@ -4140,7 +4140,7 @@ onto `agent-repl--merge-queue' (the merge attempt has ended and now
 awaits human resolution), so the workspace is no longer a merge-queue
 member and the drawer buckets it under MERGED — never MERGING, which
 holds queue members only — distinguished there by the 💥 glyph.  Keeps
-`:claude-state' untouched (unlike `--mark-merge-failed') because the
+`:agent-state' untouched (unlike `--mark-merge-failed') because the
 workspace's vterm is still alive — the user can keep typing into it
 after they resolve the conflict outside.
 
@@ -4271,7 +4271,7 @@ off so the user resolves in magit directly."
              (failed
               (agent-repl--ws-put target-ws :merge-failed t)
               (agent-repl--ws-put target-ws :repl-state :merge-failed)
-              (agent-repl--ws-put target-ws :claude-state nil))
+              (agent-repl--ws-put target-ws :agent-state nil))
              (t
               (agent-repl--ws-put target-ws :merge-completed t)
               (agent-repl--ws-put target-ws :merge-completed-at
@@ -4288,7 +4288,7 @@ off so the user resolves in magit directly."
               ;; post-nuke poll cycle that would otherwise mark the
               ;; (now-vterm-less) preserved hash entry `:dead'.
               (agent-repl--ws-put target-ws :repl-state :merged)
-              (agent-repl--ws-put target-ws :claude-state nil)
+              (agent-repl--ws-put target-ws :agent-state nil)
               (agent-repl--tag-merge-completion project-root target-ws)
               ;; Compose with `agent-repl--close-workspace' (the
               ;; named workspace-close primitive) for the editor-side
@@ -4570,7 +4570,7 @@ side-effect of asynchronous ancestry polling."
 ;; per-worktree (each linked worktree owns its own CHERRY_PICK_HEAD under
 ;; `.git/worktrees/<name>/'), which is exactly the per-target granularity
 ;; the buckets need.  Emacs is single-threaded, so the only re-entrancy
-;; window is the process-wait inside `agent-repl--invoke-auto-resolve-claude'
+;; window is the process-wait inside `agent-repl--invoke-auto-resolve-agent'
 ;; (auto-resolve mode) — whether that's the historical
 ;; `accept-process-output' busy-wait or the worker-thread `condition-wait',
 ;; the main thread is free to dispatch file-watcher callbacks (and thus
@@ -4609,9 +4609,9 @@ rather than by a marker that may drift from the list."
   "Park a merge request for SOURCE-WS onto `agent-repl--merge-queue'.
 Marks SOURCE-WS with `:repl-state :merge-queued' so the drawer
 surfaces it under MERGING with the queued-state badge.  Clears
-`:claude-state' for the same reason `--mark-merge-failed' does:
+`:agent-state' for the same reason `--mark-merge-failed' does:
 state-glyph precedence reads `:repl-state' first, but a stale
-claude-state would still color the name.
+agent-state would still color the name.
 
 TARGET-DIR is the resolved cherry-pick destination; it is stored
 \(canonicalized) on the entry as `:target-dir' so
@@ -4640,7 +4640,7 @@ the pending merges (a restart used to lose them silently)."
                               :target-dir (and target-dir
                                                (agent-repl--path-canonical target-dir))))))
     (agent-repl--ws-put source-ws :repl-state :merge-queued)
-    (agent-repl--ws-put source-ws :claude-state nil)
+    (agent-repl--ws-put source-ws :agent-state nil)
     (agent-repl--log source-ws
                       "merge-queue: enqueued ws=%s silent=%s auto-resolve=%s target-dir=%s queue-len=%d"
                       source-ws (if silent "t" "nil") (if auto-resolve "t" "nil")

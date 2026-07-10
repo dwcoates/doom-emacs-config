@@ -111,7 +111,7 @@ First %s is the change-spec, second %s is the prompt."
 
 ;;;; Session helpers
 
-(defun agent-repl--send-to-claude (text)
+(defun agent-repl--send-to-agent (text)
   "Send TEXT to Claude, starting it if needed.
 The `:permission' -> `:thinking' flip is inherited from
 `agent-repl--send-input-to-vterm' (the lowest-level send primitive),
@@ -119,9 +119,9 @@ so predefined-prompt sends (e.g. `agent-repl-create-or-update-pr')
 answer permission prompts the same way every other send path does
 even though this path does NOT funnel through `agent-repl--do-send'."
   (let ((ws (agent-repl--ws-current-name)))
-    (agent-repl--log ws "send-to-claude len=%d" (length text))
-    (unless (agent-repl--claude-running-p ws)
-      (agent-repl--initialize-claude ws))
+    (agent-repl--log ws "send-to-agent len=%d" (length text))
+    (unless (agent-repl--agent-running-p ws)
+      (agent-repl--initialize-agent ws))
     (agent-repl--send-input-to-vterm
      (agent-repl--ws-get ws :vterm-buffer) text)))
 
@@ -270,7 +270,7 @@ CHANGE-SPEC describes which changes (e.g. \"unstaged changes (git diff)\").
 PROMPT is the analysis instruction."
   (let ((msg (format agent-repl-diff-analysis-message-template change-spec prompt)))
     (agent-repl--log (agent-repl--ws-current-name) "diff-analysis: %s" change-spec)
-    (agent-repl--send-to-claude msg)))
+    (agent-repl--send-to-agent msg)))
 
 (defconst agent-repl--diff-scopes
   '((worktree    . "unstaged changes (git diff)")
@@ -385,7 +385,7 @@ Without region: sends file path and current line."
   (let* ((ref (agent-repl--context-reference))
          (msg (format agent-repl-explain-prompt-template ref)))
     (agent-repl--log (agent-repl--ws-current-name) "explain %s" msg)
-    (agent-repl--send-to-claude msg)))
+    (agent-repl--send-to-agent msg)))
 
 (defun agent-repl-explain-prompt ()
   "Prompt the user for a message to send to Claude about the current context.
@@ -398,7 +398,7 @@ Without region: pre-fills with file path and current line."
          (msg (read-string "Send to Claude: " ref)))
     (when (and msg (not (string-empty-p msg)))
       (agent-repl--log (agent-repl--ws-current-name) "explain-prompt %s" msg)
-      (agent-repl--send-to-claude msg))))
+      (agent-repl--send-to-agent msg))))
 
 ;;;; Explain config -- read-only Q&A about this doom config via headless claude
 
@@ -425,7 +425,7 @@ from prompting for tool approval headlessly."
   :type '(repeat string)
   :group 'agent-repl)
 
-(defcustom agent-repl-explain-config-buffer-name "*claude-explain-config*"
+(defcustom agent-repl-explain-config-buffer-name "*agent-explain-config*"
   "Buffer name where explain-config output is collected and displayed."
   :type 'string
   :group 'agent-repl)
@@ -497,7 +497,7 @@ changed.  This forces the resize on every show — mirrors the drawer's
          ((> delta 0) (enlarge-window delta t))
          ((< delta 0) (shrink-window (abs delta) t)))))))
 
-(defun agent-repl--explain-config-current-claude-output-window ()
+(defun agent-repl--explain-config-current-agent-output-window ()
   "Return the live claude output window in the selected frame, or nil.
 Looks up the current workspace's claude output panel via
 `agent-repl-window--panel-window' with the `:vterm' key (the
@@ -508,7 +508,7 @@ test harnesses) get nil instead of a void-function error."
   (and (fboundp 'agent-repl-window--panel-window)
        (agent-repl-window--panel-window :vterm)))
 
-(defun agent-repl--explain-config-take-over-claude-output-window (output-win buf)
+(defun agent-repl--explain-config-take-over-agent-output-window (output-win buf)
   "Swap OUTPUT-WIN's buffer for BUF and record the original for restoration.
 The claude output panel is a dedicated window, so this temporarily
 clears `window-dedicated-p' before `set-window-buffer' — otherwise
@@ -565,9 +565,9 @@ own concern.  Returns the displayed window or nil."
                      (eq existing (car agent-repl--explain-config-replaced-window)))
           (agent-repl--explain-config-apply-width existing))
         existing)
-       ((agent-repl--explain-config-current-claude-output-window)
-        (agent-repl--explain-config-take-over-claude-output-window
-         (agent-repl--explain-config-current-claude-output-window) buf))
+       ((agent-repl--explain-config-current-agent-output-window)
+        (agent-repl--explain-config-take-over-agent-output-window
+         (agent-repl--explain-config-current-agent-output-window) buf))
        (t
         (let ((win (display-buffer buf agent-repl--explain-config-display-action)))
           (when (window-live-p win)
@@ -680,7 +680,7 @@ the one we just activated."
   (concat
    "You are being asked a question about the Doom Emacs configuration"
    " in this repository (~/.config/doom), with particular emphasis on"
-   " `modules/app/agent-repl/' (the Claude REPL integration).  The"
+   " `modules/app/agent-repl/' (the Agent REPL integration).  The"
    " user wants an EXPLANATION or CLARIFICATION of how the config or"
    " its capabilities work.  This is NOT a call to action.\n"
    "\n"
@@ -1146,7 +1146,7 @@ or never-responding `claude' invocation doesn't disturb the UI."
          (input (agent-repl--explain-config-build-input prompt)))
     (let* ((default-directory dir)
            (proc (make-process
-                  :name "claude-explain-config"
+                  :name "agent-explain-config"
                   :buffer buf
                   :command cmd
                   :connection-type 'pipe
@@ -1222,7 +1222,7 @@ current workspace when WS is nil (matches the interactive `SPC o x'
 behavior); the drawer passes the entry-at-point so interrupts target
 the selected entry.
 
-After issuing the escape, marks the workspace's claude-state as
+After issuing the escape, marks the workspace's agent-state as
 `:done' and clears the Stop / SubagentStop tracking — interrupting
 terminates the in-flight turn, so the tab should immediately reflect
 \"finished\" rather than linger on `:thinking' until a stray hook
@@ -1236,18 +1236,18 @@ is the sole observer here."
         (progn
           (agent-repl--send-interrupt-escape ws vterm-buf)
           (agent-repl--ws-clear-stop-tracking ws)
-          (agent-repl--mark-claude-done ws)
+          (agent-repl--mark-agent-done ws)
           (run-at-time agent-repl-interrupt-reinsert-delay nil
                        #'agent-repl--enter-insert-mode ws))
       (agent-repl--log ws "interrupt: vterm not live, skipping"))))
 
-(defun agent-repl--claude-process-pid (ws)
+(defun agent-repl--agent-process-pid (ws)
   "Return the PID of the `claude' process running in WS's vterm, or nil.
 `claude' runs as the child of the workspace vterm's shell.  It is
 identified STRUCTURALLY as that shell's child rather than by name,
 because the native `claude' binary reports its version (e.g. \"2.1.206\",
 from `~/.local/share/claude/versions/<v>') as its process `comm' — not
-\"claude\".  Among the shell's children a claude-ish `args'/`comm' match
+\"claude\".  Among the shell's children a agent-ish `args'/`comm' match
 is preferred (in case the shell ever has more than one child), otherwise
 the sole child is taken.  A pure query over `list-system-processes' /
 `process-attributes' with no side effects; returns nil when the vterm is
@@ -1268,7 +1268,7 @@ dead or the shell has no children."
              children)
             (and (= (length children) 1) (car children)))))))
 
-(defun agent-repl-kill-claude-process (&optional ws)
+(defun agent-repl-kill-agent-process (&optional ws)
   "Kill ONLY the `claude' process in WS's vterm, leaving panels and buffers intact.
 Unlike `agent-repl-kill' (which tears down the session's windows and
 buffers via `agent-repl--kill-session'), this sends SIGTERM to the
@@ -1280,13 +1280,13 @@ session.  Defaults to the current workspace; signals a `user-error' when
 no active workspace or no live `claude' process is found."
   (interactive)
   (let ((ws (or ws (agent-repl--ws-current-name))))
-    (unless ws (user-error "agent-repl-kill-claude-process: no active workspace"))
-    (let ((pid (agent-repl--claude-process-pid ws)))
+    (unless ws (user-error "agent-repl-kill-agent-process: no active workspace"))
+    (let ((pid (agent-repl--agent-process-pid ws)))
       (if (not pid)
           (progn
-            (agent-repl--log ws "kill-claude-process: no claude child process for ws=%s" ws)
+            (agent-repl--log ws "kill-agent-process: no claude child process for ws=%s" ws)
             (user-error "agent-repl: no live claude process found for %s" ws))
-        (agent-repl--log ws "kill-claude-process: SIGTERM pid=%s ws=%s" pid ws)
+        (agent-repl--log ws "kill-agent-process: SIGTERM pid=%s ws=%s" pid ws)
         (agent-repl--signal-process pid 'TERM)
         (message "agent-repl: killed claude (pid %s) in %s — panels left intact" pid ws)))))
 
@@ -1294,7 +1294,7 @@ no active workspace or no live `claude' process is found."
   "Ask Claude to update the PR description for the current branch."
   (interactive)
   (agent-repl--log (agent-repl--ws-current-name) "update-pr: sending update-pr prompt")
-  (agent-repl--send-to-claude agent-repl-update-pr-prompt))
+  (agent-repl--send-to-agent agent-repl-update-pr-prompt))
 
 (defun agent-repl--rebase-onto-origin-master-callback (ws ok output)
   "Process the `git fetch origin' result and ask Claude to rebase.
@@ -1307,7 +1307,7 @@ would proceed against stale `origin/master' otherwise."
   (if ok
       (progn
         (message "[%s] git fetch origin complete; asking Claude to rebase onto origin/master" ws)
-        (agent-repl--send-to-claude agent-repl-rebase-onto-origin-master-prompt))
+        (agent-repl--send-to-agent agent-repl-rebase-onto-origin-master-prompt))
     (message "[%s] git fetch origin failed: %s" ws output)))
 
 (defun agent-repl-rebase-onto-origin-master ()
@@ -1370,7 +1370,7 @@ before the prompt is sent."
          (prompt (if has-prefix (concat prefix " " base) base)))
     (agent-repl--log ws "create-or-update-pr: prefix-len=%d prompt=%s"
                       (length (or prefix "")) prompt)
-    (agent-repl--send-to-claude prompt)
+    (agent-repl--send-to-agent prompt)
     (when (and has-prefix input-buf (buffer-live-p input-buf))
       (agent-repl--commit-input-buffer ws input-buf raw-prefix t))))
 
@@ -2180,7 +2180,7 @@ Each call:
     entries in saved tab-bar order and per-entry priority reseating
     would shuffle them back into priority order, defeating
     `agent-repl--collect-snapshot-entries' order preservation,
-- starts claude (`agent-repl--initialize-claude') unless already
+- starts claude (`agent-repl--initialize-agent') unless already
   running."
   (agent-repl--with-error-logging (format "establish-workspace[%s]" ws)
     ;; Create the persp and tag it with `+workspace-project' so a later
@@ -2235,10 +2235,10 @@ Each call:
     ;; restore agree on ordering.  The reorder is skipped mid-snapshot-load
     ;; (see `agent-repl--hydrate-and-reorder-on-open').
     (agent-repl--hydrate-and-reorder-on-open ws dir)
-    (when (and (fboundp 'agent-repl--initialize-claude)
-               (fboundp 'agent-repl--claude-running-p)
-               (not (agent-repl--claude-running-p ws)))
-      (agent-repl--initialize-claude ws))))
+    (when (and (fboundp 'agent-repl--initialize-agent)
+               (fboundp 'agent-repl--agent-running-p)
+               (not (agent-repl--agent-running-p ws)))
+      (agent-repl--initialize-agent ws))))
 
 (defvar agent-repl--snapshot-load-state nil
   "Plist describing an in-progress recursive snapshot load, or nil.
@@ -2305,7 +2305,7 @@ the user has manually resolved before re-entering the loop)."
                         :target-dir (plist-get entry :target-dir))
                   restored)
             (agent-repl--ws-put ws :repl-state :merge-queued)
-            (agent-repl--ws-put ws :claude-state nil))
+            (agent-repl--ws-put ws :agent-state nil))
            (t
             (cl-incf dropped)
             (agent-repl--log nil
@@ -2430,7 +2430,7 @@ The bits we flip:
 - `:ws-loaded' is flipped via the helper; the helper itself sets it
   before checking the both-bits condition, so this drives the
   emacs-side bit to t if it wasn't already.
-- `:claude-ready' is also flipped to t directly so the helper's
+- `:agent-ready' is also flipped to t directly so the helper's
   both-bits check passes even when claude never printed
   `session_start' (the most common timeout cause)."
   (let ((state agent-repl--snapshot-load-state))
@@ -2440,10 +2440,10 @@ The bits we flip:
       (setq agent-repl--snapshot-load-state
             (plist-put agent-repl--snapshot-load-state :timeout-timer nil))
       ;; Force both latch bits then fire via the helper.  Setting
-      ;; :claude-ready directly before the helper call means the
+      ;; :agent-ready directly before the helper call means the
       ;; helper's both-bits check will pass on its own :ws-loaded
       ;; flip, firing ws-fully-loaded with the :timed-out marker.
-      (agent-repl--ws-put ws :claude-ready t)
+      (agent-repl--ws-put ws :agent-ready t)
       (agent-repl--latch-and-maybe-fire-loaded ws :ws-loaded :timed-out))))
 
 (defun agent-repl--snapshot-load-step ()
@@ -2599,7 +2599,7 @@ entry, fully sets up the workspace via `agent-repl--establish-workspace'
 
 Recursive queue driver: establishes one entry, then yields to the main
 loop until that workspace's `agent-repl-ws-fully-loaded-functions'
-hook fires (i.e., both claude-side ready and emacs-side switch-settle
+hook fires (i.e., both agent-side ready and emacs-side switch-settle
 have completed), then advances.  Per-entry watchdog
 \(`agent-repl-snapshot-load-per-entry-timeout') guarantees forward
 progress even if the load barrier never fires; on timeout the loader

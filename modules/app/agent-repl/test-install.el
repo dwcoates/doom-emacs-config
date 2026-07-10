@@ -1113,7 +1113,7 @@ That case is already covered by `agent-repl--check-skill-links'."
 
 (ert-deftest agent-repl-test-register-hooks-idempotent ()
   "register-hooks-in-settings is a no-op on a second run (returns nil, no double-register)."
-  (let* ((dir (make-temp-file "claude-register-" t))
+  (let* ((dir (make-temp-file "agent-register-" t))
          (settings (expand-file-name "settings.json" dir)))
     (unwind-protect
         (progn
@@ -1123,7 +1123,7 @@ That case is already covered by `agent-repl--check-skill-links'."
 
 (ert-deftest agent-repl-test-register-hooks-preserves-foreign ()
   "register-hooks-in-settings preserves foreign top-level keys."
-  (let* ((dir (make-temp-file "claude-register-" t))
+  (let* ((dir (make-temp-file "agent-register-" t))
          (settings (expand-file-name "settings.json" dir)))
     (unwind-protect
         (progn
@@ -1136,7 +1136,7 @@ That case is already covered by `agent-repl--check-skill-links'."
 
 (ert-deftest agent-repl-test-register-hooks-notification-matcher ()
   "register-hooks-in-settings writes the permission_prompt matcher for Notification."
-  (let* ((dir (make-temp-file "claude-register-" t))
+  (let* ((dir (make-temp-file "agent-register-" t))
          (settings (expand-file-name "settings.json" dir)))
     (unwind-protect
         (progn
@@ -1149,7 +1149,7 @@ That case is already covered by `agent-repl--check-skill-links'."
 
 (ert-deftest agent-repl-test-register-hooks-malformed-signals ()
   "register-hooks-in-settings signals on malformed existing JSON (never silently resets)."
-  (let* ((dir (make-temp-file "claude-register-" t))
+  (let* ((dir (make-temp-file "agent-register-" t))
          (settings (expand-file-name "settings.json" dir)))
     (unwind-protect
         (progn

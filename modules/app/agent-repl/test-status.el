@@ -13,41 +13,41 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
-;;;; ---- Tests: Typed state setters (ws-set-claude-state, ws-set-repl-state) ----
+;;;; ---- Tests: Typed state setters (ws-set-agent-state, ws-set-repl-state) ----
 
-(ert-deftest agent-repl-test-ws-set-claude-state-writes-both ()
-  "ws-set-claude-state writes :claude-state AND legacy :status (write-both)."
+(ert-deftest agent-repl-test-ws-set-agent-state-writes-both ()
+  "ws-set-agent-state writes :agent-state AND legacy :status (write-both)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :thinking)
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :thinking))
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :thinking))))
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :thinking))
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :thinking))))
 
-(ert-deftest agent-repl-test-ws-set-claude-state-nil-writes-both ()
-  "ws-set-claude-state nil clears both axes."
+(ert-deftest agent-repl-test-ws-set-agent-state-nil-writes-both ()
+  "ws-set-agent-state nil clears both axes."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :done)
-    (agent-repl--ws-set-claude-state "ws1" nil)
-    (should-not (agent-repl--ws-get "ws1" :claude-state))
-    (should-not (agent-repl--ws-get "ws1" :claude-state))))
+    (agent-repl--ws-set-agent-state "ws1" :done)
+    (agent-repl--ws-set-agent-state "ws1" nil)
+    (should-not (agent-repl--ws-get "ws1" :agent-state))
+    (should-not (agent-repl--ws-get "ws1" :agent-state))))
 
-(ert-deftest agent-repl-test-ws-set-claude-state-nil-ws-errors ()
-  "ws-set-claude-state signals error on nil workspace."
-  (should-error (agent-repl--ws-set-claude-state nil :thinking) :type 'error))
+(ert-deftest agent-repl-test-ws-set-agent-state-nil-ws-errors ()
+  "ws-set-agent-state signals error on nil workspace."
+  (should-error (agent-repl--ws-set-agent-state nil :thinking) :type 'error))
 
-(ert-deftest agent-repl-test-ws-claude-state-getter ()
-  "ws-claude-state reads :claude-state, not :status."
+(ert-deftest agent-repl-test-ws-agent-state-getter ()
+  "ws-agent-state reads :agent-state, not :status."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state :permission)
-    (should (eq (agent-repl--ws-claude-state "ws1") :permission))))
+    (agent-repl--ws-put "ws1" :agent-state :permission)
+    (should (eq (agent-repl--ws-agent-state "ws1") :permission))))
 
 (ert-deftest agent-repl-test-ws-set-repl-state-isolated ()
-  "ws-set-repl-state writes :repl-state, leaves :claude-state/:status alone."
+  "ws-set-repl-state writes :repl-state, leaves :agent-state/:status alone."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :thinking)
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
     (agent-repl--ws-set-repl-state "ws1" :inactive)
     (should (eq (agent-repl--ws-get "ws1" :repl-state) :inactive))
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :thinking))
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :thinking))))
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :thinking))
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :thinking))))
 
 (ert-deftest agent-repl-test-ws-set-repl-state-nil-ws-errors ()
   "ws-set-repl-state signals error on nil workspace."
@@ -109,25 +109,25 @@ default at restart and shouldn't pin behavior."
     (agent-repl--ws-put "ws1" :repl-state :init)
     (should (eq (agent-repl--ws-repl-state "ws1") :init))))
 
-(ert-deftest agent-repl-test-ws-claude-state-clear-if-match-clears-both ()
-  "ws-claude-state-clear-if with a matching state clears both fields."
+(ert-deftest agent-repl-test-ws-agent-state-clear-if-match-clears-both ()
+  "ws-agent-state-clear-if with a matching state clears both fields."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :thinking)
-    (agent-repl--ws-claude-state-clear-if "ws1" :thinking)
-    (should-not (agent-repl--ws-get "ws1" :claude-state))
-    (should-not (agent-repl--ws-get "ws1" :claude-state))))
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    (agent-repl--ws-agent-state-clear-if "ws1" :thinking)
+    (should-not (agent-repl--ws-get "ws1" :agent-state))
+    (should-not (agent-repl--ws-get "ws1" :agent-state))))
 
-(ert-deftest agent-repl-test-ws-claude-state-clear-if-mismatch-noop ()
-  "ws-claude-state-clear-if with a non-matching state is a no-op on both fields."
+(ert-deftest agent-repl-test-ws-agent-state-clear-if-mismatch-noop ()
+  "ws-agent-state-clear-if with a non-matching state is a no-op on both fields."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :done)
-    (agent-repl--ws-claude-state-clear-if "ws1" :thinking)
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :done))
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :done))))
+    (agent-repl--ws-set-agent-state "ws1" :done)
+    (agent-repl--ws-agent-state-clear-if "ws1" :thinking)
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :done))
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :done))))
 
-(ert-deftest agent-repl-test-ws-claude-state-clear-if-nil-ws-errors ()
-  "ws-claude-state-clear-if signals error on nil workspace."
-  (should-error (agent-repl--ws-claude-state-clear-if nil :thinking) :type 'error))
+(ert-deftest agent-repl-test-ws-agent-state-clear-if-nil-ws-errors ()
+  "ws-agent-state-clear-if signals error on nil workspace."
+  (should-error (agent-repl--ws-agent-state-clear-if nil :thinking) :type 'error))
 
 ;;;; ---- Tests: composed-state mapping ----
 ;;
@@ -171,130 +171,130 @@ dead vterm."
 (ert-deftest agent-repl-test-display-state-done-panels-closed-renders-nil ()
   ":done with no Claude panel in layout renders nil (suppressed on close)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :done)
+    (agent-repl--ws-set-agent-state "ws1" :done)
     (agent-repl--ws-set-repl-state "ws1" :inactive)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) nil)))
       (should-not (agent-repl--ws-display-state "ws1")))))
 
 (ert-deftest agent-repl-test-display-state-done-panels-open-renders-done ()
   ":done with panels visible renders :done (green)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :done)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p)
+    (agent-repl--ws-set-agent-state "ws1" :done)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
       (should (eq :done (agent-repl--ws-display-state "ws1"))))))
 
 (ert-deftest agent-repl-test-display-state-thinking-panels-closed-renders-nil ()
-  "Panels closed during :thinking suppresses red — :claude-state is preserved."
+  "Panels closed during :thinking suppresses red — :agent-state is preserved."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :thinking)
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
     (agent-repl--ws-set-repl-state "ws1" :inactive)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) nil)))
       (should-not (agent-repl--ws-display-state "ws1"))
-      ;; :claude-state must stay so reopen restores the in-flight color.
-      (should (eq :thinking (agent-repl--ws-claude-state "ws1"))))))
+      ;; :agent-state must stay so reopen restores the in-flight color.
+      (should (eq :thinking (agent-repl--ws-agent-state "ws1"))))))
 
 (ert-deftest agent-repl-test-display-state-thinking-panels-open-renders-thinking ()
   ":thinking with panels visible renders :thinking (red)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :thinking)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p)
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
       (should (eq :thinking (agent-repl--ws-display-state "ws1"))))))
 
 (ert-deftest agent-repl-test-display-state-permission-panels-closed-renders-nil ()
   "Panels closed during :permission suppresses the ❓ badge — state preserved."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :permission)
+    (agent-repl--ws-set-agent-state "ws1" :permission)
     (agent-repl--ws-set-repl-state "ws1" :inactive)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) nil)))
       (should-not (agent-repl--ws-display-state "ws1"))
-      (should (eq :permission (agent-repl--ws-claude-state "ws1"))))))
+      (should (eq :permission (agent-repl--ws-agent-state "ws1"))))))
 
 (ert-deftest agent-repl-test-display-state-permission-panels-open-renders-permission ()
   ":permission with panels visible renders :permission (green + ❓)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :permission)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p)
+    (agent-repl--ws-set-agent-state "ws1" :permission)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
       (should (eq :permission (agent-repl--ws-display-state "ws1"))))))
 
 (ert-deftest agent-repl-test-display-state-init-panels-closed-renders-nil ()
   ":init with panels closed suppresses the blue badge."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :init)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p)
+    (agent-repl--ws-set-agent-state "ws1" :init)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) nil)))
       (should-not (agent-repl--ws-display-state "ws1")))))
 
 (ert-deftest agent-repl-test-display-state-stop-failed-panels-closed-renders-nil ()
   ":stop-failed with panels closed suppresses the magenta ⚠ badge."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :stop-failed)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p)
+    (agent-repl--ws-set-agent-state "ws1" :stop-failed)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) nil)))
       (should-not (agent-repl--ws-display-state "ws1")))))
 
 (ert-deftest agent-repl-test-display-state-dead-panels-open-renders-dead ()
-  "A workspace with :repl-state :dead and nil :claude-state renders :dead when visible."
+  "A workspace with :repl-state :dead and nil :agent-state renders :dead when visible."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state nil)
+    (agent-repl--ws-put "ws1" :agent-state nil)
     (agent-repl--ws-set-repl-state "ws1" :dead)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
       (should (eq :dead (agent-repl--ws-display-state "ws1"))))))
 
 (ert-deftest agent-repl-test-display-state-dead-panels-closed-renders-nil ()
   ":dead with panels closed also suppresses the ❌ badge — uniform rule."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :claude-state nil)
+    (agent-repl--ws-put "ws1" :agent-state nil)
     (agent-repl--ws-set-repl-state "ws1" :dead)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) nil)))
       (should-not (agent-repl--ws-display-state "ws1")))))
 
 (ert-deftest agent-repl-test-display-state-idle-panels-open-renders-idle ()
   ":idle with Claude panel present in layout renders :idle (orange)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :idle)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p)
+    (agent-repl--ws-set-agent-state "ws1" :idle)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
       (should (eq :idle (agent-repl--ws-display-state "ws1"))))))
 
 (ert-deftest agent-repl-test-display-state-idle-panels-hidden-renders-nil ()
   ":idle with no Claude panel in layout renders nil (no background, no badge)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :idle)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p)
+    (agent-repl--ws-set-agent-state "ws1" :idle)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) nil)))
       (should-not (agent-repl--ws-display-state "ws1")))))
 
 ;;;; ---- Tests: Legacy wrappers still populate both axes ----
 
-(ert-deftest agent-repl-test-legacy-ws-set-writes-claude-state ()
-  "Legacy ws-set (wrapper) still writes :claude-state during migration."
+(ert-deftest agent-repl-test-legacy-ws-set-writes-agent-state ()
+  "Legacy ws-set (wrapper) still writes :agent-state during migration."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :permission)
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :permission))
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :permission))))
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :permission))
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :permission))))
 
 (ert-deftest agent-repl-test-legacy-ws-clear-clears-both-axes ()
-  "Legacy ws-clear-if-status (wrapper) clears :claude-state too."
+  "Legacy ws-clear-if-status (wrapper) clears :agent-state too."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :thinking)
-    (agent-repl--ws-claude-state-clear-if "ws1" :thinking)
-    (should-not (agent-repl--ws-get "ws1" :claude-state))
-    (should-not (agent-repl--ws-get "ws1" :claude-state))))
+    (agent-repl--ws-agent-state-clear-if "ws1" :thinking)
+    (should-not (agent-repl--ws-get "ws1" :agent-state))
+    (should-not (agent-repl--ws-get "ws1" :agent-state))))
 
-(ert-deftest agent-repl-test-mark-dead-vterm-clears-claude-state ()
-  "mark-dead-vterm clears :claude-state and sets :repl-state :dead."
+(ert-deftest agent-repl-test-mark-dead-vterm-clears-agent-state ()
+  "mark-dead-vterm clears :agent-state and sets :repl-state :dead."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :done)
+    (agent-repl--ws-set-agent-state "ws1" :done)
     (agent-repl--mark-dead-vterm "ws1")
-    (should-not (agent-repl--ws-get "ws1" :claude-state))
+    (should-not (agent-repl--ws-get "ws1" :agent-state))
     (should (eq (agent-repl--ws-get "ws1" :repl-state) :dead))))
 
 (ert-deftest agent-repl-test-mark-dead-vterm-preserves-merged ()
@@ -315,13 +315,13 @@ The post-merge poll otherwise clobbers the 🔀 badge with ❌."
     (agent-repl--ws-set "ws1" :done)
     (should (eq (agent-repl--ws-state "ws1") :done))
     ;; Thinking should be cleared — the plist status should now be :done
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :done))))
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :done))))
 
 (ert-deftest agent-repl-test-ws-clear ()
   "ws-clear should clear only the specified state."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :thinking)
-    (agent-repl--ws-claude-state-clear-if "ws1" :thinking)
+    (agent-repl--ws-agent-state-clear-if "ws1" :thinking)
     (should-not (agent-repl--ws-state "ws1"))))
 
 (ert-deftest agent-repl-test-ws-state-inactive ()
@@ -360,20 +360,20 @@ The post-merge poll otherwise clobbers the 🔀 badge with ❌."
   "`ws-clear' with :done should not clear status when it is :thinking."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :thinking)
-    (agent-repl--ws-claude-state-clear-if "ws1" :done)
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :thinking))))
+    (agent-repl--ws-agent-state-clear-if "ws1" :done)
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :thinking))))
 
 (ert-deftest agent-repl-test-ws-clear-permission ()
   "`ws-clear' with :permission should not clear status when it is :done."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :done)
-    (agent-repl--ws-claude-state-clear-if "ws1" :permission)
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :done))))
+    (agent-repl--ws-agent-state-clear-if "ws1" :permission)
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :done))))
 
 (ert-deftest agent-repl-test-ws-clear-nil-error ()
   "`ws-clear' with nil ws should signal error."
   (agent-repl-test--with-clean-state
-    (should-error (agent-repl--ws-claude-state-clear-if nil :done) :type 'error)))
+    (should-error (agent-repl--ws-agent-state-clear-if nil :done) :type 'error)))
 
 ;;;; ---- Tests: Tabline rendering ----
 
@@ -383,7 +383,7 @@ The post-merge poll otherwise clobbers the 🔀 badge with ❌."
     (agent-repl--ws-set "other-ws" :thinking)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function '+workspace-list-names) (lambda () '("test-ws" "other-ws")))
-              ((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_ws) t)))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
       (let ((result (agent-repl--tabline-advice '("test-ws" "other-ws"))))
         ;; other-ws should have thinking face
         (should (string-match-p "other-ws" result))))))
@@ -394,18 +394,18 @@ The post-merge poll otherwise clobbers the 🔀 badge with ❌."
     (agent-repl--ws-set "test-ws" :permission)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function '+workspace-list-names) (lambda () '("test-ws")))
-              ((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_ws) t)))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
       (let ((result (agent-repl--tabline-advice '("test-ws"))))
         (should (string-match-p "1❓" result))))))
 
 (ert-deftest agent-repl-test-tabline-dead-label ()
   "Tabline should show index and ❌ for dead session (panels visible)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :claude-state nil)
+    (agent-repl--ws-put "test-ws" :agent-state nil)
     (agent-repl--ws-set-repl-state "test-ws" :dead)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
               ((symbol-function '+workspace-list-names) (lambda () '("test-ws")))
-              ((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_ws) t)))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
       (let ((result (agent-repl--tabline-advice '("test-ws"))))
         (should (string-match-p "1❌" result))))))
 
@@ -414,11 +414,11 @@ The post-merge poll otherwise clobbers the 🔀 badge with ❌."
 panels closed) — :merged uses the same palette `:label' mechanism as
 :dead but emits the merge glyph instead."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :claude-state nil)
+    (agent-repl--ws-put "test-ws" :agent-state nil)
     (agent-repl--ws-put "test-ws" :repl-state :merged)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
               ((symbol-function '+workspace-list-names) (lambda () '("test-ws")))
-              ((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_ws) nil)))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let ((result (agent-repl--tabline-advice '("test-ws"))))
         (should (string-match-p "1🔀" result))))))
 
@@ -427,7 +427,7 @@ panels closed) — :merged uses the same palette `:label' mechanism as
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "bg-ws" :done)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-              ((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_ws) t)))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
       (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
         ;; Find the "bg-ws" segment and check its face
         (let ((pos (string-match "bg-ws" result)))
@@ -463,8 +463,8 @@ The ❓ glyph in the bracket (not the name background) signals permission."
 (ert-deftest agent-repl-test-bracket-state-thinking-panels-closed ()
   "ws-bracket-state returns :thinking even when panels are closed."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :thinking)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p)
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) nil)))
       (should (eq :thinking (agent-repl--ws-bracket-state "ws1"))))))
 
@@ -495,9 +495,9 @@ The ❓ glyph in the bracket (not the name background) signals permission."
 (ert-deftest agent-repl-test-tabline-panels-closed-name-uses-default-face ()
   "Panels closed for :thinking — name region should use the default workspace face."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "bg-ws" :thinking)
+    (agent-repl--ws-set-agent-state "bg-ws" :thinking)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-              ((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_ws) nil)))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let* ((result (agent-repl--tabline-advice '("current-ws" "bg-ws")))
              (pos (string-match "bg-ws" result)))
         (should pos)
@@ -506,9 +506,9 @@ The ❓ glyph in the bracket (not the name background) signals permission."
 (ert-deftest agent-repl-test-tabline-panels-closed-bracket-keeps-state-color ()
   "Panels closed for :thinking — [N] bracket should keep the thinking-red background."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "bg-ws" :thinking)
+    (agent-repl--ws-set-agent-state "bg-ws" :thinking)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-              ((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_ws) nil)))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let* ((result (agent-repl--tabline-advice '("current-ws" "bg-ws")))
              (bracket-pos (string-match "\\[2\\]" result))
              (bracket-face (and bracket-pos (get-text-property bracket-pos 'face result))))
@@ -520,28 +520,28 @@ The ❓ glyph in the bracket (not the name background) signals permission."
   "Panels closed for :permission — bracket label keeps the ❓ glyph
 even when the full-tab background is suppressed."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "bg-ws" :permission)
+    (agent-repl--ws-set-agent-state "bg-ws" :permission)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-              ((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_ws) nil)))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
         (should (string-match-p "\\[2❓\\]" result))))))
 
 (ert-deftest agent-repl-test-tabline-panels-closed-dead-bracket-keeps-glyph ()
   "Panels closed for :dead — bracket label keeps the ❌ glyph."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "bg-ws" :claude-state nil)
+    (agent-repl--ws-put "bg-ws" :agent-state nil)
     (agent-repl--ws-set-repl-state "bg-ws" :dead)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-              ((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_ws) nil)))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
         (should (string-match-p "\\[2❌\\]" result))))))
 
 (ert-deftest agent-repl-test-tabline-panels-closed-stop-failed-bracket-keeps-glyph ()
   "Panels closed for :stop-failed — bracket label keeps the ⚠ glyph."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "bg-ws" :stop-failed)
+    (agent-repl--ws-set-agent-state "bg-ws" :stop-failed)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-              ((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_ws) nil)))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
         (should (string-match-p "\\[2⚠\\]" result))))))
 
@@ -549,18 +549,18 @@ even when the full-tab background is suppressed."
   "Panels closed for :thinking — bracket label has no glyph
 \(:thinking has no `:label' in the palette, so the index stands alone\)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "bg-ws" :thinking)
+    (agent-repl--ws-set-agent-state "bg-ws" :thinking)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-              ((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_ws) nil)))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
         (should (string-match-p "\\[2\\]" result))))))
 
 (ert-deftest agent-repl-test-tabline-panels-closed-permission-bracket-stays-green ()
   "Panels closed for :permission — bracket bg should be the done-green."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "bg-ws" :permission)
+    (agent-repl--ws-set-agent-state "bg-ws" :permission)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-              ((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_ws) nil)))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let* ((result (agent-repl--tabline-advice '("current-ws" "bg-ws")))
              (bracket-pos (string-match "\\[2❓\\]" result))
              (bracket-face (and bracket-pos (get-text-property bracket-pos 'face result))))
@@ -569,10 +569,10 @@ even when the full-tab background is suppressed."
                        (plist-get bracket-face :background)))))))
 
 (ert-deftest agent-repl-test-tabline-panels-closed-no-state-leaves-bracket-uncolored ()
-  "No claude-state on a workspace — bracket bg stays unspecified even with panels closed."
+  "No agent-state on a workspace — bracket bg stays unspecified even with panels closed."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-              ((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_ws) nil)))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let* ((result (agent-repl--tabline-advice '("current-ws" "bg-ws")))
              (bracket-pos (string-match "\\[2\\]" result))
              (bracket-face (and bracket-pos (get-text-property bracket-pos 'face result))))
@@ -609,28 +609,28 @@ even when the full-tab background is suppressed."
 (ert-deftest agent-repl-test-ws-clear-when-already-nil ()
   "Clearing when status is already nil should be a no-op."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-claude-state-clear-if "ws1" :thinking)
+    (agent-repl--ws-agent-state-clear-if "ws1" :thinking)
     (should-not (agent-repl--ws-state "ws1"))))
 
 (ert-deftest agent-repl-test-ws-clear-matching-done ()
   "Clearing :done when status IS :done should clear to nil."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :done)
-    (agent-repl--ws-claude-state-clear-if "ws1" :done)
+    (agent-repl--ws-agent-state-clear-if "ws1" :done)
     (should-not (agent-repl--ws-state "ws1"))))
 
 (ert-deftest agent-repl-test-ws-clear-matching-permission ()
   "Clearing :permission when status IS :permission should clear to nil."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :permission)
-    (agent-repl--ws-claude-state-clear-if "ws1" :permission)
+    (agent-repl--ws-agent-state-clear-if "ws1" :permission)
     (should-not (agent-repl--ws-state "ws1"))))
 
 (ert-deftest agent-repl-test-ws-clear-matching-inactive ()
   "Clearing :inactive when status IS :inactive should clear to nil."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :inactive)
-    (agent-repl--ws-claude-state-clear-if "ws1" :inactive)
+    (agent-repl--ws-agent-state-clear-if "ws1" :inactive)
     (should-not (agent-repl--ws-state "ws1"))))
 
 (ert-deftest agent-repl-test-ws-clear-calls-mode-line-update-on-match ()
@@ -641,10 +641,10 @@ even when the full-tab background is suppressed."
       (cl-letf (((symbol-function 'force-mode-line-update)
                  (lambda (&rest _) (cl-incf call-count))))
         ;; Mismatch: should NOT call force-mode-line-update
-        (agent-repl--ws-claude-state-clear-if "ws1" :thinking)
+        (agent-repl--ws-agent-state-clear-if "ws1" :thinking)
         (should (= call-count 0))
         ;; Match: should call force-mode-line-update
-        (agent-repl--ws-claude-state-clear-if "ws1" :done)
+        (agent-repl--ws-agent-state-clear-if "ws1" :done)
         (should (= call-count 1))))))
 
 ;;;; ---- Tests: ws-dir ----
@@ -1160,9 +1160,9 @@ appended *after* the faced padding, not merged into it."
 (ert-deftest agent-repl-test-render-tab-entry-flash-overrides-state-color ()
   "Flash spec overrides the state-driven coloring while :flashing is set."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :thinking)
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
     (agent-repl--ws-set-flashing "ws1" t)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_ws) t)))
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
       (let* ((result (agent-repl--render-tab-entry "ws1" "current-ws" 1))
              (bracket-pos (string-match "\\[" result))
              (bracket-face (get-text-property bracket-pos 'face result)))
@@ -1173,8 +1173,8 @@ appended *after* the faced padding, not merged into it."
 (ert-deftest agent-repl-test-render-tab-entry-no-flash-uses-state-face ()
   "Without :flashing, render-tab-entry uses the state-driven face."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :done)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_ws) t)))
+    (agent-repl--ws-set-agent-state "ws1" :done)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
       (let* ((result (agent-repl--render-tab-entry "ws1" "current-ws" 1))
              (name-pos (string-match "ws1" result)))
         (should name-pos)
@@ -1428,133 +1428,133 @@ purpose is the alternating-space cache-bust."
              (r-on (agent-repl-current-workspace-name-segment)))
         (should-not (equal r-off r-on))))))
 
-;;;; ---- Tests: wconf-has-claude-p ----
+;;;; ---- Tests: wconf-has-agent-p ----
 
-(ert-deftest agent-repl-test-wconf-has-claude-nil ()
-  "wconf-has-claude-p should return nil for nil wconf."
-  (should-not (agent-repl--wconf-has-claude-p nil)))
+(ert-deftest agent-repl-test-wconf-has-agent-nil ()
+  "wconf-has-agent-p should return nil for nil wconf."
+  (should-not (agent-repl--wconf-has-agent-p nil)))
 
-(ert-deftest agent-repl-test-wconf-has-claude-non-list ()
-  "wconf-has-claude-p should return nil for a non-list wconf."
-  (should-not (agent-repl--wconf-has-claude-p "not-a-list")))
+(ert-deftest agent-repl-test-wconf-has-agent-non-list ()
+  "wconf-has-agent-p should return nil for a non-list wconf."
+  (should-not (agent-repl--wconf-has-agent-p "not-a-list")))
 
-(ert-deftest agent-repl-test-wconf-has-claude-flat-match ()
-  "wconf-has-claude-p should return t for a flat wconf with a matching buffer."
-  (let ((wconf '((buffer "*claude-panel-ab12cd34*"))))
-    (should (agent-repl--wconf-has-claude-p wconf))))
+(ert-deftest agent-repl-test-wconf-has-agent-flat-match ()
+  "wconf-has-agent-p should return t for a flat wconf with a matching buffer."
+  (let ((wconf '((buffer "*agent-panel-ab12cd34*"))))
+    (should (agent-repl--wconf-has-agent-p wconf))))
 
-(ert-deftest agent-repl-test-wconf-has-claude-nested-match ()
-  "wconf-has-claude-p should return t for a nested wconf with matching buffer."
-  (let ((wconf '((child ((buffer "*claude-panel-ab12cd34*"))))))
-    (should (agent-repl--wconf-has-claude-p wconf))))
+(ert-deftest agent-repl-test-wconf-has-agent-nested-match ()
+  "wconf-has-agent-p should return t for a nested wconf with matching buffer."
+  (let ((wconf '((child ((buffer "*agent-panel-ab12cd34*"))))))
+    (should (agent-repl--wconf-has-agent-p wconf))))
 
-(ert-deftest agent-repl-test-wconf-has-claude-no-buffer ()
-  "wconf-has-claude-p should return nil for a wconf with no buffer entries."
+(ert-deftest agent-repl-test-wconf-has-agent-no-buffer ()
+  "wconf-has-agent-p should return nil for a wconf with no buffer entries."
   (let ((wconf '((something "other"))))
-    (should-not (agent-repl--wconf-has-claude-p wconf))))
+    (should-not (agent-repl--wconf-has-agent-p wconf))))
 
-(ert-deftest agent-repl-test-wconf-has-claude-non-claude-buffer ()
-  "wconf-has-claude-p should return nil for a wconf with non-claude buffers."
+(ert-deftest agent-repl-test-wconf-has-agent-non-agent-buffer ()
+  "wconf-has-agent-p should return nil for a wconf with non-agent buffers."
   (let ((wconf '((buffer "*scratch*"))))
-    (should-not (agent-repl--wconf-has-claude-p wconf))))
+    (should-not (agent-repl--wconf-has-agent-p wconf))))
 
-;;;; ---- Tests: visible-claude-buffer-p ----
+;;;; ---- Tests: visible-agent-buffer-p ----
 
-(ert-deftest agent-repl-test-visible-claude-buffer-dead-buffer ()
-  "visible-claude-buffer-p should return nil for a dead buffer."
-  (let ((buf (generate-new-buffer "*claude-panel-deadbeef*")))
+(ert-deftest agent-repl-test-visible-agent-buffer-dead-buffer ()
+  "visible-agent-buffer-p should return nil for a dead buffer."
+  (let ((buf (generate-new-buffer "*agent-panel-deadbeef*")))
     (kill-buffer buf)
-    (should-not (agent-repl--visible-claude-buffer-p buf))))
+    (should-not (agent-repl--visible-agent-buffer-p buf))))
 
-(ert-deftest agent-repl-test-visible-claude-buffer-non-claude ()
-  "visible-claude-buffer-p should return nil for a live non-claude buffer."
-  (agent-repl-test--with-temp-buffer "*not-claude*"
-    (should-not (agent-repl--visible-claude-buffer-p (current-buffer)))))
+(ert-deftest agent-repl-test-visible-agent-buffer-non-agent ()
+  "visible-agent-buffer-p should return nil for a live non-agent buffer."
+  (agent-repl-test--with-temp-buffer "*not-agent*"
+    (should-not (agent-repl--visible-agent-buffer-p (current-buffer)))))
 
-(ert-deftest agent-repl-test-visible-claude-buffer-no-window ()
-  "visible-claude-buffer-p should return nil for a live claude buffer with no window."
-  (agent-repl-test--with-temp-buffer "*claude-panel-00112233*"
+(ert-deftest agent-repl-test-visible-agent-buffer-no-window ()
+  "visible-agent-buffer-p should return nil for a live claude buffer with no window."
+  (agent-repl-test--with-temp-buffer "*agent-panel-00112233*"
     ;; Buffer is live and claude but has no window
-    (should-not (agent-repl--visible-claude-buffer-p (current-buffer)))))
+    (should-not (agent-repl--visible-agent-buffer-p (current-buffer)))))
 
-(ert-deftest agent-repl-test-visible-claude-buffer-with-window ()
-  "visible-claude-buffer-p should return non-nil for a live claude buffer with a window."
-  (agent-repl-test--with-temp-buffer "*claude-panel-00112233*"
+(ert-deftest agent-repl-test-visible-agent-buffer-with-window ()
+  "visible-agent-buffer-p should return non-nil for a live claude buffer with a window."
+  (agent-repl-test--with-temp-buffer "*agent-panel-00112233*"
     (cl-letf (((symbol-function 'get-buffer-window)
                (lambda (_buf) 'fake-window)))
-      (should (agent-repl--visible-claude-buffer-p (current-buffer))))))
+      (should (agent-repl--visible-agent-buffer-p (current-buffer))))))
 
-;;;; ---- Tests: claude-visible-in-current-ws-p ----
+;;;; ---- Tests: agent-visible-in-current-ws-p ----
 
-(ert-deftest agent-repl-test-claude-visible-in-current-ws-none ()
-  "claude-visible-in-current-ws-p should return nil when no claude buffers exist."
+(ert-deftest agent-repl-test-agent-visible-in-current-ws-none ()
+  "agent-visible-in-current-ws-p should return nil when no claude buffers exist."
   (cl-letf (((symbol-function 'buffer-list)
              (lambda () nil)))
-    (should-not (agent-repl--claude-visible-in-current-ws-p))))
+    (should-not (agent-repl--agent-visible-in-current-ws-p))))
 
-(ert-deftest agent-repl-test-claude-visible-in-current-ws-found ()
-  "claude-visible-in-current-ws-p should return non-nil when a visible claude buffer exists.
+(ert-deftest agent-repl-test-agent-visible-in-current-ws-found ()
+  "agent-visible-in-current-ws-p should return non-nil when a visible claude buffer exists.
 
 The `get-buffer-window' mock takes an optional second arg because on
 Emacs 30 native-compiled callers pass the ALL-FRAMES slot explicitly
 (as nil) even when the source only writes `(get-buffer-window buf)' —
 without it, the test fails with `wrong-number-of-arguments' under AOT
 native-comp."
-  (agent-repl-test--with-temp-buffer "*claude-panel-aabbccdd*"
+  (agent-repl-test--with-temp-buffer "*agent-panel-aabbccdd*"
     (let ((test-buf (current-buffer)))
       (cl-letf (((symbol-function 'buffer-list)
                  (lambda () (list test-buf)))
                 ((symbol-function 'get-buffer-window)
                  (lambda (_buf &optional _all-frames) 'fake-window)))
-        (should (agent-repl--claude-visible-in-current-ws-p))))))
+        (should (agent-repl--agent-visible-in-current-ws-p))))))
 
-;;;; ---- Tests: claude-in-saved-wconf-p ----
+;;;; ---- Tests: agent-in-saved-wconf-p ----
 
-(ert-deftest agent-repl-test-claude-in-saved-wconf-persp-not-found ()
-  "claude-in-saved-wconf-p should return nil when persp is not found."
+(ert-deftest agent-repl-test-agent-in-saved-wconf-persp-not-found ()
+  "agent-in-saved-wconf-p should return nil when persp is not found."
   (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_name) nil)))
-    (should-not (agent-repl--claude-in-saved-wconf-p "ws1"))))
+    (should-not (agent-repl--agent-in-saved-wconf-p "ws1"))))
 
-(ert-deftest agent-repl-test-claude-in-saved-wconf-persp-is-symbol ()
-  "claude-in-saved-wconf-p should return nil when persp-get-by-name returns the sentinel keyword."
+(ert-deftest agent-repl-test-agent-in-saved-wconf-persp-is-symbol ()
+  "agent-in-saved-wconf-p should return nil when persp-get-by-name returns the sentinel keyword."
   ;; persp-not-persp is :nil — a keyword; --ws-resolve-persp normalizes it to nil.
   (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_name) :nil)))
-    (should-not (agent-repl--claude-in-saved-wconf-p "ws1"))))
+    (should-not (agent-repl--agent-in-saved-wconf-p "ws1"))))
 
-(ert-deftest agent-repl-test-claude-in-saved-wconf-with-claude ()
-  "claude-in-saved-wconf-p should return t when saved wconf contains claude buffer."
+(ert-deftest agent-repl-test-agent-in-saved-wconf-with-claude ()
+  "agent-in-saved-wconf-p should return t when saved wconf contains claude buffer."
   (let ((fake-persp (list 'fake-persp-struct))
-        (fake-wconf '((buffer "*claude-panel-ab12cd34*"))))
+        (fake-wconf '((buffer "*agent-panel-ab12cd34*"))))
     (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_name) fake-persp))
               ((symbol-function 'persp-window-conf) (lambda (_persp) fake-wconf)))
-      (should (agent-repl--claude-in-saved-wconf-p "ws1")))))
+      (should (agent-repl--agent-in-saved-wconf-p "ws1")))))
 
-(ert-deftest agent-repl-test-claude-in-saved-wconf-without-claude ()
-  "claude-in-saved-wconf-p should return nil when saved wconf has no claude buffer."
+(ert-deftest agent-repl-test-agent-in-saved-wconf-without-claude ()
+  "agent-in-saved-wconf-p should return nil when saved wconf has no claude buffer."
   (let ((fake-persp (list 'fake-persp-struct))
         (fake-wconf '((buffer "*scratch*"))))
     (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_name) fake-persp))
               ((symbol-function 'persp-window-conf) (lambda (_persp) fake-wconf)))
-      (should-not (agent-repl--claude-in-saved-wconf-p "ws1")))))
+      (should-not (agent-repl--agent-in-saved-wconf-p "ws1")))))
 
-;;;; ---- Tests: ws-claude-open-p ----
+;;;; ---- Tests: ws-agent-open-p ----
 
-(ert-deftest agent-repl-test-ws-claude-open-current-ws ()
-  "ws-claude-open-p should delegate to visible check for the current workspace."
+(ert-deftest agent-repl-test-ws-agent-open-current-ws ()
+  "ws-agent-open-p should delegate to visible check for the current workspace."
   (let ((visible-called nil))
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--claude-visible-in-current-ws-p)
+              ((symbol-function 'agent-repl--agent-visible-in-current-ws-p)
                (lambda () (setq visible-called t) t)))
-      (should (agent-repl--ws-claude-open-p "ws1"))
+      (should (agent-repl--ws-agent-open-p "ws1"))
       (should visible-called))))
 
-(ert-deftest agent-repl-test-ws-claude-open-background-ws ()
-  "ws-claude-open-p should delegate to saved wconf check for a background workspace."
+(ert-deftest agent-repl-test-ws-agent-open-background-ws ()
+  "ws-agent-open-p should delegate to saved wconf check for a background workspace."
   (let ((wconf-called nil))
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-              ((symbol-function 'agent-repl--claude-in-saved-wconf-p)
+              ((symbol-function 'agent-repl--agent-in-saved-wconf-p)
                (lambda (ws) (setq wconf-called ws) t)))
-      (should (agent-repl--ws-claude-open-p "bg-ws"))
+      (should (agent-repl--ws-agent-open-p "bg-ws"))
       (should (equal wconf-called "bg-ws")))))
 
 ;;;; ---- Tests: update-ws-state (state machine) ----
@@ -1570,14 +1570,14 @@ native-comp."
 (ert-deftest agent-repl-test-update-ws-state-done-clean-acked-dwell-elapsed-to-idle ()
   ":done + clean + acked + dwell elapsed → :idle (user has dwelled long enough)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :done)
+    (agent-repl--ws-set-agent-state "ws1" :done)
     (agent-repl--ws-put "ws1" :done-acked t)
     ;; Focus started well in the past so dwell exceeds delay.
     (agent-repl--ws-put "ws1" :done-acked-at
                          (- (float-time) (+ agent-repl-done-idle-delay 1)))
     (agent-repl--ws-put "ws1" :git-clean 'clean)
     (agent-repl--update-ws-state "ws1")
-    (should (eq (agent-repl--ws-claude-state "ws1") :idle))
+    (should (eq (agent-repl--ws-agent-state "ws1") :idle))
     ;; Both ack flags clear so a future :done cycle starts unacknowledged.
     (should (null (agent-repl--ws-get "ws1" :done-acked)))
     (should (null (agent-repl--ws-get "ws1" :done-acked-at)))))
@@ -1585,36 +1585,36 @@ native-comp."
 (ert-deftest agent-repl-test-update-ws-state-done-clean-acked-dwell-not-elapsed-stays-done ()
   ":done + clean + acked + dwell NOT elapsed stays :done — user just arrived."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :done)
+    (agent-repl--ws-set-agent-state "ws1" :done)
     (agent-repl--ws-put "ws1" :done-acked t)
     ;; Focus started right now — dwell is essentially zero.
     (agent-repl--ws-put "ws1" :done-acked-at (float-time))
     (agent-repl--ws-put "ws1" :git-clean 'clean)
     (agent-repl--update-ws-state "ws1")
-    (should (eq (agent-repl--ws-claude-state "ws1") :done))
+    (should (eq (agent-repl--ws-agent-state "ws1") :done))
     ;; Timestamp preserved so the countdown continues on the next tick.
     (should (agent-repl--ws-get "ws1" :done-acked-at))))
 
 (ert-deftest agent-repl-test-update-ws-state-done-clean-not-acked-stays-done ()
   ":done + clean + NOT acked stays :done — wait for user to view."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :done)
+    (agent-repl--ws-set-agent-state "ws1" :done)
     (agent-repl--ws-put "ws1" :done-acked nil)
     (agent-repl--ws-put "ws1" :done-acked-at nil)
     (agent-repl--ws-put "ws1" :git-clean 'clean)
     (agent-repl--update-ws-state "ws1")
-    (should (eq (agent-repl--ws-claude-state "ws1") :done))))
+    (should (eq (agent-repl--ws-agent-state "ws1") :done))))
 
 (ert-deftest agent-repl-test-update-ws-state-done-dirty-stays-done ()
   ":done + dirty stays :done — waiting on user to stage/commit."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :done)
+    (agent-repl--ws-set-agent-state "ws1" :done)
     (agent-repl--ws-put "ws1" :done-acked t)
     (agent-repl--ws-put "ws1" :done-acked-at
                          (- (float-time) (+ agent-repl-done-idle-delay 1)))
     (agent-repl--ws-put "ws1" :git-clean 'dirty)
     (agent-repl--update-ws-state "ws1")
-    (should (eq (agent-repl--ws-claude-state "ws1") :done))))
+    (should (eq (agent-repl--ws-agent-state "ws1") :done))))
 
 (ert-deftest agent-repl-test-update-ws-state-inactive-dirty ()
   ":inactive + dirty should remain :inactive.
@@ -1640,7 +1640,7 @@ trees; under the revised model only the Stop hook writes :done."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'agent-repl--workspace-clean-p) (lambda (_ws) nil)))
       (agent-repl--update-ws-state "ws1")
-      (should-not (agent-repl--ws-claude-state "ws1")))))
+      (should-not (agent-repl--ws-agent-state "ws1")))))
 
 (ert-deftest agent-repl-test-update-ws-state-nil-clean ()
   "nil + clean should remain nil."
@@ -1682,7 +1682,7 @@ first call (counter increments to 1, `(mod 1 5)' is non-zero)."
       ;; Register ws1 in the hashmap so the iterator finds it
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
-                ((symbol-function 'agent-repl--claude-running-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
                 ((symbol-function 'agent-repl--update-ws-state)
                  (lambda (ws) (setq updated-ws ws)))
                 ((symbol-function 'agent-repl--async-refresh-git-status)
@@ -1701,7 +1701,7 @@ gate-tweak is needed here."
       ;; Register ws1 in the hashmap so the iterator finds it
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
-                ((symbol-function 'agent-repl--claude-running-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl--mark-dead-vterm)
                  (lambda (ws) (setq dead-ws ws)))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged) #'ignore))
@@ -1735,49 +1735,49 @@ redundant `directory-files' scan to each."
 
 ;;;; ---- Tests: mark-dead-vterm ----
 
-(ert-deftest agent-repl-test-mark-dead-vterm-sets-dead-and-clears-claude-state ()
-  "mark-dead-vterm writes :repl-state :dead and clears :claude-state."
+(ert-deftest agent-repl-test-mark-dead-vterm-sets-dead-and-clears-agent-state ()
+  "mark-dead-vterm writes :repl-state :dead and clears :agent-state."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :done)
+    (agent-repl--ws-set-agent-state "ws1" :done)
     (agent-repl--mark-dead-vterm "ws1")
     (should (eq (agent-repl--ws-repl-state "ws1") :dead))
-    (should-not (agent-repl--ws-claude-state "ws1"))))
+    (should-not (agent-repl--ws-agent-state "ws1"))))
 
 (ert-deftest agent-repl-test-mark-dead-vterm-from-thinking ()
   "mark-dead-vterm clears :thinking (vterm is gone; sentinel won't fire)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :thinking)
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
     (agent-repl--mark-dead-vterm "ws1")
     (should (eq (agent-repl--ws-repl-state "ws1") :dead))
-    (should-not (agent-repl--ws-claude-state "ws1"))))
+    (should-not (agent-repl--ws-agent-state "ws1"))))
 
 (ert-deftest agent-repl-test-mark-dead-vterm-idempotent ()
   "mark-dead-vterm is a no-op when :repl-state is already :dead."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :repl-state :dead)
-    (agent-repl--ws-put "ws1" :claude-state :done)  ; simulate stale residue
+    (agent-repl--ws-put "ws1" :agent-state :done)  ; simulate stale residue
     (agent-repl--mark-dead-vterm "ws1")
-    ;; Second call must not re-run the clear — claude-state stays as-is.
-    (should (eq (agent-repl--ws-claude-state "ws1") :done))))
+    ;; Second call must not re-run the clear — agent-state stays as-is.
+    (should (eq (agent-repl--ws-agent-state "ws1") :done))))
 
 (ert-deftest agent-repl-test-mark-dead-vterm-display-state ()
   "mark-dead-vterm results in :dead display state (❌ badge) when panels visible."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :done)
+    (agent-repl--ws-set-agent-state "ws1" :done)
     (agent-repl--mark-dead-vterm "ws1")
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
       (should (eq :dead (agent-repl--ws-display-state "ws1"))))))
 
 (ert-deftest agent-repl-test-mark-dead-vterm-preserves-init ()
-  "mark-dead-vterm is a no-op when :claude-state is :init.
-During initialize-claude, the timer may tick before claude-running-p returns t
+  "mark-dead-vterm is a no-op when :agent-state is :init.
+During initialize-agent, the timer may tick before agent-running-p returns t
 even though the session is legitimately coming up; under the old code
 this clobbered :init with :dead.  The :init guard prevents that."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :init)
+    (agent-repl--ws-set-agent-state "ws1" :init)
     (agent-repl--mark-dead-vterm "ws1")
-    (should (eq (agent-repl--ws-claude-state "ws1") :init))
+    (should (eq (agent-repl--ws-agent-state "ws1") :init))
     (should-not (agent-repl--ws-repl-state "ws1"))))
 
 ;;;; ---- Tests: on-frame-focus ----
@@ -1823,10 +1823,10 @@ Mocks the unguarded `-now' entrypoint; matches what production code calls."
 (ert-deftest agent-repl-test-update-ws-state-done-dirty-stays-done-explicit ()
   ":done + dirty stays :done — dirty worktree blocks the :done→:idle decay."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :done)
+    (agent-repl--ws-set-agent-state "ws1" :done)
     (cl-letf (((symbol-function 'agent-repl--workspace-clean-p) (lambda (_ws) nil)))
       (agent-repl--update-ws-state "ws1")
-      (should (eq (agent-repl--ws-claude-state "ws1") :done)))))
+      (should (eq (agent-repl--ws-agent-state "ws1") :done)))))
 
 (ert-deftest agent-repl-test-update-ws-state-permission-clean-unchanged ()
   ":permission + clean should remain unchanged.
@@ -1843,36 +1843,36 @@ Mocks the unguarded `-now' entrypoint; matches what production code calls."
   "Clearing :thinking when actual status is :permission should be a no-op."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :permission)
-    (agent-repl--ws-claude-state-clear-if "ws1" :thinking)
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :permission))))
+    (agent-repl--ws-agent-state-clear-if "ws1" :thinking)
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :permission))))
 
 (ert-deftest agent-repl-test-ws-clear-inactive-when-thinking-noop ()
   "Clearing :inactive when actual status is :thinking should be a no-op."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :thinking)
-    (agent-repl--ws-claude-state-clear-if "ws1" :inactive)
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :thinking))))
+    (agent-repl--ws-agent-state-clear-if "ws1" :inactive)
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :thinking))))
 
 (ert-deftest agent-repl-test-ws-clear-done-when-inactive-noop ()
   "Clearing :done when actual status is :inactive should be a no-op."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :inactive)
-    (agent-repl--ws-claude-state-clear-if "ws1" :done)
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :inactive))))
+    (agent-repl--ws-agent-state-clear-if "ws1" :done)
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :inactive))))
 
 (ert-deftest agent-repl-test-ws-clear-inactive-when-done-noop ()
   "Clearing :inactive when actual status is :done should be a no-op."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :done)
-    (agent-repl--ws-claude-state-clear-if "ws1" :inactive)
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :done))))
+    (agent-repl--ws-agent-state-clear-if "ws1" :inactive)
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :done))))
 
 (ert-deftest agent-repl-test-ws-clear-thinking-when-done-noop ()
   "Clearing :thinking when actual status is :done should be a no-op."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :done)
-    (agent-repl--ws-claude-state-clear-if "ws1" :thinking)
-    (should (eq (agent-repl--ws-get "ws1" :claude-state) :done))))
+    (agent-repl--ws-agent-state-clear-if "ws1" :thinking)
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :done))))
 
 ;;;; ---- Tests: update-all-workspace-states multi-workspace dispatch ----
 
@@ -1892,7 +1892,7 @@ timers that would never fire under ERT batch mode."
       (agent-repl--ws-put "running-ws" :project-dir "/tmp/running")
       (agent-repl--ws-put "dead-ws" :project-dir "/tmp/dead")
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
-                ((symbol-function 'agent-repl--claude-running-p)
+                ((symbol-function 'agent-repl--agent-running-p)
                  (lambda (ws) (equal ws "running-ws")))
                 ((symbol-function 'agent-repl--update-ws-state)
                  (lambda (ws) (push ws updated)))
@@ -1925,7 +1925,7 @@ for the running ws because the cheap state-machine work is gate-independent."
           (agent-repl-state-git-tick-modulus 5))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
-                ((symbol-function 'agent-repl--claude-running-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
                 ((symbol-function 'agent-repl--update-ws-state)
                  (lambda (_ws) (setq state-updated t)))
                 ((symbol-function 'agent-repl--async-refresh-git-status)
@@ -1948,7 +1948,7 @@ lands on a multiple of modulus, opening the gate."
           (agent-repl--update-tick-counter 4))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
-                ((symbol-function 'agent-repl--claude-running-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
                 ((symbol-function 'agent-repl--update-ws-state) #'ignore)
                 ((symbol-function 'agent-repl--async-refresh-git-status)
                  (lambda (_ws) (setq git-refreshed t)))
@@ -2151,7 +2151,7 @@ The cheap state-machine work still runs."
           (merge-fired nil)
           (state-fired nil))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (cl-letf (((symbol-function 'agent-repl--claude-running-p) (lambda (_ws) t))
+      (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
                 ((symbol-function 'agent-repl--update-ws-state)
                  (lambda (_ws) (setq state-fired t)))
                 ((symbol-function 'agent-repl--async-refresh-git-status)
@@ -2169,7 +2169,7 @@ The cheap state-machine work still runs."
     (let ((git-fired nil)
           (merge-fired nil))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (cl-letf (((symbol-function 'agent-repl--claude-running-p) (lambda (_ws) t))
+      (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
                 ((symbol-function 'agent-repl--update-ws-state) #'ignore)
                 ((symbol-function 'agent-repl--async-refresh-git-status)
                  (lambda (_ws) (setq git-fired t)))
@@ -2189,7 +2189,7 @@ liveness — a dead workspace can still have a merge-completed parent."
           (state-called nil)
           (merge-called nil))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (cl-letf (((symbol-function 'agent-repl--claude-running-p) (lambda (_ws) nil))
+      (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl--update-ws-state)
                  (lambda (_ws) (setq state-called t)))
                 ((symbol-function 'agent-repl--mark-dead-vterm)
@@ -2441,10 +2441,10 @@ liveness — a dead workspace can still have a merge-completed parent."
 ;; remains here.
 
 (ert-deftest agent-repl-test-display-state-stop-failed ()
-  "ws-display-state returns :stop-failed when claude-state is :stop-failed and panels visible."
+  "ws-display-state returns :stop-failed when agent-state is :stop-failed and panels visible."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :stop-failed)
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p)
+    (agent-repl--ws-set-agent-state "ws1" :stop-failed)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
       (should (eq :stop-failed (agent-repl--ws-display-state "ws1"))))))
 

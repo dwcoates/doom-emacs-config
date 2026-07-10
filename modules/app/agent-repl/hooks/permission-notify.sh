@@ -8,7 +8,7 @@
 # wording for some real permission prompts, which caused the tab to stay
 # stuck on :thinking (red, no ❓) instead of flipping to :permission.
 # We now write the sentinel unconditionally and let elisp decide whether
-# to flip state, gating on the current :claude-state (see
+# to flip state, gating on the current :agent-state (see
 # `agent-repl--on-permission-event' in sentinel.el).
 LOGFILE=${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}/workspace-notifications/hook-debug.log
 mkdir -p ${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}/workspace-notifications

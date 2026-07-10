@@ -55,12 +55,12 @@
 
 (ert-deftest agent-repl-test-format-buffer-info-with-values ()
   "format-buffer-info should show buffer name, owning workspace, and persp workspace."
-  (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
     (setq-local agent-repl--owning-workspace "my-ws")
     (cl-letf (((symbol-function 'agent-repl--workspace-for-buffer)
                (lambda (_buf) "persp-ws")))
       (let ((result (agent-repl--format-buffer-info (current-buffer))))
-        (should (string-match-p "\\*claude-panel-abcd1234\\*" result))
+        (should (string-match-p "\\*agent-panel-abcd1234\\*" result))
         (should (string-match-p "owning=my-ws" result))
         (should (string-match-p "persp=persp-ws" result))))))
 
@@ -82,7 +82,7 @@ running and the kill targets the current workspace (no NAME arg means the
 implicit target is the current workspace)."
   (let ((killed nil))
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-              ((symbol-function 'agent-repl--claude-running-p) (lambda () t))
+              ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
               ((symbol-function 'agent-repl-kill) (lambda () (setq killed t))))
       (agent-repl--kill-before-workspace-delete)
       (should killed))))
@@ -91,7 +91,7 @@ implicit target is the current workspace)."
   "kill-before-workspace-delete should not call agent-repl-kill when vterm is not running."
   (let ((killed nil))
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-              ((symbol-function 'agent-repl--claude-running-p) (lambda () nil))
+              ((symbol-function 'agent-repl--agent-running-p) (lambda () nil))
               ((symbol-function 'agent-repl-kill) (lambda () (setq killed t))))
       (agent-repl--kill-before-workspace-delete)
       (should-not killed))))
@@ -100,7 +100,7 @@ implicit target is the current workspace)."
   "When NAME equals the current workspace, the advice fires the kill."
   (let ((killed nil))
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-              ((symbol-function 'agent-repl--claude-running-p) (lambda () t))
+              ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
               ((symbol-function 'agent-repl-kill) (lambda () (setq killed t))))
       (agent-repl--kill-before-workspace-delete "current-ws")
       (should killed))))
@@ -109,11 +109,11 @@ implicit target is the current workspace)."
   "When NAME refers to a non-current workspace, the advice MUST NOT kill the
 current workspace's session.  This guards against the cross-workspace bug
 where `(+workspace/kill other-ws)' would otherwise tear down current's
-running session via `agent-repl--claude-running-p' (which inspects the
+running session via `agent-repl--agent-running-p' (which inspects the
 current workspace, not NAME)."
   (let ((killed nil))
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-              ((symbol-function 'agent-repl--claude-running-p) (lambda () t))
+              ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
               ((symbol-function 'agent-repl-kill) (lambda () (setq killed t))))
       (agent-repl--kill-before-workspace-delete "other-ws")
       (should-not killed))))
@@ -364,15 +364,15 @@ already missing from the cache — that would emit the spurious
           (should (string= result (expand-file-name "out.json" tmpdir))))
       (delete-directory tmpdir t))))
 
-;;;; ---- Tests: agent-repl--list-claude-vterm-buffers ----
+;;;; ---- Tests: agent-repl--list-agent-vterm-buffers ----
 
-(ert-deftest agent-repl-test-list-claude-vterm-buffers-filters ()
-  "list-claude-vterm-buffers should return only buffers matching the vterm pattern."
-  (let ((buf1 (get-buffer-create "*claude-panel-abcd1234*"))
-        (buf2 (get-buffer-create "*not-claude*"))
-        (buf3 (get-buffer-create "*claude-panel-11223344*")))
+(ert-deftest agent-repl-test-list-agent-vterm-buffers-filters ()
+  "list-agent-vterm-buffers should return only buffers matching the vterm pattern."
+  (let ((buf1 (get-buffer-create "*agent-panel-abcd1234*"))
+        (buf2 (get-buffer-create "*not-agent*"))
+        (buf3 (get-buffer-create "*agent-panel-11223344*")))
     (unwind-protect
-        (let ((result (agent-repl--list-claude-vterm-buffers)))
+        (let ((result (agent-repl--list-agent-vterm-buffers)))
           (should (memq buf1 result))
           (should (memq buf3 result))
           (should-not (memq buf2 result)))
@@ -380,13 +380,13 @@ already missing from the cache — that would emit the spurious
       (kill-buffer buf2)
       (kill-buffer buf3))))
 
-(ert-deftest agent-repl-test-list-claude-vterm-buffers-empty ()
-  "list-claude-vterm-buffers should return nil when no matching buffers exist."
+(ert-deftest agent-repl-test-list-agent-vterm-buffers-empty ()
+  "list-agent-vterm-buffers should return nil when no matching buffers exist."
   ;; Ensure no stray claude buffers
   (dolist (buf (buffer-list))
     (when (string-match-p agent-repl--vterm-buffer-re (buffer-name buf))
       (kill-buffer buf)))
-  (should-not (agent-repl--list-claude-vterm-buffers)))
+  (should-not (agent-repl--list-agent-vterm-buffers)))
 
 ;;;; ---- Tests: agent-repl--send-digit-char ----
 
@@ -426,7 +426,7 @@ already missing from the cache — that would emit the spurious
   "paste-to-vterm should forward Ctrl-V to the vterm buffer when live."
   (let ((sent-args nil))
     (agent-repl-test--with-clean-state
-      (agent-repl-test--with-temp-buffer "*claude-panel-aabbccdd*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-aabbccdd*"
         (cl-letf (((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
                   ((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--ws-get)
@@ -556,9 +556,9 @@ contains no `modules/app/agent-repl/config.el', reload falls back to
 
 (ert-deftest agent-repl-test-kill-owned-panel-buffers-kills-matching ()
   "kill-owned-panel-buffers should kill panel buffers owned by the specified workspace."
-  (let ((buf1 (get-buffer-create "*claude-panel-aabb0011*"))
-        (buf2 (get-buffer-create "*claude-panel-input-aabb0011*"))
-        (buf3 (get-buffer-create "*claude-panel-ccdd2233*")))
+  (let ((buf1 (get-buffer-create "*agent-panel-aabb0011*"))
+        (buf2 (get-buffer-create "*agent-panel-input-aabb0011*"))
+        (buf3 (get-buffer-create "*agent-panel-ccdd2233*")))
     (unwind-protect
         (progn
           (with-current-buffer buf1
@@ -597,7 +597,7 @@ contains no `modules/app/agent-repl/config.el', reload falls back to
 
 (ert-deftest agent-repl-test-kill-owned-panel-buffers-silences-process ()
   "kill-owned-panel-buffers should silence process query before killing."
-  (let ((buf (get-buffer-create "*claude-panel-99887766*")))
+  (let ((buf (get-buffer-create "*agent-panel-99887766*")))
     (unwind-protect
         (let ((proc (start-process "test-proc" buf "cat")))
           (set-process-query-on-exit-flag proc t)
@@ -614,7 +614,7 @@ contains no `modules/app/agent-repl/config.el', reload falls back to
 
 (ert-deftest agent-repl-test-obliterate-tombstones-state ()
   "obliterate routes through `--ws-del', so it tombstones the workspace
-rather than truly removing every key.  Runtime state (e.g. `:claude-state'
+rather than truly removing every key.  Runtime state (e.g. `:agent-state'
 seeded via `--ws-set') is cleared, identity keys (`:priority') survive,
 and `--ws-live-p' flips to nil.  This is the same teardown contract as
 nuke/kill — obliterate just adds an owned-buffer sweep on top.
@@ -718,20 +718,20 @@ this test doesn't pin."
 
 (ert-deftest agent-repl-test-format-diagnostics-full ()
   "format-diagnostics should include all diagnostic fields."
-  (agent-repl-test--with-temp-buffer "*claude-panel-aabb0011*"
+  (agent-repl-test--with-temp-buffer "*agent-panel-aabb0011*"
     (let* ((diag (list :vterm-buf (current-buffer)
                        :proc-alive t
                        :owning-ws "my-ws"
                        :has-window t
-                       :claude-open t
+                       :agent-open t
                        :dirty nil))
            (result (agent-repl-debug/--format-diagnostics "ws1" diag :thinking :done)))
       (should (string-match-p "ws1" result))
-      (should (string-match-p "\\*claude-panel-aabb0011\\*" result))
+      (should (string-match-p "\\*agent-panel-aabb0011\\*" result))
       (should (string-match-p "process=alive" result))
       (should (string-match-p "owning-ws=my-ws" result))
       (should (string-match-p "has-window=yes" result))
-      (should (string-match-p "claude-open=yes" result))
+      (should (string-match-p "agent-open=yes" result))
       (should (string-match-p "dirty=no" result))
       (should (string-match-p ":thinking -> :done" result)))))
 
@@ -741,27 +741,27 @@ this test doesn't pin."
                      :proc-alive nil
                      :owning-ws nil
                      :has-window nil
-                     :claude-open nil
+                     :agent-open nil
                      :dirty nil))
          (result (agent-repl-debug/--format-diagnostics "ws1" diag nil nil)))
     (should (string-match-p "process=dead/nil" result))
     (should (string-match-p "owning-ws=nil" result))
     (should (string-match-p "has-window=no" result))
-    (should (string-match-p "claude-open=no" result))
+    (should (string-match-p "agent-open=no" result))
     (should (string-match-p "dirty=no" result))
     (should (string-match-p "nil -> nil" result))))
 
 (ert-deftest agent-repl-test-format-diagnostics-dirty ()
   "format-diagnostics should show dirty=yes when dirty is non-nil."
   (let* ((diag (list :vterm-buf nil :proc-alive nil :owning-ws nil
-                     :has-window nil :claude-open nil :dirty t))
+                     :has-window nil :agent-open nil :dirty t))
          (result (agent-repl-debug/--format-diagnostics "ws1" diag nil nil)))
     (should (string-match-p "dirty=yes" result))))
 
 ;;;; ---- Tests: agent-repl-debug/--apply-state-refresh ----
 
-(ert-deftest agent-repl-test-apply-state-refresh-claude-open ()
-  "apply-state-refresh with claude-open should call update-ws-state."
+(ert-deftest agent-repl-test-apply-state-refresh-agent-open ()
+  "apply-state-refresh with agent-open should call update-ws-state."
   (let ((updated nil))
     (cl-letf (((symbol-function 'agent-repl--update-ws-state)
                (lambda (ws) (setq updated ws))))
@@ -778,12 +778,12 @@ this test doesn't pin."
 (ert-deftest agent-repl-test-apply-state-refresh-not-open-clears-thinking ()
   "apply-state-refresh with claude not open clears :thinking.
 The underlying vterm is gone, so no hook will ever fire to clear it
-naturally.  mark-dead-vterm clears :claude-state regardless of prior
+naturally.  mark-dead-vterm clears :agent-state regardless of prior
 value and writes :repl-state :dead."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :thinking)
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
     (agent-repl-debug/--apply-state-refresh "ws1" nil)
-    (should-not (agent-repl--ws-claude-state "ws1"))
+    (should-not (agent-repl--ws-agent-state "ws1"))
     (should (eq (agent-repl--ws-repl-state "ws1") :dead))))
 
 (ert-deftest agent-repl-test-apply-state-refresh-not-open-no-state ()
@@ -896,7 +896,7 @@ var is unset, yielding the bare slug with no leading slash."
 
 (ert-deftest agent-repl-test-debug-buffer-info-with-buffers ()
   "buffer-info should display info for all claude vterm buffers."
-  (let ((buf (get-buffer-create "*claude-panel-aabb0011*")))
+  (let ((buf (get-buffer-create "*agent-panel-aabb0011*")))
     (unwind-protect
         (progn
           (with-current-buffer buf
@@ -908,7 +908,7 @@ var is unset, yielding the bare slug with no leading slash."
                        (lambda (fmt &rest args)
                          (setq msg (apply #'format fmt args)))))
               (agent-repl-debug/buffer-info)
-              (should (string-match-p "\\*claude-panel-aabb0011\\*" msg))
+              (should (string-match-p "\\*agent-panel-aabb0011\\*" msg))
               (should (string-match-p "owning=ws1" msg)))))
       (kill-buffer buf))))
 
@@ -956,7 +956,7 @@ var is unset, yielding the bare slug with no leading slash."
 
 (ert-deftest agent-repl-test-format-buffer-info-owning-set-persp-nil ()
   "format-buffer-info should show owning workspace value and persp=nil when persp is nil."
-  (agent-repl-test--with-temp-buffer "*claude-panel-ff001122*"
+  (agent-repl-test--with-temp-buffer "*agent-panel-ff001122*"
     (setq-local agent-repl--owning-workspace "my-ws")
     (cl-letf (((symbol-function 'agent-repl--workspace-for-buffer)
                (lambda (_buf) nil)))
@@ -964,27 +964,27 @@ var is unset, yielding the bare slug with no leading slash."
         (should (string-match-p "owning=my-ws" result))
         (should (string-match-p "persp=nil" result))))))
 
-;;;; ---- Tests: list-claude-vterm-buffers excludes input buffers ----
+;;;; ---- Tests: list-agent-vterm-buffers excludes input buffers ----
 
-(ert-deftest agent-repl-test-list-claude-vterm-buffers-excludes-input ()
-  "list-claude-vterm-buffers should not include input buffers (only vterm pattern)."
-  (let ((vterm-buf (get-buffer-create "*claude-panel-aabb1122*"))
-        (input-buf (get-buffer-create "*claude-panel-input-aabb1122*")))
+(ert-deftest agent-repl-test-list-agent-vterm-buffers-excludes-input ()
+  "list-agent-vterm-buffers should not include input buffers (only vterm pattern)."
+  (let ((vterm-buf (get-buffer-create "*agent-panel-aabb1122*"))
+        (input-buf (get-buffer-create "*agent-panel-input-aabb1122*")))
     (unwind-protect
-        (let ((result (agent-repl--list-claude-vterm-buffers)))
+        (let ((result (agent-repl--list-agent-vterm-buffers)))
           (should (memq vterm-buf result))
           (should-not (memq input-buf result)))
       (kill-buffer vterm-buf)
       (kill-buffer input-buf))))
 
-;;;; ---- Tests: list-claude-vterm-buffers excludes killed buffers ----
+;;;; ---- Tests: list-agent-vterm-buffers excludes killed buffers ----
 
-(ert-deftest agent-repl-test-list-claude-vterm-buffers-excludes-killed ()
-  "list-claude-vterm-buffers should not include killed/dead buffers."
-  (let ((buf (get-buffer-create "*claude-panel-dead0001*")))
+(ert-deftest agent-repl-test-list-agent-vterm-buffers-excludes-killed ()
+  "list-agent-vterm-buffers should not include killed/dead buffers."
+  (let ((buf (get-buffer-create "*agent-panel-dead0001*")))
     (kill-buffer buf)
     ;; After killing, buffer-list should not contain buf, so result should not either
-    (let ((result (agent-repl--list-claude-vterm-buffers)))
+    (let ((result (agent-repl--list-agent-vterm-buffers)))
       (should-not (memq buf result)))))
 
 ;;;; ---- Tests: send-digit-char with non-digit last key ----
@@ -1075,7 +1075,7 @@ killing the buffer.  Asserts via the contract: the window.el helper
 panel buffer before `kill-buffer'.  Pre-consolidation this test
 intercepted `get-buffer-window' / `delete-window' directly; now the
 deletion is routed through the helper so the contract test follows."
-  (let ((buf (get-buffer-create "*claude-panel-a1b2c3d4*"))
+  (let ((buf (get-buffer-create "*agent-panel-a1b2c3d4*"))
         (helper-called-with nil)
         (kill-called-with nil))
     (unwind-protect
@@ -1095,7 +1095,7 @@ deletion is routed through the helper so the contract test follows."
 
 (ert-deftest agent-repl-test-debug-set-owning-workspace ()
   "set-owning-workspace should set the owning workspace on the selected buffer."
-  (let ((buf (get-buffer-create "*claude-panel-owntest01*")))
+  (let ((buf (get-buffer-create "*agent-panel-owntest01*")))
     (unwind-protect
         (let ((call-count 0))
           (cl-letf (((symbol-function 'completing-read)
@@ -1106,7 +1106,7 @@ deletion is routed through the helper so the contract test follows."
                            (buffer-name buf)
                          ;; Second call: select workspace
                          "new-owner")))
-                    ((symbol-function 'agent-repl--list-claude-vterm-buffers)
+                    ((symbol-function 'agent-repl--list-agent-vterm-buffers)
                      (lambda () (list buf)))
                     ((symbol-function '+workspace-list-names)
                      (lambda () '("new-owner" "other-ws"))))
@@ -1120,14 +1120,14 @@ deletion is routed through the helper so the contract test follows."
 (ert-deftest agent-repl-test-gather-ws-diagnostics-all-populated ()
   "gather-ws-diagnostics should return all fields populated when persp has a vterm buffer."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-diagfull*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-diagfull*"
       (setq-local agent-repl--owning-workspace "ws1")
       (let ((test-buf (current-buffer)))
-        (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_) t))
+        (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_) t))
                   ((symbol-function 'agent-repl--workspace-clean-p) (lambda (_) nil))
                   ((symbol-function 'persp-get-by-name) (lambda (_) [fake-persp]))
                   ((symbol-function 'persp-buffers) (lambda (_) (list test-buf)))
-                  ((symbol-function 'agent-repl--claude-buffer-p)
+                  ((symbol-function 'agent-repl--agent-buffer-p)
                    (lambda (&optional buf) (eq (or buf (current-buffer)) test-buf)))
                   ((symbol-function 'get-buffer-process) (lambda (_) 'fake-proc))
                   ((symbol-function 'process-live-p) (lambda (_) t))
@@ -1137,7 +1137,7 @@ deletion is routed through the helper so the contract test follows."
             (should (eq (plist-get diag :proc-alive) t))
             (should (equal (plist-get diag :owning-ws) "ws1"))
             (should (eq (plist-get diag :has-window) 'fake-win))
-            (should (eq (plist-get diag :claude-open) t))
+            (should (eq (plist-get diag :agent-open) t))
             (should (eq (plist-get diag :dirty) t))))))))
 
 ;;;; ---- Tests: --gather-ws-diagnostics: no persp found ----
@@ -1145,7 +1145,7 @@ deletion is routed through the helper so the contract test follows."
 (ert-deftest agent-repl-test-gather-ws-diagnostics-no-persp ()
   "gather-ws-diagnostics should return nil for buffer-related fields when no persp is found."
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_) nil))
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_) nil))
               ((symbol-function 'agent-repl--workspace-clean-p) (lambda (_) t))
               ((symbol-function 'persp-get-by-name) (lambda (_) nil)))
       (let ((diag (agent-repl-debug/--gather-ws-diagnostics "nonexistent")))
@@ -1153,7 +1153,7 @@ deletion is routed through the helper so the contract test follows."
         (should-not (plist-get diag :proc-alive))
         (should-not (plist-get diag :owning-ws))
         (should-not (plist-get diag :has-window))
-        (should-not (plist-get diag :claude-open))
+        (should-not (plist-get diag :agent-open))
         (should-not (plist-get diag :dirty))))))
 
 ;;;; ---- Tests: --gather-ws-diagnostics: persp is a symbol ----
@@ -1161,7 +1161,7 @@ deletion is routed through the helper so the contract test follows."
 (ert-deftest agent-repl-test-gather-ws-diagnostics-persp-is-symbol ()
   "gather-ws-diagnostics should return nil for buffer fields when persp is a symbol."
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--ws-claude-open-p) (lambda (_) nil))
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_) nil))
               ((symbol-function 'agent-repl--workspace-clean-p) (lambda (_) t))
               ((symbol-function 'persp-get-by-name) (lambda (_) 'none)))
       (let ((diag (agent-repl-debug/--gather-ws-diagnostics "ws1")))
@@ -1199,11 +1199,11 @@ deletion is routed through the helper so the contract test follows."
       (cl-letf (((symbol-function 'agent-repl-debug/--gather-ws-diagnostics)
                  (lambda (_ws)
                    (list :vterm-buf nil :proc-alive nil :owning-ws nil
-                         :has-window nil :claude-open nil :dirty nil)))
+                         :has-window nil :agent-open nil :dirty nil)))
                 ((symbol-function 'agent-repl-debug/--apply-state-refresh)
                  (lambda (ws _open)
                    ;; Simulate clearing state (mirroring non-open + :done behavior)
-                   (agent-repl--ws-claude-state-clear-if ws :done)))
+                   (agent-repl--ws-agent-state-clear-if ws :done)))
                 ((symbol-function 'agent-repl-debug/--format-diagnostics)
                  (lambda (ws _diag before after)
                    (format "diag: %s %s->%s" ws before after)))
@@ -1319,13 +1319,13 @@ deletion is routed through the helper so the contract test follows."
 
 (ert-deftest agent-repl-test-dump-partition-routes-known-keys ()
   "dump-partition places keys into the section that lists them."
-  (let* ((alist '((:project-dir . "/tmp/p") (:claude-state . :idle)))
-         (sections '(("STATE" (:claude-state))
+  (let* ((alist '((:project-dir . "/tmp/p") (:agent-state . :idle)))
+         (sections '(("STATE" (:agent-state))
                      ("PROJ"  (:project-dir))))
          (result (agent-repl--dump-partition alist sections))
          (state (cdr (assoc "STATE" result)))
          (proj  (cdr (assoc "PROJ"  result))))
-    (should (equal state '((:claude-state . :idle))))
+    (should (equal state '((:agent-state . :idle))))
     (should (equal proj  '((:project-dir . "/tmp/p"))))))
 
 (ert-deftest agent-repl-test-dump-partition-sends-unknown-to-other ()
@@ -1908,7 +1908,7 @@ binding without erroring."
 
 ;;; `C-S-<return>' must win lookup above Doom default's `:gi/:gn
 ;;; "C-S-RET"' -> `+default/newline-above' (evil global aux maps) and
-;;; above `claude-input-mode-map's `:ni "C-S-RET"' major-mode aux that
+;;; above `agent-repl-input-mode-map's `:ni "C-S-RET"' major-mode aux that
 ;;; previously routed the chord to `agent-repl-send-with-metaprompt'.
 ;;; A plain `(map! ... )' global-map entry loses to both.
 
@@ -1936,7 +1936,7 @@ any other minor-mode-map binding."
 aux map of `general-override-mode-map' for every state in
 `agent-repl--scroll-output-intercept-states' -- this is what beats
 both Doom default's evil-state aux binding for `C-S-RET' and any
-major-mode aux like `claude-input-mode-map's `:ni'."
+major-mode aux like `agent-repl-input-mode-map's `:ni'."
   (let* ((general-override-mode-map (make-sparse-keymap))
          (aux-maps nil))
     (cl-letf (((symbol-function 'evil-get-auxiliary-keymap)

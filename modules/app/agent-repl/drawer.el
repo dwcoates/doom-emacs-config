@@ -6,7 +6,7 @@
 ;; the workspaces themselves: it is rendered into a left-side slot and is
 ;; not tied to any single workspace's window configuration.
 ;;
-;; Each line shows: priority, claude-state icon, workspace name, and the
+;; Each line shows: priority, agent-state icon, workspace name, and the
 ;; rendered aiTitle (`:last-prompt-summary').  Hidden workspaces appear
 ;; below a separator at the bottom.
 ;;
@@ -67,9 +67,9 @@ affect the drawer's window width, which is constant (see
     (:merge-conflict . "💥")
     (:merging        . "🔄")
     (:merge-queued   . "🕒"))
-  "Alist mapping claude-state keyword to an indicator glyph.
+  "Alist mapping agent-state keyword to an indicator glyph.
 The :dead entry is used when `:repl-state' is `:dead' (overrides
-:claude-state).  The :merged entry is used when `:repl-state' is
+:agent-state).  The :merged entry is used when `:repl-state' is
 `:merged' and takes precedence over `:dead' (so a merged workspace
 whose vterm has since died still reads as merged).  The :merge-failed
 entry is used when `:repl-state' is `:merge-failed' (a workspace that
@@ -94,8 +94,8 @@ for workspaces registered but with no live session."
       (eval (car (get 'agent-repl-drawer-state-icons 'standard-value))))
 
 (defcustom agent-repl-drawer-state-icon-default "·"
-  "Glyph shown when a workspace has no recognized claude-state.
-Used for registered-but-not-yet-started workspaces (claude-state nil)."
+  "Glyph shown when a workspace has no recognized agent-state.
+Used for registered-but-not-yet-started workspaces (agent-state nil)."
   :type 'string
   :group 'agent-repl)
 
@@ -402,7 +402,7 @@ windows."
           (face-remap-add-relative
            'default :background agent-repl-drawer-background))))
 
-(define-derived-mode agent-repl-drawer-mode special-mode "ClaudeDrawer"
+(define-derived-mode agent-repl-drawer-mode special-mode "AgentDrawer"
   "Major mode for the agent-repl workspace drawer."
   (setq truncate-lines nil
         buffer-read-only t
@@ -776,7 +776,7 @@ workspaces don't carry a phantom space."
 (defun agent-repl-drawer--name-face (ws)
   "Return the face spec for WS's name, colored by render-status.
 Delegates to `agent-repl--ws-render-status' for the underlying state
-keyword, then maps claude-activity states to colored bold-foreground
+keyword, then maps agent-activity states to colored bold-foreground
 specs.  Merge-states and :dead intentionally fall through to the
 default workspace-name face — the icon column already carries the
 distinguishing signal (🔀/⛔/💥/🔄/🕒/❌), so the name itself can stay
@@ -1075,7 +1075,7 @@ updates as ages cross the s/m/h boundaries (`--format-event-age')."
     (dolist (ws (sort (agent-repl-drawer--visible-workspace-keys) #'string<))
       (push (list ws
                   (agent-repl--ws-get ws :repl-state)
-                  (agent-repl--ws-get ws :claude-state)
+                  (agent-repl--ws-get ws :agent-state)
                   (agent-repl--ws-get ws :git-clean)
                   (agent-repl--ws-get ws :branch-merged)
                   (agent-repl--ws-get ws :priority)

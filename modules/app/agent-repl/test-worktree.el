@@ -492,7 +492,7 @@ the rev-parse comparison and the checkout invocation."
 (ert-deftest agent-repl-test-dispatch-prompt-enqueues-when-not-ready ()
   "When vterm buffer exists but is not ready, prompt is enqueued."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-test-vterm*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-test-vterm*"
       (setq-local agent-repl--ready nil)
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (agent-repl--dispatch-prompt-command "ws1" "hello")
@@ -1273,7 +1273,7 @@ chance to release sockets before its vterm dies."
 (ert-deftest agent-repl-test-resolve-open-workspace-dir-prefers-registry ()
   "A live registry `:project-dir' wins and is returned verbatim."
   (agent-repl-test--with-clean-state
-    (let ((dir (make-temp-file "claude-open-reg" t)))
+    (let ((dir (make-temp-file "agent-open-reg" t)))
       (unwind-protect
           (progn
             (puthash "foo" (list :project-dir dir) agent-repl--workspaces)
@@ -1284,7 +1284,7 @@ chance to release sockets before its vterm dies."
 (ert-deftest agent-repl-test-resolve-open-workspace-dir-uses-git-root-candidate ()
   "With no registry entry, an existing candidate worktree dir resolves."
   (agent-repl-test--with-clean-state
-    (let* ((base (make-temp-file "claude-open-base" t))
+    (let* ((base (make-temp-file "agent-open-base" t))
            (repo (expand-file-name "repo" base))
            (wt (expand-file-name "foo" (expand-file-name "repo-worktrees" base))))
       (unwind-protect
@@ -1300,7 +1300,7 @@ chance to release sockets before its vterm dies."
   "No registry entry and a non-existent candidate dir resolves to nil.
 Models a workspace whose worktree was removed by `finish'."
   (agent-repl-test--with-clean-state
-    (let* ((base (make-temp-file "claude-open-gone" t))
+    (let* ((base (make-temp-file "agent-open-gone" t))
            (repo (expand-file-name "repo" base)))
       (unwind-protect
           (progn
@@ -1316,7 +1316,7 @@ Models a workspace whose worktree was removed by `finish'."
 (ert-deftest agent-repl-test-resolve-open-workspace-dir-stale-registry-falls-through ()
   "A registry `:project-dir' that no longer exists falls through to git-root."
   (agent-repl-test--with-clean-state
-    (let* ((base (make-temp-file "claude-open-stale" t))
+    (let* ((base (make-temp-file "agent-open-stale" t))
            (repo (expand-file-name "repo" base))
            (wt (expand-file-name "foo" (expand-file-name "repo-worktrees" base))))
       (unwind-protect
@@ -1427,10 +1427,10 @@ has time to fire before state is polled."
 ;;;; ---- Tests: gns-sockets-close-poll ----
 
 (ert-deftest agent-repl-test-gns-sockets-close-poll-runs-teardown-on-done ()
-  "When `:claude-state' is `:done', the poll must call TEARDOWN-FN
+  "When `:agent-state' is `:done', the poll must call TEARDOWN-FN
 rather than rescheduling."
   (agent-repl-test--with-clean-state
-    (puthash "ws" (list :claude-state :done) agent-repl--workspaces)
+    (puthash "ws" (list :agent-state :done) agent-repl--workspaces)
     (let ((called nil)
           (rescheduled nil))
       (cl-letf (((symbol-function 'run-at-time)
@@ -1445,7 +1445,7 @@ rather than rescheduling."
 decayed from `:done' but the turn is still finished, so it is safe to
 tear down."
   (agent-repl-test--with-clean-state
-    (puthash "ws" (list :claude-state :idle) agent-repl--workspaces)
+    (puthash "ws" (list :agent-state :idle) agent-repl--workspaces)
     (let ((called nil)
           (rescheduled nil))
       (cl-letf (((symbol-function 'run-at-time)
@@ -1460,7 +1460,7 @@ tear down."
 itself via `run-at-time' with the configured poll interval and must
 NOT call TEARDOWN-FN."
   (agent-repl-test--with-clean-state
-    (puthash "ws" (list :claude-state :thinking) agent-repl--workspaces)
+    (puthash "ws" (list :agent-state :thinking) agent-repl--workspaces)
     (let ((called nil)
           (rescheduled-delay :unset)
           (rescheduled-fn :unset))
@@ -1480,7 +1480,7 @@ NOT call TEARDOWN-FN."
 without reaching `:done'/`:idle', the poll must call TEARDOWN-FN
 anyway — a hung session must not stall close indefinitely."
   (agent-repl-test--with-clean-state
-    (puthash "ws" (list :claude-state :thinking) agent-repl--workspaces)
+    (puthash "ws" (list :agent-state :thinking) agent-repl--workspaces)
     (let ((called nil)
           (rescheduled nil)
           (started-at (- (float-time)
@@ -2150,18 +2150,18 @@ silently return a colliding name."
   "When git worktree add succeeds, finalize is called."
   (let ((finalized nil))
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
-               (lambda (path dirname prompt priority fork-id bare-metal _cb &optional source-dir no-claude model)
-                 (setq finalized (list path dirname prompt priority fork-id bare-metal source-dir no-claude model)))))
+               (lambda (path dirname prompt priority fork-id bare-metal _cb &optional source-dir no-agent model)
+                 (setq finalized (list path dirname prompt priority fork-id bare-metal source-dir no-agent model)))))
       (agent-repl--worktree-add-callback
        "/tmp/path" "dirname" "prompt" 5 "fork-123" nil nil "/src/dir" nil "sonnet" t "ok")
       (should (equal finalized '("/tmp/path" "dirname" "prompt" 5 "fork-123" nil "/src/dir" nil "sonnet"))))))
 
-(ert-deftest agent-repl-test-worktree-add-callback-forwards-no-claude ()
-  "NO-CLAUDE is forwarded to `agent-repl--finalize-worktree-workspace'."
+(ert-deftest agent-repl-test-worktree-add-callback-forwards-no-agent ()
+  "NO-AGENT is forwarded to `agent-repl--finalize-worktree-workspace'."
   (let ((captured :unset))
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
-               (lambda (_path _dirname _prompt _priority _fork _bm _cb &optional _src no-claude _model)
-                 (setq captured no-claude))))
+               (lambda (_path _dirname _prompt _priority _fork _bm _cb &optional _src no-agent _model)
+                 (setq captured no-agent))))
       (agent-repl--worktree-add-callback
        "/tmp/path" "dirname" nil nil nil nil nil "/src/dir" t nil t "ok")
       (should (eq captured t)))))
@@ -2170,7 +2170,7 @@ silently return a colliding name."
   "MODEL is forwarded to `agent-repl--finalize-worktree-workspace'."
   (let ((captured :unset))
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
-               (lambda (_path _dirname _prompt _priority _fork _bm _cb &optional _src _no-claude model)
+               (lambda (_path _dirname _prompt _priority _fork _bm _cb &optional _src _no-agent model)
                  (setq captured model))))
       (agent-repl--worktree-add-callback
        "/tmp/path" "dirname" nil nil nil nil nil "/src/dir" nil "haiku" t "ok")
@@ -3157,8 +3157,8 @@ resolver cannot stall on a permission prompt even when
   (should (member "--dangerously-skip-permissions"
                   (default-value 'agent-repl-auto-resolve-conflicts-extra-args))))
 
-(ert-deftest agent-repl-test-invoke-auto-resolve-claude-passes-extra-args ()
-  "`--invoke-auto-resolve-claude' includes the configured extra-args
+(ert-deftest agent-repl-test-invoke-auto-resolve-agent-passes-extra-args ()
+  "`--invoke-auto-resolve-agent' includes the configured extra-args
 (including `--dangerously-skip-permissions') in the spawned command,
 after the base `-p --model MODEL' args."
   (let* ((captured-cmd nil)
@@ -3169,17 +3169,17 @@ after the base `-p --model MODEL' args."
                  ;; Run a trivially-succeeding process so the live-p
                  ;; poll loop terminates immediately without spawning
                  ;; the real `claude' binary.
-                 (funcall real-start "claude-auto-resolve-stub"
+                 (funcall real-start "agent-auto-resolve-stub"
                           (generate-new-buffer " *stub*") "true"))))
-      (agent-repl--invoke-auto-resolve-claude "/tmp" "prompt"))
+      (agent-repl--invoke-auto-resolve-agent "/tmp" "prompt"))
     (should (member "--dangerously-skip-permissions" captured-cmd))
     (should (equal (cl-subseq captured-cmd 0 4)
                    (list agent-repl-auto-resolve-conflicts-program
                          "-p" "--model"
                          agent-repl-auto-resolve-conflicts-model)))))
 
-(ert-deftest agent-repl-test-invoke-auto-resolve-claude-passes-prompt-as-trailing-arg ()
-  "`--invoke-auto-resolve-claude' passes PROMPT as the final positional
+(ert-deftest agent-repl-test-invoke-auto-resolve-agent-passes-prompt-as-trailing-arg ()
+  "`--invoke-auto-resolve-agent' passes PROMPT as the final positional
 argument to `claude -p' (that is how the non-interactive API consumes
 the prompt — NOT via stdin)."
   (let* ((captured-cmd nil)
@@ -3187,12 +3187,12 @@ the prompt — NOT via stdin)."
     (cl-letf (((symbol-function 'start-process)
                (lambda (_name _buf &rest cmd)
                  (setq captured-cmd cmd)
-                 (funcall real-start "claude-auto-resolve-stub"
+                 (funcall real-start "agent-auto-resolve-stub"
                           (generate-new-buffer " *stub*") "true"))))
-      (agent-repl--invoke-auto-resolve-claude "/tmp" "RESOLVE THIS"))
+      (agent-repl--invoke-auto-resolve-agent "/tmp" "RESOLVE THIS"))
     (should (equal (car (last captured-cmd)) "RESOLVE THIS"))))
 
-(ert-deftest agent-repl-test-invoke-auto-resolve-claude-separates-prompt-with-double-dash ()
+(ert-deftest agent-repl-test-invoke-auto-resolve-agent-separates-prompt-with-double-dash ()
   "PROMPT is preceded by `--' in the cmd so the claude CLI's variadic
 `--allowedTools <tools...>' flag (which comes from extra-args) cannot
 swallow the prompt as another tool name.  Without `--', claude exits
@@ -3205,13 +3205,13 @@ argument when using --print' and the resolver always fails."
                  (setq captured-cmd cmd)
                  (funcall real-start "stub"
                           (generate-new-buffer " *stub*") "true"))))
-      (agent-repl--invoke-auto-resolve-claude "/tmp" "MY PROMPT"))
+      (agent-repl--invoke-auto-resolve-agent "/tmp" "MY PROMPT"))
     (let ((tail (last captured-cmd 2)))
       (should (equal (car tail) "--"))
       (should (equal (cadr tail) "MY PROMPT")))))
 
-(ert-deftest agent-repl-test-invoke-auto-resolve-claude-logs-output ()
-  "`--invoke-auto-resolve-claude' mirrors the resolver's stdout/stderr
+(ert-deftest agent-repl-test-invoke-auto-resolve-agent-logs-output ()
+  "`--invoke-auto-resolve-agent' mirrors the resolver's stdout/stderr
 into the logfile via `agent-repl--log'.  Without this the resolver's
 response only lives in a dedicated Emacs buffer — ungreppable, lost on
 session restart — and a post-mortem requires the user to know the
@@ -3227,13 +3227,13 @@ buffer name."
               ((symbol-function 'agent-repl--log)
                (lambda (_ws fmt &rest args)
                  (push (apply #'format fmt args) logged))))
-      (agent-repl--invoke-auto-resolve-claude "/tmp" "prompt" "ws1"))
+      (agent-repl--invoke-auto-resolve-agent "/tmp" "prompt" "ws1"))
     (should (cl-some (lambda (l) (string-match-p "RESOLVER STDOUT" l)) logged))
     (should (cl-some (lambda (l)
                        (string-match-p "auto-resolve: exited status=" l))
                      logged))))
 
-(ert-deftest agent-repl-test-invoke-auto-resolve-claude-log-omits-header-block ()
+(ert-deftest agent-repl-test-invoke-auto-resolve-agent-log-omits-header-block ()
   "The logged output excludes the `# agent-repl merge resolver — ...'
 header block we insert into the side buffer at the top.  Only the
 resolver's actual stdout/stderr should appear in the log — leaking our
@@ -3249,7 +3249,7 @@ own header is just noise that obscures the real response."
               ((symbol-function 'agent-repl--log)
                (lambda (_ws fmt &rest args)
                  (push (apply #'format fmt args) logged))))
-      (agent-repl--invoke-auto-resolve-claude "/tmp" "prompt" "ws1"))
+      (agent-repl--invoke-auto-resolve-agent "/tmp" "prompt" "ws1"))
     (let ((output-log (cl-find-if
                        (lambda (l) (string-match-p "output follows" l))
                        logged)))
@@ -3259,7 +3259,7 @@ own header is just noise that obscures the real response."
       (should-not (string-match-p "# root:" output-log))
       (should-not (string-match-p "# cmd:" output-log)))))
 
-(ert-deftest agent-repl-test-invoke-auto-resolve-claude-passes-ws-to-log ()
+(ert-deftest agent-repl-test-invoke-auto-resolve-agent-passes-ws-to-log ()
   "Resolver-output log entries carry TARGET-WS as the workspace tag, so
 the standard `{ws=... id=...}` metadata block disambiguates resolver
 runs across concurrent merges."
@@ -3274,7 +3274,7 @@ runs across concurrent merges."
                  (when (string-match-p "exited status="
                                        (apply #'format fmt args))
                    (push ws logged-ws)))))
-      (agent-repl--invoke-auto-resolve-claude "/tmp" "prompt" "my-ws"))
+      (agent-repl--invoke-auto-resolve-agent "/tmp" "prompt" "my-ws"))
     (should (member "my-ws" logged-ws))))
 
 (ert-deftest agent-repl-test-invoke-auto-resolve-verify-logs-output ()
@@ -3306,7 +3306,7 @@ logfile alone — the temp buffer is gone by the time anyone looks."
   (let ((invoked nil))
     (cl-letf (((symbol-function 'agent-repl--cherry-pick-conflicted-files)
                (lambda (_root) nil))
-              ((symbol-function 'agent-repl--invoke-auto-resolve-claude)
+              ((symbol-function 'agent-repl--invoke-auto-resolve-agent)
                (lambda (&rest _) (setq invoked t) 0)))
       (should-not (agent-repl--auto-resolve-cherry-pick-conflict "ws" "/tmp/repo"))
       (should-not invoked))))
@@ -3321,7 +3321,7 @@ after the stubbed `claude -p' returns successfully."
                (pcase args
                  (`("-C" "/tmp/repo" "rev-parse" "--short" "CHERRY_PICK_HEAD") "abcd123")
                  (_ (error "unmocked git-string args: %S" args)))))
-            ((symbol-function 'agent-repl--invoke-auto-resolve-claude)
+            ((symbol-function 'agent-repl--invoke-auto-resolve-agent)
              (lambda (&rest _) 0))
             ;; Files reported clean of markers after the resolver runs.
             ((symbol-function 'agent-repl--all-conflicts-resolved-p)
@@ -3338,7 +3338,7 @@ after the stubbed `claude -p' exits."
              (lambda (_root) '("shared")))
             ((symbol-function 'agent-repl--git-string)
              (lambda (&rest _args) "abcd123"))
-            ((symbol-function 'agent-repl--invoke-auto-resolve-claude)
+            ((symbol-function 'agent-repl--invoke-auto-resolve-agent)
              (lambda (&rest _) 0))
             ;; Markers still present → decline.
             ((symbol-function 'agent-repl--all-conflicts-resolved-p)
@@ -3351,7 +3351,7 @@ after the stubbed `claude -p' exits."
              (lambda (_root) '("shared")))
             ((symbol-function 'agent-repl--git-string)
              (lambda (&rest _args) "abcd123"))
-            ((symbol-function 'agent-repl--invoke-auto-resolve-claude)
+            ((symbol-function 'agent-repl--invoke-auto-resolve-agent)
              (lambda (&rest _) 'timeout))
             ((symbol-function 'agent-repl--all-conflicts-resolved-p)
              (lambda (&rest _args) (error "should not probe markers after timeout"))))
@@ -3365,7 +3365,7 @@ honest signal that something went wrong inside the headless agent."
              (lambda (_root) '("shared")))
             ((symbol-function 'agent-repl--git-string)
              (lambda (&rest _args) "abcd123"))
-            ((symbol-function 'agent-repl--invoke-auto-resolve-claude)
+            ((symbol-function 'agent-repl--invoke-auto-resolve-agent)
              (lambda (&rest _) 1))
             ;; Even with clean files, the non-zero exit short-circuits.
             ((symbol-function 'agent-repl--all-conflicts-resolved-p)
@@ -3544,7 +3544,7 @@ Soundness gate: textual marker scan is necessary but not sufficient."
                (lambda (_root) '("shared")))
               ((symbol-function 'agent-repl--git-string)
                (lambda (&rest _args) "abcd123"))
-              ((symbol-function 'agent-repl--invoke-auto-resolve-claude)
+              ((symbol-function 'agent-repl--invoke-auto-resolve-agent)
                (lambda (&rest _) 0))
               ((symbol-function 'agent-repl--all-conflicts-resolved-p)
                (lambda (_root _files) t))
@@ -3559,7 +3559,7 @@ Soundness gate: textual marker scan is necessary but not sufficient."
                (lambda (_root) '("shared")))
               ((symbol-function 'agent-repl--git-string)
                (lambda (&rest _args) "abcd123"))
-              ((symbol-function 'agent-repl--invoke-auto-resolve-claude)
+              ((symbol-function 'agent-repl--invoke-auto-resolve-agent)
                (lambda (&rest _) 0))
               ((symbol-function 'agent-repl--all-conflicts-resolved-p)
                (lambda (_root _files) t))
@@ -3826,8 +3826,8 @@ thread are undefined behavior in Emacs."
 
 ;;;; ---- Tests: resolver output is preserved in a side buffer ----
 
-(ert-deftest agent-repl-test-invoke-auto-resolve-claude-preserves-output-buffer ()
-  "When TARGET-WS is supplied, `--invoke-auto-resolve-claude' leaves the
+(ert-deftest agent-repl-test-invoke-auto-resolve-agent-preserves-output-buffer ()
+  "When TARGET-WS is supplied, `--invoke-auto-resolve-agent' leaves the
 side buffer alive after the process exits so the user can post-mortem
 the resolver's stdout/stderr + exit code."
   (let ((agent-repl-auto-resolve-conflicts-program "true")
@@ -3838,7 +3838,7 @@ the resolver's stdout/stderr + exit code."
     (let ((buf-name (agent-repl--merge-resolver-buffer-name ws)))
       (when (get-buffer buf-name) (kill-buffer buf-name))
       (unwind-protect
-          (let ((result (agent-repl--invoke-auto-resolve-claude
+          (let ((result (agent-repl--invoke-auto-resolve-agent
                          default-directory "prompt-body" ws)))
             (should (equal result 0))
             (should (buffer-live-p (get-buffer buf-name)))
@@ -3849,20 +3849,20 @@ the resolver's stdout/stderr + exit code."
                 (should (string-match-p "exit: 0" content)))))
         (when (get-buffer buf-name) (kill-buffer buf-name))))))
 
-(ert-deftest agent-repl-test-invoke-auto-resolve-claude-no-target-ws-kills-temp-buffer ()
+(ert-deftest agent-repl-test-invoke-auto-resolve-agent-no-target-ws-kills-temp-buffer ()
   "Legacy callers (no TARGET-WS argument) get the old behavior: the
 temp buffer is killed after the process completes, so we don't leak
-anonymous \" *claude-auto-resolve*\" buffers."
+anonymous \" *agent-auto-resolve*\" buffers."
   (let* ((agent-repl-auto-resolve-conflicts-program "true")
          (agent-repl-auto-resolve-conflicts-model "test-model")
          (agent-repl-auto-resolve-conflicts-extra-args nil)
          (agent-repl-auto-resolve-conflicts-timeout 5)
          (anon-p (lambda (b)
-                   (string-prefix-p " *claude-auto-resolve*" (buffer-name b))))
+                   (string-prefix-p " *agent-auto-resolve*" (buffer-name b))))
          ;; Snapshot the exact anon buffers alive BEFORE the call and assert
          ;; only on the anon buffers this invocation NEWLY leaves alive
          ;; (set difference), never a global count.  A global pre/post count
-         ;; is racy: `agent-repl--invoke-auto-resolve-claude' busy-waits via
+         ;; is racy: `agent-repl--invoke-auto-resolve-agent' busy-waits via
          ;; `accept-process-output', which services pending sentinels/timers
          ;; from OTHER tests' lingering resolver processes.  If such a
          ;; callback kills a pre-existing anon buffer mid-wait, a count
@@ -3870,7 +3870,7 @@ anonymous \" *claude-auto-resolve*\" buffers."
          ;; difference inspects only buffers created during this call, so
          ;; unrelated concurrent kills can no longer perturb it.
          (before (cl-remove-if-not anon-p (buffer-list))))
-    (let ((result (agent-repl--invoke-auto-resolve-claude
+    (let ((result (agent-repl--invoke-auto-resolve-agent
                    default-directory "prompt-body")))
       (should (equal result 0))
       (let ((leaked (cl-remove-if
@@ -3878,7 +3878,7 @@ anonymous \" *claude-auto-resolve*\" buffers."
                      (cl-remove-if-not anon-p (buffer-list)))))
         (should (null leaked))))))
 
-(ert-deftest agent-repl-test-invoke-auto-resolve-claude-no-leak-despite-concurrent-anon-kill ()
+(ert-deftest agent-repl-test-invoke-auto-resolve-agent-no-leak-despite-concurrent-anon-kill ()
   "Regression for the intermittent buffer-accounting flake: the legacy
 \(no TARGET-WS) path must not leak its OWN anonymous temp buffer even
 when an UNRELATED anon buffer is killed during the process wait —
@@ -3893,10 +3893,10 @@ failed."
          (agent-repl-auto-resolve-conflicts-extra-args nil)
          (agent-repl-auto-resolve-conflicts-timeout 5)
          (anon-p (lambda (b)
-                   (string-prefix-p " *claude-auto-resolve*" (buffer-name b))))
+                   (string-prefix-p " *agent-auto-resolve*" (buffer-name b))))
          ;; A pre-existing anon buffer standing in for one leaked by another
          ;; test; captured into BEFORE so it is not itself counted as a leak.
-         (decoy (generate-new-buffer " *claude-auto-resolve*"))
+         (decoy (generate-new-buffer " *agent-auto-resolve*"))
          (before (cl-remove-if-not anon-p (buffer-list))))
     (unwind-protect
         (cl-letf (((symbol-function 'agent-repl--wait-for-process-exit)
@@ -3905,7 +3905,7 @@ failed."
                      ;; lingering sentinel would perform mid-wait.
                      (when (buffer-live-p decoy) (kill-buffer decoy))
                      0)))
-          (let ((result (agent-repl--invoke-auto-resolve-claude
+          (let ((result (agent-repl--invoke-auto-resolve-agent
                          default-directory "prompt-body")))
             (should (equal result 0))
             (let ((leaked (cl-remove-if
@@ -3914,7 +3914,7 @@ failed."
               (should (null leaked)))))
       (when (buffer-live-p decoy) (kill-buffer decoy)))))
 
-(ert-deftest agent-repl-test-invoke-auto-resolve-claude-erases-prior-output ()
+(ert-deftest agent-repl-test-invoke-auto-resolve-agent-erases-prior-output ()
   "A second resolver invocation overwrites the prior buffer's content
 \(prefixed with the new header) instead of appending — the buffer
 always reflects the most recent run."
@@ -3930,7 +3930,7 @@ always reflects the most recent run."
             (with-current-buffer (get-buffer-create buf-name)
               (let ((inhibit-read-only t))
                 (insert "STALE-PREVIOUS-CONTENT\n")))
-            (agent-repl--invoke-auto-resolve-claude
+            (agent-repl--invoke-auto-resolve-agent
              default-directory "prompt-body" ws)
             (with-current-buffer buf-name
               (should-not (string-match-p "STALE-PREVIOUS-CONTENT"
@@ -4024,7 +4024,7 @@ on the main thread via `run-at-time'.  Without this, a failed merge
 leaves the user with a closed workspace and no way to recover.
 
 The failure arm also re-enqueues onto the merge queue and dispatches a
-claude-send prompt; this test asserts only the reopen scheduling and
+agent-send prompt; this test asserts only the reopen scheduling and
 stubs the rest."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-empty-merge-queue
@@ -4205,7 +4205,7 @@ back out and loop the same failure."
                                 :last-attempt-target-head)
                      "cafef00d")))))
 
-(ert-deftest agent-repl-test-workspace-merge-async-on-error-dispatches-claude-send-with-analyze-directive ()
+(ert-deftest agent-repl-test-workspace-merge-async-on-error-dispatches-agent-send-with-analyze-directive ()
   "The deferred main-thread thunk calls
 `agent-repl--dispatch-prompt-command' with a prompt that embeds the
 error and ends with the analyze-only directive.  Without this the
@@ -4509,14 +4509,14 @@ liveness flip."
   "Vterm buffer process is killed when present."
   (agent-repl-test--with-clean-state
     (let ((killed-buf nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-test-vterm*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-test-vterm*"
         (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
         (cl-letf (((symbol-function 'agent-repl--kill-vterm-process)
                    (lambda (b) (setq killed-buf b)))
                   ((symbol-function '+workspace-list-names) (lambda () nil))
                   ((symbol-function 'persp-kill) (lambda (_ws) nil)))
           (agent-repl--finish-workspace "ws1")
-          (should (equal killed-buf (get-buffer "*claude-panel-test-vterm*"))))))))
+          (should (equal killed-buf (get-buffer "*agent-panel-test-vterm*"))))))))
 
 (ert-deftest agent-repl-test-finish-workspace-no-persp-kill-if-not-listed ()
   "If workspace is not in +workspace-list-names, persp-kill is not called."
@@ -4854,7 +4854,7 @@ JSON, so it eagerly resolves at entry-point time."
   (agent-repl-test--with-clean-state
     (let ((captured-source-dir :unset))
       (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base &optional _git-root source-dir _no-claude _model)
+                 (lambda (_name _bare _fork _prompt _cb _priority _base &optional _git-root source-dir _no-agent _model)
                    (setq captured-source-dir source-dir))))
         (agent-repl--create-worktree-from-command "/tmp/cmd-repo/" "name" "prompt" 5)
         (should (equal captured-source-dir "/tmp/cmd-repo/"))))))
@@ -4876,7 +4876,7 @@ JSON, so it eagerly resolves at entry-point time."
   (agent-repl-test--with-clean-state
     (let ((captured-model :unset))
       (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _fs _fork _prompt _cb _priority _base _git _src _no-claude &optional model)
+                 (lambda (_name _fs _fork _prompt _cb _priority _base _git _src _no-agent &optional model)
                    (setq captured-model model))))
         (agent-repl--create-worktree-from-command
          "/tmp/repo/" "name" "prompt" 5 nil nil nil "opus")
@@ -4888,7 +4888,7 @@ receives nil so the session uses the interactive-model default."
   (agent-repl-test--with-clean-state
     (let ((captured-model :unset))
       (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _fs _fork _prompt _cb _priority _base _git _src _no-claude &optional model)
+                 (lambda (_name _fs _fork _prompt _cb _priority _base _git _src _no-agent &optional model)
                    (setq captured-model model))))
         (agent-repl--create-worktree-from-command "/tmp/repo/" "name" "prompt" 5)
         (should (null captured-model))))))
@@ -4961,59 +4961,59 @@ receives nil so the workspace uses bare-metal by default."
        "/tmp/new-wt" "new-ws" nil nil nil nil nil nil nil nil)
       (should (null (agent-repl--ws-get "new-ws" :model))))))
 
-(ert-deftest agent-repl-test-finalize-worktree-workspace-forwards-no-claude ()
-  "Finalize forwards NO-CLAUDE to `agent-repl--setup-worktree-session'."
+(ert-deftest agent-repl-test-finalize-worktree-workspace-forwards-no-agent ()
+  "Finalize forwards NO-AGENT to `agent-repl--setup-worktree-session'."
   (agent-repl-test--with-clean-state
     (let ((captured :unset))
       (cl-letf (((symbol-function 'agent-repl--register-projectile-project)
                  (lambda (&rest _) nil))
                 ((symbol-function '+workspace-new) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl--setup-worktree-session)
-                 (lambda (_ws-id _path _ws _force-sandbox &optional no-claude)
-                   (setq captured no-claude)))
+                 (lambda (_ws-id _path _ws _force-sandbox &optional no-agent)
+                   (setq captured no-agent)))
                 ((symbol-function 'agent-repl--path-canonical) #'identity)
                 ((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "")))
         (agent-repl--finalize-worktree-workspace
          "/tmp/new-wt" "new-ws" nil nil nil nil nil "/tmp/source-repo/" t)
         (should (eq captured t))))))
 
-;;;; ---- Tests: setup-worktree-session no-claude branch ----
+;;;; ---- Tests: setup-worktree-session no-agent branch ----
 
 (ert-deftest agent-repl-test-setup-worktree-session-boots-claude-by-default ()
-  "Without NO-CLAUDE, setup starts Claude via `initialize-claude'."
-  (let ((init-claude-called nil)
+  "Without NO-AGENT, setup starts Claude via `initialize-agent'."
+  (let ((init-agent-called nil)
         (init-env-called nil))
     (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
                (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--initialize-claude)
-               (lambda (&rest _) (setq init-claude-called t)))
+              ((symbol-function 'agent-repl--initialize-agent)
+               (lambda (&rest _) (setq init-agent-called t)))
               ((symbol-function 'agent-repl--initialize-ws-env)
                (lambda (&rest _) (setq init-env-called t)))
               ((symbol-function 'agent-repl--active-inst)
                (lambda (_ws) (make-agent-repl-instantiation :start-cmd "claude"))))
       (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil)
-      (should init-claude-called)
+      (should init-agent-called)
       (should-not init-env-called))))
 
 (ert-deftest agent-repl-test-setup-worktree-session-init-error-does-not-escape ()
-  "An `initialize-claude' failure (e.g. sandbox image not built) is caught,
+  "An `initialize-agent' failure (e.g. sandbox image not built) is caught,
 so it cannot escape and crash the `--async-git-sentinel' that calls this."
   (cl-letf (((symbol-function 'agent-repl--register-worktree-ws) (lambda (&rest _) nil))
-            ((symbol-function 'agent-repl--initialize-claude)
+            ((symbol-function 'agent-repl--initialize-agent)
              (lambda (&rest _) (user-error "Sandbox image not built")))
-            ((symbol-function 'agent-repl--ws-set-claude-state) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--ws-set-agent-state) (lambda (&rest _) nil))
             ((symbol-function 'message) (lambda (&rest _) nil)))
     ;; Returns normally rather than signaling.
     (should (progn (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil) t))))
 
 (ert-deftest agent-repl-test-setup-worktree-session-init-error-marks-start-failed ()
-  "A caught `initialize-claude' failure sets :claude-state :start-failed so
+  "A caught `initialize-agent' failure sets :agent-state :start-failed so
 the tab/drawer surface the failure instead of it vanishing silently."
   (let ((recorded nil))
     (cl-letf (((symbol-function 'agent-repl--register-worktree-ws) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--initialize-claude)
+              ((symbol-function 'agent-repl--initialize-agent)
                (lambda (&rest _) (user-error "Sandbox image not built")))
-              ((symbol-function 'agent-repl--ws-set-claude-state)
+              ((symbol-function 'agent-repl--ws-set-agent-state)
                (lambda (ws state) (setq recorded (cons ws state))))
               ((symbol-function 'message) (lambda (&rest _) nil)))
       (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil)
@@ -5022,32 +5022,32 @@ the tab/drawer surface the failure instead of it vanishing silently."
 (ert-deftest agent-repl-test-mark-start-failed-sets-start-failed-state ()
   "mark-start-failed records :start-failed for the workspace."
   (let ((recorded nil))
-    (cl-letf (((symbol-function 'agent-repl--ws-set-claude-state)
+    (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)
                (lambda (ws state) (setq recorded (cons ws state))))
               ((symbol-function 'message) (lambda (&rest _) nil)))
       (agent-repl--mark-start-failed "ws" '(user-error "boom"))
       (should (equal recorded '("ws" . :start-failed))))))
 
-(ert-deftest agent-repl-test-setup-worktree-session-no-claude-skips-boot ()
-  "With NO-CLAUDE, setup hydrates env via `initialize-ws-env' and never boots Claude."
-  (let ((init-claude-called nil)
+(ert-deftest agent-repl-test-setup-worktree-session-no-agent-skips-boot ()
+  "With NO-AGENT, setup hydrates env via `initialize-ws-env' and never boots Claude."
+  (let ((init-agent-called nil)
         (init-env-called nil))
     (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
                (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--initialize-claude)
-               (lambda (&rest _) (setq init-claude-called t)))
+              ((symbol-function 'agent-repl--initialize-agent)
+               (lambda (&rest _) (setq init-agent-called t)))
               ((symbol-function 'agent-repl--initialize-ws-env)
                (lambda (&rest _) (setq init-env-called t))))
       (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil t)
-      (should-not init-claude-called)
+      (should-not init-agent-called)
       (should init-env-called))))
 
-(ert-deftest agent-repl-test-setup-worktree-session-no-claude-still-registers-worktree ()
-  "With NO-CLAUDE, the workspace is still registered as a worktree workspace."
+(ert-deftest agent-repl-test-setup-worktree-session-no-agent-still-registers-worktree ()
+  "With NO-AGENT, the workspace is still registered as a worktree workspace."
   (let ((registered nil))
     (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
                (lambda (_ws-id &optional _ws) (setq registered t)))
-              ((symbol-function 'agent-repl--initialize-claude)
+              ((symbol-function 'agent-repl--initialize-agent)
                (lambda (&rest _) (error "should not boot Claude")))
               ((symbol-function 'agent-repl--initialize-ws-env)
                (lambda (&rest _) nil)))
@@ -5348,12 +5348,12 @@ from `default-directory' via `agent-repl--git-root'."
 ;;;; ---- Tests: setup-worktree-session ----
 
 (ert-deftest agent-repl-test-setup-worktree-session-passes-sandbox-hint-when-forced ()
-  "When force-sandbox is t, initialize-claude receives :sandbox as the env hint."
+  "When force-sandbox is t, initialize-agent receives :sandbox as the env hint."
   (agent-repl-test--with-clean-state
     (let ((captured-env nil))
       (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
                  (lambda (_ws-id &optional _ws) nil))
-                ((symbol-function 'agent-repl--initialize-claude)
+                ((symbol-function 'agent-repl--initialize-agent)
                  (lambda (_ws &optional _dir env) (setq captured-env env)))
                 ((symbol-function 'agent-repl--active-inst)
                  (lambda (_ws) (make-agent-repl-instantiation :start-cmd "claude"))))
@@ -5361,12 +5361,12 @@ from `default-directory' via `agent-repl--git-root'."
         (should (eq captured-env :sandbox))))))
 
 (ert-deftest agent-repl-test-setup-worktree-session-passes-bare-metal-hint-by-default ()
-  "When force-sandbox is nil, initialize-claude receives :bare-metal as the env hint."
+  "When force-sandbox is nil, initialize-agent receives :bare-metal as the env hint."
   (agent-repl-test--with-clean-state
     (let ((captured-env nil))
       (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
                  (lambda (_ws-id &optional _ws) nil))
-                ((symbol-function 'agent-repl--initialize-claude)
+                ((symbol-function 'agent-repl--initialize-agent)
                  (lambda (_ws &optional _dir env) (setq captured-env env)))
                 ((symbol-function 'agent-repl--active-inst)
                  (lambda (_ws) (make-agent-repl-instantiation :start-cmd "claude"))))
@@ -5374,12 +5374,12 @@ from `default-directory' via `agent-repl--git-root'."
         (should (eq captured-env :bare-metal))))))
 
 (ert-deftest agent-repl-test-setup-worktree-session-passes-path-hint ()
-  "initialize-claude receives the worktree PATH as the project-dir hint."
+  "initialize-agent receives the worktree PATH as the project-dir hint."
   (agent-repl-test--with-clean-state
     (let ((captured-dir-hint nil))
       (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
                  (lambda (_ws-id &optional _ws) nil))
-                ((symbol-function 'agent-repl--initialize-claude)
+                ((symbol-function 'agent-repl--initialize-agent)
                  (lambda (_ws &optional dir _env) (setq captured-dir-hint dir)))
                 ((symbol-function 'agent-repl--active-inst)
                  (lambda (_ws) (make-agent-repl-instantiation :start-cmd "claude"))))
@@ -5387,12 +5387,12 @@ from `default-directory' via `agent-repl--git-root'."
         (should (equal captured-dir-hint "/tmp/my-worktree"))))))
 
 (ert-deftest agent-repl-test-setup-worktree-session-binds-default-directory ()
-  "During initialize-claude, default-directory is bound to the worktree path."
+  "During initialize-agent, default-directory is bound to the worktree path."
   (agent-repl-test--with-clean-state
     (let ((captured-dir nil))
       (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
                  (lambda (_ws-id &optional _ws) nil))
-                ((symbol-function 'agent-repl--initialize-claude)
+                ((symbol-function 'agent-repl--initialize-agent)
                  (lambda (_ws &optional _dir _env) (setq captured-dir default-directory)))
                 ((symbol-function 'agent-repl--active-inst)
                  (lambda (_ws) (make-agent-repl-instantiation :start-cmd "claude"))))
@@ -6233,7 +6233,7 @@ hits the permission prompt and dies emitting only its question."
 `temporary-file-directory'.  Without this, the headless claude inherits
 the caller's cwd, its hooks fire with that cwd, and the sentinel watcher
 misattributes them to whichever workspace owns that project-dir — flipping
-:claude-state to :done."
+:agent-state to :done."
   (let ((captured-cwd nil))
     (cl-letf (((symbol-function 'make-process)
                (lambda (&rest _plist)
@@ -6580,13 +6580,13 @@ minibuffer read rather than erroring or spawning name generation."
         (should (= (length prompts) 2))
         (should (string-match-p "Workspace name" (car prompts)))))))
 
-(ert-deftest agent-repl-test-create-worktree-workspace-blank-prompt-creates-worktree-no-claude ()
+(ert-deftest agent-repl-test-create-worktree-workspace-blank-prompt-creates-worktree-no-agent ()
   "An empty preemptive prompt creates the worktree via
-`agent-repl--do-create-worktree-workspace' with NO-CLAUDE = t (Claude
+`agent-repl--do-create-worktree-workspace' with NO-AGENT = t (Claude
 not auto-booted) instead of spawning name generation."
   (agent-repl-test--with-clean-state
     (let ((captured-name nil)
-          (captured-no-claude :unset))
+          (captured-no-agent :unset))
       (cl-letf (((symbol-function 'agent-repl--resolve-current-git-root)
                  (lambda () "/tmp/repo/"))
                 ((symbol-function 'read-string)
@@ -6595,14 +6595,14 @@ not auto-booted) instead of spawning name generation."
                      (setq n (1+ n))
                      (if (= n 1) "" "my-ws"))))
                 ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (name &optional _fs _fork _prompt _cb _prio _base _root _src no-claude)
+                 (lambda (name &optional _fs _fork _prompt _cb _prio _base _root _src no-agent)
                    (setq captured-name name)
-                   (setq captured-no-claude no-claude)))
+                   (setq captured-no-agent no-agent)))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
                  (lambda (&rest _) (error "should not be called"))))
         (agent-repl-create-worktree-workspace 'head)
         (should (equal captured-name "my-ws"))
-        (should (eq captured-no-claude t))))))
+        (should (eq captured-no-agent t))))))
 
 (ert-deftest agent-repl-test-create-worktree-workspace-blank-prompt-empty-name-errors ()
   "An empty preemptive prompt followed by an empty workspace name signals a
@@ -7164,7 +7164,7 @@ Covers the full call the interactive `SPC TAB n' path builds up."
         (agent-repl-workspace-merge)
         (should (equal captured-default "ws-b"))))))
 
-(ert-deftest agent-repl-test-workspace-merge-skips-non-claude-ws ()
+(ert-deftest agent-repl-test-workspace-merge-skips-non-agent-ws ()
   "workspace-merge skips workspaces not registered in agent-repl--workspaces."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "current" :project-dir "/tmp/cur")
@@ -7738,12 +7738,12 @@ drawer can render an age/timestamp once that surfaces in the UI."
 
 (ert-deftest agent-repl-test-workspace-merge-do-marks-dead-on-cherry-pick-error ()
   "GENERIC cherry-pick failure (non-conflict `user-error') flips the
-target workspace to `:repl-state :dead' (and clears `:claude-state')
+target workspace to `:repl-state :dead' (and clears `:agent-state')
 so the drawer shows the ❌ badge.  The error is still re-signaled.
 Conflict-specific errors go through a different path — see
 `agent-repl-test-workspace-merge-do-marks-merge-conflict-on-conflict-error'."
   (agent-repl-test--with-clean-state
-    (puthash "other-ws" '(:claude-state :thinking) agent-repl--workspaces)
+    (puthash "other-ws" '(:agent-state :thinking) agent-repl--workspaces)
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
                ((symbol-function 'agent-repl--workspace-branch) (lambda (_ws) "branch-x"))
                ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
@@ -7756,16 +7756,16 @@ Conflict-specific errors go through a different path — see
       (should-error (agent-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
                     :type 'user-error)
       (should (eq (agent-repl--ws-get "other-ws" :repl-state) :dead))
-      (should (null (agent-repl--ws-get "other-ws" :claude-state))))))
+      (should (null (agent-repl--ws-get "other-ws" :agent-state))))))
 
 (ert-deftest agent-repl-test-workspace-merge-do-marks-merge-conflict-on-conflict-error ()
   "When the cherry-pick raises `agent-repl-merge-conflict-error', the
 target workspace flips to `:repl-state :merge-conflict' (not `:dead')
-so the drawer renders the 💥 badge.  `:claude-state' is preserved
+so the drawer renders the 💥 badge.  `:agent-state' is preserved
 because the vterm is still alive — the user can keep typing after
 resolving the conflict externally."
   (agent-repl-test--with-clean-state
-    (puthash "other-ws" '(:claude-state :thinking) agent-repl--workspaces)
+    (puthash "other-ws" '(:agent-state :thinking) agent-repl--workspaces)
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
                ((symbol-function 'agent-repl--workspace-branch) (lambda (_ws) "branch-x"))
                ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
@@ -7779,8 +7779,8 @@ resolving the conflict externally."
       (should-error (agent-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
                     :type 'agent-repl-merge-conflict-error)
       (should (eq (agent-repl--ws-get "other-ws" :repl-state) :merge-conflict))
-      ;; vterm-alive workspace should keep its claude-state through a conflict
-      (should (eq (agent-repl--ws-get "other-ws" :claude-state) :thinking)))))
+      ;; vterm-alive workspace should keep its agent-state through a conflict
+      (should (eq (agent-repl--ws-get "other-ws" :agent-state) :thinking)))))
 
 (ert-deftest agent-repl-test-workspace-merge-do-clears-prior-merge-conflict-on-retry ()
   "A retry of a previously-conflicted merge clears the stale 💥 badge
@@ -7813,9 +7813,9 @@ other repl-states are preserved."
 (ert-deftest agent-repl-test-mark-merge-conflict-sets-state ()
   "Direct invariants of `agent-repl--mark-merge-conflict':
 `:repl-state' → `:merge-conflict', `:merging' cleared,
-`:merge-completed' cleared, `:claude-state' NOT touched."
+`:merge-completed' cleared, `:agent-state' NOT touched."
   (agent-repl-test--with-clean-state
-    (puthash "ws" '(:claude-state :thinking
+    (puthash "ws" '(:agent-state :thinking
                     :merging t
                     :merge-completed t)
              agent-repl--workspaces)
@@ -7823,8 +7823,8 @@ other repl-states are preserved."
     (should (eq (agent-repl--ws-get "ws" :repl-state) :merge-conflict))
     (should (null (agent-repl--ws-get "ws" :merging)))
     (should (null (agent-repl--ws-get "ws" :merge-completed)))
-    ;; :claude-state must remain — vterm is still alive on a conflict
-    (should (eq (agent-repl--ws-get "ws" :claude-state) :thinking))))
+    ;; :agent-state must remain — vterm is still alive on a conflict
+    (should (eq (agent-repl--ws-get "ws" :agent-state) :thinking))))
 
 (ert-deftest agent-repl-test-workspace-merge-do-does-not-set-merge-completed-on-error ()
   "A failed cherry-pick must leave `:merge-completed' nil so the
@@ -9404,14 +9404,14 @@ so the drawer can route it under MERGING."
       (agent-repl--enqueue-merge "ws1" nil nil "/tmp/target")
       (should (eq (agent-repl--ws-get "ws1" :repl-state) :merge-queued)))))
 
-(ert-deftest agent-repl-test-enqueue-merge-clears-claude-state ()
-  "Stale `:claude-state' is cleared so the state glyph reflects queued."
+(ert-deftest agent-repl-test-enqueue-merge-clears-agent-state ()
+  "Stale `:agent-state' is cleared so the state glyph reflects queued."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-empty-merge-queue
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (agent-repl--ws-put "ws1" :claude-state :thinking)
+      (agent-repl--ws-put "ws1" :agent-state :thinking)
       (agent-repl--enqueue-merge "ws1" nil nil "/tmp/target")
-      (should (null (agent-repl--ws-get "ws1" :claude-state))))))
+      (should (null (agent-repl--ws-get "ws1" :agent-state))))))
 
 (ert-deftest agent-repl-test-enqueue-merge-preserves-fifo-order ()
   "Multiple enqueues land in arrival order — the drain must pop oldest first."
@@ -10194,14 +10194,14 @@ drawer routes it under MERGING with the queued badge."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-empty-merge-queue
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (agent-repl--ws-put "ws1" :claude-state :thinking)
+      (agent-repl--ws-put "ws1" :agent-state :thinking)
       (cl-letf (((symbol-function 'agent-repl--current-head-sha)
                  (lambda (_) nil))
                 ((symbol-function 'agent-repl--persist-merge-queue) #'ignore))
         (agent-repl--reenqueue-merge-on-failure "ws1" t "/tmp/target"))
       (should (eq (agent-repl--ws-get "ws1" :repl-state) :merge-queued))
-      ;; Claude-state cleared so the queued badge wins the glyph precedence.
-      (should (null (agent-repl--ws-get "ws1" :claude-state))))))
+      ;; Agent-state cleared so the queued badge wins the glyph precedence.
+      (should (null (agent-repl--ws-get "ws1" :agent-state))))))
 
 ;;;; ---- Tests: workspace-merge-into-source stashes resolved target dir ----
 
@@ -11002,7 +11002,7 @@ previously recorded dirname is left intact."
   (agent-repl-test--with-oneshot-tracking-state
     (setq agent-repl--oneshot-last-ws
           (plist-put agent-repl--oneshot-last-ws :doom :generating))
-    (agent-repl--oneshot-clear-flavor-on-failure :doom :claude-p-failed)
+    (agent-repl--oneshot-clear-flavor-on-failure :doom :agent-p-failed)
     (should (null (plist-get agent-repl--oneshot-last-ws :doom)))))
 
 (ert-deftest agent-repl-test-oneshot-clear-flavor-on-failure-drops-queued-amends ()
@@ -11014,7 +11014,7 @@ later leak onto an unrelated workspace for the same flavor."
           (plist-put agent-repl--oneshot-last-ws :doom :generating))
     (setq agent-repl--oneshot-amended-prompts
           (plist-put agent-repl--oneshot-amended-prompts :doom '("queued-a" "queued-b")))
-    (agent-repl--oneshot-clear-flavor-on-failure :doom :claude-p-failed)
+    (agent-repl--oneshot-clear-flavor-on-failure :doom :agent-p-failed)
     (should (null (plist-get agent-repl--oneshot-amended-prompts :doom)))))
 
 (ert-deftest agent-repl-test-oneshot-clear-flavor-on-failure-noop-on-non-generating ()
@@ -11033,7 +11033,7 @@ recorded workspace) or the slot was already nil."
   (agent-repl-test--with-oneshot-tracking-state
     (setq agent-repl--oneshot-last-ws
           (plist-put agent-repl--oneshot-last-ws :doom :generating))
-    (agent-repl--oneshot-clear-flavor-on-failure nil :claude-p-failed)
+    (agent-repl--oneshot-clear-flavor-on-failure nil :agent-p-failed)
     (should (eq (plist-get agent-repl--oneshot-last-ws :doom) :generating))))
 
 (ert-deftest agent-repl-test-oneshot-reset-flavor-schedules-backstop ()

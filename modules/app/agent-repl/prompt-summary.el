@@ -283,7 +283,7 @@ a prompt."
 (defun agent-repl--prompt-summary-segment ()
   "Return a propertized string for the mode-line's summary segment.
 Reads `agent-repl--owning-workspace' from the current buffer (set on
-every claude-owned vterm buffer by `agent-repl--create-buffer') and
+every agent-owned vterm buffer by `agent-repl--create-buffer') and
 pulls the workspace's :last-prompt-summary / :last-prompt-summary-pending
 state.  Returns the empty string when no prompt has been sent yet.
 
@@ -485,7 +485,7 @@ from `agent-repl--kickoff-prompt-summary' so tests can stub
 `make-process' / `process-send-string' here without going through the
 state-mutation entry point."
   (let* ((out-buf (generate-new-buffer
-                   (format " *claude-prompt-summary-%s*" ws)))
+                   (format " *agent-prompt-summary-%s*" ws)))
          (cmd (list agent-repl-prompt-summary-program
                     "-p" "--model" agent-repl-prompt-summary-model))
          (context (agent-repl--prompt-summary-collect-context ws))
@@ -496,11 +496,11 @@ state-mutation entry point."
         ;; (SessionStart / UserPromptSubmit / Stop) fire with a cwd that
         ;; doesn't resolve to any registered workspace.  Otherwise the
         ;; sentinel watcher attributes them to the calling workspace and
-        ;; flips :claude-state to :done while the user's interactive Claude
+        ;; flips :agent-state to :done while the user's interactive Claude
         ;; is still mid-turn.
         (let* ((default-directory temporary-file-directory)
                (proc (make-process
-                      :name (format "claude-prompt-summary-%s" ws)
+                      :name (format "agent-prompt-summary-%s" ws)
                       :buffer out-buf
                       :command cmd
                       :connection-type 'pipe

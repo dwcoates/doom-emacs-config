@@ -71,10 +71,10 @@ signals `user-error' rather than silently returning a bogus path."
 ;;;; ---- Tests: Buffer naming ----
 
 (ert-deftest agent-repl-test-buffer-name-format ()
-  "Buffer names should follow *claude-panel-WS* and *claude-panel-input-WS* pattern."
+  "Buffer names should follow *agent-panel-WS* and *agent-panel-input-WS* pattern."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws")))
-    (should (equal (agent-repl--buffer-name) "*claude-panel-my-ws*"))
-    (should (equal (agent-repl--buffer-name "-input") "*claude-panel-input-my-ws*"))))
+    (should (equal (agent-repl--buffer-name) "*agent-panel-my-ws*"))
+    (should (equal (agent-repl--buffer-name "-input") "*agent-panel-input-my-ws*"))))
 
 (ert-deftest agent-repl-test-buffer-name-default ()
   "Buffer name signals an error when no workspace name is available."
@@ -91,16 +91,16 @@ signals `user-error' rather than silently returning a bogus path."
   "Buffer name should prefer the explicit WS argument over the current workspace."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))
     (should (equal (agent-repl--buffer-name nil "other-ws")
-                   "*claude-panel-other-ws*"))))
+                   "*agent-panel-other-ws*"))))
 
 (ert-deftest agent-repl-test-buffer-name-sanitizes-unsafe-chars ()
   "Workspace names with unsafe characters should be sanitized to underscores."
   (should (equal (agent-repl--buffer-name nil "feat/login")
-                 "*claude-panel-feat_login*"))
+                 "*agent-panel-feat_login*"))
   (should (equal (agent-repl--buffer-name nil "ws with space")
-                 "*claude-panel-ws_with_space*"))
+                 "*agent-panel-ws_with_space*"))
   (should (equal (agent-repl--buffer-name "-input" "a*b")
-                 "*claude-panel-input-a_b*")))
+                 "*agent-panel-input-a_b*")))
 
 (ert-deftest agent-repl-test-sanitize-ws-name ()
   "sanitize-ws-name keeps alphanumerics, hyphens, and underscores."
@@ -111,21 +111,21 @@ signals `user-error' rather than silently returning a bogus path."
 
 ;;;; ---- Tests: Buffer predicates ----
 
-(ert-deftest agent-repl-test-claude-buffer-p ()
-  "claude-buffer-p should match *claude-panel-WS* pattern only (excluding input)."
-  (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
-    (should (agent-repl--claude-buffer-p)))
-  (agent-repl-test--with-temp-buffer "*claude-panel-input-abcd1234*"
-    (should-not (agent-repl--claude-buffer-p)))
-  ;; Use a name that does NOT begin with `*claude-panel-' so the vterm regex
+(ert-deftest agent-repl-test-agent-buffer-p ()
+  "agent-buffer-p should match *agent-panel-WS* pattern only (excluding input)."
+  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
+    (should (agent-repl--agent-buffer-p)))
+  (agent-repl-test--with-temp-buffer "*agent-panel-input-abcd1234*"
+    (should-not (agent-repl--agent-buffer-p)))
+  ;; Use a name that does NOT begin with `*agent-panel-' so the vterm regex
   ;; can't match.  The real `*scratch*' is the current buffer when the
   ;; aggregate test runner starts, so naming a temp buffer `*scratch*' and
   ;; then killing it swaps us out of the original buffer and leaves
   ;; `default-directory' pointing at whatever buffer ert lands in next
   ;; (Emacs.app/Contents/MacOS on macOS).  That breaks subsequent tests
   ;; that call git without a -C flag.
-  (agent-repl-test--with-temp-buffer "*repl-test-non-claude-buf*"
-    (should-not (agent-repl--claude-buffer-p))))
+  (agent-repl-test--with-temp-buffer "*repl-test-non-agent-buf*"
+    (should-not (agent-repl--agent-buffer-p))))
 
 ;;;; ---- Tests: Logging ----
 
@@ -170,15 +170,15 @@ When t, it should call `message'."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
         (should (agent-repl--vterm-live-p))))))
 
-(ert-deftest agent-repl-test-claude-running-p-no-process ()
+(ert-deftest agent-repl-test-agent-running-p-no-process ()
   "Returns nil when buffer is live but has no process."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-no-proc*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-        (should-not (agent-repl--claude-running-p))))))
+        (should-not (agent-repl--agent-running-p))))))
 
-(ert-deftest agent-repl-test-claude-running-p-with-process ()
+(ert-deftest agent-repl-test-agent-running-p-with-process ()
   "Returns non-nil when buffer has a live process."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-with-proc*"
@@ -186,7 +186,7 @@ When t, it should call `message'."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'get-buffer-process)
                  (lambda (_buf) 'fake-process)))
-        (should (agent-repl--claude-running-p))))))
+        (should (agent-repl--agent-running-p))))))
 
 ;;;; ---- Tests: Deferred macro ----
 
@@ -987,7 +987,7 @@ before return so we don't accumulate hidden buffers across many git calls."
         (progn
           (setq buf (agent-repl--create-buffer "ws1"))
           (should (buffer-live-p buf))
-          (should (equal (buffer-name buf) "*claude-panel-ws1*")))
+          (should (equal (buffer-name buf) "*agent-panel-ws1*")))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest agent-repl-test-create-buffer-input-suffix ()
@@ -996,7 +996,7 @@ before return so we don't accumulate hidden buffers across many git calls."
     (unwind-protect
         (progn
           (setq buf (agent-repl--create-buffer "ws1" "-input"))
-          (should (equal (buffer-name buf) "*claude-panel-input-ws1*")))
+          (should (equal (buffer-name buf) "*agent-panel-input-ws1*")))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest agent-repl-test-create-buffer-sets-owning-workspace ()
@@ -1011,7 +1011,7 @@ before return so we don't accumulate hidden buffers across many git calls."
 
 (ert-deftest agent-repl-test-create-buffer-owning-workspace-survives-mode ()
   "`agent-repl--owning-workspace' survives `kill-all-local-variables'.
-Major-mode activation (vterm-mode, claude-input-mode) wipes buffer-local
+Major-mode activation (vterm-mode, agent-repl-input-mode) wipes buffer-local
 bindings; the permanent-local property on this variable is what keeps
 ownership intact across that transition."
   (let ((buf nil))
@@ -1111,17 +1111,17 @@ ownership intact across that transition."
 (ert-deftest agent-repl-test-buffer-name-empty-suffix ()
   "Buffer name with empty string suffix should work like no suffix."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () "abcd1234")))
-    (should (equal (agent-repl--buffer-name "") "*claude-panel-abcd1234*"))))
+    (should (equal (agent-repl--buffer-name "") "*agent-panel-abcd1234*"))))
 
 (ert-deftest agent-repl-test-buffer-name-various-suffixes ()
   "Buffer name with various suffix values should include them."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () "abcd1234")))
-    (should (equal (agent-repl--buffer-name "-debug") "*claude-panel-debug-abcd1234*"))
-    (should (equal (agent-repl--buffer-name "-log") "*claude-panel-log-abcd1234*"))))
+    (should (equal (agent-repl--buffer-name "-debug") "*agent-panel-debug-abcd1234*"))
+    (should (equal (agent-repl--buffer-name "-log") "*agent-panel-log-abcd1234*"))))
 
 (ert-deftest agent-repl-test-buffer-name-matches-regexps ()
   "Buffer names should match their respective regexp patterns.
-Use `agent-repl--claude-buffer-p' for the vterm-vs-input distinction —
+Use `agent-repl--agent-buffer-p' for the vterm-vs-input distinction —
 `agent-repl--vterm-buffer-re' is a superset that also matches input names."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () "abcd1234")))
     (let ((vterm-name (agent-repl--buffer-name))
@@ -1132,66 +1132,66 @@ Use `agent-repl--claude-buffer-p' for the vterm-vs-input distinction —
       (should-not (string-match-p agent-repl--input-buffer-re vterm-name))
       (with-temp-buffer
         (rename-buffer vterm-name t)
-        (should (agent-repl--claude-buffer-p)))
+        (should (agent-repl--agent-buffer-p)))
       ;; Input name matches vterm-re (superset), but the predicate correctly
       ;; excludes it.
       (should (string-match-p agent-repl--vterm-buffer-re input-name))
       (with-temp-buffer
         (rename-buffer input-name t)
-        (should-not (agent-repl--claude-buffer-p))))))
+        (should-not (agent-repl--agent-buffer-p))))))
 
-;;;; ---- Tests: claude-buffer-p edge cases ----
+;;;; ---- Tests: agent-buffer-p edge cases ----
 
-(ert-deftest agent-repl-test-claude-buffer-p-no-hash ()
-  "claude-buffer-p should not match *claude-panel-* without hex chars."
-  (agent-repl-test--with-temp-buffer "*claude-panel-*"
-    (should-not (agent-repl--claude-buffer-p))))
+(ert-deftest agent-repl-test-agent-buffer-p-no-hash ()
+  "agent-buffer-p should not match *agent-panel-* without hex chars."
+  (agent-repl-test--with-temp-buffer "*agent-panel-*"
+    (should-not (agent-repl--agent-buffer-p))))
 
-(ert-deftest agent-repl-test-claude-buffer-p-extra-after-pattern ()
-  "claude-buffer-p should not match buffer with extra characters after pattern."
-  (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*extra"
-    (should-not (agent-repl--claude-buffer-p))))
+(ert-deftest agent-repl-test-agent-buffer-p-extra-after-pattern ()
+  "agent-buffer-p should not match buffer with extra characters after pattern."
+  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*extra"
+    (should-not (agent-repl--agent-buffer-p))))
 
-(ert-deftest agent-repl-test-claude-buffer-p-nil-uses-current ()
-  "claude-buffer-p with nil should use current buffer."
-  (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
-    (should (agent-repl--claude-buffer-p nil))))
+(ert-deftest agent-repl-test-agent-buffer-p-nil-uses-current ()
+  "agent-buffer-p with nil should use current buffer."
+  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
+    (should (agent-repl--agent-buffer-p nil))))
 
-(ert-deftest agent-repl-test-claude-buffer-p-explicit-buffer ()
-  "claude-buffer-p with explicit buffer argument."
-  (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+(ert-deftest agent-repl-test-agent-buffer-p-explicit-buffer ()
+  "agent-buffer-p with explicit buffer argument."
+  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
     (let ((buf (current-buffer)))
       (agent-repl-test--with-temp-buffer "*scratch-test*"
         ;; Current buffer is *scratch-test*, but pass buf explicitly
-        (should (agent-repl--claude-buffer-p buf))))))
+        (should (agent-repl--agent-buffer-p buf))))))
 
-;;;; ---- Tests: claude-panel-buffer-p ----
+;;;; ---- Tests: agent-panel-buffer-p ----
 
-(ert-deftest agent-repl-test-claude-panel-buffer-p-vterm ()
-  "claude-panel-buffer-p should match vterm buffer names."
-  (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
-    (should (agent-repl--claude-panel-buffer-p))))
+(ert-deftest agent-repl-test-agent-panel-buffer-p-vterm ()
+  "agent-panel-buffer-p should match vterm buffer names."
+  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
+    (should (agent-repl--agent-panel-buffer-p))))
 
-(ert-deftest agent-repl-test-claude-panel-buffer-p-input ()
-  "claude-panel-buffer-p should match input buffer names."
-  (agent-repl-test--with-temp-buffer "*claude-panel-input-abcd1234*"
-    (should (agent-repl--claude-panel-buffer-p))))
+(ert-deftest agent-repl-test-agent-panel-buffer-p-input ()
+  "agent-panel-buffer-p should match input buffer names."
+  (agent-repl-test--with-temp-buffer "*agent-panel-input-abcd1234*"
+    (should (agent-repl--agent-panel-buffer-p))))
 
-(ert-deftest agent-repl-test-claude-panel-buffer-p-regular ()
-  "claude-panel-buffer-p should not match regular buffer names."
+(ert-deftest agent-repl-test-agent-panel-buffer-p-regular ()
+  "agent-panel-buffer-p should not match regular buffer names."
   (agent-repl-test--with-temp-buffer "*scratch*"
-    (should-not (agent-repl--claude-panel-buffer-p))))
+    (should-not (agent-repl--agent-panel-buffer-p))))
 
-(ert-deftest agent-repl-test-claude-panel-buffer-p-nil ()
-  "claude-panel-buffer-p with nil should use current buffer."
-  (agent-repl-test--with-temp-buffer "*claude-panel-input-abcd1234*"
-    (should (agent-repl--claude-panel-buffer-p nil))))
+(ert-deftest agent-repl-test-agent-panel-buffer-p-nil ()
+  "agent-panel-buffer-p with nil should use current buffer."
+  (agent-repl-test--with-temp-buffer "*agent-panel-input-abcd1234*"
+    (should (agent-repl--agent-panel-buffer-p nil))))
 
 ;;;; ---- Tests: non-user-buffer-p ----
 
-(ert-deftest agent-repl-test-non-user-buffer-p-claude-panel ()
+(ert-deftest agent-repl-test-non-user-buffer-p-agent-panel ()
   "non-user-buffer-p should return non-nil for claude panel buffer."
-  (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
     (should (agent-repl--non-user-buffer-p (current-buffer)))))
 
 (ert-deftest agent-repl-test-non-user-buffer-p-minibuffer ()
@@ -1223,52 +1223,52 @@ Use `agent-repl--claude-buffer-p' for the vterm-vs-input distinction —
   (agent-repl-test--with-temp-buffer "*normal-test-buf2*"
     (should-not (agent-repl--non-user-buffer-p (current-buffer)))))
 
-;;;; ---- Tests: non-claude-buffers ----
+;;;; ---- Tests: non-agent-buffers ----
 
-(ert-deftest agent-repl-test-non-claude-buffers-empty-list ()
-  "non-claude-buffers with empty list should return empty list."
-  (should (null (agent-repl--non-claude-buffers nil))))
+(ert-deftest agent-repl-test-non-agent-buffers-empty-list ()
+  "non-agent-buffers with empty list should return empty list."
+  (should (null (agent-repl--non-agent-buffers nil))))
 
-(ert-deftest agent-repl-test-non-claude-buffers-all-claude ()
-  "non-claude-buffers with all claude buffers should return empty list."
-  (agent-repl-test--with-temp-buffer "*claude-panel-aaaa1111*"
+(ert-deftest agent-repl-test-non-agent-buffers-all-claude ()
+  "non-agent-buffers with all claude buffers should return empty list."
+  (agent-repl-test--with-temp-buffer "*agent-panel-aaaa1111*"
     (let ((buf1 (current-buffer)))
-      (agent-repl-test--with-temp-buffer "*claude-panel-input-bbbb2222*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-input-bbbb2222*"
         (let ((buf2 (current-buffer)))
-          (should (null (agent-repl--non-claude-buffers (list buf1 buf2)))))))))
+          (should (null (agent-repl--non-agent-buffers (list buf1 buf2)))))))))
 
-(ert-deftest agent-repl-test-non-claude-buffers-no-claude ()
-  "non-claude-buffers with no claude buffers should return all."
+(ert-deftest agent-repl-test-non-agent-buffers-no-agent ()
+  "non-agent-buffers with no claude buffers should return all."
   (agent-repl-test--with-temp-buffer "*normal-a*"
     (let ((buf1 (current-buffer)))
       (agent-repl-test--with-temp-buffer "*normal-b*"
         (let ((buf2 (current-buffer)))
-          (let ((result (agent-repl--non-claude-buffers (list buf1 buf2))))
+          (let ((result (agent-repl--non-agent-buffers (list buf1 buf2))))
             (should (= (length result) 2))))))))
 
-(ert-deftest agent-repl-test-non-claude-buffers-mixed ()
-  "non-claude-buffers with mixed list should filter correctly."
-  (agent-repl-test--with-temp-buffer "*claude-panel-aaaa1111*"
-    (let ((claude-buf (current-buffer)))
+(ert-deftest agent-repl-test-non-agent-buffers-mixed ()
+  "non-agent-buffers with mixed list should filter correctly."
+  (agent-repl-test--with-temp-buffer "*agent-panel-aaaa1111*"
+    (let ((agent-buf (current-buffer)))
       (agent-repl-test--with-temp-buffer "*normal-buf*"
         (let ((normal-buf (current-buffer)))
-          (let ((result (agent-repl--non-claude-buffers (list claude-buf normal-buf))))
+          (let ((result (agent-repl--non-agent-buffers (list agent-buf normal-buf))))
             (should (= (length result) 1))
             (should (eq (car result) normal-buf))))))))
 
-(ert-deftest agent-repl-test-non-claude-buffers-nil-entries ()
-  "non-claude-buffers should filter out nil entries."
+(ert-deftest agent-repl-test-non-agent-buffers-nil-entries ()
+  "non-agent-buffers should filter out nil entries."
   (agent-repl-test--with-temp-buffer "*normal-c*"
     (let ((buf (current-buffer)))
-      (let ((result (agent-repl--non-claude-buffers (list nil buf nil))))
+      (let ((result (agent-repl--non-agent-buffers (list nil buf nil))))
         (should (= (length result) 1))
         (should (eq (car result) buf))))))
 
-(ert-deftest agent-repl-test-non-claude-buffers-string-names ()
-  "non-claude-buffers should handle string names (non-existent buffers are filtered)."
+(ert-deftest agent-repl-test-non-agent-buffers-string-names ()
+  "non-agent-buffers should handle string names (non-existent buffers are filtered)."
   (agent-repl-test--with-temp-buffer "*normal-str*"
     ;; String names of non-existent buffers should be filtered (non-user-buffer-p returns t)
-    (let ((result (agent-repl--non-claude-buffers (list "*normal-str*" "nonexistent-xyz"))))
+    (let ((result (agent-repl--non-agent-buffers (list "*normal-str*" "nonexistent-xyz"))))
       (should (= (length result) 1))
       (should (equal (car result) "*normal-str*")))))
 
@@ -1397,19 +1397,19 @@ Use `agent-repl--claude-buffer-p' for the vterm-vs-input distinction —
 
 (ert-deftest agent-repl-test-vterm-buffer-re-matches ()
   "`agent-repl--vterm-buffer-re' matches vterm and input names (superset by design).
-Callers that need a vterm-only check must use `agent-repl--claude-buffer-p'."
-  (should (string-match-p agent-repl--vterm-buffer-re "*claude-panel-abcd1234*"))
-  (should (string-match-p agent-repl--vterm-buffer-re "*claude-panel-my-workspace*"))
+Callers that need a vterm-only check must use `agent-repl--agent-buffer-p'."
+  (should (string-match-p agent-repl--vterm-buffer-re "*agent-panel-abcd1234*"))
+  (should (string-match-p agent-repl--vterm-buffer-re "*agent-panel-my-workspace*"))
   ;; Vterm-re intentionally also matches input buffers (workspace names can
   ;; contain hyphens, so the regex can't cheaply exclude "input-*").
-  (should (string-match-p agent-repl--vterm-buffer-re "*claude-panel-input-abcd1234*"))
+  (should (string-match-p agent-repl--vterm-buffer-re "*agent-panel-input-abcd1234*"))
   (should-not (string-match-p agent-repl--vterm-buffer-re "*scratch*")))
 
 (ert-deftest agent-repl-test-input-buffer-re-matches ()
   "`agent-repl--input-buffer-re' should match expected input buffer patterns."
-  (should (string-match-p agent-repl--input-buffer-re "*claude-panel-input-abcd1234*"))
-  (should (string-match-p agent-repl--input-buffer-re "*claude-panel-input-my-workspace*"))
-  (should-not (string-match-p agent-repl--input-buffer-re "*claude-panel-abcd1234*"))
+  (should (string-match-p agent-repl--input-buffer-re "*agent-panel-input-abcd1234*"))
+  (should (string-match-p agent-repl--input-buffer-re "*agent-panel-input-my-workspace*"))
+  (should-not (string-match-p agent-repl--input-buffer-re "*agent-panel-abcd1234*"))
   (should-not (string-match-p agent-repl--input-buffer-re "*scratch*")))
 
 ;;;; ---- Tests: log-format hardening against non-string fmt ----

@@ -95,20 +95,20 @@
 
 (ert-deftest agent-repl-test-panels-extract-id-from-vterm ()
   "extract-panel-id returns workspace identifier from a vterm buffer name."
-  (should (equal (agent-repl--extract-panel-id "*claude-panel-abcd1234*")
+  (should (equal (agent-repl--extract-panel-id "*agent-panel-abcd1234*")
                  "abcd1234"))
-  (should (equal (agent-repl--extract-panel-id "*claude-panel-my-workspace*")
+  (should (equal (agent-repl--extract-panel-id "*agent-panel-my-workspace*")
                  "my-workspace")))
 
 (ert-deftest agent-repl-test-panels-extract-id-from-input ()
   "extract-panel-id returns workspace identifier from an input buffer name."
-  (should (equal (agent-repl--extract-panel-id "*claude-panel-input-abcd1234*")
+  (should (equal (agent-repl--extract-panel-id "*agent-panel-input-abcd1234*")
                  "abcd1234"))
-  (should (equal (agent-repl--extract-panel-id "*claude-panel-input-my-workspace*")
+  (should (equal (agent-repl--extract-panel-id "*agent-panel-input-my-workspace*")
                  "my-workspace")))
 
-(ert-deftest agent-repl-test-panels-extract-id-non-claude ()
-  "extract-panel-id returns nil for non-Claude buffer names."
+(ert-deftest agent-repl-test-panels-extract-id-non-agent ()
+  "extract-panel-id returns nil for non-agent buffer names."
   (should-not (agent-repl--extract-panel-id "*scratch*"))
   (should-not (agent-repl--extract-panel-id "*Messages*"))
   (should-not (agent-repl--extract-panel-id "config.el")))
@@ -117,13 +117,13 @@
 
 (ert-deftest agent-repl-test-panels-partner-of-vterm ()
   "partner-buffer-name of a vterm buffer is the input buffer."
-  (should (equal (agent-repl--partner-buffer-name "*claude-panel-abcd1234*" "abcd1234")
-                 "*claude-panel-input-abcd1234*")))
+  (should (equal (agent-repl--partner-buffer-name "*agent-panel-abcd1234*" "abcd1234")
+                 "*agent-panel-input-abcd1234*")))
 
 (ert-deftest agent-repl-test-panels-partner-of-input ()
   "partner-buffer-name of an input buffer is the vterm buffer."
-  (should (equal (agent-repl--partner-buffer-name "*claude-panel-input-abcd1234*" "abcd1234")
-                 "*claude-panel-abcd1234*")))
+  (should (equal (agent-repl--partner-buffer-name "*agent-panel-input-abcd1234*" "abcd1234")
+                 "*agent-panel-abcd1234*")))
 
 ;;;; ---- Tests: Orphaned panel detection (migrated) ----
 
@@ -135,8 +135,8 @@
               ((symbol-function 'get-buffer-window) (lambda (_buf) nil))
               ((symbol-function 'get-buffer) (lambda (_name) nil)))
       ;; Vterm with no visible input partner is orphaned
-      (should (agent-repl--orphaned-panel-p "*claude-panel-abcd1234*"))
-      ;; Non-Claude buffers are never orphaned
+      (should (agent-repl--orphaned-panel-p "*agent-panel-abcd1234*"))
+      ;; Non-agent buffers are never orphaned
       (should-not (agent-repl--orphaned-panel-p "*some-other*")))))
 
 (ert-deftest agent-repl-test-panels-orphaned-input-p ()
@@ -146,15 +146,15 @@
               ((symbol-function 'get-buffer-window) (lambda (_buf) nil))
               ((symbol-function 'get-buffer) (lambda (_name) nil)))
       ;; Input with no visible vterm partner and no loading placeholder is orphaned
-      (should (agent-repl--orphaned-panel-p "*claude-panel-input-abcd1234*"))
-      ;; Non-Claude buffers are never orphaned
+      (should (agent-repl--orphaned-panel-p "*agent-panel-input-abcd1234*"))
+      ;; Non-agent buffers are never orphaned
       (should-not (agent-repl--orphaned-panel-p "*scratch*")))))
 
 (ert-deftest agent-repl-test-panels-orphaned-vterm-one-window ()
   "When one-window-p returns t, no panel is considered orphaned."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'one-window-p) (lambda () t)))
-      (should-not (agent-repl--orphaned-panel-p "*claude-panel-abcd1234*")))))
+      (should-not (agent-repl--orphaned-panel-p "*agent-panel-abcd1234*")))))
 
 (ert-deftest agent-repl-test-panels-orphaned-input-with-loading ()
   "When loading placeholder buffer exists, input panel is not orphaned."
@@ -162,9 +162,9 @@
     (cl-letf (((symbol-function 'one-window-p) (lambda () nil))
               ((symbol-function 'get-buffer-window) (lambda (_buf) nil))
               ((symbol-function 'get-buffer) (lambda (name)
-                                               (when (equal name " *claude-loading*")
+                                               (when (equal name " *agent-loading*")
                                                  'fake-buffer))))
-      (should-not (agent-repl--orphaned-panel-p "*claude-panel-input-abcd1234*")))))
+      (should-not (agent-repl--orphaned-panel-p "*agent-panel-input-abcd1234*")))))
 
 (ert-deftest agent-repl-test-panels-orphaned-vterm-partner-visible ()
   "A vterm buffer whose input partner IS visible is not orphaned."
@@ -173,9 +173,9 @@
               ((symbol-function 'get-buffer-window)
                (lambda (buf)
                  ;; The input partner window is visible
-                 (when (equal buf "*claude-panel-input-abcd1234*")
+                 (when (equal buf "*agent-panel-input-abcd1234*")
                    'fake-window))))
-      (should-not (agent-repl--orphaned-panel-p "*claude-panel-abcd1234*")))))
+      (should-not (agent-repl--orphaned-panel-p "*agent-panel-abcd1234*")))))
 
 (ert-deftest agent-repl-test-panels-orphaned-input-partner-visible ()
   "An input buffer whose vterm partner IS visible is not orphaned."
@@ -184,9 +184,9 @@
               ((symbol-function 'get-buffer-window)
                (lambda (buf)
                  ;; The vterm partner window is visible
-                 (when (equal buf "*claude-panel-abcd1234*")
+                 (when (equal buf "*agent-panel-abcd1234*")
                    'fake-window))))
-      (should-not (agent-repl--orphaned-panel-p "*claude-panel-input-abcd1234*")))))
+      (should-not (agent-repl--orphaned-panel-p "*agent-panel-input-abcd1234*")))))
 
 ;;;; ---- Tests: Defcustom defaults ----
 
@@ -203,7 +203,7 @@
 (ert-deftest agent-repl-test-panels-show-input-beside-output-splits-output ()
   "show-input-beside-output splits the output window and shows the input buffer."
   (agent-repl-test--with-clean-state
-    (let* ((input-buf (get-buffer-create "*claude-panel-input-test-ws*"))
+    (let* ((input-buf (get-buffer-create "*agent-panel-input-test-ws*"))
            (vterm-win (selected-window))
            (split-arg nil)
            (set-win nil)
@@ -234,7 +234,7 @@
 (ert-deftest agent-repl-test-panels-show-input-beside-output-noop-no-output-window ()
   "show-input-beside-output is a no-op when the output window is not visible."
   (agent-repl-test--with-clean-state
-    (let ((input-buf (get-buffer-create "*claude-panel-input-test-ws*"))
+    (let ((input-buf (get-buffer-create "*agent-panel-input-test-ws*"))
           (split-called nil))
       (unwind-protect
           (progn
@@ -498,16 +498,16 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
 (ert-deftest agent-repl-test-panels-kill-placeholder-when-exists ()
   "kill-placeholder kills the loading placeholder buffer."
   (agent-repl-test--with-clean-state
-    (get-buffer-create " *claude-loading*")
-    (should (get-buffer " *claude-loading*"))
+    (get-buffer-create " *agent-loading*")
+    (should (get-buffer " *agent-loading*"))
     (agent-repl--kill-placeholder)
-    (should-not (get-buffer " *claude-loading*"))))
+    (should-not (get-buffer " *agent-loading*"))))
 
 (ert-deftest agent-repl-test-panels-kill-placeholder-when-absent ()
   "kill-placeholder does nothing when no placeholder exists."
   (agent-repl-test--with-clean-state
     ;; Ensure no placeholder exists
-    (when-let ((buf (get-buffer " *claude-loading*")))
+    (when-let ((buf (get-buffer " *agent-loading*")))
       (kill-buffer buf))
     ;; Should not error
     (agent-repl--kill-placeholder)))
@@ -519,13 +519,13 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
   ;; Should not error when process is nil / not live
   (agent-repl--sigkill-if-alive nil))
 
-;;;; ---- Tests: non-claude-panel-window-p ----
+;;;; ---- Tests: non-agent-panel-window-p ----
 
-(ert-deftest agent-repl-test-panels-non-claude-panel-window-p ()
-  "non-claude-panel-window-p returns t for non-Claude windows."
+(ert-deftest agent-repl-test-panels-non-agent-panel-window-p ()
+  "non-agent-panel-window-p returns t for non-agent windows."
   (let ((win (selected-window)))
     ;; The selected window should be showing *scratch* or similar
-    (should (agent-repl--non-claude-panel-window-p win))))
+    (should (agent-repl--non-agent-panel-window-p win))))
 
 ;;;; ---- Tests: on-close (single close audit point) ----
 
@@ -587,15 +587,15 @@ which writes :inactive."
       (agent-repl--on-close)
       (should (eq (agent-repl--ws-get "test-ws" :repl-state) :hidden)))))
 
-(ert-deftest agent-repl-test-panels-on-close-preserves-claude-state ()
-  "on-close does not touch :claude-state — mid-task :thinking survives close."
+(ert-deftest agent-repl-test-panels-on-close-preserves-agent-state ()
+  "on-close does not touch :agent-state — mid-task :thinking survives close."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "test-ws" :thinking)
+    (agent-repl--ws-set-agent-state "test-ws" :thinking)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
               ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore))
       (agent-repl--on-close)
-      (should (eq (agent-repl--ws-claude-state "test-ws") :thinking))
+      (should (eq (agent-repl--ws-agent-state "test-ws") :thinking))
       (should (eq (agent-repl--ws-get "test-ws" :repl-state) :hidden)))))
 
 (ert-deftest agent-repl-test-panels-on-close-pushes-current-ws-to-back ()
@@ -776,8 +776,8 @@ panels, leaving just the work window — the `SPC o c' goes-away contract."
   (agent-repl-test--with-clean-state
     (let ((wconf (current-window-configuration))
           (work-buf (generate-new-buffer "*fsclose-work*"))
-          (vterm-buf (generate-new-buffer "*claude-panel-fsclose*"))
-          (input-buf (generate-new-buffer "*claude-panel-input-fsclose*")))
+          (vterm-buf (generate-new-buffer "*agent-panel-fsclose*"))
+          (input-buf (generate-new-buffer "*agent-panel-input-fsclose*")))
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
             (delete-other-windows)
@@ -927,8 +927,8 @@ panels, leaving just the work window — the `SPC o c' goes-away contract."
 window's buffer to the fallback, leaving a single window on the fallback buffer."
   (agent-repl-test--with-clean-state
     (let ((wconf (current-window-configuration))
-          (vterm-buf (generate-new-buffer "*claude-panel-repl-fb*"))
-          (input-buf (generate-new-buffer "*claude-panel-input-repl-fb*"))
+          (vterm-buf (generate-new-buffer "*agent-panel-repl-fb*"))
+          (input-buf (generate-new-buffer "*agent-panel-input-repl-fb*"))
           (fallback-buf (generate-new-buffer "*repl-fb-fallback*")))
       (unwind-protect
           (cl-letf (((symbol-function 'agent-repl--panel-fallback-buffer)
@@ -988,7 +988,7 @@ window's buffer to the fallback, leaving a single window on the fallback buffer.
     (let ((simple-called 0)
           (full-called 0))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--claude-running-p) (lambda () t))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
                 ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
                 ((symbol-function 'use-region-p) (lambda () nil))
@@ -1006,7 +1006,7 @@ window's buffer to the fallback, leaving a single window on the fallback buffer.
     (let ((simple-called 0)
           (full-called 0))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--claude-running-p) (lambda () t))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
                 ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
                 ((symbol-function 'use-region-p) (lambda () nil))
@@ -1213,16 +1213,16 @@ is on."
 
 (ert-deftest agent-repl-test-panels-entry-point-not-running-hides ()
   "agent-repl (SPC o C, always-close) hides the workspace even when no
-Claude session is running.  Skips the initialize-claude branch the
+Claude session is running.  Skips the initialize-agent branch the
 plain `agent-repl-simple' (SPC o c) toggle would otherwise take."
   (agent-repl-test--with-clean-state
     (let ((started nil) (hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--claude-running-p) (lambda () nil))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda () nil))
                 ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'use-region-p) (lambda () nil))
-                ((symbol-function 'agent-repl--initialize-claude) (lambda (&rest _) (setq started t)))
+                ((symbol-function 'agent-repl--initialize-agent) (lambda (&rest _) (setq started t)))
                 ((symbol-function 'agent-repl--hide-and-preserve-status)
                  (lambda () (setq hidden t))))
         (agent-repl)
@@ -1235,7 +1235,7 @@ message — always-close skips the loading branch."
   (agent-repl-test--with-clean-state
     (let ((messages nil) (hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--claude-running-p) (lambda () t))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
                 ((symbol-function 'agent-repl--session-starting-p) (lambda () t))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'use-region-p) (lambda () nil))
@@ -1251,7 +1251,7 @@ message — always-close skips the loading branch."
   (agent-repl-test--with-clean-state
     (let ((hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--claude-running-p) (lambda () t))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
                 ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
                 ((symbol-function 'use-region-p) (lambda () nil))
@@ -1267,7 +1267,7 @@ always-close contract: pressing SPC o C on a hidden workspace re-asserts
   (agent-repl-test--with-clean-state
     (let ((shown nil) (hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--claude-running-p) (lambda () t))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
                 ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'use-region-p) (lambda () nil))
@@ -1285,7 +1285,7 @@ Selection-handling stays orthogonal to the always-close hide path."
   (agent-repl-test--with-clean-state
     (let ((sent-text nil) (hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--claude-running-p) (lambda () t))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
                 ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
                 ((symbol-function 'use-region-p) (lambda () t))
@@ -1296,7 +1296,7 @@ Selection-handling stays orthogonal to the always-close hide path."
                 ((symbol-function 'deactivate-mark) (lambda () nil))
                 ((symbol-function 'agent-repl--hide-and-preserve-status)
                  (lambda () (setq hidden t)))
-                ((symbol-function 'agent-repl--send-to-claude)
+                ((symbol-function 'agent-repl--send-to-agent)
                  (lambda (text) (setq sent-text text))))
         (agent-repl)
         (should (equal sent-text "hello world"))
@@ -1308,11 +1308,11 @@ nothing is running, it initializes Claude (in contrast to SPC o C)."
   (agent-repl-test--with-clean-state
     (let ((started nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--claude-running-p) (lambda () nil))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda () nil))
                 ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'use-region-p) (lambda () nil))
-                ((symbol-function 'agent-repl--initialize-claude)
+                ((symbol-function 'agent-repl--initialize-agent)
                  (lambda (&rest _) (setq started t))))
         (agent-repl-simple)
         (should started)))))
@@ -1324,7 +1324,7 @@ contrast to SPC o C, which hides further)."
   (agent-repl-test--with-clean-state
     (let ((shown nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--claude-running-p) (lambda () t))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
                 ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'use-region-p) (lambda () nil))
@@ -1340,7 +1340,7 @@ whole layout (which would duplicate the already-visible output window)."
   (agent-repl-test--with-clean-state
     (let ((added nil) (focused nil) (shown-hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--claude-running-p) (lambda () t))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
                 ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'agent-repl--output-visible-input-hidden-p)
@@ -1757,8 +1757,8 @@ dead input buffer used to strand the vterm in that adjacent window (the
 duplicated-output corruption seen switching to a freshly generated
 workspace with the drawer open)."
   (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*claude-panel-test-ws*"))
-          (input-buf (get-buffer-create "*claude-panel-input-test-ws*")))
+    (let ((vterm-buf (get-buffer-create "*agent-panel-test-ws*"))
+          (input-buf (get-buffer-create "*agent-panel-input-test-ws*")))
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                     ((symbol-function 'agent-repl--refresh-vterm) (lambda () nil))
@@ -1775,7 +1775,7 @@ workspace with the drawer open)."
             (should (= 1 (length (get-buffer-window-list vterm-buf nil nil)))))
         (delete-other-windows)
         (dolist (b (list vterm-buf input-buf
-                         (get-buffer "*claude-panel-input-test-ws*")))
+                         (get-buffer "*agent-panel-input-test-ws*")))
           (when (buffer-live-p b) (kill-buffer b)))))))
 
 ;;;; ---- Tests: ensure-input-buffer ----
@@ -1783,7 +1783,7 @@ workspace with the drawer open)."
 (ert-deftest agent-repl-test-panels-ensure-input-buffer-returns-live ()
   "ensure-input-buffer returns the recorded :input-buffer when it is live."
   (agent-repl-test--with-clean-state
-    (let ((input-buf (get-buffer-create "*claude-panel-input-test-ws*")))
+    (let ((input-buf (get-buffer-create "*agent-panel-input-test-ws*")))
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
             (agent-repl--ws-put "test-ws" :input-buffer input-buf)
@@ -1795,7 +1795,7 @@ workspace with the drawer open)."
 recorded :input-buffer is dead, and records it back on the plist."
   (agent-repl-test--with-clean-state
     (let ((dead (get-buffer-create "*stale-input*"))
-          (named (get-buffer-create "*claude-panel-input-test-ws*")))
+          (named (get-buffer-create "*agent-panel-input-test-ws*")))
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
             (agent-repl--ws-put "test-ws" :input-buffer dead)
@@ -1815,8 +1815,8 @@ recorded :input-buffer nor the canonically-named buffer is live."
           (let ((result (agent-repl--ensure-input-buffer "test-ws")))
             (should (buffer-live-p result))
             (should (eq result (agent-repl--ws-get "test-ws" :input-buffer)))
-            (should (string= (buffer-name result) "*claude-panel-input-test-ws*"))))
-      (when-let ((b (get-buffer "*claude-panel-input-test-ws*")))
+            (should (string= (buffer-name result) "*agent-panel-input-test-ws*"))))
+      (when-let ((b (get-buffer "*agent-panel-input-test-ws*")))
         (kill-buffer b)))))
 
 ;;;; ---- Tests: focus-input-panel edge cases ----
@@ -1890,7 +1890,7 @@ recorded :input-buffer nor the canonically-named buffer is live."
             (setq new-win (split-window))
             (set-window-buffer new-win buf)
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                      ((symbol-function 'agent-repl--claude-running-p) (lambda () t))
+                      ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
                       ((symbol-function 'agent-repl--panels-visible-p) (lambda () t)))
               (agent-repl-focus-input)
               (should (eq (window-buffer (selected-window)) buf))))
@@ -1910,7 +1910,7 @@ recorded :input-buffer nor the canonically-named buffer is live."
             (setq new-win (split-window))
             (set-window-buffer new-win buf)
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                      ((symbol-function 'agent-repl--claude-running-p) (lambda () t))
+                      ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
                       ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
                       ((symbol-function 'evil-insert-state)
                        (lambda (&rest _) (setq insert-called t))))
@@ -2036,7 +2036,7 @@ on the ws plist (via `--latch-and-maybe-fire-loaded')."
               ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
               ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore))
       (agent-repl--on-workspace-switch "ws1")
-      ;; :claude-ready is nil so latch hasn't fired+cleared; bit stays set.
+      ;; :agent-ready is nil so latch hasn't fired+cleared; bit stays set.
       (should (eq (agent-repl--ws-get "ws1" :ws-loaded) t)))))
 
 (ert-deftest agent-repl-test-panels-on-workspace-switch-nil-ws-skips-latch ()
@@ -2090,7 +2090,7 @@ can start."
               ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
               ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore))
-      (agent-repl--ws-set-claude-state "ws1" :done)
+      (agent-repl--ws-set-agent-state "ws1" :done)
       (let ((before (float-time)))
         (agent-repl--on-workspace-switch "ws1")
         (should (eq (agent-repl--ws-get "ws1" :done-acked) t))
@@ -2110,7 +2110,7 @@ can start."
               ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
               ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore))
-      (agent-repl--ws-set-claude-state "ws1" :thinking)
+      (agent-repl--ws-set-agent-state "ws1" :thinking)
       (agent-repl--on-workspace-switch "ws1")
       (should-not (agent-repl--ws-get "ws1" :done-acked))
       (should-not (agent-repl--ws-get "ws1" :done-acked-at)))))
@@ -2119,7 +2119,7 @@ can start."
   "Leaving a workspace in :done clears :done-acked and :done-acked-at so
 the dwell countdown restarts on return."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :done)
+    (agent-repl--ws-set-agent-state "ws1" :done)
     (agent-repl--ws-put "ws1" :done-acked t)
     (agent-repl--ws-put "ws1" :done-acked-at (float-time))
     (agent-repl--clear-done-ack-on-switch-away "ws1")
@@ -2130,7 +2130,7 @@ the dwell countdown restarts on return."
   "Leaving a workspace NOT in :done leaves ack flags untouched — the
 clear only resets the dwell countdown for live :done workspaces."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :thinking)
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
     (agent-repl--ws-put "ws1" :done-acked t)
     (let ((stamp (float-time)))
       (agent-repl--ws-put "ws1" :done-acked-at stamp)
@@ -2324,36 +2324,36 @@ only the input window."
         (when (buffer-live-p input-buf) (kill-buffer input-buf))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
-;;;; ---- Tests: non-claude-panel-window-p with Claude buffers ----
+;;;; ---- Tests: non-agent-panel-window-p with Claude buffers ----
 
-(ert-deftest agent-repl-test-panels-non-claude-panel-window-p-vterm-buffer ()
-  "non-claude-panel-window-p returns nil for a window showing a Claude vterm buffer."
-  (let ((buf (get-buffer-create "*claude-panel-abcd1234*")))
+(ert-deftest agent-repl-test-panels-non-agent-panel-window-p-vterm-buffer ()
+  "non-agent-panel-window-p returns nil for a window showing a Claude vterm buffer."
+  (let ((buf (get-buffer-create "*agent-panel-abcd1234*")))
     (unwind-protect
         (progn
           (switch-to-buffer buf)
-          (should-not (agent-repl--non-claude-panel-window-p (selected-window))))
+          (should-not (agent-repl--non-agent-panel-window-p (selected-window))))
       (switch-to-buffer "*scratch*")
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-(ert-deftest agent-repl-test-panels-non-claude-panel-window-p-input-buffer ()
-  "non-claude-panel-window-p returns nil for a window showing a Claude input buffer."
-  (let ((buf (get-buffer-create "*claude-panel-input-abcd1234*")))
+(ert-deftest agent-repl-test-panels-non-agent-panel-window-p-input-buffer ()
+  "non-agent-panel-window-p returns nil for a window showing a Claude input buffer."
+  (let ((buf (get-buffer-create "*agent-panel-input-abcd1234*")))
     (unwind-protect
         (progn
           (switch-to-buffer buf)
-          (should-not (agent-repl--non-claude-panel-window-p (selected-window))))
+          (should-not (agent-repl--non-agent-panel-window-p (selected-window))))
       (switch-to-buffer "*scratch*")
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-;;;; ---- Tests: redirect-from-claude-before-save ----
+;;;; ---- Tests: redirect-from-agent-before-save ----
 
-(ert-deftest agent-repl-test-panels-redirect-non-claude-noop ()
-  "redirect-from-claude-before-save is a no-op when selected window is non-Claude."
+(ert-deftest agent-repl-test-panels-redirect-non-agent-noop ()
+  "redirect-from-agent-before-save is a no-op when selected window is non-agent."
   (agent-repl-test--with-clean-state
     ;; Selected window shows a regular buffer -- the outer when clause fails
     (let ((orig-win (selected-window)))
-      (agent-repl--redirect-from-claude-before-save)
+      (agent-repl--redirect-from-agent-before-save)
       ;; Selected window should not change
       (should (eq (selected-window) orig-win)))))
 
@@ -2470,7 +2470,7 @@ hooks are gone."
 ;;;; ---- Tests: bounce-from-vterm ----
 
 (ert-deftest agent-repl-test-panels-bounce-from-vterm-non-vterm-buffer ()
-  "bounce-from-vterm is a no-op when the selected window shows a non-claude buffer."
+  "bounce-from-vterm is a no-op when the selected window shows a non-agent buffer."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer "*bounce-noop-regular*"
       (let ((orig-win (selected-window)))
@@ -2483,7 +2483,7 @@ hooks are gone."
 Load-bearing: after the bounce redirects vterm→input, the input selection
 must not itself trigger another bounce."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-input-test-ws*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-input-test-ws*"
       (let ((orig-win (selected-window)))
         (set-window-buffer orig-win (current-buffer))
         (let ((last-input-event ?a))
@@ -2493,8 +2493,8 @@ must not itself trigger another bounce."
 (ert-deftest agent-repl-test-panels-bounce-from-vterm-keyboard-redirects ()
   "bounce-from-vterm redirects to the input window when selection is keyboard-driven."
   (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*claude-panel-test-ws*"))
-          (input-buf (get-buffer-create "*claude-panel-input-test-ws*"))
+    (let ((vterm-buf (get-buffer-create "*agent-panel-test-ws*"))
+          (input-buf (get-buffer-create "*agent-panel-input-test-ws*"))
           (new-win nil))
       (unwind-protect
           (progn
@@ -2514,8 +2514,8 @@ must not itself trigger another bounce."
 (ert-deftest agent-repl-test-panels-bounce-from-vterm-mouse-does-not-redirect ()
   "Mouse-driven selection of a vterm window stays put — user wants to scroll/copy."
   (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*claude-panel-test-ws*"))
-          (input-buf (get-buffer-create "*claude-panel-input-test-ws*"))
+    (let ((vterm-buf (get-buffer-create "*agent-panel-test-ws*"))
+          (input-buf (get-buffer-create "*agent-panel-input-test-ws*"))
           (new-win nil))
       (unwind-protect
           (progn
@@ -2539,13 +2539,13 @@ must not itself trigger another bounce."
 Previously this path logged verbosely and stranded point in vterm; now
 we at least surface the stuck state so the user knows to click out."
   (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*claude-panel-test-ws*"))
+    (let ((vterm-buf (get-buffer-create "*agent-panel-test-ws*"))
           (messages nil))
       (unwind-protect
           (progn
             ;; Input buffer is stored but NOT displayed in any window.
             (agent-repl--ws-put "test-ws" :input-buffer
-                                 (get-buffer-create "*claude-panel-input-test-ws*"))
+                                 (get-buffer-create "*agent-panel-input-test-ws*"))
             (set-window-buffer (selected-window) vterm-buf)
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                       ((symbol-function 'message)
@@ -2555,12 +2555,12 @@ we at least surface the stuck state so the user knows to click out."
             (should (cl-some (lambda (m) (string-match-p "input panel isn't visible" m))
                              messages)))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
-        (when-let ((b (get-buffer "*claude-panel-input-test-ws*"))) (kill-buffer b))))))
+        (when-let ((b (get-buffer "*agent-panel-input-test-ws*"))) (kill-buffer b))))))
 
 ;;;; ---- Tests: initialize-input-buffer ----
 
 (ert-deftest agent-repl-test-initialize-input-buffer-fresh ()
-  "initialize-input-buffer enables claude-input-mode and restores history on a fresh buffer."
+  "initialize-input-buffer enables agent-repl-input-mode and restores history on a fresh buffer."
   (agent-repl-test--with-clean-state
     (let ((buf (generate-new-buffer " *init-input-fresh*"))
           (mode-called nil)
@@ -2568,7 +2568,7 @@ we at least surface the stuck state so the user knows to click out."
       (unwind-protect
           (cl-letf (((symbol-function 'agent-repl--create-buffer)
                      (lambda (_ws &optional _s) buf))
-                    ((symbol-function 'claude-input-mode)
+                    ((symbol-function 'agent-repl-input-mode)
                      (lambda () (setq mode-called t)))
                     ((symbol-function 'agent-repl--history-restore)
                      (lambda (_ws) (setq history-called t))))
@@ -2579,13 +2579,13 @@ we at least surface the stuck state so the user knows to click out."
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
 (ert-deftest agent-repl-test-initialize-input-buffer-already-initialized ()
-  "initialize-input-buffer errors when the buffer is already in claude-input-mode."
+  "initialize-input-buffer errors when the buffer is already in agent-repl-input-mode."
   (agent-repl-test--with-clean-state
     (let ((buf (generate-new-buffer " *init-input-already*")))
       (unwind-protect
           (progn
             (with-current-buffer buf
-              (setq major-mode 'claude-input-mode))
+              (setq major-mode 'agent-repl-input-mode))
             (cl-letf (((symbol-function 'agent-repl--create-buffer)
                        (lambda (_ws &optional _s) buf)))
               (should-error (agent-repl--initialize-input-buffer "test-ws"))))
@@ -2768,7 +2768,7 @@ loop is skipped entirely."
 Regression guard: persp-mode can drift another workspace's live Claude panel
 into this persp, and nuking it would wipe that workspace's running session."
   (let ((persp-mode t)
-        (foreign (get-buffer-create "*claude-panel-other-ws*")))
+        (foreign (get-buffer-create "*agent-panel-other-ws*")))
     (with-current-buffer foreign
       (setq-local agent-repl--owning-workspace "other-ws"))
     (unwind-protect
@@ -2781,7 +2781,7 @@ into this persp, and nuking it would wipe that workspace's running session."
 (ert-deftest agent-repl-test-panels-kill-workspace-buffers/kills-own-owned ()
   "kill-workspace-buffers kills a buffer owned by the workspace being nuked."
   (let ((persp-mode t)
-        (own (get-buffer-create "*claude-panel-this-ws*")))
+        (own (get-buffer-create "*agent-panel-this-ws*")))
     (with-current-buffer own
       (setq-local agent-repl--owning-workspace "this-ws"))
     (unwind-protect
@@ -2877,29 +2877,29 @@ into this persp, and nuking it would wipe that workspace's running session."
               ((symbol-function 'agent-repl--refresh-vterm) (lambda () nil)))
       (should-error (agent-repl--show-existing-panels)))))
 
-;;;; ---- Tests: initialize-claude ----
+;;;; ---- Tests: initialize-agent ----
 
-(ert-deftest agent-repl-test-panels-initialize-claude-no-workspace ()
-  "initialize-claude errors when no workspace is active."
+(ert-deftest agent-repl-test-panels-initialize-agent-no-workspace ()
+  "initialize-agent errors when no workspace is active."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
-      (should-error (agent-repl--initialize-claude)))))
+      (should-error (agent-repl--initialize-agent)))))
 
-(ert-deftest agent-repl-test-panels-initialize-claude-already-running-errors ()
-  "initialize-claude errors when Claude is already running."
+(ert-deftest agent-repl-test-panels-initialize-agent-already-running-errors ()
+  "initialize-agent errors when Claude is already running."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'agent-repl--claude-running-p) (lambda (_ws) t)))
-      (should-error (agent-repl--initialize-claude)))))
+              ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t)))
+      (should-error (agent-repl--initialize-agent)))))
 
-(defmacro agent-repl-test--initialize-claude-stubs (vterm-buf-var &rest body)
-  "Run BODY with the stubs needed to exercise `agent-repl--initialize-claude'.
+(defmacro agent-repl-test--initialize-agent-stubs (vterm-buf-var &rest body)
+  "Run BODY with the stubs needed to exercise `agent-repl--initialize-agent'.
 VTERM-BUF-VAR is the name of a `let'-bound buffer that will be returned
 from `create-buffer'.  Stubs can be overridden by wrapping BODY in another
 `cl-letf' that rebinds the same symbols."
   (declare (indent 1))
   `(cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-             ((symbol-function 'agent-repl--claude-running-p) (lambda (&optional _ws) nil))
+             ((symbol-function 'agent-repl--agent-running-p) (lambda (&optional _ws) nil))
              ((symbol-function 'agent-repl--initialize-ws-env) #'ignore)
              ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/tmp"))
              ((symbol-function 'agent-repl--record-project-dir) #'ignore)
@@ -2927,109 +2927,109 @@ from `create-buffer'.  Stubs can be overridden by wrapping BODY in another
              ((symbol-function 'agent-repl--workspace-id) (lambda () "id")))
      ,@body))
 
-(ert-deftest agent-repl-test-panels-initialize-claude-starts-new-session ()
-  "initialize-claude sets prefix counter, enables overlay, writes :claude-state :init."
+(ert-deftest agent-repl-test-panels-initialize-agent-starts-new-session ()
+  "initialize-agent sets prefix counter, enables overlay, writes :agent-state :init."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-claude-fixture*"))
+    (let ((vterm-buf (generate-new-buffer " *init-agent-fixture*"))
           (overlay-called nil))
       (unwind-protect
-          (agent-repl-test--initialize-claude-stubs vterm-buf
+          (agent-repl-test--initialize-agent-stubs vterm-buf
             (cl-letf (((symbol-function 'agent-repl--enable-hide-overlay)
                        (lambda () (setq overlay-called t))))
-              (agent-repl--initialize-claude)
+              (agent-repl--initialize-agent)
               (should (equal (agent-repl--ws-get "test-ws" :prefix-counter) 0))
-              (should (eq (agent-repl--ws-get "test-ws" :claude-state) :init))
+              (should (eq (agent-repl--ws-get "test-ws" :agent-state) :init))
               (should overlay-called)))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
-(ert-deftest agent-repl-test-panels-initialize-claude-build-error-creates-no-buffer ()
+(ert-deftest agent-repl-test-panels-initialize-agent-build-error-creates-no-buffer ()
   "A build-start-cmd abort (e.g. sandbox image not built) happens before any
 buffer is created, so no orphan panel buffer is left behind."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :active-env :bare-metal)
     (let ((created nil))
-      (agent-repl-test--initialize-claude-stubs nil
+      (agent-repl-test--initialize-agent-stubs nil
         (cl-letf (((symbol-function 'agent-repl--build-start-cmd)
                    (lambda (_ws) (user-error "Sandbox image not built")))
                   ((symbol-function 'agent-repl--create-buffer)
                    (lambda (_ws &optional _s) (setq created t) nil)))
-          (should-error (agent-repl--initialize-claude) :type 'user-error)
+          (should-error (agent-repl--initialize-agent) :type 'user-error)
           (should-not created)
           (should-not (agent-repl--ws-get "test-ws" :vterm-buffer)))))))
 
-(ert-deftest agent-repl-test-panels-initialize-claude-launch-error-kills-orphan-buffer ()
+(ert-deftest agent-repl-test-panels-initialize-agent-launch-error-kills-orphan-buffer ()
   "A failure after the buffer is created kills the orphan buffer and clears
 :vterm-buffer, so a failed start cannot leave a zombie workspace behind."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-claude-orphan*")))
+    (let ((vterm-buf (generate-new-buffer " *init-agent-orphan*")))
       (unwind-protect
-          (agent-repl-test--initialize-claude-stubs vterm-buf
+          (agent-repl-test--initialize-agent-stubs vterm-buf
             (cl-letf (((symbol-function 'vterm-mode)
                        (lambda () (error "boom during launch"))))
-              (should-error (agent-repl--initialize-claude))
+              (should-error (agent-repl--initialize-agent))
               (should-not (buffer-live-p vterm-buf))
               (should-not (agent-repl--ws-get "test-ws" :vterm-buffer))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
-(ert-deftest agent-repl-test-panels-initialize-claude-sends-cmd-and-return ()
-  "initialize-claude sends the startup cmd string and a return to the vterm buffer."
+(ert-deftest agent-repl-test-panels-initialize-agent-sends-cmd-and-return ()
+  "initialize-agent sends the startup cmd string and a return to the vterm buffer."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-claude-send*"))
+    (let ((vterm-buf (generate-new-buffer " *init-agent-send*"))
           (sent-string nil)
           (return-sent nil))
       (unwind-protect
-          (agent-repl-test--initialize-claude-stubs vterm-buf
+          (agent-repl-test--initialize-agent-stubs vterm-buf
             (cl-letf (((symbol-function 'vterm-send-string)
                        (lambda (s) (setq sent-string s)))
                       ((symbol-function 'vterm-send-return)
                        (lambda () (setq return-sent t))))
-              (agent-repl--initialize-claude)
+              (agent-repl--initialize-agent)
               (should (string-match-p "claude" sent-string))
               (should return-sent)))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
-(ert-deftest agent-repl-test-panels-initialize-claude-schedules-ready-timer ()
-  "initialize-claude schedules the readiness timer for the workspace."
+(ert-deftest agent-repl-test-panels-initialize-agent-schedules-ready-timer ()
+  "initialize-agent schedules the readiness timer for the workspace."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-claude-timer*"))
+    (let ((vterm-buf (generate-new-buffer " *init-agent-timer*"))
           (timer-ws nil))
       (unwind-protect
-          (agent-repl-test--initialize-claude-stubs vterm-buf
+          (agent-repl-test--initialize-agent-stubs vterm-buf
             (cl-letf (((symbol-function 'agent-repl--schedule-ready-timer)
                        (lambda (ws) (setq timer-ws ws))))
-              (agent-repl--initialize-claude)
+              (agent-repl--initialize-agent)
               (should (equal timer-ws "test-ws"))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
-(ert-deftest agent-repl-test-panels-initialize-claude-sets-ready-nil ()
-  "initialize-claude sets buffer-local agent-repl--ready to nil in the vterm buffer."
+(ert-deftest agent-repl-test-panels-initialize-agent-sets-ready-nil ()
+  "initialize-agent sets buffer-local agent-repl--ready to nil in the vterm buffer."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-claude-ready*"))
+    (let ((vterm-buf (generate-new-buffer " *init-agent-ready*"))
           (ready-at-send 'unset))
       (unwind-protect
           (progn
             (with-current-buffer vterm-buf
               (setq-local agent-repl--ready t))
-            (agent-repl-test--initialize-claude-stubs vterm-buf
+            (agent-repl-test--initialize-agent-stubs vterm-buf
               (cl-letf (((symbol-function 'vterm-send-string)
                          (lambda (_s) (setq ready-at-send agent-repl--ready))))
-                (agent-repl--initialize-claude)
+                (agent-repl--initialize-agent)
                 (should-not ready-at-send))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
-(ert-deftest agent-repl-test-panels-initialize-claude-sets-workspace-mode-line ()
-  "initialize-claude sets mode-line-format via workspace-mode-line, passing ws."
+(ert-deftest agent-repl-test-panels-initialize-agent-sets-workspace-mode-line ()
+  "initialize-agent sets mode-line-format via workspace-mode-line, passing ws."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :active-env :sandbox)
-    (let ((vterm-buf (generate-new-buffer " *init-claude-ml*"))
+    (let ((vterm-buf (generate-new-buffer " *init-agent-ml*"))
           (mode-line-ws :unset))
       (unwind-protect
-          (agent-repl-test--initialize-claude-stubs vterm-buf
+          (agent-repl-test--initialize-agent-stubs vterm-buf
             (cl-letf (((symbol-function 'agent-repl--build-start-cmd)
                        (lambda (_ws) (list :cmd "claude-sandbox"
                                            :sandboxed-p t
@@ -3041,20 +3041,20 @@ buffer is created, so no orphan panel buffer is left behind."
                                            :inst (make-agent-repl-instantiation))))
                       ((symbol-function 'agent-repl--workspace-mode-line)
                        (lambda (ws) (setq mode-line-ws ws) '("WS-ML"))))
-              (agent-repl--initialize-claude)
+              (agent-repl--initialize-agent)
               (should (equal mode-line-ws "test-ws"))
               (with-current-buffer vterm-buf
                 (should (equal mode-line-format '("WS-ML"))))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
-(ert-deftest agent-repl-test-panels-initialize-claude-clears-fork-session-id ()
-  "initialize-claude clears :fork-session-id after building the cmd."
+(ert-deftest agent-repl-test-panels-initialize-agent-clears-fork-session-id ()
+  "initialize-agent clears :fork-session-id after building the cmd."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :active-env :bare-metal)
     (agent-repl--ws-put "test-ws" :fork-session-id "fork-abc")
-    (let ((vterm-buf (generate-new-buffer " *init-claude-fork*")))
+    (let ((vterm-buf (generate-new-buffer " *init-agent-fork*")))
       (unwind-protect
-          (agent-repl-test--initialize-claude-stubs vterm-buf
+          (agent-repl-test--initialize-agent-stubs vterm-buf
             (cl-letf (((symbol-function 'agent-repl--build-start-cmd)
                        (lambda (_ws) (list :cmd "claude"
                                            :sandboxed-p nil
@@ -3064,70 +3064,70 @@ buffer is created, so no orphan panel buffer is left behind."
                                            :worktree-p nil
                                            :active-env :bare-metal
                                            :inst (make-agent-repl-instantiation)))))
-              (agent-repl--initialize-claude)
+              (agent-repl--initialize-agent)
               (should-not (agent-repl--ws-get "test-ws" :fork-session-id))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
-(ert-deftest agent-repl-test-panels-initialize-claude-always-calls-ws-env-init ()
-  "initialize-claude always calls initialize-ws-env, regardless of prior
+(ert-deftest agent-repl-test-panels-initialize-agent-always-calls-ws-env-init ()
+  "initialize-agent always calls initialize-ws-env, regardless of prior
 `:active-env'.  initialize-ws-env is idempotent, so unconditional call is
 safe and ensures the state file is re-read on every session start."
   (agent-repl-test--with-clean-state
-    (let ((vterm-buf (generate-new-buffer " *init-claude-ws-env*"))
+    (let ((vterm-buf (generate-new-buffer " *init-agent-ws-env*"))
           (init-call-count 0))
       (unwind-protect
-          (agent-repl-test--initialize-claude-stubs vterm-buf
+          (agent-repl-test--initialize-agent-stubs vterm-buf
             (cl-letf (((symbol-function 'agent-repl--initialize-ws-env)
                        (lambda (_ws &rest _) (cl-incf init-call-count))))
-              (agent-repl--initialize-claude)
+              (agent-repl--initialize-agent)
               (should (= init-call-count 1))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
-(ert-deftest agent-repl-test-panels-initialize-claude-passes-hints-to-ws-env-init ()
-  "initialize-claude forwards project-dir-hint and active-env-hint to
+(ert-deftest agent-repl-test-panels-initialize-agent-passes-hints-to-ws-env-init ()
+  "initialize-agent forwards project-dir-hint and active-env-hint to
 initialize-ws-env.  Models the worktree-creation / new-workspace paths."
   (agent-repl-test--with-clean-state
-    (let ((vterm-buf (generate-new-buffer " *init-claude-hints*"))
+    (let ((vterm-buf (generate-new-buffer " *init-agent-hints*"))
           (got-hint nil)
           (got-env nil))
       (unwind-protect
-          (agent-repl-test--initialize-claude-stubs vterm-buf
+          (agent-repl-test--initialize-agent-stubs vterm-buf
             (cl-letf (((symbol-function 'agent-repl--initialize-ws-env)
                        (lambda (_ws &optional dir env)
                          (setq got-hint dir)
                          (setq got-env env))))
-              (agent-repl--initialize-claude "test-ws" "/tmp/worktree" :sandbox)
+              (agent-repl--initialize-agent "test-ws" "/tmp/worktree" :sandbox)
               (should (equal got-hint "/tmp/worktree"))
               (should (eq got-env :sandbox))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
-(ert-deftest agent-repl-test-panels-initialize-claude-persists-state-on-success ()
-  "initialize-claude calls state-save at the end of a successful start."
+(ert-deftest agent-repl-test-panels-initialize-agent-persists-state-on-success ()
+  "initialize-agent calls state-save at the end of a successful start."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-claude-state-save*"))
+    (let ((vterm-buf (generate-new-buffer " *init-agent-state-save*"))
           (saved-ws nil))
       (unwind-protect
-          (agent-repl-test--initialize-claude-stubs vterm-buf
+          (agent-repl-test--initialize-agent-stubs vterm-buf
             (cl-letf (((symbol-function 'agent-repl--state-save)
                        (lambda (ws) (setq saved-ws ws))))
-              (agent-repl--initialize-claude)
+              (agent-repl--initialize-agent)
               (should (equal saved-ws "test-ws"))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
-(ert-deftest agent-repl-test-panels-initialize-claude-uses-explicit-ws-arg ()
-  "initialize-claude uses the explicit WS argument rather than +workspace-current-name."
+(ert-deftest agent-repl-test-panels-initialize-agent-uses-explicit-ws-arg ()
+  "initialize-agent uses the explicit WS argument rather than +workspace-current-name."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "explicit-arg-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-claude-explicit*"))
+    (let ((vterm-buf (generate-new-buffer " *init-agent-explicit*"))
           (running-ws nil))
       (unwind-protect
-          (agent-repl-test--initialize-claude-stubs vterm-buf
+          (agent-repl-test--initialize-agent-stubs vterm-buf
             (cl-letf (((symbol-function '+workspace-current-name)
                        (lambda () "persp-current-ws"))
-                      ((symbol-function 'agent-repl--claude-running-p)
+                      ((symbol-function 'agent-repl--agent-running-p)
                        (lambda (ws) (setq running-ws ws) nil)))
-              (agent-repl--initialize-claude "explicit-arg-ws")
+              (agent-repl--initialize-agent "explicit-arg-ws")
               (should (equal running-ws "explicit-arg-ws"))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
@@ -3319,7 +3319,7 @@ re-entry."
   "refresh-vterm-window calls `--snap-vterm-window-to-cursor' on the
 vterm window after the cursor reset + redraw, replacing the old bare
 `set-window-point' tail."
-  (let ((buf (get-buffer-create "*claude-panel-snap-test*"))
+  (let ((buf (get-buffer-create "*agent-panel-snap-test*"))
         (new-win nil)
         (snap-arg nil))
     (unwind-protect
@@ -3327,7 +3327,7 @@ vterm window after the cursor reset + redraw, replacing the old bare
           (setq new-win (split-window))
           (set-window-buffer new-win buf)
           (with-current-buffer buf (setq major-mode 'vterm-mode))
-          (cl-letf (((symbol-function 'agent-repl--claude-buffer-p) (lambda (_b) t))
+          (cl-letf (((symbol-function 'agent-repl--agent-buffer-p) (lambda (_b) t))
                     ((symbol-function 'agent-repl--vterm-redraw) #'ignore)
                     ((symbol-function 'vterm-reset-cursor-point) #'ignore)
                     ((symbol-function 'agent-repl--snap-vterm-window-to-cursor)
@@ -3338,17 +3338,17 @@ vterm window after the cursor reset + redraw, replacing the old bare
         (ignore-errors (delete-window new-win)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-(ert-deftest agent-repl-test-panels-refresh-vterm-window-skips-non-claude-buffer ()
+(ert-deftest agent-repl-test-panels-refresh-vterm-window-skips-non-agent-buffer ()
   "refresh-vterm-window is a no-op when the window's buffer is not a
 Claude vterm buffer — the snap helper must not run."
-  (let ((buf (get-buffer-create "*not-claude-refresh*"))
+  (let ((buf (get-buffer-create "*not-agent-refresh*"))
         (new-win nil)
         (snap-called nil))
     (unwind-protect
         (progn
           (setq new-win (split-window))
           (set-window-buffer new-win buf)
-          (cl-letf (((symbol-function 'agent-repl--claude-buffer-p) (lambda (_b) nil))
+          (cl-letf (((symbol-function 'agent-repl--agent-buffer-p) (lambda (_b) nil))
                     ((symbol-function 'agent-repl--snap-vterm-window-to-cursor)
                      (lambda (_win) (setq snap-called t))))
             (agent-repl--refresh-vterm-window new-win))
@@ -3380,13 +3380,13 @@ buffer is not in `vterm-mode' — the cursor-reset is vterm-specific."
 ;;;; ---- Tests: agent-repl-restart ----
 
 (ert-deftest agent-repl-test-panels-restart-kills-then-initializes ()
-  "agent-repl-restart calls agent-repl-kill then agent-repl--initialize-claude in order."
+  "agent-repl-restart calls agent-repl-kill then agent-repl--initialize-agent in order."
   (agent-repl-test--with-clean-state
     (let ((order nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl-kill)
                  (lambda () (push 'kill order)))
-                ((symbol-function 'agent-repl--initialize-claude)
+                ((symbol-function 'agent-repl--initialize-agent)
                  (lambda (_ws) (push 'init order))))
         (agent-repl-restart)
         (should (equal (nreverse order) '(kill init)))))))
@@ -3400,7 +3400,7 @@ buffer is not in `vterm-mode' — the cursor-reset is vterm-specific."
       (should-error (agent-repl-kill)))))
 
 (ert-deftest agent-repl-test-panels-kill-clears-state-axes ()
-  "agent-repl-kill resets :claude-state and :repl-state."
+  "agent-repl-kill resets :agent-state and :repl-state."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :thinking)
     (agent-repl--ws-set-repl-state "ws1" :inactive)
@@ -3408,50 +3408,50 @@ buffer is not in `vterm-mode' — the cursor-reset is vterm-specific."
               ((symbol-function 'agent-repl--kill-session) #'ignore)
               ((symbol-function 'force-mode-line-update) #'ignore))
       (agent-repl-kill)
-      (should-not (agent-repl--ws-get "ws1" :claude-state))
+      (should-not (agent-repl--ws-get "ws1" :agent-state))
       (should-not (agent-repl--ws-get "ws1" :repl-state)))))
 
-;;;; ---- Tests: redirect-from-claude-before-save with Claude window ----
+;;;; ---- Tests: redirect-from-agent-before-save with Claude window ----
 
 (ert-deftest agent-repl-test-panels-redirect-claude-to-other-window ()
-  "redirect-from-claude-before-save selects a non-Claude window when current is Claude."
+  "redirect-from-agent-before-save selects a non-agent window when current is Claude."
   (agent-repl-test--with-clean-state
-    (let ((claude-buf (get-buffer-create "*claude-panel-abcd1234*"))
+    (let ((agent-buf (get-buffer-create "*agent-panel-abcd1234*"))
           (regular-buf (get-buffer-create "*regular-buf*"))
           (new-win nil))
       (unwind-protect
           (progn
-            (switch-to-buffer claude-buf)
+            (switch-to-buffer agent-buf)
             (setq new-win (split-window))
             (set-window-buffer new-win regular-buf)
-            (agent-repl--redirect-from-claude-before-save)
+            (agent-repl--redirect-from-agent-before-save)
             ;; Should have redirected to the window showing regular-buf
             (should (eq (window-buffer (selected-window)) regular-buf)))
         (when (and new-win (window-live-p new-win))
           (ignore-errors (delete-window new-win)))
         (switch-to-buffer "*scratch*")
-        (when (buffer-live-p claude-buf) (kill-buffer claude-buf))
+        (when (buffer-live-p agent-buf) (kill-buffer agent-buf))
         (when (buffer-live-p regular-buf) (kill-buffer regular-buf))))))
 
-;;;; ---- Tests: redirect-from-claude-before-save fullscreen case ----
+;;;; ---- Tests: redirect-from-agent-before-save fullscreen case ----
 
 (ert-deftest agent-repl-test-panels-redirect-claude-only-window ()
-  "redirect-from-claude-before-save skips redirect when Claude is the only window."
+  "redirect-from-agent-before-save skips redirect when Claude is the only window."
   (agent-repl-test--with-clean-state
-    (let ((claude-buf (get-buffer-create "*claude-panel-abcd1234*")))
+    (let ((agent-buf (get-buffer-create "*agent-panel-abcd1234*")))
       (unwind-protect
           (progn
             (delete-other-windows)
-            (switch-to-buffer claude-buf)
+            (switch-to-buffer agent-buf)
             ;; Only one window shows Claude -- cl-find-if returns nil since
             ;; the only window is also a Claude window
-            (agent-repl--redirect-from-claude-before-save)
+            (agent-repl--redirect-from-agent-before-save)
             ;; Should still be on the same Claude buffer (no redirect target)
-            (should (eq (window-buffer (selected-window)) claude-buf)))
+            (should (eq (window-buffer (selected-window)) agent-buf)))
         (switch-to-buffer "*scratch*")
-        (when (buffer-live-p claude-buf) (kill-buffer claude-buf))))))
+        (when (buffer-live-p agent-buf) (kill-buffer agent-buf))))))
 
-;;;; ---- Tests: redirect-from-claude-before-save side/dedicated windows ----
+;;;; ---- Tests: redirect-from-agent-before-save side/dedicated windows ----
 
 (ert-deftest agent-repl-test-panels-redirect-from-side-window ()
   "Redirect fires when selected window is a side window (e.g. the drawer).
@@ -3472,7 +3472,7 @@ restored as the selected window, causing `+workspace/kill's fallback
                   (display-buffer-in-side-window side-buf '((side . right))))
             (should (window-live-p side-win))
             (select-window side-win)
-            (agent-repl--redirect-from-claude-before-save)
+            (agent-repl--redirect-from-agent-before-save)
             (should (eq (selected-window) main-win))
             (should (eq (window-buffer (selected-window)) regular-buf)))
         (when (and side-win (window-live-p side-win))
@@ -3499,7 +3499,7 @@ window after a nuke."
             (set-window-buffer extra-win dedicated-buf)
             (set-window-dedicated-p extra-win t)
             (select-window extra-win)
-            (agent-repl--redirect-from-claude-before-save)
+            (agent-repl--redirect-from-agent-before-save)
             (should (eq (selected-window) main-win))
             (should (eq (window-buffer (selected-window)) regular-buf)))
         (when (and extra-win (window-live-p extra-win))
@@ -3512,28 +3512,28 @@ window after a nuke."
 (ert-deftest agent-repl-test-panels-redirect-skips-side-window-as-target ()
   "Redirect target must skip side windows even when selected is a Claude panel.
 
-Regression: the previous predicate `non-claude-panel-window-p' returned
-t for the drawer (a non-Claude side window), so `cl-find-if' could
+Regression: the previous predicate `non-agent-panel-window-p' returned
+t for the drawer (a non-agent side window), so `cl-find-if' could
 pick the drawer as the redirect destination — defeating the purpose
 of the redirect."
   (agent-repl-test--with-clean-state
     (delete-other-windows)
-    (let* ((claude-buf (get-buffer-create "*claude-panel-abcd1234*"))
+    (let* ((agent-buf (get-buffer-create "*agent-panel-abcd1234*"))
            (regular-buf (get-buffer-create "*regular-buf*"))
            (side-buf    (get-buffer-create "*side-buf*"))
-           (claude-win (selected-window))
+           (agent-win (selected-window))
            (regular-win nil)
            (side-win nil))
       (unwind-protect
           (progn
-            (set-window-buffer claude-win claude-buf)
-            (setq regular-win (split-window claude-win nil 'below))
+            (set-window-buffer agent-win agent-buf)
+            (setq regular-win (split-window agent-win nil 'below))
             (set-window-buffer regular-win regular-buf)
             (setq side-win
                   (display-buffer-in-side-window side-buf '((side . right))))
             (should (window-live-p side-win))
-            (select-window claude-win)
-            (agent-repl--redirect-from-claude-before-save)
+            (select-window agent-win)
+            (agent-repl--redirect-from-agent-before-save)
             (should (eq (selected-window) regular-win))
             (should (eq (window-buffer (selected-window)) regular-buf)))
         (when (and side-win (window-live-p side-win))
@@ -3541,7 +3541,7 @@ of the redirect."
         (when (and regular-win (window-live-p regular-win))
           (ignore-errors (delete-window regular-win)))
         (set-window-buffer (selected-window) "*scratch*")
-        (when (buffer-live-p claude-buf) (kill-buffer claude-buf))
+        (when (buffer-live-p agent-buf) (kill-buffer agent-buf))
         (when (buffer-live-p regular-buf) (kill-buffer regular-buf))
         (when (buffer-live-p side-buf) (kill-buffer side-buf))))))
 
@@ -3549,22 +3549,22 @@ of the redirect."
   "Redirect target must skip dedicated windows."
   (agent-repl-test--with-clean-state
     (delete-other-windows)
-    (let* ((claude-buf (get-buffer-create "*claude-panel-abcd1234*"))
+    (let* ((agent-buf (get-buffer-create "*agent-panel-abcd1234*"))
            (regular-buf (get-buffer-create "*regular-buf*"))
            (ded-buf (get-buffer-create "*ded-buf*"))
-           (claude-win (selected-window))
+           (agent-win (selected-window))
            (regular-win nil)
            (ded-win nil))
       (unwind-protect
           (progn
-            (set-window-buffer claude-win claude-buf)
-            (setq ded-win (split-window claude-win nil 'right))
+            (set-window-buffer agent-win agent-buf)
+            (setq ded-win (split-window agent-win nil 'right))
             (set-window-buffer ded-win ded-buf)
             (set-window-dedicated-p ded-win t)
-            (setq regular-win (split-window claude-win nil 'below))
+            (setq regular-win (split-window agent-win nil 'below))
             (set-window-buffer regular-win regular-buf)
-            (select-window claude-win)
-            (agent-repl--redirect-from-claude-before-save)
+            (select-window agent-win)
+            (agent-repl--redirect-from-agent-before-save)
             (should (eq (selected-window) regular-win))
             (should (eq (window-buffer (selected-window)) regular-buf)))
         (when (and ded-win (window-live-p ded-win))
@@ -3573,7 +3573,7 @@ of the redirect."
         (when (and regular-win (window-live-p regular-win))
           (ignore-errors (delete-window regular-win)))
         (set-window-buffer (selected-window) "*scratch*")
-        (when (buffer-live-p claude-buf) (kill-buffer claude-buf))
+        (when (buffer-live-p agent-buf) (kill-buffer agent-buf))
         (when (buffer-live-p regular-buf) (kill-buffer regular-buf))
         (when (buffer-live-p ded-buf) (kill-buffer ded-buf))))))
 
@@ -3584,16 +3584,16 @@ of the redirect."
   (agent-repl-test--with-clean-state
     (should (agent-repl--save-target-window-p (selected-window)))))
 
-(ert-deftest agent-repl-test-panels-save-target-window-p-claude-panel ()
+(ert-deftest agent-repl-test-panels-save-target-window-p-agent-panel ()
   "save-target-window-p returns nil for a window showing a Claude panel."
   (agent-repl-test--with-clean-state
-    (let ((claude-buf (get-buffer-create "*claude-panel-abcd1234*")))
+    (let ((agent-buf (get-buffer-create "*agent-panel-abcd1234*")))
       (unwind-protect
           (progn
-            (set-window-buffer (selected-window) claude-buf)
+            (set-window-buffer (selected-window) agent-buf)
             (should-not (agent-repl--save-target-window-p (selected-window))))
         (set-window-buffer (selected-window) "*scratch*")
-        (when (buffer-live-p claude-buf) (kill-buffer claude-buf))))))
+        (when (buffer-live-p agent-buf) (kill-buffer agent-buf))))))
 
 (ert-deftest agent-repl-test-panels-save-target-window-p-side-window ()
   "save-target-window-p returns nil for a side window."
@@ -3625,16 +3625,16 @@ of the redirect."
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-claude-branch-does-not-maximize ()
   "fullscreen-and-focus in a Claude buffer only focuses input, never maximizes.
 The Claude panels already fill the frame (fullscreen is the sole
-display format), so the claude branch must NOT touch the non-Claude
+display format), so the claude branch must NOT touch the non-agent
 maximize state (`agent-repl--window-fullscreen-config') nor sweep
 windows."
   (agent-repl-test--with-clean-state
     (let ((sweep-called nil)
           (agent-repl--window-fullscreen-config nil)
-          (claude-buf (get-buffer-create "*claude-panel-abcd1234*")))
+          (agent-buf (get-buffer-create "*agent-panel-abcd1234*")))
       (unwind-protect
           (progn
-            (switch-to-buffer claude-buf)
+            (switch-to-buffer agent-buf)
             (cl-letf (((symbol-function 'agent-repl-window--delete-where)
                        (lambda (&rest _) (setq sweep-called t) nil))
                       ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
@@ -3642,18 +3642,18 @@ windows."
               (should-not sweep-called)
               (should-not agent-repl--window-fullscreen-config)))
         (switch-to-buffer "*scratch*")
-        (when (buffer-live-p claude-buf) (kill-buffer claude-buf))))))
+        (when (buffer-live-p agent-buf) (kill-buffer agent-buf))))))
 
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-selects-input ()
   "fullscreen-and-focus selects the input window after toggling when in a Claude buffer."
   (agent-repl-test--with-clean-state
-    (let ((input-buf (get-buffer-create "*claude-panel-input-abcd1234*"))
-          (claude-buf (get-buffer-create "*claude-panel-abcd1234*"))
+    (let ((input-buf (get-buffer-create "*agent-panel-input-abcd1234*"))
+          (agent-buf (get-buffer-create "*agent-panel-abcd1234*"))
           (new-win nil))
       (unwind-protect
           (progn
             (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (switch-to-buffer claude-buf)
+            (switch-to-buffer agent-buf)
             (setq new-win (split-window))
             (set-window-buffer new-win input-buf)
             (cl-letf (
@@ -3664,19 +3664,19 @@ windows."
           (ignore-errors (delete-window new-win)))
         (switch-to-buffer "*scratch*")
         (when (buffer-live-p input-buf) (kill-buffer input-buf))
-        (when (buffer-live-p claude-buf) (kill-buffer claude-buf))))))
+        (when (buffer-live-p agent-buf) (kill-buffer agent-buf))))))
 
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-no-insert-state ()
   "fullscreen-and-focus does NOT enter evil insert state after focusing input."
   (agent-repl-test--with-clean-state
-    (let ((input-buf (get-buffer-create "*claude-panel-input-abcd1234*"))
-          (claude-buf (get-buffer-create "*claude-panel-abcd1234*"))
+    (let ((input-buf (get-buffer-create "*agent-panel-input-abcd1234*"))
+          (agent-buf (get-buffer-create "*agent-panel-abcd1234*"))
           (new-win nil)
           (insert-called nil))
       (unwind-protect
           (progn
             (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (switch-to-buffer claude-buf)
+            (switch-to-buffer agent-buf)
             (setq new-win (split-window))
             (set-window-buffer new-win input-buf)
             (cl-letf (
@@ -3689,17 +3689,17 @@ windows."
           (ignore-errors (delete-window new-win)))
         (switch-to-buffer "*scratch*")
         (when (buffer-live-p input-buf) (kill-buffer input-buf))
-        (when (buffer-live-p claude-buf) (kill-buffer claude-buf))))))
+        (when (buffer-live-p agent-buf) (kill-buffer agent-buf))))))
 
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-no-input-window ()
   "fullscreen-and-focus does not error when in a Claude buffer but input has no window."
   (agent-repl-test--with-clean-state
     (let ((input-buf (get-buffer-create "*test-fs-no-win*"))
-          (claude-buf (get-buffer-create "*claude-panel-abcd1234*")))
+          (agent-buf (get-buffer-create "*agent-panel-abcd1234*")))
       (unwind-protect
           (progn
             (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (switch-to-buffer claude-buf)
+            (switch-to-buffer agent-buf)
             (cl-letf (
                       ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
               ;; Input buffer exists but is not displayed — should not error
@@ -3707,23 +3707,23 @@ windows."
               (should-not (eq (window-buffer (selected-window)) input-buf))))
         (switch-to-buffer "*scratch*")
         (when (buffer-live-p input-buf) (kill-buffer input-buf))
-        (when (buffer-live-p claude-buf) (kill-buffer claude-buf))))))
+        (when (buffer-live-p agent-buf) (kill-buffer agent-buf))))))
 
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-no-input-buffer ()
   "fullscreen-and-focus does not error when in a Claude buffer but no input buffer is set."
   (agent-repl-test--with-clean-state
-    (let ((claude-buf (get-buffer-create "*claude-panel-abcd1234*")))
+    (let ((agent-buf (get-buffer-create "*agent-panel-abcd1234*")))
       (unwind-protect
           (progn
-            (switch-to-buffer claude-buf)
+            (switch-to-buffer agent-buf)
             (cl-letf (
                       ((symbol-function '+workspace-current-name) (lambda () "test-ws")))
               ;; No input buffer at all — should not error
               (agent-repl-fullscreen-and-focus)))
         (switch-to-buffer "*scratch*")
-        (when (buffer-live-p claude-buf) (kill-buffer claude-buf))))))
+        (when (buffer-live-p agent-buf) (kill-buffer agent-buf))))))
 
-(ert-deftest agent-repl-test-panels-fullscreen-and-focus-non-claude-maximizes ()
+(ert-deftest agent-repl-test-panels-fullscreen-and-focus-non-agent-maximizes ()
   "fullscreen-and-focus saves config and sweeps other windows when not in a Claude buffer."
   (agent-repl-test--with-clean-state
     (let ((sweep-called nil)
@@ -3738,11 +3738,11 @@ windows."
         (setq agent-repl--window-fullscreen-config nil)
         (when (get-buffer "*other*") (kill-buffer "*other*"))))))
 
-(ert-deftest agent-repl-test-panels-fullscreen-and-focus-non-claude-preserves-drawer ()
-  "fullscreen-and-focus does NOT delete side windows (e.g. the drawer) when maximizing a non-Claude buffer."
+(ert-deftest agent-repl-test-panels-fullscreen-and-focus-non-agent-preserves-drawer ()
+  "fullscreen-and-focus does NOT delete side windows (e.g. the drawer) when maximizing a non-agent buffer."
   (agent-repl-test--with-clean-state
     (let* ((other-buf (get-buffer-create "*other-fs*"))
-           (drawer-buf (get-buffer-create "*claude-drawer-fs*"))
+           (drawer-buf (get-buffer-create "*agent-drawer-fs*"))
            (agent-repl--window-fullscreen-config nil)
            (predicate-captured nil)
            (skip-captured nil))
@@ -3768,12 +3768,12 @@ windows."
         (when (buffer-live-p drawer-buf) (kill-buffer drawer-buf))
         (when (buffer-live-p other-buf) (kill-buffer other-buf))))))
 
-(ert-deftest agent-repl-test-panels-fullscreen-and-focus-non-claude-real-drawer-survives ()
-  "End-to-end: maximizing a non-Claude buffer leaves a real side window alive."
+(ert-deftest agent-repl-test-panels-fullscreen-and-focus-non-agent-real-drawer-survives ()
+  "End-to-end: maximizing a non-agent buffer leaves a real side window alive."
   (agent-repl-test--with-clean-state
     (let* ((other-buf (get-buffer-create "*other-fs-real*"))
            (extra-buf (get-buffer-create "*extra-fs-real*"))
-           (drawer-buf (get-buffer-create "*claude-drawer-fs-real*"))
+           (drawer-buf (get-buffer-create "*agent-drawer-fs-real*"))
            (agent-repl--window-fullscreen-config nil))
       (switch-to-buffer other-buf)
       (unwind-protect
@@ -3792,7 +3792,7 @@ windows."
         (dolist (buf (list drawer-buf extra-buf other-buf))
           (when (buffer-live-p buf) (kill-buffer buf)))))))
 
-(ert-deftest agent-repl-test-panels-fullscreen-and-focus-non-claude-restores ()
+(ert-deftest agent-repl-test-panels-fullscreen-and-focus-non-agent-restores ()
   "fullscreen-and-focus restores saved config on second press when not in a Claude buffer."
   (agent-repl-test--with-clean-state
     (let* ((restore-called nil)
@@ -3918,9 +3918,9 @@ sacrificed because the drawer was the `keep' anchor."
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-from-drawer-routes-to-claude-branch ()
   "When the drawer is selected but the main window contains a Claude
 panel buffer, the side-window redirect lands on the Claude buffer and
-the function takes the Claude branch (focus input, no non-Claude maximize)."
+the function takes the Claude branch (focus input, no non-agent maximize)."
   (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*claude-panel-fs-redir*"))
+    (let ((vterm-buf (get-buffer-create "*agent-panel-fs-redir*"))
           (drawer-buf (get-buffer-create "*fs-redir-drawer*"))
           (agent-repl--window-fullscreen-config nil))
       (unwind-protect
@@ -3935,7 +3935,7 @@ the function takes the Claude branch (focus input, no non-Claude maximize)."
                          (lambda () "test-ws")))
                 (agent-repl-fullscreen-and-focus))
               ;; The redirect moved point onto the Claude panel main window,
-              ;; so the Claude branch fired — the non-Claude maximize branch
+              ;; so the Claude branch fired — the non-agent maximize branch
               ;; (which would save a window config) never ran.
               (should-not agent-repl--window-fullscreen-config)
               (should (window-live-p vterm-win))))
@@ -4066,7 +4066,7 @@ otherwise signal `Cannot split side window' and leave panels half-shown."
 (ert-deftest agent-repl-test-panels-stale-panel-windows-returns-foreign-panels ()
   "stale-panel-windows returns windows showing panels from a different workspace."
   (agent-repl-test--with-clean-state
-    (let ((foreign-buf (get-buffer-create "*claude-panel-other-ws*")))
+    (let ((foreign-buf (get-buffer-create "*agent-panel-other-ws*")))
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                     ((symbol-function 'window-list) (lambda (&rest _) (list (selected-window))))
@@ -4079,7 +4079,7 @@ otherwise signal `Cannot split side window' and leave panels half-shown."
 (ert-deftest agent-repl-test-panels-stale-panel-windows-nil-for-own-panels ()
   "stale-panel-windows returns nil when panels belong to the current workspace."
   (agent-repl-test--with-clean-state
-    (let ((own-buf (get-buffer-create "*claude-panel-my-ws*")))
+    (let ((own-buf (get-buffer-create "*agent-panel-my-ws*")))
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                     ((symbol-function 'window-list) (lambda (&rest _) (list (selected-window))))
@@ -4104,7 +4104,7 @@ otherwise signal `Cannot split side window' and leave panels half-shown."
 (ert-deftest agent-repl-test-panels-stale-panel-windows-includes-input-buffers ()
   "stale-panel-windows detects foreign input panel buffers too."
   (agent-repl-test--with-clean-state
-    (let ((foreign-input (get-buffer-create "*claude-panel-input-other-ws*")))
+    (let ((foreign-input (get-buffer-create "*agent-panel-input-other-ws*")))
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                     ((symbol-function 'window-list) (lambda (&rest _) (list (selected-window))))
@@ -4138,7 +4138,7 @@ the fallback buffer instead of erroring, then still reclaims the frame."
     (let ((deleted nil)
           (swapped nil)
           (reclaimed nil)
-          (fallback (get-buffer-create "*claude-test-fallback*")))
+          (fallback (get-buffer-create "*agent-test-fallback*")))
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                     ((symbol-function 'agent-repl--stale-panel-windows)
@@ -4170,8 +4170,8 @@ the fallback buffer instead of erroring, then still reclaims the frame."
   (agent-repl-test--with-clean-state
     (let ((show-called nil))
       (agent-repl--ws-put "my-ws" :panels-were-visible t)
-      (let ((vterm-buf (get-buffer-create "*claude-panel-my-ws*"))
-            (input-buf (get-buffer-create "*claude-panel-input-my-ws*")))
+      (let ((vterm-buf (get-buffer-create "*agent-panel-my-ws*"))
+            (input-buf (get-buffer-create "*agent-panel-input-my-ws*")))
         (unwind-protect
             (progn
               (agent-repl--ws-put "my-ws" :vterm-buffer vterm-buf)
@@ -4236,8 +4236,8 @@ rebuild) when the output window survived but the input window was dropped."
     (let ((show-panels-called nil)
           (add-input-called nil))
       (agent-repl--ws-put "my-ws" :panels-were-visible t)
-      (let ((vterm-buf (get-buffer-create "*claude-panel-my-ws*"))
-            (input-buf (get-buffer-create "*claude-panel-input-my-ws*")))
+      (let ((vterm-buf (get-buffer-create "*agent-panel-my-ws*"))
+            (input-buf (get-buffer-create "*agent-panel-input-my-ws*")))
         (unwind-protect
             (progn
               (agent-repl--ws-put "my-ws" :vterm-buffer vterm-buf)
@@ -4279,7 +4279,7 @@ was never recorded."
 (ert-deftest agent-repl-test-panels-stale-window-buffers-unique-live ()
   "stale-window-buffers returns each live window's buffer once."
   (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*claude-panel-other-ws*")))
+    (let ((buf (get-buffer-create "*agent-panel-other-ws*")))
       (unwind-protect
           (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
                     ((symbol-function 'window-buffer) (lambda (_w) buf)))
@@ -4290,7 +4290,7 @@ was never recorded."
 (ert-deftest agent-repl-test-panels-stale-window-buffers-drops-dead ()
   "stale-window-buffers drops dead windows."
   (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*claude-panel-other-ws*")))
+    (let ((buf (get-buffer-create "*agent-panel-other-ws*")))
       (unwind-protect
           (cl-letf (((symbol-function 'window-live-p) (lambda (w) (eq w 'live)))
                     ((symbol-function 'window-buffer) (lambda (_w) buf)))
@@ -4303,7 +4303,7 @@ was never recorded."
 (ert-deftest agent-repl-test-panels-detach-foreign-removes-each ()
   "detach-foreign-panel-buffers removes each live buffer from the persp."
   (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*claude-panel-other-ws*"))
+    (let ((buf (get-buffer-create "*agent-panel-other-ws*"))
           (removed nil))
       (unwind-protect
           (cl-letf (((symbol-function 'agent-repl--ws-remove-buffer)
@@ -4315,7 +4315,7 @@ was never recorded."
 (ert-deftest agent-repl-test-panels-detach-foreign-skips-dead ()
   "detach-foreign-panel-buffers does not remove a dead buffer."
   (agent-repl-test--with-clean-state
-    (let ((dead (get-buffer-create "*claude-panel-dead-ws*"))
+    (let ((dead (get-buffer-create "*agent-panel-dead-ws*"))
           (removed nil))
       (kill-buffer dead)
       (cl-letf (((symbol-function 'agent-repl--ws-remove-buffer)
@@ -4346,7 +4346,7 @@ was never recorded."
   (agent-repl-test--with-clean-state
     (let ((deleted nil)
           (swapped nil)
-          (fallback (get-buffer-create "*claude-test-fallback*")))
+          (fallback (get-buffer-create "*agent-test-fallback*")))
       (unwind-protect
           (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
                     ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
@@ -4365,8 +4365,8 @@ was never recorded."
   "safe-delete-window swaps to the explicitly passed FALLBACK over the default."
   (agent-repl-test--with-clean-state
     (let ((swapped nil)
-          (explicit (get-buffer-create "*claude-test-explicit*"))
-          (default (get-buffer-create "*claude-test-default*")))
+          (explicit (get-buffer-create "*agent-test-explicit*"))
+          (default (get-buffer-create "*agent-test-default*")))
       (unwind-protect
           (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
                     ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
@@ -4423,8 +4423,8 @@ the frame (fullscreen is the sole display format), so reclaim no longer
 needs a separate enter-fullscreen step."
   (agent-repl-test--with-clean-state
     (let ((show-called nil)
-          (vterm (get-buffer-create "*claude-panel-my-ws*"))
-          (input (get-buffer-create "*claude-panel-input-my-ws*")))
+          (vterm (get-buffer-create "*agent-panel-my-ws*"))
+          (input (get-buffer-create "*agent-panel-input-my-ws*")))
       (unwind-protect
           (progn
             (agent-repl--ws-put "my-ws" :vterm-buffer vterm)
@@ -4441,7 +4441,7 @@ needs a separate enter-fullscreen step."
 (ert-deftest agent-repl-test-panels-lone-output-window-returns-sole-output ()
   "lone-output-window returns the sole non-side window showing a Claude output buffer."
   (agent-repl-test--with-clean-state
-    (let ((out (get-buffer-create "*claude-panel-my-ws*")))
+    (let ((out (get-buffer-create "*agent-panel-my-ws*")))
       (unwind-protect
           (cl-letf (((symbol-function 'window-list) (lambda (&rest _) '(w1)))
                     ((symbol-function 'agent-repl-window--side-window-p) (lambda (_w) nil))
@@ -4452,7 +4452,7 @@ needs a separate enter-fullscreen step."
 (ert-deftest agent-repl-test-panels-lone-output-window-nil-when-multiple ()
   "lone-output-window returns nil when more than one non-side window is present."
   (agent-repl-test--with-clean-state
-    (let ((out (get-buffer-create "*claude-panel-my-ws*")))
+    (let ((out (get-buffer-create "*agent-panel-my-ws*")))
       (unwind-protect
           (cl-letf (((symbol-function 'window-list) (lambda (&rest _) '(w1 w2)))
                     ((symbol-function 'agent-repl-window--side-window-p) (lambda (_w) nil))
@@ -4460,8 +4460,8 @@ needs a separate enter-fullscreen step."
             (should-not (agent-repl--lone-output-window)))
         (kill-buffer out)))))
 
-(ert-deftest agent-repl-test-panels-lone-output-window-nil-non-claude ()
-  "lone-output-window returns nil when the sole non-side window shows a non-Claude buffer."
+(ert-deftest agent-repl-test-panels-lone-output-window-nil-non-agent ()
+  "lone-output-window returns nil when the sole non-side window shows a non-agent buffer."
   (agent-repl-test--with-clean-state
     (let ((reg (get-buffer-create "*regular-buffer*")))
       (unwind-protect
@@ -4474,7 +4474,7 @@ needs a separate enter-fullscreen step."
 (ert-deftest agent-repl-test-panels-lone-output-window-nil-input-buffer ()
   "lone-output-window returns nil when the sole non-side window shows a Claude input buffer."
   (agent-repl-test--with-clean-state
-    (let ((inp (get-buffer-create "*claude-panel-input-my-ws*")))
+    (let ((inp (get-buffer-create "*agent-panel-input-my-ws*")))
       (unwind-protect
           (cl-letf (((symbol-function 'window-list) (lambda (&rest _) '(w1)))
                     ((symbol-function 'agent-repl-window--side-window-p) (lambda (_w) nil))
@@ -4485,7 +4485,7 @@ needs a separate enter-fullscreen step."
 (ert-deftest agent-repl-test-panels-lone-output-window-ignores-side-windows ()
   "lone-output-window ignores side windows when finding the sole non-side output window."
   (agent-repl-test--with-clean-state
-    (let ((out (get-buffer-create "*claude-panel-my-ws*"))
+    (let ((out (get-buffer-create "*agent-panel-my-ws*"))
           (drawer (get-buffer-create "*drawer*")))
       (unwind-protect
           (cl-letf (((symbol-function 'window-list) (lambda (&rest _) '(side main)))
@@ -4503,7 +4503,7 @@ needs a separate enter-fullscreen step."
   "ensure-own-panels-on-persp-switch detaches foreign panel buffers when stale present."
   (agent-repl-test--with-clean-state
     (let ((detached nil)
-          (foreign (get-buffer-create "*claude-panel-other-ws*")))
+          (foreign (get-buffer-create "*agent-panel-other-ws*")))
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                     ((symbol-function 'agent-repl--stale-panel-windows)
@@ -4597,7 +4597,7 @@ needs a separate enter-fullscreen step."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
-              ((symbol-function 'agent-repl--redirect-from-claude-before-save) #'ignore)
+              ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
               ((symbol-function 'agent-repl--ws-frame-save-state) #'ignore))
       (agent-repl--before-persp-deactivate)
       (should (eq (agent-repl--ws-get "ws1" :panels-were-visible) t)))))
@@ -4607,7 +4607,7 @@ needs a separate enter-fullscreen step."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-              ((symbol-function 'agent-repl--redirect-from-claude-before-save) #'ignore)
+              ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
               ((symbol-function 'agent-repl--ws-frame-save-state) #'ignore))
       (agent-repl--before-persp-deactivate)
       (should-not (agent-repl--ws-get "ws1" :panels-were-visible)))))

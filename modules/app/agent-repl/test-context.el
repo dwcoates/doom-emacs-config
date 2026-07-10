@@ -258,7 +258,7 @@ is available."
 (ert-deftest agent-repl-test-context-attach-to-mode-line-appends-when-missing ()
   "attach-to-mode-line appends the :eval segment when not already present."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-context-attach-missing*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-context-attach-missing*"
       (setq-local mode-line-format (list "BAR"))
       (agent-repl--context-attach-to-mode-line (current-buffer))
       (should (= (length mode-line-format) 2))
@@ -268,7 +268,7 @@ is available."
 (ert-deftest agent-repl-test-context-attach-to-mode-line-idempotent ()
   "attach-to-mode-line does not double-append when called twice."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-context-attach-idempotent*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-context-attach-idempotent*"
       (setq-local mode-line-format
                   (list "BAR" agent-repl--context-mode-line-spec))
       (agent-repl--context-attach-to-mode-line (current-buffer))
@@ -278,7 +278,7 @@ is available."
 (ert-deftest agent-repl-test-context-attach-to-mode-line-skips-non-list ()
   "attach-to-mode-line leaves string mode-line-formats alone."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-context-attach-string*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-context-attach-string*"
       (setq-local mode-line-format "literal-string")
       (agent-repl--context-attach-to-mode-line (current-buffer))
       (should (equal mode-line-format "literal-string")))))
@@ -286,24 +286,24 @@ is available."
 (ert-deftest agent-repl-test-context-attach-all-walks-workspaces ()
   "attach-all attaches the segment to every live workspace vterm buffer."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-context-attach-all-1*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-context-attach-all-1*"
       (setq-local mode-line-format (list "A"))
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-      (agent-repl-test--with-temp-buffer "*claude-panel-context-attach-all-2*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-context-attach-all-2*"
         (setq-local mode-line-format (list "B"))
         (agent-repl--ws-put "ws2" :vterm-buffer (current-buffer))
         (agent-repl-context-attach-all)
-        (with-current-buffer "*claude-panel-context-attach-all-1*"
+        (with-current-buffer "*agent-panel-context-attach-all-1*"
           (should (member agent-repl--context-mode-line-spec
                           mode-line-format)))
-        (with-current-buffer "*claude-panel-context-attach-all-2*"
+        (with-current-buffer "*agent-panel-context-attach-all-2*"
           (should (member agent-repl--context-mode-line-spec
                           mode-line-format)))))))
 
 (ert-deftest agent-repl-test-context-attach-all-skips-dead-buffer ()
   "attach-all tolerates dead vterm buffers without signalling."
   (agent-repl-test--with-clean-state
-    (let ((dead-buf (generate-new-buffer "*claude-panel-context-dead*")))
+    (let ((dead-buf (generate-new-buffer "*agent-panel-context-dead*")))
       (kill-buffer dead-buf)
       (agent-repl--ws-put "ws-dead" :vterm-buffer dead-buf)
       ;; Should not signal.

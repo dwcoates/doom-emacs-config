@@ -459,7 +459,7 @@ Predicate is a conjunction of tombstone state AND reason marker."
   "Render-status returns nil for hide-tombstoned ws, collapsed with nuke-tombstoned."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "hidden" :project-dir "/tmp/x")
-    (agent-repl--ws-put "hidden" :claude-state :thinking)
+    (agent-repl--ws-put "hidden" :agent-state :thinking)
     (agent-repl--ws-put "hidden" :hidden-project-dir t)
     (agent-repl--ws-del "hidden")
     (should-not (agent-repl--ws-render-status "hidden"))))
@@ -644,7 +644,7 @@ even if bound — a nil cache is not a usable tab-bar signal."
   "Tombstoned ws returns nil — renderers skip these (drawer filters them anyway)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
-    (agent-repl--ws-put "ws1" :claude-state :thinking)
+    (agent-repl--ws-put "ws1" :agent-state :thinking)
     (agent-repl--ws-del "ws1")
     (should-not (agent-repl--ws-render-status "ws1"))))
 
@@ -697,45 +697,45 @@ even if bound — a nil cache is not a usable tab-bar signal."
     (should (eq :dead (agent-repl--ws-render-status "ws1")))))
 
 (ert-deftest agent-repl-test-ws-render-status-returns-thinking ()
-  "`:claude-state :thinking' renders as :thinking."
+  "`:agent-state :thinking' renders as :thinking."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
-    (agent-repl--ws-put "ws1" :claude-state :thinking)
+    (agent-repl--ws-put "ws1" :agent-state :thinking)
     (should (eq :thinking (agent-repl--ws-render-status "ws1")))))
 
 (ert-deftest agent-repl-test-ws-render-status-returns-permission ()
-  "`:claude-state :permission' renders as :permission."
+  "`:agent-state :permission' renders as :permission."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
-    (agent-repl--ws-put "ws1" :claude-state :permission)
+    (agent-repl--ws-put "ws1" :agent-state :permission)
     (should (eq :permission (agent-repl--ws-render-status "ws1")))))
 
 (ert-deftest agent-repl-test-ws-render-status-returns-init ()
-  "`:claude-state :init' renders as :init."
+  "`:agent-state :init' renders as :init."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
-    (agent-repl--ws-put "ws1" :claude-state :init)
+    (agent-repl--ws-put "ws1" :agent-state :init)
     (should (eq :init (agent-repl--ws-render-status "ws1")))))
 
 (ert-deftest agent-repl-test-ws-render-status-returns-done ()
-  "`:claude-state :done' renders as :done."
+  "`:agent-state :done' renders as :done."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
-    (agent-repl--ws-put "ws1" :claude-state :done)
+    (agent-repl--ws-put "ws1" :agent-state :done)
     (should (eq :done (agent-repl--ws-render-status "ws1")))))
 
 (ert-deftest agent-repl-test-ws-render-status-returns-stop-failed ()
-  "`:claude-state :stop-failed' renders as :stop-failed."
+  "`:agent-state :stop-failed' renders as :stop-failed."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
-    (agent-repl--ws-put "ws1" :claude-state :stop-failed)
+    (agent-repl--ws-put "ws1" :agent-state :stop-failed)
     (should (eq :stop-failed (agent-repl--ws-render-status "ws1")))))
 
 (ert-deftest agent-repl-test-ws-render-status-returns-idle ()
-  "`:claude-state :idle' renders as :idle."
+  "`:agent-state :idle' renders as :idle."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
-    (agent-repl--ws-put "ws1" :claude-state :idle)
+    (agent-repl--ws-put "ws1" :agent-state :idle)
     (should (eq :idle (agent-repl--ws-render-status "ws1")))))
 
 ;;;; ---- Tests: --ws-render-status precedence pairs -----------------------
@@ -757,7 +757,7 @@ somehow co-exist, the renderer must report the more actionable one."
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
     ;; Only one :repl-state at a time in practice; but to exercise the
     ;; precedence we set :merge-failed and let :merging carry an
-    ;; orthogonal dead-vterm signal via :claude-state nil + a stale flag.
+    ;; orthogonal dead-vterm signal via :agent-state nil + a stale flag.
     (agent-repl--ws-put "ws1" :repl-state :merge-failed)
     (should (eq :merge-failed (agent-repl--ws-render-status "ws1")))))
 
@@ -773,8 +773,8 @@ unification."
     (agent-repl--ws-put "ws1" :repl-state :merged)
     (should (eq :merged (agent-repl--ws-render-status "ws1")))))
 
-(ert-deftest agent-repl-test-ws-render-status-merged-no-claude-state-yields-merged ()
-  "`:repl-state :merged' with no active claude-state yields :merged.
+(ert-deftest agent-repl-test-ws-render-status-merged-no-agent-state-yields-merged ()
+  "`:repl-state :merged' with no active agent-state yields :merged.
 A merged workspace that has not resumed work shows the 🔀 badge."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
@@ -782,39 +782,39 @@ A merged workspace that has not resumed work shows the 🔀 badge."
     (should (eq :merged (agent-repl--ws-render-status "ws1")))))
 
 (ert-deftest agent-repl-test-ws-render-status-merged-with-thinking-yields-thinking ()
-  "`:repl-state :merged' + `:claude-state :thinking' → :thinking.
+  "`:repl-state :merged' + `:agent-state :thinking' → :thinking.
 A merged workspace that resumes work should surface the live run-state
 rather than the stale merge badge."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
     (agent-repl--ws-put "ws1" :repl-state :merged)
-    (agent-repl--ws-put "ws1" :claude-state :thinking)
+    (agent-repl--ws-put "ws1" :agent-state :thinking)
     (should (eq :thinking (agent-repl--ws-render-status "ws1")))))
 
 (ert-deftest agent-repl-test-ws-render-status-merged-with-done-yields-done ()
-  "`:repl-state :merged' + `:claude-state :done' → :done."
+  "`:repl-state :merged' + `:agent-state :done' → :done."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
     (agent-repl--ws-put "ws1" :repl-state :merged)
-    (agent-repl--ws-put "ws1" :claude-state :done)
+    (agent-repl--ws-put "ws1" :agent-state :done)
     (should (eq :done (agent-repl--ws-render-status "ws1")))))
 
 (ert-deftest agent-repl-test-ws-render-status-merged-with-idle-yields-idle ()
-  "`:repl-state :merged' + `:claude-state :idle' → :idle."
+  "`:repl-state :merged' + `:agent-state :idle' → :idle."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
     (agent-repl--ws-put "ws1" :repl-state :merged)
-    (agent-repl--ws-put "ws1" :claude-state :idle)
+    (agent-repl--ws-put "ws1" :agent-state :idle)
     (should (eq :idle (agent-repl--ws-render-status "ws1")))))
 
 (ert-deftest agent-repl-test-ws-render-status-merge-completed-with-thinking-yields-thinking ()
-  "`:merge-completed t' + `:claude-state :thinking' → :thinking.
-The merge-completed flag also yields to active claude-states so the
+  "`:merge-completed t' + `:agent-state :thinking' → :thinking.
+The merge-completed flag also yields to active agent-states so the
 transition-window case does not hide live work."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
     (agent-repl--ws-put "ws1" :merge-completed t)
-    (agent-repl--ws-put "ws1" :claude-state :thinking)
+    (agent-repl--ws-put "ws1" :agent-state :thinking)
     (should (eq :thinking (agent-repl--ws-render-status "ws1")))))
 
 (ert-deftest agent-repl-test-ws-render-status-merging-beats-dead ()
@@ -829,22 +829,22 @@ vterm."
     (agent-repl--ws-put "ws1" :repl-state :dead)
     (should (eq :merging (agent-repl--ws-render-status "ws1")))))
 
-(ert-deftest agent-repl-test-ws-render-status-merging-beats-claude-state ()
-  "An in-flight merge outranks claude-state.
+(ert-deftest agent-repl-test-ws-render-status-merging-beats-agent-state ()
+  "An in-flight merge outranks agent-state.
 A workspace that was :thinking when the merge command fired should
 read as :merging in the drawer until cherry-pick resolves."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
     (agent-repl--ws-put "ws1" :merging t)
-    (agent-repl--ws-put "ws1" :claude-state :thinking)
+    (agent-repl--ws-put "ws1" :agent-state :thinking)
     (should (eq :merging (agent-repl--ws-render-status "ws1")))))
 
-(ert-deftest agent-repl-test-ws-render-status-merge-queued-beats-claude-state ()
-  "A queued merge outranks claude-state for the same reason as :merging."
+(ert-deftest agent-repl-test-ws-render-status-merge-queued-beats-agent-state ()
+  "A queued merge outranks agent-state for the same reason as :merging."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
     (agent-repl--ws-put "ws1" :repl-state :merge-queued)
-    (agent-repl--ws-put "ws1" :claude-state :thinking)
+    (agent-repl--ws-put "ws1" :agent-state :thinking)
     (should (eq :merge-queued (agent-repl--ws-render-status "ws1")))))
 
 (ert-deftest agent-repl-test-ws-render-status-merge-queued-beats-dead ()
@@ -854,32 +854,32 @@ read as :merging in the drawer until cherry-pick resolves."
     ;; :repl-state holds one value at a time, but :merge-queued is the
     ;; queued marker and :dead is the dead-vterm marker; in this case
     ;; we set :repl-state to :merge-queued (the canonical signal) and
-    ;; verify it wins over a :claude-state nil + no dead flag.  The
+    ;; verify it wins over a :agent-state nil + no dead flag.  The
     ;; combined "what beats what when both occur" is asserted
     ;; structurally by the cond order in the function under test.
     (agent-repl--ws-put "ws1" :repl-state :merge-queued)
     (should (eq :merge-queued (agent-repl--ws-render-status "ws1")))))
 
-(ert-deftest agent-repl-test-ws-render-status-dead-beats-claude-state ()
-  "A dead vterm outranks any leftover claude-state value.
-:dead + :claude-state :thinking should read as :dead."
+(ert-deftest agent-repl-test-ws-render-status-dead-beats-agent-state ()
+  "A dead vterm outranks any leftover agent-state value.
+:dead + :agent-state :thinking should read as :dead."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
     (agent-repl--ws-put "ws1" :repl-state :dead)
-    (agent-repl--ws-put "ws1" :claude-state :thinking)
+    (agent-repl--ws-put "ws1" :agent-state :thinking)
     (should (eq :dead (agent-repl--ws-render-status "ws1")))))
 
 (ert-deftest agent-repl-test-ws-render-status-thinking-beats-permission ()
-  "Among claude-states, :thinking outranks :permission."
+  "Among agent-states, :thinking outranks :permission."
   ;; The two are not typically both set, but the cond order must be
   ;; deterministic; document via test.
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
-    ;; Only one :claude-state in practice; this test exercises the
-    ;; first-match-wins semantic by setting :claude-state to :thinking
+    ;; Only one :agent-state in practice; this test exercises the
+    ;; first-match-wins semantic by setting :agent-state to :thinking
     ;; and asserting it returns :thinking even though :permission and
     ;; later states are reachable elsewhere in the cond.
-    (agent-repl--ws-put "ws1" :claude-state :thinking)
+    (agent-repl--ws-put "ws1" :agent-state :thinking)
     (should (eq :thinking (agent-repl--ws-render-status "ws1")))))
 
 (ert-deftest agent-repl-test-ws-render-status-merge-completed-flag-yields-merged ()

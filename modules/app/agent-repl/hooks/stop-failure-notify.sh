@@ -4,7 +4,7 @@
 # invalid_request, server_error, max_output_tokens, unknown).  We capture
 # the error_type as the third sentinel-file line so the Emacs side can
 # render or surface it later (today the consumer ignores it and only
-# uses the file's existence to flip :claude-state to :stop-failed).
+# uses the file's existence to flip :agent-state to :stop-failed).
 LOGFILE=${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}/workspace-notifications/hook-debug.log
 mkdir -p ${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}/workspace-notifications
 INPUT=$(cat)

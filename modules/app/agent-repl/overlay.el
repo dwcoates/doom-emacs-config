@@ -70,7 +70,7 @@ The region is computed by `agent-repl--hide-overlay-region'."
   "Return the appropriate buffer for overlay updates.
 When called from within a claude buffer, returns it directly.
 Otherwise looks up the vterm buffer for the current workspace."
-  (if (agent-repl--claude-buffer-p)
+  (if (agent-repl--agent-buffer-p)
       (progn
         (agent-repl--log-verbose (agent-repl--ws-current-name) "resolve-overlay-target-buffer: using current claude buffer")
         (current-buffer))
@@ -104,8 +104,8 @@ Uses reference counting so multiple sessions don't clobber each other."
   (if agent-repl--in-redraw-advice
       (agent-repl--log-verbose (agent-repl--ws-current-name) "vterm-redraw-advice: skipped (recursion guard)")
     (let ((agent-repl--in-redraw-advice t))
-      (if (not (agent-repl--claude-buffer-p))
-          (agent-repl--log-verbose (agent-repl--ws-current-name) "vterm-redraw-advice: skipped (non-claude buffer)")
+      (if (not (agent-repl--agent-buffer-p))
+          (agent-repl--log-verbose (agent-repl--ws-current-name) "vterm-redraw-advice: skipped (non-agent buffer)")
         (agent-repl--update-hide-overlay)))))
 
 (defun agent-repl--disable-hide-overlay ()
@@ -178,7 +178,7 @@ Returns a dark background for Claude vterm buffers instead of letting
 solaire-mode remap the default face."
   (let ((result (apply fn index args)))
     (if (and (agent-repl--default-background-request-p index args)
-             (agent-repl--claude-buffer-p))
+             (agent-repl--agent-buffer-p))
         (let ((override (agent-repl--grey-hex agent-repl--vterm-background-grey)))
           ;; WHY: vterm--get-color fires per cell on every redraw — historical
           ;; log analysis showed this single call site emitted ~88% of all

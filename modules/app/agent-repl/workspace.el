@@ -73,7 +73,7 @@
 (defvar agent-repl--restored-workspaces)
 
 (cl-defstruct agent-repl-instantiation
-  "Per-environment session state for a Claude REPL workspace.
+  "Per-environment session state for a Agent REPL workspace.
 Each workspace has one instantiation for :sandbox and one for :bare-metal."
   session-id    ; Claude Code session ID, captured from the `session_start' hook payload via `agent-repl--update-session-id-from-sentinel'
   start-cmd)    ; last startup command (for logging/display)
@@ -91,7 +91,7 @@ Each workspace has one instantiation for :sandbox and one for :bare-metal."
 (defvar agent-repl--workspaces (make-hash-table :test 'equal)
   "Hash table mapping workspace name -> state plist.
 Keys: :vterm-buffer :input-buffer
-      :prefix-counter :claude-state :repl-state
+      :prefix-counter :agent-state :repl-state
       :git-clean :git-proc :worktree-p :project-dir
       :active-env :sandbox :bare-metal :fork-session-id
       :ready-timer :priority
@@ -162,7 +162,7 @@ producer can be identified without first turning debug logging on."
          (list ws key val trace))))))
 
 (defconst agent-repl--ws-runtime-keys
-  '(:claude-state :repl-state :vterm-buffer :input-buffer :vterm-status
+  '(:agent-state :repl-state :vterm-buffer :input-buffer :vterm-status
     :ready-timer :git-proc :flashing :pending-subagents :pending-show-panels
     :fork-session-id :fullscreen-config :active-env :sandbox :bare-metal
     :deferred-input-queue :done-ack :permission-prompt-active
@@ -425,10 +425,10 @@ directly or wrapping it themselves with `fboundp'."
 ;; what visual state every renderer (drawer state-glyph, drawer
 ;; name-face, tab-bar composed-state, project picker emoji) should
 ;; display for a workspace.  Renderers used to each re-derive this
-;; from `:claude-state' + `:repl-state' + the `:merging' /
+;; from `:agent-state' + `:repl-state' + the `:merging' /
 ;; `:merge-completed' plist keys, and they disagreed: the drawer's
-;; precedence had merge-state dominating claude-state, the tab-bar's
-;; precedence had claude-state dominating merge-state, and the
+;; precedence had merge-state dominating agent-state, the tab-bar's
+;; precedence had agent-state dominating merge-state, and the
 ;; `:merging' (in-flight) workflow signal had no visual at all.  The
 ;; unified function below is the new canonical precedence; the
 ;; rendering convergence is intentional.
@@ -438,7 +438,7 @@ directly or wrapping it themselves with `fboundp'."
 This is the SINGLE SOURCE OF TRUTH for what renderers (drawer,
 tab-bar, project picker, mode-line) should display for a workspace's
 status.  Every renderer reads this — none should re-derive status
-from `:claude-state' / `:repl-state' / `:merging' / `:merge-completed'
+from `:agent-state' / `:repl-state' / `:merging' / `:merge-completed'
 on its own.
 
 Precondition: WS must be `--ws-known-p'.  Unknown WS signals
@@ -457,7 +457,7 @@ Returns one of (in precedence order; first match wins):
                     Same actionable rationale as :merge-conflict.
 
   :merged         — `:repl-state' is `:merged' OR `:merge-completed'
-                    is t AND no active `:claude-state' is present
+                    is t AND no active `:agent-state' is present
                     (workspace's branch landed in its source; terminal
                     positive).  The setter writes both in lockstep —
                     either signal alone suffices.  Accepting
@@ -466,8 +466,8 @@ Returns one of (in precedence order; first match wins):
                     window where `:merge-completed t' is set before
                     `:repl-state :merged' has been written (and where
                     `:merging' may not yet be cleared).
-                    When an active `:claude-state' is present the
-                    merged badge is suppressed and the claude-state
+                    When an active `:agent-state' is present the
+                    merged badge is suppressed and the agent-state
                     wins: a merged workspace that resumes work (unusual
                     but possible) should surface the live run-state
                     rather than the stale merge badge.
@@ -485,14 +485,14 @@ Returns one of (in precedence order; first match wins):
 
   :dead           — `:repl-state' is `:dead' (vterm process is gone).
                     Ranks below merge-states because merge state is
-                    more actionable; ranks above claude-states
+                    more actionable; ranks above agent-states
                     because no live process means no claude activity
                     to color over.
 
-  Claude-states (when no merge or dead signal applies):
+  Agent-states (when no merge or dead signal applies):
     :thinking, :permission, :init, :done, :stop-failed, :idle
-    — read from `:claude-state' in order of precedence.  Each is set
-    by `agent-repl--ws-set-claude-state' through the typed setter.
+    — read from `:agent-state' in order of precedence.  Each is set
+    by `agent-repl--ws-set-agent-state' through the typed setter.
 
   nil             — tombstoned workspace (`--ws-tombstoned-p' t,
                     regardless of REASON marker such as
@@ -511,14 +511,14 @@ merge was in flight* still needs to surface the merge signal — the
 merge is the actionable concern.  Same logic stacks all the way up:
 merge-conflict is more important than merge-failed (an active
 conflict can be resolved; a silent abort has already aborted), and
-both dominate claude-state (an active conflict is more important
+both dominate agent-state (an active conflict is more important
 than whether Claude was thinking when the merge hit it)."
   (agent-repl--ws-require-known ws "ws-render-status")
   (cond
    ((agent-repl--ws-tombstoned-p ws) nil)
    (t
     (let ((repl       (agent-repl--ws-get ws :repl-state))
-          (claude     (agent-repl--ws-get ws :claude-state))
+          (claude     (agent-repl--ws-get ws :agent-state))
           (merging    (agent-repl--ws-get ws :merging))
           (completed  (agent-repl--ws-get ws :merge-completed)))
       (cond
@@ -529,7 +529,7 @@ than whether Claude was thinking when the merge hit it)."
        ;; two writes (and any tests fixtures that set only one of
        ;; them) still resolves to :merged.  See `--ws-render-status'
        ;; docstring for the rationale.
-       ;; Guard: when an active `:claude-state' is present the merged
+       ;; Guard: when an active `:agent-state' is present the merged
        ;; badge is suppressed so a merged workspace that resumes work
        ;; surfaces its live run-state rather than the stale merge
        ;; badge.  Without the (null claude) guard this arm would fire

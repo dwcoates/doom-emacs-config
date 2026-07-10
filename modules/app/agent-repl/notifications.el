@@ -17,7 +17,7 @@
   :type 'string
   :group 'agent-repl)
 
-(defcustom agent-repl-notify-process-name "claude-notify"
+(defcustom agent-repl-notify-process-name "agent-notify"
   "Process name used when spawning notification commands."
   :type 'string
   :group 'agent-repl)

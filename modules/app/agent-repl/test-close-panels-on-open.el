@@ -40,10 +40,10 @@
   "Advice does not close panels when the open target is itself a panel buffer."
   (agent-repl-test--with-clean-state
     (let ((close-calls 0)
-          (panel-buf (get-buffer-create "*claude-panel-target*")))
+          (panel-buf (get-buffer-create "*agent-panel-target*")))
       (unwind-protect
           (cl-letf (((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
-                    ((symbol-function 'agent-repl--claude-panel-buffer-p)
+                    ((symbol-function 'agent-repl--agent-panel-buffer-p)
                      (lambda (&optional buf) (eq buf panel-buf)))
                     ((symbol-function 'agent-repl--simple-hide-and-preserve-status)
                      (lambda () (cl-incf close-calls))))
@@ -58,7 +58,7 @@
           (other-buf (get-buffer-create "*ordinary-buffer*")))
       (unwind-protect
           (cl-letf (((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
-                    ((symbol-function 'agent-repl--claude-panel-buffer-p)
+                    ((symbol-function 'agent-repl--agent-panel-buffer-p)
                      (lambda (&optional _buf) nil))
                     ((symbol-function 'agent-repl--simple-hide-and-preserve-status)
                      (lambda () (cl-incf close-calls))))
@@ -101,9 +101,9 @@
 (ert-deftest agent-repl-test-open-target-is-panel-p-panel-buffer ()
   "A live panel buffer object is recognized as a panel target."
   (agent-repl-test--with-clean-state
-    (let ((panel-buf (get-buffer-create "*claude-panel-x*")))
+    (let ((panel-buf (get-buffer-create "*agent-panel-x*")))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--claude-panel-buffer-p)
+          (cl-letf (((symbol-function 'agent-repl--agent-panel-buffer-p)
                      (lambda (&optional buf) (eq buf panel-buf))))
             (should (agent-repl--open-target-is-panel-p (list panel-buf))))
         (kill-buffer panel-buf)))))
@@ -113,7 +113,7 @@
   (agent-repl-test--with-clean-state
     (let ((other-buf (get-buffer-create "*plain-x*")))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--claude-panel-buffer-p)
+          (cl-letf (((symbol-function 'agent-repl--agent-panel-buffer-p)
                      (lambda (&optional _buf) nil)))
             (should-not (agent-repl--open-target-is-panel-p (list other-buf))))
         (kill-buffer other-buf)))))

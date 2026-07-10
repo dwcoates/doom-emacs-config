@@ -66,13 +66,13 @@ serialize as JSON `null' instead of `{}'."
         (proj     (agent-repl--ws-get ws :project-dir))
         (src      (agent-repl--ws-get ws :source-ws-dir))
         (claude   (agent-repl--ws-keyword-to-string
-                   (agent-repl--ws-claude-state ws)))
+                   (agent-repl--ws-agent-state ws)))
         (repl     (agent-repl--ws-keyword-to-string
                    (agent-repl--ws-repl-state ws)))
         (git      (agent-repl--ws-keyword-to-string
                    (agent-repl--ws-get ws :git-clean)))
         (acked    (if (agent-repl--ws-get ws :done-acked) t json-false)))
-    `(("claude_state"        . ,(agent-repl--json-null-if-nil claude))
+    `(("agent_state"        . ,(agent-repl--json-null-if-nil claude))
       ("repl_state"          . ,(agent-repl--json-null-if-nil repl))
       ("project_dir"         . ,(agent-repl--json-null-if-nil proj))
       ("source_ws_dir"       . ,(agent-repl--json-null-if-nil src))

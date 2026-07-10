@@ -581,7 +581,7 @@ to investigate external state to fill in gaps."
   "Collect returns the last N prompts from the input buffer's history,
 re-ordered oldest first (history stores newest first)."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-collect-context-n*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-collect-context-n*"
       (setq-local agent-repl--input-history
                   '("newest" "middle" "oldest" "way-older"))
       (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
@@ -593,7 +593,7 @@ re-ordered oldest first (history stores newest first)."
   "When history has fewer entries than N, all entries are returned (no
 padding), still oldest-first."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-collect-context-fewer*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-collect-context-fewer*"
       (setq-local agent-repl--input-history '("newest" "older"))
       (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
       (let ((agent-repl-prompt-summary-context-count 5))
@@ -609,7 +609,7 @@ padding), still oldest-first."
 (ert-deftest agent-repl-test-prompt-summary-collect-context-dead-buffer ()
   "Collect tolerates a dead input buffer (returns nil)."
   (agent-repl-test--with-clean-state
-    (let ((dead (generate-new-buffer "*claude-panel-collect-context-dead*")))
+    (let ((dead (generate-new-buffer "*agent-panel-collect-context-dead*")))
       (kill-buffer dead)
       (agent-repl--ws-put "ws1" :input-buffer dead)
       (let ((agent-repl-prompt-summary-context-count 3))
@@ -618,7 +618,7 @@ padding), still oldest-first."
 (ert-deftest agent-repl-test-prompt-summary-collect-context-disabled-when-zero ()
   "When context-count is zero, collect returns nil even with history present."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-collect-context-zero*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-collect-context-zero*"
       (setq-local agent-repl--input-history '("newest"))
       (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
       (let ((agent-repl-prompt-summary-context-count 0))
@@ -627,7 +627,7 @@ padding), still oldest-first."
 (ert-deftest agent-repl-test-prompt-summary-collect-context-empty-history ()
   "Collect returns nil when input history is empty (just-created buffer)."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-collect-context-empty*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-collect-context-empty*"
       (setq-local agent-repl--input-history nil)
       (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
       (let ((agent-repl-prompt-summary-context-count 3))
@@ -641,7 +641,7 @@ include the prior prompts in the data sent to the model.  Pins the
 end-to-end wiring from history → collect-context → build-input → process
 stdin."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-spawn-context*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-spawn-context*"
       (setq-local agent-repl--input-history '("prior prompt one"))
       (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
       (let ((captured-input nil)
@@ -663,7 +663,7 @@ stdin."
   "Spawn must invoke `make-process' with `default-directory' rebound to
 `temporary-file-directory'.  Without this, the headless claude inherits
 the calling workspace's project-dir, its hooks fire with that cwd, and
-the sentinel watcher misattributes them — flipping :claude-state to :done
+the sentinel watcher misattributes them — flipping :agent-state to :done
 while the user's interactive Claude is still mid-turn."
   (let ((captured-cwd nil))
     (cl-letf (((symbol-function 'make-process)
@@ -707,7 +707,7 @@ while the user's interactive Claude is still mid-turn."
 (ert-deftest agent-repl-test-apply-prompt-summary-redisplays-vterm ()
   "Apply forces a mode-line update on the workspace's vterm buffer."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-apply-redisp*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-apply-redisp*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (agent-repl--ws-put "ws1" :last-prompt-text "raw")
       (let ((called nil))
@@ -722,7 +722,7 @@ while the user's interactive Claude is still mid-turn."
   "`agent-repl--do-send' invokes `agent-repl--kickoff-prompt-summary'
 with the workspace and raw input."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-do-send-summary*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-do-send-summary*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (let ((kickoff-args nil))
         (cl-letf (((symbol-function 'agent-repl--send-input-to-vterm) #'ignore)
@@ -737,7 +737,7 @@ with the workspace and raw input."
 (ert-deftest agent-repl-test-attach-to-mode-line-appends-when-missing ()
   "attach-to-mode-line appends the :eval segment when not already present."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-attach-missing*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-attach-missing*"
       (setq-local mode-line-format (list "BARE METAL: host"))
       (agent-repl--prompt-summary-attach-to-mode-line (current-buffer))
       (should (= (length mode-line-format) 2))
@@ -747,7 +747,7 @@ with the workspace and raw input."
 (ert-deftest agent-repl-test-attach-to-mode-line-idempotent ()
   "attach-to-mode-line does not double-append when called twice."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-attach-idempotent*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-attach-idempotent*"
       (setq-local mode-line-format
                   (list "BARE METAL: host"
                         agent-repl--prompt-summary-mode-line-spec))
@@ -758,7 +758,7 @@ with the workspace and raw input."
 (ert-deftest agent-repl-test-attach-to-mode-line-skips-non-list ()
   "attach-to-mode-line leaves string mode-line-formats alone."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-attach-string*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-attach-string*"
       (setq-local mode-line-format "literal-string")
       (agent-repl--prompt-summary-attach-to-mode-line (current-buffer))
       (should (equal mode-line-format "literal-string")))))
@@ -766,24 +766,24 @@ with the workspace and raw input."
 (ert-deftest agent-repl-test-attach-all-walks-workspaces ()
   "attach-all attaches the segment to every live workspace vterm buffer."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-attach-all-1*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-attach-all-1*"
       (setq-local mode-line-format (list "BARE METAL: a"))
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-      (agent-repl-test--with-temp-buffer "*claude-panel-attach-all-2*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-attach-all-2*"
         (setq-local mode-line-format (list "DOCKER SANDBOX: img"))
         (agent-repl--ws-put "ws2" :vterm-buffer (current-buffer))
         (agent-repl-prompt-summary-attach-all)
-        (with-current-buffer "*claude-panel-attach-all-1*"
+        (with-current-buffer "*agent-panel-attach-all-1*"
           (should (member agent-repl--prompt-summary-mode-line-spec
                           mode-line-format)))
-        (with-current-buffer "*claude-panel-attach-all-2*"
+        (with-current-buffer "*agent-panel-attach-all-2*"
           (should (member agent-repl--prompt-summary-mode-line-spec
                           mode-line-format)))))))
 
 (ert-deftest agent-repl-test-attach-all-skips-dead-buffer ()
   "attach-all tolerates dead vterm buffers in the workspace table."
   (agent-repl-test--with-clean-state
-    (let ((dead-buf (generate-new-buffer "*claude-panel-attach-dead*")))
+    (let ((dead-buf (generate-new-buffer "*agent-panel-attach-dead*")))
       (kill-buffer dead-buf)
       (agent-repl--ws-put "ws-dead" :vterm-buffer dead-buf)
       ;; Should not signal.

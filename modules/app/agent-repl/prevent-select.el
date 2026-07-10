@@ -20,16 +20,16 @@
 
 (require 'cl-lib)
 
-(defun agent-repl--prev-buffer-skip-claude-panel (_window buffer _bury-or-kill)
+(defun agent-repl--prev-buffer-skip-agent-panel (_window buffer _bury-or-kill)
   "Predicate for `switch-to-prev-buffer-skip'.
 Return non-nil when BUFFER is a Claude panel buffer (vterm or input)
 so it is skipped by `next-buffer', `previous-buffer', and the
 replacement chooser invoked after `kill-buffer'."
   (and (buffer-live-p buffer)
-       (agent-repl--claude-panel-buffer-p buffer)))
+       (agent-repl--agent-panel-buffer-p buffer)))
 
 (setq switch-to-prev-buffer-skip
-      #'agent-repl--prev-buffer-skip-claude-panel)
+      #'agent-repl--prev-buffer-skip-agent-panel)
 
 (provide 'prevent-select)
 

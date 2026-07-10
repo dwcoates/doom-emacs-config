@@ -19,7 +19,7 @@
   "Run BODY with a fresh on-disk events file and cleared in-memory cache."
   (declare (indent 0))
   `(let ((agent-repl-events-file
-          (expand-file-name (format "claude-events-%s.el" (random))
+          (expand-file-name (format "agent-events-%s.el" (random))
                             temporary-file-directory))
          (agent-repl--events-cache nil)
          (agent-repl--events-cache-loaded nil))
