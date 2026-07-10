@@ -267,6 +267,7 @@ launches under the same model."
                                 :source-ws-dir ,(agent-repl--ws-get ws :source-ws-dir)
                                 :repl-state ,(agent-repl--ws-get ws :repl-state)
                                 :saved-tab-index ,(agent-repl--ws-get ws :saved-tab-index)
+                                :backend ,(agent-repl--ws-get ws :backend)
                                 :fork-session-id ,(agent-repl--ws-get ws :fork-session-id)
                                 :last-prompt-summary ,(agent-repl--ws-get ws :last-prompt-summary)
                                 :last-prompt-summary-at ,(agent-repl--ws-get ws :last-prompt-summary-at)

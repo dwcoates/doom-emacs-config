@@ -480,6 +480,23 @@ new path does not exist but the legacy one does."
               (should (equal (plist-get data :priority) "p1"))))
         (delete-directory tmpdir t)))))
 
+(ert-deftest agent-repl-test-state-save-includes-backend ()
+  "state-save serializes `:backend' so a codex ws resumes via codex."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws" :project-dir tmpdir)
+            (agent-repl--ws-put "ws" :active-env :bare-metal)
+            (agent-repl--ws-put "ws" :backend 'codex)
+            (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
+            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
+            (agent-repl--state-save "ws")
+            (let* ((file (agent-repl--state-file tmpdir))
+                   (data (agent-repl--read-sexp-file file)))
+              (should (eq (plist-get data :backend) 'codex))))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest agent-repl-test-state-save-nil-priority ()
   "state-save writes `:priority' nil when no badge is set (no badge == nil)."
   (agent-repl-test--with-clean-state

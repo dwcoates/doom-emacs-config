@@ -2402,6 +2402,19 @@ when the saved plist carries none."
     (agent-repl--apply-display-state "ws1" '(:project-dir "/x"))
     (should (equal (agent-repl--ws-get "ws1" :model) "opus"))))
 
+(ert-deftest agent-repl-test-apply-display-state-sets-backend-from-saved ()
+  "apply-display-state copies :backend out of the saved plist onto the ws."
+  (agent-repl-test--with-clean-state
+    (agent-repl--apply-display-state "ws1" '(:backend codex))
+    (should (eq (agent-repl--ws-get "ws1" :backend) 'codex))))
+
+(ert-deftest agent-repl-test-apply-display-state-backend-falls-back-to-plist ()
+  "apply-display-state keeps the in-memory :backend when saved carries none."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :backend 'codex)
+    (agent-repl--apply-display-state "ws1" '(:project-dir "/x"))
+    (should (eq (agent-repl--ws-get "ws1" :backend) 'codex))))
+
 (ert-deftest agent-repl-test-apply-display-state-restores-repl-state-inactive ()
   "apply-display-state restores a persistable :repl-state (:inactive)."
   (agent-repl-test--with-clean-state

@@ -189,6 +189,53 @@ chain produced."
   "The built-in claude backend carries a headless-cmd-fn."
   (should (agent-repl-backend-headless-cmd-fn (agent-repl-backend-get 'claude))))
 
+;;;; ---- Tests: select-backend command ----
+
+(ert-deftest agent-repl-test-backend-select-sets-ws-backend-and-persists ()
+  "The selector writes the choice to the current ws and state-saves it."
+  (agent-repl-test--with-clean-state
+    (let (saved)
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (&rest _) "codex"))
+                ((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () "ws1"))
+                ((symbol-function 'agent-repl--agent-running-p)
+                 (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--state-save)
+                 (lambda (ws) (setq saved ws))))
+        (agent-repl-select-backend nil)
+        (should (eq (agent-repl--ws-get "ws1" :backend) 'codex))
+        (should (equal saved "ws1"))))))
+
+(ert-deftest agent-repl-test-backend-select-refuses-running-agent ()
+  "The selector refuses to change a workspace with a running agent."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) "codex"))
+              ((symbol-function 'agent-repl--ws-current-name)
+               (lambda () "ws1"))
+              ((symbol-function 'agent-repl--agent-running-p)
+               (lambda (_ws) t)))
+      (should-error (agent-repl-select-backend nil) :type 'user-error))))
+
+(ert-deftest agent-repl-test-backend-select-no-current-ws-errors ()
+  "The selector signals user-error when no current workspace resolves."
+  (cl-letf (((symbol-function 'completing-read)
+             (lambda (&rest _) "codex"))
+            ((symbol-function 'agent-repl--ws-current-name)
+             (lambda () nil)))
+    (should-error (agent-repl-select-backend nil) :type 'user-error)))
+
+(ert-deftest agent-repl-test-backend-select-prefix-sets-default ()
+  "With a prefix argument the selector sets `agent-repl-default-backend'."
+  (let ((agent-repl-default-backend 'claude))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) "codex")))
+      (agent-repl-select-backend t)
+      (should (eq agent-repl-default-backend 'codex)))))
+
 ;;;; ---- Tests: transcript seam ----
 
 (defun agent-repl-test--transcript-backend (&rest overrides)
