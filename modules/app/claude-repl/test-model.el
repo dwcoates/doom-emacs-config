@@ -319,7 +319,7 @@ beyond the scan window are not visible."
 
 (ert-deftest claude-repl-test-workspace-mode-line-has-model-segment ()
   "`claude-repl--workspace-mode-line' includes the model :eval segment
-before the prompt-summary segment.  Pins the layout so a refactor
+before the context-tokens segment.  Pins the layout so a refactor
 doesn't silently drop the model from newly-created vterm buffers."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function 'claude-repl--merge-target-name)
@@ -328,12 +328,12 @@ doesn't silently drop the model from newly-created vterm buffers."
              (specs (cl-remove-if-not (lambda (x) (and (consp x) (eq (car x) :eval)))
                                       result)))
         (should (member '(:eval (claude-repl--model-segment)) specs))
-        ;; model must appear BEFORE prompt-summary in the list.
+        ;; model must appear BEFORE the context-tokens segment in the list.
         (let ((model-pos (cl-position '(:eval (claude-repl--model-segment))
                                       result :test #'equal))
-              (ps-pos (cl-position '(:eval (claude-repl--prompt-summary-segment))
-                                   result :test #'equal)))
-          (should (and model-pos ps-pos (< model-pos ps-pos))))))))
+              (ctx-pos (cl-position '(:eval (claude-repl--context-segment))
+                                    result :test #'equal)))
+          (should (and model-pos ctx-pos (< model-pos ctx-pos))))))))
 
 (provide 'test-model)
 ;;; test-model.el ends here
