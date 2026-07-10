@@ -113,6 +113,41 @@ Used by headless call sites with no workspace in scope (e.g. new-
 workspace name generation, the config-explainer)."
   (agent-repl-backend-get agent-repl-default-backend))
 
+(defun agent-repl--backend-names ()
+  "Return the list of registered backend name symbols."
+  (let (names)
+    (maphash (lambda (name _b) (push name names)) agent-repl--backends)
+    (nreverse names)))
+
+(defun agent-repl-select-backend (set-default)
+  "Select the agent backend for the current workspace via completion.
+With prefix argument SET-DEFAULT, set `agent-repl-default-backend' (for
+subsequently created workspaces this session) instead of the current
+workspace's `:backend' property.
+
+Refuses to change a workspace whose agent is currently running — the
+in-flight session belongs to the old CLI, and the change only takes
+effect at the next agent start anyway.  The choice is persisted with
+the workspace state, so a codex workspace resumes through codex after
+an Emacs restart."
+  (interactive "P")
+  (let* ((names (agent-repl--backend-names))
+         (choice (intern (completing-read
+                          (if set-default "Default backend: " "Workspace backend: ")
+                          (mapcar #'symbol-name names) nil t))))
+    (if set-default
+        (progn
+          (setq agent-repl-default-backend choice)
+          (message "agent-repl: default backend -> %s" choice))
+      (let ((ws (agent-repl--ws-current-name)))
+        (unless ws
+          (user-error "agent-repl-select-backend: no current workspace"))
+        (when (agent-repl--agent-running-p ws)
+          (user-error "agent-repl-select-backend: %s has a running agent — kill it first (the backend applies at the next start)" ws))
+        (agent-repl--ws-put ws :backend choice)
+        (agent-repl--state-save ws)
+        (message "agent-repl: %s backend -> %s" ws choice)))))
+
 ;;;; ---- Headless command construction --------------------------------------
 
 (defun agent-repl--backend-headless-cmd (backend model extra-args)

@@ -237,7 +237,7 @@ Returns (:needs-build t :install-script PATH) if the image is not built yet."
 SAVED is a parsed state-file plist (or nil).  Hydrates the
 non-env-struct keys that drive the tabline badge and drawer glyphs:
 `:priority', `:source-ws-dir', `:model', `:last-prompt-time',
-`:repl-state', `:saved-tab-index', `:fork-session-id',
+`:repl-state', `:saved-tab-index', `:backend', `:fork-session-id',
 `:last-prompt-summary', `:last-prompt-summary-at', `:worktree-p', and
 the `:merge-completed' / `:merge-failed' / `:merge-completed-at'
 bookkeeping.
@@ -275,6 +275,14 @@ remaining keys are written only when SAVED carries them."
   (agent-repl--ws-put ws :model
                        (or (and saved (plist-get saved :model))
                            (agent-repl--ws-get ws :model)))
+  ;; Backend: prefer the saved value, fall back to whatever is already in
+  ;; the plist (e.g., `agent-repl-select-backend' run before any
+  ;; state-save happened).  Restoring the backend across restarts is
+  ;; load-bearing: a codex workspace's session id resumes correctly only
+  ;; through the codex CLI.
+  (agent-repl--ws-put ws :backend
+                       (or (and saved (plist-get saved :backend))
+                           (agent-repl--ws-get ws :backend)))
   ;; Last-prompt-time: prefer saved value, fall back to whatever is
   ;; already in the plist.  Used by the drawer's detail view to show
   ;; "duration since last user message"; survives Emacs restarts so
