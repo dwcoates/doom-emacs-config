@@ -87,10 +87,30 @@ it to the WS perspective without displaying it."
 
 (defvar claude-repl--workspace-generation-watch nil)
 
+(defun claude-repl--drain-workspace-commands-files ()
+  "Process every workspace_commands_*.json currently in the output dir.
+Used to catch files that landed while the file-notify watch was down
+\(e.g. after the output directory was deleted and recreated, which
+invalidates the watch).  Returns the number of files processed."
+  (let* ((dir (expand-file-name claude-repl-workspace-commands-output-dir))
+         (files (when (file-directory-p dir)
+                  (directory-files dir t claude-repl-workspace-commands-file-regexp))))
+    (dolist (file files)
+      (claude-repl--log nil "drain-workspace-commands-files: processing file=%s" file)
+      (claude-repl--process-workspace-commands-file file))
+    (length files)))
+
 (defun claude-repl--workspace-commands-watch-handler (event)
   "Handle a file-notify EVENT for the workspace commands output directory.
 Dispatches to `claude-repl--process-workspace-commands-file' when a
-workspace_commands_*.json file is created, changed, or renamed."
+workspace_commands_*.json file is created, changed, or renamed.
+
+When the event is `stopped' (or the watched directory itself is
+`deleted' — both fire when `~/.claude/output' is removed and recreated,
+which silently invalidates the watch descriptor and would otherwise
+strand every future generated command file), the watch is re-armed via
+`claude-repl--register-workspace-commands-watch' and any files that
+landed during the gap are drained."
   (let* ((action (nth 1 event))
          ;; renamed events carry (descriptor renamed old-file new-file)
          ;; all other events carry (descriptor action file)
@@ -98,11 +118,28 @@ workspace_commands_*.json file is created, changed, or renamed."
                    (nth 3 event)
                  (nth 2 event))))
     (claude-repl--log nil "workspace-commands-watch-handler: action=%s file=%s" action file)
-    (if (and (memq action '(changed created renamed))
-             (string-prefix-p claude-repl-workspace-commands-file-prefix
-                              (file-name-nondirectory file)))
-        (claude-repl--process-workspace-commands-file file)
-      (claude-repl--log nil "workspace-commands-watch-handler: skipped (wrong action or wrong prefix)"))))
+    (cond
+     ((and (memq action '(changed created renamed))
+           (string-prefix-p claude-repl-workspace-commands-file-prefix
+                            (file-name-nondirectory file)))
+      (claude-repl--process-workspace-commands-file file))
+     ((or (eq action 'stopped)
+          ;; `deleted' of the watched dir ITSELF means the watch is lost;
+          ;; a `deleted' of an individual command file (routine cleanup
+          ;; after processing) must NOT trigger a re-arm.
+          (and (eq action 'deleted)
+               file
+               (string= (file-name-as-directory (expand-file-name file))
+                        (file-name-as-directory
+                         (expand-file-name claude-repl-workspace-commands-output-dir)))))
+      ;; The watched directory went away — re-arm and pick up anything
+      ;; written while the watch was dead so `SPC j o' keeps working.
+      (claude-repl--log nil "workspace-commands-watch-handler: watch lost (action=%s) — re-arming" action)
+      (claude-repl--register-workspace-commands-watch)
+      (let ((n (claude-repl--drain-workspace-commands-files)))
+        (claude-repl--log nil "workspace-commands-watch-handler: re-armed and drained %d pending file(s)" n)))
+     (t
+      (claude-repl--log nil "workspace-commands-watch-handler: skipped (wrong action or wrong prefix)")))))
 
 (defun claude-repl--register-workspace-commands-watch ()
   "Register a file-notify watch on ~/.claude/output/ for workspace command files.
