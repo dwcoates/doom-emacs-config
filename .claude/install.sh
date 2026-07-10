@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh — manage claude-repl hooks in ~/.claude/settings.json and
+# install.sh — manage agent-repl hooks in ~/.claude/settings.json and
 # install the workspace-* / local skills as symlinks under ~/.claude/skills.
 #
 # Subcommands:
@@ -85,11 +85,11 @@ _impl_in_nonmain_worktree() {
   return 1
 }
 
-# Skills checked into THIS (doom) repo, under modules/app/claude-repl/skills/.
+# Skills checked into THIS (doom) repo, under modules/app/agent-repl/skills/.
 # Symlinked into $SKILLS_DIR straight to the MAIN worktree's in-tree source —
 # NEVER the invoking (possibly linked) worktree, so the link survives a
 # worktree prune.
-LOCAL_SKILLS_SRC="$MAIN_WORKTREE/modules/app/claude-repl/skills"
+LOCAL_SKILLS_SRC="$MAIN_WORKTREE/modules/app/agent-repl/skills"
 LOCAL_SKILLS=(
   "debug-logs"
   "profile"
@@ -102,7 +102,7 @@ LOCAL_SKILLS=(
 # Manifest declaring each cached workspace-* skill as "name|canonical-impl".
 # The manifest is the single source of truth for where each skill lives;
 # install always links straight to that impl (no cache copy exists).
-SKILLS_MANIFEST="$(_canonpath "$SCRIPT_DIR/../modules/app/claude-repl/skills-cache")/manifest.sh"
+SKILLS_MANIFEST="$(_canonpath "$SCRIPT_DIR/../modules/app/agent-repl/skills-cache")/manifest.sh"
 
 # Link cached skill NAME to its canonical IMPL under $SKILLS_DIR.
 # NO fallback: a missing IMPL returns 1 so the caller can fail hard.  A
@@ -151,7 +151,7 @@ if { [ -f /.dockerenv ] || [ "${DOOM_SANDBOX:-}" = "1" ]; } \
     echo "[install.sh/sandbox] ERROR: skills manifest missing at $SKILLS_MANIFEST" >&2
     exit 1
   fi
-  # shellcheck source=../modules/app/claude-repl/skills-cache/manifest.sh
+  # shellcheck source=../modules/app/agent-repl/skills-cache/manifest.sh
   source "$SKILLS_MANIFEST"
   for entry in "${CACHED_SKILLS[@]}"; do
     IFS='|' read -r name impl <<< "$entry"
@@ -172,7 +172,7 @@ fi
 # --- Constants (full install path) ---
 SETTINGS="$HOME/.claude/settings.json"
 HOOKS_DIR="$HOME/.claude/hooks"
-HOOK_SCRIPTS_SRC="$SCRIPT_DIR/../modules/app/claude-repl/hooks"
+HOOK_SCRIPTS_SRC="$SCRIPT_DIR/../modules/app/agent-repl/hooks"
 
 # Pre-commit hook (ERT + boundary gate) installed into the repo's git
 # hooks dir by do_install below.
@@ -199,7 +199,16 @@ HOOKS=(
 
 # Marker identifying our managed pre-commit hook so install/uninstall can
 # refresh or remove it without touching a foreign pre-commit hook.
-PRECOMMIT_MARKER="CLAUDE_REPL_MANAGED_HOOK: claude-repl-precommit"
+PRECOMMIT_MARKER="AGENT_REPL_MANAGED_HOOK: agent-repl-precommit"
+# Legacy marker from before the agent-repl -> agent-repl rename; installed
+# copies in existing repos still carry it, so refresh/uninstall must keep
+# recognizing it as managed rather than warning "foreign".
+PRECOMMIT_MARKER_LEGACY="AGENT_REPL_MANAGED_HOOK: agent-repl-precommit"
+
+# Return 0 iff FILE carries either the current or the legacy managed marker.
+_is_managed_precommit() {
+  grep -q -e "$PRECOMMIT_MARKER" -e "$PRECOMMIT_MARKER_LEGACY" "$1" 2>/dev/null
+}
 
 # --- Helpers ---
 
@@ -293,7 +302,7 @@ do_install() {
     echo "[install] ERROR: skills manifest missing at $SKILLS_MANIFEST" >&2
     exit 1
   fi
-  # shellcheck source=../modules/app/claude-repl/skills-cache/manifest.sh
+  # shellcheck source=../modules/app/agent-repl/skills-cache/manifest.sh
   source "$SKILLS_MANIFEST"
   missing=0
   for entry in "${CACHED_SKILLS[@]}"; do
@@ -301,7 +310,7 @@ do_install() {
     link_skill_to_impl "$name" "$impl" "install" || missing=$((missing + 1))
   done
 
-  # Repo-local managed skills (under modules/app/claude-repl/skills/),
+  # Repo-local managed skills (under modules/app/agent-repl/skills/),
   # symlinked straight to the in-tree source so SKILL.md edits go live.
   if [ ! -d "$LOCAL_SKILLS_SRC" ]; then
     echo "[install] ERROR: local skills source dir not found: $LOCAL_SKILLS_SRC" >&2
@@ -332,13 +341,13 @@ do_install() {
           cp "$src_hook" "$dest_hook"
           chmod +x "$dest_hook"
           echo "[install] Installed pre-commit hook -> $dest_hook"
-        elif grep -q "$PRECOMMIT_MARKER" "$dest_hook" 2>/dev/null; then
+        elif _is_managed_precommit "$dest_hook"; then
           cp "$src_hook" "$dest_hook"
           chmod +x "$dest_hook"
           echo "[install] Refreshed managed pre-commit hook -> $dest_hook"
         else
           echo "[install] WARNING: foreign pre-commit hook at $dest_hook (skipped)"
-          echo "[install] To enable the claude-repl test gate, append the body of $src_hook to it."
+          echo "[install] To enable the agent-repl test gate, append the body of $src_hook to it."
         fi
       fi
     fi
@@ -395,7 +404,7 @@ do_uninstall() {
   # Remove cached-skill symlinks — only ours (pointing at the canonical
   # impl declared in the manifest).  Foreign files are left alone.
   if [ -f "$SKILLS_MANIFEST" ]; then
-    # shellcheck source=../modules/app/claude-repl/skills-cache/manifest.sh
+    # shellcheck source=../modules/app/agent-repl/skills-cache/manifest.sh
     source "$SKILLS_MANIFEST"
     for entry in "${CACHED_SKILLS[@]}"; do
       IFS='|' read -r name impl <<< "$entry"
@@ -427,7 +436,7 @@ do_uninstall() {
           hooks_path="$repo_top/$hooks_path"
         fi
         dest_hook="$hooks_path/pre-commit"
-        if [ -f "$dest_hook" ] && grep -q "$PRECOMMIT_MARKER" "$dest_hook" 2>/dev/null; then
+        if [ -f "$dest_hook" ] && _is_managed_precommit "$dest_hook"; then
           rm -f "$dest_hook"
           echo "[uninstall] Removed managed pre-commit hook: $dest_hook"
         fi

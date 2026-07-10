@@ -2,8 +2,8 @@
 .claude/sandbox/sandbox.log
 .claude/emacs/
 .claude-code-emacs-mcp.log
-.claude-repl-history
-.claude-repl-state
+.agent-repl-history
+.agent-repl-state
 .workspace-snapshot.el
 .projectile
 **/.DS_Store
