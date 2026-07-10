@@ -10,10 +10,10 @@
 Only add advice when going from 0 to 1; only remove when going from 1 to 0.")
 
 (defvar-local agent-repl-hide-overlay nil
-  "Overlay used to hide Claude CLI input box.")
+  "Overlay used to hide the agent CLI input box.")
 
 (defcustom agent-repl-hide-input-box nil
-  "When non-nil, hide the Claude CLI input box in the vterm buffer."
+  "When non-nil, hide the agent CLI input box in the vterm buffer."
   :type 'boolean
   :group 'agent-repl)
 
@@ -68,7 +68,7 @@ The region is computed by `agent-repl--hide-overlay-region'."
 
 (defun agent-repl--resolve-overlay-target-buffer ()
   "Return the appropriate buffer for overlay updates.
-When called from within a claude buffer, returns it directly.
+When called from within an agent buffer, returns it directly.
 Otherwise looks up the vterm buffer for the current workspace."
   (if (agent-repl--agent-buffer-p)
       (progn
@@ -79,7 +79,7 @@ Otherwise looks up the vterm buffer for the current workspace."
       (and ws (agent-repl--ws-get ws :vterm-buffer)))))
 
 (defun agent-repl--update-hide-overlay ()
-  "Update overlay to hide bottom lines of Claude vterm buffer.
+  "Update overlay to hide bottom lines of the agent vterm buffer.
 Resolves the target buffer, then deletes and recreates the overlay in it."
   (let ((buf (agent-repl--resolve-overlay-target-buffer)))
     (if (not (and buf (buffer-live-p buf)))
@@ -122,7 +122,7 @@ session releases it."
 ;;; User commands
 
 (defun agent-repl-toggle-hide-input-box ()
-  "Toggle hiding of Claude CLI's input box in the vterm buffer."
+  "Toggle hiding of the agent CLI's input box in the vterm buffer."
   (interactive)
   (agent-repl--log (agent-repl--ws-current-name) "toggle-hide-input-box -> %s" (not agent-repl-hide-input-box))
   (setq agent-repl-hide-input-box (not agent-repl-hide-input-box))
@@ -132,7 +132,7 @@ session releases it."
 ;;; Display and color utilities
 
 (defconst agent-repl--vterm-background-grey 15
-  "Greyscale level (0-255) used for Claude vterm buffer backgrounds.
+  "Greyscale level (0-255) used for agent vterm buffer backgrounds.
 Shared between `agent-repl--vterm-color-advice' and buffer setup code.")
 
 (defun agent-repl--grey-hex (n)
@@ -146,7 +146,7 @@ Shared between `agent-repl--vterm-color-advice' and buffer setup code.")
     (face-remap-add-relative 'fringe :background hex)))
 
 (defcustom agent-repl-vterm-font-scale 1.35
-  "Font size multiplier for Claude output (vterm) buffers.
+  "Font size multiplier for agent output (vterm) buffers.
 A number relative to the default face height, where 1.0 leaves the font
 unchanged and larger values enlarge it.  Applied buffer-locally via
 `face-remap-add-relative' on the `default' face when the vterm buffer is
@@ -161,9 +161,9 @@ Multiplies the default face height by `agent-repl-vterm-font-scale' via
   (unless (= agent-repl-vterm-font-scale 1.0)
     (face-remap-add-relative 'default :height agent-repl-vterm-font-scale)))
 
-;; Override vterm--get-color so claude vterm buffers get a black background.
+;; Override vterm--get-color so agent vterm buffers get a black background.
 ;; Solaire-mode advises this function and face-background ignores buffer-local
-;; remaps, so we hardcode black for claude buffers' default background case.
+;; remaps, so we hardcode black for agent buffers' default background case.
 (defun agent-repl--default-background-request-p (index args)
   "Return non-nil if INDEX and ARGS indicate a default background color request.
 Vterm uses index -1 for the default face.  The request is for background
@@ -174,7 +174,7 @@ when neither :foreground nor :inverse-video appear in ARGS."
 
 (defun agent-repl--vterm-color-advice (fn index &rest args)
   "Around-advice for `vterm--get-color'.
-Returns a dark background for Claude vterm buffers instead of letting
+Returns a dark background for agent vterm buffers instead of letting
 solaire-mode remap the default face."
   (let ((result (apply fn index args)))
     (if (and (agent-repl--default-background-request-p index args)

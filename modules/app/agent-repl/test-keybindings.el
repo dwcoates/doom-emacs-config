@@ -382,7 +382,7 @@ already missing from the cache — that would emit the spurious
 
 (ert-deftest agent-repl-test-list-agent-vterm-buffers-empty ()
   "list-agent-vterm-buffers should return nil when no matching buffers exist."
-  ;; Ensure no stray claude buffers
+  ;; Ensure no stray agent buffers
   (dolist (buf (buffer-list))
     (when (string-match-p agent-repl--vterm-buffer-re (buffer-name buf))
       (kill-buffer buf)))
@@ -769,14 +769,14 @@ this test doesn't pin."
       (should (equal updated "ws1")))))
 
 (ert-deftest agent-repl-test-apply-state-refresh-not-open-clears-non-thinking ()
-  "apply-state-refresh with claude not open should clear non-thinking states."
+  "apply-state-refresh with the agent not open should clear non-thinking states."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :done)
     (agent-repl-debug/--apply-state-refresh "ws1" nil)
     (should-not (agent-repl--ws-state "ws1"))))
 
 (ert-deftest agent-repl-test-apply-state-refresh-not-open-clears-thinking ()
-  "apply-state-refresh with claude not open clears :thinking.
+  "apply-state-refresh with the agent not open clears :thinking.
 The underlying vterm is gone, so no hook will ever fire to clear it
 naturally.  mark-dead-vterm clears :agent-state regardless of prior
 value and writes :repl-state :dead."
@@ -787,7 +787,7 @@ value and writes :repl-state :dead."
     (should (eq (agent-repl--ws-repl-state "ws1") :dead))))
 
 (ert-deftest agent-repl-test-apply-state-refresh-not-open-no-state ()
-  "apply-state-refresh with claude not open and no state should be a no-op."
+  "apply-state-refresh with the agent not open and no state should be a no-op."
   (agent-repl-test--with-clean-state
     (agent-repl-debug/--apply-state-refresh "ws1" nil)
     (should-not (agent-repl--ws-state "ws1"))))
@@ -895,7 +895,7 @@ var is unset, yielding the bare slug with no leading slash."
 ;;;; ---- Tests: agent-repl-debug/buffer-info ----
 
 (ert-deftest agent-repl-test-debug-buffer-info-with-buffers ()
-  "buffer-info should display info for all claude vterm buffers."
+  "buffer-info should display info for all agent vterm buffers."
   (let ((buf (get-buffer-create "*agent-panel-aabb0011*")))
     (unwind-protect
         (progn
@@ -913,8 +913,8 @@ var is unset, yielding the bare slug with no leading slash."
       (kill-buffer buf))))
 
 (ert-deftest agent-repl-test-debug-buffer-info-no-buffers ()
-  "buffer-info should show (none) when no claude buffers exist."
-  ;; Clean up any stray claude buffers
+  "buffer-info should show (none) when no agent buffers exist."
+  ;; Clean up any stray agent buffers
   (dolist (buf (buffer-list))
     (when (string-match-p agent-repl--vterm-buffer-re (buffer-name buf))
       (kill-buffer buf)))
@@ -1174,7 +1174,7 @@ deletion is routed through the helper so the contract test follows."
 ;;;; ---- Tests: --apply-state-refresh: not open, :permission clears ----
 
 (ert-deftest agent-repl-test-apply-state-refresh-not-open-clears-permission ()
-  "apply-state-refresh with claude not open should clear :permission state."
+  "apply-state-refresh with the agent not open should clear :permission state."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :permission)
     (agent-repl-debug/--apply-state-refresh "ws1" nil)
@@ -1183,7 +1183,7 @@ deletion is routed through the helper so the contract test follows."
 ;;;; ---- Tests: --apply-state-refresh: not open, :inactive clears ----
 
 (ert-deftest agent-repl-test-apply-state-refresh-not-open-clears-inactive ()
-  "apply-state-refresh with claude not open should clear :inactive state."
+  "apply-state-refresh with the agent not open should clear :inactive state."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set "ws1" :inactive)
     (agent-repl-debug/--apply-state-refresh "ws1" nil)
@@ -1821,7 +1821,7 @@ otherwise a future trim could silently re-break workspace-visit nav."
 (ert-deftest agent-repl-test-vterm-shadow-keys-covers-scroll-pair ()
   "The unmap list must include `C-S-j' / `C-S-k' — the global scroll-output
 chords — so vterm doesn't capture them via `vterm--self-insert' when point
-sits inside the Claude vterm buffer."
+sits inside the agent vterm buffer."
   (should (member "C-S-j" agent-repl--vterm-shadow-keys))
   (should (member "C-S-k" agent-repl--vterm-shadow-keys)))
 

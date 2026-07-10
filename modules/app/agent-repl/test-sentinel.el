@@ -1194,7 +1194,7 @@ This is the regression guard for phantom ❓ appearing after the user is done."
         (should (eq (agent-repl--ws-state "ws1") :done))))))
 
 (ert-deftest agent-repl-test-on-permission-event-init-no-op ()
-  "on-permission-event must no-op when state is :init (Claude not yet ready)."
+  "on-permission-event must no-op when state is :init (the agent not yet ready)."
   (agent-repl-test--with-clean-state
     (let ((set-called nil))
       (agent-repl--ws-set "ws1" :init)
@@ -1205,7 +1205,7 @@ This is the regression guard for phantom ❓ appearing after the user is done."
         (should (eq (agent-repl--ws-state "ws1") :init))))))
 
 (ert-deftest agent-repl-test-on-permission-event-nil-state-no-op ()
-  "on-permission-event must no-op when state is nil (workspace has no claude session)."
+  "on-permission-event must no-op when state is nil (workspace has no agent session)."
   (agent-repl-test--with-clean-state
     (let ((set-called nil))
       (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)

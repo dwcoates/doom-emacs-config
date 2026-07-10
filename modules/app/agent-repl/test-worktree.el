@@ -725,7 +725,7 @@ the rev-parse comparison and the checkout invocation."
 Guards against regressing the user-visible behavior fix: the profiler
 report buffer must still be created (so we can scrape its text) but no
 window should pop up for the user, since the report is only forwarded
-back to the requesting Claude session."
+back to the requesting agent session."
   (let ((seen-action :unset))
     (cl-letf (((symbol-function 'profiler-stop) (lambda () nil))
               ((symbol-function 'profiler-report)
@@ -1198,7 +1198,7 @@ merge-completion-only behavior owned by `--workspace-merge-do'."
 
 (ert-deftest agent-repl-test-handle-close-command-routes-through-gns-gating ()
   "`--handle-close-command' must dispatch via `--gns-sockets-close-then'
-so the in-workspace Claude is sent `/gns-sockets close' and given a
+so the in-workspace agent is sent `/gns-sockets close' and given a
 chance to release sockets before its vterm dies."
   (let ((gating-ws :unset)
         (gating-teardown :unset))
@@ -1335,7 +1335,7 @@ Models a workspace whose worktree was removed by `finish'."
 
 (ert-deftest agent-repl-test-gns-sockets-close-then-no-vterm-runs-teardown-directly ()
   "Without a live vterm buffer, `--gns-sockets-close-then' must run the
-teardown thunk immediately — there is no Claude to drain."
+teardown thunk immediately — there is no agent to drain."
   (agent-repl-test--with-clean-state
     (puthash "ws" '() agent-repl--workspaces)
     (let ((called nil)
@@ -4132,7 +4132,7 @@ emit a spurious git error."
         (should-not abort-called)))))
 
 (ert-deftest agent-repl-test-workspace-merge-async-on-conflict-error-reenqueues-to-back ()
-  "A `agent-repl-merge-conflict-error' is the Claude-rejected-the-conflict
+  "A `agent-repl-merge-conflict-error' is the agent-rejected-the-conflict
 case; the workspace re-enters the queue at the BACK so sibling workspaces
 get a turn before this one is retried."
   (agent-repl-test--with-clean-state
@@ -4209,7 +4209,7 @@ back out and loop the same failure."
   "The deferred main-thread thunk calls
 `agent-repl--dispatch-prompt-command' with a prompt that embeds the
 error and ends with the analyze-only directive.  Without this the
-workspace's claude has no in-band signal that a merge failed."
+workspace's agent has no in-band signal that a merge failed."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-empty-merge-queue
       (let ((deferred-thunks nil)
@@ -4980,7 +4980,7 @@ receives nil so the workspace uses bare-metal by default."
 ;;;; ---- Tests: setup-worktree-session no-agent branch ----
 
 (ert-deftest agent-repl-test-setup-worktree-session-boots-claude-by-default ()
-  "Without NO-AGENT, setup starts Claude via `initialize-agent'."
+  "Without NO-AGENT, setup starts the agent via `initialize-agent'."
   (let ((init-agent-called nil)
         (init-env-called nil))
     (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
@@ -5029,7 +5029,7 @@ the tab/drawer surface the failure instead of it vanishing silently."
       (should (equal recorded '("ws" . :start-failed))))))
 
 (ert-deftest agent-repl-test-setup-worktree-session-no-agent-skips-boot ()
-  "With NO-AGENT, setup hydrates env via `initialize-ws-env' and never boots Claude."
+  "With NO-AGENT, setup hydrates env via `initialize-ws-env' and never boots the agent."
   (let ((init-agent-called nil)
         (init-env-called nil))
     (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
@@ -6582,7 +6582,7 @@ minibuffer read rather than erroring or spawning name generation."
 
 (ert-deftest agent-repl-test-create-worktree-workspace-blank-prompt-creates-worktree-no-agent ()
   "An empty preemptive prompt creates the worktree via
-`agent-repl--do-create-worktree-workspace' with NO-AGENT = t (Claude
+`agent-repl--do-create-worktree-workspace' with NO-AGENT = t (the agent
 not auto-booted) instead of spawning name generation."
   (agent-repl-test--with-clean-state
     (let ((captured-name nil)
@@ -6964,7 +6964,7 @@ Supports bases other than origin/master without hard-coding the ref."
       (should (equal fetch-args '("fetch" "origin" "develop"))))))
 
 (ert-deftest agent-repl-test-do-create-fork-skips-fetch-regardless-of-base ()
-  "FORK-SESSION-ID always skips fetch (Claude session-restore flow).
+  "FORK-SESSION-ID always skips fetch (agent session-restore flow).
 Even if someone passed an origin/ base-commit by mistake, the fork
 path short-circuits to avoid disturbing the fork source's refs."
   (let ((fetch-called nil))
@@ -7145,7 +7145,7 @@ Covers the full call the interactive `SPC TAB n' path builds up."
 ;;;; ---- Tests: workspace-merge default selection ----
 
 (ert-deftest agent-repl-test-workspace-merge-defaults-to-last-visited-claude-ws ()
-  "workspace-merge pre-selects the most recently visited claude workspace."
+  "workspace-merge pre-selects the most recently visited agent workspace."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "current" :project-dir "/tmp/cur")
     (agent-repl--ws-put "ws-a" :project-dir "/tmp/a")
@@ -7168,7 +7168,7 @@ Covers the full call the interactive `SPC TAB n' path builds up."
   "workspace-merge skips workspaces not registered in agent-repl--workspaces."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "current" :project-dir "/tmp/cur")
-    ;; Only ws-b is a claude workspace; ws-a is a plain workspace.
+    ;; Only ws-b is an agent workspace; ws-a is a plain workspace.
     (agent-repl--ws-put "ws-b" :project-dir "/tmp/b")
     (let ((agent-repl--workspace-history '("ws-a" "ws-b" "current"))
           (captured-default nil))
@@ -7609,7 +7609,7 @@ just aborted."
 
 (ert-deftest agent-repl-test-workspace-merge-do-routes-close-through-gns-gating ()
   "Successful merge must dispatch the editor-side close via
-`--gns-sockets-close-then' so the in-workspace Claude is sent
+`--gns-sockets-close-then' so the in-workspace agent is sent
 `/gns-sockets close' before its vterm dies.  The teardown thunk
 forwarded to the gate must call `--close-workspace' with
 `preserve-entry'."
@@ -9197,7 +9197,7 @@ implement, and we do not want to spawn a useless workspace."
 
 (ert-deftest agent-repl-test-create-doom-oneshot-passes-no-fork-from ()
   "doom-oneshot is not a fork — fork-from must be nil so the new workspace
-starts a fresh Claude session rather than resuming someone else's."
+starts a fresh agent session rather than resuming someone else's."
   (agent-repl-test--with-clean-state
     (let ((captured-fork-from :unset))
       (cl-letf (((symbol-function 'read-from-minibuffer)
@@ -10103,7 +10103,7 @@ AGENTS.md `No External Processes or External State in Tests')."
                    "deadbeefcafef00ddeadbeefcafef00ddeadbeef"))))
 
 (ert-deftest agent-repl-test-format-merge-failure-prompt-embeds-error ()
-  "Prompt includes the error tuple via `%S' so claude sees the full shape
+  "Prompt includes the error tuple via `%S' so the agent sees the full shape
 \(symbol + data) for analysis."
   (let ((prompt (agent-repl--format-merge-failure-prompt
                  '(error "boom"))))
@@ -10111,7 +10111,7 @@ AGENTS.md `No External Processes or External State in Tests')."
     (should (string-match-p "error" prompt))))
 
 (ert-deftest agent-repl-test-format-merge-failure-prompt-contains-workspace-merge-retry-directive ()
-  "Prompt directs claude to run /workspace-merge again — the skill's
+  "Prompt directs the agent to run /workspace-merge again — the skill's
 rebase step is more likely to resolve conflicts than a raw retry."
   (let ((prompt (agent-repl--format-merge-failure-prompt
                  '(error "boom"))))
@@ -10362,7 +10362,7 @@ implement, and we do not want to spawn a useless workspace."
 
 (ert-deftest agent-repl-test-explanation-engine-oneshot-passes-no-fork-from ()
   "The explanation-engine one-shot is not a fork — fork-from must be nil
-so the new workspace starts a fresh Claude session rather than resuming
+so the new workspace starts a fresh agent session rather than resuming
 someone else's."
   (agent-repl-test--with-clean-state
     (let ((captured-fork-from :unset))

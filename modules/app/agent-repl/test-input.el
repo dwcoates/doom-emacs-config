@@ -972,7 +972,7 @@ metaprompt must NOT carry the old main-body emoji restriction."
                               agent-repl-command-prefix)))
 
 (ert-deftest agent-repl-test-command-prefix-omits-inline-code-formatting-directive ()
-  "The inline-code-formatting directive was dropped because it confused Claude,
+  "The inline-code-formatting directive was dropped because it confused the agent,
 so the metaprompt must NOT carry it any longer."
   (should-not (string-match-p
                "standard markdown inline code spawns"
@@ -1068,11 +1068,11 @@ than inline in input.el."
 
 (ert-deftest agent-repl-test-internal-command-prefix-is-plain-read-directive ()
   "`agent-repl--command-prefix' must be a plain read-the-file instruction.
-The metaprompt body AND its wrapper bookends are now read by Claude from
+The metaprompt body AND its wrapper bookends are now read by the agent from
 `agent-repl-metaprompt-file-symlink'; neither the body nor the wrapper
 markers must be embedded inline in the derived prefix string, and the
 inline prefix must NOT use \"metaprompt\" as a conceptual framing so it
-cannot confuse Claude into refusing to read the file (the bare filename
+cannot confuse the agent into refusing to read the file (the bare filename
 inside the path is allowed and unavoidable)."
   (should (stringp agent-repl--command-prefix))
   ;; Plain read-directive is present.
@@ -1096,7 +1096,7 @@ inside the path is allowed and unavoidable)."
   "The metaprompt .md file must contain the wrapper bookend markers.
 These used to live in the inline prefix template but were moved into the
 file body so the inline prefix can be a plain, metaprompt-free read-the-file
-directive that Claude does not refuse to act on."
+directive that the agent does not refuse to act on."
   (should (string-match-p "<<\\*start of metaprompt-read-directive\\*"
                           agent-repl-command-prefix))
   (should (string-match-p "\\*metaprompt-read-directive over"
@@ -1104,16 +1104,16 @@ directive that Claude does not refuse to act on."
 
 (ert-deftest agent-repl-test-internal-command-prefix-references-symlink ()
   "`agent-repl--command-prefix' must embed `agent-repl-metaprompt-file-symlink'.
-The wrapper's job is to point Claude at the user-facing symlink path so
+The wrapper's job is to point the agent at the user-facing symlink path so
 the metaprompt body is loaded from there."
   (should (string-match-p
            (regexp-quote agent-repl-metaprompt-file-symlink)
            agent-repl--command-prefix)))
 
 (ert-deftest agent-repl-test-internal-command-prefix-read-directive-is-unconditional ()
-  "The inline directive must instruct Claude to read the file even if already loaded.
+  "The inline directive must instruct the agent to read the file even if already loaded.
 The whole point of the periodic re-injection is to force a fresh read, so
-the inline prefix must explicitly tell Claude to read the file even if it
+the inline prefix must explicitly tell the agent to read the file even if it
 has previously done so during the session and even if it has not changed."
   (should (string-match-p "even if you have previously done so during this session"
                           agent-repl--command-prefix))
@@ -1642,7 +1642,7 @@ The :thinking transition belongs to the prompt_submit Claude Code hook
   "When input buffer is empty, send raw ETX (Ctrl-C) byte directly to vterm process.
 Uses `process-send-string' rather than `vterm-send-key' because the latter
 routes through libvterm's key translation and can dispatch SIGINT instead
-of the literal ETX keystroke Claude needs to clear its input line."
+of the literal ETX keystroke the agent needs to clear its input line."
   (agent-repl-test--with-clean-state
     (let ((sent-bytes nil))
       (agent-repl-test--with-temp-buffer "*agent-panel-discard-test*"
@@ -1656,7 +1656,7 @@ of the literal ETX keystroke Claude needs to clear its input line."
             (should (equal sent-bytes '((fake-proc . "\C-c"))))))))))
 
 (ert-deftest agent-repl-test-discard-or-send-interrupt-nonempty-discards-and-clears-vterm ()
-  "When input buffer has text, BOTH discard the input locally AND clear Claude's prompt.
+  "When input buffer has text, BOTH discard the input locally AND clear the agent's prompt.
 Previously only cleared the local buffer; this regressed real-world usage
 where the user pressed C-c C-c expecting a full reset."
   (agent-repl-test--with-clean-state
@@ -1709,7 +1709,7 @@ Previously `string-blank-p' treated whitespace-only as empty and skipped
 
 (ert-deftest agent-repl-test-discard-or-send-interrupt-empty-in-slash-mode-clears-stack ()
   "When in slash mode (empty buffer, stack populated), C-c C-c exits slash mode.
-The raw Ctrl-C clears Claude's prompt line; our record of direct sends
+The raw Ctrl-C clears the agent's prompt line; our record of direct sends
 must follow so subsequent keystrokes don't continue forwarding and the
 next slash-return doesn't see stale accumulated input."
   (agent-repl-test--with-clean-state
@@ -1729,10 +1729,10 @@ next slash-return doesn't see stale accumulated input."
             (should (equal sent-bytes '((fake-proc . "\C-c"))))))))))
 
 (ert-deftest agent-repl-test-discard-or-send-interrupt-thinking-nonempty-suppresses-ctrl-c ()
-  "When Claude is :thinking AND input buffer is non-empty, C-c C-c clears
+  "When the agent is :thinking AND input buffer is non-empty, C-c C-c clears
 the local buffer + saves history but DOES NOT send raw Ctrl-C to vterm.
-This lets the user draft a message while Claude works and discard the
-draft without interrupting Claude's in-flight response."
+This lets the user draft a message while the agent works and discard the
+draft without interrupting the agent's in-flight response."
   (agent-repl-test--with-clean-state
     (let ((sent-bytes nil)
           (evil-called nil))
@@ -1757,7 +1757,7 @@ draft without interrupting Claude's in-flight response."
             (should (null sent-bytes))))))))
 
 (ert-deftest agent-repl-test-discard-or-send-interrupt-thinking-empty-still-sends-ctrl-c ()
-  "When Claude is :thinking but the input buffer is empty, C-c C-c still
+  "When the agent is :thinking but the input buffer is empty, C-c C-c still
 sends raw Ctrl-C to vterm — the suppression only applies when there is
 local content to discard."
   (agent-repl-test--with-clean-state
@@ -1774,7 +1774,7 @@ local content to discard."
             (should (equal sent-bytes '((fake-proc . "\C-c"))))))))))
 
 (ert-deftest agent-repl-test-discard-or-send-interrupt-idle-nonempty-sends-ctrl-c ()
-  "When Claude is :idle (not :thinking) AND input buffer is non-empty,
+  "When the agent is :idle (not :thinking) AND input buffer is non-empty,
 C-c C-c sends raw Ctrl-C AND clears the buffer — the historical full-reset
 behavior is preserved outside the :thinking state."
   (agent-repl-test--with-clean-state
@@ -1958,7 +1958,7 @@ send whenever the prefix counter aligned with the period."
 
 (ert-deftest agent-repl-test-send-forwards-bare-ret-when-input-buffer-empty ()
   "`agent-repl--send' forwards a bare RET to vterm when the input buffer is empty.
-RET on an empty input should still reach Claude — useful for navigating
+RET on an empty input should still reach the agent — useful for navigating
 permission prompts, menus, and confirmations."
   (agent-repl-test--with-clean-state
     (let ((ret-buf nil))
@@ -2004,7 +2004,7 @@ permission prompts, menus, and confirmations."
 (ert-deftest agent-repl-test-send-forwards-bare-ret-when-nil-raw-no-input-buffer ()
   "`agent-repl--send' forwards a bare RET to vterm when no input buffer is registered.
 Prompt is nil and no input buffer means raw is nil and the empty-input branch
-should still forward RET so the keystroke reaches Claude."
+should still forward RET so the keystroke reaches the agent."
   (agent-repl-test--with-clean-state
     (let ((ret-buf nil))
       (agent-repl-test--with-temp-buffer "*agent-panel-bare-ret-nil-raw-vterm*"
@@ -2018,7 +2018,7 @@ should still forward RET so the keystroke reaches Claude."
 (ert-deftest agent-repl-test-send-bare-ret-transitions-permission-to-thinking ()
   "`agent-repl--send' transitions :permission -> :thinking on a bare-RET send.
 Answering a permission prompt by pressing RET on an empty input buffer is the
-only signal that Claude is now working on the permitted action.  The flip
+only signal that the agent is now working on the permitted action.  The flip
 lives inside `agent-repl--vterm-send-return-key-logged' (the lowest-level
 return primitive), so the real primitive must run — `vterm--term' is set
 buffer-locally so the delivered branch is taken."
@@ -2428,7 +2428,7 @@ then truncated to `/c' fires no /clear hook."
   "When input buffer has pasted text, slash-return sends it via bracketed paste.
 Pasted text bypasses slash-mode's self-insert-command remap and lands in the
 input buffer; slash-return must forward it to vterm so it concatenates with the
-already-forwarded direct-insert chars on Claude's prompt line."
+already-forwarded direct-insert chars on the agent's prompt line."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-slash-return-paste*"
       (setq-local agent-repl--slash-stack '("c" "/"))
@@ -2480,7 +2480,7 @@ Preserves the pre-existing behavior for the typical direct-send path
 
 (ert-deftest agent-repl-test-slash-return-whitespace-only-buffer-sends-pasted ()
   "Whitespace-only buffer is treated as pasted content (non-empty after `string-empty-p').
-Whitespace can be meaningful in Claude prompts; slash-return must not silently
+Whitespace can be meaningful in agent prompts; slash-return must not silently
 drop it.  Verifies the empty/non-empty check uses `string-empty-p' on raw
 buffer-string, not a trimmed view."
   (agent-repl-test--with-clean-state
@@ -2990,13 +2990,13 @@ binding falls through.  Asserts the local key is unbound in the map."
 (ert-deftest agent-repl-test-input-map-does-not-shadow-csj ()
   "`agent-repl-input-mode-map' must not bind `C-S-j' so the global
 scroll-output binding falls through everywhere, including in the
-Claude input buffer."
+agent input buffer."
   (should-not (lookup-key agent-repl-input-mode-map (kbd "C-S-j"))))
 
 (ert-deftest agent-repl-test-input-map-does-not-shadow-csk ()
   "`agent-repl-input-mode-map' must not bind `C-S-k' so the global
 scroll-output binding falls through everywhere, including in the
-Claude input buffer."
+agent input buffer."
   (should-not (lookup-key agent-repl-input-mode-map (kbd "C-S-k"))))
 
 ;;; send-char with dead vterm buffer
@@ -3523,7 +3523,7 @@ Mirrors the append-to-input-buffer dead-buffer case."
 (ert-deftest agent-repl-test-command-prefix-contains-text ()
   "`agent-repl--command-prefix' should contain the plain read-directive text.
 Must NOT use \"metaprompt\" as a conceptual framing — that terminology
-was confusing Claude into refusing to read the file, so the inline prefix
+was confusing the agent into refusing to read the file, so the inline prefix
 is intentionally phrased as a generic \"read this file\" instruction
 (the bare filename inside the path is allowed and unavoidable)."
   (should (stringp agent-repl--command-prefix))
@@ -3920,7 +3920,7 @@ The return was never sent, so the permission prompt is still active."
 (ert-deftest agent-repl-test-slash-vterm-send-flips-permission-to-thinking ()
   "`agent-repl--slash-vterm-send' flips :permission -> :thinking on a forward.
 A bare digit answering a permission prompt enters passthrough mode and is
-committed by Claude's dialog IMMEDIATELY — no RET ever follows — so the
+committed by the agent's dialog IMMEDIATELY — no RET ever follows — so the
 char forward itself is the only observable answer signal."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer "*agent-panel-slash-send-perm*"

@@ -56,7 +56,7 @@ because Claude Code expands it at dispatch time.
 
 `PermissionRequest' is the real-time permission-dialog signal: Claude
 Code fires it the moment the permission UI appears, so the tab flips
-to `:permission' WHILE Claude is waiting on the user rather than after.
+to `:permission' WHILE the agent is waiting on the user rather than after.
 The older `Notification' permission_prompt entry can lag the dialog
 (it fires when Claude Code dispatches a NOTIFICATION about the prompt,
 which is the 60s-idle nudge on \"needs your attention\"), so it's kept
@@ -452,7 +452,7 @@ swallowing — callers wanting startup robustness wrap this in their own
     ;; PermissionRequest: when missing, the `:permission' tab transition
     ;; falls back to the `Notification' permission_prompt signal, which
     ;; can lag the dialog appearance by up to the 60s-idle nudge window.
-    ;; Tabs still eventually flip yellow — just not at the moment Claude
+    ;; Tabs still eventually flip yellow — just not at the moment the agent
     ;; starts waiting.  Warn rather than error so users on older
     ;; Claude Code versions (where PermissionRequest may not exist) are
     ;; not blocked.

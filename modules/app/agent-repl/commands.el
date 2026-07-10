@@ -27,25 +27,25 @@
 
 (defcustom agent-repl-explain-diff-prompt
   "please explain the changes"
-  "Prompt sent to Claude by explain-diff commands."
+  "Prompt sent to the agent by explain-diff commands."
   :type 'string
   :group 'agent-repl)
 
 (defcustom agent-repl-update-pr-diff-prompt
   "please update the PR description"
-  "Prompt sent to Claude by update-pr-diff commands."
+  "Prompt sent to the agent by update-pr-diff commands."
   :type 'string
   :group 'agent-repl)
 
 (defcustom agent-repl-update-pr-prompt
   "please update the PR description for the PR corresponding to our branch"
-  "Prompt sent to Claude by `agent-repl-update-pr'."
+  "Prompt sent to the agent by `agent-repl-update-pr'."
   :type 'string
   :group 'agent-repl)
 
 (defcustom agent-repl-rebase-onto-origin-master-prompt
   "please rebase the current branch onto origin/master (I already ran `git fetch origin` for you), resolving any conflicts as appropriate"
-  "Prompt sent to Claude by `agent-repl-rebase-onto-origin-master'."
+  "Prompt sent to the agent by `agent-repl-rebase-onto-origin-master'."
   :type 'string
   :group 'agent-repl)
 
@@ -59,31 +59,31 @@ any flag whose exclusion symbol appears in its EXCLUDED argument."
 
 (defcustom agent-repl-run-tests-prompt
   "please run tests, and summarize the issues found and probable causes"
-  "Prompt sent to Claude by run-tests commands."
+  "Prompt sent to the agent by run-tests commands."
   :type 'string
   :group 'agent-repl)
 
 (defcustom agent-repl-run-lint-prompt
   "please run lint, and address any issues found"
-  "Prompt sent to Claude by run-lint commands."
+  "Prompt sent to the agent by run-lint commands."
   :type 'string
   :group 'agent-repl)
 
 (defcustom agent-repl-run-all-prompt
   "please run lint and tests, and address any issues found for both"
-  "Prompt sent to Claude by run-all commands."
+  "Prompt sent to the agent by run-all commands."
   :type 'string
   :group 'agent-repl)
 
 (defcustom agent-repl-test-quality-prompt
   "please analyze tests to ensure they are following AAA standards for testing. Please be sure to confine your analysis to the specified context (branch, HEAD, uncommitted changes, etc). They should be employing DRY principle for refactoring as well (extract repeated code into helpers, use builder pattern to facilitate test DSL). We should only be testing one thing per test (can extract tests into subtests to ensure this). Ensure that tests are correctly grouped into subtests, and that very similar/redundant suites are merged. We should not be using ANY timing logic in tests. If there is any timing logic found, surface it. It is FINE for potentially hanging tests to become unblocked with ERROR after some amount of time -- we are only concerned with not attempting to ballpark synchronization via time. We should be careful to NOT reduce the production code path coverage of our refactors -- for example, we should avoid removing asserts in the effort to 'only test one thing', and instead prefer adding a new subtest. Please spin up ONE AGENT PER TEST FILE!"
-  "Prompt sent to Claude by test-quality commands."
+  "Prompt sent to the agent by test-quality commands."
   :type 'string
   :group 'agent-repl)
 
 (defcustom agent-repl-test-coverage-prompt
   "Please be sure to confine your analysis to the specified context (branch, HEAD, uncommitted changes, etc). <<IF AND ONLY IF YOU JUST PRODUCED A LIST OF EDGE CASES>>: write up a plan for producing a unit test that covers each and every one of the edge cases you just enumerated. Each test should cover *precisely* one edge case. Each test file should be worked on by a separate agent. <<IF AND ONLY IF YOU DID NOT -- I REPEAT, NOT -- JUST PRODUCE A LIST OF EDGE CASES IN YOUR LAST RESPONSE MESSAGE>>: please enumerate each and every edge cases introduced or modified by each and every function added or modified."
-  "Prompt sent to Claude by test-coverage commands."
+  "Prompt sent to the agent by test-coverage commands."
   :type 'string
   :group 'agent-repl)
 
@@ -433,8 +433,8 @@ from prompting for tool approval headlessly."
 (defcustom agent-repl-explain-config-width-fraction 0.5
   "Fraction of frame width for the explain-config right-side popup.
 Only applies when the popup falls back to its own side window (i.e.
-when the claude output window is not visible to take over).  Width
-is inherited from the claude output window when the popup takes
+when the agent output window is not visible to take over).  Width
+is inherited from the agent output window when the popup takes
 that window over — see `agent-repl--explain-config-show'.  The
 drawer is untouched in either branch."
   :type 'float
@@ -456,7 +456,7 @@ host frame's width."
      (no-delete-other-windows . t)
      (no-other-window . nil)))
   "Fallback display action for the explain-config output buffer.
-Used only when the claude output window is not visible to take
+Used only when the agent output window is not visible to take
 over — when it is, `--show' reuses it directly via
 `set-window-buffer' and bypasses `display-buffer' entirely.  The
 drawer is never touched.  Reconciled across workspace switches via
@@ -473,11 +473,11 @@ per-workspace artifact — mirrors the drawer's own
 `--global-visible-p' pattern.")
 
 (defvar agent-repl--explain-config-replaced-window nil
-  "When the popup has taken over the claude output window, holds (WIN . PREV-BUF).
-WIN is the live claude output window the popup took over; PREV-BUF
+  "When the popup has taken over the agent output window, holds (WIN . PREV-BUF).
+WIN is the live agent output window the popup took over; PREV-BUF
 is the buffer that window was displaying before takeover (the
-claude output buffer for the current workspace).  Nil when the
-popup is hosted in its own side window (i.e. the claude output
+agent output buffer for the current workspace).  Nil when the
+popup is hosted in its own side window (i.e. the agent output
 window was not visible at show time).  Consumed by
 `agent-repl--explain-config-hide' to restore the prior buffer in
 the same window position when the popup closes.")
@@ -498,11 +498,11 @@ changed.  This forces the resize on every show — mirrors the drawer's
          ((< delta 0) (shrink-window (abs delta) t)))))))
 
 (defun agent-repl--explain-config-current-agent-output-window ()
-  "Return the live claude output window in the selected frame, or nil.
-Looks up the current workspace's claude output panel via
+  "Return the live agent output window in the selected frame, or nil.
+Looks up the current workspace's agent output panel via
 `agent-repl-window--panel-window' with the `:vterm' key (the
 existing panel-lookup key — note we do NOT introduce that name
-here, the popup itself only deals in \"claude output\").  Guards
+here, the popup itself only deals in \"agent output\").  Guards
 on `fboundp' so callers in load order before panels.el (e.g. early
 test harnesses) get nil instead of a void-function error."
   (and (fboundp 'agent-repl-window--panel-window)
@@ -510,7 +510,7 @@ test harnesses) get nil instead of a void-function error."
 
 (defun agent-repl--explain-config-take-over-agent-output-window (output-win buf)
   "Swap OUTPUT-WIN's buffer for BUF and record the original for restoration.
-The claude output panel is a dedicated window, so this temporarily
+The agent output panel is a dedicated window, so this temporarily
 clears `window-dedicated-p' before `set-window-buffer' — otherwise
 the swap errors.  The pre-swap buffer is stashed in
 `agent-repl--explain-config-replaced-window' so
@@ -525,7 +525,7 @@ the swap errors.  The pre-swap buffer is stashed in
 (defun agent-repl--explain-config-restore-replaced-window ()
   "Restore the buffer in the window the popup took over, if any.
 No-op when no window was replaced or when the window or its prior
-buffer is no longer live.  Re-applies the claude output window
+buffer is no longer live.  Re-applies the agent output window
 hardening (dedicate / size-fix / delete-protect) on success so the
 restored window matches its original recipe."
   (when-let ((cell agent-repl--explain-config-replaced-window))
@@ -547,9 +547,9 @@ Display priority:
 
   1. If a window already displays the buffer, leave it in place
      (and re-apply the side-window width unless it is the stolen
-     claude output window — stolen windows inherit the prior
+     agent output window — stolen windows inherit the prior
      window's width).
-  2. Otherwise, if the claude output window is visible, take it
+  2. Otherwise, if the agent output window is visible, take it
      over via `set-window-buffer' and record the prior buffer so
      `--hide' can restore it.
   3. Otherwise, fall back to the right-side popup display action.
@@ -580,7 +580,7 @@ Clears the global visible-flag so the popup no longer auto-appears
 on workspace switches.  Keeps the buffer itself alive — only its
 visibility is toggled.
 
-If `--show' took over the claude output window, restores the prior
+If `--show' took over the agent output window, restores the prior
 buffer in that window via `--restore-replaced-window'.  Any
 remaining windows still displaying the explain-config buffer (e.g.
 side-window fallbacks) are deleted.  The drawer is never touched."
@@ -654,7 +654,7 @@ trigger before the ignore-bindings take effect."
 Mirrors `agent-repl-drawer--ensure-visible-on-persp-switch' — when
 the flag says show but the popup is missing in the activated persp,
 re-display it via `agent-repl--explain-config-show' (which will
-take over the new persp's claude output window if visible, else
+take over the new persp's agent output window if visible, else
 fall back to the side-window display action).  When the flag says
 hide but persp-mode restored a stale window, delete it.
 

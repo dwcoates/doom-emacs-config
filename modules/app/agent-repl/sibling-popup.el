@@ -1,22 +1,22 @@
-;;; sibling-popup.el --- bottom popup that respects claude panels -*- lexical-binding: t; -*-
+;;; sibling-popup.el --- bottom popup that respects agent panels -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
 ;; Display-buffer helpers for "sibling" popups that should NOT span
-;; under the claude panels (vterm + input column on the right) when
+;; under the agent panels (vterm + input column on the right) when
 ;; those panels are open.
 ;;
 ;; The Doom popup default for `:side 'bottom' uses a frame-wide side
 ;; window, so a bottom popup (e.g. the normal `*doom:vterm*' opened by
-;; `SPC o t') spans the entire frame width — overlapping the claude
+;; `SPC o t') spans the entire frame width — overlapping the agent
 ;; vterm / input column on the right.
 ;;
 ;; `agent-repl-sibling-popup-display-fn' is a `display-buffer' action
-;; that, when claude panels are visible, instead splits BELOW the
+;; that, when agent panels are visible, instead splits BELOW the
 ;; leftmost non-side, non-agent-panel "work" window.  The new popup
 ;; window inherits the work window's column width, so it stops on the
-;; right edge of the work area rather than spanning under claude.  When
-;; claude panels are NOT visible, it falls back to the standard Doom
+;; right edge of the work area rather than spanning under the agent.  When
+;; agent panels are NOT visible, it falls back to the standard Doom
 ;; bottom side-window behavior so callers can install it as a
 ;; drop-in replacement for `:side 'bottom'.
 
@@ -32,10 +32,10 @@
   "Return the work window to split below for a sibling bottom popup.
 
 Returns the leftmost live, non-side, non-agent-panel window on FRAME
-\(defaults to the selected frame\) when the claude vterm panel is
+\(defaults to the selected frame\) when the agent vterm panel is
 visible — that is the work column whose width the popup should match.
 
-Returns nil when claude panels are not visible, signalling to callers
+Returns nil when agent panels are not visible, signalling to callers
 that the default frame-wide bottom popup behavior should apply."
   (let* ((vterm-buf (agent-repl-window--panel-buffer :vterm))
          (vterm-win (and vterm-buf

@@ -486,7 +486,7 @@ Returns one of (in precedence order; first match wins):
   :dead           — `:repl-state' is `:dead' (vterm process is gone).
                     Ranks below merge-states because merge state is
                     more actionable; ranks above agent-states
-                    because no live process means no claude activity
+                    because no live process means no agent activity
                     to color over.
 
   Agent-states (when no merge or dead signal applies):
@@ -512,7 +512,7 @@ merge is the actionable concern.  Same logic stacks all the way up:
 merge-conflict is more important than merge-failed (an active
 conflict can be resolved; a silent abort has already aborted), and
 both dominate agent-state (an active conflict is more important
-than whether Claude was thinking when the merge hit it)."
+than whether the agent was thinking when the merge hit it)."
   (agent-repl--ws-require-known ws "ws-render-status")
   (cond
    ((agent-repl--ws-tombstoned-p ws) nil)

@@ -290,7 +290,7 @@
 ;;;; ---- Tests: drain-pending-show-panels ----
 
 (ert-deftest agent-repl-test-panels-drain-pending-when-set-and-ready ()
-  "drain-pending-show-panels shows panels and clears the flag when Claude is ready."
+  "drain-pending-show-panels shows panels and clears the flag when the agent is ready."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :pending-show-panels t)
     (let ((called nil))
@@ -1213,7 +1213,7 @@ is on."
 
 (ert-deftest agent-repl-test-panels-entry-point-not-running-hides ()
   "agent-repl (SPC o C, always-close) hides the workspace even when no
-Claude session is running.  Skips the initialize-agent branch the
+agent session is running.  Skips the initialize-agent branch the
 plain `agent-repl-simple' (SPC o c) toggle would otherwise take."
   (agent-repl-test--with-clean-state
     (let ((started nil) (hidden nil))
@@ -1280,7 +1280,7 @@ always-close contract: pressing SPC o C on a hidden workspace re-asserts
         (should-not shown)))))
 
 (ert-deftest agent-repl-test-panels-entry-point-selection-sends ()
-  "agent-repl sends selected text to Claude when region is active.
+  "agent-repl sends selected text to the agent when region is active.
 Selection-handling stays orthogonal to the always-close hide path."
   (agent-repl-test--with-clean-state
     (let ((sent-text nil) (hidden nil))
@@ -1304,7 +1304,7 @@ Selection-handling stays orthogonal to the always-close hide path."
 
 (ert-deftest agent-repl-test-panels-entry-point-simple-not-running-initializes ()
   "agent-repl-simple (SPC o c) keeps its non-always-close dispatch: when
-nothing is running, it initializes Claude (in contrast to SPC o C)."
+nothing is running, it initializes the agent (in contrast to SPC o C)."
   (agent-repl-test--with-clean-state
     (let ((started nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
@@ -1374,7 +1374,7 @@ whole layout (which would duplicate the already-visible output window)."
      :type 'user-error)))
 
 (ert-deftest agent-repl-test-panels-validate-env-switch-thinking ()
-  "validate-env-switch errors when Claude is thinking."
+  "validate-env-switch errors when the agent is thinking."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :thinking t)
     (should-error
@@ -1601,7 +1601,7 @@ whole layout (which would duplicate the already-visible output window)."
 (ert-deftest agent-repl-test-panels-show-panels-fills-frame-clearing-work-windows ()
   "show-panels clears existing work windows so the panels fill the frame.
 Fullscreen is the sole display format: after show-panels the only
-non-side windows are the two Claude panels — no work window remains."
+non-side windows are the two agent panels — no work window remains."
   (agent-repl-test--with-clean-state
     (let ((vterm-buf (get-buffer-create "*show-up-vterm*"))
           (input-buf (get-buffer-create "*show-up-input*"))
@@ -2324,10 +2324,10 @@ only the input window."
         (when (buffer-live-p input-buf) (kill-buffer input-buf))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
-;;;; ---- Tests: non-agent-panel-window-p with Claude buffers ----
+;;;; ---- Tests: non-agent-panel-window-p with agent buffers ----
 
 (ert-deftest agent-repl-test-panels-non-agent-panel-window-p-vterm-buffer ()
-  "non-agent-panel-window-p returns nil for a window showing a Claude vterm buffer."
+  "non-agent-panel-window-p returns nil for a window showing an agent vterm buffer."
   (let ((buf (get-buffer-create "*agent-panel-abcd1234*")))
     (unwind-protect
         (progn
@@ -2337,7 +2337,7 @@ only the input window."
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest agent-repl-test-panels-non-agent-panel-window-p-input-buffer ()
-  "non-agent-panel-window-p returns nil for a window showing a Claude input buffer."
+  "non-agent-panel-window-p returns nil for a window showing an agent input buffer."
   (let ((buf (get-buffer-create "*agent-panel-input-abcd1234*")))
     (unwind-protect
         (progn
@@ -2636,7 +2636,7 @@ we at least surface the stuck state so the user knows to click out."
 
 (ert-deftest agent-repl-test-panels-kill-vterm-process-skips-kill-buffer-query-functions ()
   "kill-vterm-process does not consult `kill-buffer-query-functions'.
-Regression: the nuke path must not prompt about closing the claude
+Regression: the nuke path must not prompt about closing the agent
 process, even when other hooks (e.g., vterm's own kill query) are
 registered."
   (agent-repl-test--with-clean-state
@@ -2765,7 +2765,7 @@ loop is skipped entirely."
 
 (ert-deftest agent-repl-test-panels-kill-workspace-buffers/spares-foreign-owned ()
   "kill-workspace-buffers does NOT kill a buffer owned by a different workspace.
-Regression guard: persp-mode can drift another workspace's live Claude panel
+Regression guard: persp-mode can drift another workspace's live agent panel
 into this persp, and nuking it would wipe that workspace's running session."
   (let ((persp-mode t)
         (foreign (get-buffer-create "*agent-panel-other-ws*")))
@@ -2886,7 +2886,7 @@ into this persp, and nuking it would wipe that workspace's running session."
       (should-error (agent-repl--initialize-agent)))))
 
 (ert-deftest agent-repl-test-panels-initialize-agent-already-running-errors ()
-  "initialize-agent errors when Claude is already running."
+  "initialize-agent errors when the agent is already running."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t)))
@@ -3339,8 +3339,8 @@ vterm window after the cursor reset + redraw, replacing the old bare
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest agent-repl-test-panels-refresh-vterm-window-skips-non-agent-buffer ()
-  "refresh-vterm-window is a no-op when the window's buffer is not a
-Claude vterm buffer — the snap helper must not run."
+  "refresh-vterm-window is a no-op when the window's buffer is not an
+agent vterm buffer — the snap helper must not run."
   (let ((buf (get-buffer-create "*not-agent-refresh*"))
         (new-win nil)
         (snap-called nil))
@@ -3411,10 +3411,10 @@ buffer is not in `vterm-mode' — the cursor-reset is vterm-specific."
       (should-not (agent-repl--ws-get "ws1" :agent-state))
       (should-not (agent-repl--ws-get "ws1" :repl-state)))))
 
-;;;; ---- Tests: redirect-from-agent-before-save with Claude window ----
+;;;; ---- Tests: redirect-from-agent-before-save with agent window ----
 
 (ert-deftest agent-repl-test-panels-redirect-claude-to-other-window ()
-  "redirect-from-agent-before-save selects a non-agent window when current is Claude."
+  "redirect-from-agent-before-save selects a non-agent window when current is the agent."
   (agent-repl-test--with-clean-state
     (let ((agent-buf (get-buffer-create "*agent-panel-abcd1234*"))
           (regular-buf (get-buffer-create "*regular-buf*"))
@@ -3436,17 +3436,17 @@ buffer is not in `vterm-mode' — the cursor-reset is vterm-specific."
 ;;;; ---- Tests: redirect-from-agent-before-save fullscreen case ----
 
 (ert-deftest agent-repl-test-panels-redirect-claude-only-window ()
-  "redirect-from-agent-before-save skips redirect when Claude is the only window."
+  "redirect-from-agent-before-save skips redirect when the agent is the only window."
   (agent-repl-test--with-clean-state
     (let ((agent-buf (get-buffer-create "*agent-panel-abcd1234*")))
       (unwind-protect
           (progn
             (delete-other-windows)
             (switch-to-buffer agent-buf)
-            ;; Only one window shows Claude -- cl-find-if returns nil since
-            ;; the only window is also a Claude window
+            ;; Only one window shows the agent -- cl-find-if returns nil since
+            ;; the only window is also an agent window
             (agent-repl--redirect-from-agent-before-save)
-            ;; Should still be on the same Claude buffer (no redirect target)
+            ;; Should still be on the same agent buffer (no redirect target)
             (should (eq (window-buffer (selected-window)) agent-buf)))
         (switch-to-buffer "*scratch*")
         (when (buffer-live-p agent-buf) (kill-buffer agent-buf))))))
@@ -3510,7 +3510,7 @@ window after a nuke."
         (when (buffer-live-p dedicated-buf) (kill-buffer dedicated-buf))))))
 
 (ert-deftest agent-repl-test-panels-redirect-skips-side-window-as-target ()
-  "Redirect target must skip side windows even when selected is a Claude panel.
+  "Redirect target must skip side windows even when selected is an agent panel.
 
 Regression: the previous predicate `non-agent-panel-window-p' returned
 t for the drawer (a non-agent side window), so `cl-find-if' could
@@ -3585,7 +3585,7 @@ of the redirect."
     (should (agent-repl--save-target-window-p (selected-window)))))
 
 (ert-deftest agent-repl-test-panels-save-target-window-p-agent-panel ()
-  "save-target-window-p returns nil for a window showing a Claude panel."
+  "save-target-window-p returns nil for a window showing an agent panel."
   (agent-repl-test--with-clean-state
     (let ((agent-buf (get-buffer-create "*agent-panel-abcd1234*")))
       (unwind-protect
@@ -3623,9 +3623,9 @@ of the redirect."
 ;;;; ---- Tests: fullscreen-and-focus ----
 
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-claude-branch-does-not-maximize ()
-  "fullscreen-and-focus in a Claude buffer only focuses input, never maximizes.
-The Claude panels already fill the frame (fullscreen is the sole
-display format), so the claude branch must NOT touch the non-agent
+  "fullscreen-and-focus in an agent buffer only focuses input, never maximizes.
+The agent panels already fill the frame (fullscreen is the sole
+display format), so the agent branch must NOT touch the non-agent
 maximize state (`agent-repl--window-fullscreen-config') nor sweep
 windows."
   (agent-repl-test--with-clean-state
@@ -3645,7 +3645,7 @@ windows."
         (when (buffer-live-p agent-buf) (kill-buffer agent-buf))))))
 
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-selects-input ()
-  "fullscreen-and-focus selects the input window after toggling when in a Claude buffer."
+  "fullscreen-and-focus selects the input window after toggling when in an agent buffer."
   (agent-repl-test--with-clean-state
     (let ((input-buf (get-buffer-create "*agent-panel-input-abcd1234*"))
           (agent-buf (get-buffer-create "*agent-panel-abcd1234*"))
@@ -3692,7 +3692,7 @@ windows."
         (when (buffer-live-p agent-buf) (kill-buffer agent-buf))))))
 
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-no-input-window ()
-  "fullscreen-and-focus does not error when in a Claude buffer but input has no window."
+  "fullscreen-and-focus does not error when in an agent buffer but input has no window."
   (agent-repl-test--with-clean-state
     (let ((input-buf (get-buffer-create "*test-fs-no-win*"))
           (agent-buf (get-buffer-create "*agent-panel-abcd1234*")))
@@ -3710,7 +3710,7 @@ windows."
         (when (buffer-live-p agent-buf) (kill-buffer agent-buf))))))
 
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-no-input-buffer ()
-  "fullscreen-and-focus does not error when in a Claude buffer but no input buffer is set."
+  "fullscreen-and-focus does not error when in an agent buffer but no input buffer is set."
   (agent-repl-test--with-clean-state
     (let ((agent-buf (get-buffer-create "*agent-panel-abcd1234*")))
       (unwind-protect
@@ -3724,7 +3724,7 @@ windows."
         (when (buffer-live-p agent-buf) (kill-buffer agent-buf))))))
 
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-non-agent-maximizes ()
-  "fullscreen-and-focus saves config and sweeps other windows when not in a Claude buffer."
+  "fullscreen-and-focus saves config and sweeps other windows when not in an agent buffer."
   (agent-repl-test--with-clean-state
     (let ((sweep-called nil)
           (agent-repl--window-fullscreen-config nil))
@@ -3793,7 +3793,7 @@ windows."
           (when (buffer-live-p buf) (kill-buffer buf)))))))
 
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-non-agent-restores ()
-  "fullscreen-and-focus restores saved config on second press when not in a Claude buffer."
+  "fullscreen-and-focus restores saved config on second press when not in an agent buffer."
   (agent-repl-test--with-clean-state
     (let* ((restore-called nil)
            (fake-config (list 'fake-window-config))
@@ -3916,9 +3916,9 @@ sacrificed because the drawer was the `keep' anchor."
           (when (buffer-live-p buf) (kill-buffer buf)))))))
 
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-from-drawer-routes-to-claude-branch ()
-  "When the drawer is selected but the main window contains a Claude
-panel buffer, the side-window redirect lands on the Claude buffer and
-the function takes the Claude branch (focus input, no non-agent maximize)."
+  "When the drawer is selected but the main window contains an agent
+panel buffer, the side-window redirect lands on the agent buffer and
+the function takes the agent branch (focus input, no non-agent maximize)."
   (agent-repl-test--with-clean-state
     (let ((vterm-buf (get-buffer-create "*agent-panel-fs-redir*"))
           (drawer-buf (get-buffer-create "*fs-redir-drawer*"))
@@ -3934,8 +3934,8 @@ the function takes the Claude branch (focus input, no non-agent maximize)."
               (cl-letf (((symbol-function '+workspace-current-name)
                          (lambda () "test-ws")))
                 (agent-repl-fullscreen-and-focus))
-              ;; The redirect moved point onto the Claude panel main window,
-              ;; so the Claude branch fired — the non-agent maximize branch
+              ;; The redirect moved point onto the agent panel main window,
+              ;; so the agent branch fired — the non-agent maximize branch
               ;; (which would save a window config) never ran.
               (should-not agent-repl--window-fullscreen-config)
               (should (window-live-p vterm-win))))
@@ -3967,10 +3967,10 @@ the function takes the Claude branch (focus input, no non-agent maximize)."
 
 (ert-deftest agent-repl-test-panels-clear-main-area-preserves-side-windows ()
   "`--clear-main-area-for-panels' must NOT delete side windows (drawer).
-Opening Claude routes through `--show-existing-panels' which clears
+Opening the agent routes through `--show-existing-panels' which clears
 the main area; the drawer side window must survive unconditionally,
 even when its `no-delete-other-windows' parameter is absent (regression:
-opening Claude used to destroy the drawer)."
+opening the agent used to destroy the drawer)."
   (agent-repl-test--with-clean-state
     (let ((drawer-buf (get-buffer-create "*clear-main-drawer*"))
           (work-buf   (get-buffer-create "*clear-main-work*"))
@@ -3995,7 +3995,7 @@ opening Claude used to destroy the drawer)."
               (list drawer-buf work-buf other-buf))))))
 
 (ert-deftest agent-repl-test-panels-show-existing-panels-preserves-drawer ()
-  "Opening Claude (full show-existing-panels flow) must NOT destroy the drawer.
+  "Opening the agent (full show-existing-panels flow) must NOT destroy the drawer.
 End-to-end regression: any drawer-as-side-window setup survives the
 panel-open path regardless of whether the drawer's window parameters
 match the canonical display-action."
@@ -4046,7 +4046,7 @@ otherwise signal `Cannot split side window' and leave panels half-shown."
             (let ((drawer-win (display-buffer-in-side-window
                               drawer-buf '((side . left) (slot . 0)))))
               ;; Simulate selected window being the drawer (e.g. mouse-click
-              ;; landed here just before claude opened).
+              ;; landed here just before the agent opened).
               (select-window drawer-win)
               (cl-letf (((symbol-function '+workspace-current-name) (lambda () ws))
                         ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
@@ -4088,7 +4088,7 @@ otherwise signal `Cannot split side window' and leave panels half-shown."
         (kill-buffer own-buf)))))
 
 (ert-deftest agent-repl-test-panels-stale-panel-windows-nil-for-non-panel-buffers ()
-  "stale-panel-windows returns nil when no Claude panel buffers are visible."
+  "stale-panel-windows returns nil when no agent panel buffers are visible."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
               ((symbol-function 'window-list) (lambda (&rest _) (list (selected-window))))
@@ -4439,7 +4439,7 @@ needs a separate enter-fullscreen step."
 ;;;; ---- Tests: lone-output-window ----
 
 (ert-deftest agent-repl-test-panels-lone-output-window-returns-sole-output ()
-  "lone-output-window returns the sole non-side window showing a Claude output buffer."
+  "lone-output-window returns the sole non-side window showing an agent output buffer."
   (agent-repl-test--with-clean-state
     (let ((out (get-buffer-create "*agent-panel-my-ws*")))
       (unwind-protect
@@ -4472,7 +4472,7 @@ needs a separate enter-fullscreen step."
         (kill-buffer reg)))))
 
 (ert-deftest agent-repl-test-panels-lone-output-window-nil-input-buffer ()
-  "lone-output-window returns nil when the sole non-side window shows a Claude input buffer."
+  "lone-output-window returns nil when the sole non-side window shows an agent input buffer."
   (agent-repl-test--with-clean-state
     (let ((inp (get-buffer-create "*agent-panel-input-my-ws*")))
       (unwind-protect

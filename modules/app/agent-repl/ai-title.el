@@ -62,7 +62,7 @@ input so callers can short-circuit cleanly."
     (replace-regexp-in-string "[/.]" "-" path)))
 
 (defun agent-repl--ai-title-ws-session-id (ws)
-  "Return WS's current Claude session id, or nil if not available.
+  "Return WS's current agent session id, or nil if not available.
 Tolerates missing :active-env / instantiation struct (returns nil rather
 than signalling) so the mode-line eval is safe to call before a session
 has started."

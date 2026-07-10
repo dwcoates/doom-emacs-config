@@ -53,7 +53,7 @@ canonicalized git-root of DIR, or nil.
 Unlike the previous dir -> git-root -> md5 -> buffer -> persp-lookup chain,
 this function does not touch persp-mode or buffer names.  Bypassing the
 persp lookup closes the last known leak path that fed \"none\" into
-`agent-repl--workspaces' when persp-mode routed a Claude buffer to the
+`agent-repl--workspaces' when persp-mode routed an agent buffer to the
 wrong perspective."
   (agent-repl--log-verbose nil "ws-for-dir-fast: ENTER dir=%S" dir)
   (let* ((target-root (and dir (agent-repl--git-root dir)))
@@ -137,7 +137,7 @@ Return the workspace name or nil."
         match))))
 
 (defun agent-repl--ws-for-dir (dir)
-  "Return the workspace name for a Claude session rooted at DIR, or nil.
+  "Return the workspace name for an agent session rooted at DIR, or nil.
 First tries the fast path: git-root -> hash -> buffer -> workspace.
 Falls back to container-path matching for Docker sandbox workspaces."
   (agent-repl--log-verbose nil "ws-for-dir: ENTER dir=%S" dir)
@@ -275,7 +275,7 @@ Callback for both sentinel sources that signal a permission prompt:
   * `permission_request' — written by the PermissionRequest hook, which
     Claude Code fires the moment the permission dialog appears (before
     the user answers).  This is the real-time signal; it's what flips
-    the tab to `:permission' WHILE Claude is waiting on the user.
+    the tab to `:permission' WHILE the agent is waiting on the user.
 
   * `permission_prompt' — written by the Notification hook for
     `notification_type=permission_prompt'.  That notification can lag
@@ -294,7 +294,7 @@ The Notification hook fires for both real permission prompts and the
 notification_type=permission_prompt.  We can't distinguish them by
 message text alone (Claude Code uses the attention wording for some
 real permission prompts too), so we gate on `:agent-state' instead:
-mid-turn (`:thinking') means Claude is actively working and a
+mid-turn (`:thinking') means the agent is actively working and a
 notification at this point is a real permission prompt; any other
 state (`:idle' / `:done' / `:permission' / `:init' / nil) means the
 turn is settled or already attention-flagged, so the notification is
@@ -373,7 +373,7 @@ recovery is left to the user."
 
 (defun agent-repl--on-session-start-event (ws _dir)
   "Handle a session_start event for workspace WS.
-When WS has a live vterm buffer, this is Claude becoming ready:
+When WS has a live vterm buffer, this is the agent becoming ready:
 transitions `:agent-state' from `:init' to `:idle', sets
 `agent-repl--ready' on the vterm buffer, cancels the ready timer,
 and opens panels (via `open-panels-after-ready').
@@ -428,7 +428,7 @@ waiting on them are never stalled by a swallowed duplicate."
 (defvar agent-repl-after-ready-functions nil
   "Hook run when a `session_start' event is observed for a workspace.
 Each function is called with one argument: the workspace name (string)
-whose Claude process printed `session_start'.
+whose agent process printed `session_start'.
 
 Unlike `agent-repl-ws-fully-loaded-functions', this hook is the
 NARROW signal — it fires on every observed `session_start' event,
