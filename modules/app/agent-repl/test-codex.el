@@ -27,7 +27,7 @@
          (agent-repl-codex-managed-permission-flags
           "--ask-for-approval on-request --sandbox workspace-write")
          (agent-repl-codex-personal-permission-flags
-          "--dangerously-bypass-approvals-and-sandbox"))
+          "--ask-for-approval on-request --sandbox workspace-write"))
      ,@body))
 
 ;;;; ---- Tests: start-cmd — subcommand selection ----
@@ -38,7 +38,15 @@
     (should (equal (agent-repl--codex-start-cmd
                     (list :session-id nil :fork-session-id nil
                           :project-dir "/home/u/personal" :model nil))
-                   "codex --dangerously-bypass-approvals-and-sandbox"))))
+                   "codex --ask-for-approval on-request --sandbox workspace-write"))))
+
+(ert-deftest agent-repl-test-codex-personal-default-is-not-dangerous ()
+  "The personal codex flags never default to the danger bypass.
+Pins the posture master set for claude (--permission-mode auto for
+personal projects): nothing runs dangerously by default."
+  (should-not (string-match-p "--dangerously-bypass-approvals-and-sandbox"
+                              (default-value
+                               'agent-repl-codex-personal-permission-flags))))
 
 (ert-deftest agent-repl-test-codex-start-cmd-resume-by-id ()
   "A known session id resumes that exact session (id-explicit, no picker)."
@@ -91,21 +99,27 @@
                         :project-dir "/home/u/personal" :model nil))))))
 
 (ert-deftest agent-repl-test-codex-start-cmd-managed-perm-flags ()
-  "A managed (pattern-matching) project gets the managed approval flags."
+  "A managed (pattern-matching) project routes to the managed flags.
+Sentinel-bound so the routing is pinned independently of the two
+defcustoms' (currently identical) default values."
   (agent-repl-test--with-codex-defaults
-    (let ((agent-repl-managed-project-pattern "ChessCom"))
+    (let ((agent-repl-managed-project-pattern "ChessCom")
+          (agent-repl-codex-managed-permission-flags "--managed-sentinel"))
       (should (string-match-p
-               "--ask-for-approval on-request --sandbox workspace-write"
+               "--managed-sentinel"
                (agent-repl--codex-start-cmd
                 (list :session-id nil :fork-session-id nil
                       :project-dir "/home/u/ChessCom/repo" :model nil)))))))
 
 (ert-deftest agent-repl-test-codex-start-cmd-personal-perm-flags ()
-  "A personal project gets the danger-bypass flag."
+  "A personal project routes to the personal flags.
+Sentinel-bound so the routing is pinned independently of the two
+defcustoms' (currently identical) default values."
   (agent-repl-test--with-codex-defaults
-    (let ((agent-repl-managed-project-pattern "ChessCom"))
+    (let ((agent-repl-managed-project-pattern "ChessCom")
+          (agent-repl-codex-personal-permission-flags "--personal-sentinel"))
       (should (string-match-p
-               "--dangerously-bypass-approvals-and-sandbox"
+               "--personal-sentinel"
                (agent-repl--codex-start-cmd
                 (list :session-id nil :fork-session-id nil
                       :project-dir "/home/u/personal" :model nil)))))))
