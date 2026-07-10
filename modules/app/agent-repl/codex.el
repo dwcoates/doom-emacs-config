@@ -65,10 +65,14 @@ Managed projects are those matching `agent-repl-managed-project-pattern'
   :group 'agent-repl)
 
 (defcustom agent-repl-codex-personal-permission-flags
-  "--dangerously-bypass-approvals-and-sandbox"
+  "--ask-for-approval on-request --sandbox workspace-write"
   "Approval/sandbox flags for personal projects under the codex backend.
-Mirrors claude's `--dangerously-skip-permissions' posture.  Note codex
-rejects combining this flag with `--ask-for-approval'."
+Defaults to the same posture as the managed flags, mirroring the claude
+backend where both permission flags now default to
+`--permission-mode auto' so workspaces never run dangerously by
+default.  Users wanting the old unguarded behavior can set this to
+\"--dangerously-bypass-approvals-and-sandbox\" (note codex rejects
+combining that flag with `--ask-for-approval')."
   :type 'string
   :group 'agent-repl)
 
@@ -272,11 +276,13 @@ trailing `agent-repl-codex-scan-bytes'."
   "Alist (EVENT-SYMBOL . COMMAND-PATH) of managed hooks for codex.
 The SAME sentinel-writing scripts as the claude backend: codex's hook
 stdin payload carries the `session_id' and `cwd' fields they parse, and
-they write to the shared `~/.claude/workspace-notifications' mailbox
-the sentinel watches, so state tracking is backend-agnostic downstream.
-The scripts intentionally live under `~/.claude/hooks/' — that is where
-`.claude/install.sh' installs the canonical copies, regardless of which
-backends consume them.
+they write to the shared sentinel mailbox
+\(`~/.claude-emacs/workspace-notifications', self-computed by the
+scripts via AGENT_REPL_STATE_DIR) the sentinel watches, so state
+tracking is backend-agnostic downstream.  The scripts intentionally
+live under `~/.claude/hooks/' — that is where `.claude/install.sh'
+installs the canonical copies, regardless of which backends consume
+them.
 
 Relative to `agent-repl--managed-hooks', codex lacks `Notification'
 \(no such event; `PermissionRequest' alone drives the `:permission'
