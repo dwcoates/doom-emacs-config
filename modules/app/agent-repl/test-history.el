@@ -740,7 +740,7 @@ survives a crash that beats kill-emacs-hook.  Roster carries only
 `:project-dir' — `:priority' lives in the per-project state file."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-" t))
-          (snapshot-file (make-temp-file "claude-snap-")))
+          (snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (agent-repl--ws-put "ws" :project-dir tmpdir)

@@ -185,13 +185,13 @@ an `:around' override."
           (agent-repl-drawer--render)
           (should (= calls 1)))))))
 
-(ert-deftest agent-repl-drawer-test-render-rebuilds-when-claude-state-changes ()
-  "A `:claude-state' change on a registered workspace must invalidate the
+(ert-deftest agent-repl-drawer-test-render-rebuilds-when-agent-state-changes ()
+  "A `:agent-state' change on a registered workspace must invalidate the
 render-signature so the next `--render' rebuilds.  Confirms the signature
 captures plist values the 1Hz status poll mutates."
   (agent-repl-test--with-clean-state
     (agent-repl-drawer-test--register "alpha" :priority "p1"
-                                       :claude-state :idle)
+                                       :agent-state :idle)
     (agent-repl-drawer-test--with-buffer
       (let ((calls 0)
             (orig (symbol-function 'agent-repl-drawer--insert-content)))
@@ -200,7 +200,7 @@ captures plist values the 1Hz status poll mutates."
                      (cl-incf calls)
                      (apply orig args))))
           (agent-repl-drawer--render)
-          (agent-repl--ws-put "alpha" :claude-state :thinking)
+          (agent-repl--ws-put "alpha" :agent-state :thinking)
           (agent-repl-drawer--render)
           (should (= calls 2)))))))
 
@@ -2621,7 +2621,7 @@ unfocused window's `window-point' to the top unless it is re-synced."
               ;; buffer (signature + content both differ).
               (agent-repl-drawer-test--register "beta"
                                                  :project-dir "/tmp/beta"
-                                                 :claude-state :thinking)
+                                                 :agent-state :thinking)
               ;; Sanity: the drawer window is not the selected one.
               (should-not (eq (selected-window) drawer-win))
               (agent-repl-drawer--refresh-if-visible)
@@ -2731,7 +2731,7 @@ just restored from the destination workspace's saved config."
 (ert-deftest agent-repl-drawer-test-name-face-thinking-is-red ()
   "`:thinking' state colors the name with the thinking-red foreground."
   (agent-repl-test--with-clean-state
-    (agent-repl-drawer-test--register "ws" :claude-state :thinking)
+    (agent-repl-drawer-test--register "ws" :agent-state :thinking)
     (let ((face (agent-repl-drawer--name-face "ws")))
       (should (equal (plist-get face :foreground) agent-repl--color-thinking-red))
       (should (eq (plist-get face :weight) 'bold)))))
@@ -2739,19 +2739,19 @@ just restored from the destination workspace's saved config."
 (ert-deftest agent-repl-drawer-test-name-face-done-is-green ()
   "`:done' state colors the name with the done-green foreground."
   (agent-repl-test--with-clean-state
-    (agent-repl-drawer-test--register "ws" :claude-state :done)
+    (agent-repl-drawer-test--register "ws" :agent-state :done)
     (should (equal (plist-get (agent-repl-drawer--name-face "ws") :foreground)
                    agent-repl--color-done-green))))
 
 (ert-deftest agent-repl-drawer-test-name-face-idle-is-orange ()
   "`:idle' state colors the name with the idle-orange foreground."
   (agent-repl-test--with-clean-state
-    (agent-repl-drawer-test--register "ws" :claude-state :idle)
+    (agent-repl-drawer-test--register "ws" :agent-state :idle)
     (should (equal (plist-get (agent-repl-drawer--name-face "ws") :foreground)
                    agent-repl--color-idle-orange))))
 
 (ert-deftest agent-repl-drawer-test-name-face-no-state-falls-back ()
-  "No claude-state falls back to the plain bold workspace-name face."
+  "No agent-state falls back to the plain bold workspace-name face."
   (agent-repl-test--with-clean-state
     (agent-repl-drawer-test--register "ws")
     (should (eq (agent-repl-drawer--name-face "ws")
@@ -2761,7 +2761,7 @@ just restored from the destination workspace's saved config."
   "`:repl-state :dead' falls back to plain bold; the hidden/dim treatment muting is layered separately."
   (agent-repl-test--with-clean-state
     (agent-repl-drawer-test--register "ws"
-                                       :claude-state :thinking
+                                       :agent-state :thinking
                                        :repl-state :dead)
     (should (eq (agent-repl-drawer--name-face "ws")
                 'agent-repl-drawer-workspace-name))))
@@ -2793,7 +2793,7 @@ just restored from the destination workspace's saved config."
 (ert-deftest agent-repl-drawer-test-render-glyph-priority-gap ()
   "Two spaces separate the state glyph from the priority badge."
   (agent-repl-test--with-clean-state
-    (agent-repl-drawer-test--register "feat" :priority "p1" :claude-state :idle)
+    (agent-repl-drawer-test--register "feat" :priority "p1" :agent-state :idle)
     (agent-repl-drawer-test--with-buffer
       (agent-repl-drawer--render)
       (let ((text (buffer-substring-no-properties (point-min) (point-max))))
@@ -2834,36 +2834,36 @@ already-bound symbols and palette tweaks would require an Emacs restart."
 
 ;;;; ---- State glyph ----
 
-(ert-deftest agent-repl-drawer-test-state-glyph-dead-overrides-claude-state ()
-  ":repl-state :dead takes precedence over :claude-state for the glyph."
+(ert-deftest agent-repl-drawer-test-state-glyph-dead-overrides-agent-state ()
+  ":repl-state :dead takes precedence over :agent-state for the glyph."
   (agent-repl-test--with-clean-state
     (agent-repl-drawer-test--register "zombie"
-                                       :claude-state :thinking
+                                       :agent-state :thinking
                                        :repl-state :dead)
     (should (equal (agent-repl-drawer--state-glyph "zombie")
                    (alist-get :dead agent-repl-drawer-state-icons)))))
 
-(ert-deftest agent-repl-drawer-test-state-glyph-from-claude-state ()
-  "Glyph reflects :claude-state when :repl-state is not :dead."
+(ert-deftest agent-repl-drawer-test-state-glyph-from-agent-state ()
+  "Glyph reflects :agent-state when :repl-state is not :dead."
   (agent-repl-test--with-clean-state
-    (agent-repl-drawer-test--register "busy" :claude-state :thinking)
+    (agent-repl-drawer-test--register "busy" :agent-state :thinking)
     (should (equal (agent-repl-drawer--state-glyph "busy")
                    (alist-get :thinking agent-repl-drawer-state-icons)))))
 
-(ert-deftest agent-repl-drawer-test-state-glyph-merged-shows-merged-when-no-claude-state ()
-  ":repl-state :merged shows the 🔀 glyph when :claude-state is nil."
+(ert-deftest agent-repl-drawer-test-state-glyph-merged-shows-merged-when-no-agent-state ()
+  ":repl-state :merged shows the 🔀 glyph when :agent-state is nil."
   (agent-repl-test--with-clean-state
     (agent-repl-drawer-test--register "merged-ws"
                                        :repl-state :merged)
     (should (equal (agent-repl-drawer--state-glyph "merged-ws")
                    (alist-get :merged agent-repl-drawer-state-icons)))))
 
-(ert-deftest agent-repl-drawer-test-state-glyph-active-claude-state-beats-merged ()
-  "An active :claude-state wins over :repl-state :merged — a merged workspace
+(ert-deftest agent-repl-drawer-test-state-glyph-active-agent-state-beats-merged ()
+  "An active :agent-state wins over :repl-state :merged — a merged workspace
 that resumes work shows its live activity badge rather than the static 🔀."
   (agent-repl-test--with-clean-state
     (agent-repl-drawer-test--register "merged-ws"
-                                       :claude-state :thinking
+                                       :agent-state :thinking
                                        :repl-state :merged)
     (should (equal (agent-repl-drawer--state-glyph "merged-ws")
                    (alist-get :thinking agent-repl-drawer-state-icons)))))
@@ -2880,13 +2880,13 @@ conflict resolution."
     (should (equal (agent-repl-drawer--state-glyph "conflicted-merge")
                    "💥"))))
 
-(ert-deftest agent-repl-drawer-test-state-glyph-merge-conflict-overrides-claude-state ()
-  ":repl-state :merge-conflict takes precedence over :claude-state.
+(ert-deftest agent-repl-drawer-test-state-glyph-merge-conflict-overrides-agent-state ()
+  ":repl-state :merge-conflict takes precedence over :agent-state.
 The vterm is still alive on a conflict (unlike :dead), but the badge
 must surface the conflict rather than the mid-session mood."
   (agent-repl-test--with-clean-state
     (agent-repl-drawer-test--register "ws"
-                                       :claude-state :thinking
+                                       :agent-state :thinking
                                        :repl-state :merge-conflict)
     (should (equal (agent-repl-drawer--state-glyph "ws") "💥"))))
 
@@ -2912,14 +2912,14 @@ a dead vterm at a glance."
     (should (equal (agent-repl-drawer--state-glyph "broken-merge")
                    (alist-get :merge-failed agent-repl-drawer-state-icons)))))
 
-(ert-deftest agent-repl-drawer-test-state-glyph-merge-failed-overrides-claude-state ()
-  ":repl-state :merge-failed takes precedence over :claude-state for
+(ert-deftest agent-repl-drawer-test-state-glyph-merge-failed-overrides-agent-state ()
+  ":repl-state :merge-failed takes precedence over :agent-state for
 the glyph — a post-merge silent-failure workspace whose vterm is
-stale still reads as ⛔-merge-failed rather than its claude-state
+stale still reads as ⛔-merge-failed rather than its agent-state
 mood."
   (agent-repl-test--with-clean-state
     (agent-repl-drawer-test--register "ws"
-                                       :claude-state :thinking
+                                       :agent-state :thinking
                                        :repl-state :merge-failed)
     (should (equal (agent-repl-drawer--state-glyph "ws")
                    (alist-get :merge-failed agent-repl-drawer-state-icons)))))
@@ -3112,21 +3112,21 @@ must remain stable."
 (ert-deftest agent-repl-drawer-test-state-glyph-merge-queued ()
   "`:repl-state :merge-queued' surfaces the 🕒 glyph from the icon
 alist, distinct from :merging (no icon — the merging bucket shows the
-underlying claude-state glyph) and :merged (🔀)."
+underlying agent-state glyph) and :merged (🔀)."
   (agent-repl-test--with-clean-state
     (agent-repl-drawer-test--register "ws" :repl-state :merge-queued)
     (should (equal (agent-repl-drawer--state-glyph "ws")
                    (alist-get :merge-queued
                               agent-repl-drawer-state-icons)))))
 
-(ert-deftest agent-repl-drawer-test-state-glyph-merge-queued-overrides-claude-state ()
-  "`:merge-queued' on repl-state outranks a stale `:claude-state' —
+(ert-deftest agent-repl-drawer-test-state-glyph-merge-queued-overrides-agent-state ()
+  "`:merge-queued' on repl-state outranks a stale `:agent-state' —
 guards against the queued badge being clobbered by a leftover
 thinking/done glyph."
   (agent-repl-test--with-clean-state
     (agent-repl-drawer-test--register "ws"
                                        :repl-state :merge-queued
-                                       :claude-state :thinking)
+                                       :agent-state :thinking)
     (should (equal (agent-repl-drawer--state-glyph "ws")
                    (alist-get :merge-queued
                               agent-repl-drawer-state-icons)))))

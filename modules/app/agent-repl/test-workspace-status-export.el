@@ -43,7 +43,7 @@
 (ert-deftest agent-repl-test-workspace-status-entry-populated ()
   "A fully populated workspace surfaces every documented field as strings."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws1" :thinking)
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
     (agent-repl--ws-set-repl-state "ws1" :active)
     (agent-repl--ws-put "ws1" :project-dir "/tmp/proj")
     (agent-repl--ws-put "ws1" :source-ws-dir "/tmp/src")
@@ -52,7 +52,7 @@
     (agent-repl--ws-put "ws1" :git-clean 'dirty)
     (agent-repl--ws-put "ws1" :done-acked t)
     (let ((entry (agent-repl--workspace-status-entry "ws1")))
-      (should (equal (cdr (assoc "claude_state" entry)) "thinking"))
+      (should (equal (cdr (assoc "agent_state" entry)) "thinking"))
       (should (equal (cdr (assoc "repl_state" entry)) "active"))
       (should (equal (cdr (assoc "project_dir" entry)) "/tmp/proj"))
       (should (equal (cdr (assoc "source_ws_dir" entry)) "/tmp/src"))
@@ -67,7 +67,7 @@
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir nil)
     (let ((entry (agent-repl--workspace-status-entry "ws1")))
-      (should (eq (cdr (assoc "claude_state" entry)) json-null))
+      (should (eq (cdr (assoc "agent_state" entry)) json-null))
       (should (eq (cdr (assoc "repl_state"   entry)) json-null))
       (should (eq (cdr (assoc "priority"     entry)) json-null))
       (should (eq (cdr (assoc "done_acked"   entry)) json-false)))))
@@ -84,17 +84,17 @@ leaves non-nil values alone."
 (ert-deftest agent-repl-test-workspace-status-snapshot-includes-all ()
   "snapshot lists every key in agent-repl--workspaces under `workspaces'."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws-a" :idle)
-    (agent-repl--ws-set-claude-state "ws-b" :thinking)
+    (agent-repl--ws-set-agent-state "ws-a" :idle)
+    (agent-repl--ws-set-agent-state "ws-b" :thinking)
     (let* ((snap (agent-repl--workspace-status-snapshot))
            (workspaces (cdr (assoc "workspaces" snap))))
       (should (hash-table-p workspaces))
       (should (gethash "ws-a" workspaces))
       (should (gethash "ws-b" workspaces))
       (should (equal "idle"
-                     (cdr (assoc "claude_state" (gethash "ws-a" workspaces)))))
+                     (cdr (assoc "agent_state" (gethash "ws-a" workspaces)))))
       (should (equal "thinking"
-                     (cdr (assoc "claude_state" (gethash "ws-b" workspaces))))))))
+                     (cdr (assoc "agent_state" (gethash "ws-b" workspaces))))))))
 
 (ert-deftest agent-repl-test-workspace-status-snapshot-has-updated-at ()
   "snapshot stamps an `updated_at' ISO-ish string at the top level."
@@ -120,7 +120,7 @@ Merged workspaces have no live session and all their interesting
 fields are null forever, so including them only bloats the JSON
 encode."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-claude-state "ws-live" :idle)
+    (agent-repl--ws-set-agent-state "ws-live" :idle)
     (agent-repl--ws-set-repl-state   "ws-live" :active)
     (agent-repl--ws-set-repl-state   "ws-merged" :merged)
     (let* ((snap (agent-repl--workspace-status-snapshot))
@@ -163,7 +163,7 @@ encode."
            (agent-repl-workspace-status-file tmp))
       (unwind-protect
           (progn
-            (agent-repl--ws-set-claude-state "ws-disk" :done)
+            (agent-repl--ws-set-agent-state "ws-disk" :done)
             (agent-repl--write-workspace-status)
             (should (file-exists-p tmp)))
         (when (file-exists-p tmp) (delete-file tmp))))))
@@ -188,7 +188,7 @@ scheduler), which is unusable.  Detect a regression by intercepting
       (unwind-protect
           (progn
             (advice-add 'write-region :around advice)
-            (agent-repl--ws-set-claude-state "ws-codec" :idle)
+            (agent-repl--ws-set-agent-state "ws-codec" :idle)
             (agent-repl--write-workspace-status)
             (should (eq observed-coding 'utf-8-unix)))
         (advice-remove 'write-region advice)
@@ -201,14 +201,14 @@ scheduler), which is unusable.  Detect a regression by intercepting
            (agent-repl-workspace-status-file tmp))
       (unwind-protect
           (progn
-            (agent-repl--ws-set-claude-state "ws-rt" :permission)
+            (agent-repl--ws-set-agent-state "ws-rt" :permission)
             (agent-repl--ws-put "ws-rt" :priority "p2")
             (agent-repl--write-workspace-status)
             (let* ((json-object-type 'alist)
                    (parsed (json-read-file tmp))
                    (ws (cdr (assoc 'ws-rt (cdr (assoc 'workspaces parsed))))))
               (should ws)
-              (should (equal "permission" (cdr (assoc 'claude_state ws))))
+              (should (equal "permission" (cdr (assoc 'agent_state ws))))
               (should (equal "p2" (cdr (assoc 'priority ws))))))
         (when (file-exists-p tmp) (delete-file tmp))))))
 
@@ -222,7 +222,7 @@ since the writer uses `json-serialize' without pretty-printing."
            (agent-repl-workspace-status-file tmp))
       (unwind-protect
           (progn
-            (agent-repl--ws-set-claude-state "ws-null" :idle)
+            (agent-repl--ws-set-agent-state "ws-null" :idle)
             (agent-repl--write-workspace-status)
             (with-temp-buffer
               (insert-file-contents tmp)
@@ -241,7 +241,7 @@ on a 111-workspace registry."
            (agent-repl-workspace-status-file tmp))
       (unwind-protect
           (progn
-            (agent-repl--ws-set-claude-state "ws-compact" :idle)
+            (agent-repl--ws-set-agent-state "ws-compact" :idle)
             (agent-repl--write-workspace-status)
             (with-temp-buffer
               (insert-file-contents tmp)

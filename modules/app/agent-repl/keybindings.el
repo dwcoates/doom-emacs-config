@@ -62,7 +62,7 @@ CLAUDE_WORKSPACE_PREFIX), so this holds no literal prefix."
   '(("🏷️  Identity"
      (:name :ws-id :priority :group-key))
     ("⚡ State"
-     (:claude-state :repl-state :status :stop-received
+     (:agent-state :repl-state :status :stop-received
       :flashing :hidden :dead :bogus :merged))
     ("🌳 Project / Git"
      (:project-dir :worktree-p :source-ws-dir :source-ws-name
@@ -72,7 +72,7 @@ CLAUDE_WORKSPACE_PREFIX), so this holds no literal prefix."
       :git-clean :git-proc))
     ("🧠 Session"
      (:session-id :fork-session-id :vterm-buffer :active-env
-      :sandbox :bare-metal :claude-ready :ws-loaded :ready-timer))
+      :sandbox :bare-metal :agent-ready :ws-loaded :ready-timer))
     ("💬 Prompts"
      (:last-prompt-time :last-prompt-text :last-prompt-summary
       :last-prompt-summary-pending :deferred-prompts :pending-prompts
@@ -171,8 +171,8 @@ the original ALIST order."
     (nreverse result)))
 
 (defun agent-repl--cons-name-state (name)
-  "Return (NAME . claude-state) for workspace NAME."
-  (cons name (agent-repl--ws-claude-state name)))
+  "Return (NAME . agent-state) for workspace NAME."
+  (cons name (agent-repl--ws-agent-state name)))
 
 (defun agent-repl--format-workspace-state (pair)
   "Format a (NAME . STATE) PAIR as an indented diagnostic string."
@@ -188,7 +188,7 @@ the original ALIST order."
 (defun agent-repl--kill-before-workspace-delete (&optional name &rest _)
   "Before-advice for `+workspace/kill': tear down any running Claude session.
 NAME is the workspace `+workspace/kill' was invoked on.  Only fire when
-NAME refers to the current workspace — `agent-repl--claude-running-p'
+NAME refers to the current workspace — `agent-repl--agent-running-p'
 inspects the current ws's vterm, so applying it cross-workspace would
 kill the wrong session (e.g. when the hide-mode sweep persp-kills a
 background `:hidden' workspace from inside a workspace-switch handler,
@@ -206,7 +206,7 @@ before invoking `+workspace/kill'."
      ((not (equal target current))
       (agent-repl--log current
                         "kill-before-workspace-delete: target!=current, skipping (caller handles teardown)"))
-     ((agent-repl--claude-running-p)
+     ((agent-repl--agent-running-p)
       (agent-repl--log current "kill-before-workspace-delete: vterm running, killing session")
       (agent-repl-kill))
      (t
@@ -272,9 +272,9 @@ Ensures the output directory exists.  Returns the full path of the written file.
       (insert (json-encode content)))
     file))
 
-(defun agent-repl--list-claude-vterm-buffers ()
+(defun agent-repl--list-agent-vterm-buffers ()
   "Return a list of live Claude vterm buffers (matching `agent-repl--vterm-buffer-re')."
-  (cl-remove-if-not #'agent-repl--claude-buffer-p (buffer-list)))
+  (cl-remove-if-not #'agent-repl--agent-buffer-p (buffer-list)))
 
 ;;; Section 2: Utility commands used by keybindings
 
@@ -487,7 +487,7 @@ Use this to verify the processor works independently of the file watcher."
 (defun agent-repl-debug/buffer-info ()
   "Display all claude vterm buffers with their owning and persp workspaces."
   (interactive)
-  (let* ((bufs (agent-repl--list-claude-vterm-buffers))
+  (let* ((bufs (agent-repl--list-agent-vterm-buffers))
          (lines (mapcar #'agent-repl--format-buffer-info bufs)))
     (message "Claude buffers:\n%s"
              (if lines (mapconcat #'identity lines "\n") "  (none)"))))
@@ -496,7 +496,7 @@ Use this to verify the processor works independently of the file watcher."
   "Clear all states for workspace WS without killing buffers."
   (interactive (list (agent-repl--read-workspace "Workspace: ")))
   (dolist (state '(:thinking :done :permission :inactive))
-    (agent-repl--ws-claude-state-clear-if ws state))
+    (agent-repl--ws-agent-state-clear-if ws state))
   (message "Cleared all states for %s" ws))
 
 (defun agent-repl--kill-owned-panel-buffers (ws)
@@ -506,7 +506,7 @@ and silences process exit queries before killing."
   (agent-repl--log ws "kill-owned-panel-buffers: entry ws=%s" ws)
   (dolist (buf (buffer-list))
     (when (and (buffer-live-p buf)
-               (agent-repl--claude-panel-buffer-p buf)
+               (agent-repl--agent-panel-buffer-p buf)
                (equal ws (agent-repl--buffer-owner buf)))
       (agent-repl--log ws "kill-owned-panel-buffers: killing buffer=%s" (buffer-name buf))
       (agent-repl-window--delete-buffer-windows buf :all-frames nil)
@@ -526,7 +526,7 @@ Kills claude buffers, closes windows, and removes all state."
 (defun agent-repl-debug/set-owning-workspace ()
   "Set the owning workspace for a claude vterm buffer."
   (interactive)
-  (let* ((bufs (agent-repl--list-claude-vterm-buffers))
+  (let* ((bufs (agent-repl--list-agent-vterm-buffers))
          (buf-name (completing-read "Buffer: " (mapcar #'buffer-name bufs) nil t))
          (ws (agent-repl--read-workspace "Owning workspace: ")))
     (with-current-buffer buf-name
@@ -571,7 +571,7 @@ appended to the file regardless of the `agent-repl-debug' level."
   "Toggle the metaprompt prefix injection."
   (interactive)
   (setq agent-repl-skip-permissions (not agent-repl-skip-permissions))
-  (message "Claude REPL metaprompt: %s" (if agent-repl-skip-permissions "ON" "OFF")))
+  (message "Agent REPL metaprompt: %s" (if agent-repl-skip-permissions "ON" "OFF")))
 
 (defun agent-repl-debug/prefix-counter ()
   "Show the current metaprompt prefix counter, period, and workspace."
@@ -620,14 +620,14 @@ Uses `agent-repl--workspace-clean-p' -- the same function used in production."
 (defun agent-repl-debug/--gather-ws-diagnostics (ws-name)
   "Gather diagnostic information about workspace WS-NAME.
 Returns a plist with keys :vterm-buf :proc-alive :owning-ws :has-window
-:claude-open :dirty."
-  (let* ((open (agent-repl--ws-claude-open-p ws-name))
+:agent-open :dirty."
+  (let* ((open (agent-repl--ws-agent-open-p ws-name))
          (dirty (not (agent-repl--workspace-clean-p ws-name)))
          (persp (agent-repl--ws-resolve-persp ws-name))
          (persp-bufs (agent-repl--ws-buffers persp))
          (vterm-buf (cl-loop for buf in persp-bufs
                              when (and (buffer-live-p buf)
-                                       (agent-repl--claude-buffer-p buf))
+                                       (agent-repl--agent-buffer-p buf))
                              return buf))
          (proc (and vterm-buf (get-buffer-process vterm-buf)))
          (proc-alive (and proc (process-live-p proc)))
@@ -635,12 +635,12 @@ Returns a plist with keys :vterm-buf :proc-alive :owning-ws :has-window
          (has-window (and vterm-buf (get-buffer-window vterm-buf t))))
     (list :vterm-buf vterm-buf :proc-alive proc-alive
           :owning-ws owning-ws :has-window has-window
-          :claude-open open :dirty dirty)))
+          :agent-open open :dirty dirty)))
 
-(defun agent-repl-debug/--apply-state-refresh (ws-name claude-open)
-  "Apply a state refresh for WS-NAME given whether CLAUDE-OPEN is non-nil.
+(defun agent-repl-debug/--apply-state-refresh (ws-name agent-open)
+  "Apply a state refresh for WS-NAME given whether AGENT-OPEN is non-nil.
 Mirrors the logic in `agent-repl--update-all-workspace-states'."
-  (if claude-open
+  (if agent-open
       (agent-repl--update-ws-state ws-name)
     (agent-repl--mark-dead-vterm ws-name)))
 
@@ -652,14 +652,14 @@ BEFORE and AFTER are the workspace states before and after refresh."
     (format (concat "Workspace %s:\n"
                     "  vterm-buf=%s process=%s\n"
                     "  owning-ws=%s has-window=%s\n"
-                    "  claude-open=%s dirty=%s\n"
+                    "  agent-open=%s dirty=%s\n"
                     "  state=%s -> %s")
             ws-name
             (and vterm-buf (buffer-name vterm-buf))
             (if (plist-get diag :proc-alive) "alive" "dead/nil")
             (or (plist-get diag :owning-ws) "nil")
             (if (plist-get diag :has-window) "yes" "no")
-            (if (plist-get diag :claude-open) "yes" "no")
+            (if (plist-get diag :agent-open) "yes" "no")
             (if (plist-get diag :dirty) "yes" "no")
             (or before "nil") (or after "nil"))))
 
@@ -669,10 +669,10 @@ Runs the same logic as the periodic `update-all-workspace-states' timer:
 checks claude visibility, git dirty status, and applies the state table.
 Reports comprehensive diagnostics."
   (interactive (list (agent-repl--read-workspace-with-default "Workspace: ")))
-  (let* ((before (agent-repl--ws-claude-state ws-name))
+  (let* ((before (agent-repl--ws-agent-state ws-name))
          (diag (agent-repl-debug/--gather-ws-diagnostics ws-name)))
-    (agent-repl-debug/--apply-state-refresh ws-name (plist-get diag :claude-open))
-    (let ((after (agent-repl--ws-claude-state ws-name)))
+    (agent-repl-debug/--apply-state-refresh ws-name (plist-get diag :agent-open))
+    (let ((after (agent-repl--ws-agent-state ws-name)))
       (force-mode-line-update t)
       (message "%s" (agent-repl-debug/--format-diagnostics ws-name diag before after)))))
 
@@ -750,14 +750,14 @@ Idempotent."
 ;; override treatment as the scroll chords -- a plain `(map! ... )' lands
 ;; in `global-map', which loses to Doom default's `:gi/:gn "C-S-RET"' ->
 ;; `+default/newline-above' (evil aux on global state maps) and to
-;; `claude-input-mode-map's `:ni "C-S-RET"' major-mode aux.  Bind the
+;; `agent-repl-input-mode-map's `:ni "C-S-RET"' major-mode aux.  Bind the
 ;; chord on `general-override-mode-map' AND its per-state aux maps so
 ;; it wins above all of them.
 (defconst agent-repl--drawer-visit-chord
   '(("C-S-<return>" . agent-repl-drawer-global-visit))
   "Alist of (KEY-STRING . COMMAND) for the global drawer-visit chord
 that must win key lookup above the Doom default's `:gi/:gn \"C-S-RET\"'
-binding and above `claude-input-mode-map's `:ni \"C-S-RET\"' aux.")
+binding and above `agent-repl-input-mode-map's `:ni \"C-S-RET\"' aux.")
 
 (defun agent-repl--install-drawer-visit-override ()
   "Install `agent-repl--drawer-visit-chord' into `general-override-mode-map'
@@ -780,7 +780,7 @@ at top-level AND into its evil intercept aux maps for every state in
 ;; its define-keys loop over '("C-" "M-" "C-S-").  That major-mode
 ;; binding shadows our global-map entries whenever point lands in a
 ;; vterm buffer (e.g. immediately after `C-S-<return>' visits a
-;; workspace and selects its Claude REPL output window), causing the
+;; workspace and selects its Agent REPL output window), causing the
 ;; chord to be sent to the shell instead of triggering drawer nav.
 ;; Strip the conflicting keys from `vterm-mode-map' so global-map sees
 ;; them.  Done lazily inside `after! vterm' so it survives package
@@ -807,10 +807,10 @@ global drawer-mirror bindings win in vterm buffers."
 
 ;; SPC o -- Claude session control (open, focus, kill, interrupt, utilities)
 (map! :leader
-      :desc "Claude REPL (simple)" "o c" #'agent-repl-simple
-      :desc "Claude REPL (deprio)" "o C" #'agent-repl
+      :desc "Agent REPL (simple)" "o c" #'agent-repl-simple
+      :desc "Agent REPL (deprio)" "o C" #'agent-repl
       :desc "Kill Claude" "o C-c" #'agent-repl-kill
-      :desc "Kill claude process (keep panels)" "o k" #'agent-repl-kill-claude-process
+      :desc "Kill claude process (keep panels)" "o k" #'agent-repl-kill-agent-process
       :desc "Claude input" "o v" #'agent-repl-focus-input
       :desc "Claude interrupt" "o x" #'agent-repl-interrupt
       :desc "Copy file reference" "o r" #'agent-repl-copy-reference

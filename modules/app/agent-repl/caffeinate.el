@@ -5,7 +5,7 @@
 ;; Keeps macOS awake while any registered workspace warrants
 ;; wakefulness.  Two activity signals are OR'd:
 ;;
-;;   1. `:claude-state' is in `agent-repl-caffeinate-active-states'
+;;   1. `:agent-state' is in `agent-repl-caffeinate-active-states'
 ;;      (default: `:thinking') — Claude is mid-computation.
 ;;   2. The workspace has a merge in flight or queued (`:merging t' or
 ;;      `:repl-state :merge-queued') — the editor needs wakefulness to
@@ -28,11 +28,11 @@
 ;; (in core.el) via `advice-add' with a key filter, so every plist
 ;; mutation of one of the relevant keys re-evaluates whether
 ;; caffeinate should be running.  Advising the central setter rather
-;; than the typed wrapper `agent-repl--ws-set-claude-state' is what
+;; than the typed wrapper `agent-repl--ws-set-agent-state' is what
 ;; lets us catch the merge-flow mutations (`:merging',
 ;; `:merge-completed', `:repl-state :merge-queued') performed
 ;; directly in worktree.el — those never route through the typed
-;; `:claude-state' setter.  Workspace removal (`agent-repl--ws-del')
+;; `:agent-state' setter.  Workspace removal (`agent-repl--ws-del')
 ;; is also advised so a workspace nuked while still `:thinking' or
 ;; mid-merge cannot orphan the subprocess.
 
@@ -51,8 +51,8 @@ leaves those states.  Ignored on non-Darwin systems."
   :group 'agent-repl-caffeinate)
 
 (defcustom agent-repl-caffeinate-active-states '(:thinking)
-  "Claude-state keywords that count as \"actively working\".
-While any workspace's `:claude-state' is `memq' of this list, the
+  "Agent-state keywords that count as \"actively working\".
+While any workspace's `:agent-state' is `memq' of this list, the
 caffeinate subprocess is held alive so macOS does not idle-sleep.
 `:thinking' is the default; `:permission' is deliberately excluded
 because the bottleneck is the user, not the machine.
@@ -60,7 +60,7 @@ because the bottleneck is the user, not the machine.
 This is one of two activity signals — see also
 `agent-repl--caffeinate-any-merging-p', which keeps caffeinate alive
 while any workspace has a merge in flight or queued (independent of
-`:claude-state' so a workspace can drop to `:done' and still hold
+`:agent-state' so a workspace can drop to `:done' and still hold
 caffeinate while its sentinel-driven cherry-pick + optional Claude
 conflict-resolution path runs)."
   :type '(repeat (choice (const :init)
@@ -94,10 +94,10 @@ Requires that the feature be enabled, we're on macOS, and the
        (eq system-type 'darwin)
        (executable-find agent-repl-caffeinate-program)))
 
-(defun agent-repl--caffeinate-any-claude-state-active-p ()
-  "Return non-nil when any workspace's `:claude-state' is in active list.
+(defun agent-repl--caffeinate-any-agent-state-active-p ()
+  "Return non-nil when any workspace's `:agent-state' is in active list.
 Iterates `agent-repl--workspaces' and checks each plist's
-`:claude-state' against `agent-repl-caffeinate-active-states'.  First
+`:agent-state' against `agent-repl-caffeinate-active-states'.  First
 of the two activity signals consulted by
 `agent-repl--caffeinate-any-active-p'."
   (let ((active nil))
@@ -105,11 +105,11 @@ of the two activity signals consulted by
       (maphash
        (lambda (_ws plist)
          ;; Skip tombstoned entries — a nuked workspace's residual
-         ;; `:claude-state' (e.g. `:thinking' captured pre-nuke) must
+         ;; `:agent-state' (e.g. `:thinking' captured pre-nuke) must
          ;; not hold caffeinate alive.  Identity-only records are
          ;; intentionally invisible to runtime predicates.
          (when (and (null (plist-get plist :nuked-at))
-                    (memq (plist-get plist :claude-state)
+                    (memq (plist-get plist :agent-state)
                           agent-repl-caffeinate-active-states))
            (setq active t)))
        agent-repl--workspaces))
@@ -146,14 +146,14 @@ exclusion principle as `:permission'), and a failed merge is terminal."
 (defun agent-repl--caffeinate-any-active-p ()
   "Return non-nil when any workspace warrants holding macOS awake.
 Logical OR of the two activity signals:
-- `agent-repl--caffeinate-any-claude-state-active-p' — a workspace's
-  `:claude-state' is in `agent-repl-caffeinate-active-states' (e.g.
+- `agent-repl--caffeinate-any-agent-state-active-p' — a workspace's
+  `:agent-state' is in `agent-repl-caffeinate-active-states' (e.g.
   Claude is mid-computation).
 - `agent-repl--caffeinate-any-merging-p' — a workspace has a merge in
   flight or queued, so the editor must stay awake to detect the
   workspace-merge sentinel file, run the cherry-pick, and optionally
   drive Claude-based conflict resolution."
-  (or (agent-repl--caffeinate-any-claude-state-active-p)
+  (or (agent-repl--caffeinate-any-agent-state-active-p)
       (agent-repl--caffeinate-any-merging-p)))
 
 (defun agent-repl--caffeinate-running-p ()
@@ -198,9 +198,9 @@ resolved.  Bails on unsupported platforms."
       (agent-repl--caffeinate-stop))))
 
 (defconst agent-repl--caffeinate-watched-keys
-  '(:claude-state :merging :merge-completed :repl-state)
+  '(:agent-state :merging :merge-completed :repl-state)
   "Plist keys whose mutation can change the caffeinate decision.
-- `:claude-state' — drives the `--any-claude-state-active-p' branch.
+- `:agent-state' — drives the `--any-agent-state-active-p' branch.
 - `:merging' — set t at cherry-pick start, nil on success/failure.
 - `:merge-completed' — flipped to t on successful merge (terminal,
   but watched so the refresh fires the moment the merge exits the
@@ -222,8 +222,8 @@ Wraps `agent-repl--caffeinate-refresh' for `:after' advice on
 
 ;; Reconcile on every plist mutation of a watched key.  Advising
 ;; `agent-repl--ws-put' (the single central plist setter in core.el)
-;; rather than `agent-repl--ws-set-claude-state' (status.el's typed
-;; wrapper for `:claude-state' only) ensures we also catch direct
+;; rather than `agent-repl--ws-set-agent-state' (status.el's typed
+;; wrapper for `:agent-state' only) ensures we also catch direct
 ;; mutations of `:merging' / `:merge-completed' / `:repl-state'
 ;; performed by the merge flow in worktree.el, which never route
 ;; through the typed setter.

@@ -347,7 +347,7 @@ Derived from the per-account defcustoms in session.el
 The default ~/.claude is EXCLUDED — install.sh owns it, and it is the
 account-independent notification funnel that must not be rewritten here.
 Duplicates and the default dir are removed; order is stable."
-  (let ((default-claude (file-name-as-directory (expand-file-name "~/.claude")))
+  (let ((default-agent (file-name-as-directory (expand-file-name "~/.claude")))
         (dirs '()))
     (dolist (raw (list (and (boundp 'agent-repl-multi-repo-config-dir)
                             agent-repl-multi-repo-config-dir)
@@ -355,7 +355,7 @@ Duplicates and the default dir are removed; order is stable."
                             agent-repl-default-config-dir)))
       (when (and (stringp raw) (> (length raw) 0))
         (let ((abs (file-name-as-directory (expand-file-name raw))))
-          (unless (or (equal abs default-claude) (member abs dirs))
+          (unless (or (equal abs default-agent) (member abs dirs))
             (push abs dirs)))))
     (nreverse dirs)))
 

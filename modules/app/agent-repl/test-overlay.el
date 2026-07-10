@@ -147,11 +147,11 @@
 (ert-deftest agent-repl-test-resolve-target-in-claude-buffer ()
   "In a claude buffer, `resolve-overlay-target-buffer' returns current buffer."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
       (should (eq (agent-repl--resolve-overlay-target-buffer) (current-buffer))))))
 
-(ert-deftest agent-repl-test-resolve-target-non-claude-with-ws ()
-  "In a non-claude buffer, resolves via workspace vterm-buffer."
+(ert-deftest agent-repl-test-resolve-target-non-agent-with-ws ()
+  "In a non-agent buffer, resolves via workspace vterm-buffer."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer "*scratch-test*"
       (let ((fake-buf (get-buffer-create " *fake-vterm*")))
@@ -162,16 +162,16 @@
               (should (eq (agent-repl--resolve-overlay-target-buffer) fake-buf)))
           (kill-buffer fake-buf))))))
 
-(ert-deftest agent-repl-test-resolve-target-non-claude-no-ws ()
-  "In a non-claude buffer with no workspace, returns nil."
+(ert-deftest agent-repl-test-resolve-target-non-agent-no-ws ()
+  "In a non-agent buffer with no workspace, returns nil."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer "*scratch-test2*"
       (cl-letf (((symbol-function '+workspace-current-name)
                  (lambda () nil)))
         (should-not (agent-repl--resolve-overlay-target-buffer))))))
 
-(ert-deftest agent-repl-test-resolve-target-non-claude-no-vterm ()
-  "In a non-claude buffer where workspace has no vterm-buffer, returns nil."
+(ert-deftest agent-repl-test-resolve-target-non-agent-no-vterm ()
+  "In a non-agent buffer where workspace has no vterm-buffer, returns nil."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer "*scratch-test3*"
       (cl-letf (((symbol-function '+workspace-current-name)
@@ -302,7 +302,7 @@
   "Reentrancy guard prevents recursive calls to `after-vterm-redraw'."
   (agent-repl-test--with-clean-state
     (let ((update-count 0))
-      (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
         (cl-letf (((symbol-function 'agent-repl--update-hide-overlay)
                    (lambda () (cl-incf update-count))))
           ;; With reentrancy guard active, update-hide-overlay should NOT be called
@@ -314,8 +314,8 @@
             (agent-repl--vterm-redraw-advice)
             (should (= update-count 1))))))))
 
-(ert-deftest agent-repl-test-redraw-advice-skips-non-claude ()
-  "In a non-claude buffer, `after-vterm-redraw' should not call `update-hide-overlay'."
+(ert-deftest agent-repl-test-redraw-advice-skips-non-agent ()
+  "In a non-agent buffer, `after-vterm-redraw' should not call `update-hide-overlay'."
   (agent-repl-test--with-clean-state
     (let ((update-count 0))
       (agent-repl-test--with-temp-buffer "*scratch*"
@@ -328,7 +328,7 @@
 (ert-deftest agent-repl-test-redraw-advice-accepts-args ()
   "The redraw advice function should accept and ignore any arguments."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-test9999*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-test9999*"
       (cl-letf (((symbol-function 'agent-repl--update-hide-overlay)
                  (lambda () nil)))
         ;; Should not error when called with extra arguments
@@ -338,7 +338,7 @@
   "While executing, the advice should set `agent-repl--in-redraw-advice' to t."
   (agent-repl-test--with-clean-state
     (let ((flag-during-update nil))
-      (agent-repl-test--with-temp-buffer "*claude-panel-f1a9c4ec*"
+      (agent-repl-test--with-temp-buffer "*agent-panel-f1a9c4ec*"
         (cl-letf (((symbol-function 'agent-repl--update-hide-overlay)
                    (lambda ()
                      (setq flag-during-update agent-repl--in-redraw-advice))))
@@ -605,7 +605,7 @@
 
 (ert-deftest agent-repl-test-vterm-color-advice-claude-default-bg ()
   "vterm-color-advice in a claude buffer with default bg request should return dark hex."
-  (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
     (let ((result (agent-repl--vterm-color-advice
                    (lambda (_idx &rest _args) "#ffffff")
                    -1)))
@@ -613,14 +613,14 @@
 
 (ert-deftest agent-repl-test-vterm-color-advice-claude-non-default ()
   "vterm-color-advice in a claude buffer with non-default request should pass through."
-  (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
     (let ((result (agent-repl--vterm-color-advice
                    (lambda (_idx &rest _args) "#ff0000")
                    0)))
       (should (equal result "#ff0000")))))
 
-(ert-deftest agent-repl-test-vterm-color-advice-non-claude ()
-  "vterm-color-advice in a non-claude buffer should pass through regardless."
+(ert-deftest agent-repl-test-vterm-color-advice-non-agent ()
+  "vterm-color-advice in a non-agent buffer should pass through regardless."
   (agent-repl-test--with-temp-buffer "*scratch*"
     (let ((result (agent-repl--vterm-color-advice
                    (lambda (_idx &rest _args) "#ff0000")
@@ -640,7 +640,7 @@
 
 (ert-deftest agent-repl-test-vterm-color-advice-no-log-when-debug-off ()
   "vterm-color-advice in a claude buffer must NOT emit a log line when `agent-repl-debug' is nil."
-  (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
     (let ((agent-repl-debug nil)
           (log-calls 0))
       (cl-letf (((symbol-function 'agent-repl--log-verbose)
@@ -650,7 +650,7 @@
 
 (ert-deftest agent-repl-test-vterm-color-advice-no-log-when-debug-t ()
   "vterm-color-advice must NOT emit a log line when `agent-repl-debug' is t (only verbose enables it)."
-  (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
     (let ((agent-repl-debug t)
           (log-calls 0))
       (cl-letf (((symbol-function 'agent-repl--log-verbose)
@@ -660,7 +660,7 @@
 
 (ert-deftest agent-repl-test-vterm-color-advice-logs-when-verbose ()
   "vterm-color-advice in a claude buffer must emit a log line when `agent-repl-debug' is \\='verbose."
-  (agent-repl-test--with-temp-buffer "*claude-panel-abcd1234*"
+  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
     (let ((agent-repl-debug 'verbose)
           (log-calls 0))
       (cl-letf (((symbol-function 'agent-repl--log-verbose)

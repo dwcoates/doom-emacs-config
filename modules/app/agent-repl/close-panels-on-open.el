@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 
-;; When the Claude REPL panels fill the frame and the user opens a
+;; When the Agent REPL panels fill the frame and the user opens a
 ;; buffer or file by any of the usual means (`SPC ,', `SPC <', `SPC .',
 ;; `SPC f f', `SPC p f', `M-x switch-to-buffer', `M-x find-file', etc.),
 ;; the panels should first close — restoring the pre-panel layout — and
@@ -77,10 +77,10 @@ machinery uses to place panels into their own windows."
   (let* ((arg (car args))
          (buf (cond ((bufferp arg) arg)
                     ((stringp arg) (get-buffer arg)))))
-    (and buf (buffer-live-p buf) (agent-repl--claude-panel-buffer-p buf))))
+    (and buf (buffer-live-p buf) (agent-repl--agent-panel-buffer-p buf))))
 
 (defun agent-repl--close-panels-before-open (&rest args)
-  "Close Claude REPL panels before an interactive buffer/file open.
+  "Close Agent REPL panels before an interactive buffer/file open.
 Installed as :before advice on `agent-repl-close-panels-on-open-fns'.
 No-op unless both panels are currently visible and the open target is
 not itself a Claude panel buffer (see

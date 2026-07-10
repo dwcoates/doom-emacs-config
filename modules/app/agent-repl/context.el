@@ -165,7 +165,7 @@ E.g. 53179 → \"53,179\" and 1000000 → \"1,000,000\"."
 (defun agent-repl--context-segment ()
   "Return a propertized string for the mode-line's context-tokens segment.
 Reads `agent-repl--owning-workspace' from the current buffer (set on
-every claude-owned vterm buffer) and pulls the workspace's used context
+every agent-owned vterm buffer) and pulls the workspace's used context
 token count.  Returns the empty string when disabled, the workspace is
 unknown, or no usage is yet available."
   (if (not agent-repl-context-enabled)

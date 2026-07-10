@@ -397,7 +397,7 @@
 (ert-deftest agent-repl-cmd-test-send-diff-analysis/formats-message ()
   "send-diff-analysis formats 'for the SPEC, PROMPT' and sends it."
   (let (sent-text)
-    (cl-letf (((symbol-function 'agent-repl--send-to-claude)
+    (cl-letf (((symbol-function 'agent-repl--send-to-agent)
                (lambda (text) (setq sent-text text))))
       (agent-repl--send-diff-analysis "unstaged changes (git diff)" "please explain the changes")
       (should (equal sent-text "for the unstaged changes (git diff), please explain the changes")))))
@@ -440,10 +440,10 @@
                'branch :use-branch-diff-spec 'agent-repl-test--no-branch-override)
               'agent-repl-branch-diff-spec)))
 
-;;;; ---- agent-repl--send-to-claude ----
+;;;; ---- agent-repl--send-to-agent ----
 
-(ert-deftest agent-repl-cmd-test-send-to-claude/not-running-initializes-first ()
-  "send-to-claude calls initialize-claude when Claude is not running."
+(ert-deftest agent-repl-cmd-test-send-to-agent/not-running-initializes-first ()
+  "send-to-agent calls initialize-agent when Claude is not running."
   (let (init-called sent-text)
     (agent-repl-test--with-clean-state
       (let ((fake-vterm-buf (get-buffer-create " *test-vterm*")))
@@ -452,19 +452,19 @@
               (agent-repl--ws-put "test-ws" :vterm-buffer fake-vterm-buf)
               (cl-letf (((symbol-function '+workspace-current-name)
                          (lambda () "test-ws"))
-                        ((symbol-function 'agent-repl--claude-running-p)
+                        ((symbol-function 'agent-repl--agent-running-p)
                          (lambda (_ws) nil))
-                        ((symbol-function 'agent-repl--initialize-claude)
+                        ((symbol-function 'agent-repl--initialize-agent)
                          (lambda (_ws) (setq init-called t)))
                         ((symbol-function 'agent-repl--send-input-to-vterm)
                          (lambda (_buf text) (setq sent-text text))))
-                (agent-repl--send-to-claude "hello claude")
+                (agent-repl--send-to-agent "hello claude")
                 (should init-called)
                 (should (equal sent-text "hello claude"))))
           (kill-buffer fake-vterm-buf))))))
 
-(ert-deftest agent-repl-cmd-test-send-to-claude/running-skips-init ()
-  "send-to-claude skips initialize-claude when Claude is already running."
+(ert-deftest agent-repl-cmd-test-send-to-agent/running-skips-init ()
+  "send-to-agent skips initialize-agent when Claude is already running."
   (let (init-called sent-buf sent-text)
     (agent-repl-test--with-clean-state
       (let ((fake-vterm-buf (get-buffer-create " *test-vterm*")))
@@ -473,14 +473,14 @@
               (agent-repl--ws-put "test-ws" :vterm-buffer fake-vterm-buf)
               (cl-letf (((symbol-function '+workspace-current-name)
                          (lambda () "test-ws"))
-                        ((symbol-function 'agent-repl--claude-running-p)
+                        ((symbol-function 'agent-repl--agent-running-p)
                          (lambda (_ws) t))
-                        ((symbol-function 'agent-repl--initialize-claude)
+                        ((symbol-function 'agent-repl--initialize-agent)
                          (lambda (_ws) (setq init-called t)))
                         ((symbol-function 'agent-repl--send-input-to-vterm)
                          (lambda (buf text)
                            (setq sent-buf buf sent-text text))))
-                (agent-repl--send-to-claude "hello claude")
+                (agent-repl--send-to-agent "hello claude")
                 (should-not init-called)
                 (should (eq sent-buf fake-vterm-buf))
                 (should (equal sent-text "hello claude"))))
@@ -493,7 +493,7 @@
   (let (sent-text)
     (cl-letf (((symbol-function 'agent-repl--context-reference)
                (lambda () "src/foo.el:42"))
-              ((symbol-function 'agent-repl--send-to-claude)
+              ((symbol-function 'agent-repl--send-to-agent)
                (lambda (text) (setq sent-text text))))
       (agent-repl-explain)
       (should (equal sent-text "please explain src/foo.el:42")))))
@@ -507,7 +507,7 @@
                (lambda () "src/foo.el:42"))
               ((symbol-function 'read-string)
                (lambda (_prompt _initial) "review src/foo.el:42 for bugs"))
-              ((symbol-function 'agent-repl--send-to-claude)
+              ((symbol-function 'agent-repl--send-to-agent)
                (lambda (text) (setq sent-text text))))
       (agent-repl-explain-prompt)
       (should (equal sent-text "review src/foo.el:42 for bugs")))))
@@ -519,7 +519,7 @@
                (lambda () "src/bar.el:10-20"))
               ((symbol-function 'read-string)
                (lambda (_prompt initial) (setq initial-input initial) "anything"))
-              ((symbol-function 'agent-repl--send-to-claude)
+              ((symbol-function 'agent-repl--send-to-agent)
                (lambda (_text))))
       (agent-repl-explain-prompt)
       (should (equal initial-input "src/bar.el:10-20")))))
@@ -531,7 +531,7 @@
                (lambda () "src/foo.el:1"))
               ((symbol-function 'read-string)
                (lambda (_prompt _initial) ""))
-              ((symbol-function 'agent-repl--send-to-claude)
+              ((symbol-function 'agent-repl--send-to-agent)
                (lambda (text) (setq sent-text text))))
       (agent-repl-explain-prompt)
       (should (null sent-text)))))
@@ -796,7 +796,7 @@ claude output window is not available to take over."
          (display-args nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
-                  ((symbol-function 'agent-repl--explain-config-current-claude-output-window)
+                  ((symbol-function 'agent-repl--explain-config-current-agent-output-window)
                    (lambda () nil))
                   ((symbol-function 'display-buffer)
                    (lambda (b action) (setq display-args (list b action)) nil))
@@ -815,7 +815,7 @@ claude output window is not available to take over."
          (agent-repl--explain-config-replaced-window nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
-                  ((symbol-function 'agent-repl--explain-config-current-claude-output-window)
+                  ((symbol-function 'agent-repl--explain-config-current-agent-output-window)
                    (lambda () nil))
                   ((symbol-function 'display-buffer) (lambda (&rest _) nil))
                   ((symbol-function 'agent-repl--explain-config-apply-width) #'ignore))
@@ -855,7 +855,7 @@ the popup and drawer are fully decoupled."
          (drawer-hide-called nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
-                  ((symbol-function 'agent-repl--explain-config-current-claude-output-window)
+                  ((symbol-function 'agent-repl--explain-config-current-agent-output-window)
                    (lambda () nil))
                   ((symbol-function 'display-buffer) (lambda (&rest _) nil))
                   ((symbol-function 'agent-repl--explain-config-apply-width) #'ignore)
@@ -867,7 +867,7 @@ the popup and drawer are fully decoupled."
 
 ;;;; ---- Claude output window takeover ----
 
-(ert-deftest agent-repl-cmd-test-explain-config-show/takes-over-claude-output-window-when-visible ()
+(ert-deftest agent-repl-cmd-test-explain-config-show/takes-over-agent-output-window-when-visible ()
   "Show reuses the live claude output window via `set-window-buffer' rather
 than falling back to the side-window display action."
   (let* ((agent-repl-explain-config-buffer-name " *test-explain-takeover*")
@@ -878,7 +878,7 @@ than falling back to the side-window display action."
          (display-buffer-called nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
-                  ((symbol-function 'agent-repl--explain-config-current-claude-output-window)
+                  ((symbol-function 'agent-repl--explain-config-current-agent-output-window)
                    (lambda () 'fake-output-win))
                   ((symbol-function 'window-buffer) (lambda (_w) 'prev-buf))
                   ((symbol-function 'set-window-dedicated-p) #'ignore)
@@ -899,7 +899,7 @@ than falling back to the side-window display action."
          (agent-repl--explain-config-replaced-window nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
-                  ((symbol-function 'agent-repl--explain-config-current-claude-output-window)
+                  ((symbol-function 'agent-repl--explain-config-current-agent-output-window)
                    (lambda () 'fake-output-win))
                   ((symbol-function 'window-buffer) (lambda (_w) 'prev-buf))
                   ((symbol-function 'set-window-dedicated-p) #'ignore)
@@ -920,7 +920,7 @@ window."
          (dedicated-cleared-with nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
-                  ((symbol-function 'agent-repl--explain-config-current-claude-output-window)
+                  ((symbol-function 'agent-repl--explain-config-current-agent-output-window)
                    (lambda () 'fake-output-win))
                   ((symbol-function 'window-buffer) (lambda (_w) 'prev-buf))
                   ((symbol-function 'set-window-dedicated-p)
@@ -1006,7 +1006,7 @@ double-restore an already-rehydrated claude output window."
       (agent-repl--explain-config-hide)
       (should-not agent-repl--explain-config-replaced-window))))
 
-(ert-deftest agent-repl-cmd-test-explain-config-hide/reapplies-claude-output-window-hardening ()
+(ert-deftest agent-repl-cmd-test-explain-config-hide/reapplies-agent-output-window-hardening ()
   "Hide re-applies `--configure-vterm-window' on successful restore so the
 claude output window regains its dedicate/size-fix/delete-protect recipe."
   (let* ((prev (get-buffer-create " *test-explain-reharden-prev*"))
@@ -1156,7 +1156,7 @@ and window is missing, with no claude output window available to take over."
          (display-args nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
-                  ((symbol-function 'agent-repl--explain-config-current-claude-output-window)
+                  ((symbol-function 'agent-repl--explain-config-current-agent-output-window)
                    (lambda () nil))
                   ((symbol-function 'display-buffer)
                    (lambda (b action) (setq display-args (list b action)) nil))
@@ -1167,7 +1167,7 @@ and window is missing, with no claude output window available to take over."
                       agent-repl--explain-config-display-action)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-(ert-deftest agent-repl-cmd-test-explain-config-ensure-visible/takes-over-new-persp-claude-output-window ()
+(ert-deftest agent-repl-cmd-test-explain-config-ensure-visible/takes-over-new-persp-agent-output-window ()
   "Persp-reconciliation routes through `--show', which takes over the new
 persp's claude output window when it is visible — no side-window fallback."
   (let* ((agent-repl-explain-config-buffer-name " *test-explain-persp-takeover*")
@@ -1178,7 +1178,7 @@ persp's claude output window when it is visible — no side-window fallback."
          (display-buffer-called nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
-                  ((symbol-function 'agent-repl--explain-config-current-claude-output-window)
+                  ((symbol-function 'agent-repl--explain-config-current-agent-output-window)
                    (lambda () 'new-persp-output-win))
                   ((symbol-function 'window-buffer) (lambda (_w) 'new-prev-buf))
                   ((symbol-function 'set-window-dedicated-p) #'ignore)
@@ -1202,7 +1202,7 @@ before re-showing — the cell belongs to the persp we left, not the new one."
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
                   ((symbol-function 'window-live-p)
                    (lambda (w) (not (eq w 'dead-win))))
-                  ((symbol-function 'agent-repl--explain-config-current-claude-output-window)
+                  ((symbol-function 'agent-repl--explain-config-current-agent-output-window)
                    (lambda () nil))
                   ((symbol-function 'display-buffer) (lambda (&rest _) nil))
                   ((symbol-function 'agent-repl--explain-config-apply-width) #'ignore))
@@ -1703,7 +1703,7 @@ focus or flip a hidden buffer's evil state."
               (agent-repl--ws-put "test-ws" :vterm-buffer fake-vterm-buf)
               ;; NOTE: do NOT stub `agent-repl--ws-get' here.  A blanket
               ;; stub that returns `fake-vterm-buf' for every key would
-              ;; hand the interrupt path (via `--mark-claude-done') a
+              ;; hand the interrupt path (via `--mark-agent-done') a
               ;; buffer where it expects other value types, risking
               ;; wrong-type errors.  The real `--ws-get' reads the value
               ;; `--ws-put' just stored for `:vterm-buffer' and returns
@@ -1731,14 +1731,14 @@ focus or flip a hidden buffer's evil state."
       (agent-repl-interrupt)
       (should-not escape-called))))
 
-(ert-deftest agent-repl-cmd-test-interrupt/marks-claude-state-done-when-vterm-live ()
-  "interrupt sets the workspace's :claude-state to :done after sending escape."
+(ert-deftest agent-repl-cmd-test-interrupt/marks-agent-state-done-when-vterm-live ()
+  "interrupt sets the workspace's :agent-state to :done after sending escape."
   (agent-repl-test--with-clean-state
     (let ((fake-vterm-buf (get-buffer-create " *test-interrupt-done-vterm*")))
       (unwind-protect
           (progn
             (agent-repl--ws-put "test-ws" :vterm-buffer fake-vterm-buf)
-            (agent-repl--ws-set-claude-state "test-ws" :thinking)
+            (agent-repl--ws-set-agent-state "test-ws" :thinking)
             (cl-letf (((symbol-function '+workspace-current-name)
                        (lambda () "test-ws"))
                       ((symbol-function 'agent-repl--send-interrupt-escape)
@@ -1746,7 +1746,7 @@ focus or flip a hidden buffer's evil state."
                       ((symbol-function 'run-at-time)
                        (lambda (_time _repeat _fn _arg) nil)))
               (agent-repl-interrupt)
-              (should (eq (agent-repl--ws-get "test-ws" :claude-state) :done))))
+              (should (eq (agent-repl--ws-get "test-ws" :agent-state) :done))))
         (kill-buffer fake-vterm-buf)))))
 
 (ert-deftest agent-repl-cmd-test-interrupt/clears-stop-tracking-when-vterm-live ()
@@ -1776,20 +1776,20 @@ state from the previous turn must be reset by Emacs."
 No interrupt was actually delivered, so the state should not change."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :vterm-buffer nil)
-    (agent-repl--ws-set-claude-state "test-ws" :thinking)
+    (agent-repl--ws-set-agent-state "test-ws" :thinking)
     (cl-letf (((symbol-function '+workspace-current-name)
                (lambda () "test-ws"))
               ((symbol-function 'agent-repl--send-interrupt-escape)
                (lambda (_ws _buf) nil)))
       (agent-repl-interrupt)
-      (should (eq (agent-repl--ws-get "test-ws" :claude-state) :thinking)))))
+      (should (eq (agent-repl--ws-get "test-ws" :agent-state) :thinking)))))
 
 ;;;; ---- agent-repl-update-pr ----
 
 (ert-deftest agent-repl-cmd-test-update-pr/sends-prompt ()
   "update-pr sends the configured update-pr prompt to claude."
   (let (sent-text)
-    (cl-letf (((symbol-function 'agent-repl--send-to-claude)
+    (cl-letf (((symbol-function 'agent-repl--send-to-agent)
                (lambda (text) (setq sent-text text))))
       (agent-repl-update-pr)
       (should (equal sent-text agent-repl-update-pr-prompt)))))
@@ -1816,7 +1816,7 @@ No interrupt was actually delivered, so the state should not change."
 (ert-deftest agent-repl-cmd-test-rebase-onto-origin-master/sends-prompt-on-fetch-success ()
   "On fetch success, callback sends the rebase prompt to claude."
   (let (sent-text)
-    (cl-letf (((symbol-function 'agent-repl--send-to-claude)
+    (cl-letf (((symbol-function 'agent-repl--send-to-agent)
                (lambda (text) (setq sent-text text))))
       (agent-repl--rebase-onto-origin-master-callback "test-ws" t "fetch output")
       (should (equal sent-text agent-repl-rebase-onto-origin-master-prompt)))))
@@ -1824,7 +1824,7 @@ No interrupt was actually delivered, so the state should not change."
 (ert-deftest agent-repl-cmd-test-rebase-onto-origin-master/skips-prompt-on-fetch-failure ()
   "On fetch failure, callback does NOT send the rebase prompt."
   (let ((send-called nil))
-    (cl-letf (((symbol-function 'agent-repl--send-to-claude)
+    (cl-letf (((symbol-function 'agent-repl--send-to-agent)
                (lambda (_text) (setq send-called t))))
       (agent-repl--rebase-onto-origin-master-callback "test-ws" nil "fatal: not a git repository")
       (should-not send-called))))
@@ -1839,7 +1839,7 @@ No interrupt was actually delivered, so the state should not change."
               ((symbol-function 'agent-repl--async-git)
                (lambda (_label _git-root _args callback)
                  (setq captured-callback callback)))
-              ((symbol-function 'agent-repl--send-to-claude)
+              ((symbol-function 'agent-repl--send-to-agent)
                (lambda (text) (setq sent-text text))))
       (agent-repl-rebase-onto-origin-master)
       (funcall captured-callback t "ok")
@@ -1895,7 +1895,7 @@ No interrupt was actually delivered, so the state should not change."
 (ert-deftest agent-repl-cmd-test-create-or-update-pr/no-args-sends-default ()
   "create-or-update-pr with no args sends the prompt built from base flags."
   (let (sent-text)
-    (cl-letf (((symbol-function 'agent-repl--send-to-claude)
+    (cl-letf (((symbol-function 'agent-repl--send-to-agent)
                (lambda (text) (setq sent-text text))))
       (agent-repl-create-or-update-pr)
       (should (equal sent-text
@@ -1904,7 +1904,7 @@ No interrupt was actually delivered, so the state should not change."
 (ert-deftest agent-repl-cmd-test-create-or-update-pr/excluded-arg-omits-flag ()
   "create-or-update-pr called with EXCLUDED list drops those flags."
   (let (sent-text)
-    (cl-letf (((symbol-function 'agent-repl--send-to-claude)
+    (cl-letf (((symbol-function 'agent-repl--send-to-agent)
                (lambda (text) (setq sent-text text))))
       (agent-repl-create-or-update-pr '(no-self-certified))
       (should-not (string-match-p "--self-certified" sent-text)))))
@@ -1917,7 +1917,7 @@ No interrupt was actually delivered, so the state should not change."
         (insert "do a thing")
         (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                  ((symbol-function 'agent-repl--send-to-claude)
+                  ((symbol-function 'agent-repl--send-to-agent)
                    (lambda (text) (setq sent-text text)))
                   ((symbol-function 'agent-repl--commit-input-buffer)
                    (lambda (&rest _) nil)))
@@ -1933,7 +1933,7 @@ No interrupt was actually delivered, so the state should not change."
       (agent-repl-test--with-temp-buffer " *test-coup-input*"
         (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                  ((symbol-function 'agent-repl--send-to-claude)
+                  ((symbol-function 'agent-repl--send-to-agent)
                    (lambda (text) (setq sent-text text))))
           (agent-repl-create-or-update-pr)
           (should (equal sent-text
@@ -1947,7 +1947,7 @@ No interrupt was actually delivered, so the state should not change."
         (insert "do a thing  \n")
         (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                  ((symbol-function 'agent-repl--send-to-claude)
+                  ((symbol-function 'agent-repl--send-to-agent)
                    (lambda (text) (setq sent-text text)))
                   ((symbol-function 'agent-repl--commit-input-buffer)
                    (lambda (&rest _) nil)))
@@ -1964,7 +1964,7 @@ No interrupt was actually delivered, so the state should not change."
         (insert "   \n  ")
         (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                  ((symbol-function 'agent-repl--send-to-claude)
+                  ((symbol-function 'agent-repl--send-to-agent)
                    (lambda (text) (setq sent-text text)))
                   ((symbol-function 'agent-repl--commit-input-buffer)
                    (lambda (&rest _) (setq commit-called t))))
@@ -1981,7 +1981,7 @@ No interrupt was actually delivered, so the state should not change."
         (insert "ship it")
         (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                  ((symbol-function 'agent-repl--send-to-claude) (lambda (_) nil))
+                  ((symbol-function 'agent-repl--send-to-agent) (lambda (_) nil))
                   ((symbol-function 'agent-repl--commit-input-buffer)
                    (lambda (ws buf raw clear-p)
                      (setq commit-args (list ws buf raw clear-p)))))
@@ -1998,7 +1998,7 @@ No interrupt was actually delivered, so the state should not change."
         (insert "do a thing")
         (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                  ((symbol-function 'agent-repl--send-to-claude)
+                  ((symbol-function 'agent-repl--send-to-agent)
                    (lambda (text) (setq sent-text text)))
                   ((symbol-function 'agent-repl--commit-input-buffer)
                    (lambda (&rest _) nil)))
@@ -2011,7 +2011,7 @@ No interrupt was actually delivered, so the state should not change."
 (ert-deftest agent-repl-cmd-test-create-or-update-pr-no-self-certified/sends-prompt ()
   "no-self-certified wrapper sends a prompt that omits --self-certified."
   (let (sent-text)
-    (cl-letf (((symbol-function 'agent-repl--send-to-claude)
+    (cl-letf (((symbol-function 'agent-repl--send-to-agent)
                (lambda (text) (setq sent-text text))))
       (agent-repl-create-or-update-pr-no-self-certified)
       (should-not (string-match-p "--self-certified" sent-text)))))
@@ -2035,10 +2035,10 @@ No interrupt was actually delivered, so the state should not change."
       (should (string-prefix-p "`" s))
       (should (string-suffix-p "`" s)))))
 
-(ert-deftest agent-repl-cmd-test-create-or-update-pr-paste/does-not-send-to-claude ()
-  "paste variant must not call `agent-repl--send-to-claude'."
+(ert-deftest agent-repl-cmd-test-create-or-update-pr-paste/does-not-send-to-agent ()
+  "paste variant must not call `agent-repl--send-to-agent'."
   (let (send-called)
-    (cl-letf (((symbol-function 'agent-repl--send-to-claude)
+    (cl-letf (((symbol-function 'agent-repl--send-to-agent)
                (lambda (&rest _) (setq send-called t))))
       (with-temp-buffer
         (agent-repl-create-or-update-pr-paste)
@@ -2094,9 +2094,9 @@ No interrupt was actually delivered, so the state should not change."
       (should (string-suffix-p "`" s)))))
 
 (ert-deftest agent-repl-cmd-test-create-or-update-pr-no-self-certified-paste/does-not-send ()
-  "no-self-certified paste wrapper does not invoke `agent-repl--send-to-claude'."
+  "no-self-certified paste wrapper does not invoke `agent-repl--send-to-agent'."
   (let (send-called)
-    (cl-letf (((symbol-function 'agent-repl--send-to-claude)
+    (cl-letf (((symbol-function 'agent-repl--send-to-agent)
                (lambda (&rest _) (setq send-called t))))
       (with-temp-buffer
         (agent-repl-create-or-update-pr-no-self-certified-paste)
@@ -2408,7 +2408,7 @@ launches Claude with `--continue', resuming the prior session.  A
 nuke that wipes state.el would force a fresh session each time, which
 is the regression this test pins."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "claude-nuke-" t)))
+    (let ((tmpdir (make-temp-file "agent-nuke-" t)))
       (unwind-protect
           (let ((state-file (agent-repl--state-file tmpdir)))
             (agent-repl-test--seed-file state-file "(:session-id \"keep-abc\")")
@@ -2809,8 +2809,8 @@ entry from drawer-only to a real tab-bar workspace via
 `--establish-workspace' and moves it to the front of `persp-names-cache'
 via `--reorder-workspace-to-front'."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (failed-dir (make-temp-file "claude-proj-failed-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (failed-dir (make-temp-file "agent-proj-failed-" t))
           (establish-calls nil)
           (front-calls nil))
       (agent-repl-test--write-merge-state failed-dir :merge-failed t)
@@ -2840,8 +2840,8 @@ probe confirms the merge landed (no `:merge-failed'), the loader does
 NOT call establish-workspace or reorder-to-front — clean merges stay in
 the drawer-only MERGED bucket."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (clean-dir (make-temp-file "claude-proj-clean-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (clean-dir (make-temp-file "agent-proj-clean-" t))
           (establish-calls nil)
           (front-calls nil))
       (agent-repl-test--write-merge-state clean-dir)
@@ -2871,8 +2871,8 @@ and the git-landing probe reports NOT landed (legacy silent failure),
 the loader still promotes the entry to a real tab-bar workspace at the
 front — the probe is authoritative for unflagged legacy state."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (probe-dir (make-temp-file "claude-proj-probe-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (probe-dir (make-temp-file "agent-proj-probe-" t))
           (establish-calls nil)
           (front-calls nil))
       (agent-repl-test--write-merge-state probe-dir)
@@ -2901,9 +2901,9 @@ front — the probe is authoritative for unflagged legacy state."
 not abort the snapshot loader — the surrounding `condition-case'
 swallows the signal so subsequent queue entries still get processed."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (failed-dir (make-temp-file "claude-proj-failed-" t))
-          (later-dir (make-temp-file "claude-proj-later-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (failed-dir (make-temp-file "agent-proj-failed-" t))
+          (later-dir (make-temp-file "agent-proj-later-" t))
           (front-calls nil))
       (agent-repl-test--write-merge-state failed-dir :merge-failed t)
       (unwind-protect
@@ -3014,7 +3014,7 @@ This is the whole point of the kill (vs nuke) split: priority and
 per-environment session-id live in that file and need to survive a
 kill so the workspace can be re-opened with its identity intact."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "claude-kill-" t)))
+    (let ((tmpdir (make-temp-file "agent-kill-" t)))
       (unwind-protect
           (let ((state-file (agent-repl--state-file tmpdir)))
             (agent-repl-test--seed-file state-file "(:session-id \"keep-me\")")
@@ -3144,7 +3144,7 @@ the ws via the tab-bar branch and the dispatcher does the plain kill."
 (ert-deftest agent-repl-cmd-test-save-workspace-snapshot/writes-entries ()
   "save-workspace-snapshot writes `(NAME :project-dir DIR)' entries."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-")))
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
@@ -3160,7 +3160,7 @@ the ws via the tab-bar branch and the dispatcher does the plain kill."
 (ert-deftest agent-repl-cmd-test-save-workspace-snapshot/skips-missing-project-dir ()
   "save-workspace-snapshot omits workspaces with no :project-dir."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-")))
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
@@ -3179,7 +3179,7 @@ hasn't run and the on-disk roster is larger — `save-workspace-snapshot'
 aborts in that case, but the explicit update command bypasses the
 safety check after a user confirmation."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-")))
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file)
                 (agent-repl--snapshot-loaded-p nil))
@@ -3201,7 +3201,7 @@ safety check after a user confirmation."
   "update-workspace-snapshot aborts when the user declines the shrink
 confirmation, leaving the on-disk file untouched."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-")))
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (agent-repl--write-sexp-file snapshot-file
@@ -3221,7 +3221,7 @@ confirmation, leaving the on-disk file untouched."
   "update-workspace-snapshot writes without confirmation when the live
 roster is at least as large as the on-disk one."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
           (prompted nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -3314,7 +3314,7 @@ that fallback, but the entries themselves must not be dropped."
 in the same order as `persp-names-cache', so a subsequent `read' returns
 the workspaces in tab-bar order."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-")))
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file)
                 (persp-names-cache '("third" "first" "second")))
@@ -3360,7 +3360,7 @@ tombstone the user nuked by hand (no hide marker on the live plist)."
   "A snapshot written while `agent-repl-hide-project-dirs-enabled' is t
 reads back with `:hide-project-dirs-enabled' t."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
           (agent-repl-hide-project-dirs-enabled t))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -3375,7 +3375,7 @@ reads back with `:hide-project-dirs-enabled' t."
   "A snapshot written while `agent-repl-hide-project-dirs-enabled' is nil
 reads back with `:hide-project-dirs-enabled' nil."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
           (agent-repl-hide-project-dirs-enabled nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -3389,7 +3389,7 @@ reads back with `:hide-project-dirs-enabled' nil."
   "Reading a legacy list-of-entries snapshot reports `:hide-project-dirs-enabled'
 as nil — the key predates that format."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-")))
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
           (progn
             (agent-repl--write-sexp-file snapshot-file
@@ -3402,7 +3402,7 @@ as nil — the key predates that format."
   "load-workspace-snapshot restores `agent-repl-hide-project-dirs-enabled'
 from the snapshot's `:hide-project-dirs-enabled' key."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
           (agent-repl-hide-project-dirs-enabled nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -3420,7 +3420,7 @@ from the snapshot's `:hide-project-dirs-enabled' key."
   "load-workspace-snapshot carries `:hidden-project-dir' onto the restored
 tombstone so a later unhide can re-establish it."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
           (agent-repl-hide-project-dirs-enabled nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -3458,9 +3458,9 @@ encodes on save."
                  (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--reorder-workspace-by-priority)
                  (lambda (ws) (push ws reorder-calls)))
-                ((symbol-function 'agent-repl--initialize-claude)
+                ((symbol-function 'agent-repl--initialize-agent)
                  (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--claude-running-p)
+                ((symbol-function 'agent-repl--agent-running-p)
                  (lambda (_ws) t)))
         ;; Simulate an in-flight snapshot load.
         (let ((agent-repl--snapshot-load-state '(:queue nil)))
@@ -3488,9 +3488,9 @@ behavior for ad-hoc creations."
                  (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--reorder-workspace-by-priority)
                  (lambda (ws) (push ws reorder-calls)))
-                ((symbol-function 'agent-repl--initialize-claude)
+                ((symbol-function 'agent-repl--initialize-agent)
                  (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--claude-running-p)
+                ((symbol-function 'agent-repl--agent-running-p)
                  (lambda (_ws) t)))
         (let ((agent-repl--snapshot-load-state nil))
           (agent-repl--establish-workspace "ws-a" "/tmp/ws-a"))
@@ -3577,8 +3577,8 @@ order preservation is honored."
       (setq-local agent-repl--owning-workspace ws))
     buf))
 
-(ert-deftest agent-repl-cmd-test-clean-frame-foreign-windows/native-claude-buffer-kept ()
-  "Window showing a buffer owned by WS is kept (native-claude case)."
+(ert-deftest agent-repl-cmd-test-clean-frame-foreign-windows/native-agent-buffer-kept ()
+  "Window showing a buffer owned by WS is kept (native-agent case)."
   (agent-repl-test--with-clean-state
     (let ((native (agent-repl-test--make-owned-buffer "*ws-native*" "ws-a"))
           (extra-win nil))
@@ -3595,7 +3595,7 @@ order preservation is honored."
           (ignore-errors (delete-window extra-win)))
         (when (buffer-live-p native) (kill-buffer native))))))
 
-(ert-deftest agent-repl-cmd-test-clean-frame-foreign-windows/foreign-claude-buffer-detected ()
+(ert-deftest agent-repl-cmd-test-clean-frame-foreign-windows/foreign-agent-buffer-detected ()
   "Window showing a buffer owned by a different workspace is scrubbed."
   (agent-repl-test--with-clean-state
     (let ((native  (agent-repl-test--make-owned-buffer "*ws-native*"  "ws-a"))
@@ -3620,8 +3620,8 @@ order preservation is honored."
         (when (buffer-live-p native)  (kill-buffer native))
         (when (buffer-live-p foreign) (kill-buffer foreign))))))
 
-(ert-deftest agent-repl-cmd-test-clean-frame-foreign-windows/non-claude-buffer-kept ()
-  "A non-Claude buffer (no owning workspace) is treated as allowed."
+(ert-deftest agent-repl-cmd-test-clean-frame-foreign-windows/non-agent-buffer-kept ()
+  "A non-agent buffer (no owning workspace) is treated as allowed."
   (agent-repl-test--with-clean-state
     (let ((regular (get-buffer-create "*regular-file*"))
           (extra-win nil))
@@ -3671,7 +3671,7 @@ order preservation is honored."
         (when (buffer-live-p regular) (kill-buffer regular))))))
 
 (ert-deftest agent-repl-cmd-test-clean-frame-foreign-windows/swaps-when-all-foreign ()
-  "When every window is foreign-claude, helper collapses to fallback."
+  "When every window is foreign-agent, helper collapses to fallback."
   (agent-repl-test--with-clean-state
     (let ((foreign1 (agent-repl-test--make-owned-buffer "*ws-foreign-1*" "ws-b"))
           (foreign2 (agent-repl-test--make-owned-buffer "*ws-foreign-2*" "ws-c"))
@@ -3705,16 +3705,16 @@ order preservation is honored."
 (ert-deftest agent-repl-cmd-test-load-workspace-snapshot/errors-when-file-missing ()
   "load-workspace-snapshot signals user-error when the snapshot file is absent."
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-workspace-snapshot-file "/nonexistent/claude-snap.el"))
+    (let ((agent-repl-workspace-snapshot-file "/nonexistent/agent-snap.el"))
       (should-error (agent-repl-load-workspace-snapshot) :type 'user-error))))
 
 (ert-deftest agent-repl-cmd-test-load-workspace-snapshot/establishes-each-entry ()
   "load-workspace-snapshot delegates to `agent-repl--establish-workspace'
 once per existing entry, passing the snapshot's `ws' name."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (dir-a (make-temp-file "claude-proj-a-" t))
-          (dir-b (make-temp-file "claude-proj-b-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t))
           (established nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -3740,9 +3740,9 @@ once per existing entry, passing the snapshot's `ws' name."
 Workspaces that go through the actually-establish branch (NOT the
 already-ready short-circuit) must be tagged."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (dir-a (make-temp-file "claude-proj-a-" t))
-          (dir-b (make-temp-file "claude-proj-b-" t)))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t)))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (agent-repl--write-sexp-file snapshot-file
@@ -3774,9 +3774,9 @@ already up in before the 2s idle loader fired).  Tagging them would make
 `nuke-restored-workspaces' incorrectly sweep the user's pre-existing
 workspace."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (dir-origin (make-temp-file "claude-proj-origin-" t))
-          (dir-new (make-temp-file "claude-proj-new-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-origin (make-temp-file "agent-proj-origin-" t))
+          (dir-new (make-temp-file "agent-proj-new-" t))
           (ready-table (make-hash-table :test 'equal)))
       (puthash "ws-origin" t ready-table)
       (unwind-protect
@@ -3808,8 +3808,8 @@ Only entries the loader actually established (`:loaded') are tracked —
 skipped entries (`:skipped' branch) must not pollute the set, otherwise
 `nuke-restored-workspaces' would try to tear down ghosts."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (real-dir (make-temp-file "claude-proj-real-" t)))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (real-dir (make-temp-file "agent-proj-real-" t)))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (agent-repl--write-sexp-file snapshot-file
@@ -3835,9 +3835,9 @@ Loading from-archive after a normal load must not drop the first batch's
 restored names — both batches are restore-origin and the nuke-restored
 path needs to see both."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (dir-a (make-temp-file "claude-proj-a-" t))
-          (dir-b (make-temp-file "claude-proj-b-" t)))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t)))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (cl-letf (((symbol-function 'agent-repl--establish-workspace) #'ignore)
@@ -3862,8 +3862,8 @@ path needs to see both."
 (ert-deftest agent-repl-cmd-test-load-workspace-snapshot/skips-missing-dirs ()
   "load-workspace-snapshot does not establish entries whose directory is gone."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (real-dir (make-temp-file "claude-proj-real-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (real-dir (make-temp-file "agent-proj-real-" t))
           (established nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -3884,9 +3884,9 @@ path needs to see both."
 A flash storm would be noise; the loader bypasses the inherent-flash
 jump path on purpose."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (dir-a (make-temp-file "claude-proj-a-" t))
-          (dir-b (make-temp-file "claude-proj-b-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t))
           (flash-calls 0))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -3911,7 +3911,7 @@ jump path on purpose."
 (ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/no-op-when-file-absent ()
   "Startup wrapper returns quietly when the snapshot file does not exist."
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-workspace-snapshot-file "/nonexistent/claude-snap.el")
+    (let ((agent-repl-workspace-snapshot-file "/nonexistent/agent-snap.el")
           (called nil))
       (cl-letf (((symbol-function 'agent-repl-load-workspace-snapshot)
                  (lambda () (setq called t))))
@@ -3921,7 +3921,7 @@ jump path on purpose."
 (ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/invokes-load-when-file-present ()
   "Startup wrapper calls the real loader when the snapshot file exists."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
           (called nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -3934,7 +3934,7 @@ jump path on purpose."
 (ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/swallows-errors ()
   "Startup wrapper must not propagate errors from the loader."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-")))
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (cl-letf (((symbol-function 'agent-repl-load-workspace-snapshot)
@@ -3947,7 +3947,7 @@ jump path on purpose."
 
 (ert-deftest agent-repl-cmd-test-workspace-snapshot-file-for-read-prefers-configured ()
   "workspace-snapshot-file-for-read returns the configured path when it exists."
-  (let ((snapshot-file (make-temp-file "claude-snap-cur-")))
+  (let ((snapshot-file (make-temp-file "agent-snap-cur-")))
     (unwind-protect
         (let ((agent-repl-workspace-snapshot-file snapshot-file))
           (should (equal (agent-repl--workspace-snapshot-file-for-read)
@@ -3957,8 +3957,8 @@ jump path on purpose."
 (ert-deftest agent-repl-cmd-test-workspace-snapshot-file-for-read-falls-back-to-legacy ()
   "workspace-snapshot-file-for-read falls back to the legacy module-dir
 path when the configured file is absent but the legacy file exists."
-  (let* ((legacy (make-temp-file "claude-snap-legacy-"))
-         (configured "/nonexistent/claude-snap.el"))
+  (let* ((legacy (make-temp-file "agent-snap-legacy-"))
+         (configured "/nonexistent/agent-snap.el"))
     (unwind-protect
         (let ((agent-repl-workspace-snapshot-file configured)
               (agent-repl--legacy-workspace-snapshot-file legacy))
@@ -4083,7 +4083,7 @@ back-compat reads of older snapshot files even though new saves omit it)."
   "Save deliberately omits :priority from saved entries — the per-project
 state file (`<root>/.claude/emacs/state.el') is the authoritative source."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-")))
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (agent-repl--ws-put "ws-a" :project-dir "/tmp/a")
@@ -4103,7 +4103,7 @@ The current format wraps entries in a `:workspaces' key inside a top-level
 plist that also carries `:merge-queue'; the workspace list portion still
 puts one entry per line so per-workspace diffs stay tight."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-")))
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
@@ -4131,7 +4131,7 @@ puts one entry per line so per-workspace diffs stay tight."
 (ert-deftest agent-repl-cmd-test-read-workspace-snapshot/legacy-list-format ()
   "Legacy `((NAME :project-dir DIR) ...)' files normalize to a plist with
 the entries under :workspaces and a nil :merge-queue."
-  (let ((file (make-temp-file "claude-snap-")))
+  (let ((file (make-temp-file "agent-snap-")))
     (unwind-protect
         (progn
           (agent-repl--write-sexp-file
@@ -4144,7 +4144,7 @@ the entries under :workspaces and a nil :merge-queue."
 
 (ert-deftest agent-repl-cmd-test-read-workspace-snapshot/plist-format ()
   "New plist files round-trip through the reader with both keys intact."
-  (let ((file (make-temp-file "claude-snap-")))
+  (let ((file (make-temp-file "agent-snap-")))
     (unwind-protect
         (progn
           (agent-repl--write-sexp-file
@@ -4167,7 +4167,7 @@ the entries under :workspaces and a nil :merge-queue."
   "Writer round-trips `agent-repl--merge-queue' into the snapshot file
 so a later read restores the FIFO."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-")))
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file)
                 (agent-repl--merge-queue
@@ -4191,7 +4191,7 @@ so a later read restores the FIFO."
   "Writer round-trips each entry's `:target-dir' so the per-target bucket
 partitioning survives a restart."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-")))
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file)
                 (agent-repl--merge-queue
@@ -4207,7 +4207,7 @@ partitioning survives a restart."
 (ert-deftest agent-repl-cmd-test-write-workspace-snapshot/empty-merge-queue ()
   "An empty live queue writes an empty :merge-queue list — not omitted."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-")))
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file)
                 (agent-repl--merge-queue nil))
@@ -4281,7 +4281,7 @@ are dropped (a workspace was removed between sessions)."
 
 (ert-deftest agent-repl-cmd-test-read-workspace-snapshot/in-flight-merges-round-trip ()
   "Plist files with `:in-flight-merges' round-trip through the reader."
-  (let ((file (make-temp-file "claude-snap-")))
+  (let ((file (make-temp-file "agent-snap-")))
     (unwind-protect
         (progn
           (agent-repl--write-sexp-file
@@ -4295,7 +4295,7 @@ are dropped (a workspace was removed between sessions)."
 
 (ert-deftest agent-repl-cmd-test-read-workspace-snapshot/in-flight-merges-absent-returns-nil ()
   "Files predating `:in-flight-merges' (or without that key) yield nil."
-  (let ((file (make-temp-file "claude-snap-")))
+  (let ((file (make-temp-file "agent-snap-")))
     (unwind-protect
         (progn
           (agent-repl--write-sexp-file
@@ -4308,7 +4308,7 @@ are dropped (a workspace was removed between sessions)."
 (ert-deftest agent-repl-cmd-test-write-workspace-snapshot/persists-in-flight-merges ()
   "Writer captures the live `agent-repl--in-flight-merges' alongside the roster."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-")))
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file)
                 (agent-repl--merge-queue nil)
@@ -4329,7 +4329,7 @@ are dropped (a workspace was removed between sessions)."
   "An empty live in-flight list writes `:in-flight-merges' as an empty
 list — present, not omitted."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-")))
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file)
                 (agent-repl--merge-queue nil)
@@ -4366,8 +4366,8 @@ list — present, not omitted."
   "Loader populates `agent-repl--merge-queue' from the snapshot file's
 :merge-queue at the end of the load (in `--snapshot-load-finish')."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (real-dir (make-temp-file "claude-proj-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (real-dir (make-temp-file "agent-proj-" t))
           (agent-repl--merge-queue nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -4433,8 +4433,8 @@ to dispatch the next eligible entry."
 (ert-deftest agent-repl-cmd-test-load-workspace-snapshot/reads-legacy-format ()
   "Loader still accepts the legacy `(NAME . DIR-STRING)' shape."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (real-dir (make-temp-file "claude-proj-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (real-dir (make-temp-file "agent-proj-" t))
           (established nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -4455,8 +4455,8 @@ to dispatch the next eligible entry."
   "Loader does NOT pass `:priority' to establish — priority is now
 sourced from each project's state file, not the snapshot roster."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (real-dir (make-temp-file "claude-proj-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (real-dir (make-temp-file "agent-proj-" t))
           (call-arity nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -4475,8 +4475,8 @@ sourced from each project's state file, not the snapshot roster."
 (ert-deftest agent-repl-cmd-test-load-workspace-snapshot/returns-to-origin-workspace ()
   "Loader switches back to the workspace that was active when it began."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (real-dir (make-temp-file "claude-proj-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (real-dir (make-temp-file "agent-proj-" t))
           (returned-to nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -4501,9 +4501,9 @@ sourced from each project's state file, not the snapshot roster."
     (let* ((tmp-dir (file-name-as-directory (make-temp-file "agent-repl-est-" t)))
            (started-for nil))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--initialize-claude)
+          (cl-letf (((symbol-function 'agent-repl--initialize-agent)
                      (lambda (ws &rest _) (setq started-for ws)))
-                    ((symbol-function 'agent-repl--claude-running-p) (lambda (&rest _) nil))
+                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                     ((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore))
@@ -4512,14 +4512,14 @@ sourced from each project's state file, not the snapshot roster."
         (delete-directory tmp-dir t)))))
 
 (ert-deftest agent-repl-cmd-test-establish-workspace/skips-claude-when-running ()
-  "establish-workspace skips claude-init when claude is already running for ws."
+  "establish-workspace skips agent-init when claude is already running for ws."
   (agent-repl-test--with-clean-state
     (let* ((tmp-dir (file-name-as-directory (make-temp-file "agent-repl-est-" t)))
            (started nil))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--initialize-claude)
+          (cl-letf (((symbol-function 'agent-repl--initialize-agent)
                      (lambda (&rest _) (setq started t)))
-                    ((symbol-function 'agent-repl--claude-running-p) (lambda (&rest _) t))
+                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) t))
                     ((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore))
@@ -4535,8 +4535,8 @@ sourced from each project's state file, not the snapshot roster."
       (unwind-protect
           (let ((+workspaces-switch-project-function
                  (lambda (d) (setq called-with d))))
-            (cl-letf (((symbol-function 'agent-repl--initialize-claude) #'ignore)
-                      ((symbol-function 'agent-repl--claude-running-p) (lambda (&rest _) nil))
+            (cl-letf (((symbol-function 'agent-repl--initialize-agent) #'ignore)
+                      ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                       ((symbol-function 'persp-add-new) #'ignore)
                       ((symbol-function 'persp-frame-switch) #'ignore)
                       ((symbol-function 'projectile-add-known-project) #'ignore))
@@ -4555,8 +4555,8 @@ root from every persp (a cross-persp bleed)."
            (sentinel-dir "/sentinel-original-dir/"))
       (unwind-protect
           (cl-letf (((symbol-function 'doom-fallback-buffer) (lambda () fb))
-                    ((symbol-function 'agent-repl--initialize-claude) #'ignore)
-                    ((symbol-function 'agent-repl--claude-running-p) (lambda (&rest _) nil))
+                    ((symbol-function 'agent-repl--initialize-agent) #'ignore)
+                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                     ((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore))
@@ -4583,8 +4583,8 @@ depend on it).  After the hook returns it's restored."
                    (setq observed-dir
                          (buffer-local-value 'default-directory fb)))))
             (cl-letf (((symbol-function 'doom-fallback-buffer) (lambda () fb))
-                      ((symbol-function 'agent-repl--initialize-claude) #'ignore)
-                      ((symbol-function 'agent-repl--claude-running-p) (lambda (&rest _) nil))
+                      ((symbol-function 'agent-repl--initialize-agent) #'ignore)
+                      ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                       ((symbol-function 'persp-add-new) #'ignore)
                       ((symbol-function 'persp-frame-switch) #'ignore)
                       ((symbol-function 'projectile-add-known-project) #'ignore))
@@ -4610,8 +4610,8 @@ depend on it).  After the hook returns it's restored."
                        (lambda (_d) tmp-file))
                       ((symbol-function 'find-file)
                        (lambda (f) (setq opened f)))
-                      ((symbol-function 'agent-repl--initialize-claude) #'ignore)
-                      ((symbol-function 'agent-repl--claude-running-p) (lambda (&rest _) nil))
+                      ((symbol-function 'agent-repl--initialize-agent) #'ignore)
+                      ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                       ((symbol-function 'persp-add-new) #'ignore)
                       ((symbol-function 'persp-frame-switch) #'ignore)
                       ((symbol-function 'projectile-add-known-project) #'ignore))
@@ -4634,8 +4634,8 @@ of ui/workspaces/autoload/workspaces.el."
            (set-with-val nil)
            (set-with-persp nil))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--initialize-claude) #'ignore)
-                    ((symbol-function 'agent-repl--claude-running-p) (lambda (&rest _) nil))
+          (cl-letf (((symbol-function 'agent-repl--initialize-agent) #'ignore)
+                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                     ((symbol-function 'persp-add-new) (lambda (&rest _) fake-persp))
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore)
@@ -4656,8 +4656,8 @@ A nil persp would crash `set-persp-parameter'."
     (let* ((tmp-dir (file-name-as-directory (make-temp-file "agent-repl-est-wp-nil-" t)))
            (set-called nil))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--initialize-claude) #'ignore)
-                    ((symbol-function 'agent-repl--claude-running-p) (lambda (&rest _) nil))
+          (cl-letf (((symbol-function 'agent-repl--initialize-agent) #'ignore)
+                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                     ((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore)
@@ -4677,8 +4677,8 @@ A nil persp would crash `set-persp-parameter'."
                      (lambda (_d) "/nonexistent/gone.el"))
                     ((symbol-function 'find-file)
                      (lambda (&rest _) (setq find-file-called t)))
-                    ((symbol-function 'agent-repl--initialize-claude) #'ignore)
-                    ((symbol-function 'agent-repl--claude-running-p) (lambda (&rest _) nil))
+                    ((symbol-function 'agent-repl--initialize-agent) #'ignore)
+                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                     ((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore))
@@ -4697,8 +4697,8 @@ so the badge restores from the per-project state file rather than the roster."
           (cl-letf (((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore)
-                    ((symbol-function 'agent-repl--initialize-claude) #'ignore)
-                    ((symbol-function 'agent-repl--claude-running-p) (lambda (&rest _) nil))
+                    ((symbol-function 'agent-repl--initialize-agent) #'ignore)
+                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                     ((symbol-function 'agent-repl--load-display-state)
                      (lambda (ws d) (setq loaded-ws ws loaded-with d))))
             (agent-repl--establish-workspace "test-ws" tmp-dir)
@@ -4718,8 +4718,8 @@ sit in file order even when state.el carries priorities."
           (cl-letf (((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore)
-                    ((symbol-function 'agent-repl--initialize-claude) #'ignore)
-                    ((symbol-function 'agent-repl--claude-running-p) (lambda (&rest _) nil))
+                    ((symbol-function 'agent-repl--initialize-agent) #'ignore)
+                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                     ((symbol-function 'agent-repl--load-display-state)
                      (lambda (&rest _) (push 'load events)))
                     ((symbol-function 'agent-repl--reorder-workspace-by-priority)
@@ -4744,8 +4744,8 @@ so persp-mode begins capturing a window configuration for that persp."
                     ((symbol-function 'persp-frame-switch)
                      (lambda (n) (setq switched-to n)))
                     ((symbol-function 'projectile-add-known-project) #'ignore)
-                    ((symbol-function 'agent-repl--initialize-claude) #'ignore)
-                    ((symbol-function 'agent-repl--claude-running-p) (lambda (&rest _) nil)))
+                    ((symbol-function 'agent-repl--initialize-agent) #'ignore)
+                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil)))
             (agent-repl--establish-workspace "DC/CV-494738/worker-suite" tmp-dir)
             (should (equal switched-to "DC/CV-494738/worker-suite")))
         (delete-directory tmp-dir t)))))
@@ -4761,9 +4761,9 @@ so persp-mode begins capturing a window configuration for that persp."
 (ert-deftest agent-repl-cmd-test-snapshot-load/advances-on-ready-event ()
   "A ws-fully-loaded callback for the awaited ws advances the queue."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (dir-a (make-temp-file "claude-proj-a-" t))
-          (dir-b (make-temp-file "claude-proj-b-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t))
           (established nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -4796,9 +4796,9 @@ so persp-mode begins capturing a window configuration for that persp."
 (ert-deftest agent-repl-cmd-test-snapshot-load/ignores-foreign-ready ()
   "Ready signal for a workspace we're not awaiting does NOT advance the queue."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (dir-a (make-temp-file "claude-proj-a-" t))
-          (dir-b (make-temp-file "claude-proj-b-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t))
           (established nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -4824,9 +4824,9 @@ so persp-mode begins capturing a window configuration for that persp."
   "When `--snapshot-load-ws-ready-p' is t after establish, queue advances
 without waiting for a hook fire."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (dir-a (make-temp-file "claude-proj-a-" t))
-          (dir-b (make-temp-file "claude-proj-b-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t))
           (established nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -4848,8 +4848,8 @@ without waiting for a hook fire."
 (ert-deftest agent-repl-cmd-test-snapshot-load/skip-missing-dir-does-not-wait ()
   "Missing-dir entries are skipped and the queue advances synchronously."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (real-dir (make-temp-file "claude-proj-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (real-dir (make-temp-file "agent-proj-" t))
           (established nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -4873,9 +4873,9 @@ without waiting for a hook fire."
 (ert-deftest agent-repl-cmd-test-snapshot-load/timeout-advances-queue ()
   "Per-entry watchdog firing advances past a wedged workspace."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (dir-a (make-temp-file "claude-proj-a-" t))
-          (dir-b (make-temp-file "claude-proj-b-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t))
           (established nil)
           captured-timer-callback)
       (unwind-protect
@@ -4907,9 +4907,9 @@ without waiting for a hook fire."
 `:timed-out' marker so observers can distinguish forced advance from
 the happy-path advance."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (dir-a (make-temp-file "claude-proj-a-" t))
-          (dir-b (make-temp-file "claude-proj-b-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t))
           (fired-with nil)
           captured-timer-callback)
       (unwind-protect
@@ -4946,8 +4946,8 @@ the happy-path advance."
   "After a successful load, `agent-repl--snapshot-load-on-loaded' is removed
 from `agent-repl-ws-fully-loaded-functions'."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (real-dir (make-temp-file "claude-proj-" t)))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (real-dir (make-temp-file "agent-proj-" t)))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (agent-repl--write-sexp-file snapshot-file `(("ws-a" . ,real-dir)))
@@ -4965,9 +4965,9 @@ from `agent-repl-ws-fully-loaded-functions'."
 (ert-deftest agent-repl-cmd-test-snapshot-load/establish-error-advances ()
   "If `--establish-workspace' errors, the loader logs and advances anyway."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (dir-a (make-temp-file "claude-proj-a-" t))
-          (dir-b (make-temp-file "claude-proj-b-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t))
           (attempts nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -4994,9 +4994,9 @@ from `agent-repl-ws-fully-loaded-functions'."
 (ert-deftest agent-repl-cmd-test-snapshot-load/establish-error-bumps-load-error-not-loaded ()
   "An establish failure increments `:load-error', NOT `:loaded'."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (dir-a (make-temp-file "claude-proj-a-" t))
-          (dir-b (make-temp-file "claude-proj-b-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t))
           finish-state)
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -5025,9 +5025,9 @@ from `agent-repl-ws-fully-loaded-functions'."
   "An establish failure must NOT arm the per-entry watchdog timer —
 no ws is alive to wait on, advance immediately."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (dir-a (make-temp-file "claude-proj-a-" t))
-          (dir-b (make-temp-file "claude-proj-b-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t))
           (timer-calls 0))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -5055,8 +5055,8 @@ by the first `--establish-workspace's `persp-frame-switch') handles
 origin's layout, so any extra capture is dead weight that risks
 resurrecting foreign or dead buffers on restore."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (real-dir (make-temp-file "claude-proj-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (real-dir (make-temp-file "agent-proj-" t))
           (state-during-establish nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
@@ -5080,8 +5080,8 @@ resurrecting foreign or dead buffers on restore."
 routed to `--snapshot-load-finish' so the hook detaches and state clears
 instead of leaving a zombie loader."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (dir-a (make-temp-file "claude-proj-a-" t)))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t)))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (agent-repl--write-sexp-file snapshot-file `(("ws-a" . ,dir-a)))
@@ -5111,9 +5111,9 @@ establish and verifying (a) `:awaiting' is nil at the re-entry point,
 (b) the queue did NOT advance to the next ws during establish, and
 (c) `:awaiting' is set to ws-a only after establish returned."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "claude-snap-"))
-          (dir-a (make-temp-file "claude-proj-a-" t))
-          (dir-b (make-temp-file "claude-proj-b-" t))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t))
           (established nil)
           (reentry-awaiting 'unset)
           (reentry-established 'unset))
@@ -5607,7 +5607,7 @@ workspace lands in priority order like the snapshot/worktree restore path."
 
 (ert-deftest agent-repl-cmd-test-snapshot-file-ws-count/counts-entries ()
   "snapshot-file-ws-count returns the number of entries in the snapshot."
-  (let ((f (make-temp-file "claude-snap-count-" nil ".el")))
+  (let ((f (make-temp-file "agent-snap-count-" nil ".el")))
     (unwind-protect
         (progn
           (with-temp-file f
@@ -5621,7 +5621,7 @@ workspace lands in priority order like the snapshot/worktree restore path."
 
 (ert-deftest agent-repl-cmd-test-snapshot-candidate-label/contains-count-and-date ()
   "Candidate label embeds workspace count and a YYYY-MM-DD HH:MM mtime."
-  (let ((f (make-temp-file "claude-snap-label-" nil ".el")))
+  (let ((f (make-temp-file "agent-snap-label-" nil ".el")))
     (unwind-protect
         (progn
           (with-temp-file f
@@ -5635,7 +5635,7 @@ workspace lands in priority order like the snapshot/worktree restore path."
 
 (ert-deftest agent-repl-cmd-test-snapshot-archive-candidates/current-and-archives ()
   "snapshot-archive-candidates returns the current file and every archived file."
-  (let* ((dir (file-name-as-directory (make-temp-file "claude-snap-dir-" t)))
+  (let* ((dir (file-name-as-directory (make-temp-file "agent-snap-dir-" t)))
          (current (expand-file-name "workspaces.el" dir))
          (archive-dir (expand-file-name "workspaces-archive" dir))
          (archive-a (expand-file-name "20260510T184855.el" archive-dir))
@@ -5656,7 +5656,7 @@ workspace lands in priority order like the snapshot/worktree restore path."
 
 (ert-deftest agent-repl-cmd-test-snapshot-archive-candidates/archives-newest-first ()
   "Archives are sorted newest-first (lexicographic on timestamped filename)."
-  (let* ((dir (file-name-as-directory (make-temp-file "claude-snap-dir-" t)))
+  (let* ((dir (file-name-as-directory (make-temp-file "agent-snap-dir-" t)))
          (current (expand-file-name "workspaces.el" dir))
          (archive-dir (expand-file-name "workspaces-archive" dir))
          (older (expand-file-name "20260101T000000.el" archive-dir))
@@ -5675,7 +5675,7 @@ workspace lands in priority order like the snapshot/worktree restore path."
 
 (ert-deftest agent-repl-cmd-test-load-from-archive/loads-selected-file ()
   "load-from-archive invokes loader with the selected file's path."
-  (let* ((dir (file-name-as-directory (make-temp-file "claude-snap-dir-" t)))
+  (let* ((dir (file-name-as-directory (make-temp-file "agent-snap-dir-" t)))
          (current (expand-file-name "workspaces.el" dir))
          (archive-dir (expand-file-name "workspaces-archive" dir))
          (chosen-archive (expand-file-name "20260510T184855.el" archive-dir))
@@ -6115,7 +6115,7 @@ even if downstream teardown errors before the redundant save fires."
 for that workspace — keeps `SPC p p' and the drawer visually consistent
 per-workspace rather than collapsing every live ws to a single 🟢."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws-live" :claude-state :thinking)
+    (agent-repl--ws-put "ws-live" :agent-state :thinking)
     (let ((summary '(:workspace-name "ws-live" :live-p t
                      :last-killed-at (1 2 3) :has-state t)))
       (should (equal (agent-repl--picker-status-emoji summary)
@@ -6123,10 +6123,10 @@ per-workspace rather than collapsing every live ws to a single 🟢."
 
 (ert-deftest agent-repl-cmd-test-picker-status-emoji/live-merge-conflict-wins ()
   "Picker mirrors `:merge-conflict' badge for a workspace mid-conflict.
-Pins the drawer's repl-state precedence (💥 wins over :claude-state)
+Pins the drawer's repl-state precedence (💥 wins over :agent-state)
 through the picker's mirror path."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws-conflict" :claude-state :thinking)
+    (agent-repl--ws-put "ws-conflict" :agent-state :thinking)
     (agent-repl--ws-put "ws-conflict" :repl-state :merge-conflict)
     (let ((summary '(:workspace-name "ws-conflict" :live-p t
                      :has-state t)))
@@ -6138,7 +6138,7 @@ data on the summary — when `:workspace-name' is set the picker reads
 the drawer glyph from the cached ws plist and never consults the
 non-live 📁 fallback branch."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws-respawned" :claude-state :done)
+    (agent-repl--ws-put "ws-respawned" :agent-state :done)
     (let ((summary '(:workspace-name "ws-respawned"
                      :last-killed-at (1 2 3))))
       (should (equal (agent-repl--picker-status-emoji summary)
@@ -6435,7 +6435,7 @@ the drawer."
       (unwind-protect
           (progn
             (agent-repl--ws-put "live-ws" :project-dir tmp)
-            (agent-repl--ws-put "live-ws" :claude-state :idle)
+            (agent-repl--ws-put "live-ws" :agent-state :idle)
             (let* ((candidates (agent-repl--build-project-picker-candidates
                                 (list tmp)))
                    (display (substring-no-properties (car (car candidates)))))
@@ -6862,58 +6862,58 @@ With ws-list (a b c d) and current=c, the result should be (a c b d)."
         (should-not switched)
         (should-not agent-repl--opened-recent-workspaces)))))
 
-(ert-deftest agent-repl-test-send-to-claude-transitions-permission-to-thinking ()
-  "`agent-repl--send-to-claude' flips :permission -> :thinking after dispatching.
+(ert-deftest agent-repl-test-send-to-agent-transitions-permission-to-thinking ()
+  "`agent-repl--send-to-agent' flips :permission -> :thinking after dispatching.
 This predefined-prompt path goes straight to vterm and does NOT funnel
 through `agent-repl--do-send'; the flip is inherited from the real
 `agent-repl--send-input-to-vterm' (the lowest-level string-send
 primitive), so only the bracketed transport beneath it is stubbed."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-send-to-claude-perm*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-send-to-agent-perm*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-      (agent-repl--ws-set-claude-state "ws1" :permission)
+      (agent-repl--ws-set-agent-state "ws1" :permission)
       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--claude-running-p) (lambda (&rest _) t))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) t))
                 ((symbol-function 'agent-repl--send-input-bracketed) #'ignore))
-        (agent-repl--send-to-claude "do the thing"))
-      (should (eq (agent-repl--ws-claude-state "ws1") :thinking)))))
+        (agent-repl--send-to-agent "do the thing"))
+      (should (eq (agent-repl--ws-agent-state "ws1") :thinking)))))
 
-(ert-deftest agent-repl-test-send-to-claude-leaves-non-permission-state-unchanged ()
-  "`agent-repl--send-to-claude' only transitions :permission, not other states."
+(ert-deftest agent-repl-test-send-to-agent-leaves-non-permission-state-unchanged ()
+  "`agent-repl--send-to-agent' only transitions :permission, not other states."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*claude-panel-send-to-claude-idle*"
+    (agent-repl-test--with-temp-buffer "*agent-panel-send-to-agent-idle*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-      (agent-repl--ws-set-claude-state "ws1" :idle)
+      (agent-repl--ws-set-agent-state "ws1" :idle)
       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--claude-running-p) (lambda (&rest _) t))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) t))
                 ((symbol-function 'agent-repl--send-input-bracketed) #'ignore))
-        (agent-repl--send-to-claude "do the thing"))
-      (should (eq (agent-repl--ws-claude-state "ws1") :idle)))))
+        (agent-repl--send-to-agent "do the thing"))
+      (should (eq (agent-repl--ws-agent-state "ws1") :idle)))))
 
-;;;; ---- agent-repl-kill-claude-process ----
+;;;; ---- agent-repl-kill-agent-process ----
 
-(ert-deftest agent-repl-cmd-test-kill-claude-process/signals-term ()
-  "kill-claude-process sends SIGTERM to the found claude pid via the boundary wrapper."
+(ert-deftest agent-repl-cmd-test-kill-agent-process/signals-term ()
+  "kill-agent-process sends SIGTERM to the found claude pid via the boundary wrapper."
   (let ((sent nil))
     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--claude-process-pid) (lambda (_ws) 4242))
+              ((symbol-function 'agent-repl--agent-process-pid) (lambda (_ws) 4242))
               ((symbol-function 'agent-repl--signal-process)
                (lambda (pid sig) (setq sent (cons pid sig)))))
-      (agent-repl-kill-claude-process)
+      (agent-repl-kill-agent-process)
       (should (equal sent '(4242 . TERM))))))
 
-(ert-deftest agent-repl-cmd-test-kill-claude-process/no-process-errors ()
-  "kill-claude-process signals user-error and signals nothing when no claude process is found."
+(ert-deftest agent-repl-cmd-test-kill-agent-process/no-process-errors ()
+  "kill-agent-process signals user-error and signals nothing when no claude process is found."
   (let ((called nil))
     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--claude-process-pid) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl--agent-process-pid) (lambda (_ws) nil))
               ((symbol-function 'agent-repl--signal-process)
                (lambda (&rest _) (setq called t))))
-      (should-error (agent-repl-kill-claude-process) :type 'user-error)
+      (should-error (agent-repl-kill-agent-process) :type 'user-error)
       (should-not called))))
 
-(ert-deftest agent-repl-cmd-test-claude-process-pid/finds-claude-child ()
-  "claude-process-pid returns the vterm shell's child whose comm matches claude, not a sibling."
+(ert-deftest agent-repl-cmd-test-agent-process-pid/finds-claude-child ()
+  "agent-process-pid returns the vterm shell's child whose comm matches claude, not a sibling."
   (agent-repl-test--with-clean-state
     (let ((buf (get-buffer-create " *test-vterm-kill*")))
       (unwind-protect
@@ -6927,11 +6927,11 @@ primitive), so only the bracketed transport beneath it is stubbed."
                          (200 '((comm . "node")   (ppid . 100)))
                          (300 '((comm . "claude") (ppid . 100)))))))
             (agent-repl--ws-put "ws1" :vterm-buffer buf)
-            (should (equal (agent-repl--claude-process-pid "ws1") 300)))
+            (should (equal (agent-repl--agent-process-pid "ws1") 300)))
         (kill-buffer buf)))))
 
-(ert-deftest agent-repl-cmd-test-claude-process-pid/version-comm-sole-child ()
-  "claude-process-pid returns the shell's sole child even when its comm is a version string, not \"claude\" (the native-binary case)."
+(ert-deftest agent-repl-cmd-test-agent-process-pid/version-comm-sole-child ()
+  "agent-process-pid returns the shell's sole child even when its comm is a version string, not \"claude\" (the native-binary case)."
   (agent-repl-test--with-clean-state
     (let ((buf (get-buffer-create " *test-vterm-kill2*")))
       (unwind-protect
@@ -6944,11 +6944,11 @@ primitive), so only the bracketed transport beneath it is stubbed."
                          (100 '((comm . "zsh")     (ppid . 1)))
                          (555 '((comm . "2.1.206") (ppid . 100)))))))
             (agent-repl--ws-put "ws1" :vterm-buffer buf)
-            (should (equal (agent-repl--claude-process-pid "ws1") 555)))
+            (should (equal (agent-repl--agent-process-pid "ws1") 555)))
         (kill-buffer buf)))))
 
-(ert-deftest agent-repl-cmd-test-claude-process-pid/no-children-nil ()
-  "claude-process-pid returns nil when the vterm shell has no child process."
+(ert-deftest agent-repl-cmd-test-agent-process-pid/no-children-nil ()
+  "agent-process-pid returns nil when the vterm shell has no child process."
   (agent-repl-test--with-clean-state
     (let ((buf (get-buffer-create " *test-vterm-kill3*")))
       (unwind-protect
@@ -6961,7 +6961,7 @@ primitive), so only the bracketed transport beneath it is stubbed."
                          (100 '((comm . "zsh")   (ppid . 1)))
                          (999 '((comm . "other") (ppid . 42)))))))
             (agent-repl--ws-put "ws1" :vterm-buffer buf)
-            (should-not (agent-repl--claude-process-pid "ws1")))
+            (should-not (agent-repl--agent-process-pid "ws1")))
         (kill-buffer buf)))))
 
 (provide 'test-commands)

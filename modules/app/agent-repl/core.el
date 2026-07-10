@@ -185,7 +185,7 @@ Characters matching this pattern are replaced with underscores."
   :type 'string
   :group 'agent-repl)
 
-(defcustom agent-repl-panel-buffer-name-format "*claude-panel%s-%s*"
+(defcustom agent-repl-panel-buffer-name-format "*agent-panel%s-%s*"
   "Format string for Claude panel buffer names.
 First %s is the suffix (e.g. \"-input\" or empty), second %s is the workspace name."
   :type 'string
@@ -241,7 +241,7 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
           (format " {ws=%s}" ws)
         (let* ((id       (agent-repl--ws-id-cached ws))
                (dir      (plist-get plist :project-dir))
-               (cstate   (plist-get plist :claude-state))
+               (cstate   (plist-get plist :agent-state))
                (rstate   (plist-get plist :repl-state))
                (env      (plist-get plist :active-env))
                (vbuf     (plist-get plist :vterm-buffer))
@@ -820,7 +820,7 @@ for a nil or dead BUF, so callers need not guard liveness themselves."
   "Return non-nil if BUF is a Claude buffer owned by a workspace other than WS.
 A buffer is foreign-owned when its owner (see `agent-repl--buffer-owner')
 is a non-nil name unequal to WS.  Buffers with no owner (nil) — e.g. magit,
-file, or other non-Claude buffers that persp-mode swept into a perspective
+file, or other non-agent buffers that persp-mode swept into a perspective
 or window — are NOT foreign and stay eligible for teardown.  Guards against
 persp-mode drifting another workspace's live Claude panel into this persp,
 which would otherwise nuke that workspace's session along with WS's own."
@@ -829,18 +829,18 @@ which would otherwise nuke that workspace's session along with WS's own."
 
 ;;; Buffer naming and predicates
 
-;; Panel buffers use the "claude-panel-" prefix to distinguish them from
+;; Panel buffers use the "agent-panel-" prefix to distinguish them from
 ;; other agent-repl utility buffers (e.g. *agent-repl-dump*,
 ;; *agent-repl-log-bug*).  The vterm regex is still a superset that
-;; matches input buffers too; `agent-repl--claude-buffer-p' explicitly
+;; matches input buffers too; `agent-repl--agent-buffer-p' explicitly
 ;; excludes them.
-(defconst agent-repl--vterm-buffer-re "^\\*claude-panel-[[:alnum:]_-]+\\*$"
-  "Regexp matching Claude panel buffer names (e.g. *claude-panel-my-workspace*).
-Caveat: also matches input buffer names.  Use `agent-repl--claude-buffer-p'
+(defconst agent-repl--vterm-buffer-re "^\\*agent-panel-[[:alnum:]_-]+\\*$"
+  "Regexp matching Claude panel buffer names (e.g. *agent-panel-my-workspace*).
+Caveat: also matches input buffer names.  Use `agent-repl--agent-buffer-p'
 for the combined check.")
 
-(defconst agent-repl--input-buffer-re "^\\*claude-panel-input-[[:alnum:]_-]+\\*$"
-  "Regexp matching Claude input buffer names (e.g. *claude-panel-input-my-workspace*).")
+(defconst agent-repl--input-buffer-re "^\\*agent-panel-input-[[:alnum:]_-]+\\*$"
+  "Regexp matching Claude input buffer names (e.g. *agent-panel-input-my-workspace*).")
 
 (defun agent-repl--sanitize-ws-name (name)
   "Return NAME with unsafe characters replaced by underscores.
@@ -849,11 +849,11 @@ Keeps alphanumerics, hyphens, and underscores.  Returns nil for nil NAME."
     (replace-regexp-in-string agent-repl-ws-name-allowed-chars-re "_" name)))
 
 (defun agent-repl--buffer-name (&optional suffix ws)
-  "Return a workspace-specific buffer name like *claude-panel-WS* or *claude-panel-input-WS*.
+  "Return a workspace-specific buffer name like *agent-panel-WS* or *agent-panel-input-WS*.
 SUFFIX, if provided, is inserted before the workspace name (e.g. \"-input\").
 WS, if provided, is the workspace name; otherwise uses the current workspace.
 Signals an error when the resolved workspace name is nil or empty — an
-empty id produces buffer names like *claude-panel-*, which the
+empty id produces buffer names like *agent-panel-*, which the
 `agent-repl--vterm-buffer-re' / `agent-repl--input-buffer-re' regexes
 mis-classify (input names match the vterm regex with id=\"input-\"),
 causing `agent-repl--sync-panels' to delete the input panel as orphaned."
@@ -869,8 +869,8 @@ causing `agent-repl--sync-panels' to delete the input panel as orphaned."
 (defun agent-repl--create-buffer (ws &optional suffix)
   "Create a workspace-owned buffer for WS and return it.
 SUFFIX is passed to `agent-repl--buffer-name' to select the buffer's
-role: nil for the vterm buffer (*claude-panel-WS*), \"-input\" for the input
-buffer (*claude-panel-input-WS*).
+role: nil for the vterm buffer (*agent-panel-WS*), \"-input\" for the input
+buffer (*agent-panel-input-WS*).
 
 Single entry point for every workspace-owned buffer.  Derives the
 canonical name, sets `agent-repl--owning-workspace' buffer-locally
@@ -890,14 +890,14 @@ no perspective named WS exists (e.g. early in session startup)."
         (agent-repl--ws-add-buffer buf persp nil)))
     buf))
 
-(defun agent-repl--claude-buffer-p (&optional buf)
+(defun agent-repl--agent-buffer-p (&optional buf)
   "Return non-nil if BUF (default: current buffer) is a Claude vterm buffer.
 Excludes Claude input buffers (which share a common prefix)."
   (let ((name (buffer-name (or buf (current-buffer)))))
     (and (string-match-p agent-repl--vterm-buffer-re name)
          (not (string-match-p agent-repl--input-buffer-re name)))))
 
-(defun agent-repl--claude-panel-buffer-p (&optional buf)
+(defun agent-repl--agent-panel-buffer-p (&optional buf)
   "Return non-nil if BUF (default: current buffer) is any Claude panel buffer.
 Matches both vterm and input buffers."
   (let ((name (buffer-name (or buf (current-buffer)))))
@@ -911,10 +911,10 @@ BUF may be a buffer object or a name string."
   (let* ((b (if (stringp buf) (get-buffer buf) buf))
          (name (and b (buffer-name b))))
     (or (not name)
-        (agent-repl--claude-panel-buffer-p b)
+        (agent-repl--agent-panel-buffer-p b)
         (string-match-p "^ \\*Minibuf" name))))
 
-(defun agent-repl--non-claude-buffers (buffers)
+(defun agent-repl--non-agent-buffers (buffers)
   "Return BUFFERS with Claude panels, minibuffers, and dead buffers removed.
 BUFFERS may be buffer objects or name strings."
   (cl-remove-if #'agent-repl--non-user-buffer-p buffers))

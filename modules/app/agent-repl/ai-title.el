@@ -181,7 +181,7 @@ cache.  Returns nil when no title is available."
 (defun agent-repl--ai-title-segment ()
   "Return a propertized string for the mode-line's aiTitle segment.
 Reads `agent-repl--owning-workspace' from the current buffer (set on
-every claude-owned vterm buffer) and pulls the workspace's aiTitle.
+every agent-owned vterm buffer) and pulls the workspace's aiTitle.
 Returns the empty string when disabled, the workspace is unknown, or no
 title is yet available."
   (if (not agent-repl-ai-title-enabled)
