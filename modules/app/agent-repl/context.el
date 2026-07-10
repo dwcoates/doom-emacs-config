@@ -108,17 +108,13 @@ conversation), don't parse, or carry no usable `message.usage'."
 
 (defun agent-repl--context-read-from-jsonl (path)
   "Return the most recent assistant context-token total from PATH, or nil.
-Reads only the trailing `agent-repl-context-scan-bytes' so this stays
-cheap on large transcripts.  Returns nil on missing/unreadable file or
-when no assistant usage is present in the scanned tail."
-  (when (and path (file-readable-p path))
-    (let* ((size (or (file-attribute-size (file-attributes path)) 0))
-           (cap agent-repl-context-scan-bytes)
-           (start (max 0 (- size cap))))
-      (when (> size 0)
-        (with-temp-buffer
-          (insert-file-contents path nil start size)
-          (agent-repl--context-extract-from-tail (buffer-string)))))))
+Reads only the trailing `agent-repl-context-scan-bytes' (via
+`agent-repl--transcript-read-tail') so this stays cheap on large
+transcripts.  Returns nil on missing/unreadable file or when no
+assistant usage is present in the scanned tail."
+  (let ((tail (agent-repl--transcript-read-tail
+               path agent-repl-context-scan-bytes)))
+    (and tail (agent-repl--context-extract-from-tail tail))))
 
 ;;;; Cached lookup
 

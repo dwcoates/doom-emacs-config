@@ -1121,6 +1121,27 @@ That case is already covered by `agent-repl--check-skill-links'."
           (should-not (agent-repl--register-hooks-in-settings settings)))
       (delete-directory dir t))))
 
+(ert-deftest agent-repl-test-register-hooks-custom-alist ()
+  "register-hooks-in-settings registers exactly a caller-supplied alist.
+Guards the parameterization the codex hooks.json installer relies on:
+only the supplied events appear, with the supplied matcher."
+  (let* ((dir (make-temp-file "agent-register-" t))
+         (settings (expand-file-name "hooks.json" dir)))
+    (unwind-protect
+        (progn
+          (agent-repl--register-hooks-in-settings
+           settings
+           '((Stop . "/x/stop.sh"))
+           '((Stop . "stop-matcher")))
+          (let* ((json (agent-repl--read-settings-alist settings))
+                 (hooks (cdr (assq 'hooks json)))
+                 (stop (cdr (assq 'Stop hooks)))
+                 (entry (car stop)))
+            (should (= (length hooks) 1))
+            (should (equal (cdr (assq 'matcher entry)) "stop-matcher"))
+            (should (agent-repl--event-has-command-p hooks 'Stop "/x/stop.sh"))))
+      (delete-directory dir t))))
+
 (ert-deftest agent-repl-test-register-hooks-preserves-foreign ()
   "register-hooks-in-settings preserves foreign top-level keys."
   (let* ((dir (make-temp-file "agent-register-" t))

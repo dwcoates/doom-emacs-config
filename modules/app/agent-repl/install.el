@@ -399,7 +399,7 @@ silent reset."
           (json-key-type 'symbol))
       (json-read-file path))))
 
-(defun agent-repl--register-hooks-in-settings (settings-file)
+(defun agent-repl--register-hooks-in-settings (settings-file &optional hooks-alist matchers-alist)
   "Ensure every managed hook is registered in SETTINGS-FILE.
 Reads SETTINGS-FILE (or starts from an empty object when absent), appends
 any managed hook whose command path is not already present under its
@@ -407,16 +407,25 @@ event, and writes the result back (pretty-printed).  Idempotent: foreign
 entries and already-present managed entries are preserved, so a no-change
 run rewrites nothing.  Creates the parent directory when needed.  Returns
 non-nil when a write occurred, nil when already complete.  Signals on
-malformed existing JSON (never silently resets)."
+malformed existing JSON (never silently resets).
+
+HOOKS-ALIST is the (EVENT-SYMBOL . COMMAND-PATH) list to register,
+defaulting to the claude backend's `agent-repl--managed-hooks';
+MATCHERS-ALIST is the (EVENT-SYMBOL . MATCHER) list, defaulting to
+`agent-repl--managed-hook-matchers'.  Codex's `~/.codex/hooks.json'
+nests its hooks block identically to Claude Code's settings.json, so
+the codex installer reuses this writer with its own alists."
   (let* ((path (expand-file-name settings-file))
          (json (agent-repl--read-settings-alist path))
          (hooks (cdr (assq 'hooks json)))
+         (hooks-alist (or hooks-alist agent-repl--managed-hooks))
+         (matchers-alist (or matchers-alist agent-repl--managed-hook-matchers))
          (changed nil))
-    (dolist (pair agent-repl--managed-hooks)
+    (dolist (pair hooks-alist)
       (let ((event (car pair))
             (cmd (cdr pair)))
         (unless (agent-repl--event-has-command-p hooks event cmd)
-          (let ((matcher (cdr (assq event agent-repl--managed-hook-matchers))))
+          (let ((matcher (cdr (assq event matchers-alist))))
             (setq hooks (agent-repl--alist-append
                          hooks event
                          (agent-repl--managed-hook-entry cmd matcher)))

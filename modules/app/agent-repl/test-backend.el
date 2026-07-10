@@ -277,6 +277,40 @@ OVERRIDES is a plist of slot keywords accepted by
                          "T2"))
           (should (= reads 2)))))))
 
+(ert-deftest agent-repl-test-backend-transcript-read-tail-reads-tail-only ()
+  "The tail reader returns only the trailing SCAN-BYTES of the file."
+  (let ((path (make-temp-file "agent-tail-")))
+    (unwind-protect
+        (progn
+          (with-temp-file path (insert "HEAD-PART|TAIL-PART"))
+          (should (equal (agent-repl--transcript-read-tail path 9)
+                         "TAIL-PART")))
+      (delete-file path))))
+
+(ert-deftest agent-repl-test-backend-transcript-read-tail-whole-when-small ()
+  "A file smaller than SCAN-BYTES is returned whole."
+  (let ((path (make-temp-file "agent-tail-")))
+    (unwind-protect
+        (progn
+          (with-temp-file path (insert "tiny"))
+          (should (equal (agent-repl--transcript-read-tail path 4096) "tiny")))
+      (delete-file path))))
+
+(ert-deftest agent-repl-test-backend-transcript-read-tail-missing-file ()
+  "A missing file yields nil."
+  (should-not (agent-repl--transcript-read-tail "/nonexistent/agent-tail" 64)))
+
+(ert-deftest agent-repl-test-backend-transcript-read-tail-nil-path ()
+  "A nil path yields nil."
+  (should-not (agent-repl--transcript-read-tail nil 64)))
+
+(ert-deftest agent-repl-test-backend-transcript-read-tail-empty-file ()
+  "An empty file yields nil rather than an empty string."
+  (let ((path (make-temp-file "agent-tail-")))
+    (unwind-protect
+        (should-not (agent-repl--transcript-read-tail path 64))
+      (delete-file path))))
+
 (ert-deftest agent-repl-test-backend-claude-transcript-slots ()
   "The claude backend wires all four transcript slots to the segment fns."
   (let ((b (agent-repl-backend-get 'claude)))
