@@ -222,7 +222,13 @@ project stamps a creation date that subsequent saves preserve.
 `:last-killed-at' is written through unchanged when set on the ws plist
 \(nuke flows populate it before calling state-save), and falls back to
 the previously-persisted value to avoid clobbering on stray saves that
-do not represent a kill."
+do not represent a kill.
+
+`:model' records the session's current model, resolved from the
+workspace's Claude config dir via `claude-repl--model-persist-value' so
+a mid-session `/model' switch (e.g. `opus' to `fable') survives restart;
+`claude-repl--apply-display-state' restores it so the re-booted session
+launches under the same model."
   (let* ((root (claude-repl--ws-get ws :project-dir))
          (file (claude-repl--state-file root)))
     (claude-repl--log ws "state-save ws=%s file=%s" ws file)
@@ -238,13 +244,24 @@ do not represent a kill."
                              (plist-get existing :created-at)
                              (current-time)))
              (last-killed-at (or (claude-repl--ws-get ws :last-killed-at)
-                                 (plist-get existing :last-killed-at))))
+                                 (plist-get existing :last-killed-at)))
+             ;; The session's *current* model, resolved from the workspace's
+             ;; Claude config dir (its session jsonl) so a mid-session
+             ;; `/model' switch survives restart; falls back to the
+             ;; workspace-generation `:model' when no session model is
+             ;; available yet.  `claude-repl--apply-display-state' restores
+             ;; this onto `:model' so `claude-repl--build-start-cmd' passes
+             ;; `--model' when re-booting the session.
+             (model (if (fboundp 'claude-repl--model-persist-value)
+                        (claude-repl--model-persist-value ws)
+                      (claude-repl--ws-get ws :model))))
         (claude-repl--ws-put ws :created-at created-at)
         (when last-killed-at
           (claude-repl--ws-put ws :last-killed-at last-killed-at))
         (let ((state (append `(:project-dir ,root
                                 :created-at ,created-at
                                 :last-killed-at ,last-killed-at
+                                :model ,model
                                 :active-env ,(claude-repl--ws-get ws :active-env)
                                 :priority ,(claude-repl--ws-get ws :priority)
                                 :source-ws-dir ,(claude-repl--ws-get ws :source-ws-dir)

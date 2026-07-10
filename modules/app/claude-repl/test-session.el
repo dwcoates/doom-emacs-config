@@ -2387,6 +2387,21 @@ through an Emacs crash — without it, the SID would only reach
     (claude-repl--apply-display-state "ws1" '(:project-dir "/x"))
     (should (equal (claude-repl--ws-get "ws1" :priority) "mem"))))
 
+(ert-deftest claude-repl-test-apply-display-state-sets-model-from-saved ()
+  "apply-display-state restores `:model' from the saved plist so a booted
+session re-launches under the persisted model (e.g. fable)."
+  (claude-repl-test--with-clean-state
+    (claude-repl--apply-display-state "ws1" '(:model "claude-fable-5"))
+    (should (equal (claude-repl--ws-get "ws1" :model) "claude-fable-5"))))
+
+(ert-deftest claude-repl-test-apply-display-state-model-falls-back-to-plist ()
+  "apply-display-state keeps the in-memory `:model' (the generation model)
+when the saved plist carries none."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-put "ws1" :model "opus")
+    (claude-repl--apply-display-state "ws1" '(:project-dir "/x"))
+    (should (equal (claude-repl--ws-get "ws1" :model) "opus"))))
+
 (ert-deftest claude-repl-test-apply-display-state-restores-repl-state-inactive ()
   "apply-display-state restores a persistable :repl-state (:inactive)."
   (claude-repl-test--with-clean-state
