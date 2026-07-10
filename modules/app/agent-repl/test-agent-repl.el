@@ -22,6 +22,7 @@
 
   ;; Per-module test files (alphabetical order)
   (load (expand-file-name "test-autosave.el" dir) nil t)
+  (load (expand-file-name "test-backend.el" dir) nil t)
   (load (expand-file-name "test-caffeinate.el" dir) nil t)
   (load (expand-file-name "test-commands.el" dir) nil t)
   (load (expand-file-name "test-config.el" dir) nil t)

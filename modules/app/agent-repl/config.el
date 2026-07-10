@@ -252,6 +252,11 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; after core.el (which provides the logging primitives workspace.el
 ;; calls) and before everything else.
 (agent-repl--load-module "workspace")
+;; WHY: backend.el defines the pluggable agent-CLI backend registry and
+;; registers the `claude' backend.  It must load after workspace.el
+;; (its selection helpers call the `agent-repl--ws-*' accessors) and
+;; before session.el (whose command assembly resolves the backend).
+(agent-repl--load-module "backend")
 (agent-repl--load-module "install")
 (agent-repl--load-module "notifications")
 (agent-repl--load-module "history")
