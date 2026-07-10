@@ -51,7 +51,7 @@
 ;;
 ;; This block runs BEFORE any module file is `require'd — its only
 ;; dependencies are built-in Elisp (`read', `call-process', `with-temp-file')
-;; and the persisted workspace snapshot at `~/.claude/emacs/workspaces.el'.
+;; and the persisted workspace snapshot at `~/.claude-emacs/workspaces.el'.
 ;; That keeps it loadable even when every other claude-repl module file
 ;; has conflict markers.  Each in-flight entry persisted by
 ;; `claude-repl--push-in-flight-merge' is processed:
@@ -114,14 +114,24 @@ worktree (whose `.git' is a file pointing into the parent
   (claude-repl--early-git-exit-code
    "-C" target-dir "cherry-pick" "--abort"))
 
+(defun claude-repl--early-workspace-snapshot-file ()
+  "Return the absolute path of the workspace-roster snapshot.
+Resolved with ONLY built-in Elisp because this runs before `core.el'
+defines `claude-repl--global-state-file'; the resolution must stay
+byte-for-byte equivalent to that helper (the `CLAUDE_REPL_STATE_DIR'
+override, else `~/.claude-emacs')."
+  (expand-file-name
+   "workspaces.el"
+   (expand-file-name (or (getenv "CLAUDE_REPL_STATE_DIR") "~/.claude-emacs"))))
+
 (defun claude-repl--early-recover-orphan-cherry-picks ()
   "Process every in-flight-merge entry in the on-disk workspace snapshot.
 See the commentary at the top of `config.el' for the full rationale.
-Reads `~/.claude/emacs/workspaces.el', iterates `:in-flight-merges',
+Reads `~/.claude-emacs/workspaces.el', iterates `:in-flight-merges',
 aborts each entry whose `:target-dir' still has a `CHERRY_PICK_HEAD',
 and rewrites the snapshot with `:in-flight-merges' cleared and the
 recovered source workspaces appended to `:merge-queue' for retry."
-  (let ((snap-file (expand-file-name "~/.claude/emacs/workspaces.el")))
+  (let ((snap-file (claude-repl--early-workspace-snapshot-file)))
     (when (file-exists-p snap-file)
       (condition-case err
           (let* ((raw (with-temp-buffer

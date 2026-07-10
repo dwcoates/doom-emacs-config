@@ -19,7 +19,7 @@
 ;; EXTERNAL BOUNDARY UNMOCKED.
 ;;
 ;; The snapshot file is the one piece of real disk IO retained — the
-;; recovery's contract is "read and rewrite ~/.claude/emacs/workspaces.el",
+;; recovery's contract is "read and rewrite ~/.claude-emacs/workspaces.el",
 ;; so a temp file in `temporary-file-directory' models that contract
 ;; (same pattern as the existing snapshot tests in test-commands.el).
 
@@ -41,7 +41,7 @@
     nil))
 
 ;; Loading `config.el' also invokes `claude-repl--early-recover-orphan-cherry-picks'
-;; against the host's real `~/.claude/emacs/workspaces.el', which is
+;; against the host's real `~/.claude-emacs/workspaces.el', which is
 ;; undesirable in a test run.  Suppress that invocation by binding the
 ;; function to a no-op for the duration of the load.
 (cl-letf (((symbol-function 'message) #'ignore))
@@ -62,18 +62,15 @@
        (when (file-exists-p ,path) (delete-file ,path)))))
 
 (defmacro claude-repl-test--with-redirected-snapshot (snap-path &rest body)
-  "Redirect `expand-file-name' for the snapshot path to SNAP-PATH while BODY runs.
-Tests need the recovery to read/write a controlled temp file instead
-of `~/.claude/emacs/workspaces.el'; we intercept that single path
-expansion and pass everything else through to the real subr."
+  "Redirect the snapshot lookup to SNAP-PATH while BODY runs.
+The recovery resolves the snapshot via
+`claude-repl--early-workspace-snapshot-file'; override that to return
+SNAP-PATH so tests read/write a controlled temp file instead of the real
+`~/.claude-emacs/workspaces.el'."
   (declare (indent 1))
-  `(let ((orig-efn (symbol-function 'expand-file-name)))
-     (cl-letf (((symbol-function 'expand-file-name)
-                (lambda (name &optional dir)
-                  (if (equal name "~/.claude/emacs/workspaces.el")
-                      ,snap-path
-                    (funcall orig-efn name dir)))))
-       ,@body)))
+  `(cl-letf (((symbol-function 'claude-repl--early-workspace-snapshot-file)
+              (lambda () ,snap-path)))
+     ,@body))
 
 (defun claude-repl-test--read-snapshot (path)
   "Return the parsed sexp at PATH (used by tests to inspect rewrites)."
@@ -81,6 +78,23 @@ expansion and pass everything else through to the real subr."
     (insert-file-contents path)
     (goto-char (point-min))
     (read (current-buffer))))
+
+;;;; ---- Tests: --early-workspace-snapshot-file ----
+
+(ert-deftest claude-repl-config-test-early-snapshot-file-honors-env ()
+  "The early snapshot resolver honors CLAUDE_REPL_STATE_DIR."
+  (let ((process-environment (cons "CLAUDE_REPL_STATE_DIR=/tmp/statetest" process-environment)))
+    (should (equal (claude-repl--early-workspace-snapshot-file)
+                   (expand-file-name "/tmp/statetest/workspaces.el")))))
+
+(ert-deftest claude-repl-config-test-early-snapshot-file-defaults-to-claude-emacs ()
+  "The early snapshot resolver defaults under ~/.claude-emacs when the
+override is unset."
+  ;; A bare \"CLAUDE_REPL_STATE_DIR\" entry (no =) makes getenv return nil.
+  (let ((process-environment (cons "CLAUDE_REPL_STATE_DIR" process-environment)))
+    (should (equal (claude-repl--early-workspace-snapshot-file)
+                   (expand-file-name "workspaces.el"
+                                     (expand-file-name "~/.claude-emacs"))))))
 
 ;;;; ---- Tests: --early-recover-orphan-cherry-picks ----
 

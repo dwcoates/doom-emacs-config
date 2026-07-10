@@ -11,8 +11,11 @@
 ;; ---------------------------------------------------------------------------
 
 (defconst claude-repl--sentinel-dir
-  (expand-file-name "~/.claude/workspace-notifications")
-  "Directory where Claude Code hooks write sentinel files.")
+  (claude-repl--global-state-file "workspace-notifications")
+  "Directory where Claude Code hooks write sentinel files.
+Lives at `~/.claude-emacs/workspace-notifications' (under
+`claude-repl--global-state-dir'); the managed hook scripts compute the
+identical path as `$HOME/.claude-emacs/workspace-notifications'.")
 
 (defcustom claude-repl-sentinel-debug-log-filename "hook-debug.log"
   "Filename of the hook debug log to ignore in sentinel file processing."

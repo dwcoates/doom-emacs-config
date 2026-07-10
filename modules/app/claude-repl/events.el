@@ -3,7 +3,7 @@
 ;;; Commentary:
 
 ;; Records workspace create/merge events with timestamps to a small file
-;; under `~/.claude/emacs/'.  The drawer renders a summary of the last 24
+;; under `~/.claude-emacs/'.  The drawer renders a summary of the last 24
 ;; hours at its top.  Storage is trimmed to that window on every write,
 ;; so the file cannot grow unbounded.
 
@@ -12,8 +12,9 @@
 (require 'cl-lib)
 
 (defcustom claude-repl-events-file
-  (expand-file-name "events.el" "~/.claude/emacs/")
+  (claude-repl--global-state-file "events.el")
   "Path to the global workspace-event log.
+Lives at `~/.claude-emacs/events.el' (under `claude-repl--global-state-dir').
 Stores recent `:create' and `:merge' events as a list of plists."
   :type 'file
   :group 'claude-repl)
