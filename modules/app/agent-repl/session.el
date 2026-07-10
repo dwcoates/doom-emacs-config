@@ -541,6 +541,18 @@ Returns nil for nil, empty, or non-Haiku models."
        (string-match-p "haiku" (downcase model))
        t))
 
+(defun agent-repl--managed-project-p (project-dir)
+  "Return non-nil when PROJECT-DIR is a managed (work) project.
+Matches the expanded path against `agent-repl-managed-project-pattern'.
+Shared by every backend's permission-flag selection (claude and codex
+pick different flag spellings for the same managed/personal split).
+Signals when PROJECT-DIR is nil, since the split cannot be resolved
+without it."
+  (unless project-dir
+    (error "agent-repl--managed-project-p: project-dir is nil — cannot determine permission mode"))
+  (string-match-p agent-repl-managed-project-pattern
+                  (expand-file-name project-dir)))
+
 (defun agent-repl--compute-perm-flag (sandboxed-p project-dir &optional model)
   "Return the permission flag string for the Claude CLI, or nil.
 SANDBOXED-P means Docker handles permissions.  Otherwise, PROJECT-DIR
@@ -555,9 +567,7 @@ whenever MODEL denotes Haiku."
       (progn
         (agent-repl--log nil "compute-perm-flag: sandboxed — no perm flag")
         nil)
-    (unless project-dir
-      (error "agent-repl--compute-perm-flag: project-dir is nil — cannot determine permission mode"))
-    (let* ((managed (string-match-p agent-repl-managed-project-pattern (expand-file-name project-dir)))
+    (let* ((managed (agent-repl--managed-project-p project-dir))
            (base (if managed
                      agent-repl-managed-permission-flag
                    agent-repl-personal-permission-flag))
