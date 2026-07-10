@@ -10,11 +10,11 @@
 # We now write the sentinel unconditionally and let elisp decide whether
 # to flip state, gating on the current :claude-state (see
 # `claude-repl--on-permission-event' in sentinel.el).
-LOGFILE=~/.claude/workspace-notifications/hook-debug.log
-mkdir -p ~/.claude/workspace-notifications
+LOGFILE=${CLAUDE_REPL_STATE_DIR:-$HOME/.claude-emacs}/workspace-notifications/hook-debug.log
+mkdir -p ${CLAUDE_REPL_STATE_DIR:-$HOME/.claude-emacs}/workspace-notifications
 INPUT=$(cat)
 echo "$(date '+%H:%M:%S.%3N') [permission] raw_input=$INPUT" >> "$LOGFILE"
 CWD=$(echo "$INPUT" | jq -r '.cwd')
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 echo "$(date '+%H:%M:%S.%3N') [permission] parsed_cwd=$CWD session_id=$SESSION_ID" >> "$LOGFILE"
-printf '%s\n%s\n' "$CWD" "$SESSION_ID" > ~/.claude/workspace-notifications/permission_prompt
+printf '%s\n%s\n' "$CWD" "$SESSION_ID" > ${CLAUDE_REPL_STATE_DIR:-$HOME/.claude-emacs}/workspace-notifications/permission_prompt

@@ -1,9 +1,9 @@
 #!/bin/bash
-LOGFILE=~/.claude/workspace-notifications/hook-debug.log
-mkdir -p ~/.claude/workspace-notifications
+LOGFILE=${CLAUDE_REPL_STATE_DIR:-$HOME/.claude-emacs}/workspace-notifications/hook-debug.log
+mkdir -p ${CLAUDE_REPL_STATE_DIR:-$HOME/.claude-emacs}/workspace-notifications
 INPUT=$(cat)
 echo "$(date '+%H:%M:%S.%3N') [session_start_$$] raw_input=$INPUT" >> "$LOGFILE"
 CWD=$(echo "$INPUT" | jq -r '.cwd')
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 echo "$(date '+%H:%M:%S.%3N') [session_start_$$] parsed_cwd=$CWD session_id=$SESSION_ID" >> "$LOGFILE"
-printf '%s\n%s\n' "$CWD" "$SESSION_ID" > ~/.claude/workspace-notifications/session_start_$$
+printf '%s\n%s\n' "$CWD" "$SESSION_ID" > ${CLAUDE_REPL_STATE_DIR:-$HOME/.claude-emacs}/workspace-notifications/session_start_$$
