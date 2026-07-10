@@ -2,8 +2,10 @@
 
 ;;; Section 1: Internal helpers
 
-(defconst claude-repl--output-dir (expand-file-name "~/.claude/output/")
-  "Directory for workspace command files and other IPC output.")
+(defconst claude-repl--output-dir
+  (file-name-as-directory (claude-repl--global-state-file "output"))
+  "Directory for workspace command files and other IPC output.
+Lives at `~/.claude-emacs/output/' (under `claude-repl--global-state-dir').")
 
 (defcustom claude-repl-debug-mock-workspace-default-slug "mock-test"
   "Default bare slug used in mock workspace generation.
@@ -461,7 +463,7 @@ NAMES is an optional list of branch name strings; defaults to a single test entr
     (message "Wrote %s with priority=%s" file priority)))
 
 (defun claude-repl-debug/process-pending-commands ()
-  "Manually scan ~/.claude/output/ and process any workspace_commands_*.json files.
+  "Manually scan ~/.claude-emacs/output/ and process any workspace_commands_*.json files.
 Use this to verify the processor works independently of the file watcher."
   (interactive)
   (let ((files (when (file-directory-p claude-repl--output-dir)
@@ -554,7 +556,7 @@ window changes, git-diff sentinels, resolve-root, etc.)."
       (claude-repl--log (claude-repl--ws-current-name) "debug logging toggled: %s" label))))
 
 (defun claude-repl-debug/toggle-log-to-file ()
-  "Toggle writing debug log output to `~/.claude/emacs/doom-claude-repl.log'.
+  "Toggle writing debug log output to `~/.claude-emacs/doom-claude-repl.log'.
 When enabled, all messages that pass through `claude-repl--do-log' are
 appended to the file regardless of the `claude-repl-debug' level."
   (interactive)

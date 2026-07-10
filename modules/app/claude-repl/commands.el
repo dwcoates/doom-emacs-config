@@ -1630,11 +1630,11 @@ workspace."
 ;; existed at this default.  Users wanting a custom path can `setq'
 ;; after load.
 (defconst claude-repl-workspace-snapshot-file
-  (expand-file-name "workspaces.el" "~/.claude/emacs/")
+  (claude-repl--global-state-file "workspaces.el")
   "Path to the file where the workspace roster snapshot is persisted.
-Lives at `~/.claude/emacs/workspaces.el' (symmetric with per-project
-`<root>/.claude/emacs/state.el' and `history.el').  Auto-created on
-first save.")
+Lives at `~/.claude-emacs/workspaces.el' (under `claude-repl--global-state-dir',
+claude-repl's own state tree, NOT the Claude CLI config dir).
+Auto-created on first save.")
 
 (defconst claude-repl--legacy-workspace-snapshot-file
   (expand-file-name ".workspace-snapshot.el"

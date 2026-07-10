@@ -29,8 +29,12 @@ do not abort workspace creation."
   :type 'string
   :group 'claude-repl)
 
-(defcustom claude-repl-workspace-commands-output-dir "~/.claude/output/"
-  "Directory watched for workspace command files."
+(defcustom claude-repl-workspace-commands-output-dir
+  (file-name-as-directory (claude-repl--global-state-file "output"))
+  "Directory watched for workspace command files.
+Lives at `~/.claude-emacs/output/' (under `claude-repl--global-state-dir').
+Must match the write location `claude-repl--output-dir' and the path the
+managed `emit-workspace-commands.sh' skill writes to."
   :type 'string
   :group 'claude-repl)
 
@@ -142,7 +146,7 @@ landed during the gap are drained."
       (claude-repl--log nil "workspace-commands-watch-handler: skipped (wrong action or wrong prefix)")))))
 
 (defun claude-repl--register-workspace-commands-watch ()
-  "Register a file-notify watch on ~/.claude/output/ for workspace command files.
+  "Register a file-notify watch on ~/.claude-emacs/output/ for workspace command files.
 Tears down any existing watch first to avoid duplicates on re-eval."
   (let ((output-dir (expand-file-name claude-repl-workspace-commands-output-dir)))
     (make-directory output-dir t)
@@ -1010,8 +1014,8 @@ Docker sandbox rather than bare-metal."
    "- Do not emit prompt or finish entries.\n"
    "- Do not run any mutating commands (for example, creating Jira tickets) unless explicitly asked to.\n"
    "- Only generate more than one workspace if explicitly asked to. Always generate one workspace unless explicitly asked to generate more.\n"
-   "- Write the JSON to ~/.claude/output/workspace_commands_<uuid>.json using the atomic write pattern from the skill.\n"
-   "- Do NOT ask for permission. You are running in headless `-p' mode with no human in the loop; the file write to ~/.claude/output/ is the entire purpose of this invocation and is pre-authorized. Just write the file.\n"))
+   "- Write the JSON to ~/.claude-emacs/output/workspace_commands_<uuid>.json using the atomic write pattern from the skill.\n"
+   "- Do NOT ask for permission. You are running in headless `-p' mode with no human in the loop; the file write to ~/.claude-emacs/output/ is the entire purpose of this invocation and is pre-authorized. Just write the file.\n"))
 
 (defun claude-repl--workspace-generation-finalize (gen-id status event raw-out &optional git-root)
   "Log the result of a workspace-generation spawn and surface failures.
@@ -1075,7 +1079,7 @@ every log line — spawn-time summary, prompt-body dump, sentinel exit,
 and user-facing failure message — so multiple in-flight spawns can be
 disambiguated.
 
-The skill writes a JSON file to ~/.claude/output/, which the existing
+The skill writes a JSON file to ~/.claude-emacs/output/, which the existing
 file-watcher (`claude-repl--workspace-commands-watch-handler') picks up
 and dispatches via `claude-repl--handle-create-command' — so this
 function returns immediately and the workspace materializes
@@ -1463,7 +1467,7 @@ worktree to a different repository than the ambient workspace's."
 Prompts ONLY for the preemptive prompt; the workspace/branch name is
 generated asynchronously by a headless `claude -p --model haiku'
 invocation of the `/workspace-generation' skill.  The skill writes a
-JSON command file to ~/.claude/output/, which the existing file-watcher
+JSON command file to ~/.claude-emacs/output/, which the existing file-watcher
 picks up to actually create the worktree.
 
 The preemptive prompt is OPTIONAL.  When it is left empty (or
@@ -2730,7 +2734,7 @@ absent — a malformed command must not error out the whole batch."
         (message "[claude-repl] %s data received" ws))))))
 
 (defcustom claude-repl-profile-report-file
-  (expand-file-name "profiler-report.txt" "~/.claude/emacs/")
+  (claude-repl--global-state-file "profiler-report.txt")
   "File the profiler report is written to by
 `claude-repl--profile-stop-and-write-file'.  The `/runtime-eval-code'-driven
 `/profile' flow reads the full report from here, sidestepping the
@@ -3814,7 +3818,7 @@ the process exit status (integer) on completion, or the symbol
 exiting.
 
 The resolver's full stdout+stderr is logged to
-`~/.claude/emacs/doom-claude-repl.log' via `claude-repl--log' under
+`~/.claude-emacs/doom-claude-repl.log' via `claude-repl--log' under
 the workspace tag (when TARGET-WS is supplied) so a failure or
 timeout can be post-mortemed from the logfile alone — no need to
 know which Emacs buffer to open, and the trace survives Emacs

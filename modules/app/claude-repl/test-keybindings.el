@@ -948,7 +948,7 @@ var is unset, yielding the bare slug with no leading slash."
 ;;;; ---- Tests: claude-repl--output-dir constant ----
 
 (ert-deftest claude-repl-test-output-dir-is-absolute ()
-  "output-dir should be an absolute path under ~/.claude/output/."
+  "output-dir should be an absolute path under ~/.claude-emacs/output/."
   (should (file-name-absolute-p claude-repl--output-dir))
   (should (string-match-p "output/$" claude-repl--output-dir)))
 
