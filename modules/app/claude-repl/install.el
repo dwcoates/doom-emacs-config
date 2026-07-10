@@ -325,9 +325,11 @@ corrupts window-layout assertions in the test suite."
 ;;
 ;; The hook SCRIPTS stay in ~/.claude/hooks/: the registered command paths
 ;; are the literal "~/.claude/hooks/*.sh" (Claude Code expands `~' to HOME
-;; regardless of CLAUDE_CONFIG_DIR), so every account funnels its
-;; notifications through the same account-independent
-;; ~/.claude/workspace-notifications/ dir the sentinel watches.  Only the
+;; regardless of CLAUDE_CONFIG_DIR).  The scripts themselves write to
+;; claude-repl's own account-independent state dir
+;; (~/.claude-emacs/workspace-notifications/, computed as
+;; $HOME/.claude-emacs by the scripts), which the sentinel watches, so
+;; every account funnels its notifications through the same dir.  Only the
 ;; registration ARRAY is replicated per account, never the scripts nor the
 ;; notification dir.
 

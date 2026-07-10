@@ -7,11 +7,10 @@
 ;; state (the `/workspace-status' skill is the documented consumer).
 ;;
 ;; The file lives at `claude-repl-workspace-status-file' — by default
-;; `~/.claude/emacs/workspace-status.json' — alongside `workspaces.el'
-;; and per-project `state.el'.  Because the host's `~/.claude' is
-;; bind-mounted into each sandboxed claude as `/home/claude/.claude',
-;; every workspace's claude can read the same file regardless of which
-;; environment wrote it.
+;; `~/.claude-emacs/workspace-status.json' — alongside `workspaces.el'.
+;; claude-repl launches plain `claude' on the host, so the publishing
+;; editor and every consuming claude session share the same host
+;; filesystem and read/write the identical path.
 ;;
 ;; Refresh cadence: an outer scheduler runs every
 ;; `claude-repl-workspace-status-write-window-seconds' (default 60s)
@@ -26,11 +25,13 @@
 (require 'json)
 
 (defconst claude-repl-workspace-status-file
-  (expand-file-name "workspace-status.json" "~/.claude/emacs/")
+  (claude-repl--global-state-file "workspace-status.json")
   "Path where the JSON workspace status export is written.
-Lives alongside `claude-repl-workspace-snapshot-file' so the same
-mount semantics apply: host writes here, sandboxed claude reads the
-same bytes via `/home/claude/.claude/emacs/workspace-status.json'.")
+Lives at `~/.claude-emacs/workspace-status.json' (under
+`claude-repl--global-state-dir'), alongside
+`claude-repl-workspace-snapshot-file'.  The peer-introspection consumer
+\(the `create-or-update-workspace' status skill) reads the identical
+path.")
 
 (defun claude-repl--ws-keyword-to-string (val)
   "Return a string form of VAL for JSON export, or nil when VAL is nil.

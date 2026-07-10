@@ -373,7 +373,7 @@ behavior can rebind via `cl-letf'.")
 
 ;; Disable file-logging during tests so the unconditional file-write path
 ;; (always-on after the core.el log refactor) does not append every
-;; test-emitted line to the user's real `~/.claude/emacs/doom-claude-repl.log'.
+;; test-emitted line to the user's real `~/.claude-emacs/doom-claude-repl.log'.
 ;; Tests that specifically exercise the file-write path bind this back
 ;; locally and redirect `claude-repl-log-file-name' to a temp path.
 (when (boundp 'claude-repl-log-to-file)
@@ -487,7 +487,7 @@ shell out to the real binary."
 
 ;; Redirect the events log to a throwaway temp path so any test that
 ;; exercises a code path which records workspace lifecycle events does
-;; not clobber the user's real `~/.claude/emacs/events.el'.  Per-test
+;; not clobber the user's real `~/.claude-emacs/events.el'.  Per-test
 ;; isolation still uses the `--with-clean-state' rebinding below.
 (when (boundp 'claude-repl-events-file)
   (setq claude-repl-events-file
