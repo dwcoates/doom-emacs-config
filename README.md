@@ -12,7 +12,7 @@ Personal Doom Emacs configuration at `~/.config/doom`.
 └── modules/
     ├── app/
     │   ├── chess/        # Chess functionality
-    │   └── agent-repl/  # Claude AI REPL
+    │   └── agent-repl/  # Agent REPL (pluggable backends: claude code, codex)
     ├── config/
     │   ├── personal-bindings/    # Custom keybindings
     │   ├── treemacs/             # File explorer config
