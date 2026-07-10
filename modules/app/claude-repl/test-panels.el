@@ -666,10 +666,12 @@ which writes :inactive."
       (should (eq :inactive (claude-repl--ws-get "test-ws" :repl-state))))))
 
 (ert-deftest claude-repl-test-panels-on-simple-close-hides-panels ()
-  "on-simple-close calls hide-panels."
+  "on-simple-close calls hide-panels when a saved layout is restored."
   (claude-repl-test--with-clean-state
     (let ((hide-called 0))
+      (claude-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'set-window-configuration) #'ignore)
                 ((symbol-function 'claude-repl--hide-panels)
                  (lambda () (cl-incf hide-called))))
         (claude-repl--on-simple-close)
@@ -729,10 +731,42 @@ from the restored splitscreen layout rather than from the full-frame one."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'set-window-configuration)
                  (lambda (_cfg) (cl-incf restore-called)))
-                ((symbol-function 'claude-repl--hide-panels) #'ignore))
+                ((symbol-function 'claude-repl--replace-panels-with-fallback) #'ignore))
         ;; No :fullscreen-config set on test-ws.
         (claude-repl--on-simple-close)
         (should (= 0 restore-called))))))
+
+(ert-deftest claude-repl-test-panels-on-simple-close-no-config-routes-to-fallback ()
+  "on-simple-close with no saved layout replaces panels with the fallback buffer.
+Rather than `hide-panels' (which would strand the output window), the
+no-`:fullscreen-config' branch routes to
+`claude-repl--replace-panels-with-fallback'."
+  (claude-repl-test--with-clean-state
+    (let ((hide-called 0) (replace-ws 'unset))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'set-window-configuration) #'ignore)
+                ((symbol-function 'claude-repl--hide-panels)
+                 (lambda () (cl-incf hide-called)))
+                ((symbol-function 'claude-repl--replace-panels-with-fallback)
+                 (lambda (ws) (setq replace-ws ws))))
+        ;; No :fullscreen-config set on test-ws.
+        (claude-repl--on-simple-close)
+        (should (equal replace-ws "test-ws"))
+        (should (= 0 hide-called))))))
+
+(ert-deftest claude-repl-test-panels-on-simple-close-with-config-does-not-fallback ()
+  "on-simple-close with a saved layout hides panels and does NOT use the fallback.
+The restore-succeeded branch keeps the historical `hide-panels' behavior."
+  (claude-repl-test--with-clean-state
+    (let ((replace-called 0))
+      (claude-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'set-window-configuration) #'ignore)
+                ((symbol-function 'claude-repl--hide-panels) #'ignore)
+                ((symbol-function 'claude-repl--replace-panels-with-fallback)
+                 (lambda (_ws) (cl-incf replace-called))))
+        (claude-repl--on-simple-close)
+        (should (= 0 replace-called))))))
 
 (ert-deftest claude-repl-test-panels-on-simple-close-fullscreen-leaves-work-window ()
   "on-simple-close on a fullscreen ws removes panels and leaves the work window.
@@ -803,6 +837,130 @@ panels, leaving just the work window — the `SPC o c' goes-away contract."
     (cl-letf (((symbol-function 'set-window-configuration)
                (lambda (_cfg) (error "should not restore"))))
       (should-not (claude-repl--restore-fullscreen-config nil)))))
+
+;;;; ---- Tests: workspace-magit-status-buffer ----
+
+(ert-deftest claude-repl-test-panels-workspace-magit-status-buffer-finds-match ()
+  "workspace-magit-status-buffer returns a magit-status buffer whose dir matches."
+  (claude-repl-test--with-clean-state
+    (let ((magit-buf (generate-new-buffer "*magit-match*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :project-dir "/repo")
+            (with-current-buffer magit-buf
+              (setq major-mode 'magit-status-mode)
+              (setq default-directory "/repo/"))
+            (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (_) "/repo"))
+                      ((symbol-function 'claude-repl--path-canonical)
+                       (lambda (p) (directory-file-name p))))
+              (should (eq magit-buf
+                          (claude-repl--workspace-magit-status-buffer "test-ws")))))
+        (kill-buffer magit-buf)))))
+
+(ert-deftest claude-repl-test-panels-workspace-magit-status-buffer-dir-mismatch-nil ()
+  "workspace-magit-status-buffer returns nil when the only magit buffer's dir differs."
+  (claude-repl-test--with-clean-state
+    (let ((magit-buf (generate-new-buffer "*magit-other*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :project-dir "/repo")
+            (with-current-buffer magit-buf
+              (setq major-mode 'magit-status-mode)
+              (setq default-directory "/other/"))
+            (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (_) "/repo"))
+                      ((symbol-function 'claude-repl--path-canonical)
+                       (lambda (p) (directory-file-name p))))
+              (should-not (claude-repl--workspace-magit-status-buffer "test-ws"))))
+        (kill-buffer magit-buf)))))
+
+(ert-deftest claude-repl-test-panels-workspace-magit-status-buffer-non-magit-nil ()
+  "workspace-magit-status-buffer ignores a matching-dir buffer that is not magit-status."
+  (claude-repl-test--with-clean-state
+    (let ((plain-buf (generate-new-buffer "*plain-repo*")))
+      (unwind-protect
+          (progn
+            (claude-repl--ws-put "test-ws" :project-dir "/repo")
+            (with-current-buffer plain-buf
+              (setq major-mode 'fundamental-mode)
+              (setq default-directory "/repo/"))
+            (cl-letf (((symbol-function 'claude-repl--git-root) (lambda (_) "/repo"))
+                      ((symbol-function 'claude-repl--path-canonical)
+                       (lambda (p) (directory-file-name p))))
+              (should-not (claude-repl--workspace-magit-status-buffer "test-ws"))))
+        (kill-buffer plain-buf)))))
+
+;;;; ---- Tests: panel-fallback-buffer ----
+
+(ert-deftest claude-repl-test-panels-panel-fallback-buffer-prefers-magit ()
+  "panel-fallback-buffer returns the workspace magit-status buffer when one exists."
+  (claude-repl-test--with-clean-state
+    (let ((magit-buf (generate-new-buffer "*magit-pref*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'claude-repl--workspace-magit-status-buffer)
+                     (lambda (_ws) magit-buf)))
+            (should (eq magit-buf (claude-repl--panel-fallback-buffer "test-ws"))))
+        (kill-buffer magit-buf)))))
+
+(ert-deftest claude-repl-test-panels-panel-fallback-buffer-falls-back-to-doom ()
+  "panel-fallback-buffer returns the Doom splash when no magit-status buffer exists."
+  (claude-repl-test--with-clean-state
+    (let ((splash (generate-new-buffer "*splash-fb*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'claude-repl--workspace-magit-status-buffer)
+                     (lambda (_ws) nil))
+                    ((symbol-function 'doom-fallback-buffer) (lambda () splash)))
+            (should (eq splash (claude-repl--panel-fallback-buffer "test-ws"))))
+        (kill-buffer splash)))))
+
+(ert-deftest claude-repl-test-panels-panel-fallback-buffer-errors-when-none ()
+  "panel-fallback-buffer signals when neither a magit nor a Doom fallback exists."
+  (claude-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'claude-repl--workspace-magit-status-buffer)
+               (lambda (_ws) nil))
+              ((symbol-function 'doom-fallback-buffer) (lambda () nil)))
+      (should-error (claude-repl--panel-fallback-buffer "test-ws")))))
+
+;;;; ---- Tests: replace-panels-with-fallback ----
+
+(ert-deftest claude-repl-test-panels-replace-panels-with-fallback-swaps-output ()
+  "replace-panels-with-fallback closes the input window and swaps the output
+window's buffer to the fallback, leaving a single window on the fallback buffer."
+  (claude-repl-test--with-clean-state
+    (let ((wconf (current-window-configuration))
+          (vterm-buf (generate-new-buffer "*claude-panel-repl-fb*"))
+          (input-buf (generate-new-buffer "*claude-panel-input-repl-fb*"))
+          (fallback-buf (generate-new-buffer "*repl-fb-fallback*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'claude-repl--panel-fallback-buffer)
+                     (lambda (_ws) fallback-buf)))
+            (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (delete-other-windows)
+            (let* ((vterm-win (selected-window))
+                   (input-win (split-window vterm-win nil 'below)))
+              (set-window-buffer vterm-win vterm-buf)
+              (set-window-buffer input-win input-buf)
+              (claude-repl--replace-panels-with-fallback "test-ws")
+              ;; Input window is gone.
+              (should-not (get-buffer-window input-buf))
+              ;; The output window survives but now shows the fallback buffer.
+              (should (get-buffer-window fallback-buf))
+              (should-not (get-buffer-window vterm-buf))))
+        (set-window-configuration wconf)
+        (kill-buffer vterm-buf)
+        (kill-buffer input-buf)
+        (kill-buffer fallback-buf)))))
+
+(ert-deftest claude-repl-test-panels-replace-panels-with-fallback-noop-no-buffers ()
+  "replace-panels-with-fallback is a no-op when the workspace has no panel buffers."
+  (claude-repl-test--with-clean-state
+    (let ((fallback-called 0))
+      (cl-letf (((symbol-function 'claude-repl--panel-fallback-buffer)
+                 (lambda (_ws) (cl-incf fallback-called) nil)))
+        ;; No :vterm-buffer / :input-buffer on test-ws.
+        (claude-repl--replace-panels-with-fallback "test-ws")
+        ;; Fallback buffer is never computed when there is no output window.
+        (should (= 0 fallback-called))))))
 
 ;;;; ---- Tests: simple-hide-and-preserve-status ----
 
