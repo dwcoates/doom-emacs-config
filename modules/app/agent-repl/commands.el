@@ -410,18 +410,24 @@ installed configuration."
   :type 'string
   :group 'agent-repl)
 
-(defcustom agent-repl-explain-config-program "claude"
-  "Executable invoked by `agent-repl-explain-config'."
+;; NOTE: the headless executable is no longer a defcustom here — it is
+;; resolved from the default agent backend (explain-config is a global
+;; utility with no workspace in scope) via
+;; `agent-repl--backend-headless-cmd', which owns the one-shot flag
+;; spelling (`-p' for claude, `exec' for codex, ...).
+
+(defcustom agent-repl-explain-config-model "haiku"
+  "Model alias pinned for the headless config-explainer run.
+`explain-config' is short-form Q&A, so the small/fast model is used
+rather than the default-tier model."
   :type 'string
   :group 'agent-repl)
 
-(defcustom agent-repl-explain-config-flags
-  '("-p" "--model" "haiku" "--dangerously-skip-permissions")
-  "Argument list for the headless claude invocation.
-`-p' makes claude exit after one turn; `--model haiku' pins the small,
-fast model (explain-config is short-form Q&A — no need for the
-default-tier model); `--dangerously-skip-permissions' prevents the run
-from prompting for tool approval headlessly."
+(defcustom agent-repl-explain-config-extra-args
+  '("--dangerously-skip-permissions")
+  "Extra flags appended to the headless config-explainer invocation.
+`--dangerously-skip-permissions' prevents the run from prompting for
+tool approval headlessly (in one-shot mode there is no one to approve)."
   :type '(repeat string)
   :group 'agent-repl)
 
@@ -1141,8 +1147,10 @@ or never-responding `claude' invocation doesn't disturb the UI."
   (let* ((dir (file-name-as-directory
                (expand-file-name agent-repl-explain-config-dir)))
          (buf (agent-repl--explain-config-init-buffer prompt))
-         (cmd (cons agent-repl-explain-config-program
-                    agent-repl-explain-config-flags))
+         (cmd (agent-repl--backend-headless-cmd
+               (agent-repl--default-backend)
+               agent-repl-explain-config-model
+               agent-repl-explain-config-extra-args))
          (input (agent-repl--explain-config-build-input prompt)))
     (let* ((default-directory dir)
            (proc (make-process

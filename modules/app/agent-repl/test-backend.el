@@ -152,6 +152,43 @@ chain produced."
          (legacy (agent-repl--assemble-cmd flags cfg)))
     (should (equal (agent-repl--claude-start-cmd opts) legacy))))
 
+;;;; ---- Tests: headless command construction ----
+
+(ert-deftest agent-repl-test-backend-claude-headless-cmd-shape ()
+  "The claude headless builder prefixes `claude -p --model MODEL'."
+  (should (equal (agent-repl--claude-headless-cmd "haiku" nil)
+                 '("claude" "-p" "--model" "haiku"))))
+
+(ert-deftest agent-repl-test-backend-claude-headless-cmd-appends-extra ()
+  "Extra-args are appended after the standard claude headless prefix."
+  (should (equal (agent-repl--claude-headless-cmd "opus" '("--foo" "bar"))
+                 '("claude" "-p" "--model" "opus" "--foo" "bar"))))
+
+(ert-deftest agent-repl-test-backend-headless-cmd-delegates ()
+  "`agent-repl--backend-headless-cmd' delegates to the backend's fn."
+  (agent-repl-test--with-backends
+    (agent-repl-register-backend
+     (agent-repl-backend-create
+      :name 'hb :binary "hb"
+      :start-cmd-fn #'ignore
+      :headless-cmd-fn (lambda (model extra) (cons "hb-run" (cons model extra)))))
+    (should (equal (agent-repl--backend-headless-cmd
+                    (agent-repl-backend-get 'hb) "m" '("x"))
+                   '("hb-run" "m" "x")))))
+
+(ert-deftest agent-repl-test-backend-headless-cmd-errors-when-absent ()
+  "Asking a headless-less backend for a headless command signals an error."
+  (agent-repl-test--with-backends
+    (agent-repl-register-backend
+     (agent-repl-backend-create :name 'nohl :binary "nohl"
+                                :start-cmd-fn #'ignore))
+    (should-error (agent-repl--backend-headless-cmd
+                   (agent-repl-backend-get 'nohl) "m" nil))))
+
+(ert-deftest agent-repl-test-backend-claude-registered-with-headless ()
+  "The built-in claude backend carries a headless-cmd-fn."
+  (should (agent-repl-backend-headless-cmd-fn (agent-repl-backend-get 'claude))))
+
 ;;;; ---- Tests: build-start-cmd delegation ----
 
 (ert-deftest agent-repl-test-backend-build-start-cmd-uses-ws-backend ()

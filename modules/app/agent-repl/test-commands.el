@@ -556,19 +556,18 @@
   (let ((rendered (agent-repl--explain-config-build-input "anything")))
     (should (string-match-p "REFUSE" rendered))))
 
-(ert-deftest agent-repl-cmd-test-explain-config-flags/contains-headless-and-skip-perms ()
-  "Default flags include `-p' and `--dangerously-skip-permissions'."
-  (should (member "-p" agent-repl-explain-config-flags))
+(ert-deftest agent-repl-cmd-test-explain-config-extra-args/contains-skip-perms ()
+  "Default extra-args include `--dangerously-skip-permissions'.
+The `-p' one-shot flag is now injected by the backend headless-cmd-fn,
+not carried in this defcustom — see the spawn-level test for it."
   (should (member "--dangerously-skip-permissions"
-                  agent-repl-explain-config-flags)))
+                  agent-repl-explain-config-extra-args)))
 
-(ert-deftest agent-repl-cmd-test-explain-config-flags/pins-haiku-model ()
-  "Default flags pass `--model haiku' so the read-only Q&A run uses the
-small, fast model rather than the default-tier one (explain-config is
-short-form Q&A — no need for the bigger model)."
-  (should (member "--model" agent-repl-explain-config-flags))
-  (let* ((tail (cdr (member "--model" agent-repl-explain-config-flags))))
-    (should (equal (car tail) "haiku"))))
+(ert-deftest agent-repl-cmd-test-explain-config-model/pins-haiku ()
+  "The config-explainer pins the small/fast `haiku' model.
+`explain-config' is short-form Q&A, so it deliberately avoids the
+default-tier model."
+  (should (equal agent-repl-explain-config-model "haiku")))
 
 (ert-deftest agent-repl-cmd-test-explain-config-spawn/passes-haiku-model-to-process ()
   "spawn forwards `--model haiku' through to `make-process' so the headless
@@ -615,8 +614,10 @@ that drops the model pin without surfacing in the defcustom-shape test."
       (agent-repl-explain-config "  hello  ")
       (should (equal captured "hello")))))
 
-(ert-deftest agent-repl-cmd-test-explain-config-spawn/builds-command-from-defcustoms ()
-  "spawn constructs the command list from program + flags defcustoms."
+(ert-deftest agent-repl-cmd-test-explain-config-spawn/builds-command-from-backend ()
+  "spawn builds the command via the default backend's headless-cmd-fn.
+The argv leads with the default backend's binary and carries the
+one-shot `-p' flag plus the configured extra-args."
   (let (captured-cmd)
     (cl-letf (((symbol-function 'make-process)
                (lambda (&rest args)
@@ -626,7 +627,8 @@ that drops the model pin without surfacing in the defcustom-shape test."
               ((symbol-function 'process-send-eof) #'ignore)
               ((symbol-function 'display-buffer) #'ignore))
       (agent-repl--explain-config-spawn "anything")
-      (should (equal (car captured-cmd) agent-repl-explain-config-program))
+      (should (equal (car captured-cmd)
+                     (agent-repl-backend-binary (agent-repl--default-backend))))
       (should (member "-p" captured-cmd))
       (should (member "--dangerously-skip-permissions" captured-cmd)))))
 
