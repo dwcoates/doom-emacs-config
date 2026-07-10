@@ -550,13 +550,41 @@ the rev-parse comparison and the checkout invocation."
       (should (equal captured-file "/tmp/workspace_commands_new.json")))))
 
 (ert-deftest claude-repl-test-watch-handler-ignores-delete-action ()
-  "Delete actions are ignored even for workspace_commands_ files."
-  (let ((called nil))
+  "Per-file delete actions do not process and do not re-arm the watch."
+  (let ((called nil) (rearmed nil))
     (cl-letf (((symbol-function 'claude-repl--process-workspace-commands-file)
-               (lambda (_f) (setq called t))))
+               (lambda (_f) (setq called t)))
+              ((symbol-function 'claude-repl--register-workspace-commands-watch)
+               (lambda () (setq rearmed t))))
       (claude-repl--workspace-commands-watch-handler
        '(descriptor deleted "/tmp/workspace_commands_del.json"))
-      (should-not called))))
+      (should-not called)
+      (should-not rearmed))))
+
+(ert-deftest claude-repl-test-watch-handler-rearms-on-stopped ()
+  "A `stopped' event re-arms the watch and drains pending files."
+  (let ((rearmed nil) (drained nil))
+    (cl-letf (((symbol-function 'claude-repl--register-workspace-commands-watch)
+               (lambda () (setq rearmed t)))
+              ((symbol-function 'claude-repl--drain-workspace-commands-files)
+               (lambda () (setq drained t) 0)))
+      (claude-repl--workspace-commands-watch-handler
+       '(descriptor stopped "/Users/x/.claude/output"))
+      (should rearmed)
+      (should drained))))
+
+(ert-deftest claude-repl-test-watch-handler-rearms-on-output-dir-deleted ()
+  "A `deleted' event for the output directory itself re-arms and drains."
+  (let ((rearmed nil) (drained nil)
+        (claude-repl-workspace-commands-output-dir "/tmp/test-output/"))
+    (cl-letf (((symbol-function 'claude-repl--register-workspace-commands-watch)
+               (lambda () (setq rearmed t)))
+              ((symbol-function 'claude-repl--drain-workspace-commands-files)
+               (lambda () (setq drained t) 0)))
+      (claude-repl--workspace-commands-watch-handler
+       (list 'descriptor 'deleted (expand-file-name "/tmp/test-output")))
+      (should rearmed)
+      (should drained))))
 
 ;;;; ---- Tests: dispatch-workspace-command ----
 
