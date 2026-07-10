@@ -516,25 +516,43 @@ is non-nil.  Returns a trimmed flags string."
     (claude-repl--log nil "compute-claude-flags: flags=%s" flags)
     flags))
 
-(defun claude-repl--compute-perm-flag (sandboxed-p project-dir)
+(defun claude-repl--model-haiku-p (model)
+  "Return non-nil when MODEL denotes a Haiku-tier model.
+MODEL is a model alias string (e.g. \"haiku\", \"haiku-4-5\",
+\"claude-haiku-4-5\") or nil.  Matching is case-insensitive on the
+presence of the `haiku' family token so every Haiku variant counts.
+Returns nil for nil, empty, or non-Haiku models."
+  (and (stringp model)
+       (not (string-empty-p model))
+       (string-match-p "haiku" (downcase model))
+       t))
+
+(defun claude-repl--compute-perm-flag (sandboxed-p project-dir &optional model)
   "Return the permission flag string for the Claude CLI, or nil.
 SANDBOXED-P means Docker handles permissions.  Otherwise, PROJECT-DIR
-determines the flag: ChessCom repos use `claude-repl-managed-permission-flag',
-all others use `claude-repl-personal-permission-flag'.  Both default to
---permission-mode auto."
+determines the base flag: ChessCom repos use `claude-repl-managed-permission-flag',
+all others use `claude-repl-personal-permission-flag' (both default to
+--permission-mode auto).  MODEL is the effective interactive model alias;
+`--permission-mode auto' is only allowed when MODEL is not Haiku (see
+`claude-repl--model-haiku-p'), so a resolved base flag of
+`--permission-mode auto' is downgraded to `--dangerously-skip-permissions'
+whenever MODEL denotes Haiku."
   (if sandboxed-p
       (progn
         (claude-repl--log nil "compute-perm-flag: sandboxed — no perm flag")
         nil)
     (unless project-dir
       (error "claude-repl--compute-perm-flag: project-dir is nil — cannot determine permission mode"))
-    (let ((flag (if (string-match-p claude-repl-managed-project-pattern (expand-file-name project-dir))
-                    claude-repl-managed-permission-flag
-                  claude-repl-personal-permission-flag)))
-      (claude-repl--log nil "compute-perm-flag: branch=%s flag=%s"
-                        (if (string-match-p claude-repl-managed-project-pattern (expand-file-name project-dir))
-                            "managed" "personal")
-                        flag)
+    (let* ((managed (string-match-p claude-repl-managed-project-pattern (expand-file-name project-dir)))
+           (base (if managed
+                     claude-repl-managed-permission-flag
+                   claude-repl-personal-permission-flag))
+           (flag (if (and (claude-repl--model-haiku-p model)
+                          (equal base "--permission-mode auto"))
+                     "--dangerously-skip-permissions"
+                   base)))
+      (claude-repl--log nil "compute-perm-flag: branch=%s model=%s flag=%s"
+                        (if managed "managed" "personal") model flag)
       flag)))
 
 (defun claude-repl--compute-config-dir (project-dir)
@@ -592,11 +610,14 @@ with everything the caller needs for logging and mode-line setup."
          (project-dir (claude-repl--ws-get ws :project-dir))
          (active-env (claude-repl--ws-get ws :active-env))
          (fork-session-id (claude-repl--ws-get ws :fork-session-id))
+         (model (claude-repl--ws-get ws :model))
+         ;; Effective model drives the permission flag: Haiku sessions can't
+         ;; use `--permission-mode auto', so resolve the fallback here too.
+         (effective-model (or model claude-repl-interactive-model))
          ;; claude-repl always launches plain `claude', never claude-sandbox,
          ;; so no Docker image is resolved and the command is never sandboxed.
-         (perm-flag (claude-repl--compute-perm-flag nil project-dir))
+         (perm-flag (claude-repl--compute-perm-flag nil project-dir effective-model))
          (config-dir (claude-repl--compute-config-dir project-dir))
-         (model (claude-repl--ws-get ws :model))
          (claude-flags (claude-repl--compute-claude-flags session-id fork-session-id perm-flag model))
          (cmd (claude-repl--assemble-cmd claude-flags config-dir)))
     (list :cmd cmd
