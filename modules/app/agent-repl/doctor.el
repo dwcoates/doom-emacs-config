@@ -7,13 +7,16 @@
 ;; Skips everything inside the agent sandbox: hook installation is a
 ;; host-only concern.
 
-(let ((install-el (expand-file-name "install.el"
-                                    (file-name-directory load-file-name))))
-  (when (file-exists-p install-el)
-    (load install-el nil t)))
+(let ((dir (file-name-directory load-file-name)))
+  (dolist (file '("install.el" "codex.el"))
+    (let ((path (expand-file-name file dir)))
+      (when (file-exists-p path)
+        (load path nil t)))))
 
-(dolist (issue (and (fboundp 'agent-repl--doctor-issues)
-                    (agent-repl--doctor-issues)))
+(dolist (issue (append (and (fboundp 'agent-repl--doctor-issues)
+                            (agent-repl--doctor-issues))
+                       (and (fboundp 'agent-repl--codex-doctor-issues)
+                            (agent-repl--codex-doctor-issues))))
   (pcase (car issue)
     ('error (if (fboundp 'error!)
                 (error! "%s" (cdr issue))
