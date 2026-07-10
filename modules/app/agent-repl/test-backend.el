@@ -118,14 +118,19 @@ Prevents test registrations from leaking into the module-level
     (should (equal (agent-repl-backend-binary b) "claude"))))
 
 (ert-deftest agent-repl-test-backend-claude-start-cmd-plain ()
-  "The claude backend builds a plain `claude' command (no config dir)."
+  "The claude backend builds a plain `claude' command (no config dir).
+The permission flag is bound explicitly so the assertion tracks the
+personal-project ROUTING rather than the defcustom's current default
+\(which changed once already: --dangerously-skip-permissions ->
+--permission-mode auto)."
   (let ((agent-repl-interactive-model nil)
-        (agent-repl-system-prompt nil))
+        (agent-repl-system-prompt nil)
+        (agent-repl-personal-permission-flag "--personal-sentinel-flag"))
     (let ((cmd (agent-repl--claude-start-cmd
                 (list :session-id nil :fork-session-id nil
                       :project-dir "/home/user/personal-proj" :model nil))))
       (should (string-prefix-p "claude " cmd))
-      (should (string-match-p "--dangerously-skip-permissions" cmd))
+      (should (string-match-p "--personal-sentinel-flag" cmd))
       (should-not (string-match-p "CLAUDE_CONFIG_DIR" cmd)))))
 
 (ert-deftest agent-repl-test-backend-claude-start-cmd-continue ()
