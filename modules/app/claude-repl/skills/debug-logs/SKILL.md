@@ -1,13 +1,13 @@
 ---
 name: debug-logs
-description: Read and interpret (a) the claude-repl debug log at ~/.claude/emacs/doom-claude-repl.log and (b) the per-workspace memory-state.el snapshot under <root>/.claude/emacs/memory-state.el, and emphatically recommend adding instrumentation when the log lacks coverage of the suspect code path. Use when the user is debugging anything in modules/app/claude-repl/ (workspaces, drawer, sentinels, REPL state, autosave, hooks, vterm panels) or invokes /debug-logs.
+description: Read and interpret (a) the claude-repl debug log at ~/.claude-emacs/doom-claude-repl.log and (b) the per-workspace memory-state.el snapshot under <root>/.claude/emacs/memory-state.el, and emphatically recommend adding instrumentation when the log lacks coverage of the suspect code path. Use when the user is debugging anything in modules/app/claude-repl/ (workspaces, drawer, sentinels, REPL state, autosave, hooks, vterm panels) or invokes /debug-logs.
 ---
 
 # Debug Logs (claude-repl)
 
 The doom claude-repl module writes two on-disk artifacts you can read without an Emacs session:
 
-1. A single rolling **log file** at `~/.claude/emacs/doom-claude-repl.log` (history of events).
+1. A single rolling **log file** at `~/.claude-emacs/doom-claude-repl.log` (history of events).
 2. A per-workspace **memory-state snapshot** at `<project-root>/.claude/emacs/memory-state.el` (current full plist).
 
 Use them as your first source of truth when investigating any claude-repl bug — assume they are more authoritative than your memory of what the code does.
@@ -18,13 +18,13 @@ If the relevant evidence is **not in the log** because the failing code is 3rd-p
 
 ## 1. Where the log lives
 
-- Path: `~/.claude/emacs/doom-claude-repl.log` (current Emacs session)
-- Prior session: `~/.claude/emacs/doom-claude-repl.log.prev` (one session retained — clobbered on each startup)
+- Path: `~/.claude-emacs/doom-claude-repl.log` (current Emacs session)
+- Prior session: `~/.claude-emacs/doom-claude-repl.log.prev` (one session retained — clobbered on each startup)
 - Configured by `claude-repl-log-file-name` (defcustom in `modules/app/claude-repl/core.el`)
 - Writing is ON by default (`claude-repl-log-to-file` defaults to `t`)
 - Rollover: at Emacs startup the current log is renamed to `.prev`, so the active file always reflects the current session only
 - Size cap: 1 GiB (`claude-repl-log-size-cap-bytes`); checked every 1000 writes; over-cap files have their first 80% dropped with a `WARNING: log truncated` line appended
-- The parent directory `~/.claude/emacs/` is created on demand by `claude-repl--logfile-path`
+- The parent directory `~/.claude-emacs/` is created on demand by `claude-repl--logfile-path`
 - Toggle at runtime with `M-x claude-repl-debug/toggle-log-to-file`
 
 If the active log is empty, no event has fired yet this session — check `.prev` for the previous session's events.
@@ -75,15 +75,15 @@ The 1 GiB size cap (truncate-first-80%-on-overflow) is the safety valve that let
 
 Useful bash recipes:
 
-- Last 200 lines: `tail -n 200 ~/.claude/emacs/doom-claude-repl.log`
-- Live tail during repro: `tail -f ~/.claude/emacs/doom-claude-repl.log`
-- Filter by workspace: `grep 'ws=DWC/feature-foo' ~/.claude/emacs/doom-claude-repl.log | tail -100`
-- Errors/warnings: `grep -E 'WARNING|ERROR|STUB-CREATE|backtrace|BUG' ~/.claude/emacs/doom-claude-repl.log | tail -50`
-- Time-window: `awk '$1 >= "14:32:00" && $1 < "14:35:00"' ~/.claude/emacs/doom-claude-repl.log`
-- Top message prefixes (find hot code paths): `grep '\[claude-repl\]' ~/.claude/emacs/doom-claude-repl.log | sed -E 's/^[^[]+\[claude-repl\] ([a-z-]+).*/\1/' | sort | uniq -c | sort -rn | head -30`
-- File size sanity: `wc -l ~/.claude/emacs/doom-claude-repl.log; ls -lh ~/.claude/emacs/doom-claude-repl.log`
-- Previous session: `tail -n 200 ~/.claude/emacs/doom-claude-repl.log.prev`
-- Confirm truncation has fired: `grep -E 'WARNING: log truncated' ~/.claude/emacs/doom-claude-repl.log`
+- Last 200 lines: `tail -n 200 ~/.claude-emacs/doom-claude-repl.log`
+- Live tail during repro: `tail -f ~/.claude-emacs/doom-claude-repl.log`
+- Filter by workspace: `grep 'ws=DWC/feature-foo' ~/.claude-emacs/doom-claude-repl.log | tail -100`
+- Errors/warnings: `grep -E 'WARNING|ERROR|STUB-CREATE|backtrace|BUG' ~/.claude-emacs/doom-claude-repl.log | tail -50`
+- Time-window: `awk '$1 >= "14:32:00" && $1 < "14:35:00"' ~/.claude-emacs/doom-claude-repl.log`
+- Top message prefixes (find hot code paths): `grep '\[claude-repl\]' ~/.claude-emacs/doom-claude-repl.log | sed -E 's/^[^[]+\[claude-repl\] ([a-z-]+).*/\1/' | sort | uniq -c | sort -rn | head -30`
+- File size sanity: `wc -l ~/.claude-emacs/doom-claude-repl.log; ls -lh ~/.claude-emacs/doom-claude-repl.log`
+- Previous session: `tail -n 200 ~/.claude-emacs/doom-claude-repl.log.prev`
+- Confirm truncation has fired: `grep -E 'WARNING: log truncated' ~/.claude-emacs/doom-claude-repl.log`
 
 The companion buffer `*claude-repl-log-bug*` (inside Emacs) captures the first backtrace whenever `claude-repl--log-format` receives a non-string FMT. Ask the user to surface its contents if logging looks malformed.
 

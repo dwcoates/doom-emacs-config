@@ -5,12 +5,12 @@
 # the error_type as the third sentinel-file line so the Emacs side can
 # render or surface it later (today the consumer ignores it and only
 # uses the file's existence to flip :claude-state to :stop-failed).
-LOGFILE=~/.claude/workspace-notifications/hook-debug.log
-mkdir -p ~/.claude/workspace-notifications
+LOGFILE=${CLAUDE_REPL_STATE_DIR:-$HOME/.claude-emacs}/workspace-notifications/hook-debug.log
+mkdir -p ${CLAUDE_REPL_STATE_DIR:-$HOME/.claude-emacs}/workspace-notifications
 INPUT=$(cat)
 echo "$(date '+%H:%M:%S.%3N') [stop_failure_$$] raw_input=$INPUT" >> "$LOGFILE"
 CWD=$(echo "$INPUT" | jq -r '.cwd')
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 ERROR_TYPE=$(echo "$INPUT" | jq -r '.error_type // empty')
 echo "$(date '+%H:%M:%S.%3N') [stop_failure_$$] parsed_cwd=$CWD session_id=$SESSION_ID error_type=$ERROR_TYPE" >> "$LOGFILE"
-printf '%s\n%s\n%s\n' "$CWD" "$SESSION_ID" "$ERROR_TYPE" > ~/.claude/workspace-notifications/stop_failure_$$
+printf '%s\n%s\n%s\n' "$CWD" "$SESSION_ID" "$ERROR_TYPE" > ${CLAUDE_REPL_STATE_DIR:-$HOME/.claude-emacs}/workspace-notifications/stop_failure_$$
