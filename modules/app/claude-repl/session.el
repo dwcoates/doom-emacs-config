@@ -560,15 +560,15 @@ it."
                       (if under-multi-repo "multi-repo" "default") dir)
     (and dir (expand-file-name dir))))
 
-(defun claude-repl--assemble-cmd (sandbox-config sandboxed-p claude-flags &optional config-dir)
-  "Assemble the final shell command string.
-SANDBOX-CONFIG is the sandbox plist (may be nil), SANDBOXED-P indicates
-Docker mode, and CLAUDE-FLAGS is the pre-built flags string.  CONFIG-DIR,
-when non-nil, is prepended as a `CLAUDE_CONFIG_DIR=...' environment
-assignment so the launched Claude uses that account's credentials."
-  (let* ((base (if sandboxed-p
-                   (concat (plist-get sandbox-config :script) " " claude-flags)
-                 (concat "claude " claude-flags)))
+(defun claude-repl--assemble-cmd (claude-flags &optional config-dir)
+  "Assemble the final `claude' shell command string.
+CLAUDE-FLAGS is the pre-built flags string.  CONFIG-DIR, when non-nil,
+is prepended as a `CLAUDE_CONFIG_DIR=...' environment assignment so the
+launched Claude uses that account's credentials.
+
+claude-repl ALWAYS launches plain `claude' — it never shells out to
+`claude-sandbox'.  There is deliberately no sandbox branch here."
+  (let* ((base (concat "claude " claude-flags))
          (env-prefix (if config-dir
                          (format "CLAUDE_CONFIG_DIR=%s " (shell-quote-argument config-dir))
                        ""))
@@ -589,18 +589,16 @@ with everything the caller needs for logging and mode-line setup."
          (project-dir (claude-repl--ws-get ws :project-dir))
          (active-env (claude-repl--ws-get ws :active-env))
          (fork-session-id (claude-repl--ws-get ws :fork-session-id))
-         (sandbox-config (claude-repl--get-sandbox-image ws))
-         (docker-image (and (not (plist-get sandbox-config :needs-build))
-                            (plist-get sandbox-config :image)))
-         (sandboxed-p (and worktree-p docker-image))
-         (perm-flag (claude-repl--compute-perm-flag sandboxed-p project-dir))
+         ;; claude-repl always launches plain `claude', never claude-sandbox,
+         ;; so no Docker image is resolved and the command is never sandboxed.
+         (perm-flag (claude-repl--compute-perm-flag nil project-dir))
          (config-dir (claude-repl--compute-config-dir project-dir))
          (model (claude-repl--ws-get ws :model))
          (claude-flags (claude-repl--compute-claude-flags session-id fork-session-id perm-flag model))
-         (cmd (claude-repl--assemble-cmd sandbox-config sandboxed-p claude-flags config-dir)))
+         (cmd (claude-repl--assemble-cmd claude-flags config-dir)))
     (list :cmd cmd
-          :sandboxed-p sandboxed-p
-          :docker-image docker-image
+          :sandboxed-p nil
+          :docker-image nil
           :session-id session-id
           :fork-session-id fork-session-id
           :worktree-p worktree-p

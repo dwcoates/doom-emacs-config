@@ -506,31 +506,24 @@ wrapper to an error-on-call lambda."
   (should (equal (claude-repl--compute-perm-flag nil "/tmp/ChessCom/test")
                  "--permission-mode auto")))
 
-(ert-deftest claude-repl-test-assemble-cmd-sandboxed ()
-  "assemble-cmd should use sandbox script when sandboxed."
-  (let ((config (list :script "/usr/bin/claude-sandbox" :image "img")))
-    (should (equal (claude-repl--assemble-cmd config t "--resume abc")
-                   "/usr/bin/claude-sandbox --resume abc"))))
-
 (ert-deftest claude-repl-test-assemble-cmd-bare-metal ()
-  "assemble-cmd should use 'claude' when not sandboxed."
-  (should (equal (claude-repl--assemble-cmd nil nil "--resume abc")
+  "assemble-cmd should produce a plain `claude' command."
+  (should (equal (claude-repl--assemble-cmd "--resume abc")
                  "claude --resume abc")))
 
 (ert-deftest claude-repl-test-assemble-cmd-no-flags ()
   "assemble-cmd with empty flags should produce clean command."
-  (should (equal (claude-repl--assemble-cmd nil nil "") "claude")))
+  (should (equal (claude-repl--assemble-cmd "") "claude")))
 
 (ert-deftest claude-repl-test-assemble-cmd-config-dir ()
   "assemble-cmd prepends CLAUDE_CONFIG_DIR when config-dir is given."
-  (should (equal (claude-repl--assemble-cmd nil nil "--resume abc" "/home/u/.claude-cc")
+  (should (equal (claude-repl--assemble-cmd "--resume abc" "/home/u/.claude-cc")
                  "CLAUDE_CONFIG_DIR=/home/u/.claude-cc claude --resume abc")))
 
-(ert-deftest claude-repl-test-assemble-cmd-config-dir-sandboxed ()
-  "assemble-cmd prepends CLAUDE_CONFIG_DIR before the sandbox script."
-  (let ((config (list :script "/usr/bin/claude-sandbox" :image "img")))
-    (should (equal (claude-repl--assemble-cmd config t "--resume abc" "/cc")
-                   "CLAUDE_CONFIG_DIR=/cc /usr/bin/claude-sandbox --resume abc"))))
+(ert-deftest claude-repl-test-assemble-cmd-never-sandbox ()
+  "assemble-cmd never emits a claude-sandbox invocation, even with a config-dir."
+  (should-not (string-match-p "claude-sandbox"
+                              (claude-repl--assemble-cmd "--resume abc" "/cc"))))
 
 ;;;; ---- Tests: claude-repl--compute-config-dir ----
 
@@ -2060,22 +2053,20 @@ restart (the lazy-start path applies its defaults instead)."
           (should (equal (plist-get result :cmd)
                          "claude --dangerously-skip-permissions --system-prompt \".\"")))))))
 
-(ert-deftest claude-repl-test-build-start-cmd-sandbox-with-session ()
-  "build-start-cmd for worktree sandbox with session should use sandbox script + --continue."
+(ert-deftest claude-repl-test-build-start-cmd-sandbox-env-uses-plain-claude ()
+  "Even a :sandbox-env worktree with a session launches plain `claude' + --continue, never claude-sandbox."
   (claude-repl-test--with-clean-state
     (claude-repl--ws-put "ws1" :active-env :sandbox)
     (claude-repl--ws-put "ws1" :sandbox
                          (make-claude-repl-instantiation :session-id "sess-123"))
     (claude-repl--ws-put "ws1" :worktree-p t)
     (claude-repl--ws-put "ws1" :project-dir "/home/user/project")
-    (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
-               (lambda (_ws) '(:image "img:latest" :script "/usr/bin/claude-sandbox"))))
-      (let ((result (claude-repl--build-start-cmd "ws1")))
-        (should (string-match-p "/usr/bin/claude-sandbox" (plist-get result :cmd)))
-        (should (string-match-p "--continue" (plist-get result :cmd)))
-        (should-not (string-match-p "--resume sess-123" (plist-get result :cmd)))
-        (should (plist-get result :sandboxed-p))
-        (should (equal (plist-get result :docker-image) "img:latest"))))))
+    (let ((result (claude-repl--build-start-cmd "ws1")))
+      (should-not (string-match-p "claude-sandbox" (plist-get result :cmd)))
+      (should (string-match-p "\\`claude " (plist-get result :cmd)))
+      (should (string-match-p "--continue" (plist-get result :cmd)))
+      (should-not (plist-get result :sandboxed-p))
+      (should-not (plist-get result :docker-image)))))
 
 (ert-deftest claude-repl-test-build-start-cmd-fork-session ()
   "build-start-cmd with fork-session-id should include --fork-session flag."
