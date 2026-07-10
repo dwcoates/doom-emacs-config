@@ -2,10 +2,9 @@
 
 ;;; Commentary:
 
-;; Tests for the context-window utilization mode-line segment: usage
-;; token summing, jsonl tail scanning for the most recent main-chain
-;; assistant usage, mtime-keyed cache, percentage computation and
-;; clamping, threshold-based face selection, segment formatting, and
+;; Tests for the context-tokens mode-line segment: usage token summing,
+;; jsonl tail scanning for the most recent main-chain assistant usage,
+;; mtime-keyed cache, comma thousands formatting, segment rendering, and
 ;; mode-line attachment.
 
 ;;; Code:
@@ -189,60 +188,33 @@ beyond the scan window are not visible."
                (lambda (_p) nil)))
       (should-not (claude-repl--context-for-ws "ws1")))))
 
-;;;; ---- Tests: percent ----
+;;;; ---- Tests: commafy ----
 
-(ert-deftest claude-repl-test-context-percent-rounds ()
-  "Percentage is `round(100 * used / window)'."
-  (let ((claude-repl-context-window-tokens 200000))
-    (should (= (claude-repl--context-percent 53179) 27))))
+(ert-deftest claude-repl-test-context-commafy-inserts-single-separator ()
+  "A four-to-six digit number gets one comma."
+  (should (equal (claude-repl--context-commafy 53179) "53,179")))
 
-(ert-deftest claude-repl-test-context-percent-clamps-to-100 ()
-  "Usage exceeding the window clamps to 100, never above."
-  (let ((claude-repl-context-window-tokens 200000))
-    (should (= (claude-repl--context-percent 500000) 100))))
+(ert-deftest claude-repl-test-context-commafy-inserts-multiple-separators ()
+  "A seven-digit number gets two commas."
+  (should (equal (claude-repl--context-commafy 1000000) "1,000,000")))
 
-(ert-deftest claude-repl-test-context-percent-zero-used ()
-  "Zero tokens used is 0 percent."
-  (let ((claude-repl-context-window-tokens 200000))
-    (should (= (claude-repl--context-percent 0) 0))))
+(ert-deftest claude-repl-test-context-commafy-short-number-unchanged ()
+  "A number under 1000 is returned without any comma."
+  (should (equal (claude-repl--context-commafy 999) "999")))
 
-(ert-deftest claude-repl-test-context-percent-nil-used ()
-  "Nil used yields nil so the segment can short-circuit."
-  (should-not (claude-repl--context-percent nil)))
+(ert-deftest claude-repl-test-context-commafy-zero ()
+  "Zero renders as the bare string \"0\"."
+  (should (equal (claude-repl--context-commafy 0) "0")))
 
-(ert-deftest claude-repl-test-context-percent-nonpositive-window ()
-  "A non-positive window yields nil rather than dividing by zero."
-  (let ((claude-repl-context-window-tokens 0))
-    (should-not (claude-repl--context-percent 100))))
-
-;;;; ---- Tests: face-for-percent ----
-
-(ert-deftest claude-repl-test-context-face-normal-below-warn ()
-  "Below the warn threshold paints the normal (green) face."
-  (let ((claude-repl-context-warn-percent 70)
-        (claude-repl-context-critical-percent 90))
-    (should (equal (claude-repl--context-face-for-percent 27)
-                   '(:foreground "medium sea green" :weight normal)))))
-
-(ert-deftest claude-repl-test-context-face-warn-at-threshold ()
-  "At the warn threshold paints the warning (gold) face."
-  (let ((claude-repl-context-warn-percent 70)
-        (claude-repl-context-critical-percent 90))
-    (should (equal (claude-repl--context-face-for-percent 70)
-                   '(:foreground "goldenrod" :weight normal)))))
-
-(ert-deftest claude-repl-test-context-face-critical-at-threshold ()
-  "At the critical threshold paints the critical (tomato) face."
-  (let ((claude-repl-context-warn-percent 70)
-        (claude-repl-context-critical-percent 90))
-    (should (equal (claude-repl--context-face-for-percent 95)
-                   '(:foreground "tomato" :weight bold)))))
+(ert-deftest claude-repl-test-context-commafy-exact-thousand ()
+  "Exactly 1000 gets a single comma."
+  (should (equal (claude-repl--context-commafy 1000) "1,000")))
 
 ;;;; ---- Tests: format ----
 
 (ert-deftest claude-repl-test-context-format ()
-  "Formats a percentage as `ctx NN%'."
-  (should (equal (claude-repl--context-format 27) "ctx 27%")))
+  "Formats a token count as `tokens N,NNN'."
+  (should (equal (claude-repl--context-format 53179) "tokens 53,179")))
 
 ;;;; ---- Tests: segment ----
 
@@ -261,15 +233,15 @@ beyond the scan window are not visible."
         (setq-local claude-repl--owning-workspace "ws1")
         (should (equal (claude-repl--context-segment) ""))))))
 
-(ert-deftest claude-repl-test-context-segment-renders-percent ()
-  "Segment contains the `ctx NN%' label when usage is available."
+(ert-deftest claude-repl-test-context-segment-renders-tokens ()
+  "Segment contains the comma-formatted `tokens N,NNN' label when usage
+is available."
   (claude-repl-test--with-clean-state
-    (let ((claude-repl-context-window-tokens 200000))
-      (cl-letf (((symbol-function 'claude-repl--context-for-ws)
-                 (lambda (_ws) 53179)))
-        (with-temp-buffer
-          (setq-local claude-repl--owning-workspace "ws1")
-          (should (string-match-p "ctx 27%" (claude-repl--context-segment))))))))
+    (cl-letf (((symbol-function 'claude-repl--context-for-ws)
+               (lambda (_ws) 53179)))
+      (with-temp-buffer
+        (setq-local claude-repl--owning-workspace "ws1")
+        (should (string-match-p "tokens 53,179" (claude-repl--context-segment)))))))
 
 (ert-deftest claude-repl-test-context-segment-disabled ()
   "Segment is empty when the feature is disabled."
@@ -341,9 +313,8 @@ beyond the scan window are not visible."
 
 (ert-deftest claude-repl-test-workspace-mode-line-has-context-segment ()
   "`claude-repl--workspace-mode-line' includes the context :eval segment
-after the model segment and before the prompt-summary segment.  Pins the
-layout so a refactor doesn't silently drop context from newly-created
-vterm buffers."
+immediately after the model segment.  Pins the layout so a refactor
+doesn't silently drop context from newly-created vterm buffers."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function 'claude-repl--merge-target-name)
                (lambda (_ws) nil)))
@@ -354,12 +325,8 @@ vterm buffers."
         (let ((model-pos (cl-position '(:eval (claude-repl--model-segment))
                                       result :test #'equal))
               (ctx-pos (cl-position '(:eval (claude-repl--context-segment))
-                                    result :test #'equal))
-              (ps-pos (cl-position '(:eval (claude-repl--prompt-summary-segment))
-                                   result :test #'equal)))
-          (should (and model-pos ctx-pos ps-pos
-                       (< model-pos ctx-pos)
-                       (< ctx-pos ps-pos))))))))
+                                    result :test #'equal)))
+          (should (and model-pos ctx-pos (< model-pos ctx-pos))))))))
 
 (provide 'test-context)
 ;;; test-context.el ends here
