@@ -6846,6 +6846,40 @@ primitive), so only the bracketed transport beneath it is stubbed."
             (should (equal (claude-repl--claude-process-pid "ws1") 300)))
         (kill-buffer buf)))))
 
+(ert-deftest claude-repl-cmd-test-claude-process-pid/version-comm-sole-child ()
+  "claude-process-pid returns the shell's sole child even when its comm is a version string, not \"claude\" (the native-binary case)."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create " *test-vterm-kill2*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'get-buffer-process) (lambda (_b) 'fake-proc))
+                    ((symbol-function 'process-id) (lambda (p) (when (eq p 'fake-proc) 100)))
+                    ((symbol-function 'list-system-processes) (lambda () '(100 555)))
+                    ((symbol-function 'process-attributes)
+                     (lambda (pid)
+                       (pcase pid
+                         (100 '((comm . "zsh")     (ppid . 1)))
+                         (555 '((comm . "2.1.206") (ppid . 100)))))))
+            (claude-repl--ws-put "ws1" :vterm-buffer buf)
+            (should (equal (claude-repl--claude-process-pid "ws1") 555)))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-repl-cmd-test-claude-process-pid/no-children-nil ()
+  "claude-process-pid returns nil when the vterm shell has no child process."
+  (claude-repl-test--with-clean-state
+    (let ((buf (get-buffer-create " *test-vterm-kill3*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'get-buffer-process) (lambda (_b) 'fake-proc))
+                    ((symbol-function 'process-id) (lambda (p) (when (eq p 'fake-proc) 100)))
+                    ((symbol-function 'list-system-processes) (lambda () '(100 999)))
+                    ((symbol-function 'process-attributes)
+                     (lambda (pid)
+                       (pcase pid
+                         (100 '((comm . "zsh")   (ppid . 1)))
+                         (999 '((comm . "other") (ppid . 42)))))))
+            (claude-repl--ws-put "ws1" :vterm-buffer buf)
+            (should-not (claude-repl--claude-process-pid "ws1")))
+        (kill-buffer buf)))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here
