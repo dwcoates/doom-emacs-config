@@ -2293,6 +2293,37 @@ the selected window has no `window-side' parameter."
             (should (eq (selected-window) sel-before))))
       (set-window-configuration wconf))))
 
+(ert-deftest claude-repl-drawer-test-leave-side-window-descends-to-live-leaf-when-main-split ()
+  "`claude-repl-drawer--leave-side-window-before-switch' selects a LIVE
+main-area leaf — never the internal main window — when the main area is
+split into multiple windows.  `window-main-window' returns a non-live
+internal window in that case, and handing it to `select-window' signals
+`wrong-type-argument window-live-p'.  Regression guard for the RET-in-
+drawer crash where the user had the main area split."
+  (let ((wconf (current-window-configuration)))
+    (unwind-protect
+        (progn
+          (delete-other-windows)
+          ;; Split the main area so `window-main-window' is an internal
+          ;; (non-live) window rather than a single live leaf.
+          (split-window-right)
+          (let ((drawer-buf (get-buffer-create claude-repl-drawer-buffer-name)))
+            (unwind-protect
+                (let ((drawer-win (display-buffer-in-side-window
+                                   drawer-buf '((side . left) (slot . 0)))))
+                  ;; Precondition: the main window really is a non-live
+                  ;; internal window (the bug trigger).
+                  (should-not (window-live-p (window-main-window)))
+                  (select-window drawer-win)
+                  (should (window-parameter (selected-window) 'window-side))
+                  ;; Act: must NOT error on the internal main window.
+                  (claude-repl-drawer--leave-side-window-before-switch)
+                  ;; Assert: landed on a live, non-side main-area window.
+                  (should (window-live-p (selected-window)))
+                  (should-not (window-parameter (selected-window) 'window-side)))
+              (when (buffer-live-p drawer-buf) (kill-buffer drawer-buf)))))
+      (set-window-configuration wconf))))
+
 (ert-deftest claude-repl-drawer-test-display-action-marks-no-other-window ()
   "The drawer display-action marks its window `no-other-window' t so
 buffer-display machinery never repurposes the dedicated side window.
