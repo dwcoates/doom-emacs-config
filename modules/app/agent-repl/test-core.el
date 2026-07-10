@@ -1771,9 +1771,29 @@ The master kill-switch overrides the always-on file-write decoupling."
 ;;;; ---- Tests: workspace-name prefix ----
 
 (ert-deftest agent-repl-test-workspace-prefix-env-set ()
-  "workspace-prefix returns the CLAUDE_WORKSPACE_PREFIX value when set."
+  "workspace-prefix falls back to the legacy CLAUDE_WORKSPACE_PREFIX."
   (cl-letf (((symbol-function 'getenv)
              (lambda (k) (and (equal k "CLAUDE_WORKSPACE_PREFIX") "DWC"))))
+    (should (equal (agent-repl--workspace-prefix) "DWC"))))
+
+(ert-deftest agent-repl-test-workspace-prefix-new-env-set ()
+  "workspace-prefix returns the AGENT_WORKSPACE_PREFIX value when set."
+  (cl-letf (((symbol-function 'getenv)
+             (lambda (k) (and (equal k "AGENT_WORKSPACE_PREFIX") "AWP"))))
+    (should (equal (agent-repl--workspace-prefix) "AWP"))))
+
+(ert-deftest agent-repl-test-workspace-prefix-new-env-wins-over-legacy ()
+  "workspace-prefix prefers AGENT_WORKSPACE_PREFIX over the legacy var."
+  (cl-letf (((symbol-function 'getenv)
+             (lambda (k) (cond ((equal k "AGENT_WORKSPACE_PREFIX") "AWP")
+                               ((equal k "CLAUDE_WORKSPACE_PREFIX") "DWC")))))
+    (should (equal (agent-repl--workspace-prefix) "AWP"))))
+
+(ert-deftest agent-repl-test-workspace-prefix-empty-new-env-falls-back ()
+  "workspace-prefix treats an empty AGENT_WORKSPACE_PREFIX as unset."
+  (cl-letf (((symbol-function 'getenv)
+             (lambda (k) (cond ((equal k "AGENT_WORKSPACE_PREFIX") "")
+                               ((equal k "CLAUDE_WORKSPACE_PREFIX") "DWC")))))
     (should (equal (agent-repl--workspace-prefix) "DWC"))))
 
 (ert-deftest agent-repl-test-workspace-prefix-env-unset ()
