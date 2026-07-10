@@ -657,6 +657,32 @@ stdin."
         (should (string-match-p "\\[1\\] prior prompt one" captured-input))
         (should (string-match-p "current raw prompt" captured-input))))))
 
+(ert-deftest agent-repl-test-prompt-summary-spawn-cmd-from-ws-backend ()
+  "Spawn builds its command via the workspace's resolved agent backend,
+so a codex workspace summarizes via codex rather than the claude binary."
+  ;; Private registry copy so the test's throwaway backend does not leak
+  ;; into the module-level registry (which holds the real claude backend).
+  (let ((agent-repl--backends (copy-hash-table agent-repl--backends)))
+    (agent-repl-test--with-clean-state
+      (agent-repl-register-backend
+       (agent-repl-backend-create
+        :name 'ps-backend :binary "ps-bin"
+        :start-cmd-fn #'ignore
+        :headless-cmd-fn (lambda (model _extra) (list "ps-bin" "run" model))))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
+      (agent-repl--ws-put "ws1" :backend 'ps-backend)
+      (let ((captured-cmd nil)
+            (agent-repl-prompt-summary-model "some-model"))
+        (cl-letf (((symbol-function 'make-process)
+                   (lambda (&rest plist)
+                     (setq captured-cmd (plist-get plist :command))
+                     (make-marker)))
+                  ((symbol-function 'process-send-string) (lambda (&rest _) nil))
+                  ((symbol-function 'process-send-eof) (lambda (&rest _) nil))
+                  ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+          (agent-repl--prompt-summary-spawn "ws1" "a raw prompt long enough"))
+        (should (equal captured-cmd '("ps-bin" "run" "some-model")))))))
+
 ;;;; ---- Tests: prompt-summary-spawn cwd ----
 
 (ert-deftest agent-repl-test-prompt-summary-spawn-binds-temporary-default-directory ()

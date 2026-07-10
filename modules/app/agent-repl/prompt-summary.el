@@ -43,11 +43,10 @@
   :type 'boolean
   :group 'agent-repl)
 
-(defcustom agent-repl-prompt-summary-program "claude"
-  "Executable used to generate prompt summaries.
-Invoked with `-p --model MODEL' and the prompt sent on stdin."
-  :type 'string
-  :group 'agent-repl)
+;; NOTE: the headless executable is no longer a defcustom here — it is
+;; resolved from the workspace's agent backend (see
+;; `agent-repl--backend-headless-cmd'), so a codex workspace summarizes
+;; via codex and a claude workspace via claude.
 
 (defcustom agent-repl-prompt-summary-model "haiku"
   "Model alias or ID passed to `--model' for prompt summaries."
@@ -486,8 +485,9 @@ from `agent-repl--kickoff-prompt-summary' so tests can stub
 state-mutation entry point."
   (let* ((out-buf (generate-new-buffer
                    (format " *agent-prompt-summary-%s*" ws)))
-         (cmd (list agent-repl-prompt-summary-program
-                    "-p" "--model" agent-repl-prompt-summary-model))
+         (cmd (agent-repl--backend-headless-cmd
+               (agent-repl--ws-backend ws)
+               agent-repl-prompt-summary-model nil))
          (context (agent-repl--prompt-summary-collect-context ws))
          (proc-input (agent-repl--prompt-summary-build-input raw context))
          (sentinel (agent-repl--prompt-summary-make-sentinel ws raw out-buf)))

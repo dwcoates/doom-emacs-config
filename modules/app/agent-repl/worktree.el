@@ -916,13 +916,11 @@ Explanation-engine flavor counterpart of
   (let ((prompt (read-string "Amended explanation-engine-oneshot prompt: ")))
     (agent-repl--oneshot-amend :explanation-engine prompt)))
 
-;;; Async workspace-name generation via headless `claude -p'
+;;; Async workspace-name generation via a headless one-shot agent run
 
-(defcustom agent-repl-workspace-generation-program "claude"
-  "Executable used to generate workspace names via /workspace-generation.
-Invoked with `-p --model MODEL' and the prompt sent on stdin."
-  :type 'string
-  :group 'agent-repl)
+;; NOTE: the headless executable is no longer a defcustom here — it is
+;; resolved from the default agent backend (there is no workspace yet
+;; when a name is being generated) via `agent-repl--backend-headless-cmd'.
 
 (defcustom agent-repl-workspace-generation-model "haiku"
   "Model alias passed to `--model' when generating workspace names."
@@ -1087,9 +1085,10 @@ asynchronously."
   (let* ((gen-id (agent-repl--workspace-generation-id))
          (out-buf (generate-new-buffer
                    (format " *agent-workspace-generation-%s*" gen-id)))
-         (cmd (append (list agent-repl-workspace-generation-program
-                            "-p" "--model" agent-repl-workspace-generation-model)
-                      agent-repl-workspace-generation-extra-args))
+         (cmd (agent-repl--backend-headless-cmd
+               (agent-repl--default-backend)
+               agent-repl-workspace-generation-model
+               agent-repl-workspace-generation-extra-args))
          (proc-input (agent-repl--workspace-generation-prompt
                       raw-prompt prefixed-prompt git-root base-commit fork-from force-sandbox))
          (prompt-snippet (agent-repl--workspace-generation-truncate
