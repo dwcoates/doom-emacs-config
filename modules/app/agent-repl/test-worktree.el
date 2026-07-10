@@ -6207,9 +6207,10 @@ hits the permission prompt and dies emitting only its question."
       (agent-repl--spawn-workspace-generation "raw" "prefixed" "/tmp/repo/" "HEAD" nil)
       (should (member "--permission-mode" captured-cmd))
       (should (member "bypassPermissions" captured-cmd))
-      ;; Sanity: extra-args come after the base `-p --model MODEL'.
+      ;; Sanity: extra-args come after the default backend's base
+      ;; `<binary> -p --model MODEL' prefix.
       (should (equal (cl-subseq captured-cmd 0 4)
-                     (list agent-repl-workspace-generation-program
+                     (list (agent-repl-backend-binary (agent-repl--default-backend))
                            "-p" "--model" agent-repl-workspace-generation-model))))))
 
 (ert-deftest agent-repl-test-spawn-workspace-generation-empty-extra-args ()
@@ -6225,7 +6226,7 @@ hits the permission prompt and dies emitting only its question."
               ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
       (agent-repl--spawn-workspace-generation "raw" "prefixed" "/tmp/repo/" "HEAD" nil)
       (should (equal captured-cmd
-                     (list agent-repl-workspace-generation-program
+                     (list (agent-repl-backend-binary (agent-repl--default-backend))
                            "-p" "--model" agent-repl-workspace-generation-model))))))
 
 (ert-deftest agent-repl-test-spawn-workspace-generation-binds-temporary-default-directory ()

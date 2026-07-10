@@ -635,6 +635,15 @@ never sandboxed and no Docker image is resolved."
                         session-id fork-session-id perm-flag model)))
     (agent-repl--assemble-cmd claude-flags config-dir)))
 
+(defun agent-repl--claude-headless-cmd (model extra-args)
+  "Return the argv for a one-shot headless `claude' run.
+This is the `claude' backend's HEADLESS-CMD-FN (see
+`agent-repl-backend').  MODEL is the `--model' alias; EXTRA-ARGS is a
+list of additional flags appended after the standard `-p --model MODEL'
+prefix.  `-p' makes `claude' exit after a single turn; the prompt is
+delivered on the process's stdin by the caller."
+  (append (list "claude" "-p" "--model" model) extra-args))
+
 (defun agent-repl--build-start-cmd (ws)
   "Build the shell command string to start the agent for workspace WS.
 Returns a plist (:cmd CMD :sandboxed-p BOOL :docker-image IMAGE

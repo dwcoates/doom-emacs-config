@@ -37,10 +37,17 @@ START-CMD-FN builds the interactive start command: called with one
 plist argument carrying `:session-id', `:fork-session-id',
 `:project-dir' and `:model' (any of which may be nil except
 `:project-dir'), it returns the full shell command string used to
-launch the agent inside the workspace vterm."
+launch the agent inside the workspace vterm.
+HEADLESS-CMD-FN builds the argv for a one-shot (non-interactive) run:
+called with (MODEL EXTRA-ARGS), it returns the process command list
+(the prompt is delivered on stdin by the caller).  Optional — a
+backend with no headless mode leaves it nil, and
+`agent-repl--backend-headless-cmd' errors if such a backend is asked
+for a headless command."
   name
   binary
-  start-cmd-fn)
+  start-cmd-fn
+  headless-cmd-fn)
 
 ;;;; ---- Registry -----------------------------------------------------------
 
@@ -86,6 +93,27 @@ Signals via `agent-repl-backend-get' when the named backend is not
 registered."
   (agent-repl-backend-get (agent-repl--ws-backend-name ws)))
 
+(defun agent-repl--default-backend ()
+  "Return the resolved default backend struct.
+Used by headless call sites with no workspace in scope (e.g. new-
+workspace name generation, the config-explainer)."
+  (agent-repl-backend-get agent-repl-default-backend))
+
+;;;; ---- Headless command construction --------------------------------------
+
+(defun agent-repl--backend-headless-cmd (backend model extra-args)
+  "Return the argv for a one-shot headless run under BACKEND.
+MODEL is the model alias to pin; EXTRA-ARGS is a list of additional
+flags.  Delegates to BACKEND's HEADLESS-CMD-FN.  Signals an error when
+BACKEND declares no headless command builder — headless mode is a
+capability, and asking for it from a backend that lacks it is a bug,
+not a condition to paper over."
+  (let ((fn (agent-repl-backend-headless-cmd-fn backend)))
+    (unless fn
+      (error "agent-repl--backend-headless-cmd: backend `%s' has no headless-cmd-fn"
+             (agent-repl-backend-name backend)))
+    (funcall fn model extra-args)))
+
 ;;;; ---- Claude backend -----------------------------------------------------
 
 ;; Implementation functions live in session.el; symbols resolve at call
@@ -95,7 +123,8 @@ registered."
  (agent-repl-backend-create
   :name 'claude
   :binary "claude"
-  :start-cmd-fn #'agent-repl--claude-start-cmd))
+  :start-cmd-fn #'agent-repl--claude-start-cmd
+  :headless-cmd-fn #'agent-repl--claude-headless-cmd))
 
 (provide 'agent-repl-backend)
 ;;; backend.el ends here
