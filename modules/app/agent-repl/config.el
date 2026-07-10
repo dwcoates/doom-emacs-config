@@ -258,6 +258,10 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; before session.el (whose command assembly resolves the backend).
 (agent-repl--load-module "backend")
 (agent-repl--load-module "install")
+;; WHY: codex.el registers the codex backend (backend.el must precede
+;; it) and reuses install.el's hook-registration writer for its
+;; hooks.json installer.
+(agent-repl--load-module "codex")
 (agent-repl--load-module "notifications")
 (agent-repl--load-module "history")
 (agent-repl--load-module "memory-state")
