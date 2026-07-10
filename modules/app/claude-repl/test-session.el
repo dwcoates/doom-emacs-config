@@ -591,18 +591,18 @@ wrapper to an error-on-call lambda."
       (let ((result (claude-repl--workspace-mode-line "ws-blank")))
         (should (equal (car result) ""))))))
 
-(ert-deftest claude-repl-test-workspace-mode-line-keeps-prompt-summary-segment ()
-  "Mode-line list has 5 elements; the model :eval segment leads the
-:eval group, the context :eval segment follows it, the prompt-summary
-:eval segment follows that, and the ai-title :eval segment trails."
+(ert-deftest claude-repl-test-workspace-mode-line-is-parent-model-tokens ()
+  "Mode-line list has 3 elements: the parent label, then the model :eval
+segment, then the context-tokens :eval segment.  The prompt-summary and
+ai-title segments were dropped from the status bar, so neither appears."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function 'claude-repl--merge-target-name) (lambda (_ws) nil)))
       (let ((result (claude-repl--workspace-mode-line "ws")))
-        (should (= (length result) 5))
+        (should (= (length result) 3))
         (should (equal (nth 1 result) '(:eval (claude-repl--model-segment))))
         (should (equal (nth 2 result) '(:eval (claude-repl--context-segment))))
-        (should (equal (nth 3 result) '(:eval (claude-repl--prompt-summary-segment))))
-        (should (equal (nth 4 result) '(:eval (claude-repl--ai-title-segment))))))))
+        (should-not (member '(:eval (claude-repl--prompt-summary-segment)) result))
+        (should-not (member '(:eval (claude-repl--ai-title-segment)) result))))))
 
 (ert-deftest claude-repl-test-workspace-mode-line-strips-trailing-slash ()
   "A trailing slash on :source-ws-dir does not leak into the parent name."

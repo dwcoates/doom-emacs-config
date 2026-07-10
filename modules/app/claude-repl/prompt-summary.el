@@ -576,7 +576,11 @@ manual recovery."
            (claude-repl--prompt-summary-attach-to-mode-line buf))))
      claude-repl--workspaces)))
 
-(claude-repl-prompt-summary-attach-all)
+;; The prompt-summary segment is intentionally NOT wired into the vterm
+;; mode-line (see `claude-repl--workspace-mode-line'): it was dropped
+;; from the status bar.  `claude-repl-prompt-summary-attach-all' remains
+;; defined for manual/interactive recovery but is deliberately not run
+;; at load, so the segment never re-attaches to existing buffers.
 
 (provide 'claude-repl-prompt-summary)
 ;;; prompt-summary.el ends here
