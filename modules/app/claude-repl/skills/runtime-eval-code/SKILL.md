@@ -53,16 +53,16 @@ Reach for this skill **proactively** — do not wait to be told to "eval some el
 
    b. **Dump `*Messages*` to disk** (intent: "what did 3rd-party code emit?", "the bug is signaled by a magit / transient / byte-compile warning that doesn't show in the claude-repl log"):
       ```elisp
-      (let ((file (expand-file-name "messages-dump.txt" "~/.claude/emacs/")))
+      (let ((file (expand-file-name "messages-dump.txt" "~/.claude-emacs/")))
         (make-directory (file-name-directory file) t)
         (with-current-buffer "*Messages*"
           (write-region (point-min) (point-max) file nil 'silent))
         file)
       ```
-      The dump path is stable (always `~/.claude/emacs/messages-dump.txt`) so subsequent dumps overwrite — read promptly or rename if you need to keep a copy. After the eval response arrives:
+      The dump path is stable (always `~/.claude-emacs/messages-dump.txt`) so subsequent dumps overwrite — read promptly or rename if you need to keep a copy. After the eval response arrives:
       ```bash
-      tail -n 500 ~/.claude/emacs/messages-dump.txt
-      grep -E 'Error|Warning|cannot|failed|void-function|void-variable' ~/.claude/emacs/messages-dump.txt
+      tail -n 500 ~/.claude-emacs/messages-dump.txt
+      grep -E 'Error|Warning|cannot|failed|void-function|void-variable' ~/.claude-emacs/messages-dump.txt
       ```
 
    c. **Create a buffer in this workspace** (intent: "open/create a buffer named X for me to look at"):
@@ -154,7 +154,7 @@ This skill is the canonical way to drive the Emacs profiler — there is no sepa
   ```elisp
   (claude-repl--profile-stop-and-write-file)
   ```
-  It stops the profiler, writes the FULL expanded report to `claude-repl-profile-report-file` (`~/.claude/emacs/profiler-report.txt`), and returns that path as the eval result. Then **`Read` the returned file** for the report body — do NOT read the report out of the inline eval result, which `claude-repl-eval-output-max-chars` would clip on a large calltree. A nil result means the profiler was not running or produced no report.
+  It stops the profiler, writes the FULL expanded report to `claude-repl-profile-report-file` (`~/.claude-emacs/profiler-report.txt`), and returns that path as the eval result. Then **`Read` the returned file** for the report body — do NOT read the report out of the inline eval result, which `claude-repl-eval-output-max-chars` would clip on a large calltree. A nil result means the profiler was not running or produced no report.
 
 To measure exactly one operation: start, dispatch the snippet under measurement (label it via `note`), then stop. The eval snippet is identical across runs (deterministic) and can wrap `princ` calls to roundtrip before/after state. For a hands-off "start, wait N, auto-stop, analyze" flow, use `/profile`, which orchestrates these same two dispatches with a scheduled auto-stop.
 

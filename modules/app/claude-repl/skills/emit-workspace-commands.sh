@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reads a JSON workspace commands array from stdin and writes it atomically
-# to ~/.claude/output/workspace_commands_<uuid>.json.
+# to ${CLAUDE_REPL_STATE_DIR:-$HOME/.claude-emacs}/output/workspace_commands_<uuid>.json.
 #
 # Repo-local impl: explanation-engine folded the original into its
 # `/workspace' super-skill (`workspace/run.sh --emit-commands'), which
@@ -15,7 +15,7 @@ if ! command -v uuidgen &>/dev/null; then
   exit 1
 fi
 
-mkdir -p ~/.claude/output
-tmp=$(mktemp ~/.claude/output/.workspace_commands_XXXXXX.json)
+mkdir -p ${CLAUDE_REPL_STATE_DIR:-$HOME/.claude-emacs}/output
+tmp=$(mktemp ${CLAUDE_REPL_STATE_DIR:-$HOME/.claude-emacs}/output/.workspace_commands_XXXXXX.json)
 cat > "$tmp"
-mv "$tmp" ~/.claude/output/workspace_commands_$(uuidgen).json
+mv "$tmp" ${CLAUDE_REPL_STATE_DIR:-$HOME/.claude-emacs}/output/workspace_commands_$(uuidgen).json
