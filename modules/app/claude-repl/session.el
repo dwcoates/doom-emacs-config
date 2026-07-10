@@ -669,15 +669,9 @@ Segments, in order:
   2. `:eval' segment that renders the Claude model serving the active
      session (see `claude-repl--model-segment'), reading from the
      project's session jsonl under `~/.claude/projects/'.
-  3. `:eval' segment that renders context-window utilization for the
+  3. `:eval' segment that renders the used context token count for the
      active session (see `claude-repl--context-segment'), reading from
      the project's session jsonl under `~/.claude/projects/'.
-  4. `:eval' segment that renders the last-prompt summary (see
-     `claude-repl--prompt-summary-segment') and recomputes on every
-     mode-line redisplay.
-  5. `:eval' segment that renders Claude's own aiTitle for the active
-     session (see `claude-repl--ai-title-segment'), reading from the
-     project's session jsonl under `~/.claude/projects/'.
 
 The parent segment is computed once when the vterm is initialized; it
 is not reactive to later state changes."
@@ -694,9 +688,7 @@ is not reactive to later state changes."
                            (propertize yellow 'face '(:foreground "yellow" :weight bold))))
            (t (propertize green 'face '(:foreground "green" :weight bold))))
           '(:eval (claude-repl--model-segment))
-          '(:eval (claude-repl--context-segment))
-          '(:eval (claude-repl--prompt-summary-segment))
-          '(:eval (claude-repl--ai-title-segment)))))
+          '(:eval (claude-repl--context-segment)))))
 
 (defun claude-repl--log-session-start (ws start-info)
   "Log session startup details for workspace WS from START-INFO plist."

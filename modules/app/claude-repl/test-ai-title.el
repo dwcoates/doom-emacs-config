@@ -346,26 +346,19 @@ a future refactor doesn't accidentally start reading the whole file."
       ;; Should not signal.
       (claude-repl-ai-title-attach-all))))
 
-;;;; ---- Tests: workspace-mode-line wires both segments ----
+;;;; ---- Tests: workspace-mode-line does NOT wire the ai-title segment ----
 
-(ert-deftest claude-repl-test-workspace-mode-line-has-ai-title-segment ()
-  "`claude-repl--workspace-mode-line' includes the ai-title :eval segment
-after the prompt-summary segment.  Pins the layout so a refactor doesn't
-silently drop the new segment from newly-created vterm buffers."
+(ert-deftest claude-repl-test-workspace-mode-line-omits-ai-title-segment ()
+  "`claude-repl--workspace-mode-line' does NOT wire the ai-title (nor the
+prompt-summary) :eval segment: both were intentionally dropped from the
+status bar.  Pins the drop so a refactor doesn't silently re-add either
+to newly-created vterm buffers."
   (claude-repl-test--with-clean-state
     (cl-letf (((symbol-function 'claude-repl--merge-target-name)
                (lambda (_ws) nil)))
-      (let* ((result (claude-repl--workspace-mode-line "ws1"))
-             (specs (cl-remove-if-not (lambda (x) (and (consp x) (eq (car x) :eval)))
-                                      result)))
-        (should (member '(:eval (claude-repl--prompt-summary-segment)) specs))
-        (should (member '(:eval (claude-repl--ai-title-segment)) specs))
-        ;; ai-title must appear AFTER prompt-summary in the list.
-        (let ((ps-pos (cl-position '(:eval (claude-repl--prompt-summary-segment))
-                                   result :test #'equal))
-              (at-pos (cl-position '(:eval (claude-repl--ai-title-segment))
-                                   result :test #'equal)))
-          (should (and ps-pos at-pos (> at-pos ps-pos))))))))
+      (let ((result (claude-repl--workspace-mode-line "ws1")))
+        (should-not (member '(:eval (claude-repl--ai-title-segment)) result))
+        (should-not (member '(:eval (claude-repl--prompt-summary-segment)) result))))))
 
 (provide 'test-ai-title)
 ;;; test-ai-title.el ends here

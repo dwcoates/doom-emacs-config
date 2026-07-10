@@ -234,7 +234,14 @@ recovery."
            (claude-repl--ai-title-attach-to-mode-line buf))))
      claude-repl--workspaces)))
 
-(claude-repl-ai-title-attach-all)
+;; The aiTitle segment is intentionally NOT wired into the vterm
+;; mode-line (see `claude-repl--workspace-mode-line'): it was dropped
+;; from the status bar.  This file is still loaded because
+;; `model.el' and `context.el' reuse its path/mtime resolvers
+;; (`claude-repl--ai-title-jsonl-path' / `claude-repl--ai-title-mtime').
+;; `claude-repl-ai-title-attach-all' remains defined for manual recovery
+;; but is deliberately not run at load, so the segment never re-attaches
+;; to existing buffers.
 
 (provide 'claude-repl-ai-title)
 ;;; ai-title.el ends here
