@@ -3831,12 +3831,15 @@ primitive resolves the workspace from."
         (claude-repl-send-char "y"))
       (should (eq (claude-repl--ws-claude-state "test-ws") :thinking)))))
 
-(ert-deftest claude-repl-test-send-char-does-not-touch-non-permission-state ()
-  "`claude-repl-send-char' only transitions :permission, not other states."
+(ert-deftest claude-repl-test-send-char-forces-thinking-from-idle ()
+  "`claude-repl-send-char' drives ANY prior state to :thinking, not just :permission.
+A single-char send (y/n, digit) is `not directly sent' input Claude
+acts on, but it never fires the UserPromptSubmit hook — so the send
+itself must mark :thinking even when the prior state is :idle."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer "*claude-panel-sendchar-think*"
+    (claude-repl-test--with-temp-buffer "*claude-panel-sendchar-idle*"
       (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-      (claude-repl--ws-set-claude-state "test-ws" :thinking)
+      (claude-repl--ws-set-claude-state "test-ws" :idle)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                 ((symbol-function 'vterm-send-string) #'ignore)
@@ -3876,20 +3879,23 @@ tab stuck at green-❓."
             (claude-repl--slash-return))))
       (should (eq (claude-repl--ws-claude-state "test-ws") :thinking)))))
 
-(ert-deftest claude-repl-test-slash-return-does-not-touch-non-permission-state ()
-  "`claude-repl--slash-return' only transitions :permission, not other states."
+(ert-deftest claude-repl-test-slash-return-forces-thinking-from-idle ()
+  "`claude-repl--slash-return' drives ANY prior state to :thinking, not just :permission.
+Submitting a slash command is `not directly sent' input Claude acts on
+but that never fires the UserPromptSubmit hook, so the submission itself
+marks :thinking even when the prior state is :idle."
   (claude-repl-test--with-clean-state
-    (claude-repl-test--with-temp-buffer " *test-slash-return-think*"
-      (setq-local claude-repl--slash-stack '("/" "c" "l" "e" "a" "r"))
+    (claude-repl-test--with-temp-buffer " *test-slash-return-idle*"
+      (setq-local claude-repl--slash-stack '("/" "m" "o" "d" "e" "l"))
       (claude-slash-input-mode 1)
-      (claude-repl-test--with-temp-buffer "*claude-panel-slash-return-think-vterm*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-slash-return-idle-vterm*"
         (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-        (claude-repl--ws-set-claude-state "test-ws" :thinking)
+        (claude-repl--ws-set-claude-state "test-ws" :idle)
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'claude-repl--vterm-live-p) (lambda () t))
                   ((symbol-function 'vterm-send-return) #'ignore)
                   ((symbol-function 'claude-repl--run-send-posthooks) #'ignore))
-          (with-current-buffer " *test-slash-return-think*"
+          (with-current-buffer " *test-slash-return-idle*"
             (claude-repl--slash-return))))
       (should (eq (claude-repl--ws-claude-state "test-ws") :thinking)))))
 
@@ -3925,8 +3931,11 @@ char forward itself is the only observable answer signal."
         (should (claude-repl--slash-vterm-send "1")))
       (should (eq (claude-repl--ws-claude-state "test-ws") :thinking)))))
 
-(ert-deftest claude-repl-test-slash-vterm-send-leaves-non-permission-unchanged ()
-  "`claude-repl--slash-vterm-send' only transitions :permission, not other states."
+(ert-deftest claude-repl-test-slash-vterm-send-forces-thinking-from-non-permission ()
+  "`claude-repl--slash-vterm-send' drives ANY prior state to :thinking on a forward.
+A slash/digit forward is `not directly sent' input Claude acts on but
+that never fires the UserPromptSubmit hook, so the forward itself marks
+:thinking even when the prior state is :done."
   (claude-repl-test--with-clean-state
     (claude-repl-test--with-temp-buffer "*claude-panel-slash-send-done*"
       (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
@@ -3934,7 +3943,7 @@ char forward itself is the only observable answer signal."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'vterm-send-string) #'ignore))
         (should (claude-repl--slash-vterm-send "/")))
-      (should (eq (claude-repl--ws-claude-state "test-ws") :done)))))
+      (should (eq (claude-repl--ws-claude-state "test-ws") :thinking)))))
 
 (ert-deftest claude-repl-test-slash-vterm-send-no-vterm-keeps-permission ()
   "`claude-repl--slash-vterm-send' does not transition when no live vterm exists.
@@ -4032,6 +4041,65 @@ When the buffer carries no owner pin, the current workspace is flipped."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
         (claude-repl--note-permission-answered-for-vterm (current-buffer)))
       (should (eq (claude-repl--ws-claude-state "ws1") :thinking)))))
+
+;;;; ---- Tests: non-direct sends force :thinking (mark-send-thinking) ----
+
+(ert-deftest claude-repl-test-mark-send-thinking-forces-thinking-from-idle ()
+  "`claude-repl--mark-send-thinking' drives a non-:permission state to :thinking."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :idle)
+    (claude-repl--mark-send-thinking "ws1")
+    (should (eq (claude-repl--ws-claude-state "ws1") :thinking))))
+
+(ert-deftest claude-repl-test-mark-send-thinking-forces-thinking-from-done ()
+  "`claude-repl--mark-send-thinking' drives a :done state to :thinking."
+  (claude-repl-test--with-clean-state
+    (claude-repl--ws-set-claude-state "ws1" :done)
+    (claude-repl--mark-send-thinking "ws1")
+    (should (eq (claude-repl--ws-claude-state "ws1") :thinking))))
+
+(ert-deftest claude-repl-test-mark-send-thinking-nil-ws-is-noop ()
+  "`claude-repl--mark-send-thinking' is a no-op when WS is nil (no error)."
+  (claude-repl-test--with-clean-state
+    (should-not (claude-repl--mark-send-thinking nil))))
+
+(ert-deftest claude-repl-test-mark-send-thinking-for-vterm-resolves-owner ()
+  "`claude-repl--mark-send-thinking-for-vterm' marks the buffer OWNER, not current ws."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-mstfv-owner*"
+      (setq-local claude-repl--owning-workspace "wsA")
+      (claude-repl--ws-set-claude-state "wsA" :idle)
+      (claude-repl--ws-set-claude-state "wsB" :idle)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wsB")))
+        (claude-repl--mark-send-thinking-for-vterm (current-buffer)))
+      (should (eq (claude-repl--ws-claude-state "wsA") :thinking))
+      (should (eq (claude-repl--ws-claude-state "wsB") :idle)))))
+
+(ert-deftest claude-repl-test-mark-send-thinking-for-vterm-falls-back-to-current-ws ()
+  "`claude-repl--mark-send-thinking-for-vterm' falls back to the current ws.
+When the buffer carries no owner pin, the current workspace is marked."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer "*claude-panel-mstfv-fallback*"
+      (claude-repl--ws-set-claude-state "ws1" :idle)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+        (claude-repl--mark-send-thinking-for-vterm (current-buffer)))
+      (should (eq (claude-repl--ws-claude-state "ws1") :thinking)))))
+
+(ert-deftest claude-repl-test-passthrough-digit-forces-thinking-from-idle ()
+  "Typing a digit into an empty input buffer forces :thinking from :idle too.
+End-to-end over `claude-repl--passthrough-start' -> slash mode -> char
+forward: the digit is `not directly sent' input, so it marks :thinking
+regardless of the prior state."
+  (claude-repl-test--with-clean-state
+    (claude-repl-test--with-temp-buffer " *test-passthrough-digit-idle-input*"
+      (claude-repl-test--with-temp-buffer "*claude-panel-passthrough-digit-idle-vterm*"
+        (claude-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+        (claude-repl--ws-set-claude-state "test-ws" :idle)
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'vterm-send-string) #'ignore))
+          (with-current-buffer " *test-passthrough-digit-idle-input*"
+            (claude-repl--passthrough-start "1")))
+        (should (eq (claude-repl--ws-claude-state "test-ws") :thinking))))))
 
 (provide 'test-input)
 
