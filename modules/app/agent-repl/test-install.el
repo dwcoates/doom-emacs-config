@@ -145,7 +145,7 @@
 (ert-deftest agent-repl-test-hooks-installed-missing-permission-request ()
   "Returns nil when the PermissionRequest hook is absent.
 PermissionRequest is the real-time permission-dialog signal that drives
-the tab to `:permission' WHILE Claude is waiting on the user.  Its
+the tab to `:permission' WHILE the agent is waiting on the user.  Its
 absence falls back to the lagging Notification permission_prompt path,
 so doctor must surface the missing registration."
   (cl-letf (((symbol-function 'agent-repl--settings-json)

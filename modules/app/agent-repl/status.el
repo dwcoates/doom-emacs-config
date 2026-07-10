@@ -275,7 +275,7 @@ every recognized priority."
 ;;                   Emacs-side exceptions at lifecycle boundaries
 ;;                   (initialize-agent writes :init; kill clears).
 ;;   :repl-state   — Emacs-owned session-lifecycle flag.  Values:
-;;                     nil       — workspace registered, no Claude
+;;                     nil       — workspace registered, no agent
 ;;                                 session has ever been attached.
 ;;                     :active   — panels open, session running.
 ;;                     :inactive — panels closed, session preserved.
@@ -363,8 +363,8 @@ Compare-and-clear: no-op if the current value is not STATE."
 
 ;; --- Stop / SubagentStop coordination ---
 ;;
-;; The Stop hook fires when Claude finishes its main response.  When
-;; Claude has spawned background subagents (Task tool with
+;; The Stop hook fires when the agent finishes its main response.  When
+;; the agent has spawned background subagents (Task tool with
 ;; run_in_background: true), Stop can fire while those subagents are
 ;; still running — so transitioning the workspace to :done on Stop alone
 ;; would falsely advertise "ready for review" while work is still in
@@ -592,7 +592,7 @@ visually distinct from states that have no palette mapping.")
 
 (defconst agent-repl--color-stop-failed-magenta "#8b1f8b"
   "Magenta used for the :stop-failed agent-state tab background.
-:stop-failed means the StopFailure hook fired — Claude's turn ended
+:stop-failed means the StopFailure hook fired — the agent's turn ended
 due to an API error (rate limit, auth failure, billing, etc.).  The
 vterm session is still alive and re-promptable; :dead (the plain ❌
 badge) is reserved for vterm process death.  A distinct color signals
@@ -616,7 +616,7 @@ tabs; readable against `agent-repl--color-selected-bg'.")
   "Dark foreground for light state backgrounds.")
 
 (defconst agent-repl--label-permission       "❓"
-  "Bracket label shown adjacent to the numeric index when Claude is
+  "Bracket label shown adjacent to the numeric index when the agent is
 asking for a permission decision.")
 
 (defconst agent-repl--label-dead             "❌"
@@ -630,7 +630,7 @@ session is still alive and re-promptable).")
 
 (defconst agent-repl--label-start-failed     "🚫"
   "Bracket label shown adjacent to the numeric index when starting
-Claude failed (e.g. the sandbox Docker image is not built).  Distinct
+the agent failed (e.g. the sandbox Docker image is not built).  Distinct
 from `:stop-failed' (⚠, a live re-promptable session) and `:dead' (❌, a
 vterm that died) — the session never came up at all.")
 
@@ -795,7 +795,7 @@ Keys in the returned plist: :bg :fg :bracket-fg :bracket-bg :weight."
   "Return appearance spec applying STATE's color to the [N] bracket only.
 Pulls bracket-bg/bracket-fg/weight from STATE's palette row (per
 SELECTED) and leaves :bg/:fg unspecified so the separator and name
-region inherit defaults.  Used for workspaces whose Claude panels
+region inherit defaults.  Used for workspaces whose agent panels
 have been dismissed: the bracket retains the state's color so the
 workspace's agent-state stays visible while the rest of the tab
 falls back to the default appearance."
@@ -817,31 +817,31 @@ falls back to the default appearance."
   `((t :background ,agent-repl--color-init-blue
        :foreground ,agent-repl--color-light
        :weight ,agent-repl--tab-weight))
-  "Face for workspace tabs where Claude is initializing (blue).")
+  "Face for workspace tabs where the agent is initializing (blue).")
 
 (defface agent-repl-tab-thinking
   `((t :background ,agent-repl--color-thinking-red
        :foreground ,agent-repl--color-light
        :weight ,agent-repl--tab-weight))
-  "Face for workspace tabs where Claude is thinking (red).")
+  "Face for workspace tabs where the agent is thinking (red).")
 
 (defface agent-repl-tab-done
   `((t :background ,agent-repl--color-done-green
        :foreground ,agent-repl--color-dark
        :weight ,agent-repl--tab-weight))
-  "Face for workspace tabs where Claude is done (green).")
+  "Face for workspace tabs where the agent is done (green).")
 
 (defface agent-repl-tab-permission
   `((t :background ,agent-repl--color-done-green
        :foreground ,agent-repl--color-dark
        :weight ,agent-repl--tab-weight))
-  "Face for workspace tabs where Claude needs permission (green + emoji).")
+  "Face for workspace tabs where the agent needs permission (green + emoji).")
 
 (defface agent-repl-tab-idle
   `((t :background ,agent-repl--color-idle-orange
        :foreground ,agent-repl--color-dark
        :weight ,agent-repl--tab-weight))
-  "Face for workspace tabs where Claude is idle (orange).")
+  "Face for workspace tabs where the agent is idle (orange).")
 
 (defface agent-repl-tab-stop-failed
   `((t :background ,agent-repl--color-stop-failed-magenta
@@ -1002,7 +1002,7 @@ face so selection dims the state color."
 Delegates to `agent-repl--ws-render-status' (the single source of
 truth for visual state across the drawer, tab-bar, and project
 picker), then layers panel-visibility suppression on top: when the
-render-state is non-nil AND no Claude panel is present in WS's
+render-state is non-nil AND no agent panel is present in WS's
 live-or-saved window layout, returns nil regardless of state — this
 suppresses full-tab coloring (state-colored name and label badges
 like ❓/❌/⚠) for workspaces whose panels the user has dismissed.
@@ -1034,7 +1034,7 @@ the bracket keeps its color when panels are closed."
   "Return WS's render-state for [N]-bracket coloring.
 Unlike `agent-repl--ws-display-state', this does NOT suppress when
 panels are closed: the bracket should retain the state's color even
-for workspaces whose Claude panels have been dismissed, so the
+for workspaces whose agent panels have been dismissed, so the
 render-state remains visible at a glance.
 
 UI-boundary tolerance: returns nil for unknown ws (see
@@ -1054,7 +1054,7 @@ built via `agent-repl--tab-spec-bracket-only' so only the [N] bracket
 keeps the state's color.  The bracket label is driven by bracket-state
 when display-state is suppressed, so palette `:label' glyphs (❓ for
 :permission, ❌ for :dead, ⚠ for :stop-failed) render even on
-workspaces whose Claude panels are closed — only the full-tab
+workspaces whose agent panels are closed — only the full-tab
 background requires panels to be open.  When the workspace's
 `:flashing' flag is set \(see `agent-repl-flash-tab'\), the spec and
 name face are overridden to a uniform pulse so the tab stands out."
@@ -1294,7 +1294,7 @@ visible glyph is still the faced one.  Size and center rows to
     (concat (mapconcat #'identity lines " \n") " ")))
 
 (cl-defun agent-repl--tabline-advice (&optional (names nil names-supplied-p))
-  "Override for `+workspace--tabline' to color tabs by Claude status.
+  "Override for `+workspace--tabline' to color tabs by agent status.
 
 The tab-bar reflects every workspace in NAMES (defaulting to
 `agent-repl--ws-list-names' — the persp-mode integration wrapper
@@ -1452,13 +1452,13 @@ notification while dropping the leading workspace list."
 (advice-add '+workspace--message-body :override
             #'agent-repl--workspace-message-body-advice)
 
-;;; Claude panel visibility ---------------------------------------------------
+;;; Agent panel visibility ---------------------------------------------------
 
-;; Walk saved window-configuration tree to find claude buffers.
+;; Walk saved window-configuration tree to find agent buffers.
 (defun agent-repl--wconf-has-agent-p (wconf)
-  "Return non-nil if WCONF (a `window-state-get' tree) contains a claude vterm buffer.
+  "Return non-nil if WCONF (a `window-state-get' tree) contains an agent vterm buffer.
 Excludes input buffers: presence of only the input panel in a saved
-config (e.g. from a placeholder layout) should not count as claude open."
+config (e.g. from a placeholder layout) should not count as agent open."
   (when (and wconf (proper-list-p wconf))
     (let ((buf-entry (alist-get 'buffer wconf)))
       (if (and buf-entry (stringp (car-safe buf-entry))
@@ -1469,24 +1469,24 @@ config (e.g. from a placeholder layout) should not count as claude open."
                  (cl-remove-if-not #'proper-list-p wconf))))))
 
 (defun agent-repl--visible-agent-buffer-p (buf)
-  "Return non-nil if BUF is a live, visible Claude buffer."
+  "Return non-nil if BUF is a live, visible agent buffer."
   (and (buffer-live-p buf)
        (agent-repl--agent-buffer-p buf)
        (get-buffer-window buf)))
 
 (defun agent-repl--agent-visible-in-current-ws-p ()
-  "Return non-nil if a claude buffer is visible in the current workspace."
+  "Return non-nil if an agent buffer is visible in the current workspace."
   (cl-some #'agent-repl--visible-agent-buffer-p
            (buffer-list)))
 
 (defun agent-repl--agent-in-saved-wconf-p (ws-name)
-  "Return non-nil if background workspace WS-NAME has a claude buffer in its saved config."
+  "Return non-nil if background workspace WS-NAME has an agent buffer in its saved config."
   (let* ((persp (agent-repl--ws-resolve-persp ws-name))
          (wconf (agent-repl--ws-window-conf persp)))
     (agent-repl--wconf-has-agent-p wconf)))
 
 (defun agent-repl--ws-agent-open-p (ws-name)
-  "Return non-nil if workspace WS-NAME has a claude buffer in its window layout.
+  "Return non-nil if workspace WS-NAME has an agent buffer in its window layout.
 For the current workspace, checks live windows.
 For background workspaces, inspects the saved persp window configuration."
   (if (equal ws-name (agent-repl--ws-current-name))
@@ -1500,7 +1500,7 @@ For background workspaces, inspects the saved persp window configuration."
 
 This is the sole transition the timer drives on the agent-state axis.
 Every other transition is sentinel-owned (see the hook handlers in
-`sentinel.el').  When Claude finishes a turn the Stop hook writes
+`sentinel.el').  When the agent finishes a turn the Stop hook writes
 `:done'; if the worktree is clean AND the user has been focused on
 the workspace for at least `agent-repl-done-idle-delay' seconds
 \(tracked via `:done-acked-at'), the tab decays to `:idle'.  If the
@@ -1598,7 +1598,7 @@ mod-N tick selected by `agent-repl-state-git-tick-modulus'."
           (agent-repl--async-refresh-git-status ws)))
     ;; No live vterm process → clear non-thinking state
     (agent-repl--mark-dead-vterm ws))
-  ;; Merged-ness is independent of claude/vterm liveness — refresh
+  ;; Merged-ness is independent of agent/vterm liveness — refresh
   ;; for every workspace so the drawer's flatten-through-merged
   ;; rendering has fresh `:branch-merged' values.  Gated on DO-GIT-P
   ;; because the refresh's preconditions and process spawn are
@@ -1766,7 +1766,7 @@ No-op in four cases:
   :dead).  Without this guard, the next poll would re-classify the
   workspace as plain `:dead' and the MERGED-section semantics would
   be lost.
-- `:agent-state' is `:init' — Claude is starting, the vterm process
+- `:agent-state' is `:init' — the agent is starting, the vterm process
   may not have reached running state yet, and observing no process
   does not mean dead.  The session-start hook will transition away
   from `:init' shortly; until then the timer leaves things alone."
@@ -1783,7 +1783,7 @@ No-op in four cases:
 ;;; Frame focus handler -------------------------------------------------------
 
 (defun agent-repl--on-frame-focus ()
-  "Refresh claude vterm and update all workspace states when Emacs regains focus.
+  "Refresh the agent vterm and update all workspace states when Emacs regains focus.
 Calls `agent-repl--update-all-workspace-states-now' (the unguarded
 entrypoint) rather than the periodic-timer entrypoint: frame focus is
 an event-driven signal that the user is back and wants fresh data, so

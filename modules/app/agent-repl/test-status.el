@@ -149,7 +149,7 @@ the tab-bar renders the badge when render-status yields
 
 (ert-deftest agent-repl-test-tab-palette-has-start-failed-label ()
   "Palette has a `:start-failed' entry mapping to the 🚫 label so a
-workspace whose Claude session failed to start renders a visible badge,
+workspace whose agent session failed to start renders a visible badge,
 distinct from `:stop-failed' (⚠) and `:dead' (❌)."
   (should (equal (plist-get
                   (alist-get :start-failed agent-repl--tab-palette)
@@ -169,7 +169,7 @@ dead vterm."
 ;;;; ---- Tests: ws-display-state suppresses all coloring when panels closed ----
 
 (ert-deftest agent-repl-test-display-state-done-panels-closed-renders-nil ()
-  ":done with no Claude panel in layout renders nil (suppressed on close)."
+  ":done with no agent panel in layout renders nil (suppressed on close)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "ws1" :done)
     (agent-repl--ws-set-repl-state "ws1" :inactive)
@@ -257,7 +257,7 @@ dead vterm."
       (should-not (agent-repl--ws-display-state "ws1")))))
 
 (ert-deftest agent-repl-test-display-state-idle-panels-open-renders-idle ()
-  ":idle with Claude panel present in layout renders :idle (orange)."
+  ":idle with agent panel present in layout renders :idle (orange)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "ws1" :idle)
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
@@ -265,7 +265,7 @@ dead vterm."
       (should (eq :idle (agent-repl--ws-display-state "ws1"))))))
 
 (ert-deftest agent-repl-test-display-state-idle-panels-hidden-renders-nil ()
-  ":idle with no Claude panel in layout renders nil (no background, no badge)."
+  ":idle with no agent panel in layout renders nil (no background, no badge)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "ws1" :idle)
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
@@ -469,7 +469,7 @@ The ❓ glyph in the bracket (not the name background) signals permission."
       (should (eq :thinking (agent-repl--ws-bracket-state "ws1"))))))
 
 (ert-deftest agent-repl-test-bracket-state-nil-when-no-state ()
-  "ws-bracket-state returns nil when WS has no claude/repl state."
+  "ws-bracket-state returns nil when WS has no agent/repl state."
   (agent-repl-test--with-clean-state
     (should-not (agent-repl--ws-bracket-state "untouched"))))
 
@@ -1472,13 +1472,13 @@ purpose is the alternating-space cache-bust."
     (should-not (agent-repl--visible-agent-buffer-p (current-buffer)))))
 
 (ert-deftest agent-repl-test-visible-agent-buffer-no-window ()
-  "visible-agent-buffer-p should return nil for a live claude buffer with no window."
+  "visible-agent-buffer-p should return nil for a live agent buffer with no window."
   (agent-repl-test--with-temp-buffer "*agent-panel-00112233*"
-    ;; Buffer is live and claude but has no window
+    ;; Buffer is live and an agent buffer but has no window
     (should-not (agent-repl--visible-agent-buffer-p (current-buffer)))))
 
 (ert-deftest agent-repl-test-visible-agent-buffer-with-window ()
-  "visible-agent-buffer-p should return non-nil for a live claude buffer with a window."
+  "visible-agent-buffer-p should return non-nil for a live agent buffer with a window."
   (agent-repl-test--with-temp-buffer "*agent-panel-00112233*"
     (cl-letf (((symbol-function 'get-buffer-window)
                (lambda (_buf) 'fake-window)))
@@ -1487,13 +1487,13 @@ purpose is the alternating-space cache-bust."
 ;;;; ---- Tests: agent-visible-in-current-ws-p ----
 
 (ert-deftest agent-repl-test-agent-visible-in-current-ws-none ()
-  "agent-visible-in-current-ws-p should return nil when no claude buffers exist."
+  "agent-visible-in-current-ws-p should return nil when no agent buffers exist."
   (cl-letf (((symbol-function 'buffer-list)
              (lambda () nil)))
     (should-not (agent-repl--agent-visible-in-current-ws-p))))
 
 (ert-deftest agent-repl-test-agent-visible-in-current-ws-found ()
-  "agent-visible-in-current-ws-p should return non-nil when a visible claude buffer exists.
+  "agent-visible-in-current-ws-p should return non-nil when a visible agent buffer exists.
 
 The `get-buffer-window' mock takes an optional second arg because on
 Emacs 30 native-compiled callers pass the ALL-FRAMES slot explicitly
@@ -1522,7 +1522,7 @@ native-comp."
     (should-not (agent-repl--agent-in-saved-wconf-p "ws1"))))
 
 (ert-deftest agent-repl-test-agent-in-saved-wconf-with-claude ()
-  "agent-in-saved-wconf-p should return t when saved wconf contains claude buffer."
+  "agent-in-saved-wconf-p should return t when saved wconf contains an agent buffer."
   (let ((fake-persp (list 'fake-persp-struct))
         (fake-wconf '((buffer "*agent-panel-ab12cd34*"))))
     (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_name) fake-persp))
@@ -1530,7 +1530,7 @@ native-comp."
       (should (agent-repl--agent-in-saved-wconf-p "ws1")))))
 
 (ert-deftest agent-repl-test-agent-in-saved-wconf-without-claude ()
-  "agent-in-saved-wconf-p should return nil when saved wconf has no claude buffer."
+  "agent-in-saved-wconf-p should return nil when saved wconf has no agent buffer."
   (let ((fake-persp (list 'fake-persp-struct))
         (fake-wconf '((buffer "*scratch*"))))
     (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_name) fake-persp))
@@ -1634,7 +1634,7 @@ native-comp."
       (should (eq (agent-repl--ws-state "ws1") :inactive)))))
 
 (ert-deftest agent-repl-test-update-ws-state-nil-dirty-stays-nil ()
-  "nil + dirty no longer transitions (dirty ≠ signal from Claude anymore).
+  "nil + dirty no longer transitions (dirty ≠ signal from the agent anymore).
 The old (nil . t) → :done inference was a footgun on pre-existing dirty
 trees; under the revised model only the Stop hook writes :done."
   (agent-repl-test--with-clean-state

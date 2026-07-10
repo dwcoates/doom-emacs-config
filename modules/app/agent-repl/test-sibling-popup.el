@@ -41,7 +41,7 @@ exit so test isolation is preserved."
 ;;;; ---- target-window selection ----
 
 (ert-deftest agent-repl-sibling-popup-test-target-nil-when-vterm-not-visible ()
-  "Returns nil when the claude vterm buffer isn't shown on the frame.
+  "Returns nil when the agent vterm buffer isn't shown on the frame.
 The display fn must fall through to default popup behavior in that
 case — without this guard a single editor window would be split below
 itself by every `SPC o t', breaking the no-agent UX."
@@ -58,7 +58,7 @@ itself by every `SPC o t', breaking the no-agent UX."
 (ert-deftest agent-repl-sibling-popup-test-target-nil-when-vterm-buf-missing ()
   "Returns nil when the panel-buffer lookup itself yields nil.
 This covers the never-initialized-agent state — `--panel-buffer'
-returns nil before any claude session is opened, and the display fn
+returns nil before any agent session is opened, and the display fn
 must not crash on the nil."
   (agent-repl-sibling-popup-test--with-temp-frame
     (agent-repl-sibling-popup-test--with-mocked-panels nil nil
@@ -67,7 +67,7 @@ must not crash on the nil."
 (ert-deftest agent-repl-sibling-popup-test-target-picks-leftmost-work-window ()
   "Picks the leftmost non-agent, non-side work window when vterm is shown.
 Layout: [work] [agent-vterm] horizontally.  Target must be the work
-window (left), NOT the claude vterm window (right), because the popup
+window (left), NOT the agent vterm window (right), because the popup
 is meant to drop below the work column only."
   (agent-repl-sibling-popup-test--with-temp-frame
     (let* ((work-buf  (generate-new-buffer " *test-work*"))
@@ -87,7 +87,7 @@ is meant to drop below the work column only."
 (ert-deftest agent-repl-sibling-popup-test-target-excludes-side-windows ()
   "Skips side windows (e.g. the drawer) even if they are the leftmost.
 Side windows shouldn't be split — they're frame-level UI.  Layout: a
-left-side drawer + a regular work window + claude vterm; target must
+left-side drawer + a regular work window + agent vterm; target must
 be the regular work window, not the drawer."
   (agent-repl-sibling-popup-test--with-temp-frame
     (let* ((drawer-buf (generate-new-buffer " *test-drawer*"))
@@ -112,10 +112,10 @@ be the regular work window, not the drawer."
         (kill-buffer input-buf)))))
 
 (ert-deftest agent-repl-sibling-popup-test-target-excludes-claude-input-panel ()
-  "Doesn't pick the claude input panel even when it's leftmost.
-A degenerate frame where only claude buffers are shown (no editor
+  "Doesn't pick the agent input panel even when it's leftmost.
+A degenerate frame where only agent buffers are shown (no editor
 window) must still return nil — splitting below the input would
-deform the claude column."
+deform the agent column."
   (agent-repl-sibling-popup-test--with-temp-frame
     (let* ((vterm-buf (generate-new-buffer " *test-cv*"))
            (input-buf (generate-new-buffer " *test-ci*")))
@@ -167,11 +167,11 @@ and `split-window' would signal `window-too-small'."
 ;;;; ---- display-fn integration ----
 
 (ert-deftest agent-repl-sibling-popup-test-display-fn-splits-below-work-window ()
-  "When claude vterm is visible, the display fn splits BELOW the work
+  "When the agent vterm is visible, the display fn splits BELOW the work
 window and places BUFFER there.  Layout invariants verified:
   • new popup window is a child of (or successor below) the work-win edge
   • popup buffer is the supplied buffer
-  • claude vterm window is left untouched (still showing vterm-buf)"
+  • agent vterm window is left untouched (still showing vterm-buf)"
   (agent-repl-sibling-popup-test--with-temp-frame
     (let* ((work-buf  (generate-new-buffer " *test-work*"))
            (vterm-buf (generate-new-buffer " *test-cv*"))
@@ -188,7 +188,7 @@ window and places BUFFER there.  Layout invariants verified:
                               popup-buf '((window-height . 0.3)))))
                 (should (window-live-p new-win))
                 (should (eq (window-buffer new-win) popup-buf))
-                ;; Claude vterm window survives untouched.
+                ;; Agent vterm window survives untouched.
                 (should (window-live-p vterm-win))
                 (should (eq (window-buffer vterm-win) vterm-buf))
                 ;; New window sits below the original work-win region:
@@ -202,7 +202,7 @@ window and places BUFFER there.  Layout invariants verified:
 (ert-deftest agent-repl-sibling-popup-test-display-fn-popup-width-matches-work-column ()
   "The popup width matches the work column (not the full frame).
 This is the core promise of the feature: the popup must stop on the
-right side at the claude window edge.  Verify the popup's right edge
+right side at the agent window edge.  Verify the popup's right edge
 equals the work window's right edge BEFORE the popup was opened (the
 column width is preserved by `split-window' below)."
   (agent-repl-sibling-popup-test--with-temp-frame
@@ -236,7 +236,7 @@ column width is preserved by `split-window' below)."
         (kill-buffer popup-buf)))))
 
 (ert-deftest agent-repl-sibling-popup-test-display-fn-falls-back-when-claude-absent ()
-  "With no claude panels visible, the display fn defers to the fallback.
+  "With no agent panels visible, the display fn defers to the fallback.
 We override the fallback symbol to observe that it's called with the
 buffer and alist intact.  This guards the no-agent UX path."
   (agent-repl-sibling-popup-test--with-temp-frame

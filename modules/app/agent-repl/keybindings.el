@@ -186,7 +186,7 @@ the original ALIST order."
           (or (agent-repl--workspace-for-buffer buf) "nil")))
 
 (defun agent-repl--kill-before-workspace-delete (&optional name &rest _)
-  "Before-advice for `+workspace/kill': tear down any running Claude session.
+  "Before-advice for `+workspace/kill': tear down any running agent session.
 NAME is the workspace `+workspace/kill' was invoked on.  Only fire when
 NAME refers to the current workspace — `agent-repl--agent-running-p'
 inspects the current ws's vterm, so applying it cross-workspace would
@@ -252,7 +252,7 @@ whether to run the agent-repl teardown or a bare `+workspace/kill'."
 (defun agent-repl--read-nukeable-workspace (prompt)
   "Prompt for a workspace to nuke/kill.
 Candidates come from `agent-repl--nukeable-workspace-names': live
-agent-repl workspaces plus tab-bar workspaces whose claude has
+agent-repl workspaces plus tab-bar workspaces whose agent has
 already been killed.  Defaults to the current workspace when it
 appears in the candidate list.  Signals `user-error' when no
 candidates exist."
@@ -273,14 +273,14 @@ Ensures the output directory exists.  Returns the full path of the written file.
     file))
 
 (defun agent-repl--list-agent-vterm-buffers ()
-  "Return a list of live Claude vterm buffers (matching `agent-repl--vterm-buffer-re')."
+  "Return a list of live agent vterm buffers (matching `agent-repl--vterm-buffer-re')."
   (cl-remove-if-not #'agent-repl--agent-buffer-p (buffer-list)))
 
 ;;; Section 2: Utility commands used by keybindings
 
-;; SPC o 0-9: send a digit character to Claude from the leader keymap.
+;; SPC o 0-9: send a digit character to the agent from the leader keymap.
 (defun agent-repl--send-digit-char ()
-  "Send the digit from the current key event to Claude.
+  "Send the digit from the current key event to the agent.
 Extracts the trailing digit from the key sequence (e.g. SPC o 3 -> \"3\")."
   (interactive)
   (let* ((keys (this-command-keys-vector))
@@ -290,8 +290,8 @@ Extracts the trailing digit from the key sequence (e.g. SPC o 3 -> \"3\")."
 
 ;; C-v paste forwarding to vterm
 (defun agent-repl-paste-to-vterm ()
-  "Forward a Ctrl-V keystroke to the Claude vterm buffer.
-This lets Claude CLI handle paste natively, including images."
+  "Forward a Ctrl-V keystroke to the agent vterm buffer.
+This lets the agent CLI handle paste natively, including images."
   (interactive)
   (agent-repl--log (agent-repl--ws-current-name) "paste-to-vterm: entry")
   (if (agent-repl--vterm-live-p)
@@ -399,7 +399,7 @@ image so the visual mapping between key and glyph is obvious."
   (revert-buffer :ignore-auto :noconfirm)
   (eval-buffer))
 
-;; SPC j R -- reload the agent-repl module's config.el (the claude
+;; SPC j R -- reload the agent-repl module's config.el (the agent
 ;; workspace's config), independent of whatever buffer is current.
 (defun agent-repl--reload-config-file ()
   "Return the config.el path to reload for the current workspace.
@@ -485,7 +485,7 @@ Use this to verify the processor works independently of the file watcher."
              (mapconcat #'agent-repl--format-workspace-state states "\n"))))
 
 (defun agent-repl-debug/buffer-info ()
-  "Display all claude vterm buffers with their owning and persp workspaces."
+  "Display all agent vterm buffers with their owning and persp workspaces."
   (interactive)
   (let* ((bufs (agent-repl--list-agent-vterm-buffers))
          (lines (mapcar #'agent-repl--format-buffer-info bufs)))
@@ -500,7 +500,7 @@ Use this to verify the processor works independently of the file watcher."
   (message "Cleared all states for %s" ws))
 
 (defun agent-repl--kill-owned-panel-buffers (ws)
-  "Kill all Claude panel buffers owned by workspace WS.
+  "Kill all agent panel buffers owned by workspace WS.
 Closes their windows (selected-frame, to preserve historical scope)
 and silences process exit queries before killing."
   (agent-repl--log ws "kill-owned-panel-buffers: entry ws=%s" ws)
@@ -516,7 +516,7 @@ and silences process exit queries before killing."
 
 (defun agent-repl-debug/obliterate (ws)
   "Completely remove workspace WS from all agent-repl tracking.
-Kills claude buffers, closes windows, and removes all state."
+Kills agent buffers, closes windows, and removes all state."
   (interactive (list (agent-repl--read-workspace "Obliterate workspace: ")))
   (agent-repl--log ws "debug/obliterate: entry ws=%s" ws)
   (agent-repl--kill-owned-panel-buffers ws)
@@ -524,7 +524,7 @@ Kills claude buffers, closes windows, and removes all state."
   (message "Obliterated all agent-repl state for %s" ws))
 
 (defun agent-repl-debug/set-owning-workspace ()
-  "Set the owning workspace for a claude vterm buffer."
+  "Set the owning workspace for an agent vterm buffer."
   (interactive)
   (let* ((bufs (agent-repl--list-agent-vterm-buffers))
          (buf-name (completing-read "Buffer: " (mapcar #'buffer-name bufs) nil t))
@@ -666,7 +666,7 @@ BEFORE and AFTER are the workspace states before and after refresh."
 (defun agent-repl-debug/refresh-state (ws-name)
   "Force a full state refresh for workspace WS-NAME.
 Runs the same logic as the periodic `update-all-workspace-states' timer:
-checks claude visibility, git dirty status, and applies the state table.
+checks agent visibility, git dirty status, and applies the state table.
 Reports comprehensive diagnostics."
   (interactive (list (agent-repl--read-workspace-with-default "Workspace: ")))
   (let* ((before (agent-repl--ws-agent-state ws-name))
@@ -805,7 +805,7 @@ global drawer-mirror bindings win in vterm buffers."
 
 (map! :leader :prefix "w" :n "f" #'agent-repl-fullscreen-and-focus)
 
-;; SPC o -- Claude session control (open, focus, kill, interrupt, utilities)
+;; SPC o -- agent session control (open, focus, kill, interrupt, utilities)
 (map! :leader
       :desc "Agent REPL (simple)" "o c" #'agent-repl-simple
       :desc "Agent REPL (deprio)" "o C" #'agent-repl
@@ -931,7 +931,7 @@ aux maps for every state in `agent-repl--scroll-output-intercept-states'
 
 (agent-repl--install-workspace-jump-overrides)
 
-;; SPC j -- Tell Claude to do a predefined thing
+;; SPC j -- Tell the agent to do a predefined thing
 (map! :leader
       (:prefix ("j" . "claude")
        :desc "Enqueue input as deferred prompt"        "RET" #'agent-repl-queue-deferred-prompt
@@ -1014,7 +1014,7 @@ aux maps for every state in `agent-repl--scroll-output-intercept-states'
 ;; It belongs in session.el or panels.el.  Do not move yet -- other agents are
 ;; modifying those files.
 
-;; Kill Claude session before workspace deletion so buffers/windows are cleaned
+;; Kill the agent session before workspace deletion so buffers/windows are cleaned
 ;; up while the workspace is still current.
 (agent-repl--ws-advise-kill-before #'agent-repl--kill-before-workspace-delete)
 

@@ -443,7 +443,7 @@
 ;;;; ---- agent-repl--send-to-agent ----
 
 (ert-deftest agent-repl-cmd-test-send-to-agent/not-running-initializes-first ()
-  "send-to-agent calls initialize-agent when Claude is not running."
+  "send-to-agent calls initialize-agent when the agent is not running."
   (let (init-called sent-text)
     (agent-repl-test--with-clean-state
       (let ((fake-vterm-buf (get-buffer-create " *test-vterm*")))
@@ -464,7 +464,7 @@
           (kill-buffer fake-vterm-buf))))))
 
 (ert-deftest agent-repl-cmd-test-send-to-agent/running-skips-init ()
-  "send-to-agent skips initialize-agent when Claude is already running."
+  "send-to-agent skips initialize-agent when the agent is already running."
   (let (init-called sent-buf sent-text)
     (agent-repl-test--with-clean-state
       (let ((fake-vterm-buf (get-buffer-create " *test-vterm*")))
@@ -489,7 +489,7 @@
 ;;;; ---- agent-repl-explain ----
 
 (ert-deftest agent-repl-cmd-test-explain/sends-context-reference ()
-  "explain sends 'please explain REF' to claude."
+  "explain sends 'please explain REF' to the agent."
   (let (sent-text)
     (cl-letf (((symbol-function 'agent-repl--context-reference)
                (lambda () "src/foo.el:42"))
@@ -501,7 +501,7 @@
 ;;;; ---- agent-repl-explain-prompt ----
 
 (ert-deftest agent-repl-cmd-test-explain-prompt/sends-user-input ()
-  "explain-prompt sends user-provided text to claude."
+  "explain-prompt sends user-provided text to the agent."
   (let (sent-text)
     (cl-letf (((symbol-function 'agent-repl--context-reference)
                (lambda () "src/foo.el:42"))
@@ -788,7 +788,7 @@ that drops the model pin without surfacing in the defcustom-shape test."
 
 (ert-deftest agent-repl-cmd-test-explain-config-show/displays-existing-buffer ()
   "Show falls back to `display-buffer' with the side-window action when the
-claude output window is not available to take over."
+agent output window is not available to take over."
   (let* ((agent-repl-explain-config-buffer-name " *test-explain-show*")
          (buf (get-buffer-create agent-repl-explain-config-buffer-name))
          (agent-repl--explain-config-global-visible-p nil)
@@ -865,10 +865,10 @@ the popup and drawer are fully decoupled."
           (should-not drawer-hide-called))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-;;;; ---- Claude output window takeover ----
+;;;; ---- Agent output window takeover ----
 
 (ert-deftest agent-repl-cmd-test-explain-config-show/takes-over-agent-output-window-when-visible ()
-  "Show reuses the live claude output window via `set-window-buffer' rather
+  "Show reuses the live agent output window via `set-window-buffer' rather
 than falling back to the side-window display action."
   (let* ((agent-repl-explain-config-buffer-name " *test-explain-takeover*")
          (buf (get-buffer-create agent-repl-explain-config-buffer-name))
@@ -910,7 +910,7 @@ than falling back to the side-window display action."
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest agent-repl-cmd-test-explain-config-show/takeover-clears-window-dedication ()
-  "Show clears the claude output window's dedicated flag before swapping
+  "Show clears the agent output window's dedicated flag before swapping
 buffers — without this, `set-window-buffer' would error on the dedicated
 window."
   (let* ((agent-repl-explain-config-buffer-name " *test-explain-takeover-dedup*")
@@ -975,7 +975,7 @@ the drawer in the first place, so it has nothing to restore."
       (agent-repl--explain-config-hide)
       (should-not drawer-show-called))))
 
-;;;; ---- Claude output window restoration on --hide ----
+;;;; ---- Agent output window restoration on --hide ----
 
 (ert-deftest agent-repl-cmd-test-explain-config-hide/restores-prev-buffer-in-replaced-window ()
   "Hide re-displays the saved prev-buffer in the window the popup took over."
@@ -998,7 +998,7 @@ the drawer in the first place, so it has nothing to restore."
 
 (ert-deftest agent-repl-cmd-test-explain-config-hide/clears-replaced-window-after-restore ()
   "Hide clears `--replaced-window' after restoring, so a future show won't
-double-restore an already-rehydrated claude output window."
+double-restore an already-rehydrated agent output window."
   (let ((agent-repl--explain-config-global-visible-p t)
         (agent-repl--explain-config-replaced-window (cons 'fake-output-win 'prev-buf)))
     (cl-letf (((symbol-function 'window-live-p) (lambda (_w) nil))
@@ -1008,7 +1008,7 @@ double-restore an already-rehydrated claude output window."
 
 (ert-deftest agent-repl-cmd-test-explain-config-hide/reapplies-agent-output-window-hardening ()
   "Hide re-applies `--configure-vterm-window' on successful restore so the
-claude output window regains its dedicate/size-fix/delete-protect recipe."
+agent output window regains its dedicate/size-fix/delete-protect recipe."
   (let* ((prev (get-buffer-create " *test-explain-reharden-prev*"))
          (agent-repl--explain-config-global-visible-p t)
          (agent-repl--explain-config-replaced-window (cons 'fake-output-win prev))
@@ -1148,7 +1148,7 @@ Guards against the mode body unconditionally calling
 
 (ert-deftest agent-repl-cmd-test-explain-config-ensure-visible/shows-when-flag-set-and-hidden ()
   "Persp-reconciliation re-displays the popup via `--show' when flag is set
-and window is missing, with no claude output window available to take over."
+and window is missing, with no agent output window available to take over."
   (let* ((agent-repl-explain-config-buffer-name " *test-explain-persp-show*")
          (buf (get-buffer-create agent-repl-explain-config-buffer-name))
          (agent-repl--explain-config-global-visible-p t)
@@ -1169,7 +1169,7 @@ and window is missing, with no claude output window available to take over."
 
 (ert-deftest agent-repl-cmd-test-explain-config-ensure-visible/takes-over-new-persp-agent-output-window ()
   "Persp-reconciliation routes through `--show', which takes over the new
-persp's claude output window when it is visible — no side-window fallback."
+persp's agent output window when it is visible — no side-window fallback."
   (let* ((agent-repl-explain-config-buffer-name " *test-explain-persp-takeover*")
          (buf (get-buffer-create agent-repl-explain-config-buffer-name))
          (agent-repl--explain-config-global-visible-p t)
@@ -1647,7 +1647,7 @@ does not appear in the output."
 (ert-deftest agent-repl-cmd-test-enter-insert-mode/never-sends-i-to-vterm ()
   "enter-insert-mode must NOT forward a literal \"i\" keystroke to the vterm.
 Regression: sending \"i\" double-dispatched the mode switch and leaked a
-stray \"i\" onto Claude's prompt line."
+stray \"i\" onto the agent's prompt line."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-input-no-i*"
       (let ((input-buf (current-buffer))
@@ -1787,7 +1787,7 @@ No interrupt was actually delivered, so the state should not change."
 ;;;; ---- agent-repl-update-pr ----
 
 (ert-deftest agent-repl-cmd-test-update-pr/sends-prompt ()
-  "update-pr sends the configured update-pr prompt to claude."
+  "update-pr sends the configured update-pr prompt to the agent."
   (let (sent-text)
     (cl-letf (((symbol-function 'agent-repl--send-to-agent)
                (lambda (text) (setq sent-text text))))
@@ -1814,7 +1814,7 @@ No interrupt was actually delivered, so the state should not change."
       (should (equal args-arg '("fetch" "origin"))))))
 
 (ert-deftest agent-repl-cmd-test-rebase-onto-origin-master/sends-prompt-on-fetch-success ()
-  "On fetch success, callback sends the rebase prompt to claude."
+  "On fetch success, callback sends the rebase prompt to the agent."
   (let (sent-text)
     (cl-letf (((symbol-function 'agent-repl--send-to-agent)
                (lambda (text) (setq sent-text text))))
@@ -3066,7 +3066,7 @@ kill so the workspace can be re-opened with its identity intact."
         (should proc-deleted)))))
 
 (ert-deftest agent-repl-cmd-test-nuke-workspace/tabbar-only-routes-to-persp-kill ()
-  "nuke-workspace on a tab-bar-only ws (claude already killed) routes
+  "nuke-workspace on a tab-bar-only ws (agent already killed) routes
 through `+workspace/kill' and does NOT call the agent-repl teardown.
 The ws has no live `agent-repl--workspaces' entry but its persp is
 still in `+workspace-list-names', so the picker offers it and the
@@ -3114,7 +3114,7 @@ dispatcher chooses the plain-kill branch."
         (should-not kill-session-called)))))
 
 (ert-deftest agent-repl-cmd-test-nuke-workspace/tombstoned-with-persp-routes-to-persp-kill ()
-  "nuke-workspace on a tombstoned ws (claude killed but persp still in
+  "nuke-workspace on a tombstoned ws (agent killed but persp still in
 tab-bar) routes through `+workspace/kill'.  The hash entry already has
 `:nuked-at' set so `--ws-live-p' returns nil; the picker still offers
 the ws via the tab-bar branch and the dispatcher does the plain kill."
@@ -3769,7 +3769,7 @@ already-ready short-circuit) must be tagged."
 (ert-deftest agent-repl-cmd-test-load-workspace-snapshot/already-ready-not-tracked ()
   "A snapshot entry that hits the `already-ready' short-circuit must NOT be
 tagged as restored.  Such workspaces were already alive before the loader
-ran (the origin ws the user was sitting in, or any other ws claude was
+ran (the origin ws the user was sitting in, or any other ws the agent was
 already up in before the 2s idle loader fired).  Tagging them would make
 `nuke-restored-workspaces' incorrectly sweep the user's pre-existing
 workspace."
@@ -4496,7 +4496,7 @@ sourced from each project's state file, not the snapshot roster."
         (delete-directory real-dir t)))))
 
 (ert-deftest agent-repl-cmd-test-establish-workspace/starts-claude-when-not-running ()
-  "establish-workspace starts claude for the workspace unless it's already running."
+  "establish-workspace starts the agent for the workspace unless it's already running."
   (agent-repl-test--with-clean-state
     (let* ((tmp-dir (file-name-as-directory (make-temp-file "agent-repl-est-" t)))
            (started-for nil))
@@ -4512,7 +4512,7 @@ sourced from each project's state file, not the snapshot roster."
         (delete-directory tmp-dir t)))))
 
 (ert-deftest agent-repl-cmd-test-establish-workspace/skips-claude-when-running ()
-  "establish-workspace skips agent-init when claude is already running for ws."
+  "establish-workspace skips agent-init when the agent is already running for ws."
   (agent-repl-test--with-clean-state
     (let* ((tmp-dir (file-name-as-directory (make-temp-file "agent-repl-est-" t)))
            (started nil))
@@ -6893,7 +6893,7 @@ primitive), so only the bracketed transport beneath it is stubbed."
 ;;;; ---- agent-repl-kill-agent-process ----
 
 (ert-deftest agent-repl-cmd-test-kill-agent-process/signals-term ()
-  "kill-agent-process sends SIGTERM to the found claude pid via the boundary wrapper."
+  "kill-agent-process sends SIGTERM to the found agent pid via the boundary wrapper."
   (let ((sent nil))
     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
               ((symbol-function 'agent-repl--agent-process-pid) (lambda (_ws) 4242))
@@ -6903,7 +6903,7 @@ primitive), so only the bracketed transport beneath it is stubbed."
       (should (equal sent '(4242 . TERM))))))
 
 (ert-deftest agent-repl-cmd-test-kill-agent-process/no-process-errors ()
-  "kill-agent-process signals user-error and signals nothing when no claude process is found."
+  "kill-agent-process signals user-error and signals nothing when no agent process is found."
   (let ((called nil))
     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
               ((symbol-function 'agent-repl--agent-process-pid) (lambda (_ws) nil))

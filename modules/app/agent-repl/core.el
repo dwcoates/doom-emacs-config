@@ -186,7 +186,7 @@ Characters matching this pattern are replaced with underscores."
   :group 'agent-repl)
 
 (defcustom agent-repl-panel-buffer-name-format "*agent-panel%s-%s*"
-  "Format string for Claude panel buffer names.
+  "Format string for agent panel buffer names.
 First %s is the suffix (e.g. \"-input\" or empty), second %s is the workspace name."
   :type 'string
   :group 'agent-repl)
@@ -809,7 +809,7 @@ both must be initialized by `agent-repl--initialize-ws-env' before this is calle
       inst)))
 
 (defvar-local agent-repl--owning-workspace nil
-  "Workspace name that owns this claude session.
+  "Workspace name that owns this agent session.
 Set when the user sends a message; used to correctly target workspace
 state changes regardless of which persp the buffer drifts into.")
 (put 'agent-repl--owning-workspace 'permanent-local t)
@@ -822,12 +822,12 @@ for a nil or dead BUF, so callers need not guard liveness themselves."
        (buffer-local-value 'agent-repl--owning-workspace buf)))
 
 (defun agent-repl--foreign-owned-buffer-p (buf ws)
-  "Return non-nil if BUF is a Claude buffer owned by a workspace other than WS.
+  "Return non-nil if BUF is an agent buffer owned by a workspace other than WS.
 A buffer is foreign-owned when its owner (see `agent-repl--buffer-owner')
 is a non-nil name unequal to WS.  Buffers with no owner (nil) — e.g. magit,
 file, or other non-agent buffers that persp-mode swept into a perspective
 or window — are NOT foreign and stay eligible for teardown.  Guards against
-persp-mode drifting another workspace's live Claude panel into this persp,
+persp-mode drifting another workspace's live agent panel into this persp,
 which would otherwise nuke that workspace's session along with WS's own."
   (let ((owner (agent-repl--buffer-owner buf)))
     (and owner (not (equal owner ws)))))
@@ -840,12 +840,12 @@ which would otherwise nuke that workspace's session along with WS's own."
 ;; matches input buffers too; `agent-repl--agent-buffer-p' explicitly
 ;; excludes them.
 (defconst agent-repl--vterm-buffer-re "^\\*agent-panel-[[:alnum:]_-]+\\*$"
-  "Regexp matching Claude panel buffer names (e.g. *agent-panel-my-workspace*).
+  "Regexp matching agent panel buffer names (e.g. *agent-panel-my-workspace*).
 Caveat: also matches input buffer names.  Use `agent-repl--agent-buffer-p'
 for the combined check.")
 
 (defconst agent-repl--input-buffer-re "^\\*agent-panel-input-[[:alnum:]_-]+\\*$"
-  "Regexp matching Claude input buffer names (e.g. *agent-panel-input-my-workspace*).")
+  "Regexp matching agent input buffer names (e.g. *agent-panel-input-my-workspace*).")
 
 (defun agent-repl--sanitize-ws-name (name)
   "Return NAME with unsafe characters replaced by underscores.
@@ -896,14 +896,14 @@ no perspective named WS exists (e.g. early in session startup)."
     buf))
 
 (defun agent-repl--agent-buffer-p (&optional buf)
-  "Return non-nil if BUF (default: current buffer) is a Claude vterm buffer.
-Excludes Claude input buffers (which share a common prefix)."
+  "Return non-nil if BUF (default: current buffer) is an agent vterm buffer.
+Excludes agent input buffers (which share a common prefix)."
   (let ((name (buffer-name (or buf (current-buffer)))))
     (and (string-match-p agent-repl--vterm-buffer-re name)
          (not (string-match-p agent-repl--input-buffer-re name)))))
 
 (defun agent-repl--agent-panel-buffer-p (&optional buf)
-  "Return non-nil if BUF (default: current buffer) is any Claude panel buffer.
+  "Return non-nil if BUF (default: current buffer) is any agent panel buffer.
 Matches both vterm and input buffers."
   (let ((name (buffer-name (or buf (current-buffer)))))
     (or (string-match-p agent-repl--vterm-buffer-re name)
@@ -911,7 +911,7 @@ Matches both vterm and input buffers."
 
 (defun agent-repl--non-user-buffer-p (buf)
   "Return non-nil if BUF is not a user-facing buffer.
-Matches Claude panel buffers, minibuffers, and dead/nil buffers.
+Matches agent panel buffers, minibuffers, and dead/nil buffers.
 BUF may be a buffer object or a name string."
   (let* ((b (if (stringp buf) (get-buffer buf) buf))
          (name (and b (buffer-name b))))
@@ -920,7 +920,7 @@ BUF may be a buffer object or a name string."
         (string-match-p "^ \\*Minibuf" name))))
 
 (defun agent-repl--non-agent-buffers (buffers)
-  "Return BUFFERS with Claude panels, minibuffers, and dead buffers removed.
+  "Return BUFFERS with agent panels, minibuffers, and dead buffers removed.
 BUFFERS may be buffer objects or name strings."
   (cl-remove-if #'agent-repl--non-user-buffer-p buffers))
 
@@ -941,7 +941,7 @@ the buffer object is still live."
     (when live buf)))
 
 (defun agent-repl--vterm-live-p ()
-  "Return non-nil if the Claude vterm buffer for the current workspace exists and is live."
+  "Return non-nil if the agent vterm buffer for the current workspace exists and is live."
   (not (null (agent-repl--current-ws-live-vterm))))
 
 (defmacro agent-repl--with-vterm-buf (&rest body)
