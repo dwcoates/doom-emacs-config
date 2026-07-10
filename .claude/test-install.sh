@@ -21,7 +21,7 @@ FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); shift; if [ $# -gt 0 ]; then printf '%s\n' "$@" | sed 's/^/        /'; fi; }
 
-# Local skills install.sh expects to find under modules/app/claude-repl/skills/.
+# Local skills install.sh expects to find under modules/app/agent-repl/skills/.
 LOCAL_SKILL_NAMES=( debug-logs profile runtime-eval-code workspace-close workspace-open emit-workspace-commands.sh )
 
 # Build a synthetic repo containing a fresh copy of install.sh, the
@@ -34,9 +34,9 @@ mkfake_repo() {
   local impl_path="${1:-$root/impl/foo}"
   mkdir -p "$root/.claude" \
            "$root/.githooks" \
-           "$root/modules/app/claude-repl/skills-cache" \
-           "$root/modules/app/claude-repl/skills" \
-           "$root/modules/app/claude-repl/hooks"
+           "$root/modules/app/agent-repl/skills-cache" \
+           "$root/modules/app/agent-repl/skills" \
+           "$root/modules/app/agent-repl/hooks"
   cp "$REPO_ROOT/.claude/install.sh" "$root/.claude/install.sh"
   cp "$REPO_ROOT/.githooks/pre-commit" "$root/.githooks/pre-commit"
   chmod +x "$root/.claude/install.sh" "$root/.githooks/pre-commit"
@@ -45,17 +45,17 @@ mkfake_repo() {
     mkdir -p "$root/impl/foo"
     echo "impl-content" > "$root/impl/foo/SKILL.md"
   fi
-  cat > "$root/modules/app/claude-repl/skills-cache/manifest.sh" <<EOF
+  cat > "$root/modules/app/agent-repl/skills-cache/manifest.sh" <<EOF
 CACHED_SKILLS=("foo|$impl_path")
 EOF
   # Local-skill source dirs (install.sh links straight to these).
   for s in "${LOCAL_SKILL_NAMES[@]}"; do
-    mkdir -p "$root/modules/app/claude-repl/skills/$s"
-    printf 'name: %s\n' "$s" > "$root/modules/app/claude-repl/skills/$s/SKILL.md"
+    mkdir -p "$root/modules/app/agent-repl/skills/$s"
+    printf 'name: %s\n' "$s" > "$root/modules/app/agent-repl/skills/$s/SKILL.md"
   done
   # Dummy hook script so install.sh's hook-copy loop has something to do.
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$root/modules/app/claude-repl/hooks/dummy.sh"
-  chmod +x "$root/modules/app/claude-repl/hooks/dummy.sh"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$root/modules/app/agent-repl/hooks/dummy.sh"
+  chmod +x "$root/modules/app/agent-repl/hooks/dummy.sh"
   # Init git so install.sh can resolve --show-toplevel + --git-path.
   (cd "$root" && git init -q && git config user.email t@t && git config user.name t)
   echo "$root"
@@ -130,7 +130,7 @@ test_install_rejects_nonmain_worktree_impl() {
   # Point the manifest's skill impl INSIDE the linked (non-main) worktree.
   mkdir -p "$repo/linked-wt/impl/bar"
   echo x > "$repo/linked-wt/impl/bar/SKILL.md"
-  cat > "$repo/modules/app/claude-repl/skills-cache/manifest.sh" <<EOF
+  cat > "$repo/modules/app/agent-repl/skills-cache/manifest.sh" <<EOF
 CACHED_SKILLS=("bar|$repo/linked-wt/impl/bar")
 EOF
   run_install "$repo" "$home"
@@ -157,7 +157,7 @@ test_local_skills_link_to_main_worktree() {
   LAST_RC=$?
   set -e
   local actual; actual="$(readlink "$home/.claude/skills/debug-logs" 2>/dev/null || echo MISSING)"
-  local expected="$repo/modules/app/claude-repl/skills/debug-logs"
+  local expected="$repo/modules/app/agent-repl/skills/debug-logs"
   if [ "$LAST_RC" -eq 0 ] && [ "$actual" = "$expected" ]; then
     pass "local skills link to main worktree when run from a linked worktree"
   else
@@ -185,7 +185,7 @@ test_install_installs_pre_commit_hook() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
   run_install "$repo" "$home"
   local dest="$repo/.git/hooks/pre-commit"
-  if [ -x "$dest" ] && grep -q "claude-repl-precommit" "$dest"; then
+  if [ -x "$dest" ] && grep -q "agent-repl-precommit" "$dest"; then
     pass "pre-commit hook installed into repo .git/hooks"
   else
     fail "pre-commit install" "$(cat "$repo/.install.log")"

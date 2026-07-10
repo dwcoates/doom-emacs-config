@@ -221,12 +221,12 @@
   (add-to-list 'hl-todo-keyword-faces '("PRREVIEW" . "#7cb8bb")))
 
 (after! vterm
-  ;; `:actions' points at the claude-repl sibling-popup display fn so
+  ;; `:actions' points at the agent-repl sibling-popup display fn so
   ;; the bottom vterm popup stops at the claude panel boundary when
   ;; claude is open; when claude is closed the fn falls back to the
   ;; standard `:side 'bottom' frame-wide popup.
   (set-popup-rule! "\\.*doom:vterm\\.*"
-    :actions '(claude-repl-sibling-popup-display-fn)
+    :actions '(agent-repl-sibling-popup-display-fn)
     :size 0.4 :side 'right :select t :quit nil :ttl nil)
   (defun +dwc/vterm-toggle (ARG)
     (interactive "P")
@@ -392,20 +392,20 @@
   (advice-add '+ivy/project-compile :after #'DWC--add-command-to-projectile-history))
 
 ;; Workspace/persp policy configuration (+workspaces-switch-project-function
-;; and the persp-mode session/buffer settings) moved into the claude-repl
+;; and the persp-mode session/buffer settings) moved into the agent-repl
 ;; module's workspace.el, which owns the persp boundary.
 
 ;; Cmd+<numeral> AND Meta+<numeral> workspace switching live in
-;; `modules/app/claude-repl/keybindings.el' via
-;; `claude-repl--install-workspace-jump-overrides', so the merge-sentinel
-;; reload (which only reloads the claude-repl module's `config.el') picks
+;; `modules/app/agent-repl/keybindings.el' via
+;; `agent-repl--install-workspace-jump-overrides', so the merge-sentinel
+;; reload (which only reloads the agent-repl module's `config.el') picks
 ;; them up automatically.  See that installer for the cross-talk
 ;; rationale (Doom's `:n s-9' -> `+workspace/switch-to-final', `s-0' ->
 ;; `doom/reset-font-size', etc.).
 
-;; Open-most-recent-workspace moved into the claude-repl module
-;; (`claude-repl-open-most-recent-workspace' in commands.el, with
-;; `claude-repl--workspace-history' / `claude-repl--opened-recent-workspaces'
+;; Open-most-recent-workspace moved into the agent-repl module
+;; (`agent-repl-open-most-recent-workspace' in commands.el, with
+;; `agent-repl--workspace-history' / `agent-repl--opened-recent-workspaces'
 ;; state and the history-recording hook in workspace.el).
 
 (unless (display-graphic-p)
@@ -645,7 +645,7 @@ If found, the class name is returned, otherwise STR is returned"
 (defun +dwc/switch-to-project-buffer ()
   "Switch to a project buffer, with file paths searchable in Ivy."
   (interactive)
-  (let* ((buffers (claude-repl--non-claude-buffers (projectile-project-buffer-names)))
+  (let* ((buffers (agent-repl--non-claude-buffers (projectile-project-buffer-names)))
          (candidates
           (mapcar (lambda (name)
                     (let* ((buf (get-buffer name))
@@ -753,7 +753,7 @@ If found, the class name is returned, otherwise STR is returned"
 (defun +dwc/toggle-last-buffer ()
   "Toggle between the last two buffers, excluding Claude REPL and minibuffers."
   (interactive)
-  (let ((buf (car (claude-repl--non-claude-buffers
+  (let ((buf (car (agent-repl--non-claude-buffers
                    (cl-remove (current-buffer) (buffer-list))))))
     (when buf (switch-to-buffer buf))))
 
@@ -853,13 +853,13 @@ If found, the class name is returned, otherwise STR is returned"
   (add-to-list 'undo-fu-session-incompatible-files
                (concat "\\`" (regexp-quote (expand-file-name "~/.config/doom/")))))
 
-;; Load claude-repl directly here rather than via `:app claude-repl' in
+;; Load agent-repl directly here rather than via `:app agent-repl' in
 ;; init.el OR `doom-after-modules-config-hook'.
 ;;
-;; `:app claude-repl' loaded the module during the :app phase, BEFORE
+;; `:app agent-repl' loaded the module during the :app phase, BEFORE
 ;; `:config default'+evil-bindings.el ran -- which then rebound
-;; `SPC TAB n' to `+workspace/new', shadowing claude-repl's own binding
-;; to `claude-repl-create-worktree-workspace'.
+;; `SPC TAB n' to `+workspace/new', shadowing agent-repl's own binding
+;; to `agent-repl-create-worktree-workspace'.
 ;;
 ;; `doom-after-modules-config-hook' looked like the right home for the
 ;; load, but Doom's startup order is: ALL module config.el files (which
@@ -867,20 +867,20 @@ If found, the class name is returned, otherwise STR is returned"
 ;; → load $DOOMDIR/config.el (this file).  So `add-hook' from this file
 ;; is dead code on cold boot — the hook has already fired by the time
 ;; we get here and won't fire again until `M-x doom/reload', which is
-;; why claude-repl came up only partially after a fresh start: the
+;; why agent-repl came up only partially after a fresh start: the
 ;; module never loaded, so `keybindings.el' never ran and `SPC TAB n'
 ;; kept the default `+workspace/new' binding.
 ;;
 ;; $DOOMDIR/config.el runs AFTER every module's config.el, so loading
-;; the module here is the simplest way to make claude-repl's `map!'
+;; the module here is the simplest way to make agent-repl's `map!'
 ;; calls land last and win.
-(unless (featurep 'claude-repl)
-  (load! "modules/app/claude-repl/config"))
+(unless (featurep 'agent-repl)
+  (load! "modules/app/agent-repl/config"))
 
 ;; Per-repo initial buffers for new worktree workspaces.
-(after! claude-repl
-  (add-to-list 'claude-repl-workspace-initial-buffers
-               '("open-claude-config" . ("modules/app/claude-repl/config.el"))))
+(after! agent-repl
+  (add-to-list 'agent-repl-workspace-initial-buffers
+               '("open-claude-config" . ("modules/app/agent-repl/config.el"))))
 
 ;; Read-only, face-based rich rendering of markdown buffers.  Loads
 ;; `+markdown-rich-render-buffer' (one-shot) and `+markdown-rich-mode'

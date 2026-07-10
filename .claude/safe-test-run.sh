@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# safe-test-run.sh — run the claude-repl ERT suite with a git-state safety net.
+# safe-test-run.sh — run the agent-repl ERT suite with a git-state safety net.
 #
 # Captures HEAD + refs/heads/* + working-tree status before invoking the
 # suite, drops a timestamped checkpoint tag at HEAD, then re-captures the
@@ -7,7 +7,7 @@
 # is LEFT IN PLACE and the user is told exactly how to roll back; on a
 # clean run the tag is auto-removed.
 #
-# Why this exists: the claude-repl runtime guards catch unmocked-WRAPPER
+# Why this exists: the agent-repl runtime guards catch unmocked-WRAPPER
 # call paths, but a raw `(shell-command-to-string "git ...")` in
 # production code that bypasses the registered wrappers entirely is NOT
 # automatically detected — see AGENTS.md "How the rule is enforced".
@@ -19,7 +19,7 @@
 #   .claude/safe-test-run.sh [SELECTOR]
 #
 # SELECTOR is an optional ERT selector (a regex matching test names).
-# Defaults to running the full suite via test-claude-repl.el.
+# Defaults to running the full suite via test-agent-repl.el.
 #
 # Exit codes:
 #   0   — tests passed AND no git drift
@@ -38,7 +38,7 @@ if [ -z "$REPO_ROOT" ]; then
 fi
 cd "$REPO_ROOT"
 
-TEST_FILE="modules/app/claude-repl/test-claude-repl.el"
+TEST_FILE="modules/app/agent-repl/test-agent-repl.el"
 if [ ! -f "$TEST_FILE" ]; then
   echo "[safe-test-run] FATAL: $TEST_FILE not found" >&2
   exit 3
@@ -54,7 +54,7 @@ PRE_REFS="$(git for-each-ref --format='%(refname) %(objectname)' refs/heads/ ref
 PRE_REFS_HASH="$(printf '%s' "$PRE_REFS" | shasum -a 256 | cut -d' ' -f1)"
 PRE_STATUS="$(git status --porcelain)"
 
-CHECKPOINT_TAG="claude-repl-test-checkpoint-$(date +%Y%m%d-%H%M%S)-$$"
+CHECKPOINT_TAG="agent-repl-test-checkpoint-$(date +%Y%m%d-%H%M%S)-$$"
 git tag "$CHECKPOINT_TAG" "$PRE_HEAD"
 
 echo "[safe-test-run] Checkpoint tag: $CHECKPOINT_TAG @ $PRE_HEAD"

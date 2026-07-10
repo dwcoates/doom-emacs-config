@@ -4,13 +4,13 @@
 #
 # Implements the static half of AGENTS.md "No External Processes or
 # External State in Tests".  The runtime half (per-test guards) lives
-# in `modules/app/claude-repl/test-helpers.el'.
+# in `modules/app/agent-repl/test-helpers.el'.
 #
 # Rule:
-#   Production code (modules/app/claude-repl/*.el, excluding test-*.el
+#   Production code (modules/app/agent-repl/*.el, excluding test-*.el
 #   and the wrapper-defining `core.el') may invoke external binaries
 #   ONLY through a function listed in
-#   `claude-repl--external-boundary-functions' (the registry in
+#   `agent-repl--external-boundary-functions' (the registry in
 #   core.el).  Any other code path that names an external CLI as an
 #   argument to `call-process', `shell-command(-to-string)',
 #   `start-process', `make-process', `process-file', or their
@@ -27,7 +27,7 @@
 #   - Binary list: git, gh, docker, claude, osascript, pbcopy,
 #     pbpaste, curl, terminal-notifier.  Add new ones here as new
 #     wrappers land (and remember to extend the registry in
-#     `claude-repl--external-boundary-functions').
+#     `agent-repl--external-boundary-functions').
 #   - Match requires the binary name to be followed by a quote,
 #     whitespace, or `/' so `"github"' / `"gitea-cli"' don't fire.
 #
@@ -45,9 +45,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-MODULE_DIR="$REPO_ROOT/modules/app/claude-repl"
+MODULE_DIR="$REPO_ROOT/modules/app/agent-repl"
 
-# core.el holds the canonical wrapper family (`claude-repl--git-string',
+# core.el holds the canonical wrapper family (`agent-repl--git-string',
 # etc.) — every external invocation in that file IS a wrapper definition,
 # so whole-file exempt.  Per-line ALLOW-EXTERNAL-BOUNDARY covers wrappers
 # that live elsewhere.
@@ -126,9 +126,9 @@ if [ "$violations" -gt 0 ]; then
   echo "" >&2
   echo "[check-external-boundaries] $violations violation(s)." >&2
   echo "[check-external-boundaries] Fix: route each call through a wrapper named" >&2
-  echo "    claude-repl--<resource>-* (e.g. claude-repl--git-string, claude-repl--gh-string-quiet)" >&2
+  echo "    agent-repl--<resource>-* (e.g. agent-repl--git-string, agent-repl--gh-string-quiet)" >&2
   echo "[check-external-boundaries] then add the new wrapper symbol to" >&2
-  echo "    \`claude-repl--external-boundary-functions' in core.el so the test-time guards see it." >&2
+  echo "    \`agent-repl--external-boundary-functions' in core.el so the test-time guards see it." >&2
   echo "[check-external-boundaries] If the source line legitimately IS the wrapper definition," >&2
   echo "    append \`;; ALLOW-EXTERNAL-BOUNDARY' to that line so the lint exempts it." >&2
   echo "[check-external-boundaries] See AGENTS.md \"No External Processes or External State in Tests\"." >&2
