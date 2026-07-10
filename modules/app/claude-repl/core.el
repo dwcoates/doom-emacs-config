@@ -28,6 +28,93 @@ Cancelled and reset whenever this file is re-evaluated.")
   :group 'tools
   :prefix "claude-repl-")
 
+;;;; Canonical state directory
+;;
+;; claude-repl's OWN persisted state and cross-process IPC live in a
+;; single, account-independent tree at `~/.claude-emacs' — a fixed
+;; sibling of the Claude CLI config dir (~/.claude), deliberately
+;; separate so account selection can never split it.
+;;
+;; The path is a plain hardcoded sibling rather than `doom-data-dir' so
+;; the managed out-of-process shell scripts (hooks/*.sh,
+;; skills/emit-workspace-commands.sh) can compute the IDENTICAL location
+;; as `$HOME/.claude-emacs' without replicating Doom/XDG internals.
+;;
+;; The `CLAUDE_REPL_STATE_DIR' environment variable overrides the root,
+;; honored identically by BOTH the elisp helper below and the shell
+;; scripts.  It exists so the test suite can isolate state to a temp dir;
+;; production leaves it unset and uses the `~/.claude-emacs' fallback.
+
+(defconst claude-repl--state-dir-env "CLAUDE_REPL_STATE_DIR"
+  "Name of the environment variable overriding `claude-repl--global-state-dir'.
+Honored identically by the managed shell scripts.  Unset in production;
+the test suite sets it to a temp dir to isolate state.")
+
+(defconst claude-repl--state-dir-default "~/.claude-emacs"
+  "Fallback root for claude-repl state when `claude-repl--state-dir-env' is unset.
+A fixed sibling of the Claude CLI config dir (~/.claude).")
+
+(defun claude-repl--global-state-dir ()
+  "Return claude-repl's canonical state directory (with trailing slash).
+Resolves the `claude-repl--state-dir-env' override, else
+`claude-repl--state-dir-default' (~/.claude-emacs).  See the commentary
+above for why this is a fixed sibling dir rather than `doom-data-dir'.
+Creates nothing."
+  (file-name-as-directory
+   (expand-file-name (or (getenv claude-repl--state-dir-env)
+                         claude-repl--state-dir-default))))
+
+(defun claude-repl--global-state-file (relative)
+  "Return the absolute path of RELATIVE under `claude-repl--global-state-dir'.
+RELATIVE is a path fragment such as \"workspaces.el\" or \"output\".  An
+empty string yields the state dir itself.  The parent directory is NOT
+created here."
+  (expand-file-name relative (claude-repl--global-state-dir)))
+
+(defconst claude-repl--legacy-state-migrations
+  '(("~/.claude/emacs"                  . "")
+    ("~/.claude/output"                 . "output")
+    ("~/.claude/workspace-notifications" . "workspace-notifications"))
+  "Alist (LEGACY-ABS . NEW-RELATIVE) of state dirs to migrate once.
+LEGACY-ABS is the old location under the Claude CLI config dir;
+NEW-RELATIVE is the fragment under `claude-repl--global-state-dir'.  The
+legacy `~/.claude/emacs' dir flattens onto the state-dir root (empty
+NEW-RELATIVE), so `~/.claude/emacs/workspaces.el' becomes
+`~/.claude-emacs/workspaces.el'.")
+
+(defun claude-repl--migrate-legacy-state ()
+  "One-time move of claude-repl state out of the legacy ~/.claude location.
+Historically claude-repl kept its own state and IPC under the Claude CLI
+config dir; it now lives under `claude-repl--global-state-dir'.  For each entry
+in `claude-repl--legacy-state-migrations' whose legacy path still exists
+and whose new counterpart does NOT, move it.  Idempotent: a no-op once
+migrated or on a fresh install.  Never overwrites an existing
+new-location path.  A failed move is surfaced (warned/logged), never
+swallowed, and does not abort the remaining migrations."
+  (dolist (pair claude-repl--legacy-state-migrations)
+    (let ((old (expand-file-name (car pair)))
+          (new (claude-repl--global-state-file (cdr pair))))
+      (when (and (file-exists-p old) (not (file-exists-p new)))
+        (condition-case err
+            (progn
+              (make-directory (file-name-directory (directory-file-name new)) t)
+              (rename-file old new)
+              (if (fboundp 'claude-repl--log)
+                  (claude-repl--log nil "migrate-legacy-state: moved %s -> %s" old new)
+                (message "[claude-repl] migrated state %s -> %s" old new)))
+          (error
+           (message "[claude-repl] WARNING: state migration %s -> %s failed: %S"
+                    old new err)))))))
+
+;; Run only in a real interactive session.  The `noninteractive' guard
+;; keeps batch invocations (the ERT suite, CI, ad-hoc `emacs -batch'
+;; scripts) from MOVING the developer's live ~/.claude state out from
+;; under a separately-running interactive Emacs — which would split state
+;; across the two locations.  The function itself is still exercised
+;; directly (with isolated temp paths) by test-core.el.
+(unless noninteractive
+  (claude-repl--migrate-legacy-state))
+
 (defcustom claude-repl-debug nil
   "Controls debug logging level.
 nil means no logging; t means standard logging; \\='verbose also enables
@@ -78,10 +165,12 @@ Longer values reduce collision risk in setups with many workspaces."
   :type 'integer
   :group 'claude-repl)
 
-(defcustom claude-repl-log-file-name "~/.claude/emacs/doom-claude-repl.log"
+(defcustom claude-repl-log-file-name (claude-repl--global-state-file "doom-claude-repl.log")
   "Path to the claude-repl log file.
-The value is passed through `expand-file-name', and the parent directory
-is created on demand by `claude-repl--logfile-path'."
+Defaults under `claude-repl--global-state-dir' (claude-repl's own canonical
+state tree at ~/.claude-emacs), NOT the Claude CLI config dir.  The value
+is passed through `expand-file-name', and the parent directory is created
+on demand by `claude-repl--logfile-path'."
   :type 'string
   :group 'claude-repl)
 

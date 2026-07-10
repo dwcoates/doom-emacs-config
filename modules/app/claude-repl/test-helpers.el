@@ -310,6 +310,20 @@ from START (default 0), or nil when NEEDLE does not occur."
   (defvar claude-repl--notification-backend (lambda (_ws _title _msg) nil)
     "Stub: no-op notification backend for test environments."))
 
+;; Isolate claude-repl's canonical state dir to a throwaway temp location
+;; for the ENTIRE test session, BEFORE the module loads.  `core.el'
+;; resolves `claude-repl--global-state-dir' (and the log path default it
+;; bakes in at load) from the `CLAUDE_REPL_STATE_DIR' override, falling
+;; back to `~/.claude-emacs'; pointing that env var at a temp dir here
+;; ensures module load-time logging and any state writes never touch the
+;; developer's real `~/.claude-emacs' tree — which, if created by a test
+;; run, would otherwise block the one-time legacy migration on the next
+;; interactive reload.  Individual tests that assert specific state-dir
+;; paths rebind `process-environment' locally and are unaffected.
+(setenv "CLAUDE_REPL_STATE_DIR"
+        (expand-file-name (format "claude-repl-test-state-%d" (emacs-pid))
+                          temporary-file-directory))
+
 ;; Suppress timers at load time
 (defvar claude-repl-test--orig-run-with-timer (symbol-function 'run-with-timer))
 (advice-add 'run-with-timer :override (lambda (&rest _) nil))
