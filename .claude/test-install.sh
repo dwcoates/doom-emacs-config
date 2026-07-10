@@ -157,7 +157,11 @@ test_local_skills_link_to_main_worktree() {
   LAST_RC=$?
   set -e
   local actual; actual="$(readlink "$home/.claude/skills/debug-logs" 2>/dev/null || echo MISSING)"
-  local expected="$repo/modules/app/agent-repl/skills/debug-logs"
+  # install.sh links to the PHYSICAL main-worktree path (matching git's
+  # canonical `worktree list` output), so canonicalize the tmpdir-based
+  # expectation too (mktemp yields /var/... which symlinks to /private/var/...
+  # on macOS).
+  local expected; expected="$(cd "$repo" && pwd -P)/modules/app/agent-repl/skills/debug-logs"
   if [ "$LAST_RC" -eq 0 ] && [ "$actual" = "$expected" ]; then
     pass "local skills link to main worktree when run from a linked worktree"
   else
