@@ -1,8 +1,8 @@
-;;; model.el --- Claude model in vterm mode-line -*- lexical-binding: t; -*-
+;;; model.el --- Agent model in vterm mode-line -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
-;; Render the Claude model actually in use by a workspace's session in
+;; Render the agent model actually in use by a workspace's session in
 ;; the vterm mode-line, alongside the prompt-summary and aiTitle
 ;; segments.
 ;;
@@ -37,7 +37,7 @@
 ;;;; Defcustoms
 
 (defcustom agent-repl-model-enabled t
-  "Non-nil to render the Claude model in the vterm mode-line."
+  "Non-nil to render the agent model in the vterm mode-line."
   :type 'boolean
   :group 'agent-repl)
 
@@ -187,7 +187,7 @@ model is yet available."
 
 (defconst agent-repl--model-mode-line-spec
   '(:eval (agent-repl--model-segment))
-  "Trailing `:eval' mode-line segment that paints the Claude model.
+  "Trailing `:eval' mode-line segment that paints the agent model.
 Captured as a constant so the attach helper can detect (via `equal')
 whether a buffer's mode-line already contains it.")
 

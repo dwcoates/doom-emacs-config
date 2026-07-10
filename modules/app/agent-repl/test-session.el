@@ -89,7 +89,7 @@ the composed-state rule with :repl-state."
 
 (ert-deftest agent-repl-test-finished-from-hook-nil-vterm-sets-done ()
   "handle-agent-finished still sets :done when vterm-buf is nil.
-The Stop signal's intent is \"Claude finished\" — unrelated to whether
+The Stop signal's intent is \"the agent finished\" — unrelated to whether
 the vterm buffer is still around.  Refresh-vterm-after-finish is guarded
 by vterm-buf presence; the :done write is not."
   (agent-repl-test--with-clean-state
@@ -159,7 +159,7 @@ by vterm-buf presence; the :done write is not."
                        '("hold-me")))))))
 
 (ert-deftest agent-repl-test-drain-deferred-skipped-when-permission ()
-  "Drain does NOT fire while Claude is at a `:permission' prompt."
+  "Drain does NOT fire while the agent is at a `:permission' prompt."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :agent-state :permission)
     (agent-repl--ws-put "ws1" :deferred-prompts '("hold-me"))
@@ -172,7 +172,7 @@ by vterm-buf presence; the :done write is not."
                        '("hold-me")))))))
 
 (ert-deftest agent-repl-test-drain-deferred-skipped-when-init ()
-  "Drain does NOT fire while Claude is still initializing (`:init')."
+  "Drain does NOT fire while the agent is still initializing (`:init')."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :agent-state :init)
     (agent-repl--ws-put "ws1" :deferred-prompts '("hold-me"))
@@ -1268,7 +1268,7 @@ TIMER-SLOT is a cons cell; the most recent scheduled thunk is stored at
           (agent-repl-test--with-deliver-mocks sent timer-slot
             (agent-repl--deliver-pending-prompts fake-buf '("a") "ws1")
             (should (equal (car sent) '("a")))
-            ;; State remains :idle — Claude never saw the paste.
+            ;; State remains :idle — the agent never saw the paste.
             (agent-repl--ws-put "ws1" :agent-state :idle)
             (funcall (car timer-slot))
             ;; Same prompt resent.
@@ -1798,7 +1798,7 @@ ws that was deprioritized at quit returns to its prior slot on restart."
 
 (ert-deftest agent-repl-test-initialize-ws-env-restores-fork-session-id ()
   "initialize-ws-env hydrates `:fork-session-id' from the saved file so a
-fork-ws whose claude session never started before quit can launch with
+fork-ws whose agent session never started before quit can launch with
 --fork-session on the next start."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-init-fork-" t)))

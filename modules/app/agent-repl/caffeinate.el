@@ -1,4 +1,4 @@
-;;; caffeinate.el --- Prevent macOS sleep while Claude workspaces are working -*- lexical-binding: t; -*-
+;;; caffeinate.el --- Prevent macOS sleep while agent workspaces are working -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
@@ -6,7 +6,7 @@
 ;; wakefulness.  Two activity signals are OR'd:
 ;;
 ;;   1. `:agent-state' is in `agent-repl-caffeinate-active-states'
-;;      (default: `:thinking') — Claude is mid-computation.
+;;      (default: `:thinking') — the agent is mid-computation.
 ;;   2. The workspace has a merge in flight or queued (`:merging t' or
 ;;      `:repl-state :merge-queued') — the editor needs wakefulness to
 ;;      detect the workspace-merge sentinel file, run the cherry-pick,
@@ -15,7 +15,7 @@
 ;; A `caffeinate -i' subprocess is started on the first transition
 ;; into either active condition and killed once every workspace has
 ;; resolved out of all of them, so a user-initiated shutdown waits
-;; while Claude is computing or a merge is in flight but proceeds
+;; while the agent is computing or a merge is in flight but proceeds
 ;; immediately once every workspace lands on `:idle' / `:done' /
 ;; `:permission' AND is not `:merging' / `:merge-queued'.  A merge
 ;; that lands on `:merged' / `:merge-completed t' (or terminal
@@ -39,7 +39,7 @@
 ;;; Code:
 
 (defgroup agent-repl-caffeinate nil
-  "macOS sleep-prevention while Claude workspaces are active."
+  "macOS sleep-prevention while agent workspaces are active."
   :group 'agent-repl)
 
 (defcustom agent-repl-caffeinate-enabled t
@@ -61,7 +61,7 @@ This is one of two activity signals — see also
 `agent-repl--caffeinate-any-merging-p', which keeps caffeinate alive
 while any workspace has a merge in flight or queued (independent of
 `:agent-state' so a workspace can drop to `:done' and still hold
-caffeinate while its sentinel-driven cherry-pick + optional Claude
+caffeinate while its sentinel-driven cherry-pick + optional agent
 conflict-resolution path runs)."
   :type '(repeat (choice (const :init)
                          (const :idle)
@@ -122,7 +122,7 @@ Mirrors the drawer's MERGING bucket gate
 \(active cherry-pick in flight) or `:repl-state :merge-queued' (parked
 behind another in-flight cherry-pick) are considered active so macOS
 cannot idle-sleep between sentinel-driven merge detection and the
-follow-up cherry-pick + optional Claude-driven conflict resolution.
+follow-up cherry-pick + optional agent-driven conflict resolution.
 
 `:merged' / `:merge-completed t' / `:merge-conflict' / `:merge-failed'
 are *not* considered active: a completed merge has no further work, a

@@ -328,7 +328,7 @@ input window and disturbs redisplay.  Going through `set-window-start'
                           (point)))))
        (set-window-start vterm-win new-start t)
        (set-window-point vterm-win new-start)))
-   ;; Freeze the vterm buffer so subsequent process output from Claude
+   ;; Freeze the vterm buffer so subsequent process output from the agent
    ;; doesn't yank the scroll back to the prompt while the user is still
    ;; scrolling.  Scrolling UP (negative LINES) freezes indefinitely so
    ;; the user can read history undisturbed; scrolling DOWN arms a timed

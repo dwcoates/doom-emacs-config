@@ -3,13 +3,13 @@
 ;;; Commentary:
 
 ;; Writes a JSON snapshot of every registered agent-repl workspace to a
-;; shared file so other claude sessions can introspect peer workspace
+;; shared file so other agent sessions can introspect peer workspace
 ;; state (the `/workspace-status' skill is the documented consumer).
 ;;
 ;; The file lives at `agent-repl-workspace-status-file' — by default
 ;; `~/.claude-emacs/workspace-status.json' — alongside `workspaces.el'.
-;; agent-repl launches plain `claude' on the host, so the publishing
-;; editor and every consuming claude session share the same host
+;; agent-repl launches agents directly on the host, so the publishing
+;; editor and every consuming agent session share the same host
 ;; filesystem and read/write the identical path.
 ;;
 ;; Refresh cadence: an outer scheduler runs every
@@ -88,7 +88,7 @@ serialize as JSON `null' instead of `{}'."
 
 (defun agent-repl--workspace-status-merged-p (ws)
   "Return non-nil when WS is a merged-and-dead workspace.
-Merged workspaces have no live claude session and all interesting
+Merged workspaces have no live agent session and all interesting
 fields stay `null' for the remainder of the registry's lifetime, so
 they are filtered out of the JSON snapshot to (a) keep the on-disk
 file focused on live workspaces and (b) scale json-encode cost with
