@@ -837,6 +837,52 @@ to compare equal under propertized-string semantics."
         (when (fboundp 'claude-repl--force-tab-bar-redraw)
           (claude-repl--force-tab-bar-redraw))))))
 
+(defun claude-repl--workspace-magit-status-buffer (ws)
+  "Return an existing `magit-status-mode' buffer for workspace WS, or nil.
+Matches a live buffer whose `major-mode' derives from `magit-status-mode'
+and whose `default-directory' canonicalizes to the same git root as WS's
+project directory.  Never creates a buffer — it only locates one already
+available for the workspace, so the `SPC o c' fallback
+\(`claude-repl--panel-fallback-buffer') can prefer an existing
+magit-status buffer over the Doom splash."
+  (when-let* ((dir (ignore-errors (claude-repl--ws-dir ws)))
+              (root (claude-repl--git-root dir)))
+    (cl-find-if
+     (lambda (buf)
+       (with-current-buffer buf
+         (and (derived-mode-p 'magit-status-mode)
+              (equal (claude-repl--path-canonical default-directory) root))))
+     (buffer-list))))
+
+(defun claude-repl--panel-fallback-buffer (ws)
+  "Return the buffer to display when `SPC o c' clears WS's sole panels.
+Prefers an existing workspace magit-status buffer
+\(`claude-repl--workspace-magit-status-buffer'); when none exists, falls
+back to the Doom splash (`doom-fallback-buffer').  Signals when neither
+is available rather than returning nil, so the caller never swaps a
+panel window to a dead buffer (see the fail-hard invariant)."
+  (or (claude-repl--workspace-magit-status-buffer ws)
+      (and (fboundp 'doom-fallback-buffer) (doom-fallback-buffer))
+      (error "claude-repl--panel-fallback-buffer: no magit-status or doom-fallback buffer for ws=%s" ws)))
+
+(defun claude-repl--replace-panels-with-fallback (ws)
+  "Replace WS's frame-filling panels with a single fallback buffer.
+The `SPC o c' path calls this when the panels are the only windows on
+screen (no saved `:fullscreen-config' to restore to): rather than
+stranding the lone output window, closes the input window and swaps the
+output window's buffer to WS's magit-status buffer when one already
+exists, else the Doom splash (see `claude-repl--panel-fallback-buffer').
+Routes the output-window swap through `claude-repl--safe-delete-window'
+so the dedicated vterm window is un-dedicated before the buffer swap."
+  (let ((input-buf (claude-repl--ws-get ws :input-buffer))
+        (vterm-buf (claude-repl--ws-get ws :vterm-buffer)))
+    (claude-repl--log ws "replace-panels-with-fallback ws=%s" ws)
+    (when input-buf
+      (claude-repl--close-buffer-window input-buf))
+    (when-let ((vterm-win (and vterm-buf (get-buffer-window vterm-buf))))
+      (claude-repl--safe-delete-window
+       vterm-win (claude-repl--panel-fallback-buffer ws)))))
+
 (defun claude-repl--on-simple-close (&optional ws)
   "Bookkeep + hide panels; do NOT touch tab-bar order.
 Sets `:repl-state :inactive' on WS (`:claude-state' untouched so an
@@ -844,13 +890,19 @@ in-flight :thinking / :permission survives the close), then hides
 the panel windows.  No save-tab-index, no push-to-back, no flash —
 this is the simple-close audit point that `SPC o c' is bound to.
 
-The panels fill the frame (fullscreen is the only display format), so
-first restores the pre-panel layout saved at open time via
+The panels fill the frame (fullscreen is the only display format).
+When a pre-panel layout was captured at open time, restores it via
 `claude-repl--restore-fullscreen-config' — re-establishing the work
-windows that were on screen before the panels took over — so the
-subsequent `claude-repl--hide-panels' leaves those work windows behind
-rather than hitting `delete-window's sole-ordinary-window refusal and
-stranding a panel onscreen."
+windows that were on screen before the panels took over — then
+`claude-repl--hide-panels' leaves those work windows behind rather than
+hitting `delete-window's sole-ordinary-window refusal and stranding a
+panel onscreen.
+
+When there is NO saved layout to restore (the panels were the only
+windows on screen), replaces both panels with a single fallback buffer
+via `claude-repl--replace-panels-with-fallback' — the workspace's
+magit-status buffer when one already exists, else the Doom splash —
+rather than stranding the output window."
   (let ((ws (or ws (claude-repl--ws-current-name))))
     (claude-repl--log ws "on-simple-close: CALLED this-command=%s last-command=%s"
                       this-command last-command)
@@ -858,8 +910,9 @@ stranding a panel onscreen."
       (claude-repl--log ws "on-simple-close ws=%s claude-state=%s -> repl-state=:inactive"
                         ws (claude-repl--ws-claude-state ws))
       (claude-repl--ws-set-repl-state ws :inactive))
-    (claude-repl--restore-fullscreen-config ws)
-    (claude-repl--hide-panels)))
+    (if (claude-repl--restore-fullscreen-config ws)
+        (claude-repl--hide-panels)
+      (claude-repl--replace-panels-with-fallback ws))))
 
 (defun claude-repl--on-close (&optional ws)
   "Full close: bookkeep + restore pre-panel layout + hide + deprio + save tab index.
