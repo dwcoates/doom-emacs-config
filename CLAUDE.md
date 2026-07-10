@@ -112,7 +112,7 @@ Set these environment variables for full functionality:
 
 ## Testing Requirements
 
-- **Always run tests after making changes.** Before considering any code change complete, run the relevant test suite to verify nothing is broken. For `modules/app/claude-repl/`, run:
+- **Always run tests after making changes.** Before considering any code change complete, run the relevant test suite to verify nothing is broken. For `modules/app/agent-repl/`, run:
   ```bash
   emacs -batch -Q -l ert -l test-<module>.el -f ert-run-tests-batch-and-exit
   ```

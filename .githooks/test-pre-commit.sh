@@ -21,14 +21,15 @@ fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); shift; if [ $# -gt 0 ]; then pri
 #   - emacs is stubbed via PATH to exit 0 (so ERT never really runs)
 #   - check-external-boundaries.sh is absent (boundary lint skipped)
 mkrepo() {
-  local repo; repo="$(mktemp -d)"
+  local repo module="${1:-agent-repl}"; repo="$(mktemp -d)"
   git -C "$repo" init -q
   git -C "$repo" config user.email "test@example.com"
   git -C "$repo" config user.name "Test"
 
-  # Minimal repo layout expected by the hook.
-  mkdir -p "$repo/modules/app/claude-repl"
-  touch "$repo/modules/app/claude-repl/test-claude-repl.el"
+  # Minimal repo layout expected by the hook (module name parameterizable
+  # so the legacy agent-repl fallback can be exercised).
+  mkdir -p "$repo/modules/app/$module"
+  touch "$repo/modules/app/$module/test-$module.el"
 
   # Install the hook under test.
   cp "$HOOK_SRC" "$repo/.git/hooks/pre-commit"
@@ -37,10 +38,10 @@ mkrepo() {
   echo "$repo"
 }
 
-# Stage a dummy claude-repl .el file in REPO so the test gate is reached.
+# Stage a dummy module .el file in REPO so the test gate is reached.
 stage_el_file() {
-  local repo="$1"
-  local file="$repo/modules/app/claude-repl/dummy.el"
+  local repo="$1" module="${2:-agent-repl}"
+  local file="$repo/modules/app/$module/dummy.el"
   echo "(provide 'dummy)" > "$file"
   git -C "$repo" add "$file"
 }
@@ -156,6 +157,53 @@ EOF
   rm -rf "$repo" "$stub_dir"
 }
 
+test_legacy_claude_repl_layout_still_gated() {
+  # A sibling worktree that predates the agent-repl -> agent-repl rename
+  # shares this hook via core.hooksPath: the hook must fall back to the
+  # legacy module name and run ITS aggregator.
+  local repo; repo="$(mkrepo agent-repl)"
+  stage_el_file "$repo" agent-repl
+
+  local stub_dir; stub_dir="$(mktemp -d)"
+  local arglog="$stub_dir/emacs-args"
+  cat > "$stub_dir/emacs" <<EOF
+#!/usr/bin/env bash
+echo "\$@" > "$arglog"
+exit 0
+EOF
+  chmod +x "$stub_dir/emacs"
+
+  PATH="$stub_dir:$PATH" git -C "$repo" -c core.hooksPath=.git/hooks commit -m "legacy" >/dev/null 2>&1 || true
+
+  if [ -f "$arglog" ] && grep -q "modules/app/agent-repl/test-agent-repl.el" "$arglog"; then
+    pass "legacy layout: hook gates on agent-repl aggregator"
+  else
+    fail "legacy layout: expected emacs run on agent-repl aggregator" "$(cat "$arglog" 2>/dev/null || echo 'emacs never invoked')"
+  fi
+
+  rm -rf "$repo" "$stub_dir"
+}
+
+test_missing_aggregator_refuses_commit() {
+  # Gate reached (module .el staged) but NO module has an aggregator test
+  # file: the hook must refuse the commit rather than skipping the suite.
+  local repo; repo="$(mkrepo)"
+  rm "$repo/modules/app/agent-repl/test-agent-repl.el"
+  stage_el_file "$repo"
+
+  local stub_dir; stub_dir="$(stub_emacs_dir)"
+  local out exit_code=0
+  out="$(PATH="$stub_dir:$PATH" git -C "$repo" -c core.hooksPath=.git/hooks commit -m "broken" 2>&1)" || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ] && echo "$out" | grep -q "refusing to commit"; then
+    pass "missing aggregator: commit refused"
+  else
+    fail "missing aggregator: expected refusal" "exit: $exit_code" "$out"
+  fi
+
+  rm -rf "$repo" "$stub_dir"
+}
+
 # ---------------------------------------------------------------------------
 
 echo "=== test-pre-commit.sh ==="
@@ -163,6 +211,8 @@ test_cherry_pick_skips_ert
 test_cherry_pick_does_not_invoke_emacs
 test_normal_commit_reaches_ert_when_el_staged
 test_normal_commit_no_el_skips_ert
+test_legacy_claude_repl_layout_still_gated
+test_missing_aggregator_refuses_commit
 
 echo
 echo "Passed: $PASS  Failed: $FAIL"

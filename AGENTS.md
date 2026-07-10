@@ -12,56 +12,56 @@ Begin the persistence message with ✅ if the changes are not persistent after r
 
 Why this is a hard gate rather than a soft preference:
 
-- Workspace-merge reload (the `M-x doom/reload`-equivalent fired by the merge sentinel) reloads `modules/app/claude-repl/*.el` but does **not** re-evaluate the top-level `config.el`.
+- Workspace-merge reload (the `M-x doom/reload`-equivalent fired by the merge sentinel) reloads `modules/app/agent-repl/*.el` but does **not** re-evaluate the top-level `config.el`.
   - Top-level edits silently fail to take effect in the running Emacs until the user manually restarts or does a full reload.
   - The agent and the user then waste real time debugging "why didn't my fix land" when the fix is correct but unloaded.
 - Top-level `config.el` is the user's personal scope (`+dwc/...`).
-  - Anything claude-repl-related that lives there is almost certainly mis-placed and should be inside the module.
+  - Anything agent-repl-related that lives there is almost certainly mis-placed and should be inside the module.
   - Editing it conflates user-scope and package-scope, which makes future extraction harder.
 
-If you find yourself about to edit top-level `config.el` for a claude-repl-related concern (anything touching `tab-bar`, `persp-mode`, `+workspace-*`, `safe-persp-name`, claude faces, claude commands, claude keybindings, claude hooks, etc.), STOP and:
+If you find yourself about to edit top-level `config.el` for a agent-repl-related concern (anything touching `tab-bar`, `persp-mode`, `+workspace-*`, `safe-persp-name`, claude faces, claude commands, claude keybindings, claude hooks, etc.), STOP and:
 
 1. Do not edit `config.el`.
 2. Surface the situation to the user in your next message. Include:
    - Exactly what change you were about to make and on which lines.
    - Why the change wants to live in `config.el` (e.g. it reads a `+dwc/` toggle, it depends on a `(after! persp-mode ...)` block, it sets `tab-bar-format`, etc.).
-   - A concrete proposal for extracting the existing surrounding code into `modules/app/claude-repl/` so the new change can live in the module too.
+   - A concrete proposal for extracting the existing surrounding code into `modules/app/agent-repl/` so the new change can live in the module too.
    - A brief justification: why extraction is the right move, what it unblocks, and what the risk is of leaving it in `config.el`.
 3. Wait for the user to decide between: (a) approve the top-level edit anyway, (b) approve the extraction, (c) something else.
 
-**Never put new claude-repl code in the top-level doomdir `config.el`.** All claude-repl code — defuns, advice, hooks, keybindings, magit integration — lives under `modules/app/claude-repl/*.el`. The top-level `config.el` is not reloaded by `M-x doom/reload-lisp-config` the same way the module is, and instrumentation added there routinely fails to take effect, wasting debugging cycles.
+**Never put new agent-repl code in the top-level doomdir `config.el`.** All agent-repl code — defuns, advice, hooks, keybindings, magit integration — lives under `modules/app/agent-repl/*.el`. The top-level `config.el` is not reloaded by `M-x doom/reload-lisp-config` the same way the module is, and instrumentation added there routinely fails to take effect, wasting debugging cycles.
 
 When adding a new concern:
 
 1. Pick the right sub-file (`core.el`, `panels.el`, `status.el`, `session.el`, `sentinel.el`, `worktree.el`, `input.el`, `keybindings.el`, `magit.el`, etc.) or create a new one.
-2. If creating a new file, register it in `modules/app/claude-repl/config.el` via `(claude-repl--load-module "NAME")`.
-3. If the feature bridges claude-repl with another package (e.g. magit), put it in a dedicated integration file like `magit.el` rather than in the doomdir `config.el` under `(after! PACKAGE ...)`.
-4. Leader-key bindings that reference a `claude-repl-*` symbol (e.g. overriding `SPC p p` to `claude-repl-switch-to-project`) belong in `keybindings.el`, not in the doomdir `config.el` — even when they shadow a pre-existing `+dwc/` binding there.
+2. If creating a new file, register it in `modules/app/agent-repl/config.el` via `(agent-repl--load-module "NAME")`.
+3. If the feature bridges agent-repl with another package (e.g. magit), put it in a dedicated integration file like `magit.el` rather than in the doomdir `config.el` under `(after! PACKAGE ...)`.
+4. Leader-key bindings that reference a `agent-repl-*` symbol (e.g. overriding `SPC p p` to `agent-repl-switch-to-project`) belong in `keybindings.el`, not in the doomdir `config.el` — even when they shadow a pre-existing `+dwc/` binding there.
 
-Naming: internals use `claude-repl--` prefix, public entry points use `claude-repl-` prefix. User-facing commands triggered by leader keybindings may keep the `+dwc/` prefix when they were moved out of the doomdir `config.el` and remain user-scope entry points.
+Naming: internals use `agent-repl--` prefix, public entry points use `agent-repl-` prefix. User-facing commands triggered by leader keybindings may keep the `+dwc/` prefix when they were moved out of the doomdir `config.el` and remain user-scope entry points.
 
-**Never add `+dwc/` functions or variables inside the claude-repl module.** If a feature needs state that currently lives in `config.el` (e.g. `+dwc/workspace-history`), define a `claude-repl--` equivalent inside the module and wire it up there. The `+dwc/` namespace belongs to the doomdir config layer; the module must be self-contained and not introduce new `+dwc/` symbols.
+**Never add `+dwc/` functions or variables inside the agent-repl module.** If a feature needs state that currently lives in `config.el` (e.g. `+dwc/workspace-history`), define a `agent-repl--` equivalent inside the module and wire it up there. The `+dwc/` namespace belongs to the doomdir config layer; the module must be self-contained and not introduce new `+dwc/` symbols.
 
 ## Workspace state encapsulation — go through `workspace.el`
 
-The `claude-repl--workspaces` hash table is owned by `modules/app/claude-repl/workspace.el`. **All new code touching workspace state must go through `workspace.el`'s wrapper API**: `claude-repl--ws-get`, `claude-repl--ws-put`, `claude-repl--ws-del`, `claude-repl--ws-live-p`, `claude-repl--ws-known-p`, `claude-repl--ws-tombstoned-p`, `claude-repl--ws-open-p`, `claude-repl--ws-render-status`, `claude-repl--live-ws-names`, `claude-repl--ws-require-known`.
+The `agent-repl--workspaces` hash table is owned by `modules/app/agent-repl/workspace.el`. **All new code touching workspace state must go through `workspace.el`'s wrapper API**: `agent-repl--ws-get`, `agent-repl--ws-put`, `agent-repl--ws-del`, `agent-repl--ws-live-p`, `agent-repl--ws-known-p`, `agent-repl--ws-tombstoned-p`, `agent-repl--ws-open-p`, `agent-repl--ws-render-status`, `agent-repl--live-ws-names`, `agent-repl--ws-require-known`.
 
-**Forbidden in any file other than `workspace.el`:** direct `gethash`, `puthash`, `maphash`, `hash-table-keys`, `hash-table-count`, `remhash`, or `clrhash` against `claude-repl--workspaces`. Doc-strings and `:argument` references to the symbol name are fine; runtime hash ops are not.
+**Forbidden in any file other than `workspace.el`:** direct `gethash`, `puthash`, `maphash`, `hash-table-keys`, `hash-table-count`, `remhash`, or `clrhash` against `agent-repl--workspaces`. Doc-strings and `:argument` references to the symbol name are fine; runtime hash ops are not.
 
-Two exceptions are grandfathered inside `core.el` itself: `claude-repl--ws-id-cached` and `claude-repl--format-ws-metadata` directly read the hash because they are logging primitives that `--ws-put` calls on stub-create — routing them through the wrapper would create a logging-to-workspace cycle. These exceptions live inside the encapsulation boundary, not outside it; do not add new ones.
+Two exceptions are grandfathered inside `core.el` itself: `agent-repl--ws-id-cached` and `agent-repl--format-ws-metadata` directly read the hash because they are logging primitives that `--ws-put` calls on stub-create — routing them through the wrapper would create a logging-to-workspace cycle. These exceptions live inside the encapsulation boundary, not outside it; do not add new ones.
 
-**Render-state unification:** every renderer (drawer state-glyph, drawer name-face, drawer workspace-section, tab-bar composed-state via `--ws-display-state`/`--ws-bracket-state`, project picker emoji) MUST call `claude-repl--ws-render-status` to determine what state to display. Never re-derive status from `:claude-state` / `:repl-state` / `:merging` / `:merge-completed` in a renderer — that's what the unification eliminated. New visual states added to the system go in `--ws-render-status`'s `cond` (with a documented precedence comment) and in `claude-repl-drawer-state-icons`; renderers automatically pick them up.
+**Render-state unification:** every renderer (drawer state-glyph, drawer name-face, drawer workspace-section, tab-bar composed-state via `--ws-display-state`/`--ws-bracket-state`, project picker emoji) MUST call `agent-repl--ws-render-status` to determine what state to display. Never re-derive status from `:claude-state` / `:repl-state` / `:merging` / `:merge-completed` in a renderer — that's what the unification eliminated. New visual states added to the system go in `--ws-render-status`'s `cond` (with a documented precedence comment) and in `agent-repl-drawer-state-icons`; renderers automatically pick them up.
 
-Per-diff audit (mandatory on every diff touching `modules/app/claude-repl/`): grep the diff for `(gethash` / `(puthash` / `(maphash` against `claude-repl--workspaces` in any file other than `workspace.el`. If you find one, extract a wrapper into `workspace.el` first; only then write the calling logic.
+Per-diff audit (mandatory on every diff touching `modules/app/agent-repl/`): grep the diff for `(gethash` / `(puthash` / `(maphash` against `agent-repl--workspaces` in any file other than `workspace.el`. If you find one, extract a wrapper into `workspace.el` first; only then write the calling logic.
 
 ## NEVER manipulate third-party internals from a high-level layer
 
-**ABSOLUTE RULE: a high-level layer in `modules/app/claude-repl/` must never touch a third-party dependency's internals directly. Every third-party API call must go through a dedicated wrapper module that owns the integration boundary.** "Third-party" here means anything outside `modules/app/claude-repl/` itself — external Emacs packages, Doom helpers, language-tool integrations, shell programs, etc.
+**ABSOLUTE RULE: a high-level layer in `modules/app/agent-repl/` must never touch a third-party dependency's internals directly. Every third-party API call must go through a dedicated wrapper module that owns the integration boundary.** "Third-party" here means anything outside `modules/app/agent-repl/` itself — external Emacs packages, Doom helpers, language-tool integrations, shell programs, etc.
 
 The shape is always the same, regardless of which dependency is in play:
 
-- One claude-repl file owns the integration boundary for a given dependency.
-- Every other claude-repl file expresses its intent in terms of claude-repl semantics (verbs like "register workspace", "render this status", "tag this commit") and routes through the owning file's wrapper API.
+- One agent-repl file owns the integration boundary for a given dependency.
+- Every other agent-repl file expresses its intent in terms of agent-repl semantics (verbs like "register workspace", "render this status", "tag this commit") and routes through the owning file's wrapper API.
 - The dependency-specific bookkeeping (data-structure shape, naming conventions, undocumented-behavior workarounds, version skew) lives inside the owning file, never sprinkled across the high-level layer.
 
 If a high-level call site needs a behavior the owning file does not yet expose, STOP and surface to the user with:
@@ -75,57 +75,57 @@ Wait for the user to decide whether to extend an existing wrapper, add a new one
 
 Why this is absolute:
 
-- Direct third-party calls at high-level sites are abstraction leaks. High-level code is supposed to express claude-repl semantics, not the dependency's internal bookkeeping.
+- Direct third-party calls at high-level sites are abstraction leaks. High-level code is supposed to express agent-repl semantics, not the dependency's internal bookkeeping.
 
 - Leaks create load-bearing dependencies on a third party's undocumented or version-specific behavior. The fix for any one such quirk then has to be applied at N call sites instead of one wrapper.
 
-- They also pin claude-repl to the current dependency choice. A future swap (different workspace backend, different git frontend, different terminal emulator) touches N files instead of one.
+- They also pin agent-repl to the current dependency choice. A future swap (different workspace backend, different git frontend, different terminal emulator) touches N files instead of one.
 
 - They defeat the testing model. The wrappers ARE the mock boundary — without them, every call site has to be mocked independently, and tests of high-level logic end up encoding dependency-specific behavior that drifts when the dependency upgrades.
 
 Examples of integration boundaries already established or in progress:
 
 - Persp-mode / Doom-workspace API (`persp-names-cache`, `persp-add-new`, `+workspace/new`, `+workspace/kill`, `+workspace-list-names`, etc.) → owned by `workspace.el`.
-- Shell / subprocess invocations (`git`, `gh`, `claude -p`, etc.) → owned via the `claude-repl--<resource>-<verb>` wrapper convention documented under "No External Processes or External State in Tests".
+- Shell / subprocess invocations (`git`, `gh`, `claude -p`, etc.) → owned via the `agent-repl--<resource>-<verb>` wrapper convention documented under "No External Processes or External State in Tests".
 - (Future) magit, vterm, projectile integration points should follow the same pattern when they grow non-trivial bookkeeping.
 
 Pre-existing call sites are grandfathered until they migrate. New ones are not, and migration of the existing ones is in progress (see commit history for the current wave).
 
 ## Claude REPL instrumentation
 
-New code added to the claude-repl module must include instrumentation via `claude-repl--log`. Every dynamic aspect of the call site must be included in the log message — variable values, resolved paths, computed flags, branch outcomes, etc. The goal is that a log trace alone should be sufficient to diagnose any behavioral issue without needing to add instrumentation after the fact.
+New code added to the agent-repl module must include instrumentation via `agent-repl--log`. Every dynamic aspect of the call site must be included in the log message — variable values, resolved paths, computed flags, branch outcomes, etc. The goal is that a log trace alone should be sufficient to diagnose any behavioral issue without needing to add instrumentation after the fact.
 
-**Always thread WS through `claude-repl--log` / `claude-repl--log-verbose`.** If a workspace is in lexical scope, or derivable via `(+workspace-current-name)` or the buffer-local `claude-repl--owning-workspace`, pass it as the first argument. `nil` WS silently drops the `{ws=... id=... dir=... cst=... rst=... env=... vt=... in=... ...}` metadata block — that block is exactly what disambiguates 30 identical flood lines across N workspaces. Only pass `nil` when the call site is genuinely workspace-agnostic (load-time sentinel init, workspace-resolving helpers, pure file/directory utilities). If threading WS into a function changes its signature, do it — add an optional `ws` parameter dedicated to diagnostics if purity needs to be preserved otherwise.
+**Always thread WS through `agent-repl--log` / `agent-repl--log-verbose`.** If a workspace is in lexical scope, or derivable via `(+workspace-current-name)` or the buffer-local `agent-repl--owning-workspace`, pass it as the first argument. `nil` WS silently drops the `{ws=... id=... dir=... cst=... rst=... env=... vt=... in=... ...}` metadata block — that block is exactly what disambiguates 30 identical flood lines across N workspaces. Only pass `nil` when the call site is genuinely workspace-agnostic (load-time sentinel init, workspace-resolving helpers, pure file/directory utilities). If threading WS into a function changes its signature, do it — add an optional `ws` parameter dedicated to diagnostics if purity needs to be preserved otherwise.
 
-**Diagnostic output must land in the logfile, never in a dedicated buffer as the sole record.** Route subprocess stdout/stderr, captured shell output, resolver responses, and any other instrumentation through `claude-repl--log` / `claude-repl--log-verbose` so it inherits the standard timestamp + `{ws=...}` metadata and survives session restarts. Side buffers are not greppable from `~/.claude/emacs/doom-claude-repl.log`, do not persist after Emacs exits, and require a human to already know the buffer name to inspect them. A side buffer is acceptable *in addition* for live interactive inspection — never *instead of* a log entry. If you find yourself writing `(get-buffer-create "*claude-repl-...*")` to hold diagnostics, stop and log instead.
+**Diagnostic output must land in the logfile, never in a dedicated buffer as the sole record.** Route subprocess stdout/stderr, captured shell output, resolver responses, and any other instrumentation through `agent-repl--log` / `agent-repl--log-verbose` so it inherits the standard timestamp + `{ws=...}` metadata and survives session restarts. Side buffers are not greppable from `~/.claude/emacs/doom-agent-repl.log`, do not persist after Emacs exits, and require a human to already know the buffer name to inspect them. A side buffer is acceptable *in addition* for live interactive inspection — never *instead of* a log entry. If you find yourself writing `(get-buffer-create "*agent-repl-...*")` to hold diagnostics, stop and log instead.
 
-**Every bug fix MUST add instrumentation.** A bug that reached production is itself proof the existing logging could not pinpoint it, so any fix must leave behind the `claude-repl--log` coverage (decision inputs, computed flags, branch taken, error captured) that would have isolated the root cause from a trace alone — never fix a bug without also closing the instrumentation gap it exposed.
+**Every bug fix MUST add instrumentation.** A bug that reached production is itself proof the existing logging could not pinpoint it, so any fix must leave behind the `agent-repl--log` coverage (decision inputs, computed flags, branch taken, error captured) that would have isolated the root cause from a trace alone — never fix a bug without also closing the instrumentation gap it exposed.
 
-**Instrument every new or changed code path.** Skip only for "extremely hot" paths — code that fires more than ~once per second across all workspaces (per-keystroke handlers, per-timer-tick callbacks, redisplay hooks, char-output filters) where the file-write itself would multiply log volume and bury other events. For merely-frequent-but-load-bearing paths, use `claude-repl--log-verbose` (echo-gated, always file-written) instead of omitting the log. Default to logging; "no log" is the harder choice and warrants a one-line comment naming the firing frequency and why instrumentation would be counterproductive.
+**Instrument every new or changed code path.** Skip only for "extremely hot" paths — code that fires more than ~once per second across all workspaces (per-keystroke handlers, per-timer-tick callbacks, redisplay hooks, char-output filters) where the file-write itself would multiply log volume and bury other events. For merely-frequent-but-load-bearing paths, use `agent-repl--log-verbose` (echo-gated, always file-written) instead of omitting the log. Default to logging; "no log" is the harder choice and warrants a one-line comment naming the firing frequency and why instrumentation would be counterproductive.
 
 ## Skill symlinks: always target the MAIN worktree, never a linked one
 
-The skill installer (`.claude/install.sh` + `modules/app/claude-repl/skills-cache/manifest.sh`) symlinks each managed skill into `~/.claude/skills/`. **Every symlink MUST point into the MAIN worktree of its repo, never a transient linked worktree.**
+The skill installer (`.claude/install.sh` + `modules/app/agent-repl/skills-cache/manifest.sh`) symlinks each managed skill into `~/.claude/skills/`. **Every symlink MUST point into the MAIN worktree of its repo, never a transient linked worktree.**
 
 - A linked worktree (anything under `~/.config/doom-worktrees/*`, sandbox worktrees, etc.) is ephemeral — its path dangles the moment the worktree is pruned, leaving a broken skill symlink.
 - `install.sh` resolves the main worktree via `git worktree list --porcelain` (its first `worktree` entry) and sources repo-local skills from there, regardless of which worktree the script is invoked from.
 - `install.sh` **fails hard** (`_impl_in_nonmain_worktree`) when any manifest impl path resolves inside a non-main worktree. Do not add such an entry to `manifest.sh`.
-- A skill with no home in the main worktree is NOT eligible to be managed. Re-home it (commit it into `modules/app/claude-repl/skills/` for repo-local skills, or its repo's main checkout for external skills) before adding it back.
+- A skill with no home in the main worktree is NOT eligible to be managed. Re-home it (commit it into `modules/app/agent-repl/skills/` for repo-local skills, or its repo's main checkout for external skills) before adding it back.
 
 The workspace-command skills (`workspace-merge`, `workspace-status`, `workspace-update`, `generate-workspace`) were folded into the single `/workspace` skill — manage `workspace`, not the removed per-command names.
 
 ## Debugging skills: when to use each
 
-The doom-claude-repl ecosystem ships several Claude Code skills for debugging. Pick by the *kind* of evidence you need.
+The doom-agent-repl ecosystem ships several Claude Code skills for debugging. Pick by the *kind* of evidence you need.
 
 - `/debug-logs` — read history that already exists.
-  - Use for any claude-repl logic/state bug whose timestamp you can pin down.
-  - Reads `~/.claude/emacs/doom-claude-repl.log` and per-workspace `memory-state.el` snapshots.
-  - First stop for reproducible bugs originating in `modules/app/claude-repl/`.
+  - Use for any agent-repl logic/state bug whose timestamp you can pin down.
+  - Reads `~/.claude/emacs/doom-agent-repl.log` and per-workspace `memory-state.el` snapshots.
+  - First stop for reproducible bugs originating in `modules/app/agent-repl/`.
 
 - `/runtime-eval-code` — inspect or mutate live editor state by sending elisp to the running Emacs, scoped to the current workspace.
   - Use when you need a value, predicate, or state inspection not captured by any logger.
-  - Use to dump `*Messages*` to disk when the bug is signaled by 3rd-party output that the claude-repl log does NOT capture (magit/transient/doom-core warnings, byte-compile errors during refactor or dep bumps, package-init failures). The dump snippet and its grep recipes live in the `/runtime-eval-code` skill itself; `debug-logs` §9 just points there.
+  - Use to dump `*Messages*` to disk when the bug is signaled by 3rd-party output that the agent-repl log does NOT capture (magit/transient/doom-core warnings, byte-compile errors during refactor or dep bumps, package-init failures). The dump snippet and its grep recipes live in the `/runtime-eval-code` skill itself; `debug-logs` §9 just points there.
   - Use to drive a specific elisp snippet during a profiling session.
 
 - `/profile` — capture a fresh sample with auto-stop.
@@ -137,13 +137,13 @@ The doom-claude-repl ecosystem ships several Claude Code skills for debugging. P
 
 Rule of thumb: read first (`/debug-logs`), then inspect live (`/runtime-eval-code`), then measure (`/profile`).
 
-When build or compilation errors surface during refactor or dep-bump work, the failing output typically lives in `*Messages*` — not in the claude-repl log file. Use `/runtime-eval-code` to dump `*Messages*` (its SKILL.md has the snippet and grep recipes), then read the dump.
+When build or compilation errors surface during refactor or dep-bump work, the failing output typically lives in `*Messages*` — not in the agent-repl log file. Use `/runtime-eval-code` to dump `*Messages*` (its SKILL.md has the snippet and grep recipes), then read the dump.
 
 ## No Silent Fallbacks — Fail Hard on Invariant Violations
 
 **ABSOLUTE RULE: Do not introduce ANY "fallback" behavior.** Under no circumstances — without **explicit, per-case permission from the user**, and only when the fallback is *absolutely* necessary — may code fall back to an alternative value, default, or code path when the primary input/lookup/precondition is missing or fails. **Always** prefer a loud error and a hard failure. Assume the answer is "no fallback" and propose the failure mode to the user; wait for explicit approval before writing any fallback. Do not suggest a fallback unless asked, and do not smuggle one in under names like "default", "graceful degradation", "sensible behavior when …", or "keep existing callers working".
 
-**Never silently fall back, skip, or no-op when a precondition fails.** If an invariant is violated, **immediately fail loudly** with a `claude-repl--log` entry AND user-visible feedback (`user-error`, `error`, or at minimum a `message` that reaches the echo area). **Never fall back to an alternative code path** — the operation must abort entirely.
+**Never silently fall back, skip, or no-op when a precondition fails.** If an invariant is violated, **immediately fail loudly** with a `agent-repl--log` entry AND user-visible feedback (`user-error`, `error`, or at minimum a `message` that reaches the echo area). **Never fall back to an alternative code path** — the operation must abort entirely.
 
 **Do not commit state changes before the failure point.** If an operation involves multiple steps (e.g., resolve session ID, then create worktree), validate all preconditions before mutating any state. If validation fails partway through, no workspace should be created, no timers scheduled, no hash table entries written. The system state must remain unchanged on failure. Always commit concrete changes when finished. Commit frequently.
 
@@ -165,7 +165,7 @@ When in doubt: fail loudly. When a precondition fails: abort entirely. When temp
 
 ## Testing
 
-After any changes to `modules/app/claude-repl/`, always run the claude-repl test suite. Prefer the safety-net wrapper:
+After any changes to `modules/app/agent-repl/`, always run the agent-repl test suite. Prefer the safety-net wrapper:
 
 ```bash
 .claude/safe-test-run.sh           # full suite
@@ -177,10 +177,10 @@ The wrapper drops a checkpoint tag at `HEAD` before invoking ert, then diffs the
 You may invoke ert directly if you have a specific reason:
 
 ```bash
-emacs -batch -Q -l ert -l modules/app/claude-repl/test-claude-repl.el -f ert-run-tests-batch-and-exit
+emacs -batch -Q -l ert -l modules/app/agent-repl/test-agent-repl.el -f ert-run-tests-batch-and-exit
 ```
 
-A repo-checked-in pre-commit hook enforces this automatically: when any `modules/app/claude-repl/**.el` file is staged, the suite runs and a failure blocks the commit. The hook lives at `.githooks/pre-commit`. Install once per clone:
+A repo-checked-in pre-commit hook enforces this automatically: when any `modules/app/agent-repl/**.el` file is staged, the suite runs and a failure blocks the commit. The hook lives at `.githooks/pre-commit`. Install once per clone:
 
 ```bash
 git config core.hooksPath .githooks
@@ -216,21 +216,21 @@ Never use `git commit --no-verify` to bypass it; fix the failures instead.
   - Tests assert against the production lisp behavior, NOT the external system's behavior.
   - The test never asserts "git created a branch"; it asserts "the production function, given this mocked git output, returned this value / called this other wrapper with these args".
 
-3. **Wrapper naming convention:** `claude-repl--<resource>-<verb>[-<noun>]` where `<resource>` names the external thing the wrapper boundaries (`git`, `gh`, `curl`, `claude`, `pbcopy`, `clipboard`, `notify`, etc.).
-  - The leading `claude-repl--<resource>-` prefix is the **signal** to a future contributor: "this is the external boundary; mock me in tests, do not let it run for real."
-  - Existing examples: `claude-repl--git-string`, `claude-repl--git-string-quiet`, `claude-repl--git-exit-code`, `claude-repl--async-git` (these are the canonical reference and grandfathered).
-  - For a new external, follow the same shape: `claude-repl--gh-string`, `claude-repl--curl-string`, `claude-repl--pbcopy-write`, `claude-repl--notify-send`, etc.
+3. **Wrapper naming convention:** `agent-repl--<resource>-<verb>[-<noun>]` where `<resource>` names the external thing the wrapper boundaries (`git`, `gh`, `curl`, `claude`, `pbcopy`, `clipboard`, `notify`, etc.).
+  - The leading `agent-repl--<resource>-` prefix is the **signal** to a future contributor: "this is the external boundary; mock me in tests, do not let it run for real."
+  - Existing examples: `agent-repl--git-string`, `agent-repl--git-string-quiet`, `agent-repl--git-exit-code`, `agent-repl--async-git` (these are the canonical reference and grandfathered).
+  - For a new external, follow the same shape: `agent-repl--gh-string`, `agent-repl--curl-string`, `agent-repl--pbcopy-write`, `agent-repl--notify-send`, etc.
 
 4. **No external call may exist in production code outside such a wrapper.** If you find a bare `(shell-command-to-string "git ...")` or `(call-process "gh" ...)` in production code, extract it into a wrapper first; only then write the calling logic.
 
-5. **No external call may exist in test code at all.** Not even via a "test-only helper" macro. If a test helper macro currently shells out (e.g., a `with-temp-git-repo` macro that runs `git init`), it is an anti-pattern and must be replaced with a fixture-data approach that mocks the relevant `claude-repl--git-*` wrapper.
+5. **No external call may exist in test code at all.** Not even via a "test-only helper" macro. If a test helper macro currently shells out (e.g., a `with-temp-git-repo` macro that runs `git init`), it is an anti-pattern and must be replaced with a fixture-data approach that mocks the relevant `agent-repl--git-*` wrapper.
 
 **Prohibited anti-patterns:**
 
 - `(call-process "git" nil nil nil "-C" repo "init")` or any sibling thereof inside a test file or test helper.
 - `(shell-command-to-string "git ...")` inside a test file.
 - "Temp git repo" macros that build up state via real `git` invocations — even when scoped via `-C $TEMP`. The blast radius is bigger than it looks; see the incident note above.
-- Tests that depend on the test runner's CWD being inside a git repo (e.g., `(claude-repl--git-string "rev-parse" "--show-toplevel")` without binding `default-directory`).
+- Tests that depend on the test runner's CWD being inside a git repo (e.g., `(agent-repl--git-string "rev-parse" "--show-toplevel")` without binding `default-directory`).
 - Tests that mutate `~/.claude/` or any path under `$HOME` other than `temporary-file-directory`.
 - "Integration tests" that opt out of this rule by running real external processes. There is no integration-test escape hatch in this codebase; if integration coverage is needed, it lives outside the ERT suite and is run manually, never by the pre-commit hook.
 
@@ -256,12 +256,12 @@ This corollary is the policy reason `test-install.el` no longer ships its `bash 
 
 This is deliberate. A backstop would create moral hazard: the agent learns to rely on it ("the lint will catch me") and the primary obligation erodes. The system instead trusts the agent to do its job correctly, and the cost of a miss is borne immediately by the resulting silent state pollution — which is exactly the failure class that motivated this policy in the first place.
 
-**Required agent workflow on every diff that touches `modules/app/claude-repl/`:**
+**Required agent workflow on every diff that touches `modules/app/agent-repl/`:**
 
 1. **Audit step (mandatory, explicit).** Before staging the commit, search the diff for every occurrence of `call-process`, `start-process`, `make-process`, `shell-command`, `shell-command-to-string`, `async-shell-command`, `process-file` — in production files (NOT test files; NOT the wrapper-definition file core.el).
 
 2. **Classify each hit.** Each one is either:
-  - (i) Inside a wrapper definition listed in `claude-repl--external-boundary-functions' (acceptable — the wrapper IS the external boundary).
+  - (i) Inside a wrapper definition listed in `agent-repl--external-boundary-functions' (acceptable — the wrapper IS the external boundary).
   - (ii) Raw production code that needs to be extracted into a new wrapper (NOT acceptable; refactor before committing).
 
 3. **No exceptions.** Phrases like "this is just for X, it's safe" are never valid. If you find yourself reasoning "this one is fine because…", stop and extract the wrapper anyway.
@@ -270,7 +270,7 @@ There IS one secondary safety net, but it covers a DIFFERENT failure mode:
 
 #### Runtime guards (catch unmocked-WRAPPER test paths only)
 
-`modules/app/claude-repl/test-helpers.el' iterates the registry at load time and replaces every wrapper's function cell with a guard that errors with `EXTERNAL BOUNDARY UNMOCKED: ...' if invoked. Tests `cl-letf' over the guard to install their fixture; tests that forget fail loudly.
+`modules/app/agent-repl/test-helpers.el' iterates the registry at load time and replaces every wrapper's function cell with a guard that errors with `EXTERNAL BOUNDARY UNMOCKED: ...' if invoked. Tests `cl-letf' over the guard to install their fixture; tests that forget fail loudly.
 
 This catches: a test that exercises a code path reaching a registered wrapper without mocking it. The test sees a loud error pointing at exactly which wrapper needs the `cl-letf` binding.
 
@@ -278,15 +278,15 @@ This does NOT catch: a raw `(shell-command-to-string "git ...")` in production c
 
 #### Wrapper registry (single source of truth)
 
-`claude-repl--external-boundary-functions' (defvar in `modules/app/claude-repl/core.el') is the canonical list. The runtime guards iterate it. When you introduce a new wrapper, you MUST add it to that list in the same commit — otherwise the guard never installs for it and tests can silently shell out.
+`agent-repl--external-boundary-functions' (defvar in `modules/app/agent-repl/core.el') is the canonical list. The runtime guards iterate it. When you introduce a new wrapper, you MUST add it to that list in the same commit — otherwise the guard never installs for it and tests can silently shell out.
 
 ### Maintainer rule for new external wrappers
 
 When you wrap a new external binary `X`:
 
-1. Define `claude-repl--X-string` (or `--X-string-quiet`, etc.) in core.el. The body does NOTHING but invoke the external thing — no conditional logic, no parsing, no retries.
+1. Define `agent-repl--X-string` (or `--X-string-quiet`, etc.) in core.el. The body does NOTHING but invoke the external thing — no conditional logic, no parsing, no retries.
 
-2. Add the wrapper symbol to `claude-repl--external-boundary-functions' in the SAME commit. Skipping this step means no guard, no protection, silent leak.
+2. Add the wrapper symbol to `agent-repl--external-boundary-functions' in the SAME commit. Skipping this step means no guard, no protection, silent leak.
 
 3. Update any existing production sites that already call `X` raw to route through the new wrapper.
 
@@ -323,7 +323,7 @@ Why this is absolute:
 Required process when adding a new variant of an existing pattern:
 
 1. **Before writing the new variant, identify the existing one.** Read it. Look for what would differ vs. what would stay the same.
-2. **If anything stays the same, extract first.** Pull the shared body into a private helper (`claude-repl--<verb>-<noun>`). Make the differing parts parameters. Then rewrite the existing call site through the helper *as a separate refactor commit*, run the tests to prove the refactor is behavior-preserving, and only then add the new variant on top.
+2. **If anything stays the same, extract first.** Pull the shared body into a private helper (`agent-repl--<verb>-<noun>`). Make the differing parts parameters. Then rewrite the existing call site through the helper *as a separate refactor commit*, run the tests to prove the refactor is behavior-preserving, and only then add the new variant on top.
 3. **Test the helper directly,** in addition to the wrappers. The wrappers are thin and tested via end-to-end behavior; the helper carries the contract and deserves its own focused unit tests for the contract (validation, interpolation, edge cases).
 4. **The wrappers must be trivial after extraction.** Each wrapper should be ~3–8 lines: docstring + `(interactive)` + a single call into the helper with literal arguments. If the wrapper is doing anything else, push that into the helper too.
 
@@ -337,17 +337,17 @@ Anti-patterns to reject:
 
 The ONLY acceptable reason to leave near-duplication in place is that the user has been told what the shared helper would look like and has *explicitly* opted to keep the duplication for a stated reason. Default to extraction; ask if unsure.
 
-Example (this is the canonical reference): the one-shot creators `claude-repl-create-doom-oneshot-workspace` and `claude-repl-create-explanation-engine-oneshot-workspace` both dispatch through `claude-repl--create-pinned-oneshot-workspace`. The success-suffix constants `claude-repl--oneshot-merge-suffix` and `claude-repl--oneshot-create-pr-suffix` are both built via `claude-repl--build-oneshot-success-suffix`. Any future `claude-repl-create-<repo>-oneshot-workspace` MUST dispatch through the same helper — do not start a third copy.
+Example (this is the canonical reference): the one-shot creators `agent-repl-create-doom-oneshot-workspace` and `agent-repl-create-explanation-engine-oneshot-workspace` both dispatch through `agent-repl--create-pinned-oneshot-workspace`. The success-suffix constants `agent-repl--oneshot-merge-suffix` and `agent-repl--oneshot-create-pr-suffix` are both built via `agent-repl--build-oneshot-success-suffix`. Any future `agent-repl-create-<repo>-oneshot-workspace` MUST dispatch through the same helper — do not start a third copy.
 
 ## Fullscreen panels — one consolidated entry point
 
-**There is a single canonical operation for showing the Claude REPL fullscreen: `claude-repl--enter-fullscreen` in `panels.el`.** It always shows BOTH panels (vterm output AND input) and saves the prior layout as the workspace's `:fullscreen-config` so `claude-repl-toggle-fullscreen` can restore it. Every place with a concept of "go fullscreen" routes through it:
+**There is a single canonical operation for showing the Claude REPL fullscreen: `agent-repl--enter-fullscreen` in `panels.el`.** It always shows BOTH panels (vterm output AND input) and saves the prior layout as the workspace's `:fullscreen-config` so `agent-repl-toggle-fullscreen` can restore it. Every place with a concept of "go fullscreen" routes through it:
 
-- `claude-repl-toggle-fullscreen` — its go-fullscreen branch calls `--enter-fullscreen` (the toggle adds the restore/no-poison logic around it).
-- `claude-repl--drain-pending-fullscreen` — the `/workspace-generation` path calls `--enter-fullscreen` directly, NOT the toggle (the toggle would read the all-Claude-buffers layout as already-fullscreen via `claude-repl--fullscreen-p` and skip, leaving the input panel unshown).
-- `claude-repl--maybe-fullscreen-on-switch` — the switch-to-workspace path reuses `claude-repl-toggle-fullscreen` (so the splitscreen layout is saved for a later `SPC w f` restore), and therefore funnels through `--enter-fullscreen` transitively.
+- `agent-repl-toggle-fullscreen` — its go-fullscreen branch calls `--enter-fullscreen` (the toggle adds the restore/no-poison logic around it).
+- `agent-repl--drain-pending-fullscreen` — the `/workspace-generation` path calls `--enter-fullscreen` directly, NOT the toggle (the toggle would read the all-Claude-buffers layout as already-fullscreen via `agent-repl--fullscreen-p` and skip, leaving the input panel unshown).
+- `agent-repl--maybe-fullscreen-on-switch` — the switch-to-workspace path reuses `agent-repl-toggle-fullscreen` (so the splitscreen layout is saved for a later `SPC w f` restore), and therefore funnels through `--enter-fullscreen` transitively.
 
-When adding any new fullscreen entry point, call `claude-repl--enter-fullscreen` — never re-implement the save-config + sweep-non-panel-windows dance, and never show only one panel.
+When adding any new fullscreen entry point, call `agent-repl--enter-fullscreen` — never re-implement the save-config + sweep-non-panel-windows dance, and never show only one panel.
 
 ## Comment Non-Obvious Code
 
@@ -373,7 +373,7 @@ When asked to make changes, commit your work when done. Commit freely and often.
 
 Keep entries minimal — one short sentence or a brief code block per rule.
 
-# Agent Guidelines for claude-repl Development
+# Agent Guidelines for agent-repl Development
 
 ## Debugging Vexing / Non-Obvious Bugs
 
@@ -383,12 +383,12 @@ When facing a bug that resists immediate root-cause identification, **do not spe
    Design targeted log statements that distinguish between competing hypotheses. Each log point should eliminate at least one theory.
 
 2. **Always use the existing logging helper.**
-   All debug logging must go through `claude-repl--log` (defined in `core.el`). Never use raw `(message ...)` for debug instrumentation. The helper provides:
-   - Timestamped output (`HH:MM:SS.mmm [claude-repl] {ws=... id=... ...} ...`)
+   All debug logging must go through `agent-repl--log` (defined in `core.el`). Never use raw `(message ...)` for debug instrumentation. The helper provides:
+   - Timestamped output (`HH:MM:SS.mmm [agent-repl] {ws=... id=... ...} ...`)
    - Automatic workspace metadata (all plist keys) when `ws` is non-nil
-   - Gated by `claude-repl-debug` (nil = off, t = on, 'verbose = high-frequency)
-   - Use `claude-repl--log-verbose` for high-frequency events (per-keystroke, per-timer-tick, git-diff sentinels)
-   - Signature: `(claude-repl--log WS "context: key=%s" value)` — WS is the workspace name string, or nil for workspace-free contexts
+   - Gated by `agent-repl-debug` (nil = off, t = on, 'verbose = high-frequency)
+   - Use `agent-repl--log-verbose` for high-frequency events (per-keystroke, per-timer-tick, git-diff sentinels)
+   - Signature: `(agent-repl--log WS "context: key=%s" value)` — WS is the workspace name string, or nil for workspace-free contexts
    - When a function has `ws` in scope (parameter or local), always pass it. Pure helpers with no ws pass nil.
 
 3. **Prioritize "smoking gun" instrumentation.**
@@ -399,7 +399,7 @@ When facing a bug that resists immediate root-cause identification, **do not spe
    ```elisp
    (condition-case err
        (risky-call)
-     (error (claude-repl--log ws "context: risky-call failed: %S" err)))
+     (error (agent-repl--log ws "context: risky-call failed: %S" err)))
    ```
    This both catches the error for logging and prevents it from silently breaking downstream cleanup.
 
@@ -407,19 +407,19 @@ When facing a bug that resists immediate root-cause identification, **do not spe
    For bugs involving wrong-buffer or stale-state theories, log `(current-buffer)`, relevant buffer-local variables, and mode states at the instrumentation point.
 
 6. **Toggling logging at runtime.**
-   Use `M-x claude-repl-debug/toggle-logging` to cycle standard logging on/off. With a prefix argument (`C-u M-x claude-repl-debug/toggle-logging`), it toggles verbose mode instead. Verbose mode includes high-frequency events (1-second timer ticks, git-diff sentinels, window changes, resolve-root). Standard mode logs only meaningful state transitions and user-initiated actions.
+   Use `M-x agent-repl-debug/toggle-logging` to cycle standard logging on/off. With a prefix argument (`C-u M-x agent-repl-debug/toggle-logging`), it toggles verbose mode instead. Verbose mode includes high-frequency events (1-second timer ticks, git-diff sentinels, window changes, resolve-root). Standard mode logs only meaningful state transitions and user-initiated actions.
 
-   **Suggest verbose mode to the user when investigating hot-path issues** (vterm redraws, overlay churn, mode-line refresh, window-config changes, async refresh ticks). Some call sites are *fully* gated on verbose (file write and echo both skipped) because they fire too often to leave on by default — notably `vterm-color-advice` in `overlay.el`, which previously emitted ~88% of the entire logfile. If the log appears silent for a suspected hot path, that gating is usually why; ask the user to enable verbose with `C-u M-x claude-repl-debug/toggle-logging` and reproduce.
+   **Suggest verbose mode to the user when investigating hot-path issues** (vterm redraws, overlay churn, mode-line refresh, window-config changes, async refresh ticks). Some call sites are *fully* gated on verbose (file write and echo both skipped) because they fire too often to leave on by default — notably `vterm-color-advice` in `overlay.el`, which previously emitted ~88% of the entire logfile. If the log appears silent for a suspected hot path, that gating is usually why; ask the user to enable verbose with `C-u M-x agent-repl-debug/toggle-logging` and reproduce.
 
-7. **Persistent logfile (`~/.claude/doom-claude-repl.log`).**
-   By default, all log output is also appended to `~/.claude/doom-claude-repl.log`. This file persists across Emacs sessions and is the primary artifact for debugging and coordinating with the user. When investigating a bug or answering a user question about recent behavior, **read `~/.claude/doom-claude-repl.log` first** — it contains the full timestamped trace of claude-repl activity. Use `M-x claude-repl-debug/toggle-log-to-file` to disable or re-enable file logging at runtime. Ensure that the user is cognizant of it's existence during tricky debug problems, and of how to enable/disable it. 
+7. **Persistent logfile (`~/.claude/doom-agent-repl.log`).**
+   By default, all log output is also appended to `~/.claude/doom-agent-repl.log`. This file persists across Emacs sessions and is the primary artifact for debugging and coordinating with the user. When investigating a bug or answering a user question about recent behavior, **read `~/.claude/doom-agent-repl.log` first** — it contains the full timestamped trace of agent-repl activity. Use `M-x agent-repl-debug/toggle-log-to-file` to disable or re-enable file logging at runtime. Ensure that the user is cognizant of it's existence during tricky debug problems, and of how to enable/disable it. 
 
 8. **Choosing standard vs verbose.**
-   Events that fire on every timer tick, every window change, or every keystroke MUST use `claude-repl--log-verbose`. Events that fire on discrete user actions or state transitions use `claude-repl--log`. Rule of thumb: if it fires more than once per second across all workspaces, it's verbose.
+   Events that fire on every timer tick, every window change, or every keystroke MUST use `agent-repl--log-verbose`. Events that fire on discrete user actions or state transitions use `agent-repl--log`. Rule of thumb: if it fires more than once per second across all workspaces, it's verbose.
 
 ## `ns_select_1` worker-thread trap — never call `accept-process-output` from a non-main thread on macOS
 
-**TL;DR:** if your code runs inside `(make-thread ...)` and needs to wait for a subprocess, **do not** call `accept-process-output`, `call-process`, `shell-command-to-string`, or anything else that routes through `wait_reading_process_output`. Use a process sentinel + condition variable instead. The convenience helpers `claude-repl--wait-for-process-exit` and `claude-repl--spawn-and-wait` in `modules/app/claude-repl/worktree.el` already encapsulate the correct pattern — prefer those.
+**TL;DR:** if your code runs inside `(make-thread ...)` and needs to wait for a subprocess, **do not** call `accept-process-output`, `call-process`, `shell-command-to-string`, or anything else that routes through `wait_reading_process_output`. Use a process sentinel + condition variable instead. The convenience helpers `agent-repl--wait-for-process-exit` and `agent-repl--spawn-and-wait` in `modules/app/agent-repl/worktree.el` already encapsulate the correct pattern — prefer those.
 
 ### The structural cause (Emacs 30.2 source)
 
@@ -455,7 +455,7 @@ unblock_input ();
 (make-thread
  (lambda ()
    (let* ((proc (start-process "my-task" buf "my-cmd" ...))
-          (status (claude-repl--wait-for-process-exit
+          (status (agent-repl--wait-for-process-exit
                    proc TIMEOUT "my-tag" target-ws)))
      ;; ... use status ...
      )))
@@ -464,13 +464,13 @@ unblock_input ();
 Or — if you need spawn + wait + log + buffer-cleanup as one unit — use the higher-level helper:
 
 ```elisp
-(claude-repl--spawn-and-wait
+(agent-repl--spawn-and-wait
  cmd out-buf
  :process-name "my-task"
  :timeout 30
  :log-tag "my-task"
  :log-ws ws
- :extract #'claude-repl--extract-buffer-whole       ; or skip-header-comments
+ :extract #'agent-repl--extract-buffer-whole       ; or skip-header-comments
  :on-completed (lambda (status output) ...)        ; optional
  :keep-buffer nil)                                  ; t to preserve OUT-BUF
 ```
@@ -484,7 +484,7 @@ Both helpers dispatch on `current-thread`:
 
 - ❌ `(accept-process-output proc TIMEOUT)` inside `(make-thread ...)` — even with `JUST-THIS-ONE=t`, the syscall still routes through `ns_select_1`. The flag only restricts which process's filters fire, not which select implementation is used.
 - ❌ `(call-process ...)`, `(shell-command-to-string ...)`, `(process-file ...)` inside `(make-thread ...)` when the call captures stdout — same path, same trap.
-- ❌ `(call-process ...)` with `destination=nil` (output discarded, e.g. `(apply #'call-process "git" nil nil nil "-C" root args)`) inside `(make-thread ...)`. It does NOT trap in `ns_select_1` (Emacs reads no pipes, so it never reaches `wait_reading_process_output`), but it is still SYNCHRONOUS and holds the global Lisp lock for the child's ENTIRE runtime — a worker thread executing C `call-process` never yields the lock until the child exits, so the main thread cannot run Lisp and the UI freezes for as long as the subprocess runs. This is the 2026-06-12 merge hang: the `onto-master` handler's `git fetch` and the cee-agent reinstall-and-bounce script (both destination-nil) starved the main-thread heartbeat for the whole subprocess duration. An earlier revision of this doc wrongly called destination-nil "fine"; it avoids the trap but not the freeze. Use the sentinel + condvar wait (`--wait-for-process-exit`, which DOES release the lock via `condition-wait`) instead. `claude-repl--git-exit-code` dispatches to that helper automatically on worker threads.
+- ❌ `(call-process ...)` with `destination=nil` (output discarded, e.g. `(apply #'call-process "git" nil nil nil "-C" root args)`) inside `(make-thread ...)`. It does NOT trap in `ns_select_1` (Emacs reads no pipes, so it never reaches `wait_reading_process_output`), but it is still SYNCHRONOUS and holds the global Lisp lock for the child's ENTIRE runtime — a worker thread executing C `call-process` never yields the lock until the child exits, so the main thread cannot run Lisp and the UI freezes for as long as the subprocess runs. This is the 2026-06-12 merge hang: the `onto-master` handler's `git fetch` and the cee-agent reinstall-and-bounce script (both destination-nil) starved the main-thread heartbeat for the whole subprocess duration. An earlier revision of this doc wrongly called destination-nil "fine"; it avoids the trap but not the freeze. Use the sentinel + condvar wait (`--wait-for-process-exit`, which DOES release the lock via `condition-wait`) instead. `agent-repl--git-exit-code` dispatches to that helper automatically on worker threads.
 - ❌ Polling via `sit-for` / `sleep-for` in a worker thread — same path.
 
 ### What's fine

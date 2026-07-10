@@ -188,10 +188,10 @@
 
        :app
        chess
-       ;; claude-repl is loaded from config.el via `doom-after-modules-config-hook'
+       ;; agent-repl is loaded from config.el via `doom-after-modules-config-hook'
        ;; so its keybindings land AFTER `:config default'+evil-bindings.el (which
        ;; otherwise re-binds `SPC TAB n' to `+workspace/new', shadowing ours).
-       ;;claude-repl
+       ;;agent-repl
        ;;calendar
        ;;emms
        ;;everywhere        ; *leave* Emacs!? You must be joking

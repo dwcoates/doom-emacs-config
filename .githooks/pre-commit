@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# pre-commit — enforce the claude-repl ERT suite (and the external-boundary
-# lint) whenever claude-repl source/test files are staged.
+# pre-commit — enforce the agent-repl ERT suite (and the external-boundary
+# lint) whenever agent-repl source/test files are staged.
 #
 # Per AGENTS.md zero-tolerance rule, ANY failing test blocks the commit.
 # Do not bypass with --no-verify; fix the failures.
@@ -12,10 +12,27 @@
 # marker string below lets install/uninstall recognize this script as
 # managed (so it can be refreshed or removed without touching foreign
 # pre-commit hooks).  Don't edit the marker.
-# CLAUDE_REPL_MANAGED_HOOK: claude-repl-precommit
+# AGENT_REPL_MANAGED_HOOK: agent-repl-precommit
+# Legacy marker kept alongside the current one during the
+# agent-repl -> agent-repl transition: the installed hook is SHARED
+# across worktrees via core.hooksPath, so a pre-rename install.sh (on a
+# sibling worktree) must still recognize this copy as managed.
+# AGENT_REPL_MANAGED_HOOK: agent-repl-precommit
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# The module was renamed agent-repl -> agent-repl.  This hook is shared
+# across ALL worktrees (core.hooksPath points at the common git dir), and
+# sibling worktrees may still carry the old module name — resolve whichever
+# module (with its aggregator test file) exists in THIS checkout.
+MODULE_NAME=""
+for _name in agent-repl agent-repl; do
+  if [ -f "$REPO_ROOT/modules/app/$_name/test-$_name.el" ]; then
+    MODULE_NAME="$_name"
+    break
+  fi
+done
 
 # Skip the test gate entirely during cherry-picks.  The commit being
 # replayed was already tested on its source branch; re-running ERT here
@@ -26,9 +43,16 @@ if [ -f "$GIT_DIR_PATH/CHERRY_PICK_HEAD" ]; then
   exit 0
 fi
 
-# Only gate when claude-repl source or test files are staged.
-if ! git diff --cached --name-only | grep -qE '^modules/app/claude-repl/.*\.el$'; then
+# Only gate when module source or test files are staged (either module
+# name, so the rename commit itself — which stages deletions under the
+# old path — is gated too).
+if ! git diff --cached --name-only | grep -qE '^modules/app/(agent|claude)-repl/.*\.el$'; then
   exit 0
+fi
+
+if [ -z "$MODULE_NAME" ]; then
+  echo "[pre-commit] no agent-repl/agent-repl module with an aggregator test file found — refusing to commit." >&2
+  exit 1
 fi
 
 # Static lint: no raw external-process invocations outside the wrapper
@@ -43,25 +67,25 @@ if [ -x "$BOUNDARY_LINT" ]; then
   fi
 fi
 
-TEST_FILE="$REPO_ROOT/modules/app/claude-repl/test-claude-repl.el"
+TEST_FILE="$REPO_ROOT/modules/app/$MODULE_NAME/test-$MODULE_NAME.el"
 
 if [ ! -f "$TEST_FILE" ]; then
   echo "[pre-commit] $TEST_FILE not found — refusing to commit." >&2
   exit 1
 fi
 
-echo "[pre-commit] claude-repl files staged — running ERT suite..."
+echo "[pre-commit] $MODULE_NAME files staged — running ERT suite..."
 
 # Run from repo root so relative `modules/...` paths in test loader resolve.
 cd "$REPO_ROOT"
 
 # Capture output to a temp file; only show the failure tail on error
 # (full output is enormous because of per-test STUB-CREATE log lines).
-TMP_OUT="$(mktemp -t claude-repl-precommit.XXXXXX)"
+TMP_OUT="$(mktemp -t agent-repl-precommit.XXXXXX)"
 trap 'rm -f "$TMP_OUT"' EXIT
 
 if ! emacs -batch -Q -l ert \
-       -l modules/app/claude-repl/test-claude-repl.el \
+       -l "modules/app/$MODULE_NAME/test-$MODULE_NAME.el" \
        -f ert-run-tests-batch-and-exit \
        >"$TMP_OUT" 2>&1; then
   echo "[pre-commit] ✗ ERT tests failed — refusing commit." >&2
@@ -75,4 +99,4 @@ fi
 
 # Trim noise; only print the final summary line.
 grep -E "^Ran [0-9]+ tests" "$TMP_OUT" >&2 || true
-echo "[pre-commit] ✓ claude-repl tests pass."
+echo "[pre-commit] ✓ $MODULE_NAME tests pass."
