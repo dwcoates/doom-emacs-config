@@ -493,9 +493,9 @@ wrapper to an error-on-call lambda."
                  "--permission-mode auto")))
 
 (ert-deftest claude-repl-test-compute-perm-flag-personal ()
-  "compute-perm-flag should return --dangerously-skip-permissions for personal repos."
+  "compute-perm-flag should return --permission-mode auto for personal repos."
   (should (equal (claude-repl--compute-perm-flag nil "/home/user/personal/project")
-                 "--dangerously-skip-permissions")))
+                 "--permission-mode auto")))
 
 (ert-deftest claude-repl-test-compute-perm-flag-nil-dir ()
   "compute-perm-flag with nil project-dir should signal an error."
@@ -1994,7 +1994,7 @@ restart (the lazy-start path applies its defaults instead)."
 ;;;; ---- Tests: build-start-cmd ----
 
 (ert-deftest claude-repl-test-build-start-cmd-bare-metal-no-session ()
-  "build-start-cmd for bare-metal with no session should produce claude --dangerously-skip-permissions."
+  "build-start-cmd for bare-metal with no session should produce claude --permission-mode auto."
   (claude-repl-test--with-clean-state
     (let ((claude-repl-system-prompt nil)
           (claude-repl-interactive-model nil))
@@ -2005,7 +2005,7 @@ restart (the lazy-start path applies its defaults instead)."
       (cl-letf (((symbol-function 'claude-repl--get-sandbox-image)
                  (lambda (_ws) nil)))
         (let ((result (claude-repl--build-start-cmd "ws1")))
-          (should (equal (plist-get result :cmd) "claude --dangerously-skip-permissions"))
+          (should (equal (plist-get result :cmd) "claude --permission-mode auto"))
           (should-not (plist-get result :sandboxed-p)))))))
 
 (ert-deftest claude-repl-test-build-start-cmd-uses-ws-model ()
@@ -2051,7 +2051,7 @@ restart (the lazy-start path applies its defaults instead)."
                  (lambda (_ws) nil)))
         (let ((result (claude-repl--build-start-cmd "ws1")))
           (should (equal (plist-get result :cmd)
-                         "claude --dangerously-skip-permissions --system-prompt \".\"")))))))
+                         "claude --permission-mode auto --system-prompt \".\"")))))))
 
 (ert-deftest claude-repl-test-build-start-cmd-sandbox-env-uses-plain-claude ()
   "Even a :sandbox-env worktree with a session launches plain `claude' + --continue, never claude-sandbox."
