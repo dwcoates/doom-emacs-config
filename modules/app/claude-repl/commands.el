@@ -1243,22 +1243,30 @@ is the sole observer here."
 
 (defun claude-repl--claude-process-pid (ws)
   "Return the PID of the `claude' process running in WS's vterm, or nil.
-`claude' runs as a direct child of the workspace vterm's shell, so this
-finds the child PID (of the vterm process's shell PID) whose command
-name matches \"claude\".  A pure query over `list-system-processes' /
+`claude' runs as the child of the workspace vterm's shell.  It is
+identified STRUCTURALLY as that shell's child rather than by name,
+because the native `claude' binary reports its version (e.g. \"2.1.206\",
+from `~/.local/share/claude/versions/<v>') as its process `comm' — not
+\"claude\".  Among the shell's children a claude-ish `args'/`comm' match
+is preferred (in case the shell ever has more than one child), otherwise
+the sole child is taken.  A pure query over `list-system-processes' /
 `process-attributes' with no side effects; returns nil when the vterm is
-dead or no matching child exists."
+dead or the shell has no children."
   (let* ((buf (claude-repl--ws-get ws :vterm-buffer))
          (proc (and (buffer-live-p buf) (get-buffer-process buf)))
          (shell-pid (and proc (process-id proc))))
     (when shell-pid
-      (seq-find
-       (lambda (pid)
-         (let ((attrs (process-attributes pid)))
-           (and (eq (alist-get 'ppid attrs) shell-pid)
-                (let ((comm (alist-get 'comm attrs)))
-                  (and comm (string-match-p "claude" comm))))))
-       (list-system-processes)))))
+      (let ((children (seq-filter
+                       (lambda (pid)
+                         (eq (alist-get 'ppid (process-attributes pid)) shell-pid))
+                       (list-system-processes))))
+        (or (seq-find
+             (lambda (pid)
+               (let ((attrs (process-attributes pid)))
+                 (or (string-match-p "claude" (or (alist-get 'args attrs) ""))
+                     (string-match-p "claude" (or (alist-get 'comm attrs) "")))))
+             children)
+            (and (= (length children) 1) (car children)))))))
 
 (defun claude-repl-kill-claude-process (&optional ws)
   "Kill ONLY the `claude' process in WS's vterm, leaving panels and buffers intact.
