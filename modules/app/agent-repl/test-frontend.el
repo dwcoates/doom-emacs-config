@@ -230,6 +230,18 @@ exact failure seen live in the fresh instance."
         (should (null (agent-repl--ws-get "ws1" :frontend-buffer)))
         (should (null (agent-repl--ws-get "ws1" :frontend-buffer-session-id)))))))
 
+(ert-deftest agent-repl-test-frontend-kill-webview-suppresses-query-prompt ()
+  "Webview kills bypass kill-buffer query functions.
+The xwidget query fn raises a blocking yes-or-no prompt, which would
+deadlock the non-interactive nuke hook."
+  ;; Arrange — a query fn that refuses every kill.
+  (let ((buf (generate-new-buffer "*fake-webview*"))
+        (kill-buffer-query-functions (list (lambda () nil))))
+    ;; Act
+    (agent-repl--frontend-kill-webview buf)
+    ;; Assert — killed despite the refusing query fn.
+    (should-not (buffer-live-p buf))))
+
 (ert-deftest agent-repl-test-frontend-webview-killed-on-ws-nuke ()
   "The nuke hook kills the webview so the WKWebView never outlives the ws."
   ;; Arrange
