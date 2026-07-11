@@ -24,6 +24,9 @@
 ;;     (the webapp sets document.title per model); the buffer-local
 ;;     `xwidget-webkit-buffer-name-format' is pinned to the fixed name
 ;;     so the identity never drifts.
+;;   - `xwidget-webkit-mode' installs a "WebKit: <document title>"
+;;     header-line; the panel is chrome, not a browser, so the
+;;     header-line is cleared on mount.
 ;;
 ;; The WKWebView is external state: creation funnels through the
 ;; boundary wrapper `agent-repl--frontend-make-webview-buffer',
@@ -123,7 +126,9 @@ bound to SESSION-ID (`:frontend-buffer-session-id'); a session change
 kills the stale webview and mounts a fresh one, since an xwidget
 session cannot be retargeted reliably from outside.  The new buffer's
 name is pinned via buffer-local `xwidget-webkit-buffer-name-format' so
-webapp title changes never rename it."
+webapp title changes never rename it, and `xwidget-webkit-mode's
+\"WebKit: <title>\" header-line is cleared — the webview is the
+workspace's agent output panel, not a browser."
   (let ((existing (agent-repl--ws-get ws :frontend-buffer))
         (bound-to (agent-repl--ws-get ws :frontend-buffer-session-id)))
     (if (and (buffer-live-p existing) (equal bound-to session-id))
@@ -139,6 +144,8 @@ webapp title changes never rename it."
           ;; title-change renames; the format is the fixed name itself
           ;; (no %-constructs), so every "rename" is a no-op.
           (setq-local xwidget-webkit-buffer-name-format name)
+          ;; Drop the mode's "WebKit: <document title>" header-line.
+          (setq-local header-line-format nil)
           (rename-buffer name t))
         (agent-repl--ws-put ws :frontend-buffer buf)
         (agent-repl--ws-put ws :frontend-buffer-session-id session-id)
