@@ -389,8 +389,10 @@ UI-originated commands (`user-message`, `permission-decision`,
 shapes verbatim, plus the `replay-request` frame (§2.10), so this
 section otherwise enumerates only **daemon → webapp** frames. A
 client-sent `shutdown` is out of contract: session teardown is
-daemon-owned (`DELETE /sessions/{id}`), and the daemon ignores a
-`shutdown` frame like any other unknown type.
+daemon-owned (`DELETE /sessions/{id}`). The daemon decodes a `shutdown`
+frame (it is a known Layer-1 command shape) but deliberately drops it
+without forwarding — the net effect matches an unknown type, the
+mechanism does not.
 
 Every frame carries a `seq` (monotonic, per-session) so the SPA store
 can detect drops and request a snapshot replay. Exception: `hello` sits

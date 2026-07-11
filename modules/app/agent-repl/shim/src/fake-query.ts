@@ -27,6 +27,12 @@ export interface FakeQueryOpts {
    * session_id (continuation of the resumed CLI session). Mirrors the
    * empirically verified real behavior — context restores but NO
    * history messages are re-emitted through the stream.
+   *
+   * Without resume, fake init reports the SHIM session id as its
+   * session uuid (there is no CLI to mint one), so in fake mode the
+   * daemon's captured claude_session_id equals the ephemeral daemon
+   * id. That is a fake-mode-only artifact: real init always carries
+   * the durable CLI uuid the spec describes.
    */
   resume?: string;
 }

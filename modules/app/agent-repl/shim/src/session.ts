@@ -97,7 +97,13 @@ export class ShimSession {
   private readonly pendingPermissions = new Map<RequestId, PendingPermission>();
   private query: QueryLike | null = null;
   private interruptRequested = false;
-  private turnInFlight = false;
+  /**
+   * Outstanding-turn COUNTER (user-messages received minus results
+   * seen), not a boolean: streaming-input mode queues turns, and a
+   * boolean cleared by turn N's result would misreport turn N+1 as
+   * idle, mislabeling its interrupted result.
+   */
+  private turnsInFlight = 0;
   private shutdownRequestId: RequestId | null = null;
   private closed = false;
 
@@ -169,7 +175,7 @@ export class ShimSession {
         // not poison the NEXT turn's result into `subtype: "aborted"`.
         // The SDK interrupt() is still forwarded (it is a no-op when
         // idle) and pending prompts are still cancelled.
-        if (this.turnInFlight) {
+        if (this.turnsInFlight > 0) {
           this.interruptRequested = true;
         }
         this.cancelPendingPermissions();
@@ -208,7 +214,7 @@ export class ShimSession {
   }
 
   private handleUserMessage(cmd: UserMessageCmd): void {
-    this.turnInFlight = true;
+    this.turnsInFlight++;
     const content: ContentBlock[] =
       typeof cmd.content === "string"
         ? [{ type: "text", text: cmd.content }]
@@ -395,7 +401,9 @@ export class ShimSession {
       ? "aborted"
       : mapResultSubtype(String(msg.subtype));
     this.interruptRequested = false;
-    this.turnInFlight = false;
+    if (this.turnsInFlight > 0) {
+      this.turnsInFlight--;
+    }
     const denials = msg.permission_denials as
       | Array<{ tool_use_id: string; tool_name: string; message?: string }>
       | undefined;

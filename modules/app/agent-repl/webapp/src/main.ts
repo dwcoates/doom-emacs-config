@@ -9,7 +9,7 @@
 import { PermissionMode } from "./protocol.js";
 import { FeedRenderer } from "./render.js";
 import { ConversationStore } from "./store.js";
-import { WsClient } from "./ws.js";
+import { WsClient, makeSessionExistsProbe } from "./ws.js";
 import "./styles.css";
 
 function must<T extends HTMLElement>(id: string): T {
@@ -93,12 +93,7 @@ async function boot(): Promise<void> {
       statusEl.textContent = connected ? "connected" : "disconnected";
       statusEl.classList.toggle("ok", connected);
     },
-    sessionExists: async () => {
-      const resp = await fetch(`${httpBase}/sessions`);
-      if (!resp.ok) throw new Error(`GET /sessions: ${resp.status}`);
-      const body = (await resp.json()) as { sessions: Array<{ session_id: string }> };
-      return body.sessions.some((s) => s.session_id === sessionId);
-    },
+    sessionExists: makeSessionExistsProbe(httpBase, sessionId),
     onGone: () => {
       statusEl.textContent = "session gone";
       statusEl.classList.remove("ok");

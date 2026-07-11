@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { WsClient } from "../src/ws.js";
+import { WsClient, makeSessionExistsProbe } from "../src/ws.js";
 
 /** Minimal scripted WebSocket standing in for the real one. */
 class FakeWebSocket {
@@ -106,6 +106,24 @@ describe("WsClient", () => {
     expect(client.send({ type: "interrupt", request_id: "r1" })).toBe(false);
   });
 
+  it("makeSessionExistsProbe answers from the /sessions listing", async () => {
+    // Arrange
+    const fetchFn = (async () => ({
+      ok: true,
+      json: async () => ({ sessions: [{ session_id: "s1" }] }),
+    })) as unknown as typeof fetch;
+    // Act / Assert
+    await expect(makeSessionExistsProbe("http://d", "s1", fetchFn)()).resolves.toBe(true);
+    await expect(makeSessionExistsProbe("http://d", "ghost", fetchFn)()).resolves.toBe(false);
+  });
+
+  it("makeSessionExistsProbe throws on a non-2xx listing", async () => {
+    // Arrange — transport failure must read as unknown, not gone.
+    const fetchFn = (async () => ({ ok: false, status: 502 })) as unknown as typeof fetch;
+    // Act / Assert
+    await expect(makeSessionExistsProbe("http://d", "s1", fetchFn)()).rejects.toThrow("502");
+  });
+
   it("reconnects with backoff after an unexpected close", () => {
     // Arrange
     const { client } = newClient();
@@ -140,6 +158,31 @@ describe("WsClient", () => {
     // Assert — no second socket, onGone fired exactly once.
     expect(FakeWebSocket.instances).toHaveLength(1);
     expect(gone).toBe(1);
+  });
+
+  it("ignores a stale in-flight probe after close() then connect()", async () => {
+    // Arrange — a probe we resolve manually, long after the client has
+    // been closed and reconnected by the user.
+    let resolveProbe: (v: boolean) => void = () => {};
+    const client = new WsClient({
+      url: "ws://x/sessions/s1/stream",
+      onMessage: () => undefined,
+      wsFactory: (url) => new FakeWebSocket(url) as unknown as WebSocket,
+      backoffMs: [10],
+      sessionExists: () => new Promise<boolean>((resolve) => (resolveProbe = resolve)),
+    });
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    FakeWebSocket.instances[0].close(); // schedules reconnect
+    await vi.advanceTimersByTimeAsync(10); // probe now in flight
+    // Act — user closes and reconnects while the probe dangles...
+    client.close();
+    client.connect(); // socket #2
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    resolveProbe(true); // ...then the stale probe resolves
+    await vi.advanceTimersByTimeAsync(0);
+    // Assert — the stale probe must NOT open socket #3.
+    expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
   it("keeps reconnecting when the existence probe itself fails", async () => {

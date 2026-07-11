@@ -259,6 +259,63 @@ func TestSessionReplayAllowedOnTerminalSession(t *testing.T) {
 	}
 }
 
+func TestSessionReplayFromDrainedClientDoesNotPanic(t *testing.T) {
+	// Arrange — a client attached when the shim hard-dies: Run's drain
+	// closes its channel and removes it from the client set, but the
+	// server's reader goroutine may still deliver one more frame.
+	h := newHarness(t, 16)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c)
+	h.shim.pushEvent(t, `{"type":"system","session_id":"sess-1","uuid":"u","subtype":"init","data":{}}`)
+	recvFrame(t, c)
+	h.endShim()
+	<-h.sess.Done()
+	expectClosed(t, c)
+	// Act / Assert — the terminal carve-out honors the replay, and the
+	// stale client's closed channel is skipped instead of panicking.
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"replay-request","from_seq":1}`)); err != nil {
+		t.Fatalf("replay from drained client: %v", err)
+	}
+}
+
+func TestSessionInitOverwritesRequestedCwdModel(t *testing.T) {
+	// Arrange — requested values seed the mirror.
+	shim := newFakeShim()
+	sess := New(Config{
+		ID:            "sess-1",
+		DaemonVersion: "0.1.0-test",
+		Shim:          shim,
+		CWD:           "/requested",
+		Model:         "requested-model",
+		Retention:     16,
+		Now:           func() time.Time { return time.Date(2026, 5, 24, 12, 34, 56, 789e6, time.UTC) },
+		Logf:          func(string, ...any) {},
+	})
+	go sess.Run()
+	t.Cleanup(func() {
+		shim.end()
+		<-sess.Done()
+	})
+	early := NewClient()
+	sess.Attach(early)
+	recvFrame(t, early)
+	// Act — the authoritative init reports different values.
+	e, err := protocol.DecodeL1Event([]byte(`{"type":"system","session_id":"sess-1","uuid":"u","subtype":"init","data":{"model":"authoritative-model","cwd":"/authoritative"}}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	shim.events <- e
+	recvFrame(t, early)
+	// Assert — a late hello carries the authoritative values.
+	late := NewClient()
+	sess.Attach(late)
+	hello := recvFrame(t, late)
+	if hello["cwd"] != "/authoritative" || hello["model"] != "authoritative-model" {
+		t.Errorf("hello = %v", hello)
+	}
+}
+
 // --- broadcast / seq -----------------------------------------------------------
 
 func TestSessionSeqIsStrictlyIncreasingAcrossFrames(t *testing.T) {

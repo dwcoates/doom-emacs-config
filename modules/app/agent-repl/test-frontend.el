@@ -108,37 +108,49 @@
 
 ;;;; ---- Placement ---------------------------------------------------------------
 
-(ert-deftest agent-repl-test-frontend-display-replaces-output-window-buffer ()
-  "With a live output window, the webview replaces its buffer."
+(ert-deftest agent-repl-test-frontend-display-hides-panels-first ()
+  "Visible agent panels are hidden through the module's own path.
+Swapping the webview under the strongly-dedicated output window would
+orphan the input panel for the sync sweep and break the next
+show-panels — hiding first sidesteps the whole class."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((buf (generate-new-buffer "*fake-webview*"))
-          (win (selected-window)))
+          (hidden nil))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl-window--panel-window)
-                     (lambda (&rest _) win)))
+          (cl-letf (((symbol-function 'agent-repl--panels-visible-p)
+                     (lambda () t))
+                    ((symbol-function 'agent-repl--hide-panels)
+                     (lambda () (setq hidden t))))
             ;; Act
             (agent-repl--frontend-display-webview "ws1" buf)
-            ;; Assert — buffer swapped in and the window re-dedicated.
-            (should (eq (window-buffer win) buf))
-            (should (window-dedicated-p win)))
-        (set-window-dedicated-p win nil)
+            ;; Assert
+            (should hidden)
+            (should (eq (window-buffer (selected-window)) buf)))
         (kill-buffer buf)))))
 
-(ert-deftest agent-repl-test-frontend-display-falls-back-to-main-window ()
-  "Without panels, the webview takes the frame's main window."
+(ert-deftest agent-repl-test-frontend-display-uses-main-area-window ()
+  "Without panels, the webview takes a live main-area window."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((buf (generate-new-buffer "*fake-webview*")))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl-window--panel-window)
-                     (lambda (&rest _) nil)))
+          (cl-letf (((symbol-function 'agent-repl--panels-visible-p)
+                     (lambda () nil)))
             ;; Act
             (agent-repl--frontend-display-webview "ws1" buf)
             ;; Assert
             (should (eq (window-buffer (selected-window)) buf)))
-        (set-window-dedicated-p (selected-window) nil)
         (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-main-area-window-skips-side-windows ()
+  "The webview host window is never a side window."
+  ;; Arrange — mark every window EXCEPT the selected one as side.
+  (let ((sel (selected-window)))
+    (cl-letf (((symbol-function 'agent-repl-window--side-window-p)
+               (lambda (win) (not (eq win sel)))))
+      ;; Act / Assert
+      (should (eq (agent-repl--frontend-main-area-window) sel)))))
 
 ;;;; ---- open-panel ------------------------------------------------------------------
 
@@ -190,6 +202,23 @@
         (should-not (buffer-live-p buf))
         (should (null (agent-repl--ws-get "ws1" :frontend-buffer)))
         (should (null (agent-repl--ws-get "ws1" :frontend-buffer-session-id)))))))
+
+(ert-deftest agent-repl-test-frontend-webview-killed-on-ws-nuke ()
+  "The nuke hook kills the webview so the WKWebView never outlives the ws."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (agent-repl--ws-put "ws1" :frontend-buffer buf)
+      ;; Act — simulate the pre-tombstone hook dispatch.
+      (agent-repl--frontend-release-workspace-webview "ws1")
+      ;; Assert
+      (should-not (buffer-live-p buf)))))
+
+(ert-deftest agent-repl-test-frontend-webview-release-registered-on-ws-del-hook ()
+  "The webview release fn is registered on the pre-tombstone hook."
+  ;; Assert
+  (should (memq #'agent-repl--frontend-release-workspace-webview
+                agent-repl-ws-del-hook)))
 
 (ert-deftest agent-repl-test-frontend-close-panel-errors-without-webview ()
   "close-panel on a workspace with no webview raises a user-error."
