@@ -1403,6 +1403,22 @@ workspace that is already hidden / never-started should still mark it
                       vterm-running session-starting panels-visible
                       (if selection "yes" "no") (if always-close "yes" "no"))
     (cond
+     ;; GUI frontend: its own three-way toggle (send-selection / hide /
+     ;; open-or-show) — the vterm branches below reason about vterm
+     ;; process state and panel pairs that do not exist for the gui.
+     ((agent-repl--ws-gui-frontend-p ws)
+      (let ((fe (agent-repl--ws-frontend ws))
+            (webview (agent-repl--ws-get ws :frontend-buffer)))
+        (cond
+         (selection
+          (deactivate-mark)
+          (agent-repl--send-to-agent selection))
+         ((and (buffer-live-p webview) (get-buffer-window webview))
+          (funcall (agent-repl-frontend-hide-fn fe) ws))
+         ((funcall (agent-repl-frontend-running-p-fn fe) ws)
+          (funcall (agent-repl-frontend-show-fn fe) ws))
+         (t
+          (funcall (agent-repl-frontend-open-fn fe) ws)))))
      (selection
       (deactivate-mark)
       (agent-repl--send-to-agent selection))
@@ -1567,32 +1583,27 @@ would wipe that workspace's running session."
 ;;;; User commands
 
 (defun agent-repl-kill ()
-  "Kill Agent REPL buffers and windows for the current workspace."
+  "Kill the agent session and its view for the current workspace.
+Frontend-blind: dispatches the workspace's registered frontend's
+`:kill-fn' (vterm process + panels, or daemon session + webview).
+The vterm capability carries the historical lifecycle-reset semantics
+\(see `agent-repl--vterm-kill')."
   (interactive)
   (let ((ws (agent-repl--ws-current-name)))
     (agent-repl--log ws "kill")
     (unless ws (error "agent-repl-kill: no active workspace"))
-    ;; Lifecycle-reset: kill destroys the session, so both state axes are
-    ;; reset to nil.  (Documented exception to "sentinel-only writes
-    ;; agent-state" — see analysis/12.)  :repl-state nil means "no panels
-    ;; and no particular inactive/dead designation"; the workspace returns
-    ;; to a pristine no-agent state awaiting the next initialize-agent.
-    (agent-repl--ws-put ws :agent-state nil)
-    (agent-repl--ws-put ws :repl-state nil)
-    (force-mode-line-update t)
-    (agent-repl--kill-session ws)))
+    (funcall (agent-repl-frontend-kill-fn (agent-repl--ws-frontend ws)) ws)))
 
 (defun agent-repl-restart ()
   "Hard restart the agent for the current workspace.
-Kills the process, windows, and buffers for the current session and
-re-initializes. The agent state file on disk is preserved so the new
-process resumes via `--continue'. Panels reopen once the new session
-signals ready."
+Frontend-blind: dispatches the workspace's registered frontend's
+`:restart-fn'.  For vterm the agent state file on disk is preserved so
+the new process resumes via `--continue'; for the gui a fresh daemon
+session is created."
   (interactive)
   (let ((ws (agent-repl--ws-current-name)))
     (agent-repl--log ws "restart")
-    (agent-repl-kill)
-    (agent-repl--initialize-agent ws)))
+    (funcall (agent-repl-frontend-restart-fn (agent-repl--ws-frontend ws)) ws)))
 
 (defun agent-repl-focus-input ()
   "Focus the agent input buffer, or return to previous window if already there.
@@ -1766,3 +1777,57 @@ independently.  Requires a worktree workspace with a captured session ID."
                       (substring session-id 0 agent-repl-session-id-display-length))
     (agent-repl--initialize-agent ws)
     (agent-repl--show-panels-and-focus)))
+
+;;;; ---- Frontend registration (vterm) -----------------------------------------
+;;
+;; The vterm frontend wraps the classic machinery this file and
+;; session.el own: interactive TUI in a vterm process, panels shown via
+;; the fullscreen layout. Registered here (rather than frontends.el) so
+;; the registry file stays mechanism-only, mirroring how backend.el
+;; hosts the registry while claude/codex register from their homes.
+
+(defun agent-repl--vterm-kill (ws)
+  "The vterm frontend's kill capability (registry `:kill-fn').
+Lifecycle-reset: kill destroys the session, so both state axes reset to
+nil (documented exception to \"sentinel-only writes agent-state\").
+The workspace returns to a pristine no-agent state awaiting the next
+initialize."
+  (agent-repl--ws-put ws :agent-state nil)
+  (agent-repl--ws-put ws :repl-state nil)
+  (force-mode-line-update t)
+  (agent-repl--kill-session ws))
+
+(defun agent-repl--vterm-interrupt (ws kind)
+  "The vterm frontend's interrupt capability (registry `:interrupt-fn').
+KIND `ctrl-c' clears the TUI prompt line (raw ETX byte); `escape' stops
+the in-flight generation.  Returns non-nil only when the gesture was
+actually delivered to a live vterm."
+  (pcase kind
+    ('ctrl-c (agent-repl--vterm-send-raw-ctrl-c))
+    ('escape
+     (let ((vterm-buf (agent-repl--ws-get ws :vterm-buffer)))
+       (when (and vterm-buf (buffer-live-p vterm-buf))
+         (agent-repl--send-interrupt-escape ws vterm-buf)
+         t)))))
+
+(agent-repl-register-frontend
+ (agent-repl-frontend-create
+  :name 'vterm
+  :open-fn (lambda (_ws) (agent-repl--initialize-agent))
+  :kill-fn #'agent-repl--vterm-kill
+  :send-fn #'agent-repl--vterm-send-turn
+  :interrupt-fn #'agent-repl--vterm-interrupt
+  :running-p-fn (lambda (ws) (agent-repl--agent-running-p ws))
+  :show-fn (lambda (_ws) (agent-repl--show-hidden-panels))
+  :hide-fn (lambda (_ws) (agent-repl--hide-panels))
+  :restart-fn (lambda (ws)
+                (agent-repl--vterm-kill ws)
+                (agent-repl--initialize-agent ws))
+  :supported-backends '(claude codex)
+  ;; Durable-resume currency: the hook-captured instantiation session
+  ;; id IS the CLI session uuid; adopting one persists it so the next
+  ;; initialize resumes through the state file.
+  :durable-session-id-fn (lambda (ws)
+                           (let ((inst (agent-repl--active-inst ws)))
+                             (and inst (agent-repl-instantiation-session-id inst))))
+  :adopt-session-fn (lambda (ws id) (agent-repl--set-session-id ws id))))

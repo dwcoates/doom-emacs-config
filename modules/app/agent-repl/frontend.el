@@ -46,6 +46,16 @@
 (declare-function agent-repl--panels-visible-p "agent-repl-panels" ())
 (declare-function agent-repl--hide-panels "agent-repl-panels" ())
 (declare-function agent-repl--ensure-input-buffer "agent-repl-panels" (ws))
+(declare-function agent-repl--close-buffer-windows "agent-repl-panels" (&rest bufs))
+(declare-function agent-repl--ws-backend-name "agent-repl-backend" (ws))
+(declare-function agent-repl--frontend-validate-pair "agent-repl-frontends" (frontend-name backend-name))
+(declare-function agent-repl-register-frontend "agent-repl-frontends" (frontend))
+(declare-function agent-repl-frontend-create "agent-repl-frontends")
+(declare-function agent-repl--gui-send-turn "agent-repl-frontend-client" (ws input raw &optional on-settle))
+(declare-function agent-repl--gui-interrupt "agent-repl-frontend-client" (ws kind))
+(declare-function agent-repl--gui-running-p "agent-repl-frontend-client" (ws))
+(declare-function agent-repl--gui-durable-session-id "agent-repl-frontend-client" (ws))
+(declare-function agent-repl--gui-adopt-session "agent-repl-frontend-client" (ws claude-session-id))
 (defvar agent-repl-input-height-fraction)
 (declare-function xwidget-webkit--create-new-session-buffer "xwidget" (url &optional callback))
 (declare-function xwidget-webkit-current-session "xwidget" ())
@@ -196,26 +206,79 @@ window like an ordinary buffer display."
 
 ;;;; ---- Entry point ----------------------------------------------------------------
 
+(defun agent-repl--gui-open (ws)
+  "The gui frontend's open capability (registry `:open-fn').
+The lazy end-to-end trigger: validates the backend pair and xwidget
+capability, ensures the daemon (built if stale, launched if absent),
+ensures WS's daemon session (rooted at its worktree), mounts the
+webview attached to that session, and places it over the input panel."
+  (unless (agent-repl--frontend-xwidget-available-p)
+    (user-error "agent-repl: this Emacs build lacks xwidget-webkit support"))
+  (agent-repl--frontend-validate-pair 'gui (agent-repl--ws-backend-name ws))
+  (let* ((session-id (agent-repl--frontend-ensure-session ws))
+         ;; composer=0: Emacs owns input (the panel below), so the
+         ;; webview hides its own composer and stays output-only.
+         (url (concat (agent-repl--frontend-session-url session-id)
+                      "&composer=0"))
+         (buf (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
+    (agent-repl--frontend-display-webview ws buf)))
+
+(defun agent-repl--gui-show (ws)
+  "The gui frontend's show capability (registry `:show-fn').
+Remounts the live webview (or opens fresh when it died)."
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+    (if (buffer-live-p buf)
+        (agent-repl--frontend-display-webview ws buf)
+      (agent-repl--gui-open ws))))
+
+(defun agent-repl--gui-hide (ws)
+  "The gui frontend's hide capability (registry `:hide-fn').
+Closes the webview and input windows; buffers and session survive."
+  (agent-repl--close-buffer-windows
+   (agent-repl--ws-get ws :frontend-buffer)
+   (agent-repl--ws-get ws :input-buffer)))
+
+(defun agent-repl--gui-kill (ws)
+  "The gui frontend's kill capability (registry `:kill-fn').
+Deletes the daemon session (best-effort) and kills the webview; the
+input buffer survives (it is workspace furniture, not session state)."
+  (agent-repl--frontend-release-workspace-session ws)
+  (agent-repl--frontend-release-workspace-webview ws)
+  (agent-repl--ws-put ws :frontend-buffer nil)
+  (agent-repl--ws-put ws :frontend-buffer-session-id nil))
+
+(agent-repl-register-frontend
+ (agent-repl-frontend-create
+  :name 'gui
+  :open-fn #'agent-repl--gui-open
+  :kill-fn #'agent-repl--gui-kill
+  :send-fn #'agent-repl--gui-send-turn
+  :interrupt-fn #'agent-repl--gui-interrupt
+  :running-p-fn #'agent-repl--gui-running-p
+  :show-fn #'agent-repl--gui-show
+  :hide-fn #'agent-repl--gui-hide
+  :restart-fn (lambda (ws)
+                (agent-repl--gui-kill ws)
+                (agent-repl--gui-open ws))
+  ;; The gui drives sessions through the claude Agent SDK; a codex
+  ;; shim does not exist (yet), so the pair validation fails loudly.
+  :supported-backends '(claude)
+  :durable-session-id-fn #'agent-repl--gui-durable-session-id
+  :adopt-session-fn #'agent-repl--gui-adopt-session))
+
 ;;;###autoload
 (defun agent-repl-frontend-open-panel ()
   "Open the web frontend for the current workspace's session.
-The lazy end-to-end trigger: ensures the daemon is built and running,
-ensures this workspace's daemon session (rooted at its worktree),
-mounts the webview buffer attached to that session, and places it in
-the agent output window."
+Stamps the workspace's `:frontend' choice to `gui' (the unified
+command surface — `SPC o c' and friends — then routes here through the
+frontend registry) and dispatches the gui open capability."
   (interactive)
-  (unless (agent-repl--frontend-xwidget-available-p)
-    (user-error "agent-repl: this Emacs build lacks xwidget-webkit support"))
   (let ((ws (agent-repl--ws-current-name)))
     (unless ws
       (user-error "agent-repl: no current workspace"))
-    (let* ((session-id (agent-repl--frontend-ensure-session ws))
-           ;; composer=0: Emacs owns input (the panel below), so the
-           ;; webview hides its own composer and stays output-only.
-           (url (concat (agent-repl--frontend-session-url session-id)
-                        "&composer=0"))
-           (buf (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
-      (agent-repl--frontend-display-webview ws buf))))
+    (agent-repl--frontend-validate-pair 'gui (agent-repl--ws-backend-name ws))
+    (agent-repl--ws-put ws :frontend 'gui)
+    (agent-repl--gui-open ws)))
 
 ;;;###autoload
 (defun agent-repl-frontend-close-panel ()

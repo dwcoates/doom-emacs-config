@@ -3442,14 +3442,14 @@ buffer is not in `vterm-mode' — the cursor-reset is vterm-specific."
 ;;;; ---- Tests: agent-repl-restart ----
 
 (ert-deftest agent-repl-test-panels-restart-kills-then-initializes ()
-  "agent-repl-restart calls agent-repl-kill then agent-repl--initialize-agent in order."
+  "agent-repl-restart dispatches the vterm frontend's kill-then-initialize."
   (agent-repl-test--with-clean-state
     (let ((order nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl-kill)
-                 (lambda () (push 'kill order)))
+                ((symbol-function 'agent-repl--vterm-kill)
+                 (lambda (_ws) (push 'kill order)))
                 ((symbol-function 'agent-repl--initialize-agent)
-                 (lambda (_ws) (push 'init order))))
+                 (lambda (&optional _ws &rest _) (push 'init order))))
         (agent-repl-restart)
         (should (equal (nreverse order) '(kill init)))))))
 

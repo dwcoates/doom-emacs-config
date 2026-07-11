@@ -1237,28 +1237,18 @@ terminates the in-flight turn, so the tab should immediately reflect
 arrives.  No Stop hook will fire for the interrupted turn, so Emacs
 is the sole observer here."
   (interactive)
-  (let* ((ws (or ws (agent-repl--ws-current-name)))
-         (vterm-buf (agent-repl--ws-get ws :vterm-buffer)))
+  (let ((ws (or ws (agent-repl--ws-current-name))))
     (agent-repl--log ws "interrupt")
-    (cond
-     ;; Web-frontend backend: the wire interrupt (HTTP route) replaces
-     ;; the vterm Escape; the done-marking mirrors the vterm branch —
-     ;; the aborted turn's result frame is the webview's signal, but
-     ;; Emacs-side state must not linger on :thinking either.
-     ((agent-repl--frontend-backend-p ws)
-      (agent-repl--interrupt-agent ws)
-      (agent-repl--ws-clear-stop-tracking ws)
-      (agent-repl--mark-agent-done ws)
-      (run-at-time agent-repl-interrupt-reinsert-delay nil
-                   #'agent-repl--enter-insert-mode ws))
-     ((and vterm-buf (buffer-live-p vterm-buf))
-      (agent-repl--send-interrupt-escape ws vterm-buf)
-      (agent-repl--ws-clear-stop-tracking ws)
-      (agent-repl--mark-agent-done ws)
-      (run-at-time agent-repl-interrupt-reinsert-delay nil
-                   #'agent-repl--enter-insert-mode ws))
-     (t
-      (agent-repl--log ws "interrupt: vterm not live, skipping")))))
+    ;; The frontend's interrupt capability returns non-nil only when the
+    ;; interrupt was actually issued (a dead vterm returns nil); the
+    ;; done-marking must not fire for an undelivered interrupt.
+    (if (agent-repl--frontend-dispatch-interrupt ws 'escape)
+        (progn
+          (agent-repl--ws-clear-stop-tracking ws)
+          (agent-repl--mark-agent-done ws)
+          (run-at-time agent-repl-interrupt-reinsert-delay nil
+                       #'agent-repl--enter-insert-mode ws))
+      (agent-repl--log ws "interrupt: frontend reported not delivered, skipping"))))
 
 (defun agent-repl--agent-process-pid (ws)
   "Return the PID of the `claude' process running in WS's vterm, or nil.
