@@ -2924,8 +2924,58 @@ from `create-buffer'.  Stubs can be overridden by wrapping BODY in another
              ((symbol-function 'agent-repl--schedule-ready-timer) #'ignore)
              ((symbol-function 'agent-repl--initialize-input-buffer) #'ignore)
              ((symbol-function 'agent-repl--enable-hide-overlay) #'ignore)
+             ;; Launch-time panel open (the 2026-07 gate change) is
+             ;; neutralized here; the dedicated launch-opens-panels tests
+             ;; rebind it to observe the call.
+             ((symbol-function 'agent-repl--show-hidden-panels) #'ignore)
              ((symbol-function 'agent-repl--workspace-id) (lambda () "id")))
      ,@body))
+
+(ert-deftest agent-repl-test-panels-initialize-agent-opens-panels-at-launch ()
+  "initialize-agent opens panels immediately for the current workspace.
+Pins the 2026-07 gate change: blocking first-run screens (trust
+dialogs, codex onboarding) fire no readiness hook, so panels must not
+wait for ready."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
+    (let ((vterm-buf (generate-new-buffer " *init-agent-open*"))
+          (shown nil))
+      (unwind-protect
+          (agent-repl-test--initialize-agent-stubs vterm-buf
+            (cl-letf (((symbol-function 'agent-repl--show-hidden-panels)
+                       (lambda () (setq shown t))))
+              (agent-repl--initialize-agent "test-ws")
+              (should shown)))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
+(ert-deftest agent-repl-test-panels-initialize-agent-background-boot-no-panels ()
+  "initialize-agent does NOT open panels for a non-current workspace boot."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "bg-ws" :active-env :bare-metal)
+    (let ((vterm-buf (generate-new-buffer " *init-agent-bg*"))
+          (shown nil))
+      (unwind-protect
+          (agent-repl-test--initialize-agent-stubs vterm-buf
+            (cl-letf (((symbol-function 'agent-repl--show-hidden-panels)
+                       (lambda () (setq shown t))))
+              (agent-repl--initialize-agent "bg-ws")
+              (should-not shown)))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
+(ert-deftest agent-repl-test-panels-initialize-agent-hidden-pref-no-panels ()
+  "initialize-agent honors a persisted :hidden repl-state (panels stay closed)."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
+    (agent-repl--ws-put "test-ws" :repl-state :hidden)
+    (let ((vterm-buf (generate-new-buffer " *init-agent-hidden*"))
+          (shown nil))
+      (unwind-protect
+          (agent-repl-test--initialize-agent-stubs vterm-buf
+            (cl-letf (((symbol-function 'agent-repl--show-hidden-panels)
+                       (lambda () (setq shown t))))
+              (agent-repl--initialize-agent "test-ws")
+              (should-not shown)))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
 (ert-deftest agent-repl-test-panels-initialize-agent-starts-new-session ()
   "initialize-agent sets prefix counter, enables overlay, writes :agent-state :init."

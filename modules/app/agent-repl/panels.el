@@ -1220,10 +1220,14 @@ Writes `:agent-state :init' immediately after launching the vterm
 process (documented lifecycle exception to the sentinel-only-writes
 rule — no hook fires between process launch and session-start, so
 Emacs is the only observer of \"agent process exists, not ready yet\").
-Panels are deliberately NOT opened here — `on-session-start-event'
-opens them once `:agent-state' transitions from `:init' to `:idle'.
-During that window the user sees the blue `:init' tab and the
-echo-area message below."
+
+Panels open IMMEDIATELY after a successful launch (when WS is the
+current workspace and no persisted hidden/inactive preference says
+otherwise) so the agent TUI is visible from process start — blocking
+first-run screens (claude's folder-trust dialog, codex onboarding)
+fire no readiness hook, and the historical wait-for-ready gate left
+them invisible.  `on-session-start-event' still runs the after-ready
+path later for pending-prompt draining; its panel-show is idempotent."
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (unless ws (error "agent-repl--initialize-agent: no active workspace"))
     (when (agent-repl--agent-running-p ws)
@@ -1277,6 +1281,21 @@ echo-area message below."
               (message "Starting agent... ws=%s ws-id=%s dir=%s cmd=%s"
                        ws (agent-repl--workspace-id) root (or cmd "?"))
               (agent-repl--state-save ws)
+              ;; Open panels NOW rather than waiting for readiness (see
+              ;; docstring): blocking first-run screens fire no hook, so
+              ;; the wait-for-ready gate left them invisible.  Guards
+              ;; mirror `agent-repl--open-panels-after-ready': honor a
+              ;; persisted panels-closed preference and never steal the
+              ;; frame from a different workspace's background boot.
+              (cond
+               ((memq (agent-repl--ws-repl-state ws) '(:inactive :hidden))
+                (agent-repl--log ws "initialize-agent: persisted %s ws=%s — not opening panels"
+                                  (agent-repl--ws-repl-state ws) ws))
+               ((agent-repl--current-ws-p ws)
+                (agent-repl--log ws "initialize-agent: opening panels at launch ws=%s" ws)
+                (agent-repl--show-hidden-panels))
+               (t
+                (agent-repl--log ws "initialize-agent: background boot ws=%s — not opening panels" ws)))
               (setq launched t))
           (unless launched
             (agent-repl--log ws "initialize-agent: launch aborted, killing orphan buffer ws=%s" ws)
