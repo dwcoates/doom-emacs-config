@@ -6620,6 +6620,90 @@ beforehand must not redirect the jump to a different index."
       (claude-repl-workspace-switch-to-8)
       (should (equal switched '("i"))))))
 
+;;;; Second nine (Option M-1..M-9 -> workspaces 10-18)
+
+(ert-deftest claude-repl-cmd-test-switch-to-9/lands-on-tenth ()
+  "switch-to-9 routes to the 10th workspace (first of the second nine)."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e" "f" "g" "h" "i" "j") switched
+      (claude-repl-workspace-switch-to-9)
+      (should (equal switched '("j"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-9/ignores-prefix-arg ()
+  "switch-to-9 ignores `current-prefix-arg' — the second-nine wrappers
+preserve the prefix-arg-free contract of the first nine."
+  (let ((switched (list))
+        (current-prefix-arg 99))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e" "f" "g" "h" "i" "j") switched
+      (claude-repl-workspace-switch-to-9)
+      (should (equal switched '("j"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-10/lands-on-eleventh ()
+  "switch-to-10 routes to the 11th workspace."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k") switched
+      (claude-repl-workspace-switch-to-10)
+      (should (equal switched '("k"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-11/lands-on-twelfth ()
+  "switch-to-11 routes to the 12th workspace."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l") switched
+      (claude-repl-workspace-switch-to-11)
+      (should (equal switched '("l"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-12/lands-on-thirteenth ()
+  "switch-to-12 routes to the 13th workspace."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m") switched
+      (claude-repl-workspace-switch-to-12)
+      (should (equal switched '("m"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-13/lands-on-fourteenth ()
+  "switch-to-13 routes to the 14th workspace."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m" "n") switched
+      (claude-repl-workspace-switch-to-13)
+      (should (equal switched '("n"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-14/lands-on-fifteenth ()
+  "switch-to-14 routes to the 15th workspace."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m" "n" "o") switched
+      (claude-repl-workspace-switch-to-14)
+      (should (equal switched '("o"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-15/lands-on-sixteenth ()
+  "switch-to-15 routes to the 16th workspace."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m" "n" "o" "p") switched
+      (claude-repl-workspace-switch-to-15)
+      (should (equal switched '("p"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-16/lands-on-seventeenth ()
+  "switch-to-16 routes to the 17th workspace."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m" "n" "o" "p" "q") switched
+      (claude-repl-workspace-switch-to-16)
+      (should (equal switched '("q"))))))
+
+(ert-deftest claude-repl-cmd-test-switch-to-17/lands-on-eighteenth ()
+  "switch-to-17 routes to the 18th workspace (last of the second nine)."
+  (let ((switched (list)))
+    (claude-repl-cmd-test--with-switch-stubs
+        '("a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m" "n" "o" "p" "q" "r") switched
+      (claude-repl-workspace-switch-to-17)
+      (should (equal switched '("r"))))))
+
 (ert-deftest claude-repl-cmd-test-switch-to-final/lands-on-last ()
   "switch-to-final routes to the last name in the workspace list."
   (let ((switched (list)))

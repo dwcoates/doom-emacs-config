@@ -3252,19 +3252,23 @@ Drop-in replacement for `+workspace/switch-right' that honors
   (interactive)
   (claude-repl--workspace-cycle +1))
 
-;;;; Indexed workspace switchers (M-1..M-9, M-0 bindings)
+;;;; Indexed workspace switchers (first nine: SPC 1-9 / Cmd s-1..s-9; second nine: Opt M-1..M-9)
 ;;
 ;; Thin persp wrappers around `+workspace-switch' used in place of the
 ;; Doom `+workspace/switch-to-N' / `+workspace/switch-to-final' commands
-;; for the M-1..M-9 / M-0 bindings.  They were extracted to make the
-;; workspace-jump bindings ignore `current-prefix-arg' entirely — Doom's
-;; `+workspace/switch-to' inspects `current-prefix-arg' in its
-;; `interactive' form, which sporadically caused M-9 to land on the
-;; final workspace (when the previous key sequence had set a prefix
-;; arg) instead of the 9th, and M-0 to fall through to a no-op
-;; `text-scale-set' with the "The font hasn't been resized" message.
-;; These wrappers take no prefix argument and call `+workspace-switch'
-;; directly by name, so the behaviour is deterministic.
+;; for the workspace-jump bindings.  `switch-to-0'..`switch-to-8' back
+;; the FIRST nine workspaces (bound to `SPC 1-9' and Cmd `s-1..s-9');
+;; `switch-to-9'..`switch-to-17' back the SECOND nine (bound to Option
+;; `M-1..M-9', whose key digits 1-9 address workspaces 10-18).  They were
+;; extracted to make the workspace-jump bindings ignore
+;; `current-prefix-arg' entirely — Doom's `+workspace/switch-to' inspects
+;; `current-prefix-arg' in its `interactive' form, which sporadically
+;; caused M-9 to land on the final workspace (when the previous key
+;; sequence had set a prefix arg) instead of the intended one, and M-0 to
+;; fall through to a no-op `text-scale-set' with the "The font hasn't
+;; been resized" message.  These wrappers take no prefix argument and
+;; call `+workspace-switch' directly by name, so the behaviour is
+;; deterministic.
 ;;
 ;; `claude-repl--workspace-switch-by-index' is the shared core; the
 ;; named commands below are the only entry points bound to keys.
@@ -3323,6 +3327,54 @@ does not consult `current-prefix-arg' and does not flash the tab."
   "Switch to the 9th workspace.  Thin wrapper, ignores prefix arg."
   (interactive)
   (claude-repl--workspace-switch-by-index 8))
+
+;; Second nine (Option `M-1'..`M-9').  The key digits 1-9 address
+;; workspaces 10-18, so `M-1' -> `switch-to-9' (10th) .. `M-9' ->
+;; `switch-to-17' (18th).  Same thin-wrapper contract as the first nine.
+(defun claude-repl-workspace-switch-to-9 ()
+  "Switch to the 10th workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 9))
+
+(defun claude-repl-workspace-switch-to-10 ()
+  "Switch to the 11th workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 10))
+
+(defun claude-repl-workspace-switch-to-11 ()
+  "Switch to the 12th workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 11))
+
+(defun claude-repl-workspace-switch-to-12 ()
+  "Switch to the 13th workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 12))
+
+(defun claude-repl-workspace-switch-to-13 ()
+  "Switch to the 14th workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 13))
+
+(defun claude-repl-workspace-switch-to-14 ()
+  "Switch to the 15th workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 14))
+
+(defun claude-repl-workspace-switch-to-15 ()
+  "Switch to the 16th workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 15))
+
+(defun claude-repl-workspace-switch-to-16 ()
+  "Switch to the 17th workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 16))
+
+(defun claude-repl-workspace-switch-to-17 ()
+  "Switch to the 18th workspace.  Thin wrapper, ignores prefix arg."
+  (interactive)
+  (claude-repl--workspace-switch-by-index 17))
 
 (defun claude-repl-workspace-switch-to-final ()
   "Switch to the final (last) workspace.  Thin wrapper, ignores prefix arg."

@@ -853,6 +853,14 @@ global drawer-mirror bindings win in vterm buffers."
 
 ;; Workspace-jump chords (M-1..M-9 / M-0 and s-1..s-9 / s-0) must beat:
 ;;
+;; On this macOS setup Option emits `M-' (`ns-option-modifier' = meta)
+;; and Command emits `s-' (`ns-command-modifier' = super), so the two
+;; digit rows address two DIFFERENT nines:
+;;   - Command `s-1..s-9' -> the FIRST nine workspaces (indices 0-8).
+;;   - Option  `M-1..M-9' -> the SECOND nine workspaces (indices 9-17);
+;;     the key digits stay 1-9 but land on workspaces 10-18.
+;;   - Both `M-0' and `s-0' -> the final (last) workspace.
+;;
 ;;   - Doom default's `:n "s-9" #'+workspace/switch-to-final'
 ;;     (modules/config/default/config.el:356, normal state only) which
 ;;     would otherwise route Cmd+9 to the LAST workspace from normal
@@ -878,15 +886,15 @@ global drawer-mirror bindings win in vterm buffers."
 ;; redirect the jump (the original M-9 -> final / M-0 -> font-resize
 ;; bug).
 (defconst claude-repl--workspace-jump-chords
-  '(("M-1" . claude-repl-workspace-switch-to-0)
-    ("M-2" . claude-repl-workspace-switch-to-1)
-    ("M-3" . claude-repl-workspace-switch-to-2)
-    ("M-4" . claude-repl-workspace-switch-to-3)
-    ("M-5" . claude-repl-workspace-switch-to-4)
-    ("M-6" . claude-repl-workspace-switch-to-5)
-    ("M-7" . claude-repl-workspace-switch-to-6)
-    ("M-8" . claude-repl-workspace-switch-to-7)
-    ("M-9" . claude-repl-workspace-switch-to-8)
+  '(("M-1" . claude-repl-workspace-switch-to-9)
+    ("M-2" . claude-repl-workspace-switch-to-10)
+    ("M-3" . claude-repl-workspace-switch-to-11)
+    ("M-4" . claude-repl-workspace-switch-to-12)
+    ("M-5" . claude-repl-workspace-switch-to-13)
+    ("M-6" . claude-repl-workspace-switch-to-14)
+    ("M-7" . claude-repl-workspace-switch-to-15)
+    ("M-8" . claude-repl-workspace-switch-to-16)
+    ("M-9" . claude-repl-workspace-switch-to-17)
     ("M-0" . claude-repl-workspace-switch-to-final)
     ("s-1" . claude-repl-workspace-switch-to-0)
     ("s-2" . claude-repl-workspace-switch-to-1)
@@ -901,7 +909,10 @@ global drawer-mirror bindings win in vterm buffers."
   "Alist of (KEY-STRING . COMMAND) for the workspace-jump chords that
 must win key lookup above Doom default's `:n s-9' / `s-0', above
 `vterm-mode-map's `M-X' blanket bindings, and across every evil
-state.  Each KEY-STRING is passed to `kbd' at install time.")
+state.  Command `s-1..s-9' address the FIRST nine workspaces and Option
+`M-1..M-9' address the SECOND nine (workspaces 10-18); `M-0'/`s-0' both
+address the final workspace.  Each KEY-STRING is passed to `kbd' at
+install time.")
 
 (defun claude-repl--install-workspace-jump-overrides ()
   "Install `claude-repl--workspace-jump-chords' into
