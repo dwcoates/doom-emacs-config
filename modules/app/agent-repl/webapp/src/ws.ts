@@ -124,6 +124,16 @@ export class WsClient {
 }
 
 /**
+ * Whether the page should show its own composer. `?composer=0` is set
+ * by hosts that own input themselves (the Emacs hybrid UI, where the
+ * input panel below the webview submits over HTTP) — the webview then
+ * stays output-only, which also sidesteps webview focus capture.
+ */
+export function composerEnabled(params: URLSearchParams): boolean {
+  return params.get("composer") !== "0";
+}
+
+/**
  * Build the standard sessionExists probe against GET /sessions.
  * Extracted from the boot path so the "session gone" detection is unit
  * testable; throws on a non-2xx response so transport failures count as

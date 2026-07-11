@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { WsClient, makeSessionExistsProbe } from "../src/ws.js";
+import { WsClient, composerEnabled, makeSessionExistsProbe } from "../src/ws.js";
 
 /** Minimal scripted WebSocket standing in for the real one. */
 class FakeWebSocket {
@@ -104,6 +104,13 @@ describe("WsClient", () => {
     client.connect();
     // Act + Assert — never opened.
     expect(client.send({ type: "interrupt", request_id: "r1" })).toBe(false);
+  });
+
+  it("composerEnabled is on by default and off only for composer=0", () => {
+    // Arrange + Act + Assert
+    expect(composerEnabled(new URLSearchParams(""))).toBe(true);
+    expect(composerEnabled(new URLSearchParams("composer=1"))).toBe(true);
+    expect(composerEnabled(new URLSearchParams("composer=0"))).toBe(false);
   });
 
   it("makeSessionExistsProbe answers from the /sessions listing", async () => {
