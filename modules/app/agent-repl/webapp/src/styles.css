@@ -236,3 +236,30 @@ pre {
 
 .md .hljs-emphasis { font-style: italic; }
 .md .hljs-strong { font-weight: 700; }
+
+/* --- AskUserQuestion picker ---------------------------------------------- */
+.q-block { margin: 0.4em 0 0.7em; }
+.q-chip { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+.q-text { margin: 0.3em 0 0.45em; font-weight: 600; }
+.q-multi { font-weight: 400; color: var(--muted); font-size: 0.85em; }
+.q-opts { display: flex; flex-wrap: wrap; gap: 0.4em; }
+.q-opt {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 0.25em 0.85em;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+.q-opt:hover { border-color: var(--accent); }
+.q-opt.selected {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.permission.question .perm-actions button[data-q-submit]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
