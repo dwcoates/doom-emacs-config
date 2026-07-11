@@ -35,6 +35,7 @@
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
+(declare-function agent-repl--resolve-current-git-root "agent-repl-core" ())
 
 (defvar url-http-response-status)
 
@@ -180,8 +181,14 @@ Lazily ensures the daemon itself (build-if-stale + launch via
 daemon.el), waits for readiness, then reuses WS's recorded
 `:frontend-session-id' when the daemon still lists it as live —
 otherwise POSTs a new session rooted at WS's `:project-dir'.
-Signals when WS has no `:project-dir' (a workspace without a project
-directory cannot own a session; that is an invariant violation)."
+
+A workspace WITHOUT a recorded `:project-dir' is not an error: plain
+project perspectives (opened via projectile, never through agent-repl
+workspace creation) have no registration at all.  The project dir is
+adopted from the current git root exactly as workspace creation would
+resolve it, and recorded so later consumers see the same value.
+Signals `user-error' outside a git repository (the resolver's own
+contract)."
   ;; ensure-frontend-daemon returns nil (without acting) when auto-start
   ;; is disabled or init is inhibited — polling readiness against a
   ;; daemon that was never started would burn the whole retry budget to
@@ -194,9 +201,11 @@ directory cannot own a session; that is an invariant violation)."
   (let ((existing (agent-repl--ws-get ws :frontend-session-id)))
     (if (and existing (agent-repl--frontend-session-live-p existing))
         existing
-      (let ((dir (agent-repl--ws-get ws :project-dir)))
-        (unless (and (stringp dir) (not (string-empty-p dir)))
-          (error "agent-repl: workspace %s has no :project-dir" ws))
+      (let ((dir (or (agent-repl--ws-get ws :project-dir)
+                     (let ((root (agent-repl--resolve-current-git-root)))
+                       (agent-repl--log ws "ensure-session: adopting git root %s for unregistered ws %s" root ws)
+                       (agent-repl--ws-put ws :project-dir root)
+                       root))))
         (let ((id (agent-repl--frontend-create-session dir)))
           (agent-repl--ws-put ws :frontend-session-id id)
           (agent-repl--log ws "frontend session created: %s (cwd=%s)" id dir)
