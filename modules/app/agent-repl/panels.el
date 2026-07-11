@@ -1411,13 +1411,17 @@ workspace that is already hidden / never-started should still mark it
             (webview (agent-repl--ws-get ws :frontend-buffer)))
         (cond
          (selection
+          (agent-repl--log ws "toggle[gui]: branch=send-selection")
           (deactivate-mark)
           (agent-repl--send-to-agent selection))
          ((and (buffer-live-p webview) (get-buffer-window webview))
+          (agent-repl--log ws "toggle[gui]: branch=hide")
           (funcall (agent-repl-frontend-hide-fn fe) ws))
          ((funcall (agent-repl-frontend-running-p-fn fe) ws)
+          (agent-repl--log ws "toggle[gui]: branch=show")
           (funcall (agent-repl-frontend-show-fn fe) ws))
          (t
+          (agent-repl--log ws "toggle[gui]: branch=open")
           (funcall (agent-repl-frontend-open-fn fe) ws)))))
      (selection
       (deactivate-mark)

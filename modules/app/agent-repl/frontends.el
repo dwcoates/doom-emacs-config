@@ -216,16 +216,35 @@ conversation, and the message says so."
       (let* ((from (agent-repl-frontend-get from-name))
              (to (agent-repl-frontend-get to-name))
              (durable (when-let ((fn (agent-repl-frontend-durable-session-id-fn from)))
-                        (funcall fn ws))))
+                        (funcall fn ws)))
+             (step "capture"))
         (agent-repl--log ws "switch-frontend: %s -> %s durable=%s" from-name to-name durable)
-        (funcall (agent-repl-frontend-kill-fn from) ws)
-        (agent-repl--ws-put ws :frontend to-name)
-        (agent-repl--state-save ws)
-        (when durable
-          (if-let ((adopt (agent-repl-frontend-adopt-session-fn to)))
-              (funcall adopt ws durable)
-            (setq durable nil)))
-        (funcall (agent-repl-frontend-open-fn to) ws)
+        ;; Every step is logged before it runs and any error is logged
+        ;; WITH the failing step before re-signaling: a mid-switch error
+        ;; otherwise leaves half-switched state with no log trail (the
+        ;; failure mode that made the first live switches undebuggable).
+        (condition-case err
+            (progn
+              (setq step (format "kill %s" from-name))
+              (agent-repl--log ws "switch-frontend: step=%s" step)
+              (funcall (agent-repl-frontend-kill-fn from) ws)
+              (setq step "flip+persist")
+              (agent-repl--ws-put ws :frontend to-name)
+              (agent-repl--state-save ws)
+              (when durable
+                (if-let ((adopt (agent-repl-frontend-adopt-session-fn to)))
+                    (progn
+                      (setq step (format "adopt %s" durable))
+                      (agent-repl--log ws "switch-frontend: step=%s" step)
+                      (funcall adopt ws durable))
+                  (setq durable nil)))
+              (setq step (format "open %s" to-name))
+              (agent-repl--log ws "switch-frontend: step=%s" step)
+              (funcall (agent-repl-frontend-open-fn to) ws))
+          (error
+           (agent-repl--log ws "switch-frontend: ERROR at step=%s: %s"
+                            step (error-message-string err))
+           (signal (car err) (cdr err))))
         (message "agent-repl: %s frontend -> %s%s" ws to-name
                  (if durable
                      (format " (resuming %s)" durable)
