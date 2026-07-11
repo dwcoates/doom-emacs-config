@@ -1838,7 +1838,11 @@ actually delivered to a live vterm."
   :interrupt-fn #'agent-repl--vterm-interrupt
   :running-p-fn (lambda (ws) (agent-repl--agent-running-p ws))
   :show-fn (lambda (_ws) (agent-repl--show-hidden-panels))
-  :hide-fn (lambda (_ws) (agent-repl--hide-panels))
+  ;; The hide capability is the SPC-o-c CLOSE semantic (restore the
+  ;; pre-panel layout, mark :inactive), not the bare window hide —
+  ;; the gui frontend's hide is its analog, and the frontend switch
+  ;; composes hide+open, so both must leave a clean frame behind.
+  :hide-fn (lambda (ws) (agent-repl--on-simple-close ws))
   :restart-fn (lambda (ws)
                 (agent-repl--vterm-kill ws)
                 (agent-repl--initialize-agent ws))

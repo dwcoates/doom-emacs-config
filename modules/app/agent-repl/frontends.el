@@ -192,16 +192,20 @@ workspace state, mirroring `agent-repl-select-backend'."
 
 ;;;###autoload
 (defun agent-repl-switch-frontend ()
-  "Switch the current workspace's frontend IN PLACE, keeping the conversation.
-Captures the durable claude session uuid from the CURRENT frontend,
-kills its session and view, flips `:frontend', hands the uuid to the
-new frontend's adopt capability, and opens it — same conversation,
-different lens.  With exactly two registered frontends the target is
-the other one; otherwise it is read by completion.
+  "Switch the current workspace's frontend IN PLACE.
+The literal composition of the manual recipe (close, select, open):
 
-When the current frontend cannot report a durable id (no session yet,
-daemon unreachable), the switch still happens but starts a FRESH
-conversation, and the message says so."
+  1. CLOSE the current frontend's view via its hide capability —
+     the session is NOT killed, so nothing async needs awaiting and
+     the conversation is simply there when you switch back.
+  2. FLIP `:frontend' and persist it (what `agent-repl-select-frontend'
+     would do, minus its running-session guard — hiding is the guard).
+  3. OPEN the other frontend exactly like `SPC o c': SHOW it when its
+     session is already running (a previous switch left it alive),
+     else open it fresh.
+
+With exactly two registered frontends the target is the other one;
+otherwise it is read by completion."
   (interactive)
   (let ((ws (agent-repl--ws-current-name)))
     (unless ws
@@ -213,56 +217,30 @@ conversation, and the message says so."
                       (intern (completing-read "Switch frontend to: "
                                                (mapcar #'symbol-name others) nil t)))))
       (agent-repl--frontend-validate-pair to-name (agent-repl--ws-backend-name ws))
-      (let* ((from (agent-repl-frontend-get from-name))
-             (to (agent-repl-frontend-get to-name))
-             (durable (when-let ((fn (agent-repl-frontend-durable-session-id-fn from)))
-                        (funcall fn ws)))
-             (step "capture"))
-        (agent-repl--log ws "switch-frontend: %s -> %s durable=%s" from-name to-name durable)
-        ;; Every step is logged before it runs and any error is logged
-        ;; WITH the failing step before re-signaling: a mid-switch error
-        ;; otherwise leaves half-switched state with no log trail (the
-        ;; failure mode that made the first live switches undebuggable).
+      (let ((from (agent-repl-frontend-get from-name))
+            (to (agent-repl-frontend-get to-name))
+            (step "close"))
+        (agent-repl--log ws "switch-frontend: %s -> %s" from-name to-name)
         (condition-case err
             (progn
-              (setq step (format "kill %s" from-name))
-              (agent-repl--log ws "switch-frontend: step=%s" step)
-              (funcall (agent-repl-frontend-kill-fn from) ws)
-              ;; Process teardown can be ASYNC (the vterm kill path
-              ;; schedules a SIGKILL fallback ~0.5s out): opening the
-              ;; next frontend while the old one still reads as running
-              ;; trips its already-running guard. Bounded blocking wait,
-              ;; loud on timeout.
-              (setq step (format "await %s stop" from-name))
-              (let ((attempts 0))
-                (while (and (funcall (agent-repl-frontend-running-p-fn from) ws)
-                            (< attempts 30))
-                  (setq attempts (1+ attempts))
-                  (sleep-for 0.1))
-                (when (funcall (agent-repl-frontend-running-p-fn from) ws)
-                  (error "agent-repl-switch-frontend: %s still running %.1fs after kill"
-                         from-name (* attempts 0.1))))
+              (agent-repl--log ws "switch-frontend: step=%s %s" step from-name)
+              (funcall (agent-repl-frontend-hide-fn from) ws)
               (setq step "flip+persist")
               (agent-repl--ws-put ws :frontend to-name)
               (agent-repl--state-save ws)
-              (when durable
-                (if-let ((adopt (agent-repl-frontend-adopt-session-fn to)))
-                    (progn
-                      (setq step (format "adopt %s" durable))
-                      (agent-repl--log ws "switch-frontend: step=%s" step)
-                      (funcall adopt ws durable))
-                  (setq durable nil)))
-              (setq step (format "open %s" to-name))
-              (agent-repl--log ws "switch-frontend: step=%s" step)
-              (funcall (agent-repl-frontend-open-fn to) ws))
+              (if (funcall (agent-repl-frontend-running-p-fn to) ws)
+                  (progn
+                    (setq step (format "show %s" to-name))
+                    (agent-repl--log ws "switch-frontend: step=%s (already running)" step)
+                    (funcall (agent-repl-frontend-show-fn to) ws))
+                (setq step (format "open %s" to-name))
+                (agent-repl--log ws "switch-frontend: step=%s" step)
+                (funcall (agent-repl-frontend-open-fn to) ws)))
           (error
            (agent-repl--log ws "switch-frontend: ERROR at step=%s: %s"
                             step (error-message-string err))
            (signal (car err) (cdr err))))
-        (message "agent-repl: %s frontend -> %s%s" ws to-name
-                 (if durable
-                     (format " (resuming %s)" durable)
-                   " (fresh conversation)"))))))
+        (message "agent-repl: %s frontend -> %s" ws to-name)))))
 
 (provide 'frontends)
 
