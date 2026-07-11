@@ -119,20 +119,73 @@ workspace name generation, the config-explainer)."
     (maphash (lambda (name _b) (push name names)) agent-repl--backends)
     (nreverse names)))
 
-(defun agent-repl--ws-reset-session-ids (ws)
-  "Clear WS's per-environment session ids and fork pointer.
-Session ids are BACKEND-SCOPED: a claude session UUID means nothing to
-codex and vice versa, so a backend switch must reset them or the next
-start would try to resume a session the new CLI never minted (e.g.
-`codex resume <claude-uuid>').  Clears the session id on every
-environment's instantiation struct plus the `:fork-session-id'
-workspace property."
+(defun agent-repl--capture-backend-session-ids (ws)
+  "Return a plist snapshot of WS's current per-env session ids and fork pointer.
+The plist carries one entry per `agent-repl--environment-keys' env (its
+session id, or nil) plus `:fork-session-id'.  These live per-env ids
+always belong to WS's CURRENT backend, so the snapshot is what gets
+stashed under the outgoing backend on a switch.  Round-trips through
+`agent-repl--apply-backend-session-ids'."
+  (let (snapshot)
+    (dolist (env agent-repl--environment-keys)
+      (let ((inst (agent-repl--ws-get ws env)))
+        (setq snapshot
+              (plist-put snapshot env
+                         (and (agent-repl-instantiation-p inst)
+                              (agent-repl-instantiation-session-id inst))))))
+    (setq snapshot (plist-put snapshot :fork-session-id
+                              (agent-repl--ws-get ws :fork-session-id)))
+    snapshot))
+
+(defun agent-repl--apply-backend-session-ids (ws saved)
+  "Restore per-env session ids and the fork pointer on WS from SAVED plist.
+SAVED is a plist as produced by `agent-repl--capture-backend-session-ids',
+or nil to clear every env's session id and the fork pointer (the
+fresh-backend case, where the incoming backend has no stash yet).  Each
+env's instantiation struct is updated in place; an env with no struct is
+skipped."
   (dolist (env agent-repl--environment-keys)
     (let ((inst (agent-repl--ws-get ws env)))
       (when (agent-repl-instantiation-p inst)
-        (setf (agent-repl-instantiation-session-id inst) nil))))
-  (agent-repl--ws-put ws :fork-session-id nil)
-  (agent-repl--log ws "ws-reset-session-ids: cleared for backend switch ws=%s" ws))
+        (setf (agent-repl-instantiation-session-id inst)
+              (plist-get saved env)))))
+  (agent-repl--ws-put ws :fork-session-id (plist-get saved :fork-session-id)))
+
+(defun agent-repl--backend-session-ids-present-p (saved)
+  "Return non-nil when SAVED carries any non-empty session id or fork pointer.
+SAVED is a captured/stashed session-id plist.  Used to decide whether a
+backend switch restored resumable state (so the next start will
+`--continue'/`resume') versus started fresh."
+  (cl-some (lambda (v) (and (stringp v) (> (length v) 0)))
+           (cons (plist-get saved :fork-session-id)
+                 (mapcar (lambda (env) (plist-get saved env))
+                         agent-repl--environment-keys))))
+
+(defun agent-repl--ws-switch-backend-session-ids (ws old-backend new-backend)
+  "Stash OLD-BACKEND's session ids and restore NEW-BACKEND's for WS.
+Session ids are BACKEND-SCOPED: a claude session UUID means nothing to
+codex and vice versa, so the per-env ids and the fork pointer always
+belong to whichever backend is currently selected.  On a switch this:
+
+  - snapshots WS's live per-env session ids plus `:fork-session-id' and
+    stashes them under OLD-BACKEND in the `:backend-session-stash'
+    workspace plist, and
+  - restores NEW-BACKEND's previously-stashed ids (or clears everything
+    when NEW-BACKEND was never used), so switching BACK to a prior
+    backend resumes its conversation instead of starting fresh.
+
+Returns non-nil when NEW-BACKEND's restored ids were present (i.e. the
+next start will resume rather than start a new session)."
+  (let* ((stash (agent-repl--ws-get ws :backend-session-stash))
+         (outgoing (agent-repl--capture-backend-session-ids ws))
+         (incoming (plist-get stash new-backend)))
+    (setq stash (plist-put stash old-backend outgoing))
+    (agent-repl--ws-put ws :backend-session-stash stash)
+    (agent-repl--apply-backend-session-ids ws incoming)
+    (let ((restored (agent-repl--backend-session-ids-present-p incoming)))
+      (agent-repl--log ws "ws-switch-backend-session-ids: ws=%s old=%s new=%s restored=%s"
+                       ws old-backend new-backend (if restored "yes" "no"))
+      restored)))
 
 (defun agent-repl-select-backend (set-default)
   "Select the agent backend for the current workspace via completion.
@@ -146,10 +199,12 @@ effect at the next agent start anyway.  The choice is persisted with
 the workspace state, so a codex workspace resumes through codex after
 an Emacs restart.
 
-An actual backend CHANGE also resets the workspace's stored session
-ids (see `agent-repl--ws-reset-session-ids'): they are scoped to the
-CLI that minted them, so conversation continuity intentionally does
-not survive a backend switch."
+An actual backend CHANGE stashes the outgoing backend's session ids and
+restores the incoming backend's previously-stashed ids (see
+`agent-repl--ws-switch-backend-session-ids'): session ids are scoped to
+the CLI that minted them, so the active per-env ids always belong to the
+current backend, and switching BACK to a prior backend resumes its
+conversation via `--continue'/`resume' instead of starting fresh."
   (interactive "P")
   (let* ((names (agent-repl--backend-names))
          (choice (intern (completing-read
@@ -164,13 +219,16 @@ not survive a backend switch."
           (user-error "agent-repl-select-backend: no current workspace"))
         (when (agent-repl--agent-running-p ws)
           (user-error "agent-repl-select-backend: %s has a running agent — kill it first (the backend applies at the next start)" ws))
-        (let ((changed (not (eq (agent-repl--ws-backend-name ws) choice))))
+        (let* ((old (agent-repl--ws-backend-name ws))
+               (changed (not (eq old choice)))
+               (restored (when changed
+                           (agent-repl--ws-switch-backend-session-ids ws old choice))))
           (agent-repl--ws-put ws :backend choice)
-          (when changed
-            (agent-repl--ws-reset-session-ids ws))
           (agent-repl--state-save ws)
           (message "agent-repl: %s backend -> %s%s" ws choice
-                   (if changed " (session ids reset — new CLI, new session)" "")))))))
+                   (cond ((not changed) "")
+                         (restored " (resumed prior session)")
+                         (t " (session ids reset — new CLI, new session)"))))))))
 
 ;;;; ---- Headless command construction --------------------------------------
 
