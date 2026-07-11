@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseArgs } from "../src/main.js";
+import { parseArgs, realQueryOptions } from "../src/main.js";
 
 describe("parseArgs", () => {
   it("defaults to real SDK mode with a generated session id and default mode", () => {
@@ -45,5 +45,38 @@ describe("parseArgs", () => {
   it("throws when a flag is missing its value", () => {
     // Arrange + Act + Assert
     expect(() => parseArgs(["--session-id"])).toThrow(/missing value/);
+  });
+});
+
+describe("realQueryOptions", () => {
+  const noopCanUse = (async () => ({ behavior: "allow" as const, updatedInput: {} })) as never;
+
+  it("requests interactive-CLI parity (claude_code preset + all setting sources)", () => {
+    // Arrange
+    const args = parseArgs(["--session-id", "s1"]);
+    // Act
+    const opts = realQueryOptions(args, noopCanUse);
+    // Assert — without the preset the model has no environment block
+    // (and invents paths like /Users/user for `~`); without the
+    // sources the user's settings/hooks/CLAUDE.md never load.
+    expect(opts.systemPrompt).toEqual({ type: "preset", preset: "claude_code" });
+    expect(opts.settingSources).toEqual(["user", "project", "local"]);
+    expect(opts.includePartialMessages).toBe(true);
+  });
+
+  it("passes cwd/model/resume through only when provided", () => {
+    // Arrange
+    const bare = realQueryOptions(parseArgs(["--session-id", "s1"]), noopCanUse);
+    const full = realQueryOptions(
+      parseArgs(["--session-id", "s1", "--cwd", "/w", "--model", "haiku", "--resume", "cli-1"]),
+      noopCanUse,
+    );
+    // Assert
+    expect("cwd" in bare).toBe(false);
+    expect("model" in bare).toBe(false);
+    expect("resume" in bare).toBe(false);
+    expect(full.cwd).toBe("/w");
+    expect(full.model).toBe("haiku");
+    expect(full.resume).toBe("cli-1");
   });
 });
