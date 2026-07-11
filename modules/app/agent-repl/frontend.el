@@ -44,7 +44,9 @@
 (declare-function agent-repl-window--side-window-p "agent-repl-window" (win))
 (declare-function agent-repl--panels-visible-p "agent-repl-panels" ())
 (declare-function agent-repl--hide-panels "agent-repl-panels" ())
-(declare-function xwidget-webkit--create-new-session-buffer "xwidget" (url))
+(declare-function xwidget-webkit--create-new-session-buffer "xwidget" (url &optional callback))
+(declare-function xwidget-webkit-current-session "xwidget" ())
+(declare-function xwidget-webkit-goto-uri "xwidget.c" (xwidget uri))
 
 (defvar xwidget-webkit-buffer-name-format)
 
@@ -78,10 +80,26 @@ build that has not happened to load xwidget.el yet."
 
 (defun agent-repl--frontend-make-webview-buffer (url)
   "External-boundary wrapper: create a WKWebView xwidget buffer on URL.
-Body does nothing but the external call; tests mock via `cl-letf'.
-Registered in `agent-repl--external-boundary-functions'."
+The creator only seeds the buffer — it does NOT navigate (upstream
+callers like `xwidget-webkit-new-session' always follow with
+`xwidget-webkit-goto-uri', and skipping it shows a blank about:blank
+webview).  Body does nothing but the external calls; tests mock via
+`cl-letf'.  Registered in `agent-repl--external-boundary-functions'."
   (require 'xwidget)
-  (xwidget-webkit--create-new-session-buffer url)) ;; ALLOW-EXTERNAL-BOUNDARY
+  (let ((buf (xwidget-webkit--create-new-session-buffer url))) ;; ALLOW-EXTERNAL-BOUNDARY
+    (with-current-buffer buf
+      (xwidget-webkit-goto-uri (xwidget-webkit-current-session) url))
+    buf))
+
+(defun agent-repl--frontend-kill-webview (buf)
+  "Kill webview BUF without the xwidget kill-query prompt.
+`xwidget-kill-buffer-query-function' (on `kill-buffer-query-functions')
+raises a blocking yes-or-no minibuffer prompt for any buffer holding
+xwidgets; every frontend kill site is an INTENTIONAL teardown (rebind,
+close-panel, workspace nuke), so the prompt is suppressed — left in
+place it deadlocks non-interactive callers like the nuke hook."
+  (let ((kill-buffer-query-functions nil))
+    (kill-buffer buf)))
 
 (defun agent-repl--frontend-ensure-webview-buffer (ws session-id url)
   "Return a live webview buffer for WS attached to SESSION-ID at URL.
@@ -98,7 +116,7 @@ webapp title changes never rename it."
       (when (buffer-live-p existing)
         (agent-repl--log ws "frontend webview rebind: session %s -> %s (killing stale webview)"
                           bound-to session-id)
-        (kill-buffer existing))
+        (agent-repl--frontend-kill-webview existing))
       (let ((buf (agent-repl--frontend-make-webview-buffer url))
             (name (agent-repl--frontend-webview-buffer-name ws)))
         (with-current-buffer buf
@@ -174,7 +192,7 @@ workspace nuke path (`agent-repl-ws-del-hook')."
          (buf (agent-repl--ws-get ws :frontend-buffer)))
     (unless (buffer-live-p buf)
       (user-error "agent-repl: no webview open for workspace %s" ws))
-    (kill-buffer buf)
+    (agent-repl--frontend-kill-webview buf)
     (agent-repl--ws-put ws :frontend-buffer nil)
     (agent-repl--ws-put ws :frontend-buffer-session-id nil)
     (message "agent-repl: webview closed (session kept)")))
@@ -189,7 +207,7 @@ Runs pre-tombstone, while `:frontend-buffer' is still readable."
   (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
     (when (buffer-live-p buf)
       (agent-repl--log ws "frontend webview released on nuke: %s" (buffer-name buf))
-      (kill-buffer buf))))
+      (agent-repl--frontend-kill-webview buf))))
 
 (add-hook 'agent-repl-ws-del-hook #'agent-repl--frontend-release-workspace-webview)
 
