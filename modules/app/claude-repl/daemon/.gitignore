@@ -1,0 +1,3 @@
+# Build output of `go build -o bin/claude-repld` (produced by
+# ../bin/build-frontend.sh). A platform-specific binary, never committed.
+bin/
