@@ -121,15 +121,18 @@ Must match the `SKILLS_SRC' default in `.claude/install.sh' (or the
   :group 'agent-repl)
 
 (defconst agent-repl--managed-local-skills
-  '("debug-logs"
-    "runtime-eval-code"
+  '("runtime-eval-code"
     "workspace-close"
     "workspace-open"
     "emit-workspace-commands.sh")
   "Bare names for repo-local managed skills.
 Sourced from `agent-repl-local-skills-src-dir' (this repo's
 `modules/app/agent-repl/skills/').  Must match the `LOCAL_SKILLS'
-array in `.claude/install.sh'.")
+array in `.claude/install.sh'.
+
+debug-logs is deliberately absent: it is PROJECT-scoped via the
+checked-in `<repo>/.claude/skills/debug-logs' symlink, not a
+user-level `~/.claude/skills' link.")
 
 (defcustom agent-repl-local-skills-src-dir
   (when load-file-name
