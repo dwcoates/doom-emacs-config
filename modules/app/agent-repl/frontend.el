@@ -41,6 +41,9 @@
 (declare-function agent-repl--frontend-ensure-session "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
+(declare-function agent-repl-window--side-window-p "agent-repl-window" (win))
+(declare-function agent-repl--panels-visible-p "agent-repl-panels" ())
+(declare-function agent-repl--hide-panels "agent-repl-panels" ())
 (declare-function xwidget-webkit--create-new-session-buffer "xwidget" (url))
 
 (defvar xwidget-webkit-buffer-name-format)
@@ -106,24 +109,33 @@ webapp title changes never rename it."
 
 ;;;; ---- Placement ---------------------------------------------------------------
 
+(defun agent-repl--frontend-main-area-window ()
+  "Return a live main-area (non-side) window to host the webview.
+`window-main-window' can return an INTERNAL window when the main area
+is split, and `select-window' on an internal window errors — so walk
+the frame's live windows and take the first that is not a side window.
+Falls back to the selected window (always live) when everything else is
+a side window."
+  (or (seq-find (lambda (win)
+                  (not (agent-repl-window--side-window-p win)))
+                (window-list nil 'no-minibuffer))
+      (selected-window)))
+
 (defun agent-repl--frontend-display-webview (ws buf)
-  "Display BUF in WS's agent output window, else the frame's main window.
-When the vterm output window is live, the webview REPLACES the terminal
-view in that window (the window's dedication is lifted for the swap and
-restored after).  Without visible panels the webview takes the frame's
-main window like an ordinary buffer display."
-  (let ((out-win (agent-repl-window--panel-window :vterm ws)))
-    (if (window-live-p out-win)
-        (progn
-          (set-window-dedicated-p out-win nil)
-          (set-window-buffer out-win buf)
-          (set-window-dedicated-p out-win t)
-          (select-window out-win))
-      (let ((main (if (fboundp 'window-main-window)
-                      (window-main-window)
-                    (selected-window))))
-        (select-window main)
-        (set-window-buffer main buf))))
+  "Display BUF as the workspace's frontend view in the frame's main area.
+When the vterm/input panels are visible they are HIDDEN first through
+the module's own path (`agent-repl--hide-panels') rather than swapped
+under: replacing the buffer of the strongly-dedicated output window
+would (a) leave the input panel orphaned for the sync-panels sweep to
+reap and (b) break the next `agent-repl--show-panels' against the
+still-dedicated window.  The webview then takes a live main-area
+window like an ordinary buffer display."
+  (when (agent-repl--panels-visible-p)
+    (agent-repl--log ws "display-webview: hiding agent panels first")
+    (agent-repl--hide-panels))
+  (let ((win (agent-repl--frontend-main-area-window)))
+    (select-window win)
+    (set-window-buffer win buf))
   buf)
 
 ;;;; ---- Entry point ----------------------------------------------------------------
@@ -161,6 +173,20 @@ workspace nuke path (`agent-repl-ws-del-hook')."
     (agent-repl--ws-put ws :frontend-buffer nil)
     (agent-repl--ws-put ws :frontend-buffer-session-id nil)
     (message "agent-repl: webview closed (session kept)")))
+
+;;;; ---- Workspace teardown -----------------------------------------------------
+
+(defun agent-repl--frontend-release-workspace-webview (ws)
+  "Kill WS's webview buffer on nuke (for `agent-repl-ws-del-hook').
+Tombstoning only nils the plist keys — without this the buffer (a live
+WKWebView holding an open WebSocket) would outlive the workspace.
+Runs pre-tombstone, while `:frontend-buffer' is still readable."
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+    (when (buffer-live-p buf)
+      (agent-repl--log ws "frontend webview released on nuke: %s" (buffer-name buf))
+      (kill-buffer buf))))
+
+(add-hook 'agent-repl-ws-del-hook #'agent-repl--frontend-release-workspace-webview)
 
 (provide 'frontend)
 

@@ -178,6 +178,27 @@ caller to stamp the timestamp."
     (agent-repl--ws-del "ws1")
     (should (agent-repl--ws-get "ws1" :last-killed-at))))
 
+(ert-deftest agent-repl-test-ws-del-hook-runs-before-runtime-key-clear ()
+  "`agent-repl-ws-del-hook' fires while runtime keys are still readable.
+The frontend session/webview release handlers depend on reading
+`:frontend-session-id' / `:frontend-buffer' pre-clear; a regression
+that moves the hook after the clear loop would silently strand daemon
+sessions and WKWebViews on every nuke."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_live")
+    (let ((seen 'unset)
+          (agent-repl-ws-del-hook nil))
+      (add-hook 'agent-repl-ws-del-hook
+                (lambda (ws)
+                  (setq seen (agent-repl--ws-get ws :frontend-session-id))))
+      ;; Act
+      (agent-repl--ws-del "ws1")
+      ;; Assert — the hook observed the pre-clear value, and the
+      ;; tombstone cleared it afterwards.
+      (should (equal seen "s_live"))
+      (should (null (agent-repl--ws-get "ws1" :frontend-session-id))))))
+
 (ert-deftest agent-repl-test-ws-del-keeps-entry-in-hash ()
   "ws-del leaves the hash entry in place (tombstone, not remhash).
 This is the structural inverse of the pre-tombstone behavior — pinning

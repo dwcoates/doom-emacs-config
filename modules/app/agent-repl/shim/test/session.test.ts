@@ -629,6 +629,45 @@ describe("ShimSession SDK message mapping", () => {
     expect(h.eventsOfType("result")[0].subtype).toBe("success");
   });
 
+  it("marks a queued second turn's result aborted when interrupted mid-queue", async () => {
+    // Arrange — two turns queued; turn A completes, turn B is still
+    // outstanding when the interrupt lands. A boolean in-flight flag
+    // would misread this as idle (turn A's result cleared it).
+    const h = makeHarness();
+    h.send({ type: "user-message", request_id: "rA", content: "turn A" });
+    h.send({ type: "user-message", request_id: "rB", content: "turn B" });
+    h.sdkOut.push({
+      type: "result",
+      uuid: "uA",
+      subtype: "success",
+      duration_ms: 1,
+      duration_api_ms: 1,
+      num_turns: 1,
+      total_cost_usd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      is_error: false,
+      result: "A done",
+    });
+    await until(() => h.eventsOfType("result").length === 1);
+    // Act — interrupt while turn B is outstanding, then B's result.
+    h.send({ type: "interrupt", request_id: "r1" });
+    h.sdkOut.push({
+      type: "result",
+      uuid: "uB",
+      subtype: "error_during_execution",
+      duration_ms: 1,
+      duration_api_ms: 1,
+      num_turns: 1,
+      total_cost_usd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      is_error: true,
+    });
+    h.sdkOut.end();
+    await h.pump;
+    // Assert — the interrupt aborted the OUTSTANDING queued turn.
+    expect(h.eventsOfType("result")[1].subtype).toBe("aborted");
+  });
+
   it("treats an interrupt after a completed turn as idle", async () => {
     // Arrange — first turn completes, so in-flight resets before the interrupt.
     const h = makeHarness();
