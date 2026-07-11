@@ -155,6 +155,14 @@ func (t *Translator) OnInterruptCmd() []protocol.L2Frame {
 	return t.cancelPendingPermissions("interrupted")
 }
 
+// OnShimDeath invalidates pending permission prompts when the shim's
+// stdout closes WITHOUT a `closed` event (SIGKILL/crash). §2.7 names
+// shim death as a cancel trigger; the graceful path is covered by
+// onClosed, so this is the hard-death counterpart.
+func (t *Translator) OnShimDeath() []protocol.L2Frame {
+	return t.cancelPendingPermissions("shim died")
+}
+
 // OnSetPermissionModeCmd records the pending mode change; the
 // permission-mode-changed frame is emitted once the shim acks (§1.2).
 func (t *Translator) OnSetPermissionModeCmd(cmd *protocol.L1Command) {

@@ -457,6 +457,48 @@ func TestSessionShimDeathWithoutClosedEmitsShimDied(t *testing.T) {
 	expectClosed(t, c)
 }
 
+func TestSessionHardShimDeathCancelsPendingPermissions(t *testing.T) {
+	// Arrange — a permission prompt is pending when the shim hard-dies.
+	h := newHarness(t, 16)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c)
+	h.shim.pushEvent(t, `{"type":"permission-request","session_id":"sess-1","request_id":"p1","tool_use_id":"t1","tool_name":"Bash","input":{}}`)
+	recvFrame(t, c)
+	// Act — stdout closes with no closed event (hard crash).
+	h.endShim()
+	<-h.sess.Done()
+	// Assert — cancel precedes the shim_died error frame (§2.7).
+	cancel := recvFrame(t, c)
+	if cancel["type"] != "permission-resolved" || cancel["decision"] != "cancel" || cancel["request_id"] != "p1" {
+		t.Errorf("cancel = %v", cancel)
+	}
+	errFrame := recvFrame(t, c)
+	if errFrame["type"] != "error" || errFrame["code"] != "shim_died" {
+		t.Errorf("error frame = %v", errFrame)
+	}
+	expectClosed(t, c)
+}
+
+func TestSessionClientShutdownFrameIsIgnoredNotForwarded(t *testing.T) {
+	// Arrange — client-sent shutdown is outside the §2 command set.
+	h := newHarness(t, 16)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c)
+	// Act
+	err := h.sess.HandleClientFrame(c, []byte(`{"type":"shutdown","request_id":"r1"}`))
+	// Assert — ignored without error and never forwarded to the shim.
+	if err != nil {
+		t.Fatalf("HandleClientFrame: %v", err)
+	}
+	select {
+	case line := <-h.shim.sent:
+		t.Fatalf("unexpected forward: %s", line)
+	default:
+	}
+}
+
 func TestSessionShutdownSendsShutdownCommand(t *testing.T) {
 	// Arrange
 	h := newHarness(t, 16)

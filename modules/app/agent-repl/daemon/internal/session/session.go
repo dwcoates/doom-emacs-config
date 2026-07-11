@@ -114,7 +114,11 @@ func (s *Session) Run() {
 	s.mu.Lock()
 	if !s.terminal {
 		// Shim stdout closed without a `closed` event: hard death.
+		// Cancel pending permission prompts FIRST (§2.7 "cancel" on shim
+		// death) so no tab is left with a live prompt for a dead shim,
+		// then surface the error frame.
 		s.terminal = true
+		s.broadcastLocked(s.translator.OnShimDeath())
 		s.broadcastLocked([]protocol.L2Frame{&protocol.ErrorFrame{
 			Envelope:    protocol.Envelope{Type: "error"},
 			Code:        "shim_died",
@@ -222,9 +226,12 @@ func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 	case "set-permission-mode":
 		s.translator.OnSetPermissionModeCmd(cmd)
 		return s.shim.SendRaw(ndjson(raw))
-	case "shutdown":
-		return s.shim.SendRaw(ndjson(raw))
 	}
+	// `shutdown` is deliberately NOT forwarded: the §2 preamble limits
+	// webapp→daemon traffic to the four UI commands plus replay-request;
+	// session teardown is daemon-owned via DELETE /sessions/{id}
+	// (Session.Shutdown). A client-sent shutdown falls through here and
+	// is ignored like any other out-of-contract type.
 	return nil
 }
 
