@@ -320,6 +320,7 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "session")
 (agent-repl--load-module "daemon")
 (agent-repl--load-module "frontend-client")
+(agent-repl--load-module "frontend")
 (agent-repl--load-module "prompt-summary")
 (agent-repl--load-module "ai-title")
 (agent-repl--load-module "model")
