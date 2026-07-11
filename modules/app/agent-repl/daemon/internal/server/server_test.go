@@ -470,3 +470,103 @@ func TestShimArgvAssemblesAllCreateOpts(t *testing.T) {
 		})
 	}
 }
+
+// --- HTTP message / interrupt injection ---------------------------------------
+
+func TestSendMessageRouteBroadcastsUserTurnAndForwards(t *testing.T) {
+	// Arrange — a WS tab is attached; the message arrives over HTTP.
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	// Act
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/message", "application/json",
+		bytes.NewBufferString(`{"content":"hello from emacs"}`))
+	if err != nil {
+		t.Fatalf("POST message: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert — 202 with a minted request id, user-turn broadcast, shim forward.
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	var body struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.HasPrefix(body.RequestID, "r_") {
+		t.Errorf("request_id = %q", body.RequestID)
+	}
+	turn := readFrame(t, conn)
+	if turn["type"] != "user-turn" || turn["request_id"] != body.RequestID {
+		t.Errorf("turn = %v", turn)
+	}
+	select {
+	case line := <-shim.sent:
+		if !strings.Contains(string(line), `"user-message"`) ||
+			!strings.Contains(string(line), "hello from emacs") {
+			t.Errorf("forwarded = %s", line)
+		}
+	case <-time.After(recvTimeout):
+		t.Fatal("message not forwarded to shim")
+	}
+}
+
+func TestSendMessageRouteRejectsEmptyContent(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	id, _ := h.createSession(t)
+	// Act
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/message", "application/json",
+		bytes.NewBufferString(`{"content":"   "}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestSendMessageRoute404sOnUnknownSession(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	resp, err := http.Post(h.ts.URL+"/sessions/nope/message", "application/json",
+		bytes.NewBufferString(`{"content":"x"}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestInterruptRouteForwardsToShim(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	// Act
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/interrupt", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST interrupt: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	select {
+	case line := <-shim.sent:
+		if !strings.Contains(string(line), `"interrupt"`) {
+			t.Errorf("forwarded = %s", line)
+		}
+	case <-time.After(recvTimeout):
+		t.Fatal("interrupt not forwarded to shim")
+	}
+}

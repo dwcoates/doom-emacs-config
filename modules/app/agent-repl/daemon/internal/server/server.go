@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -103,7 +104,67 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /sessions", s.handleListSessions)
 	mux.HandleFunc("GET /sessions/{id}/stream", s.handleStream)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleDeleteSession)
+	mux.HandleFunc("POST /sessions/{id}/message", s.handleSendMessage)
+	mux.HandleFunc("POST /sessions/{id}/interrupt", s.handleInterrupt)
 	return mux
+}
+
+// handleSendMessage injects a user turn over HTTP — the send path for
+// clients that hold no WebSocket (the Emacs input buffer). The turn
+// flows through the exact same pipeline as a WS-submitted user-message,
+// so connected tabs still get the user-turn broadcast and replay
+// retention sees it.
+func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
+	sess := s.lookup(r.PathValue("id"))
+	if sess == nil {
+		httpError(w, http.StatusNotFound, "no such session")
+		return
+	}
+	var body struct {
+		Content   string `json:"content"`
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+		return
+	}
+	if strings.TrimSpace(body.Content) == "" {
+		httpError(w, http.StatusBadRequest, "content must be non-empty")
+		return
+	}
+	if body.RequestID == "" {
+		body.RequestID = newRequestID()
+	}
+	if err := sess.InjectCommand(map[string]any{
+		"type":       "user-message",
+		"request_id": body.RequestID,
+		"content":    body.Content,
+	}); err != nil {
+		httpError(w, http.StatusConflict, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, s.logf, map[string]string{"request_id": body.RequestID})
+}
+
+// handleInterrupt aborts the in-flight turn over HTTP (the Emacs-side
+// C-c C-k path). Same pipeline as a WS interrupt: pending permission
+// prompts cancel and the turn's result arrives as "aborted".
+func (s *Server) handleInterrupt(w http.ResponseWriter, r *http.Request) {
+	sess := s.lookup(r.PathValue("id"))
+	if sess == nil {
+		httpError(w, http.StatusNotFound, "no such session")
+		return
+	}
+	if err := sess.InjectCommand(map[string]any{
+		"type":       "interrupt",
+		"request_id": newRequestID(),
+	}); err != nil {
+		httpError(w, http.StatusConflict, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
@@ -269,9 +330,20 @@ func writeJSON(w http.ResponseWriter, logf func(string, ...any), v any) {
 }
 
 func newSessionID() string {
+	return "s_" + randomHex()
+}
+
+// newRequestID mints correlation ids for daemon-originated commands
+// (the HTTP message/interrupt injection paths, where no WS client
+// supplied one).
+func newRequestID() string {
+	return "r_" + randomHex()
+}
+
+func randomHex() string {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		panic(fmt.Sprintf("server: crypto/rand failed: %v", err))
 	}
-	return "s_" + hex.EncodeToString(b[:])
+	return hex.EncodeToString(b[:])
 }
