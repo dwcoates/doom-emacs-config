@@ -1977,19 +1977,21 @@ binding without erroring."
 
 (ert-deftest claude-repl-test-workspace-jump-chords-cover-mod-and-super-digits ()
   "`claude-repl--workspace-jump-chords' must enumerate the full 0-9 grid
-across BOTH `M-' (Meta/Alt) and `s-' (Super/Cmd), each mapped to the
-prefix-arg-free wrapper at the matching index.  Anything less leaves
-gaps that fall through to whatever Doom or `vterm-mode-map' bound."
+across BOTH `M-' (Option/Meta) and `s-' (Cmd/Super).  Command `s-1..s-9'
+map to the FIRST nine (`switch-to-0'..`switch-to-8'); Option `M-1..M-9'
+map to the SECOND nine (`switch-to-9'..`switch-to-17'); `M-0'/`s-0' map
+to `switch-to-final'.  Anything less leaves gaps that fall through to
+whatever Doom or `vterm-mode-map' bound."
   (let ((expected
-         '(("M-1" . claude-repl-workspace-switch-to-0)
-           ("M-2" . claude-repl-workspace-switch-to-1)
-           ("M-3" . claude-repl-workspace-switch-to-2)
-           ("M-4" . claude-repl-workspace-switch-to-3)
-           ("M-5" . claude-repl-workspace-switch-to-4)
-           ("M-6" . claude-repl-workspace-switch-to-5)
-           ("M-7" . claude-repl-workspace-switch-to-6)
-           ("M-8" . claude-repl-workspace-switch-to-7)
-           ("M-9" . claude-repl-workspace-switch-to-8)
+         '(("M-1" . claude-repl-workspace-switch-to-9)
+           ("M-2" . claude-repl-workspace-switch-to-10)
+           ("M-3" . claude-repl-workspace-switch-to-11)
+           ("M-4" . claude-repl-workspace-switch-to-12)
+           ("M-5" . claude-repl-workspace-switch-to-13)
+           ("M-6" . claude-repl-workspace-switch-to-14)
+           ("M-7" . claude-repl-workspace-switch-to-15)
+           ("M-8" . claude-repl-workspace-switch-to-16)
+           ("M-9" . claude-repl-workspace-switch-to-17)
            ("M-0" . claude-repl-workspace-switch-to-final)
            ("s-1" . claude-repl-workspace-switch-to-0)
            ("s-2" . claude-repl-workspace-switch-to-1)
@@ -2021,6 +2023,28 @@ emitting \"The font hasn't been resized\" because Doom's global
 `s-0 -> doom/reset-font-size' default leaked through."
   (should (eq (cdr (assoc "s-0" claude-repl--workspace-jump-chords))
               'claude-repl-workspace-switch-to-final)))
+
+(ert-deftest claude-repl-test-workspace-jump-m-1-routes-to-second-nine-first ()
+  "`M-1' (Option+1) must map to `claude-repl-workspace-switch-to-9' (the
+10th workspace / first of the SECOND nine), NOT `switch-to-0' (the
+first workspace).  Guards the Option row addressing the second nine."
+  (should (eq (cdr (assoc "M-1" claude-repl--workspace-jump-chords))
+              'claude-repl-workspace-switch-to-9)))
+
+(ert-deftest claude-repl-test-workspace-jump-m-9-routes-to-second-nine-last ()
+  "`M-9' (Option+9) must map to `claude-repl-workspace-switch-to-17' (the
+18th workspace / last of the SECOND nine), NOT `switch-to-8' (the
+9th workspace) or `switch-to-final'.  Guards that the second nine tops
+out at workspace 18, not the final workspace."
+  (should (eq (cdr (assoc "M-9" claude-repl--workspace-jump-chords))
+              'claude-repl-workspace-switch-to-17)))
+
+(ert-deftest claude-repl-test-workspace-jump-s-1-routes-to-first-nine-first ()
+  "`s-1' (Cmd+1) must still map to `claude-repl-workspace-switch-to-0'
+(the first workspace) after the Option row moved to the second nine —
+the Command row stays on the FIRST nine."
+  (should (eq (cdr (assoc "s-1" claude-repl--workspace-jump-chords))
+              'claude-repl-workspace-switch-to-0)))
 
 (ert-deftest claude-repl-test-install-workspace-jump-installs-top-level ()
   "`--install-workspace-jump-overrides' must populate `general-override-mode-map'
