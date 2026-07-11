@@ -22,7 +22,9 @@ pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); shift; if [ $# -gt 0 ]; then printf '%s\n' "$@" | sed 's/^/        /'; fi; }
 
 # Local skills install.sh expects to find under modules/app/agent-repl/skills/.
-LOCAL_SKILL_NAMES=( debug-logs profile runtime-eval-code workspace-close workspace-open emit-workspace-commands.sh )
+# debug-logs is deliberately absent: it is PROJECT-scoped (checked-in
+# <repo>/.claude/skills symlink), not a user-level installed skill.
+LOCAL_SKILL_NAMES=( profile runtime-eval-code workspace-close workspace-open emit-workspace-commands.sh )
 
 # Build a synthetic repo containing a fresh copy of install.sh, the
 # pre-commit hook, a manifest with one cached skill 'foo' whose impl is
@@ -156,12 +158,12 @@ test_local_skills_link_to_main_worktree() {
     bash "$repo/linked-wt/.claude/install.sh" install >"$repo/.install.log" 2>&1
   LAST_RC=$?
   set -e
-  local actual; actual="$(readlink "$home/.claude/skills/debug-logs" 2>/dev/null || echo MISSING)"
+  local actual; actual="$(readlink "$home/.claude/skills/profile" 2>/dev/null || echo MISSING)"
   # install.sh links to the PHYSICAL main-worktree path (matching git's
   # canonical `worktree list` output), so canonicalize the tmpdir-based
   # expectation too (mktemp yields /var/... which symlinks to /private/var/...
   # on macOS).
-  local expected; expected="$(cd "$repo" && pwd -P)/modules/app/agent-repl/skills/debug-logs"
+  local expected; expected="$(cd "$repo" && pwd -P)/modules/app/agent-repl/skills/profile"
   if [ "$LAST_RC" -eq 0 ] && [ "$actual" = "$expected" ]; then
     pass "local skills link to main worktree when run from a linked worktree"
   else
