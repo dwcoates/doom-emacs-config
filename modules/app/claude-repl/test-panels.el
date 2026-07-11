@@ -1747,6 +1747,78 @@ bypassed by `window--resize-mini-window' (ignore=t), so the stronger
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
         (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
 
+(ert-deftest claude-repl-test-panels-show-panels-no-output-dup-on-dead-input ()
+  "show-panels must NOT duplicate the output window when the input buffer is
+dead and the output window is already selected/visible.
+
+Regression for the panel-corruption bug: the input window is split off
+the output window and inherits the vterm buffer until reassigned, so a
+dead input buffer used to strand the vterm in that adjacent window (the
+duplicated-output corruption seen switching to a freshly generated
+workspace with the drawer open)."
+  (claude-repl-test--with-clean-state
+    (let ((vterm-buf (get-buffer-create "*claude-panel-test-ws*"))
+          (input-buf (get-buffer-create "*claude-panel-input-test-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                    ((symbol-function 'claude-repl--refresh-vterm) (lambda () nil))
+                    ((symbol-function 'claude-repl--update-all-workspace-states-now) (lambda () nil)))
+            (claude-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (delete-other-windows)
+            ;; Output already visible AND selected, so the split inherits it.
+            (set-window-buffer (selected-window) vterm-buf)
+            ;; Input buffer dies before the show.
+            (kill-buffer input-buf)
+            (claude-repl--show-panels)
+            ;; Exactly one window shows the vterm buffer — not duplicated.
+            (should (= 1 (length (get-buffer-window-list vterm-buf nil nil)))))
+        (delete-other-windows)
+        (dolist (b (list vterm-buf input-buf
+                         (get-buffer "*claude-panel-input-test-ws*")))
+          (when (buffer-live-p b) (kill-buffer b)))))))
+
+;;;; ---- Tests: ensure-input-buffer ----
+
+(ert-deftest claude-repl-test-panels-ensure-input-buffer-returns-live ()
+  "ensure-input-buffer returns the recorded :input-buffer when it is live."
+  (claude-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*claude-panel-input-test-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+            (claude-repl--ws-put "test-ws" :input-buffer input-buf)
+            (should (eq (claude-repl--ensure-input-buffer "test-ws") input-buf)))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
+(ert-deftest claude-repl-test-panels-ensure-input-buffer-adopts-named ()
+  "ensure-input-buffer adopts the live canonically-named buffer when the
+recorded :input-buffer is dead, and records it back on the plist."
+  (claude-repl-test--with-clean-state
+    (let ((dead (get-buffer-create "*stale-input*"))
+          (named (get-buffer-create "*claude-panel-input-test-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+            (claude-repl--ws-put "test-ws" :input-buffer dead)
+            (kill-buffer dead)
+            (let ((result (claude-repl--ensure-input-buffer "test-ws")))
+              (should (eq result named))
+              (should (eq (claude-repl--ws-get "test-ws" :input-buffer) named))))
+        (when (buffer-live-p named) (kill-buffer named))))))
+
+(ert-deftest claude-repl-test-panels-ensure-input-buffer-recreates-when-absent ()
+  "ensure-input-buffer creates a fresh, live input buffer when neither the
+recorded :input-buffer nor the canonically-named buffer is live."
+  (claude-repl-test--with-clean-state
+    (unwind-protect
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+          (claude-repl--ws-put "test-ws" :input-buffer nil)
+          (let ((result (claude-repl--ensure-input-buffer "test-ws")))
+            (should (buffer-live-p result))
+            (should (eq result (claude-repl--ws-get "test-ws" :input-buffer)))
+            (should (string= (buffer-name result) "*claude-panel-input-test-ws*"))))
+      (when-let ((b (get-buffer "*claude-panel-input-test-ws*")))
+        (kill-buffer b)))))
+
 ;;;; ---- Tests: focus-input-panel edge cases ----
 
 (ert-deftest claude-repl-test-panels-focus-input-panel-nil-buffer ()

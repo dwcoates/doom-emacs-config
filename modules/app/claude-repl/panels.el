@@ -107,6 +107,37 @@ input panel (or a warning if the input isn't displayed)."
                               :size-fix       'width
                               :delete-protect t))
 
+(defun claude-repl--ensure-input-buffer (ws)
+  "Return a live input buffer for WS, adopting or (re)creating one if needed.
+
+The panel-show path (`claude-repl--show-panels') builds the input
+window by `split-window'-ing the output (vterm) window, so the new
+window transiently inherits the vterm buffer until the input buffer is
+set into it.  If WS's `:input-buffer' is dead or nil at that moment,
+`set-window-buffer' errors and leaves the vterm buffer stranded in the
+adjacent window — the duplicated-output corruption seen when switching
+to a freshly generated workspace with the drawer open.  Guaranteeing a
+live input buffer here keeps that reassignment from ever failing.
+
+Resolution order, loud rather than silent about a missing buffer:
+- the recorded `:input-buffer' when it is still live;
+- else the canonically-named `*claude-panel-input-WS*' buffer when a
+  live one already exists (re-adopting it without re-running
+  `claude-input-mode', which would trip its already-initialized guard);
+- else a fresh buffer via `claude-repl--initialize-input-buffer'."
+  (or (let ((buf (claude-repl--ws-get ws :input-buffer)))
+        (and (buffer-live-p buf) buf))
+      (let ((named (get-buffer (claude-repl--buffer-name "-input" ws))))
+        (when (buffer-live-p named)
+          (claude-repl--log ws "ensure-input-buffer: ws=%s adopting live named buffer %s"
+                            ws (buffer-name named))
+          (claude-repl--ws-put ws :input-buffer named)
+          named))
+      (progn
+        (claude-repl--log ws "ensure-input-buffer: ws=%s input buffer dead/nil — recreating" ws)
+        (claude-repl--initialize-input-buffer ws)
+        (claude-repl--ws-get ws :input-buffer))))
+
 ;; Fullscreen window layout: vterm fills the frame's main area, input below it.
 (defun claude-repl--show-panels ()
   "Display vterm and input panels filling the frame (fullscreen).
@@ -125,7 +156,12 @@ The `:fullscreen-config' save is guarded so it captures the layout only
 on a genuine open (no panels visible and no config already saved): the
 many re-show paths (workspace-switch reclaim, half-shown repair) call
 through here too and must not clobber the saved work layout with a
-panels-already-up one."
+panels-already-up one.
+
+The input buffer is resolved through `claude-repl--ensure-input-buffer'
+so it is always live before the split: the new input window inherits
+the vterm buffer until it is reassigned, so a dead/nil input buffer
+would otherwise leave the vterm duplicated in the adjacent window."
   (when (claude-repl-window--side-window-p (selected-window))
     (when-let ((main (and (fboundp 'window-main-window) (window-main-window))))
       (select-window main)))
@@ -136,7 +172,11 @@ panels-already-up one."
   (claude-repl--clear-main-area-for-panels)
   (let* ((ws (claude-repl--ws-current-name))
          (vterm-buf (claude-repl--ws-get ws :vterm-buffer))
-         (input-buf (claude-repl--ws-get ws :input-buffer)))
+         ;; Guarantee a live input buffer BEFORE the split below: the new
+         ;; input window inherits the vterm buffer until `set-window-buffer'
+         ;; reassigns it, so a dead/nil input buffer would strand the vterm
+         ;; duplicated in the adjacent window (see `--ensure-input-buffer').
+         (input-buf (claude-repl--ensure-input-buffer ws)))
     (claude-repl--log ws "show-panels vterm=%s input=%s"
                       (claude-repl--safe-buffer-name vterm-buf)
                       (claude-repl--safe-buffer-name input-buf))
