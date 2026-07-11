@@ -491,7 +491,19 @@ shell out to the real binary."
   "Execute BODY with fresh agent-repl global state.
 Also redirects `agent-repl-workspace-snapshot-file' to a throwaway
 temp path so the state-save snapshot piggyback can't clobber the
-user's real snapshot during ERT runs."
+user's real snapshot during ERT runs.
+
+`agent-repl-default-frontend' is scratch-bound here, at the choke point
+every test already passes through, because the selection commands ADOPT
+their choice as the default new workspaces are born with
+\(`agent-repl--frontend-adopt-default') — a plain `setq' on a global.
+A BODY that drives `agent-repl-select-frontend' /
+`agent-repl-switch-frontend' therefore leaks its choice into every later
+test in load order, and every workspace carrying no `:frontend' of its
+own resolves through that global.  Binding it per-test closes the whole
+class: leaking a scratch frontend name makes later tests ERROR
+\(unregistered), and leaking a real one (`gui') is worse — it silently
+re-routes their frontend resolution instead."
   (declare (indent 0))
   `(let ((agent-repl--workspaces (make-hash-table :test 'equal))
          ;; Repo-fold set: global UI state, so a test that folds a repo
@@ -504,6 +516,7 @@ user's real snapshot during ERT runs."
          (agent-repl--sync-timer nil)
          (agent-repl--hide-overlay-refcount 0)
          (agent-repl-debug nil)
+         (agent-repl-default-frontend agent-repl-default-frontend)
          (agent-repl-workspace-snapshot-file
           (expand-file-name (format "agent-snap-%s" (random)) temporary-file-directory))
          (agent-repl--snapshot-archived-this-run nil)
