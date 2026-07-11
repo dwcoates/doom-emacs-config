@@ -1096,9 +1096,18 @@ Otherwise, only show panels if WS is the current workspace AND its
 persisted `:repl-state' is not `:inactive' or `:hidden' — both signal
 that the user wants panels closed (hide-mode survives restart: when
 `--initialize-ws-env' hydrated either value from the saved file, we
-honor it here by skipping the panel-open call)."
+honor it here by skipping the panel-open call).
+
+Since `--initialize-agent' opens panels at launch, after-ready is
+usually the SECOND show — and re-running the show path while panels
+are already visible is not safe (it can resolve both windows onto the
+input buffer and die on its window-dedication mid-layout, leaving a
+broken input-only frame), so an already-visible current-workspace
+layout is left untouched in both branches."
   (if (agent-repl--drain-pending-prompts ws)
-      (progn
+      (if (and (agent-repl--current-ws-p ws)
+               (agent-repl--panels-visible-p))
+          (agent-repl--log ws "open-panels-after-ready: pending drained, panels already visible ws=%s — no re-show" ws)
         (agent-repl--log ws "open-panels-after-ready: had pending prompts ws=%s — show or defer" ws)
         (agent-repl--show-panels-or-defer ws))
     (agent-repl--log ws "first-ready no pending prompts for ws=%s" ws)
@@ -1106,6 +1115,9 @@ honor it here by skipping the panel-open call)."
      ((memq (agent-repl--ws-repl-state ws) '(:inactive :hidden))
       (agent-repl--log ws "open-panels-after-ready: persisted %s ws=%s — skipping panel open"
                         (agent-repl--ws-repl-state ws) ws))
+     ((and (agent-repl--current-ws-p ws)
+           (agent-repl--panels-visible-p))
+      (agent-repl--log ws "open-panels-after-ready: panels already visible ws=%s — no re-show" ws))
      ((and (agent-repl--current-ws-p ws)
            (not (agent-repl--loading-placeholder-visible-p)))
       (agent-repl--log ws "open-panels-after-ready: no pending + current ws=%s — showing panels" ws)
